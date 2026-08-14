@@ -38,7 +38,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.config import settings
+from app.etf_sources import user_agent
 from app.repositories.isin_identity_repository import IsinIdentityRepository
 
 logger = logging.getLogger(__name__)
@@ -57,18 +57,6 @@ OPENFIGI_MIN_INTERVAL_S = 2.6
 GLEIF_MIN_INTERVAL_S = 1.1
 
 REQUEST_TIMEOUT_S = 20.0
-
-
-def _user_agent() -> str:
-    """
-    Identify the client honestly, with a contact address when one is configured.
-
-    The address comes from settings rather than a literal because this repository is
-    public, and an operator's email does not belong in it.
-    """
-    contact = (settings.lookthrough_contact_email or "").strip()
-    suffix = f" (+{contact})" if contact else ""
-    return f"ibkr-portfolio-tracker/{settings.app_version}{suffix}"
 
 
 class IdentityService:
@@ -124,7 +112,7 @@ class IdentityService:
     async def _resolve_openfigi(
         self, isins: List[str], rows: Dict[str, Dict], summary: Dict
     ) -> None:
-        headers = {"Content-Type": "application/json", "User-Agent": _user_agent()}
+        headers = {"Content-Type": "application/json", "User-Agent": user_agent()}
         async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
             for index in range(0, len(isins), OPENFIGI_BATCH):
                 batch = isins[index:index + OPENFIGI_BATCH]
@@ -204,7 +192,7 @@ class IdentityService:
     ) -> None:
         headers = {
             "Accept": "application/vnd.api+json",
-            "User-Agent": _user_agent(),
+            "User-Agent": user_agent(),
         }
         async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
             for index, isin in enumerate(isins):

@@ -46,6 +46,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.identity_service import IdentityService
+from app.services.lookthrough_service import LookthroughService
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ async def resolve_identities(
     dry_run: bool = False,
     limit: Optional[int] = None,
     include_funds: bool = False,
+    constituents: bool = False,
 ) -> int:
     started_at = utcnow()
 
@@ -86,13 +88,26 @@ async def resolve_identities(
         try:
             service = IdentityService(db)
             targets = await _held_isins(db, include_funds)
+            direct_count = len(targets)
+            constituent_count = 0
+            if constituents:
+                # Tier B: the head of the constituent ranking. Additive rather than a separate
+                # mode, because the directly-held ISINs are where the user-visible folding
+                # lives and must never be traded away for tail coverage.
+                extra = await LookthroughService(db).material_constituent_isins()
+                known = set(targets)
+                added = [i for i in extra if i not in known]
+                constituent_count = len(added)
+                targets = targets + added
             if not targets:
                 print("No held securities with an ISIN — nothing to resolve.")
                 return 0
+            print(f"Targets: {len(targets)} ISIN(s) — {direct_count} held directly"
+                  + (f" + {constituent_count} material fund constituent(s)"
+                     if constituents else ""))
 
             pending_figi = await service.repo.unchecked(targets, "openfigi")
             pending_lei = await service.repo.unchecked(targets, "gleif")
-            print(f"Held ISINs: {len(targets)}")
             print(
                 f"Never asked: OpenFIGI {len(pending_figi)}, GLEIF {len(pending_lei)}"
                 + (f" (limited to {limit} each)" if limit else "")
@@ -163,11 +178,20 @@ def main() -> int:
         "--include-funds", action="store_true",
         help="Also resolve fund ISINs, which are normally skipped as never being companies",
     )
+    parser.add_argument(
+        "--constituents", action="store_true",
+        help=(
+            "Also resolve the largest fund constituents, down to 99.5%% of cumulative "
+            "look-through value and capped at 500 ISINs. Without this, a company held only "
+            "inside funds groups on its ISIN alone, so two of its ISINs would not fold"
+        ),
+    )
     args = parser.parse_args()
 
     return asyncio.run(
         resolve_identities(
-            dry_run=args.dry_run, limit=args.limit, include_funds=args.include_funds
+            dry_run=args.dry_run, limit=args.limit, include_funds=args.include_funds,
+            constituents=args.constituents,
         )
     )
 

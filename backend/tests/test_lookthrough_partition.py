@@ -596,3 +596,59 @@ async def test_the_service_and_the_response_model_agree_in_both_directions(sessi
     )
     # And the whole thing must actually validate.
     LookthroughResponse.model_validate(report)
+
+
+@pytest.mark.parametrize("direct_price,uncovered_price,fund_price,weight", [
+    # Sub-cent prices, so several buckets carry a fraction that rounds the same way and the
+    # errors accumulate. Each of these fails if the residual is published as its own rounded
+    # sum instead of as the remainder — verified by mutation.
+    ("10.004", "30.004", "50.008", "50"),
+    ("7.006", "3.006", "9.004", "33.333333"),
+    ("1.004", "1.004", "1.008", "66.666667"),
+    ("12.344", "56.784", "90.124", "25"),
+    ("0.504", "0.504", "0.504", "10"),
+    ("999.994", "888.884", "777.774", "99.999999"),
+])
+@pytest.mark.asyncio
+async def test_the_published_buckets_close_whatever_the_rounding(
+    session, direct_price, uncovered_price, fund_price, weight
+):
+    """
+    The partition must close in the numbers a CALLER RECEIVES, not only in the Decimals behind
+    them — and the values matter, which is why they are engineered rather than tidy.
+
+    Five independently rounded buckets do not sum to the rounded total: on the real book they
+    came to 70,842.40 against a total of 70,842.39. A partition that misses by a cent still
+    misses, both for the assertion above and for anyone adding the columns up on screen. So the
+    residual is published as the rounded remainder.
+
+    The first version of this test used round prices and **passed against the bug**, which is
+    the failure mode this codebase keeps meeting: a test whose fixture cannot reach the
+    condition it names. Every row below carries a sub-cent fraction so at least four buckets
+    round in the same direction.
+    """
+    session.add_all([
+        _security(1, "DIRECT", ALPHABET_A_ISIN, "NASDAQ"),
+        _security(2, "XNAS", XNAS_ISIN, "IBIS2"),
+        _security(3, "VWCE", VWCE_ISIN, "IBIS2"),
+        _lot(1, "1", "1"), _lot(2, "1", "1"), _lot(3, "1", "1"),
+        _price(1, direct_price), _price(2, fund_price), _price(3, uncovered_price),
+        _basket(XNAS_ISIN, weight),
+        _holding(XNAS_ISIN, 1, NVIDIA_ISIN, "NVIDIA CORP", weight),
+        _holding(XNAS_ISIN, 2, None, "CASH", str(Decimal("100") - Decimal(weight)),
+                 asset_class="Cash"),
+    ])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    assert _bucket_sum(report) == Decimal(str(report["total_market_value_eur"])), (
+        f"published buckets {[(f, report[f]) for f in BUCKET_FIELDS]} do not sum to the "
+        f"published total {report['total_market_value_eur']}"
+    )
+    # The company rows still account for the two equity buckets, to within the cent the
+    # residual absorbs.
+    rows_total = sum((Decimal(str(r["value_eur"])) for r in report["companies"]), Decimal("0"))
+    assert abs(rows_total - (
+        Decimal(str(report["direct_equity_eur"]))
+        + Decimal(str(report["looked_through_equity_eur"]))
+    )) <= Decimal("0.02")

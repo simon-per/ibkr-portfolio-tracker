@@ -1,19 +1,44 @@
 """Repository for EtfBasket / EtfHolding — stored fund constituent baskets."""
 import logging
-from typing import Dict, Iterable, List
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from typing import Dict, Iterable, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow
 from app.models.etf_basket import EtfBasket, EtfHolding
 
 logger = logging.getLogger(__name__)
+
+# A replacement basket may not fall below this share of the rows already stored. The guard
+# exists because the failure it prevents is the *quiet* one: `validate()` in the parsers
+# catches an HTML body or a one-row file, but a genuinely partial parse of a 1,338-row fund
+# yields hundreds of plausible rows, replaces the real basket atomically, and every
+# look-through figure shrinks with nothing reporting it. Same shape as `reconcile_taxlots`'
+# empty-statement wipe guard, and the same response: refuse and keep what we have.
+MIN_ROW_RETENTION = Decimal("0.5")
+
+
+class BasketReplaceRefused(Exception):
+    """The incoming basket is implausible against the one already stored — nothing written."""
+
+
+@dataclass
+class ReplaceResult:
+    fund_isin: str
+    stored_rows: int
+    previous_rows: int
+    previous_as_of: Optional[date]
 
 
 class EtfBasketRepository:
     """Repository for EtfBasket / EtfHolding model operations"""
 
     SELECT_CHUNK = 400
+    INSERT_CHUNK = 100
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -60,3 +85,97 @@ class EtfBasketRepository:
             for row in rows:
                 out.setdefault(row.fund_isin, []).append(row)
         return out
+
+    async def replace_basket(self, parsed, force: bool = False) -> ReplaceResult:
+        """
+        Replace one fund's basket wholesale, or refuse and change nothing.
+
+        Wholesale rather than row-by-row because a basket is a snapshot: there is no sensible
+        merge of two vintages, and `UNIQUE(fund_isin, line_no)` keys on the source file's own
+        row order rather than on an identifier, so an upsert would silently mix them.
+
+        Two refusals, both overridable with `force` for the case where the fund genuinely
+        changed (an index reconstitution can halve a niche fund's row count):
+
+        - **A collapse in row count** — see `MIN_ROW_RETENTION`.
+        - **An as-of that moves backwards.** Re-importing an older saved file would regress
+          the basket while looking like a successful refresh. Equal as-of is allowed, so
+          re-running an import is idempotent.
+        """
+        fund_isin = parsed.fund_isin.strip().upper()
+        previous = (await self.get_baskets([fund_isin])).get(fund_isin)
+        previous_rows = 0
+        previous_as_of = None
+
+        if previous is not None:
+            previous_as_of = previous.as_of_date
+            previous_rows = int(previous.stored_rows or 0)
+        if previous is not None and not force:
+            if parsed.as_of_date < previous.as_of_date:
+                raise BasketReplaceRefused(
+                    f"{fund_isin}: the incoming basket is dated {parsed.as_of_date} but the "
+                    f"stored one is {previous.as_of_date}. Refusing to move a basket "
+                    f"backwards — pass --force if this is deliberate."
+                )
+            floor = Decimal(previous_rows) * MIN_ROW_RETENTION
+            if previous_rows and Decimal(len(parsed.rows)) < floor:
+                raise BasketReplaceRefused(
+                    f"{fund_isin}: the incoming basket has {len(parsed.rows)} rows against "
+                    f"{previous_rows} stored, below the {MIN_ROW_RETENTION:.0%} floor. A "
+                    f"partial parse replaces a real basket with a plausible one and every "
+                    f"figure silently shrinks, so nothing was written — pass --force if the "
+                    f"fund genuinely shrank."
+                )
+
+        # Delete-then-insert inside the caller's transaction, so a failure part-way leaves the
+        # previous basket intact rather than a half-replaced one.
+        await self.session.execute(
+            delete(EtfHolding).where(EtfHolding.fund_isin == fund_isin)
+        )
+        rows = [
+            {
+                "fund_isin": fund_isin,
+                "line_no": row.line_no,
+                "constituent_isin": row.isin,
+                "constituent_ticker": row.ticker,
+                "constituent_name": row.name,
+                "weight_pct": row.weight_pct,
+                "asset_class": row.asset_class,
+                "sector": row.sector,
+                "country": row.country,
+            }
+            for row in parsed.rows
+        ]
+        for start in range(0, len(rows), self.INSERT_CHUNK):
+            self.session.add_all(
+                EtfHolding(**values) for values in rows[start:start + self.INSERT_CHUNK]
+            )
+            await self.session.flush()
+
+        fields = {
+            "as_of_date": parsed.as_of_date,
+            "as_of_is_issuer_stated": parsed.as_of_is_issuer_stated,
+            "source": parsed.source,
+            "adapter": parsed.adapter,
+            "source_rows": parsed.source_rows,
+            "stored_rows": len(parsed.rows),
+            "skipped_rows": parsed.skipped_rows,
+            "total_weight_pct": parsed.total_weight_pct,
+            "equity_weight_pct": parsed.equity_weight_pct,
+            "identifier_coverage_pct": parsed.identifier_coverage_pct,
+            "asset_class_available": parsed.asset_class_available,
+            "fetched_at": utcnow(),
+        }
+        if previous is None:
+            self.session.add(EtfBasket(fund_isin=fund_isin, **fields))
+        else:
+            for key, value in fields.items():
+                setattr(previous, key, value)
+        await self.session.flush()
+
+        return ReplaceResult(
+            fund_isin=fund_isin,
+            stored_rows=len(parsed.rows),
+            previous_rows=previous_rows,
+            previous_as_of=previous_as_of,
+        )

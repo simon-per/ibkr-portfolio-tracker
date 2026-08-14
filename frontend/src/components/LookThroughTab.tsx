@@ -211,7 +211,7 @@ function fundColumns(deps: {
       align: 'right',
       hint: {
         description:
-          'How much of the fund the stored basket attributes to companies. Genuinely below 100% for real funds, whose files carry cash, FX and futures rows.',
+          "How much of the fund the stored basket attributes to securities. Genuinely below 100% for real funds: their files carry cash, FX and futures rows, and a broad fund also loses weight to rounding — Vanguard publishes weights to 2dp, so thousands of VT's smallest holdings round to zero.",
       },
       cell: (row) =>
         row.equity_weight_pct === null ? '—' : `${row.equity_weight_pct.toFixed(2)}%`,
@@ -492,10 +492,11 @@ export function LookThroughTab() {
                       data.nested_fund_eur,
                   )}{' '}
                   — {formatCurrency(data.uncovered_fund_eur)} in funds with no usable
-                  basket, {formatCurrency(data.fund_residual_eur)} of cash and derivatives
-                  inside the funds that were decomposed
+                  basket, and {formatCurrency(data.fund_residual_eur)} left over inside the
+                  funds that were decomposed: cash, derivatives, and weight lost to rounding
+                  in the issuer's own file
                   {data.nested_fund_eur > 0
-                    ? `, and ${formatCurrency(data.nested_fund_eur)} in funds held inside those funds`
+                    ? `, plus ${formatCurrency(data.nested_fund_eur)} in funds held inside those funds`
                     : ''}
                   .
                 </p>

@@ -26,6 +26,7 @@ privately for a single portfolio and is not ours to redistribute.
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+from app.config import settings
 from app.services.company_identity import IssuerOverride
 
 # Adapter names that `app/services/etf_basket_parsers.py` knows how to parse. `manual`
@@ -197,3 +198,18 @@ def source_for_fund_isin(isin: str) -> Optional[FundSource]:
     if not isin:
         return None
     return FUND_SOURCES.get(isin.strip().upper())
+
+
+def user_agent() -> str:
+    """
+    How this app identifies itself to OpenFIGI, GLEIF and the issuer sites.
+
+    Lives here rather than beside either caller because it is part of the etiquette this
+    module documents, and because both the identity resolver and the basket fetcher must send
+    the *same* thing — two user agents would make one of them unattributable in somebody
+    else's logs. The contact address comes from settings, since this repository is public and
+    an operator's email does not belong in it.
+    """
+    contact = (settings.lookthrough_contact_email or "").strip()
+    suffix = f" (+{contact})" if contact else ""
+    return f"ibkr-portfolio-tracker/{settings.app_version}{suffix}"

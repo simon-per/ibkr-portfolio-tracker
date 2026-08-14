@@ -191,7 +191,14 @@ class LookthroughResponse(BaseModel):
     looked_through_equity_eur: float
     fund_residual_eur: float = Field(
         ...,
-        description="Cash, FX and derivative rows inside funds that WERE looked through",
+        description=(
+            "The part of a decomposed fund not attributed to any company. Cash, FX and "
+            "derivative rows — and also weight lost to rounding in the issuer's own file, "
+            "which is the larger cause for a broad fund: Vanguard publishes percentWeight to "
+            "2dp, so several thousand of VT's 10,032 holdings round to 0.00 and its weights "
+            "sum to ~92%. Deliberately NOT renormalised away, since that would invent the "
+            "attribution rather than report the gap."
+        ),
     )
     nested_fund_eur: float = Field(
         ...,

@@ -51,16 +51,11 @@ from app.etf_sources import ISSUER_OVERRIDES, source_for_fund_isin
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
 from app.services.company_identity import IdentityMember, company_groups
+from app.services.etf_basket_parsers import counts_as_invested
 
 logger = logging.getLogger(__name__)
 
 HUNDRED = Decimal("100")
-
-# The equity classes a constituent row must declare to count as a company. A WHITELIST,
-# never a blacklist — the same reasoning as `CashFlowRepository.get_deposits()` selecting
-# DEPOSITWITHDRAW by name so no new transfer-ish type can leak in. A blacklist would admit
-# the next value an issuer invents ('Rights', 'Warrant', 'Preferred') as a company.
-EQUITY_ASSET_CLASSES = frozenset({"equity"})
 
 # Below this, a basket is treated as *absent* rather than as a fund holding mostly cash.
 # A residual is the right answer for EMIM's real 98.04; at Σ=3 — a half-parsed file — "this
@@ -74,6 +69,13 @@ BASKET_STALE_DAYS = 45
 
 # The API will not return more rows than this however large a `limit` is asked for.
 COMPANY_LIMIT_MAX = 200
+
+# How far down the constituent ranking identity resolution is worth taking, as a share of
+# cumulative look-through value. A share rather than an amount because the base currency is
+# user-switchable, and a fixed floor would silently change the resolved set when the user flips
+# a display toggle. The cap bounds one run's duration — GLEIF is one request per ISIN at ~1/s.
+IDENTITY_COVERAGE_TARGET_PCT = Decimal("99.5")
+IDENTITY_MAX_ISINS = 500
 
 
 class LookthroughService:
@@ -247,7 +249,15 @@ class LookthroughService:
             "total_market_value_eur": self._q(total),
             "direct_equity_eur": self._q(direct_equity),
             "looked_through_equity_eur": self._q(looked_through),
-            "fund_residual_eur": self._q(residual_total),
+            # The residual is published as the ROUNDED remainder, not as its own rounded sum.
+            # Σ of five independently-rounded buckets is not the rounded total — on the real
+            # book the two differed by a cent — and a partition that fails to close by a cent
+            # is still a partition that fails to close, both for the test that pins it and for
+            # anyone adding the columns up on screen. The residual is the right bucket to carry
+            # it because "whatever is left of a decomposed fund" is literally its definition.
+            "fund_residual_eur": self._residual_remainder(
+                total, direct_equity, looked_through, nested_total, uncovered_total
+            ),
             "nested_fund_eur": self._q(nested_total),
             "uncovered_fund_eur": self._q(uncovered_total),
             "coverage_pct": self._pct(covered, total),
@@ -265,6 +275,72 @@ class LookthroughService:
             "identity": aggregates,
             "warnings": warnings,
         }
+
+    async def material_constituent_isins(
+        self,
+        coverage_target_pct: Decimal = IDENTITY_COVERAGE_TARGET_PCT,
+        cap: int = IDENTITY_MAX_ISINS,
+    ) -> List[str]:
+        """
+        Which constituent ISINs are worth spending a provider request on, largest first.
+
+        **The naive form of this rule is circular** — it wants each ISIN's *company* value to
+        decide whether to resolve its identity, and the identity is what builds companies. It is
+        broken by ordering: aggregate by raw constituent ISIN, which needs no identity at all,
+        then resolve the head of that ranking.
+
+        The threshold is a share of cumulative value rather than an amount, because the base
+        currency is user-switchable and a fixed floor would change the resolved set when a
+        display toggle is flipped. `cap` then bounds one run's duration: VT alone contributes
+        10,032 rows for under 2% of the book, and its tail rows are worth fractions of a cent
+        and can never move a published figure.
+
+        Directly-held ISINs are NOT included — those are resolved unconditionally elsewhere,
+        being where all the user-visible folding lives.
+        """
+        from app.services.portfolio_service import PortfolioService
+
+        positions = await PortfolioService(self.db).get_positions_breakdown()
+        valuable, _ = self._split_by_valuability(positions)
+        funds = [p for p in valuable if is_known_etf_isin(p["isin"])]
+        if not funds:
+            return []
+
+        repo = EtfBasketRepository(self.db)
+        held = sorted({p["isin"].strip().upper() for p in funds})
+        baskets = await repo.get_baskets(held)
+        holdings = await repo.get_holdings(list(baskets))
+
+        by_isin: Dict[str, Decimal] = {}
+        for pos in funds:
+            isin = pos["isin"].strip().upper()
+            basket = baskets.get(isin)
+            if basket is None or self._fund_status(isin, basket)[0] != "looked_through":
+                continue
+            for row in holdings.get(isin, []):
+                # The same predicates the read path uses, so this ranks exactly the rows that
+                # can become company rows — not merely everything in the file.
+                if not row.constituent_isin or not self._counts_as_company(row, basket):
+                    continue
+                key = row.constituent_isin.strip().upper()
+                by_isin[key] = by_isin.get(key, Decimal("0")) + (
+                    pos["_mv"] * Decimal(row.weight_pct) / HUNDRED
+                )
+
+        ranked = sorted(by_isin.items(), key=lambda kv: (-kv[1], kv[0]))
+        grand_total = sum((v for _, v in ranked), Decimal("0"))
+        if grand_total <= 0:
+            return []
+
+        out: List[str] = []
+        running = Decimal("0")
+        ceiling = grand_total * coverage_target_pct / HUNDRED
+        for isin, value in ranked:
+            if len(out) >= cap or running >= ceiling:
+                break
+            out.append(isin)
+            running += value
+        return out
 
     # ------------------------------------------------------------------ classification
 
@@ -332,28 +408,42 @@ class LookthroughService:
             return True
         return "fund" in (row.asset_class or "").strip().lower()
 
+    @staticmethod
+    def _is_invested(row, basket) -> bool:
+        """
+        Is this row a holding in a security at all, rather than cash or a derivative?
+
+        Delegates to `etf_basket_parsers.counts_as_invested`, which is the same predicate the
+        import used to compute `etf_baskets.equity_weight_pct`. Sharing it is what makes the
+        stored figure and the value derived here from the same rows agree — a second copy is
+        precisely how a stored total and a recomputed one come to disagree.
+        """
+        return counts_as_invested(row.asset_class, bool(basket.asset_class_available))
+
     @classmethod
     def _counts_as_company(cls, row, basket) -> bool:
-        """A row contributes to a company only if it is equity and is not itself a fund."""
-        if cls._is_nested_fund(row):
-            return False
-        if not basket.asset_class_available:
-            # The issuer publishes no asset class (Xtrackers), so the whitelist cannot be
-            # applied. Every row counts and the API says the filter did not run — never
-            # inferred from "it has an ISIN", which a bond or a money-market line also has.
-            return True
-        return (row.asset_class or "").strip().lower() in EQUITY_ASSET_CLASSES
+        """A row contributes to a company only if it is invested and is not itself a fund."""
+        return cls._is_invested(row, basket) and not cls._is_nested_fund(row)
 
     @classmethod
     def _split_weights(cls, rows, basket) -> Tuple[Decimal, Decimal]:
-        """(company weight %, nested-fund weight %) over a basket's rows."""
+        """
+        (company weight %, nested-fund weight %) over a basket's rows.
+
+        The invested filter runs FIRST and the company/nested split second, so the two sum to
+        exactly `equity_weight_pct` and the residual is whatever is left. Splitting before
+        filtering would let a cash-classified row reach the nested bucket and make the three
+        parts stop adding up to the fund.
+        """
         company = Decimal("0")
         nested = Decimal("0")
         for row in rows:
+            if not cls._is_invested(row, basket):
+                continue
             weight = Decimal(row.weight_pct)
             if cls._is_nested_fund(row):
                 nested += weight
-            elif cls._counts_as_company(row, basket):
+            else:
                 company += weight
         return company, nested
 
@@ -500,6 +590,33 @@ class LookthroughService:
     def _q(value: Decimal) -> float:
         """Round for the wire. Totals are always summed BEFORE this, never after."""
         return float(round(value, 2))
+
+    @classmethod
+    def _residual_remainder(
+        cls,
+        total: Decimal,
+        direct: Decimal,
+        looked_through: Decimal,
+        nested: Decimal,
+        uncovered: Decimal,
+    ) -> float:
+        """
+        The residual bucket, derived so the five published figures close exactly.
+
+        Rounds the other four first and subtracts them from the rounded total, so the identity
+        holds in the numbers a caller actually receives rather than only in the Decimals behind
+        them. The correction is at most a couple of cents; it can make the residual very
+        slightly negative when an issuer's weights sum a hair above 100 (IWDA publishes
+        100.01), which is honest — that fund really does attribute marginally more than its own
+        value.
+        """
+        return float(
+            round(total, 2)
+            - round(direct, 2)
+            - round(looked_through, 2)
+            - round(nested, 2)
+            - round(uncovered, 2)
+        )
 
     @staticmethod
     def _pct(part: Decimal, whole: Decimal) -> float:
