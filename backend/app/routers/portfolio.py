@@ -18,6 +18,8 @@ from app.services.activity_service import (
 )
 from app.services.portfolio_service import PortfolioService
 from app.services.benchmark_service import BenchmarkService, BENCHMARKS
+from app.services.lookthrough_service import COMPANY_LIMIT_MAX, LookthroughService
+from app.schemas.lookthrough import LookthroughResponse
 from app.schemas.portfolio import (
     PortfolioValuePoint,
     PortfolioSummary,
@@ -346,3 +348,29 @@ async def get_positions_breakdown(db: AsyncSession = Depends(get_db)):
     positions = await portfolio_service.get_positions_breakdown()
 
     return positions
+
+
+@router.get("/lookthrough", response_model=LookthroughResponse)
+async def get_lookthrough(
+    limit: int = Query(
+        50,
+        ge=1,
+        le=COMPANY_LIMIT_MAX,
+        description="How many company rows to return, largest first",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Company-level exposure: direct holdings plus every held fund decomposed into the
+    companies inside it, folded across listings and share classes.
+
+    Pure DB read — touches no provider, so it is safe at any hour. Baskets arrive through
+    `app/cli/import_etf_basket.py`; a fund with no stored basket is reported in `funds`
+    with the reason why, never dropped.
+
+    **Read `coverage_pct` before any row.** Every percentage is a share of the whole
+    portfolio and nothing is renormalised onto the decomposed subset, so while some funds
+    have no basket each company figure is an understatement by whatever those funds hold.
+    """
+    service = LookthroughService(db)
+    return await service.get_lookthrough(limit=limit)

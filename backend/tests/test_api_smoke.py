@@ -72,6 +72,8 @@ READ_ENDPOINTS = [
     "/api/dividends/breakdown?forecast=false",
     f"/api/tax/report?year={TODAY.year}",
     f"/api/tax/report.csv?year={TODAY.year}",
+    "/api/portfolio/lookthrough",
+    "/api/portfolio/lookthrough?limit=5",
 ]
 
 
@@ -444,3 +446,55 @@ def test_the_shapes_that_broke_production_serialize(client):
     csv_text = client.get("/api/portfolio/activity.csv").text
     assert csv_text.splitlines()[0].startswith("date,kind,subtype")
     assert "amount_chf" in csv_text.splitlines()[0]
+
+
+def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
+    """
+    The look-through endpoint over the real HTTP stack, `response_model` included.
+
+    This fixture is deliberately all-direct — no fund carries a stored basket — which is the
+    state a fresh deployment is in, and the one where the view must still be useful rather
+    than empty. What it does exercise is the fold that needs no provider at all: ASML is two
+    `securities` rows sharing ISIN NL0010273215, and folding them is the whole reason this
+    feature ships before any identity is resolved.
+
+    A fund plus a basket is deliberately NOT added to the shared `_seed`: thirty other
+    endpoints read it, and the basket paths are covered against a dedicated fixture in
+    `tests/test_lookthrough_partition.py`.
+    """
+    lt = client.get("/api/portfolio/lookthrough").json()
+
+    # The two ASML listings are one company row carrying both venues.
+    asml = next(r for r in lt["companies"] if "NL0010273215" in r["isins"])
+    assert sorted(asml["listings"]) == ["ASML@AEB", "ASML@NASDAQ"]
+    assert asml["direct_value_eur"] == asml["value_eur"], "nothing here comes via a fund"
+    assert asml["via_funds"] == []
+    # Folded on the ISIN floor, with no `isin_identities` row in this fixture at all — so
+    # the row must also declare that a sibling ISIN could still be missing.
+    assert asml["key_type"] == "isin"
+    assert asml["partially_resolved"] is True
+
+    # The partition closes over whatever the endpoint served.
+    buckets = (
+        "direct_equity_eur", "looked_through_equity_eur", "fund_residual_eur",
+        "nested_fund_eur", "uncovered_fund_eur",
+    )
+    assert sum(Decimal(str(lt[b])) for b in buckets) == Decimal(
+        str(lt["total_market_value_eur"])
+    )
+
+    # And it agrees with the headline, because both come from the same valuation helper.
+    # Two figures under one meaning on two screens is this codebase's dominant failure mode.
+    summary = client.get("/api/portfolio/summary").json()
+    assert lt["total_market_value_eur"] == summary["total_market_value_eur"]
+    assert lt["base_currency"] == summary["base_currency"] == "CHF"
+
+    # Truncation reports the tail as a value rather than only a count.
+    small = client.get("/api/portfolio/lookthrough?limit=1").json()
+    assert small["companies_shown"] == 1
+    assert small["company_count_total"] == lt["company_count_total"]
+    if small["other_companies_count"]:
+        assert small["other_companies_eur"] > 0
+    # The clamp is enforced by FastAPI rather than trusted.
+    assert client.get("/api/portfolio/lookthrough?limit=0").status_code == 422
+    assert client.get("/api/portfolio/lookthrough?limit=9999").status_code == 422

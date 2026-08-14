@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     # Alpha Vantage Configuration
     alpha_vantage_api_key: str = ""  # Optional for initial setup
 
+    # Contact address advertised in the User-Agent when the look-through feature calls
+    # OpenFIGI, GLEIF or an ETF issuer's holdings endpoint. Those are third-party sites
+    # used as a guest rather than an API we are a customer of, and identifying the client
+    # honestly is the price of that. Empty simply omits it — nothing breaks.
+    # A setting rather than a literal because this repository is public and an operator's
+    # email does not belong in it.
+    lookthrough_contact_email: str = ""
+
     # Database Configuration
     database_url: str = "sqlite+aiosqlite:///./portfolio.db"
 

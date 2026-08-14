@@ -13,11 +13,37 @@ a measurement and a guess: GRID's top ten is 59.6% of the fund, QTUM's is 14.9%.
 
 Do not "improve" a geographic block from an ETF's *sector* data or from `.info` — a fund
 carries no `country`, which is exactly why the look-through table exists.
+
+**`isins` per entry exists because a symbol is not an identity, and this table was
+already wrong about one fund.** `securities` identity is `isin + exchange`, symbols are
+not unique, and `SMH` is the live collision: this account holds the **UCITS** VanEck
+Semiconductor fund (`IE00BMC38736`, LSE, USD) while the far better-known `SMH` is the
+US-listed VanEck fund — a symbol-keyed lookup cannot tell them apart, and the two are
+different instruments with different domiciles. So every entry declares the ISINs it
+covers, and `fund_isins()` / `is_known_etf_isin()` / `symbol_for_fund_isin()` below are
+**the** fundness predicates. CLAUDE.md records that this predicate has already diverged
+once (`securities.asset_type` said "Stock" while this table said "ETF"); a third answer
+would be the same bug a third time, so nothing outside this module may decide it —
+`tests/test_fund_predicate_family.py` walks the AST to enforce that.
+
+**The successor to the two percent blocks is `etf_holdings`, and the precondition for
+migrating is written down here so the two do not silently diverge.** Real constituent
+files carry a sector and a country of risk *per holding*, so once every held fund has a
+stored basket the `sector` and `geographic` blocks here become measurable rather than
+estimated. That switch is deliberately not made yet, for three reasons: coverage is 6
+of 12 funds, so the Allocation tab's numbers would start depending on whether a scraper
+succeeded; `countryOfRisk` is a **country** while `geographic` buckets are **regions**,
+so switching needs a new hand-maintained country-to-region map — a new drift surface
+rather than a removed one; and iShares' `sectorName` is a third taxonomy beside Yahoo's
+and `AllocationTab.tsx`'s `SECTOR_MAPPING`. Until all three are resolved, **this table
+is the live answer for the three allocation charts** and `lookthrough_service` says so
+from its own side.
 """
 
 ETF_ALLOCATIONS = {
     # iShares Core MSCI World (IWDA)
     "IWDA": {
+        "isins": ["IE00B4L5Y983"],
         "asset_type": "ETF",
         "geographic": {
             "North America": 72.0,
@@ -42,6 +68,7 @@ ETF_ALLOCATIONS = {
 
     # Vanguard FTSE All-World (VWCE)
     "VWCE": {
+        "isins": ["IE00BK5BQT80"],
         "asset_type": "ETF",
         "geographic": {
             "North America": 65.0,
@@ -66,6 +93,7 @@ ETF_ALLOCATIONS = {
 
     # iShares Core S&P 500 (SXR8)
     "SXR8": {
+        "isins": ["IE00B5BMR087"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 100.0,
@@ -87,6 +115,7 @@ ETF_ALLOCATIONS = {
 
     # Xtrackers NASDAQ 100 (XNAS)
     "XNAS": {
+        "isins": ["IE00BMFKG444"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 100.0,
@@ -103,6 +132,7 @@ ETF_ALLOCATIONS = {
 
     # Xtrackers S&P 500 2x Leveraged (DBPG)
     "DBPG": {
+        "isins": ["LU0411078552"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 100.0,
@@ -122,8 +152,12 @@ ETF_ALLOCATIONS = {
         },
     },
 
-    # VanEck Semiconductor ETF (SMH)
+    # VanEck Semiconductor UCITS ETF (SMH) — IE00BMC38736, Irish-domiciled, LSE-listed,
+    # USD. NOT the US-listed VanEck SMH, which is the one every search result describes.
+    # Both track the same MVIS semiconductor index, so the blocks below hold for either,
+    # but the ISIN is what tells them apart and the holdings files are per-ISIN.
     "SMH": {
+        "isins": ["IE00BMC38736"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 60.0,
@@ -149,6 +183,7 @@ ETF_ALLOCATIONS = {
     # semiconductor fund; the geography skews more US than SMH because the PHLX
     # SOX index is limited to US-listed names. Adjust if you want it tighter.
     "SOXQ": {
+        "isins": ["US46138G6153"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 80.0,
@@ -163,6 +198,7 @@ ETF_ALLOCATIONS = {
 
     # Xtrackers Artificial Intelligence & Big Data (XAIX)
     "XAIX": {
+        "isins": ["IE00BGV5VN51"],
         "asset_type": "ETF",
         "geographic": {
             "United States": 85.0,
@@ -178,6 +214,7 @@ ETF_ALLOCATIONS = {
 
     # iShares Core MSCI Emerging Markets IMI (EMIM)
     "EMIM": {
+        "isins": ["IE00BKM4GZ66"],
         "asset_type": "ETF",
         "geographic": {
             "China": 30.0,
@@ -210,6 +247,7 @@ ETF_ALLOCATIONS = {
     # table would be this codebase's dominant failure mode in miniature, so they are
     # pinned together on purpose: change one and change the other.
     "VT": {
+        "isins": ["US9220427424"],
         "asset_type": "ETF",
         "geographic": {
             "North America": 65.0,
@@ -244,6 +282,7 @@ ETF_ALLOCATIONS = {
     # and with `currencyExposure.ts`: where a thing trades is what we can actually observe.
     # The tail is given a little Asia Pacific, which the measured decile has none of.
     "GRID": {
+        "isins": ["US33737A1088"],
         "asset_type": "ETF",
         "geographic": {
             "North America": 48.0,
@@ -271,6 +310,7 @@ ETF_ALLOCATIONS = {
     # If this matters later, replace it with Defiance's own published country weights;
     # that is a real source and this is an estimate.
     "QTUM": {
+        "isins": ["US26922A4206"],
         "asset_type": "ETF",
         "geographic": {
             "North America": 65.0,
@@ -297,5 +337,61 @@ def get_etf_allocation(symbol: str) -> dict:
 
 
 def is_known_etf(symbol: str) -> bool:
-    """Check if a symbol is a known ETF in our mappings."""
+    """
+    Check if a symbol is a known ETF in our mappings.
+
+    Prefer `is_known_etf_isin` for anything new. A symbol is not an identity — see the
+    `SMH` collision in the module docstring — and this form survives only because
+    `allocation_service` merges its output by symbol anyway.
+    """
     return symbol in ETF_ALLOCATIONS
+
+
+def _build_isin_index() -> dict:
+    """
+    ISIN -> symbol, derived from the table rather than maintained beside it.
+
+    A second literal listing the same ISINs is exactly the duplication this codebase
+    keeps being bitten by, so the index is computed once at import. A duplicate ISIN
+    across two entries raises here — at import, not on a request — because two funds
+    sharing an ISIN is a copy-paste slip that would otherwise silently give one fund
+    the other's basket.
+    """
+    index = {}
+    for symbol, entry in ETF_ALLOCATIONS.items():
+        for isin in entry.get("isins", ()):
+            key = isin.strip().upper()
+            if key in index:
+                raise ValueError(
+                    f"ISIN {key} is claimed by both {index[key]} and {symbol} in "
+                    f"ETF_ALLOCATIONS; one fund would silently inherit the other's basket"
+                )
+            index[key] = symbol
+    return index
+
+
+_ISIN_TO_SYMBOL = _build_isin_index()
+
+
+def fund_isins() -> frozenset:
+    """Every ISIN this table knows to be a fund."""
+    return frozenset(_ISIN_TO_SYMBOL)
+
+
+def is_known_etf_isin(isin: str) -> bool:
+    """
+    Is this ISIN a fund we hold a look-through opinion about?
+
+    THE fundness predicate. Keyed on ISIN rather than symbol, so the UCITS and US lines
+    of one ticker are distinguishable, and case-insensitive because issuer files disagree
+    about ISIN casing — a lower-cased ISIN failing to match would silently reclassify a
+    fund as a company.
+    """
+    return bool(isin) and isin.strip().upper() in _ISIN_TO_SYMBOL
+
+
+def symbol_for_fund_isin(isin: str):
+    """The mapped symbol for a fund ISIN, or None. Used for labelling, never for logic."""
+    if not isin:
+        return None
+    return _ISIN_TO_SYMBOL.get(isin.strip().upper())

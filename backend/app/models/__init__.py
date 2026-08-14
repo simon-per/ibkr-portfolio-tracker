@@ -22,6 +22,8 @@ from app.models.sync_run import SyncRun
 # discovery and any create_all() silently skipped them.
 from app.models.ticker_mapping import TickerMapping
 from app.models.benchmark_timeline_cache import BenchmarkTimelineCache
+from app.models.etf_basket import EtfBasket, EtfHolding
+from app.models.isin_identity import IsinIdentity
 
 __all__ = [
     "Security",
@@ -41,4 +43,7 @@ __all__ = [
     "SyncRun",
     "TickerMapping",
     "BenchmarkTimelineCache",
+    "EtfBasket",
+    "EtfHolding",
+    "IsinIdentity",
 ]
