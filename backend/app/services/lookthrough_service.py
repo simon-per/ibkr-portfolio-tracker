@@ -62,10 +62,29 @@ HUNDRED = Decimal("100")
 # fund is 97% cash" is a plausible figure, which is the dangerous kind.
 MIN_BASKET_COVERAGE_PCT = Decimal("80")
 
-# Vanguard publishes month-end and lags ~6 weeks, which is normal and must not read as a
-# fault; past this a basket is served but badged, because today's fund value times an old
-# basket shows exposure to a company that has left the index.
+# Past this a basket is served but badged, because today's fund value times an old basket shows
+# exposure to a company that has left the index. Default for an adapter not named below.
 BASKET_STALE_DAYS = 45
+
+# **Per adapter, because otherwise the badge means two different things.** "Stale" is only useful
+# if it says *the issuer has newer data we failed to fetch* — not *this feed is inherently slow*.
+# Xtrackers and iShares republish daily, so a week-old basket there really is a missed fetch and
+# worth acting on. Vanguard US publishes month-end and lags ~6 weeks by design, so a single global
+# 45-day rule would badge it permanently for doing exactly what it says it does — and a badge that
+# can never clear is the pathology the always-present Flex banner already taught this codebase.
+# A future quarterly source (SEC N-PORT arrives 75-136 days old) would need its own entry for the
+# same reason; do not "fix" that by raising the global default.
+ADAPTER_STALE_DAYS = {
+    "dws": 7,
+    "blackrock": 7,
+    "vanguard_us": 75,
+    "manual": 45,
+}
+
+
+def stale_after_days(adapter: Optional[str]) -> int:
+    """How old this adapter's basket may get before the age is worth reporting."""
+    return ADAPTER_STALE_DAYS.get((adapter or "").strip().lower(), BASKET_STALE_DAYS)
 
 # The API will not return more rows than this however large a `limit` is asked for.
 COMPANY_LIMIT_MAX = 200
@@ -173,9 +192,11 @@ class LookthroughService:
 
             basket = baskets[isin]
             rows = holdings.get(isin, [])
+            age_days = (today - basket.as_of_date).days
+            stale_limit = stale_after_days(basket.adapter)
             entry.update(
                 basket_as_of=basket.as_of_date.isoformat(),
-                stale=(today - basket.as_of_date).days > BASKET_STALE_DAYS,
+                stale=age_days > stale_limit,
                 constituents=len(rows),
                 equity_weight_pct=Decimal(basket.equity_weight_pct),
                 asset_class_available=bool(basket.asset_class_available),
@@ -184,8 +205,9 @@ class LookthroughService:
             if entry["stale"]:
                 warnings.append(
                     f"{entry['symbol']}'s basket is dated {basket.as_of_date.isoformat()}, "
-                    f"more than {BASKET_STALE_DAYS} days old — its companies may have "
-                    f"changed."
+                    f"{age_days} days old against a {stale_limit}-day expectation for its "
+                    f"source — its issuer has newer holdings that were not fetched, so its "
+                    f"share of every company figure describes an older index."
                 )
             if not basket.as_of_is_issuer_stated:
                 warnings.append(

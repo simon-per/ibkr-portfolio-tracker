@@ -15,7 +15,6 @@ The two assertions that matter most are the ones a plausible implementation fail
 """
 import random
 
-import pytest
 
 from app.etf_sources import ISSUER_OVERRIDES
 from app.services.company_identity import (

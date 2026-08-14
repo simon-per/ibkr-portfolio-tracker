@@ -227,3 +227,92 @@ describe('LookThroughTab', () => {
     expect(screen.getByRole('button', { name: 'Top 25' })).toBeTruthy()
   })
 })
+
+describe('LookThroughTab coverage tone', () => {
+  /**
+   * The threshold this replaces was `coverage_pct >= 95`, which was unreachable: DBPG is ~3.8% of
+   * the book and excluded by design, and no basket attributes 100% of its fund, so the practical
+   * ceiling is ~95.1-95.9%. The card would have sat amber forever — the always-present-banner
+   * pathology. These pin the reachable rule instead, from both sides.
+   */
+  function coverageCard() {
+    const label = screen.getByText('Coverage')
+    // KpiCard renders label and value as siblings inside the card body.
+    return label.closest('div')?.parentElement as HTMLElement
+  }
+
+  it('is not green while any fund has no basket, however high the percentage', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        // Deliberately ABOVE the old 95% threshold, to prove the percentage is not what decides it.
+        coverage_pct: 97.4,
+        funds: [
+          {
+            symbol: 'VWCE', fund_isin: 'IE00BK5BQT80', market_value_eur: 1000,
+            status: 'no_basket', reason: 'No machine-readable holdings file.',
+            basket_as_of: null, stale: false, constituents: 0, equity_weight_pct: null,
+            residual_eur: 0, asset_class_available: true, source: null,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    expect(coverageCard().querySelector('.text-green-600')).toBeNull()
+    expect(coverageCard().querySelector('.text-yellow-600')).toBeTruthy()
+    expect(screen.getByText(/1 fund\(s\) have no basket/)).toBeTruthy()
+  })
+
+  it('is green when the only undecomposed fund is the deliberately excluded one', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        // Deliberately BELOW the old threshold — this is the state it could never reach.
+        coverage_pct: 92.1,
+        funds: [
+          {
+            symbol: 'XNAS', fund_isin: 'IE00BMFKG444', market_value_eur: 2000,
+            status: 'looked_through', reason: null, basket_as_of: '2026-08-13', stale: false,
+            constituents: 106, equity_weight_pct: 100, residual_eur: 0,
+            asset_class_available: true, source: 'dws',
+          },
+          {
+            symbol: 'DBPG', fund_isin: 'LU0411078552', market_value_eur: 2703,
+            status: 'excluded',
+            reason: 'Synthetic swap-based fund: the basket it publishes is collateral.',
+            basket_as_of: null, stale: false, constituents: 0, equity_weight_pct: null,
+            residual_eur: 0, asset_class_available: true, source: null,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
+    expect(screen.getByText(/every fund decomposed or deliberately excluded/)).toBeTruthy()
+  })
+
+  it('stays green but names ageing baskets, since coverage_pct cannot show that', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        coverage_pct: 92.1,
+        funds: [
+          {
+            symbol: 'VWCE', fund_isin: 'IE00BK5BQT80', market_value_eur: 6510,
+            status: 'looked_through', reason: null, basket_as_of: '2026-03-31', stale: true,
+            constituents: 3500, equity_weight_pct: 99, residual_eur: 60,
+            asset_class_available: false, source: 'manual',
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    // Every fund IS decomposed, so the card is not amber - but a hand-imported basket rots
+    // invisibly, and the percentage never moves when it does.
+    expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
+    expect(screen.getByText(/1 basket\(s\) ageing/)).toBeTruthy()
+  })
+})

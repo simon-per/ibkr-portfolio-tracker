@@ -1,6 +1,6 @@
 """Repository for IsinIdentity — the cached ISIN -> company identity map."""
 import logging
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert

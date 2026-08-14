@@ -1893,6 +1893,16 @@ so a fraction landing here makes the fund contribute 1/100th of its value and re
 `sector`/`country` are captured **and deliberately unserved** — see `etf_mappings.py`'s docstring
 for the precondition for switching the three allocation charts onto them.
 
+**"Stale" is per-adapter (`ADAPTER_STALE_DAYS`), and a single global threshold was wrong.** The badge
+is only useful if it means *the issuer has newer holdings we failed to fetch* — Xtrackers and iShares
+republish daily, so 7 days there is a missed fetch worth acting on, while Vanguard US publishes
+month-end and lags ~6 weeks *by design*, so one 45-day rule badged it permanently for behaving
+exactly as documented. A badge that can never clear is the always-present-Flex-banner pathology.
+A future quarterly source (SEC N-PORT arrives 75–136 days old) needs its own entry rather than a
+raised default. Staleness deliberately **does not reduce `coverage_pct`** — the percentage answers
+"how much is attributed", not "how current is it" — which is exactly why the age has to be surfaced
+on the card rather than only in the fund table.
+
 **`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not.**
 Xtrackers publishes none at all — not in the CSV, not in a `Last-Modified` header (verified).
 Know which way that errs: the true as-of can only be *older*, so a stood-in date makes a basket
@@ -1905,7 +1915,7 @@ holdings Mastercard 6.6%, Altria 5.7%, Tesla 4.9% — the tell), *and* even the 
 would understate its exposure by half. `replication` and `leverage` are recorded **separately**,
 so a future "we found the swap reference" change cannot clear one and silently reintroduce the other.
 
-### Sources, and what is not built yet
+### Sources, and what still needs a hand download
 
 Verified working, keyless, login-free: **DWS** (`etf.dws.com/etfdata/export/GBR/ENG/csv/product/
 constituent/<FUND_ISIN>/` — keyed by fund ISIN, nothing to discover, echoes `ShareClass ISIN` on
@@ -2458,7 +2468,9 @@ Tests: `tests/test_currency_fallback.py`.
 | A drift or currency panel says it couldn't load positions | The positions query failed. The panel refuses to build a plan from absent data rather than reporting a portfolio of unheld rows |
 | Currency exposure looks wrong for an ETF | It is quote currency, not economic exposure, and deliberately not re-attributed — a EUR-listed S&P tracker is EUR-quoted with USD risk. The fund share is named on screen |
 | A recently bought holding sits in an *Unknown* sector or region | Expected, and correct rather than missing. `sync_helper` never writes `sector`/`country`, so an IBKR-ingested security has both NULL while `asset_type` has a `"Stock"` column default. Only `POST /api/allocation/sync` fills them and **nothing schedules it** (it needs Yahoo), so run it by hand. Before 2026-08-05 the holding was silently dropped from those two charts instead, which made them sum to under 100% under a "% of portfolio" label. A **mapped ETF** is the exception and needs no sync at all — `app/etf_mappings.py` supplies its sector, region *and* asset type live at read time |
-| Look-through coverage is well below 100% | Expected until the basket adapters ship (Phase 2). Read the `funds` table on the tab: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| Look-through coverage is well below 100% | Expected, and it cannot reach 100%. Six of twelve funds publish no machine-readable basket, and DBPG is excluded by design — so the practical ceiling is ~95%, not 100. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| The Coverage card is amber at a high percentage | It tones on whether any fund is *unresolved*, not on a threshold — green means every held fund is either decomposed or deliberately excluded. That is deliberate: a percentage threshold could not be green even with every obtainable basket loaded (the ceiling is ~95%), so it would have been a warning that never clears. Amber names the count of funds still missing a basket |
+| A basket is badged `†` stale but its issuer publishes slowly | `ADAPTER_STALE_DAYS` is per-source, so `†` means *the issuer has newer holdings we failed to fetch* rather than *this feed is slow*: 7 days for Xtrackers and iShares (they republish daily), 75 for Vanguard US (month-end, ~6-week lag by design), 45 for a hand import. A quarterly source needs its own entry — do not raise the global default to silence it |
 | A company appears twice in the look-through table | The two rows share no identifier. Check `key_type` and the `†` marker: `ISIN` means no LEI and no shareClassFIGI is on record, so run `python -m app.cli.resolve_identities`. If both rows are already resolved it is a genuine gap no identifier closes — an ADR against its ordinary, or a dual-listed company with two legitimate LEIs — and it needs an `ISSUER_OVERRIDES` entry with its evidence |
 | A look-through row is named `台灣積體電路製造…` or similar | GLEIF's legal name is the company's real one in its own script, and it is preferred only when Latin. That row has no OpenFIGI name cached — re-run `resolve_identities`, which fills `figi_name` |
 | Look-through total ≠ the Market Value card | It cannot be: both come from `get_positions_breakdown`, and `test_api_smoke.py` pins them equal. If they differ, one of them is not the deployed build — check `/health`'s commit |

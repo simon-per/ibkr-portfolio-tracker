@@ -20,7 +20,7 @@ constructed explicitly instead.
 """
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 import pytest
 import pytest_asyncio

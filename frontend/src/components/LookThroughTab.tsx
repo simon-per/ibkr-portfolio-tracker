@@ -329,6 +329,16 @@ export function LookThroughTab() {
   const coverageColumns = useMemo(() => fundColumns({ formatCurrency }), [formatCurrency])
   const selectedRow = data?.companies.find((r) => r.company_key === selected) ?? null
 
+  // A fund contributes nothing to the company table while it reads either of these. `excluded`
+  // is NOT one of them: DBPG is a settled decision, not an outstanding gap, so counting it here
+  // would make the card permanently amber for a reason nobody can act on.
+  const unresolvedFunds = (data?.funds ?? []).filter(
+    (f) => f.status === 'no_basket' || f.status === 'implausible',
+  )
+  // Ageing baskets are the other way coverage lies: the percentage does not move, but the
+  // holdings behind it describe an older index. Surfaced on the card, not only in the table.
+  const staleFunds = (data?.funds ?? []).filter((f) => f.stale)
+
   // A fetch failure must not impersonate an empty portfolio — the table below would render
   // nothing and read as "you own no companies", which is the worst possible misreading of a
   // page whose entire purpose is completeness.
@@ -360,13 +370,30 @@ export function LookThroughTab() {
               value={data.company_count_total > 0 ? data.company_count_total : null}
               sub={`${data.companies_shown} shown`}
             />
+            {/*
+              Toned on whether any fund is UNRESOLVED, not on a percentage threshold.
+              `coverage_pct >= 95` was unreachable: DBPG is ~3.8% of the book and excluded by
+              design, and no basket attributes 100% of its fund (part is always cash,
+              derivatives and issuer rounding), so the practical ceiling is ~95.1-95.9% and the
+              card would have sat amber forever with under a point of margin. A warning that can
+              never clear is the always-present-Flex-banner pathology.
+
+              "Every fund is either decomposed or deliberately excluded" IS reachable, and it
+              correctly goes amber again the day a fund is bought that has no basket yet.
+            */}
             <KpiCard
               label="Coverage"
               value={
                 data.total_market_value_eur > 0 ? `${data.coverage_pct.toFixed(1)}%` : null
               }
-              tone={data.coverage_pct >= 95 ? 'positive' : 'warning'}
-              sub="of the portfolio attributed to companies"
+              tone={unresolvedFunds.length === 0 ? 'positive' : 'warning'}
+              sub={
+                unresolvedFunds.length === 0
+                  ? staleFunds.length > 0
+                    ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
+                    : 'every fund decomposed or deliberately excluded'
+                  : `${unresolvedFunds.length} fund(s) have no basket`
+              }
             />
             <KpiCard
               label="In funds"

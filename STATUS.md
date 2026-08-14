@@ -89,15 +89,34 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   ```
   Expect coverage ≈78.6% afterwards, and ASML/Alphabet/Amazon as the top three.
 
-- **Six funds need a basket downloaded by hand — 21% of the book.** VWCE (the largest single
-  position), SMH, SOXQ, GRID and QTUM publish no machine-readable holdings file: Vanguard Europe
-  serves holdings through a GraphQL endpoint requiring an undocumented header and its robots.txt
-  disallows automated agents, and the other three serve single-page apps. Download the holdings
-  spreadsheet from each product page and ingest it:
-  `python -m app.cli.import_etf_basket <FUND_ISIN> <file> --dry-run`. The parser handles the
-  BlackRock / DWS / Vanguard shapes; a different layout will need a small adapter, and the CLI
-  refuses rather than half-applying. **DBPG is deliberately not on this list** — it is excluded by
-  design, not for want of data.
+- **VWCE's basket needs one browser click, and it decides ±9 pp of coverage.** It is the largest
+  single position (9.2% of the book) and worth ~1.9× everything SEC N-PORT could add. Open
+  `https://www.vanguard.co.uk/professional/product/etf/equity/9679/ftse-all-world-ucits-etf-usd-accumulating`
+  → **Holdings details** → the black **Download** button at the end of that section. Then check two
+  things: **the row count**, and **whether there is an ISIN column**.
+
+  **Expect it to be 10 rows with no ISINs** — the server-rendered table holds exactly ten, there is
+  no view-all control, and Vanguard Funds plc's own Portfolio Holdings Disclosure Policy (updated
+  2025-10-02) makes complete holdings **request-only, month-end + 15 days, by email**. It is still
+  worth five minutes, because if it *is* full depth with ISINs then VWCE is solved by a monthly
+  `import_etf_basket` run through the CLI that already exists.
+  **If it is top-ten:** email `european_client_services@vanguard.co.uk` as a shareholder asking for
+  complete sub-fund holdings for **IE00BK5BQT80**, machine-readable, ISINs included, recurring monthly.
+
+  **Ruled out on 2026-08-14, each verified — do not re-investigate:** the US profile API that served
+  VT rejects the Irish fund id; live EU holdings are GraphQL-only with no key in the delivered HTML;
+  Euronext carries no constituent data and the LSE page is an empty SPA shell; there is no EU
+  analogue to N-PORT. The semiannual report PDF *does* list every holding across ~53 pages and is
+  free, but carries **zero ISINs** and is 7.5 months stale, and this pipeline is ISIN-keyed.
+  **And do not ship VT's basket as a proxy** — different index (Global All Cap ~10k vs All-World
+  ~3,500), the overlap was never quantified, and 9.2% of the book entering the charts under another
+  fund's index is the fabricated-plausible-figure failure this codebase refuses everywhere else.
+
+- **SOXQ, GRID and QTUM (4.7% combined) need a hand download too** — all three serve single-page
+  apps. `python -m app.cli.import_etf_basket <FUND_ISIN> <file> --dry-run`; the CLI refuses rather
+  than half-applying. A layout the three shipped parsers do not recognise needs a small adapter.
+  **SMH is no longer on this list** — a keyless route was found, see *Worth doing next*.
+  **DBPG never was** — it is excluded by design, not for want of data.
 
 - **Two credentials are unrotated, and they are different things.**
   - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
@@ -344,6 +363,32 @@ no unit test could have seen this.
 Final suite: `mobile` 50/50, `a11y` 17/17, `sweep` 18/18, `axis` 8/8, `csp` 4/4, `chunks` 37/37
 (the new lazy chunk is requested on click, served 200, and mounts clean), `errors` 18/18.
 `ledger` is 5/7 for a reason that predates this work — see *Known rough edges*.
+
+**Two defects in the coverage card, both found by an adversarial audit of code written the same day,
+both fixed before the push.**
+
+- **The green threshold was above the achievable ceiling.** `coverage_pct >= 95` could not be reached:
+  DBPG is 3.8% excluded by design and no basket attributes 100% of its fund, so the practical maximum
+  is **95.08–95.86%** — the card would have sat amber forever with under a point of margin, which is
+  the always-present-Flex-banner pathology. It now tones on whether any fund is *unresolved*: green
+  when every held fund is decomposed or deliberately excluded, amber naming the count that are not.
+  Reachable, and it goes amber again the day a fund is bought.
+- **A single global staleness threshold meant two different things.** `BASKET_STALE_DAYS = 45` badged
+  Vanguard US permanently for publishing month-end with a ~6-week lag, exactly as documented, while
+  giving Xtrackers and iShares — which republish *daily* — six weeks of silence. `ADAPTER_STALE_DAYS`
+  is per-source now (7 / 7 / 75 / 45), so `†` means "the issuer has newer holdings we failed to fetch".
+  The card also names ageing baskets, because staleness deliberately does not move `coverage_pct` and
+  a hand-imported VWCE basket would otherwise keep claiming ~9 pp while describing last quarter's index.
+
+Three new frontend tests pin the tone from both sides, and a mutation check confirms all three fail
+against the old threshold — the first version of the rounding test earlier in this session passed
+against its own bug, so that check is now habit.
+
+**One factual error corrected in docs committed hours earlier:** `etf_sources.py` claimed Vanguard
+Europe's robots.txt "disallows automated agents". It does not — every Vanguard EU domain is
+`User-agent: * / Disallow:`, allow-all, with only model-training crawlers named. VWCE's blocker is
+that **the data is not published**, not that we are forbidden to read it, and stating a policy barrier
+that does not exist would stop the next person looking for the route that does.
 
 Two e2e corrections worth knowing. The tab count was hardcoded in **three** scripts plus `lib.mjs`'s
 `TABS`, and `csp.mjs` held it **twice** — I updated one and its sibling diagnostic then fired a false
@@ -1552,7 +1597,38 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
-1. **Make look-through coverage keep itself current.** The baskets and identities are refreshed by
+1. **A VanEck UCITS adapter for SMH — the cheapest coverage left (+3.4 pp).** Verified working
+   2026-08-14: `https://www.vaneck.com/nl/en/investments/semiconductor-etf/downloads/holdings/`
+   returns a ~5 kB XLSX with `Holding Name | Ticker | ISIN | Shares | Market Value | % of Net
+   Assets`, **as-of T-1** — fresher than every feed we have except the Xtrackers CSV, and
+   self-maintaining once written. It needs a **cookie jar** (a cookieless GET loops the geo/consent
+   redirects) and the `/nl/en/` locale **pinned** rather than trusting `/ucits/` to geo-resolve twice.
+   Parse the zip with `zipfile` + `ElementTree` — do not add `openpyxl`. Confirmed it is the UCITS
+   fund, not the US SMH (the page carries IE00BMC38736 and the 10% cap shows in the data).
+   **Do not substitute the US SMH's SEC filing** — different index variant, different membership.
+
+2. **An SEC N-PORT adapter for SOXQ + GRID + QTUM (+4.7 pp).** Researched 2026-08-14 and deliberately
+   deferred; these specifics were expensive and two are silent-corruption traps:
+   - **Key on ISIN, never ticker.** `company_tickers_mf.json` maps `SMH → CIK 1137360` (VanEck's *US*
+     fund) and `XAIX → CIK 1503123` (a US namesake of the Xtrackers UCITS we already fetch) — a ticker
+     lookup silently returns the wrong vehicle for **two of our twelve funds**. Verified:
+     SOXQ `(1378872, S000072470)`, GRID `(1364608, S000026919)`, QTUM `(1540305, S000062478)`.
+   - **`data.sec.gov/submissions/CIK*.json` is series-blind** (First Trust ETF II: 976 NPORT-P
+     entries, zero `S000…` strings, 22 accessions filed in one day). Use
+     `efts.sec.gov/LATEST/search-index?q=%22S000026919%22&forms=NPORT-P`, then
+     `/Archives/edgar/data/{cik}/{accession}/primary_doc.xml` (49–141 kB). `/cgi-bin/` is
+     robots-disallowed; `/Archives/` is allowed.
+   - **Assert `formData/genInfo/seriesId`** before using a row — a sibling series is a silently
+     100%-wrong basket.
+   - **As-of is `repPdDate`, not `repPdEnd`** (the latter is the fiscal year end), and fiscal
+     quarters are not calendar quarters.
+   - **QTUM's `pctVal` sums to 104.61%** (sec-lending collateral). Filter to `assetCat ∈ {EC, EP}`
+     with an `<isin>`, then renormalise, or every weight inflates ~4.6%.
+   - ISIN coverage is **100%** on all three live filings, so no CUSIP→ISIN derivation is needed.
+   - Arrives **75–136 days old**, which is why `ADAPTER_STALE_DAYS` is per-source: give it its own
+     entry rather than raising the default.
+
+3. **Make look-through coverage keep itself current.** The baskets and identities are refreshed by
    hand today, and a basket goes stale silently — the tab badges it past 45 days, but nothing warns.
    In order: a `find_stale_etf_baskets()` contributing `warnings[]`, hung off the **market-data** job
    for the documented reason (that slot succeeds while others refuse); then a staleness-guarded
@@ -1568,14 +1644,14 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    `etf_mappings.py`'s docstring, and the reason not to serve two sector answers at once is in
    CLAUDE.md.
 
-2. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
+4. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
    `prune_empty_dividends.py` is a manual CLI and the ingest window already prevents new junk, so
    there is very little left for a scheduled run to find. Investigating this on 2026-07-31 turned up
    a **defect in the CLI rather than a case for automating it** (below), which is a fair warning
    about automating a deleter over financial rows: the value is small and the downside is silent.
    If it is built, it must reuse the CLI's predicate rather than re-deriving one.
 
-3. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
+5. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
    fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running
    cost basis at each point's date; `_calculate_timeline_swept` converts each lot's cost at its own
    `open_date`. Same tax lots, two conversion rules — the *dominant failure mode* in CLAUDE.md, in

@@ -33,7 +33,7 @@ from app.services.company_identity import IssuerOverride
 # means the only route in is a file downloaded by hand and ingested through
 # `app/cli/import_etf_basket.py` — a real answer, not a placeholder: for VWCE it is the
 # permanent one, because Vanguard Europe's GraphQL endpoint requires an undocumented
-# header and its robots.txt disallows automated agents outright.
+# header, and it publishes only its top ten holdings — complete holdings are request-only.
 ADAPTERS = frozenset({"blackrock", "dws", "vanguard_us", "manual"})
 
 
@@ -120,17 +120,32 @@ FUND_SOURCES: Dict[str, FundSource] = {
     ),
 
     # --- No programmatic route: import a downloaded file ---------------------------
-    # Vanguard Europe serves holdings only through a GraphQL endpoint requiring an
-    # undocumented `x-consumer-id`, and vanguard.co.uk/robots.txt disallows automated
-    # agents. This is the largest single position in the account, so its basket matters
-    # more than any other — hence a hand import rather than leaving it uncovered.
+    # The largest single position in the account, so its basket matters more than any other —
+    # and there is genuinely nothing to fetch. **The blocker is that the data is not published,
+    # NOT that we are forbidden to read it**, and getting that backwards (as an earlier revision
+    # of this comment did) would stop the next person looking for the route that does exist:
+    # every Vanguard EU domain's robots.txt is `User-agent: * / Disallow:` — allow-all — and only
+    # model-training crawlers are named. What is actually missing: the product page publishes the
+    # top ten holdings with no ISIN column, the US profile API that serves VT rejects the Irish
+    # fund id, live EU holdings are GraphQL-only behind an undocumented `x-consumer-id`, and
+    # there is no EU analogue to SEC N-PORT. Vanguard Funds plc's own disclosure policy makes
+    # complete holdings request-only (month-end + 15 days, by email). The semiannual report PDF
+    # does carry every holding but no ISINs at all, and our pipeline is ISIN-keyed.
     "IE00BK5BQT80": FundSource(
         symbol="VWCE",
         name="Vanguard FTSE All-World UCITS ETF",
         adapter="manual",
     ),
-    # VanEck's UCITS site 302-redirects to itself behind a cookie-consent gate under any
-    # non-browser client.
+    # **A route exists and is worth building** — this entry is `manual` only because the adapter
+    # has not been written yet, not because nothing is fetchable. Verified 2026-08-14:
+    # `https://www.vaneck.com/nl/en/investments/semiconductor-etf/downloads/holdings/` returns a
+    # ~5 kB XLSX carrying `Holding Name | Ticker | ISIN | Shares | Market Value | % of Net
+    # Assets`, **as-of T-1** — fresher than every feed here except the Xtrackers CSV, and the
+    # smallest unit of work of any remaining gap. Two things it needs: a **cookie jar** (a
+    # cookieless GET loops the geo/consent redirects indefinitely) and the `/nl/en/` locale
+    # **pinned** rather than trusting `/ucits/` to geo-resolve the same way twice. Parse the zip
+    # with `zipfile` + `ElementTree` rather than adding an `openpyxl` dependency.
+    # Do NOT substitute the US SMH's SEC filing: different index variant, different membership.
     "IE00BMC38736": FundSource(
         symbol="SMH",
         name="VanEck Semiconductor UCITS ETF",
