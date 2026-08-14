@@ -36,6 +36,7 @@ const FundamentalsTab = lazy(() => import('./FundamentalsTab').then(m => ({ defa
 const WatchlistTab = lazy(() => import('./WatchlistTab').then(m => ({ default: m.WatchlistTab })))
 const TaxTab = lazy(() => import('./TaxTab').then(m => ({ default: m.TaxTab })))
 const DividendsTab = lazy(() => import('./DividendsTab').then(m => ({ default: m.DividendsTab })))
+const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ default: m.LookThroughTab })))
 import { ThemeToggle } from './ThemeToggle'
 import { AdminKeyButton } from './AdminKeyButton'
 import { SyncStatusMessage } from './SyncStatusMessage'
@@ -523,6 +524,7 @@ export function Dashboard() {
               <TabsTrigger value="performance">Performance</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="allocation">Allocation</TabsTrigger>
+              <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
               <TabsTrigger value="dividends">Dividends</TabsTrigger>
               <TabsTrigger value="fundamentals">Fundamentals</TabsTrigger>
               <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
@@ -688,6 +690,11 @@ export function Dashboard() {
           {/* Allocation Tab */}
           <TabsContent value="allocation">
             <LazyTabPanel label="Allocation"><AllocationTab /></LazyTabPanel>
+          </TabsContent>
+
+          {/* Look-through Tab */}
+          <TabsContent value="lookthrough">
+            <LazyTabPanel label="Look-through"><LookThroughTab /></LazyTabPanel>
           </TabsContent>
 
           {/* Dividends Tab */}

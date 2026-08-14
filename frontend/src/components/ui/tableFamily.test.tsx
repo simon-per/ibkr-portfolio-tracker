@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Column } from './DataTable'
 import { positionColumns } from '../PositionsList'
 import { watchlistColumns } from '../watchlistColumns'
+import { lookthroughColumns } from '../LookThroughTab'
 
 /**
  * The family test CLAUDE.md asks for: written against "every table that renders through
@@ -86,6 +87,21 @@ const SPARSE_WATCHLIST = {
   data_currency: null,
 }
 
+const SPARSE_LOOKTHROUGH = {
+  company_key: 'XX0000000000',
+  key_type: 'unidentified',
+  name: 'Unknown Holding',
+  value_eur: 0,
+  pct_of_portfolio: 0,
+  direct_value_eur: 0,
+  via_funds_value_eur: 0,
+  isins: [],
+  listings: [],
+  via_funds: [],
+  partially_resolved: false,
+  identity_conflicts: [],
+}
+
 const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   [
     'Positions',
@@ -99,6 +115,14 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
     SPARSE_POSITION,
   ],
   ['Watchlist', watchlistColumns({ formatCurrency: moneyOrDash }) as never, SPARSE_WATCHLIST],
+  [
+    'Look-through',
+    lookthroughColumns({ formatCurrency: money }) as never,
+    // The sparse case that actually occurs: a company reached ONLY through funds has no
+    // directly-held listing, and one reached only directly has no contributing funds. Both
+    // arrays empty at once is the shape a cell must not index into blindly.
+    SPARSE_LOOKTHROUGH,
+  ],
 ]
 
 describe.each(FAMILY)('%s columns follow the shared conventions', (_name, columns, sparseRow) => {

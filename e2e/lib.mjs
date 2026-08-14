@@ -11,7 +11,7 @@ export const CSP =
   "frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 export const TABS = [
-  'Performance', 'Activity', 'Allocation', 'Dividends',
+  'Performance', 'Activity', 'Allocation', 'Look-through', 'Dividends',
   'Fundamentals', 'Watchlist', 'Forecast', 'Tax',
 ]
 

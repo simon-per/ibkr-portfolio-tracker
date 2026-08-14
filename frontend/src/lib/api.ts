@@ -250,6 +250,90 @@ export interface PortfolioAllocationResponse {
   total_market_value_eur: number;
 }
 
+/**
+ * Look-through exposure. Names match the Pydantic models exactly, which is what lets
+ * `tests/test_api_contract_drift.py` pair them with no hand-maintained list — so a field
+ * declared here that the backend stops sending fails the backend suite rather than arriving
+ * as a silent `undefined`.
+ *
+ * All `*_eur` fields are in `base_currency`, as everywhere else in this client.
+ */
+export interface LookthroughFundContribution {
+  symbol: string | null;
+  fund_isin: string;
+  value_eur: number;
+  /** The company's weight inside that fund. */
+  weight_pct: number;
+}
+
+export interface LookthroughCompanyRow {
+  company_key: string;
+  key_type: 'lei' | 'share_class_figi' | 'isin' | 'unidentified';
+  name: string;
+  value_eur: number;
+  /** Share of the WHOLE portfolio — never renormalised onto the decomposed subset. */
+  pct_of_portfolio: number;
+  direct_value_eur: number;
+  via_funds_value_eur: number;
+  isins: string[];
+  listings: string[];
+  via_funds: LookthroughFundContribution[];
+  /** A member of this row was folded on its ISIN alone, so a sibling ISIN could be missing. */
+  partially_resolved: boolean;
+  identity_conflicts: string[];
+}
+
+export interface LookthroughFundCoverage {
+  symbol: string | null;
+  fund_isin: string;
+  market_value_eur: number;
+  status: 'looked_through' | 'no_basket' | 'excluded' | 'implausible';
+  reason: string | null;
+  basket_as_of: string | null;
+  stale: boolean;
+  constituents: number;
+  equity_weight_pct: number | null;
+  residual_eur: number;
+  asset_class_available: boolean;
+  source: string | null;
+}
+
+export interface LookthroughIdentityCoverage {
+  resolved_by_lei: number;
+  resolved_by_share_class_figi: number;
+  resolved_by_isin: number;
+  unidentified_groups: number;
+  partially_resolved_groups: number;
+  unresolved_isins: number;
+  unresolved_value_eur: number;
+}
+
+export interface LookthroughResponse {
+  as_of: string;
+  base_currency: string;
+  total_market_value_eur: number;
+  /** These five buckets partition total_market_value_eur exactly. */
+  direct_equity_eur: number;
+  looked_through_equity_eur: number;
+  fund_residual_eur: number;
+  nested_fund_eur: number;
+  uncovered_fund_eur: number;
+  /** Share of the portfolio attributed to companies. Read this before any row. */
+  coverage_pct: number;
+  companies: LookthroughCompanyRow[];
+  companies_shown: number;
+  company_count_total: number;
+  shown_value_eur: number;
+  other_companies_eur: number;
+  other_companies_count: number;
+  funds: LookthroughFundCoverage[];
+  oldest_basket_as_of: string | null;
+  unvaluable_positions: number;
+  unvaluable_symbols: string[];
+  identity: LookthroughIdentityCoverage;
+  warnings: string[];
+}
+
 export interface SyncResponse {
   message: string;
   // 'skipped' means IBKR had already generated today's statement, so nothing was
@@ -890,6 +974,11 @@ class ApiClient {
 
   async getAnalystRatingsStatus(): Promise<{ total_ratings: number; stale_ratings: number; fresh_ratings: number; oldest_update: string | null; newest_update: string | null }> {
     return this.request('/api/analyst-ratings/status');
+  }
+
+  // Look-through endpoints
+  async getLookthrough(limit = 50): Promise<LookthroughResponse> {
+    return this.request<LookthroughResponse>(`/api/portfolio/lookthrough?limit=${limit}`);
   }
 
   // Allocation endpoints

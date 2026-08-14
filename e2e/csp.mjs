@@ -32,7 +32,7 @@ await page.goto(PREVIEW + '/', { waitUntil: 'networkidle' })
 await page.waitForTimeout(4000)
 
 const tabs = await page.getByRole('tab').count()
-log(tabs === 8, `app renders under the production CSP (${tabs} tabs)`)
+log(tabs === 9, `app renders under the production CSP (${tabs} tabs)`)
 if (tabs !== 8) {
   // Almost always the wrong target rather than a real policy failure.
   log(false, 'is PREVIEW pointing at `vite preview` (built output) rather than the dev server?')

@@ -28,7 +28,7 @@ log((await tablist.count()) === 1, 'exactly one tablist')
 
 const tabs = page.getByRole('tab')
 const tabCount = await tabs.count()
-log(tabCount === 8, `8 tabs present (got ${tabCount})`)
+log(tabCount === 9, `9 tabs present (got ${tabCount})`)
 
 // Roving tabIndex: the strip is one tab stop, arrows move within it.
 await tabs.first().focus()

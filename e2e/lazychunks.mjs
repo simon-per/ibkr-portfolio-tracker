@@ -35,13 +35,13 @@ await applyProductionCsp(page)
 await page.goto(PREVIEW + '/', { waitUntil: 'networkidle' })
 await page.waitForTimeout(2500)
 
-log((await page.getByRole('tab').count()) === 8, 'app renders under the production CSP')
+log((await page.getByRole('tab').count()) === 9, 'app renders under the production CSP')
 
 const initial = jsRequests.map(r => r.file)
 const TAB_TO_CHUNK = {
   Activity: 'ActivityTab', Allocation: 'AllocationTab', Dividends: 'DividendsTab',
   Fundamentals: 'FundamentalsTab', Watchlist: 'WatchlistTab', Forecast: 'ForecastTab',
-  Tax: 'TaxTab',
+  Tax: 'TaxTab', 'Look-through': 'LookThroughTab',
 }
 
 const eager = Object.values(TAB_TO_CHUNK).filter(n => initial.some(f => f.startsWith(n + '-')))
