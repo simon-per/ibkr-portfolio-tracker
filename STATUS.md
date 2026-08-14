@@ -1,6 +1,15 @@
 # Working state
 
-**Last updated: 2026-08-08.** Latest: **the Flex sync no longer asks IBKR for a statement it has
+**Last updated: 2026-08-14.** Latest: **a Look-through tab — company-level exposure, with ETFs
+decomposed into their constituents and one company rendered as one row.** Three of the four largest
+true positions were previously invisible *as positions*, because one company occupies several rows:
+against a snapshot of production it now reads ASML 5,999 (8.5%), Alphabet 5,832 (8.2%) across three
+listings and five funds, Amazon 5,790, Meta 4,546, Nvidia 2,548. Six of twelve funds decompose
+automatically for **78.6% coverage**; the other six publish no machine-readable basket and need a
+hand-downloaded file — see *Needs a human*. Nothing is renormalised, so the gap is stated on screen
+rather than hidden. Details in *Shipped 2026-08-14*.
+
+Before that (2026-08-08): **the Flex sync no longer asks IBKR for a statement it has
 already made today**, which is what "it always errors out" was. IBKR issues about one generation per
 US-Eastern day, so two of three slots plus every manual Sync press failed by construction — and each
 failure spent `Code=1025` lockout budget. The guard skips instead, and the **primary IBKR slot moved
@@ -65,6 +74,30 @@ that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin w
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
 ## Needs a human
+
+- **The Look-through tab ships with empty tables and needs two runs on production.** Neither is
+  scheduled, deliberately (both reach third parties, and the read path is pure DB), and until they
+  run the tab shows every fund as `no_basket` — honest, but not yet useful. Neither touches Yahoo or
+  IBKR, so both are safe at any hour:
+
+  ```bash
+  # 1. identity (~505 ISINs, ~11 min: OpenFIGI batched, GLEIF ~1/s)
+  docker exec backend-portfolio-backend-1 python -m app.cli.resolve_identities --constituents
+  # 2. baskets for the six funds that have an automated source
+  docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
+  #    then the import line it prints for each fund (--dry-run first)
+  ```
+  Expect coverage ≈78.6% afterwards, and ASML/Alphabet/Amazon as the top three.
+
+- **Six funds need a basket downloaded by hand — 21% of the book.** VWCE (the largest single
+  position), SMH, SOXQ, GRID and QTUM publish no machine-readable holdings file: Vanguard Europe
+  serves holdings through a GraphQL endpoint requiring an undocumented header and its robots.txt
+  disallows automated agents, and the other three serve single-page apps. Download the holdings
+  spreadsheet from each product page and ingest it:
+  `python -m app.cli.import_etf_basket <FUND_ISIN> <file> --dry-run`. The parser handles the
+  BlackRock / DWS / Vanguard shapes; a different layout will need a small adapter, and the CLI
+  refuses rather than half-applying. **DBPG is deliberately not on this list** — it is excluded by
+  design, not for want of data.
 
 - **Two credentials are unrotated, and they are different things.**
   - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
@@ -233,6 +266,94 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-14 — the Look-through tab: one company, one row
+
+**Asked for a "seethrough" view: how much is actually invested in each company, with the ETFs broken
+into their single stocks and share classes like GOOG/GOOGL/ABEA combined — "not by string match, but
+a smarter way".** The smarter way is two keyless identifier services, and the interesting part is
+that they are complementary rather than redundant.
+
+**What it fixes on the direct side alone**, before any ETF is opened. One company occupies several
+rows of Positions in three different shapes:
+
+| shown as | folds on |
+|---|---|
+| `GOOGL@NASDAQ` + `ABEA@IBIS` | one ISIN — no provider needed at all |
+| + `GOOG@NASDAQ` | the **LEI** (a different ISIN, share class C) |
+| `ASML@NASDAQ` + `ASML@AEB` | the **LEI** (`USN070592100` NY registry vs `NL0010273215` Amsterdam) |
+
+**Measured on this account's own 25 held ISINs:** OpenFIGI resolved 25/25, GLEIF 20/25 — it has no
+ISIN record at all for TSMC, Samsung, SK Hynix, Credo or Marvell, and OpenFIGI covers every one.
+GLEIF is what folds *share classes*; OpenFIGI's `shareClassFIGI` is what folds *venues* and is the
+only tier that answers for the Asian ordinaries. Neither alone would do.
+
+**Grouping is a union over every identifier, not a precedence chain.** `key = lei or figi or isin`
+re-creates the bug the feature exists to fix: when one of a company's ISINs resolves an LEI and its
+sibling does not, the two are keyed at different depths and split into two rows *while the response
+reports nothing wrong*. Pinned by a test that shuffles the input 25 times.
+
+**Verified end to end against a snapshot of production** (fetched, imported, resolved, deleted
+afterwards). The two real bugs it found are worth knowing, because both were invisible on tidy
+fixtures:
+
+- **The partition missed by a cent.** Five independently rounded buckets summed to 70,842.40 against
+  a total of 70,842.39 — the "never derive a total from rounded rows" rule, broken by my own
+  verification. The residual is now published as the rounded remainder. **The first test written for
+  it passed against the bug**; a mutation check showed it could not reach the condition, and the
+  engineered version now fails 3 of 6 cases when the fix is removed.
+- **XNAS produced company rows called *US DOLLAR* and *NASDAQ 100 E-MINI SEP26*.** Xtrackers
+  publishes no asset-class column, so cash and futures rows counted as companies. It *does* mark them
+  by identifier (`_CURRENCYUSD`, `___ADI34XYM5`), which the adapter now reads. Unidentified company
+  groups went 21 → 8.
+
+Two more shapes real files taught us, both now pinned: EMIM ships **five negative cash rows** (KRW
+−0.10 and friends — ordinary overdrawn balances), so the negative-weight refusal is scoped to
+*invested* rows rather than costing a 4,042-row basket; and XNAS ships a real ISIN with a **blank
+name**, so the label falls back to the identifier.
+
+**Coverage, and what it costs to read the page wrongly.** 78.6% of the book is attributed to
+companies. The remaining 21.1% is six funds with no basket (VWCE 6,510, SMH 2,391, GRID 1,523,
+SOXQ 1,456, QTUM 386) plus DBPG 2,703 excluded outright — it is a *synthetic 2× leveraged* swap ETF
+whose published basket is substitute collateral (Mastercard 6.6%, Altria 5.7%, Tesla 4.9% for an
+S&P 500 product). Every company figure is therefore an **understatement**, and nothing is rescaled
+to disguise that: the coverage figure leads the panel as a `role="alert"` outside every collapsible.
+
+Also worth knowing: VT's weights sum to **91.86%**, and that is *rounding*, not cash — Vanguard
+publishes `percentWeight` to 2dp and thousands of its 10,032 holdings round to 0.00.
+
+**The bounded identity rule earns its keep, measured.** The union of six baskets is ~10,400 distinct
+constituent ISINs, and resolving all of them would be hours of paced requests. Resolving the **480**
+that reach 99.5% of cumulative look-through value took unresolved value from **13,219 to 2,113** —
+18.7% of the book down to 3.0% — while the 9,930 ISINs left unresolved are worth about 0.2 each and
+cannot move any published figure. Companies folded by LEI went 18 → 355 and by shareClassFIGI 5 →
+147. GLEIF had no record for 142 of the 480, which is the same one-in-three gap the held ISINs
+showed, so both providers remain load-bearing at constituent scale too. Top ten companies = 49.2%
+of the portfolio.
+
+Backend 845 → 976 (+131), frontend 416 → 431.
+
+**The browser suite ran against the snapshot and caught a defect nothing else could.** `mobile.mjs`
+reported the Look-through tab pushing the page **1,282px sideways at 390px** and named the element:
+the fund table's `reason` column landed in `DataTable`'s phone card as
+`<dd class="shrink-0 tabular-nums">`, which is exactly right for a figure and exactly wrong for a
+sentence. Prose is now rendered as prose below the table, visible on both viewports — it explains why
+a fifth of the portfolio is absent, so hiding it on a phone was not an option. jsdom loads no CSS, so
+no unit test could have seen this.
+
+Final suite: `mobile` 50/50, `a11y` 17/17, `sweep` 18/18, `axis` 8/8, `csp` 4/4, `chunks` 37/37
+(the new lazy chunk is requested on click, served 200, and mounts clean), `errors` 18/18.
+`ledger` is 5/7 for a reason that predates this work — see *Known rough edges*.
+
+Two e2e corrections worth knowing. The tab count was hardcoded in **three** scripts plus `lib.mjs`'s
+`TABS`, and `csp.mjs` held it **twice** — I updated one and its sibling diagnostic then fired a false
+failure against a good build. All three now read `TABS.length`, so a tenth tab cannot desynchronise
+them. And raising `errors.mjs`'s floor from 10 to 11 was **wrong**: that count is scoped to the
+*Performance* panel, so a new tab can never contribute to it. Reverted, with the new tab given its own
+three assertions instead — including that it must not publish a coverage figure during an outage.
+
+**What to check once deployed** — the feature ships with empty tables, so it needs two operational
+runs before the tab says anything interesting. See *Needs a human*.
 
 ## Shipped 2026-08-08 — the Flex sync stopped asking for a statement IBKR had already made
 
@@ -984,6 +1105,20 @@ twenty rows carrying it, since every holding is continuously held.
 
 ## Known rough edges (accepted, not bugs)
 
+- **`e2e/ledger.mjs` fails 2 of 7, and it is the check that has aged rather than the app.**
+  Found on 2026-08-14 while running the browser suite for the look-through work; **unrelated to it**
+  — none of `ActivityTab.tsx`, `activity_service.py` or `ledger.mjs` is touched by that change. Its
+  two transfer assertions read the *rendered* Activity panel, and the account's only transfer is the
+  in-kind arrival of **2026-01-21**. The default range (`1Y`) still reaches it, but the window now
+  holds 175 rows and the transfers are the oldest of them, so they sit past the first page and no
+  longer appear in the panel text. The API is correct: `/api/portfolio/activity?limit=400` returns
+  all 22 `TRANSFER_IN` rows, badged.
+  **This will stay red and get worse as rows accumulate**, which is exactly the pattern that trains
+  a reader to ignore red — so fix it rather than living with it. The cheap fix is to have the script
+  narrow to transfers before asserting (the `kind` filter, or the `ALL`/`YTD` range) instead of
+  hoping they land on page one. Deliberately not changed as part of the look-through work: quietly
+  editing another check's semantics while shipping an unrelated feature is how a guard stops
+  guarding.
 - **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
   far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
   shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
@@ -1417,14 +1552,30 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
-1. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
+1. **Make look-through coverage keep itself current.** The baskets and identities are refreshed by
+   hand today, and a basket goes stale silently — the tab badges it past 45 days, but nothing warns.
+   In order: a `find_stale_etf_baskets()` contributing `warnings[]`, hung off the **market-data** job
+   for the documented reason (that slot succeeds while others refuse); then a staleness-guarded
+   refresh on the existing 18:00 `full_sync` rather than a new slot, because a new hour has to be
+   threaded through `ALL_SYNC_HOURS` and the three deploy-guard copies `test_deploy_guard_hours.py`
+   keeps in step. The read path must stay pure DB either way.
+
+   Then, once every held fund has a basket: the `sector` and `country` columns on `etf_holdings` are
+   already populated and deliberately **unserved**, and they are the raw material for replacing
+   `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones. That needs a
+   country-to-region map with its own test first — `countryOfRisk` is a country and the charts bucket
+   regions — so it is a real project rather than a flag. The precondition is written into
+   `etf_mappings.py`'s docstring, and the reason not to serve two sector answers at once is in
+   CLAUDE.md.
+
+2. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
    `prune_empty_dividends.py` is a manual CLI and the ingest window already prevents new junk, so
    there is very little left for a scheduled run to find. Investigating this on 2026-07-31 turned up
    a **defect in the CLI rather than a case for automating it** (below), which is a fair warning
    about automating a deleter over financial rows: the value is small and the downside is silent.
    If it is built, it must reuse the CLI's predicate rather than re-deriving one.
 
-2. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
+3. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
    fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running
    cost basis at each point's date; `_calculate_timeline_swept` converts each lot's cost at its own
    `open_date`. Same tax lots, two conversion rules — the *dominant failure mode* in CLAUDE.md, in
@@ -1521,6 +1672,18 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-14** — asked for a "seethrough" view breaking ETFs into single stocks, with GOOG/GOOGL/ABEA
+  combined "not by string match, but a smarter way". Two lenses paid off. **First: measure the
+  premise before designing on it.** Web research produced confident answers that were wrong for this
+  account — four fund ISINs (GRID, SOXQ, QTUM, and the US VanEck SMH instead of the UCITS line
+  actually held) — while running the two identifier APIs against our *own* ISINs settled the design
+  in one pass: GLEIF and OpenFIGI are **complementary**, GLEIF having no record at all for TSMC,
+  Samsung, SK Hynix, Credo or Marvell. **Second: the obvious key ladder was the bug.**
+  `lei or figi or isin` splits a company whose ISINs resolve to different depths and reports nothing
+  wrong, so grouping is a union. And two defects showed up only on real data — a partition missing by
+  a cent from summing rounded buckets, and *US DOLLAR* rendered as a company because Xtrackers ships
+  no asset-class column. The first test written for the cent bug **passed against it**; a mutation
+  check is what exposed that.
 - **2026-08-08** — "fix the flexquery, it always errors out". It never errored: it succeeds once a
   day, and every attempt *after* that success is refused. **IBKR issues about one Flex generation per
   US-Eastern calendar day**, so two of three slots plus every manual Sync press failed by
@@ -1557,9 +1720,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   Yahoo in USD, and writing their look-through entries. Worth remembering as a shape — "fetch the data
   for X" can be blocked by X not existing yet, and the useful move is to do every part that does not
   depend on it rather than to wait.
-- **2026-08-06** — asked to ingest a statement carrying that day's VT/GRID/QTUM buys and a fresh
-  deposit; the statement could not contain them. Generated 18:27 Berlin, it reads `to=2026-08-05` with
-  every open-position row stamped `reportDate=20260805`, because the rolling period is the 30 days
-  ending on the last *completed* day. A production dry-run confirmed it was a byte-for-byte no-op
-  against what the 06:00 job had already ingested, so nothing was written. Recorded in CLAUDE.md so
-  the next "I bought today" does not become a hunt for a broken sync.

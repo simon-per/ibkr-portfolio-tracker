@@ -238,7 +238,7 @@ Vitest runs in `node` by default; component tests opt into jsdom per file with a
 `// @vitest-environment jsdom` docblock, because the pure `lib/` tests are the large majority and
 paying jsdom's startup for all of them is the wrong default.
 
-**The bundle is code-split, and two of the boundaries are deliberate.** The seven non-default tabs
+**The bundle is code-split, and two of the boundaries are deliberate.** The eight non-default tabs
 are `React.lazy` in `Dashboard.tsx` (safe because `TabsContent` returns `null` while inactive, so a
 panel is not mounted until selected). **Recharts stays eager** — `PortfolioValueChart`,
 `PerformanceAttribution` and `MonthlyDeploymentCard` are all on the default Performance tab, so
@@ -472,10 +472,21 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 - **dividend_payments** — `gross_amount_eur`, **`withholding_tax_eur`**, **`net_amount_eur`**,
   `pay_date`, **`source`** ∈ `ibkr` | `yfinance_estimate`.
 - **exchange_rates** / **market_prices** — caches. **ticker_mappings** — IBKR→Yahoo symbols.
+- **isin_identities** — ISIN → company identity, keyed by ISIN: `lei` + `issuer_name` +
+  `lei_source` + `lei_checked_at` (GLEIF), `share_class_figi` + `composite_figi` + `figi_name` +
+  `figi_source` + `figi_checked_at` (OpenFIGI). Per-provider stamps because they fail
+  independently in both directions; a NULL identifier beside a non-NULL stamp means *asked, no
+  record*. See *Look-through*.
+- **etf_baskets** / **etf_holdings** — one fund's constituent basket, keyed by **fund ISIN** (a
+  basket belongs to the share class, not the venue, so one fund held on two exchanges shares it).
+  Metadata is split from the rows on purpose; `weight_pct` is a **percent**;
+  `UNIQUE(fund_isin, line_no)` because `constituent_isin` is nullable and SQLite treats NULLs as
+  distinct. Replaced wholesale, never merged row-by-row.
 - **app_settings** — `base_currency`, `last_sync_to_date`. Plus fundamentals + earnings tables.
 - **sync_runs** — one row per sync attempt (`sync_type` ∈ `ibkr` | `ibkr_sync` | `full_sync` |
   `market_data_only` | `ibkr_manual_xml` | `manual_prices` | `manual_mapping` | `manual_cash_flow` |
-  `manual_dividend_prune` | `manual_dividend_purge`,
+  `manual_dividend_prune` | `manual_dividend_purge` | `manual_identity_resolve` |
+  `manual_etf_basket`,
   `status`, `message`,
   `details`, `warnings`). Timestamps are
   serialized UTC-aware via `utc_iso()` — a bare naive `isoformat()` is parsed as *local* by the browser,
@@ -1736,6 +1747,235 @@ the 72% got there.
 
 ---
 
+## Look-through — company-level exposure
+
+`GET /api/portfolio/lookthrough?limit=50` → `LookthroughService.get_lookthrough()`, rendered by
+`LookThroughTab.tsx` (the 9th tab). Direct holdings plus every held fund decomposed into the
+companies inside it, folded across listings and share classes. Pure DB read — no provider, safe
+at any hour.
+
+It exists because **48% of this account sits in twelve ETFs**, so "how much do I own of Nvidia"
+was unanswerable — and the *direct* side was already fragmented, because one company routinely
+occupies several rows of Positions. The three shapes are all different, which is why this is not
+a string match on names or symbols:
+
+| shown as | really | folds on |
+|---|---|---|
+| `GOOGL@NASDAQ` + `ABEA@IBIS` | Alphabet | **one ISIN** (`US02079K3059`) — no provider needed |
+| + `GOOG@NASDAQ` | Alphabet class C | the **LEI** (`US02079K1079` is a different ISIN) |
+| `ASML@NASDAQ` + `ASML@AEB` | ASML | the **LEI** (`USN070592100` NY registry vs `NL0010273215` Amsterdam) |
+
+### Grouping is a union, never a precedence chain
+
+`company_identity.company_groups()` unions any two members sharing **any** of ISIN /
+shareClassFIGI / LEI / a declared override. The obvious design — `key = lei or share_class_figi
+or isin` — **re-creates the bug the feature exists to fix**: when one of a company's ISINs
+resolves an LEI and its sibling does not, the first is keyed by the LEI and the second by the
+ISIN, so they land in two rows while the response reports a cheerful "1 unresolved". A weaker
+identifier had already folded them and the stronger one pulled them apart. The key is chosen
+*after* grouping (LEI > shareClassFIGI > lowest ISIN) purely so the API has a stable id.
+
+Order-independence is a property, not an accident: the module is pure and
+`test_company_identity.py` shuffles the input 25 times and asserts the grouping and every
+display name are byte-identical.
+
+### Both identity providers are required, and they fail in opposite directions
+
+Measured against this account's own ISINs on 2026-08-14, both keyless:
+
+| | folds | has no record for |
+|---|---|---|
+| **GLEIF** `api.gleif.org/api/v1/lei-records?filter[isin]=` | share classes and multi-ISIN companies (both Alphabet ISINs → `5493006MHB84DD0ZWV18`; both ASML ISINs → `724500Y6DUVHQD6OXN27`) | **TSMC, Samsung, SK Hynix, Credo** — the Asian ordinaries held here |
+| **OpenFIGI** `POST api.openfigi.com/v3/mapping` | one share class across venues (GOOGL@US + ABEA@Xetra) | nothing held here; resolves all four GLEIF misses |
+
+So a single-provider design loses either the Alphabet/ASML folds or every Asian ordinary.
+`isin_identities` stores both with **separate `*_checked_at` stamps**: a NULL identifier beside a
+non-NULL stamp means *asked, that provider has nothing*, distinct from *never asked* (no row).
+Without the split, every run re-asks the four permanently-absent ISINs forever — the loop the
+holiday rule and `UPSTREAM_RETRY_COOLDOWN_SECONDS` both exist to stop. Separate `*_source`
+columns because a bulk-file LEI is not an API LEI, the `source='alpha_vantage'`-as-
+`'yahoo_finance'` lesson.
+
+**`compositeFIGI` is stored and must never enter the union.** It is per-exchange-composite, so
+it folds nothing the ISIN does not, and unioning on it would merge unrelated lines.
+
+**Neither provider folds an ADR to its ordinary**, and this is live rather than theoretical:
+TSMC's ordinary is `BBG001S6Q004` while the `TSM` ADR is `BBG001S5WWW4` (as it must be — an ADR
+is a distinct instrument), and GLEIF gives the ADR a LEI while giving the ordinary none. `2330@TWSE`
+is held directly and `TSM` is a top constituent of the US-listed funds. Hence `ISSUER_OVERRIDES`
+in `app/etf_sources.py` — ISIN-keyed, **reason mandatory by test**, currently one entry. Growth
+there is the signal a tier below is being misused. `test_company_identity.py` checks it from
+*both* sides: without the override TSMC is two rows, with it one, which is what proves the
+override carries the fold rather than masking a broken tier.
+
+**Display name is a separate decision from the key.** GLEIF returns the *legal* name in its own
+script — TSMC's is `台灣積體電路製造股份有限公司`, correct and unreadable on a dashboard whose every
+other row is Latin — while OpenFIGI's is clean ASCII truncated to ~30 chars and better only for
+those. So: Latin-script legal name, else FIGI name, else non-Latin legal name, else the
+highest-weight contributing row's name, else the ref. Deterministic, because a label that
+changes with sort order is this codebase's signature bug. The Latin test is codepoint-based and
+deliberately permissive about accents, so "Société Générale" keeps its own name.
+
+### The partition, and why it is the only assertion that matters
+
+```
+direct_equity + looked_through_equity + fund_residual + nested_fund + uncovered_fund
+  == total_market_value
+```
+
+To the cent. One equality catches a dropped holding, a double-counted constituent, a
+renormalisation and a mis-scaled weight alike. `test_lookthrough_partition.py` pins it **and**
+fails when the response grows a top-level `*_eur` field classified as neither a bucket nor a
+non-bucket — so a bucket added later cannot escape the identity. (`test_allocation_completeness.py`
+claims to be family-level and hardcodes its tuple; this is that shape done properly.)
+
+Positions come from `PortfolioService.get_positions_breakdown()` and nowhere else, so the
+base-currency projection is inherited and the total **cannot disagree with
+`/api/portfolio/summary`** — pinned in `test_api_smoke.py`.
+
+### Nine rules, each a wrong number the other way
+
+- **Nothing is renormalised onto covered value.** Every percentage is a share of the *whole*
+  portfolio, so while some funds have no basket every row is an understatement — and rescaling
+  would convert a stated gap into a confident lie. Same refusal `rebalance.ts` makes about
+  targets. `coverage_pct` leads the panel as a `role="alert"` **outside any collapsible**, the
+  `MonthlyReturnsHeatmap` lesson.
+- **Equity asset classes are a whitelist**, never a blacklist — the reasoning behind
+  `get_deposits()` selecting `DEPOSITWITHDRAW` by name. A blacklist admits the next label an
+  issuer invents (`Rights`, `Warrant`, `Preferred`) as a company.
+- **`asset_class_available=False` is a real state.** Xtrackers/DWS publishes no asset-class
+  column at all, so the whitelist cannot run: every row counts, the residual becomes
+  `100 − Σ(all rows)`, and the API says the filter did not apply. Never infer "equity" from "has
+  an ISIN" — a bond has one too.
+- **A basket below `MIN_BASKET_COVERAGE_PCT` (80) is reported as absent**, with its measured Σ.
+  A residual is right for EMIM's real 98.04 and catastrophic at Σ=3, where "this fund is 97%
+  cash" is a *plausible* figure — the dangerous kind.
+- **A constituent that is itself a fund gets its own bucket, not a company row.** Live risk:
+  iShares baskets carry the BlackRock ICS liquidity fund as a line item. v1 does not recurse —
+  that needs a depth cap and a visited set, because a feeder can hold its own share class.
+- **A repeated ISIN inside one basket is summed.** Copying `import_prices.py`'s last-row-wins
+  rule for a repeated date would silently drop weight; hence `UNIQUE(fund_isin, line_no)`.
+- **The truncated tail is a named row carrying a value**, or the visible percentages sum to well
+  under 100 under a "% of portfolio" header. Sort is `value desc, company_key asc`, because
+  thousands of constituents tie near zero and without a total order the tail would shuffle
+  between requests and a company would appear and vanish.
+- **An unvaluable holding is excluded from both sides and named**, on the server-side test
+  `market_value_eur > 0` alone — cited from `dividend_service`'s forward-yield filter rather
+  than reinvented. An unpriced *fund* is the sharpest silent failure here: it renders not as a
+  visible zero but as the **absence** of its companies from rows that still say "% of portfolio".
+- **There is deliberately no cost or gain column.** Splitting a fund's cost across constituents
+  needs the basket as it stood on each purchase date, which nothing stores — so any per-company
+  cost would be fabricated, not merely approximate. Stated in the schema docstring so it is not
+  "completed" later.
+
+### One fundness predicate, keyed on ISIN
+
+`ETF_ALLOCATIONS` entries now declare `"isins": [...]`, and `fund_isins()` /
+`is_known_etf_isin()` / `symbol_for_fund_isin()` are **the** fundness predicates. The live
+collision that forced it: this account holds the **UCITS** VanEck fund `IE00BMC38736` (LSE), not
+the far better-known US `SMH`, and a symbol-keyed lookup cannot tell them apart. `app/etf_sources.py`
+holds only *how to fetch* and is cross-checked against `ETF_ALLOCATIONS` in both directions by
+`test_etf_source_registry.py`; a third census of what counts as a fund would be the same
+divergence a third time. `_build_isin_index()` raises **at import** on a duplicate ISIN, because
+two funds sharing one would silently give one the other's basket.
+
+### Baskets, and DBPG
+
+`etf_baskets` (one row per fund: as-of, source, row counts, weight sums,
+`asset_class_available`) is split from `etf_holdings` deliberately — a `SUM(weight_pct)` over
+holdings cannot tell "98.04 because the file carries cash and futures rows" from "98.04 because
+2% of rows failed to parse", and those need different responses. Denormalising the as-of onto
+every row would make "the fund's as-of" a `MAX()` that one stale row ages.
+
+`weight_pct` is a **percent**, matching `etf_mappings.py`, and normalising at the adapter
+boundary is mandatory: DWS ships fractions summing to 1.0 and iShares percents summing to ~100,
+so a fraction landing here makes the fund contribute 1/100th of its value and read as 99% cash.
+`sector`/`country` are captured **and deliberately unserved** — see `etf_mappings.py`'s docstring
+for the precondition for switching the three allocation charts onto them.
+
+**`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not.**
+Xtrackers publishes none at all — not in the CSV, not in a `Last-Modified` header (verified).
+Know which way that errs: the true as-of can only be *older*, so a stood-in date makes a basket
+look **fresher** than it is, which is the wrong direction for a staleness alarm. Tolerable only
+because DWS regenerates continuously, and surfaced via `as_of_is_issuer_stated` rather than hidden.
+
+**DBPG is excluded and carries two independent disqualifiers.** It is a synthetic swap-based S&P
+500 **2× leveraged** ETF: the 46-name basket it publishes is substitute collateral (measured top
+holdings Mastercard 6.6%, Altria 5.7%, Tesla 4.9% — the tell), *and* even the real index basket
+would understate its exposure by half. `replication` and `leverage` are recorded **separately**,
+so a future "we found the swap reference" change cannot clear one and silently reintroduce the other.
+
+### Sources, and what is not built yet
+
+Verified working, keyless, login-free: **DWS** (`etf.dws.com/etfdata/export/GBR/ENG/csv/product/
+constituent/<FUND_ISIN>/` — keyed by fund ISIN, nothing to discover, echoes `ShareClass ISIN` on
+every row for the parser to check); **BlackRock** (a varnish JSON API needing a per-fund
+`portfolio_id`, recorded in the registry — note several share classes are distinct product ids
+over one portfolio and return byte-identical baskets, so a copy-pasted id is *invisible* and
+`test_etf_source_registry.py` checks uniqueness); **Vanguard US** (500 rows/page, as-of lags ~6
+weeks, which is normal). No route exists for VWCE, SMH, SOXQ, GRID or QTUM — `adapter="manual"`,
+meaning a downloaded file.
+
+All three adapters are built and verified against live files: **6 of 12 funds decompose, giving
+78.6% coverage of the book**; the other six need a hand-downloaded file. The read path never
+dereferences `adapter`, so a declared-but-unimplemented one degrades to "no basket yet", never to
+a wrong number.
+
+**Fetching is split from parsing, and that is not tidiness.** `app/cli/fetch_etf_baskets.py`
+writes response bodies to disk; `app/cli/import_etf_basket.py` parses and stores them. It is the
+same relationship `ingest_flex_xml.py` has to a browser download, it makes every scraper's
+failure mode a committable fixture, and **it is the only way to test the lying-content-type trap
+at all** — a fetcher that parsed inline would have nothing to hand a test. The import path works
+identically on a file downloaded by hand, which is the whole route for VWCE, SMH, SOXQ, GRID and
+QTUM.
+
+**Everything the parsers refuse, they refuse whole.** `import_prices.py`'s rule, and here the
+stakes are higher: a partial parse *succeeds*, replaces a real 1,338-row basket with plausible
+rows, and every figure shrinks silently. On top of that `replace_basket` refuses a basket whose
+row count collapses below half the stored one, or whose as-of moves backwards, keeping what is
+already there. Both overridable with `--force` for a genuine index reconstitution.
+
+**Four things real files taught us on the first run, all now pinned by tests:**
+
+- **A negative weight is refused only on an *invested* row.** EMIM publishes five negative cash
+  lines (THB −0.01, TWD −0.01, CNH −0.01, HKD −0.02, KRW −0.10) — ordinary overdrawn balances.
+  Refusing 4,042 rows over −0.10% of cash trades a whole fund's look-through for nothing. A
+  negative *security* weight is the real hazard and still refuses. An issuer that states no class
+  at all still refuses any negative, since there is no way to tell the two apart.
+- **A nameless row falls back to its identifier.** XNAS ships `IE00BYQNZ507` with an empty name at
+  0.008% of the fund. Nameless *and* unidentifiable still refuses.
+- **Xtrackers' cash and futures rows are read off its identifier convention** (`_CURRENCYUSD`,
+  `___ADI34XYM5`), because the export has no class column — without which XNAS produced company
+  rows called *US DOLLAR* and *NASDAQ 100 E-MINI SEP26*. Only the negatives are derived; a real
+  holding is left unclassified rather than asserted to be equity, which would be wrong for a bond
+  fund. This is why `counts_as_invested` lets a **stated** class decide even when the issuer
+  publishes no column.
+- **`fund_residual_eur` is the rounded remainder, not its own rounded sum.** Five independently
+  rounded buckets summed to a cent more than the rounded total on the real book — a partition
+  that misses by a cent still misses. The residual carries the correction because "whatever is
+  left" is its definition. Note the residual is mostly *rounding*, not cash, for a broad fund:
+  Vanguard publishes weights to 2dp, so thousands of VT's 10,032 holdings round to 0.00 and its
+  weights sum to ~92%. Not renormalised — that would invent the attribution.
+
+`app/cli/resolve_identities.py` resolves identity: a CLI rather than a route, following the
+precedent that there is no upload endpoint for Flex XML and no route for price import. Being a
+separate process it needs no gate — and if it ever becomes a route it must **not** use
+`SYNC_PIPELINE`, because entering that gate bumps the shared last-start clock every other route's
+cooldown reads, so a look-through refresh would 429 a real IBKR sync. Held ISINs are resolved
+unconditionally (~25); `--constituents` adds the head of the constituent ranking, down to
+`IDENTITY_COVERAGE_TARGET_PCT` (99.5) of cumulative look-through value and capped at
+`IDENTITY_MAX_ISINS` (500). **The obvious form of that rule is circular** — it wants a company's
+value to decide whether to resolve its identity, and identity is what builds companies — so it
+ranks by *raw constituent ISIN* first, which needs no identity at all. The threshold is a share
+rather than an amount because the base currency is user-switchable and a fixed floor would change
+the resolved set when a display toggle is flipped.
+
+Tests: `test_company_identity.py`, `test_lookthrough_partition.py`, `test_etf_source_registry.py`,
+`test_etf_basket_import.py` (the poison fixtures), plus the look-through case in
+`test_api_smoke.py` and `LookThroughTab.test.tsx`.
+
+---
+
 ## Client-side analytics — risk, targets, currency
 
 Three pure `frontend/src/lib/` modules with no endpoint of their own: they compute from series and
@@ -2038,7 +2278,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (798 backend + 399 frontend as of 2026-08-05, all offline — no IBKR, Yahoo or FX-provider
+Tests (933 backend + 431 frontend as of 2026-08-14, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -2218,6 +2458,11 @@ Tests: `tests/test_currency_fallback.py`.
 | A drift or currency panel says it couldn't load positions | The positions query failed. The panel refuses to build a plan from absent data rather than reporting a portfolio of unheld rows |
 | Currency exposure looks wrong for an ETF | It is quote currency, not economic exposure, and deliberately not re-attributed — a EUR-listed S&P tracker is EUR-quoted with USD risk. The fund share is named on screen |
 | A recently bought holding sits in an *Unknown* sector or region | Expected, and correct rather than missing. `sync_helper` never writes `sector`/`country`, so an IBKR-ingested security has both NULL while `asset_type` has a `"Stock"` column default. Only `POST /api/allocation/sync` fills them and **nothing schedules it** (it needs Yahoo), so run it by hand. Before 2026-08-05 the holding was silently dropped from those two charts instead, which made them sum to under 100% under a "% of portfolio" label. A **mapped ETF** is the exception and needs no sync at all — `app/etf_mappings.py` supplies its sector, region *and* asset type live at read time |
+| Look-through coverage is well below 100% | Expected until the basket adapters ship (Phase 2). Read the `funds` table on the tab: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| A company appears twice in the look-through table | The two rows share no identifier. Check `key_type` and the `†` marker: `ISIN` means no LEI and no shareClassFIGI is on record, so run `python -m app.cli.resolve_identities`. If both rows are already resolved it is a genuine gap no identifier closes — an ADR against its ordinary, or a dual-listed company with two legitimate LEIs — and it needs an `ISSUER_OVERRIDES` entry with its evidence |
+| A look-through row is named `台灣積體電路製造…` or similar | GLEIF's legal name is the company's real one in its own script, and it is preferred only when Latin. That row has no OpenFIGI name cached — re-run `resolve_identities`, which fills `figi_name` |
+| Look-through total ≠ the Market Value card | It cannot be: both come from `get_positions_breakdown`, and `test_api_smoke.py` pins them equal. If they differ, one of them is not the deployed build — check `/health`'s commit |
+| A look-through fund reads `Basket rejected` | Its stored basket accounts for less than `MIN_BASKET_COVERAGE_PCT` (80) of the fund, which is a half-parsed file rather than a fund holding mostly cash. Re-import it; the previous basket is kept on a refused import |
 | Beta is blank with a benchmark selected | Fewer than the 20 flow-free days a regression needs; the count so far is in the footnote. Flow days are excluded by design |
 | Sharpe, Volatility and Sortino all read `—` on a short range | Expected, and now consistent: all three need 5 daily returns. MTD in the first days of a month gives 2–3. Sharpe used to show `0.00` here instead, which looked like a measurement |
 | Top 5 Weight reads `—` / *No priced positions* | Nothing held resolved a price, so there is no weight to concentrate. Deliberately not `0.0%`, which the tone ladder would have drawn **green** — a reassuring all-clear from no data |
