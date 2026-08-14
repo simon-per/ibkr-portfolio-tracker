@@ -216,14 +216,34 @@ function fundColumns(deps: {
       cell: (row) =>
         row.equity_weight_pct === null ? '—' : `${row.equity_weight_pct.toFixed(2)}%`,
     },
-    {
-      key: 'reason',
-      header: 'Why',
-      shortHeader: 'Why',
-      cellClassName: 'text-muted-foreground text-xs max-w-[340px]',
-      cell: (row) => row.reason ?? null,
-    },
   ]
+}
+
+/**
+ * Why each undecomposed fund is undecomposed, as prose.
+ *
+ * Deliberately NOT a column. `DataTable`'s phone card renders every detail into
+ * `<dd class="shrink-0 tabular-nums">` — exactly right for a figure and exactly wrong for a
+ * sentence, because `shrink-0` forces the element's intrinsic width. A `reason` column pushed
+ * the page 1,282px sideways at 390px, which `e2e/mobile.mjs` caught and no unit test could:
+ * jsdom loads no CSS, so overflow is invisible to it.
+ *
+ * Prose in prose also reads better on both viewports, and it must stay visible on the phone —
+ * this is the explanation for a fifth of the portfolio being absent from the table above.
+ */
+function FundReasons({ funds }: { funds: LookthroughFundCoverage[] }) {
+  const missing = funds.filter((f) => f.status !== 'looked_through' && f.reason)
+  if (missing.length === 0) return null
+  return (
+    <dl className="space-y-1.5 text-xs">
+      {missing.map((fund) => (
+        <div key={fund.fund_isin} className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
+          <dt className="font-medium sm:shrink-0">{fund.symbol ?? fund.fund_isin}</dt>
+          <dd className="text-muted-foreground">{fund.reason}</dd>
+        </div>
+      ))}
+    </dl>
+  )
 }
 
 function CompanyDrillDown({
@@ -484,6 +504,7 @@ export function LookThroughTab() {
                   label="Fund coverage"
                   detailLimit={4}
                 />
+                <FundReasons funds={data.funds} />
                 <p className="text-xs text-muted-foreground">
                   Not attributed to any company:{' '}
                   {formatCurrency(

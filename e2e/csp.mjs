@@ -14,7 +14,7 @@
  * Needs: `npm run build && npx vite preview --port 4173` in frontend/. No backend
  * required — panels render error states, which still exercises the CSP.
  */
-import { PREVIEW, applyProductionCsp, openPage, reporter } from './lib.mjs'
+import { PREVIEW, TABS, applyProductionCsp, openPage, reporter } from './lib.mjs'
 
 const { log, done } = reporter()
 const { browser, page } = await openPage()
@@ -32,8 +32,8 @@ await page.goto(PREVIEW + '/', { waitUntil: 'networkidle' })
 await page.waitForTimeout(4000)
 
 const tabs = await page.getByRole('tab').count()
-log(tabs === 9, `app renders under the production CSP (${tabs} tabs)`)
-if (tabs !== 8) {
+log(tabs === TABS.length, `app renders under the production CSP (${tabs} tabs)`)
+if (tabs !== TABS.length) {
   // Almost always the wrong target rather than a real policy failure.
   log(false, 'is PREVIEW pointing at `vite preview` (built output) rather than the dev server?')
 }

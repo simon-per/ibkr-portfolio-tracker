@@ -13,7 +13,7 @@
  * one it reports 11/14 and all three failures are phantoms. The checked-in `portfolio.db`
  * is enough — this needs positions, not realistic ones.
  */
-import { BASE, openPage, reporter } from './lib.mjs'
+import { BASE, TABS, openPage, reporter } from './lib.mjs'
 
 const { log, done } = reporter()
 const { browser, page, errors } = await openPage({ width: 1440, height: 950 })
@@ -28,7 +28,7 @@ log((await tablist.count()) === 1, 'exactly one tablist')
 
 const tabs = page.getByRole('tab')
 const tabCount = await tabs.count()
-log(tabCount === 9, `9 tabs present (got ${tabCount})`)
+log(tabCount === TABS.length, `${TABS.length} tabs present (got ${tabCount})`)
 
 // Roving tabIndex: the strip is one tab stop, arrows move within it.
 await tabs.first().focus()

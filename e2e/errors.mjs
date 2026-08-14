@@ -46,7 +46,11 @@ const hits = (opened.match(/didn't respond/g) || []).length
 // silently were not. A floor rather than an equality so adding a panel is free; lowering
 // it should be a deliberate edit, because that is what a surface losing its error state
 // looks like.
-log(hits >= 11, `${hits} panels report the backend failure explicitly`)
+//
+// Note this counts within the PERFORMANCE panel only, so a new *tab* never raises it — a
+// tab needs its own assertion further down instead. Raising this to 11 for the
+// Look-through tab was exactly that mistake, caught by the check failing.
+log(hits >= 10, `${hits} panels report the backend failure explicitly`)
 log(!/Not enough data to compute/.test(opened), 'Monthly Returns does not claim "not enough data"')
 log(!/No contribution history yet/.test(opened), 'Monthly Deployment does not claim "no history"')
 log(!/No dividend data available/.test(opened), 'Dividend Income does not claim "no dividends"')
@@ -88,6 +92,22 @@ log(
 log(
   !/position\(s\) outside the/.test(alloc) && !/Nothing to do/.test(alloc),
   'the rebalance panel does not report an all-clear it cannot know',
+)
+
+// The look-through tab is the one surface where an empty state is the worst possible lie:
+// a company table that renders nothing during an outage says "you own no companies", on a
+// page whose entire purpose is completeness.
+await page.getByRole('tab', { name: 'Look-through' }).click()
+await page.waitForTimeout(9000)
+const lt = await page.getByRole('tabpanel').innerText()
+log(/didn't respond/.test(lt), 'Look-through reports the failure')
+log(
+  !/No company exposure yet/.test(lt),
+  'Look-through does not claim the portfolio holds no companies',
+)
+log(
+  !/covers .* of the portfolio/.test(lt) && !/% of portfolio/.test(lt),
+  'Look-through does not publish a coverage figure it cannot know',
 )
 
 done()

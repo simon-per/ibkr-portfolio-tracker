@@ -13,7 +13,7 @@
  * required — the panels render their error states, which still proves the chunk arrived
  * and the component mounted.
  */
-import { PREVIEW, applyProductionCsp, openPage, reporter } from './lib.mjs'
+import { PREVIEW, TABS, applyProductionCsp, openPage, reporter } from './lib.mjs'
 
 const { log, done } = reporter()
 const { browser, page } = await openPage()
@@ -35,7 +35,7 @@ await applyProductionCsp(page)
 await page.goto(PREVIEW + '/', { waitUntil: 'networkidle' })
 await page.waitForTimeout(2500)
 
-log((await page.getByRole('tab').count()) === 9, 'app renders under the production CSP')
+log((await page.getByRole('tab').count()) === TABS.length, 'app renders under the production CSP')
 
 const initial = jsRequests.map(r => r.file)
 const TAB_TO_CHUNK = {
