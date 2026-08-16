@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     # email does not belong in it.
     lookthrough_contact_email: str = ""
 
+    # OpenFIGI's free API key, sent as `X-OPENFIGI-APIKEY`. Optional and empty by default —
+    # the keyless tier works and is what the feature shipped on — but it lifts the batch from
+    # 10 mapping jobs per request to 100 and the rate from 25 requests/minute to 250, i.e.
+    # from ~250 identifiers a minute to ~25,000. That is the difference between resolving the
+    # few hundred ISINs held directly and resolving the thousands inside the funds, so the key
+    # has to be in place *before* `IDENTITY_MAX_ISINS` is worth raising.
+    openfigi_api_key: str = ""
+
     # Database Configuration
     database_url: str = "sqlite+aiosqlite:///./portfolio.db"
 

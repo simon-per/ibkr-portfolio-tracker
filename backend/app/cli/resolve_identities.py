@@ -20,9 +20,20 @@ Touches **no** Yahoo and **no** IBKR, so neither rule at the top of CLAUDE.md ap
 does reach OpenFIGI and GLEIF: both keyless, both paced well under their limits, both
 answering about public identifiers.
 
+With `--constituents` it also resolves the fund constituents whose issuer published a **CINS or
+a SEDOL instead of an ISIN** — 77 of GRID's 128 rows, 20 of QTUM's 89. Those get a
+shareClassFIGI rather than an ISIN, because OpenFIGI's mapping endpoint has no ISIN to give,
+and a FIGI folds the row just as well without inventing an identifier. Note the idType matters:
+asked as `ID_CUSIP` a CINS returns zero rows, silently.
+
 Re-running is cheap and safe. A positive answer is cached forever (LEIs do not change) and a
 definitive "no record" is cached too, so a second run asks about nothing. A *failed*
-request is not cached, so it is retried.
+request is not cached, so it is retried. The one exception is a constituent identifier that
+resolves to nothing, which is re-asked — a hundred-odd identifiers behind two small funds, two
+requests with a key.
+
+**Set `OPENFIGI_API_KEY` before asking about constituents.** It is free and self-service, and
+takes the batch from 10 identifiers per request to 100.
 
 Usage, inside the container:
 
@@ -40,12 +51,14 @@ from typing import List, Optional
 from sqlalchemy import select
 
 from app.clock import utcnow
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.etf_mappings import is_known_etf_isin
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.identity_service import IdentityService
+from app.services.identity_service import GLEIF_MIN_INTERVAL_S, IdentityService
 from app.services.lookthrough_service import LookthroughService
 
 logger = logging.getLogger(__name__)
@@ -108,10 +121,31 @@ async def resolve_identities(
 
             pending_figi = await service.repo.unchecked(targets, "openfigi")
             pending_lei = await service.repo.unchecked(targets, "gleif")
+            # Fund constituents whose issuer published a CINS or a SEDOL instead of an ISIN.
+            # A separate question with a separate answer, so it is counted separately.
+            pending_ids = (
+                await EtfBasketRepository(db).unresolved_identifiers() if constituents else []
+            )
+            asking_lei = min(len(pending_lei), limit) if limit else len(pending_lei)
             print(
                 f"Never asked: OpenFIGI {len(pending_figi)}, GLEIF {len(pending_lei)}"
+                + (f", non-ISIN constituent identifiers {len(pending_ids)}" if constituents
+                   else "")
                 + (f" (limited to {limit} each)" if limit else "")
             )
+            if asking_lei:
+                # GLEIF has no batch form, so it decides how long this takes. Said up front
+                # rather than discovered forty minutes in.
+                print(
+                    f"Estimated runtime ~{asking_lei * GLEIF_MIN_INTERVAL_S / 60:.0f} min, "
+                    f"almost all of it GLEIF (one request per ISIN). Answers are cached, so "
+                    f"--limit and several runs come to the same thing."
+                )
+            if not settings.openfigi_api_key.strip():
+                print(
+                    "OPENFIGI_API_KEY is not set: 10 identifiers per request instead of 100. "
+                    "Free from https://www.openfigi.com/api and worth it above a few hundred."
+                )
 
             if dry_run:
                 # Returns before any write and records no sync_run, exactly as
@@ -119,11 +153,15 @@ async def resolve_identities(
                 print("DRY RUN - nothing written, no requests made.")
                 return 0
 
-            if not pending_figi and not pending_lei:
+            if not pending_figi and not pending_lei and not pending_ids:
                 print("Every held ISIN has already been asked about. Nothing to do.")
                 return 0
 
             summary = await service.resolve(targets, limit=limit)
+            if constituents:
+                summary.update(
+                    await service.resolve_constituent_identifiers(limit=limit)
+                )
             await db.commit()
 
             print(
@@ -138,6 +176,13 @@ async def resolve_identities(
                 f"{summary['gleif_errors']} failed"
             )
             print(f"Rows written: {summary['rows_written']}")
+            if constituents:
+                print(
+                    f"Constituent identifiers: {summary['identifiers_resolved']} resolved to a "
+                    f"shareClassFIGI, {summary['identifiers_not_found']} no match, "
+                    f"{summary['identifiers_errors']} failed; "
+                    f"{summary['holdings_updated']} holding row(s) updated"
+                )
 
         except Exception as e:
             await db.rollback()
@@ -156,6 +201,8 @@ async def resolve_identities(
                 f"Resolved identity for {summary['rows_written']} ISIN(s): "
                 f"{summary['gleif_resolved']} LEI, "
                 f"{summary['openfigi_resolved']} shareClassFIGI"
+                + (f"; {summary.get('holdings_updated', 0)} fund constituent row(s) folded "
+                   f"by CINS/SEDOL" if constituents else "")
             ),
             details=summary,
             started_at=started_at,
