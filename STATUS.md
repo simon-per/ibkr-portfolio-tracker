@@ -1,19 +1,23 @@
 # Working state
 
-**Last updated: 2026-08-16.** Latest: **the Look-through tab got its two charts** — a treemap of
-company exposure and a composition bar showing how much of the book the look-through can attribute
-at all. Both refuse to renormalise: the treemap carries the truncated tail and the unattributed
-remainder as tiles, so a tile's area really is its share of the whole. Details in
-*Shipped 2026-08-16*.
+**Last updated: 2026-08-16 (evening).** Latest: **the look-through treemap clusters by sector, and
+four more funds have an automated basket route.** SOXQ, GRID, QTUM and SMH were listed here as
+needing a hand download; all four turned out to have keyless, login-free routes, so **10 of 12 funds
+now decompose** and only VWCE is a genuine gap. Watch for one thing on prod: three of the four US
+issuers publish a **CINS or a SEDOL instead of an ISIN**, which fold only after
+`resolve_identities --constituents` runs. Details in *Shipped 2026-08-16 (evening)*.
+
+Before that, the same day: **the Look-through tab got its two charts** — a treemap of company
+exposure and a composition bar showing how much of the book the look-through can attribute at all.
+Both refuse to renormalise: the treemap carries the truncated tail and the unattributed remainder as
+tiles, so a tile's area really is its share of the whole. Details in *Shipped 2026-08-16*.
 
 Before that (2026-08-14): **a Look-through tab — company-level exposure, with ETFs
 decomposed into their constituents and one company rendered as one row.** Three of the four largest
 true positions were previously invisible *as positions*, because one company occupies several rows:
-against a snapshot of production it now reads ASML 5,999 (8.5%), Alphabet 5,832 (8.2%) across three
-listings and five funds, Amazon 5,790, Meta 4,546, Nvidia 2,548. Six of twelve funds decompose
-automatically for **78.6% coverage**; the other six publish no machine-readable basket and need a
-hand-downloaded file — see *Needs a human*. Nothing is renormalised, so the gap is stated on screen
-rather than hidden. Details in *Shipped 2026-08-14*.
+against a snapshot of production it read ASML, Alphabet (across three listings and five funds),
+Amazon, Meta and Nvidia as the top five. Nothing is renormalised, so the coverage gap is stated on
+screen rather than hidden. Details in *Shipped 2026-08-14*.
 
 Before that (2026-08-08): **the Flex sync no longer asks IBKR for a statement it has
 already made today**, which is what "it always errors out" was. IBKR issues about one generation per
@@ -81,19 +85,28 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Needs a human
 
-- **The Look-through tab ships with empty tables and needs two runs on production.** Neither is
-  scheduled, deliberately (both reach third parties, and the read path is pure DB), and until they
-  run the tab shows every fund as `no_basket` — honest, but not yet useful. Neither touches Yahoo or
-  IBKR, so both are safe at any hour:
+- **The Look-through tab needs three CLI runs on production, in this order.** None is scheduled,
+  deliberately (they reach third parties, and the read path is pure DB), and until they run the tab
+  shows every fund as `no_basket` — honest, but not useful. None touches Yahoo or IBKR, so all are
+  safe at any hour:
 
   ```bash
-  # 1. identity (~505 ISINs, ~11 min: OpenFIGI batched, GLEIF ~1/s)
-  docker exec backend-portfolio-backend-1 python -m app.cli.resolve_identities --constituents
-  # 2. baskets for the six funds that have an automated source
+  # 1. baskets — 10 funds now have an automated route (was 6)
   docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
   #    then the import line it prints for each fund (--dry-run first)
+  # 2. identity: ISINs. Bounded by GLEIF at ~1.1s each, and it prints an estimate first.
+  docker exec backend-portfolio-backend-1 python -m app.cli.resolve_identities --constituents
   ```
-  Expect coverage ≈78.6% afterwards, and ASML/Alphabet/Amazon as the top three.
+
+  **Order matters now**: step 2 also resolves the CINS/SEDOL identifiers step 1 stores, so running it
+  first leaves GRID's and QTUM's companies unfolded. A **basket re-import deliberately clears** those
+  resolutions (it keeps the raw identifier), so step 2 is the second half of every basket refresh.
+
+  **Set `OPENFIGI_API_KEY` in `backend/.env` before step 2** — free and instant from
+  <https://www.openfigi.com/api>, no payment details. It takes the batch from 10 identifiers per
+  request to 100 and the rate from 25 requests/minute to 250, which is what makes
+  `IDENTITY_MAX_ISINS` (raised 500 → 2500) affordable. Remember `docker compose up -d`, **not**
+  `restart`, or the container keeps its old environment and reports success anyway.
 
 - **VWCE's basket needs one browser click, and it decides ±9 pp of coverage.** It is the largest
   single position (9.2% of the book) and worth ~1.9× everything SEC N-PORT could add. Open
@@ -118,11 +131,10 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   ~3,500), the overlap was never quantified, and 9.2% of the book entering the charts under another
   fund's index is the fabricated-plausible-figure failure this codebase refuses everywhere else.
 
-- **SOXQ, GRID and QTUM (4.7% combined) need a hand download too** — all three serve single-page
-  apps. `python -m app.cli.import_etf_basket <FUND_ISIN> <file> --dry-run`; the CLI refuses rather
-  than half-applying. A layout the three shipped parsers do not recognise needs a small adapter.
-  **SMH is no longer on this list** — a keyless route was found, see *Worth doing next*.
-  **DBPG never was** — it is excluded by design, not for want of data.
+- **SOXQ, GRID, QTUM and SMH are no longer on this list.** All four have adapters as of
+  2026-08-16 — the "single-page app" reading was wrong for each of them in a different way, see
+  *Shipped 2026-08-16 (evening)*. **DBPG never was on it** — it is excluded by design, not for want
+  of data.
 
 - **Two credentials are unrotated, and they are different things.**
   - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
@@ -187,24 +199,26 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   meantime is a browser download through `app/cli/ingest_flex_xml.py`, which is idempotent and
   spends no token budget.
 
-- **Every piece of look-through data is a one-off snapshot taken 2026-08-14, and nothing renews
-  any of it.** This is the weakest part of the feature and the thing most likely to mislead later,
-  because the numbers stay confidently on screen while the baskets behind them age. Populated on
-  production that evening: 6 baskets, 16,138 constituent rows, 505 identities. Three different
-  decay clocks:
+- **Every piece of look-through data is a one-off snapshot, and nothing renews any of it.** This is
+  the weakest part of the feature and the thing most likely to mislead later, because the numbers
+  stay confidently on screen while the baskets behind them age. Populated on production 2026-08-14:
+  6 baskets, 16,138 constituent rows, 505 identities — **and the four adapters added 2026-08-16 have
+  not been run against production at all yet** (see *Needs a human*). Decay clocks:
 
-  | data | issuer republishes | as-of now | badged `†` after | renewed by |
-  |---|---|---|---|---|
-  | XNAS, XAIX (DWS) | **daily** | 2026-08-14 *(fetch date — DWS publishes none)* | 7 days | nobody |
-  | SXR8, IWDA, EMIM (BlackRock) | **daily** | 2026-08-13 (issuer's own) | 7 days | nobody |
-  | VT (Vanguard US) | month-end, ~6wk lag | 2026-06-30 (issuer's own) | 75 days → ~09-13 | nobody |
-  | VWCE, SMH, SOXQ, GRID, QTUM | — | no basket at all | permanently amber | a hand download |
-  | DBPG | — | excluded by design | never | n/a |
-  | 505 ISIN identities | LEIs never change | — | nothing warns | nobody |
+  | data | issuer republishes | badged `†` after | renewed by |
+  |---|---|---|---|
+  | XNAS, XAIX (DWS) | **daily** *(publishes no as-of; fetch date stands in)* | 7 days | nobody |
+  | SXR8, IWDA, EMIM (BlackRock) | **daily** | 7 days | nobody |
+  | SOXQ, GRID, QTUM, SMH (the four new) | **daily** | 7 days | nobody |
+  | VT (Vanguard US) | month-end, ~6wk lag | 75 days | nobody |
+  | VWCE | not published at all | permanently amber | a hand download |
+  | DBPG | — | never (excluded by design) | n/a |
+  | ISIN identities | LEIs never change | nothing warns | nobody |
 
-  **So five of the six baskets will be badged stale within a week of that date**, the coverage card
-  will read *"5 baskets ageing"*, and no job will do anything about it. Refresh is
-  `fetch_etf_baskets --all` plus the import lines it prints, by hand.
+  **So nine of the ten baskets go stale within a week of a fetch**, the coverage card reads
+  *"N baskets ageing"*, and no job does anything about it. Refresh is `fetch_etf_baskets --all` plus
+  the import lines it prints, **then `resolve_identities --constituents`** — a re-import clears the
+  CINS/SEDOL resolutions on purpose.
 
   **Identity drift is the quieter half.** A positive answer is cached forever, which is right — but
   a fund rebalance introduces constituent ISINs nobody has asked about, and **a newly bought
@@ -219,13 +233,13 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   "tells you". Until it exists, the tab's own `†` and the coverage card's *"N baskets ageing"* are
   the only signals, and both require someone to look.
 
-- **The TSMC ADR override has never fired on real data.** `ISSUER_OVERRIDES` folds
-  `US8740391003` (the TSM ADR) into the Taiwanese ordinary, and it is pinned from both sides in
-  `test_company_identity.py` — but **zero stored baskets contain the ADR** (checked 08-14: EMIM and
-  VT both hold the *ordinary*, `TW0002330008`). So the entry is inert today and will first matter
-  the day SOXQ or SMH gets a basket, since the US semiconductor funds are what hold the ADR. Not a
-  defect; just untested against production, so treat the first SOXQ/SMH import as the moment to
-  check TSMC does not appear twice.
+- **The TSMC ADR override is about to fire for the first time.** `ISSUER_OVERRIDES` folds
+  `US8740391003` (the TSM ADR) into the Taiwanese ordinary, pinned from both sides in
+  `test_company_identity.py`, but **zero stored baskets contained the ADR** (checked 08-14: EMIM and
+  VT both hold the *ordinary*). SOXQ and SMH now have adapters, and both hold the ADR — SOXQ under
+  CUSIP `874039100` → `US8740391003`, SMH under a published ISIN. **Check TSMC appears once, not
+  twice, on the first look-through read after those two are imported to production.** It has never
+  been exercised outside a test.
 
 - **`find_flex_generation_gap` has never fired.** New on 2026-08-08: it warns after 2 ET days with
   no successful IBKR sync, which is the actual margin under a 3-day Flex window — `find_stale_ibkr_sync`
@@ -331,6 +345,75 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-16 (evening) — sector clustering, and four funds that were never unreachable
+
+Two follow-ups on the charts: cluster the treemap **by sector** rather than by how a company is
+held, and "take a look at the missing data too" — 5 funds worth 17.3% of the book publishing no
+basket, and 9,930 constituent ISINs carrying no identifier.
+
+**The missing-data half turned out to be a research failure, not a data gap.** `etf_sources.py`
+recorded SOXQ, GRID and QTUM as unreachable single-page apps and SMH as needing a hand download.
+All four have keyless, login-free routes, and each old note was wrong in its own way:
+
+| fund | what the note said | what is actually there |
+|---|---|---|
+| SOXQ | "Invesco serves a single-page app" | true of the *product page*; the API behind it is keyless JSON, keyed by the fund's own CUSIP — derivable from its ISIN, so nothing to discover |
+| GRID | "tickers but no ISINs, so a scrape could not fold" | there is a CUSIP column beside the tickers. The *fold* concern was right for a different reason — see below |
+| QTUM | "a WordPress table carrying CUSIPs but no ISINs" | the table is on `/qtum-full-holdings/`, not `/qtum/`; and the identifiers are not all CUSIPs |
+| SMH | needed a hand download | an XLSX with a real ISIN on **every** row — the best-identified feed of the seven |
+
+**10 of 12 funds decompose now.** Only VWCE is a genuine gap (Vanguard Europe publishes complete
+holdings by email on request) and DBPG stays excluded by design.
+
+**The trap that would have been silent, and the reason this took a live API check.** Three of the
+four publish nine-character identifiers, and most of them are not CUSIPs:
+
+- **77 of GRID's 128 rows are CINS** — the same numbering space extended to foreign issuers, marked
+  by a leading letter — including its three largest holdings (Eaton, Schneider, Johnson Controls).
+  `US` + a CINS produces a **check-digit-valid ISIN that belongs to nothing**, so a bulk prefix
+  would have fabricated an identifier for 60% of the fund, each one passing every validity test.
+- **20 of QTUM's 89 rows are SEDOLs** in a column headed "CUSIP".
+- **`ID_CUSIP` with a CINS returns zero rows from OpenFIGI** — no error, just nothing. The plan for
+  this session said to resolve CINS as `ID_CUSIP`; it would have resolved nothing and reported
+  success. The idType is `ID_CINS`, verified with one live request before any code was written.
+- **OpenFIGI's mapping endpoint returns no ISIN at all**, only FIGIs. So resolution writes
+  `etf_holdings.constituent_share_class_figi`, which `IdentityMember` already unions on — Eaton's
+  CINS and its ISIN both give `BBG001S5QZ45`, so the fold works without inventing an identifier.
+
+**Sector clustering.** `sector_taxonomy.py` normalises four vocabularies into the eleven names the
+Allocation tab already shows; a company's sector is a value-weighted majority of its contributing
+rows, tie-broken on the name so the answer cannot depend on arrival order. Precedence was measured
+rather than assumed: BlackRock's baskets classify 97 of the 103 top ISINs, Yahoo 27, and where both
+answer they differ only by taxonomy. This narrows `etf_basket.py`'s "sector is deliberately
+unserved" refusal rather than breaking it — grouping only, no rollup anywhere in the response, so
+nothing states a portfolio-level sector figure.
+
+**The old sector palette failed validation outright**, which is why one is now shared by both tabs:
+`#3b82f6` Technology against `#8b5cf6` Communications measures **ΔE 1.3 deuteran** — the two largest
+groups here, indistinguishable. Brute-forcing all 256 subsets of the categorical order found only
+**four** hues that clear the all-pairs CVD pairlist simultaneously, so four sectors get a hue and the
+rest fold into *Other sectors*. `Unknown` also took a positional colour and moved when the chart
+reordered; it has a fixed grey now.
+
+**What to check on prod, in order of how quietly it would be wrong:**
+
+- run the CLI steps in *Needs a human* — **baskets first, identities second**. The four funds were
+  8.1 pp of the book unattributed at the 08-14 snapshot, so coverage should move from ~78.6% to
+  **just under 87%**, less each fund's own residual. Anything much below that means an import
+  refused; anything above it means something is being renormalised, which nothing here may do.
+- **TSMC must appear once.** SOXQ and SMH are the first baskets to carry the TSM ADR, so the
+  `ISSUER_OVERRIDES` entry fires for the first time outside a test.
+- GRID's and QTUM's companies should carry `key_type: share_class_figi` after step 2. If they read
+  `unidentified`, `OPENFIGI_API_KEY` or the CINS pass is not doing its job.
+- the treemap's sector legend, in **both themes**. Four hues plus a grey; each fill carries its own
+  ink because dark `--viz-sector-2` measures 2.94:1 against white.
+
+Verified: backend **1112 passed** (+27 adapters, +58 identifiers, +13 resolution), frontend 464,
+`tsc -b` and `npm run build` clean, and all four adapters run against the real downloaded files —
+SOXQ 33 rows/100.00%, GRID 128/100.00%, QTUM 89/100.04%, SMH 26/100.02%, each imported into a local
+DB through the same CLI production uses. **The browser suite was not re-run** — nothing rendered
+changed since the morning's run beyond the treemap's fills, which `sectorColors.test.ts` covers.
 
 ## Shipped 2026-08-16 — the Look-through tab's two charts
 
@@ -1675,18 +1758,13 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
-1. **A VanEck UCITS adapter for SMH — the cheapest coverage left (+3.4 pp).** Verified working
-   2026-08-14: `https://www.vaneck.com/nl/en/investments/semiconductor-etf/downloads/holdings/`
-   returns a ~5 kB XLSX with `Holding Name | Ticker | ISIN | Shares | Market Value | % of Net
-   Assets`, **as-of T-1** — fresher than every feed we have except the Xtrackers CSV, and
-   self-maintaining once written. It needs a **cookie jar** (a cookieless GET loops the geo/consent
-   redirects) and the `/nl/en/` locale **pinned** rather than trusting `/ucits/` to geo-resolve twice.
-   Parse the zip with `zipfile` + `ElementTree` — do not add `openpyxl`. Confirmed it is the UCITS
-   fund, not the US SMH (the page carries IE00BMC38736 and the 10% cap shows in the data).
-   **Do not substitute the US SMH's SEC filing** — different index variant, different membership.
-
-2. **An SEC N-PORT adapter for SOXQ + GRID + QTUM (+4.7 pp).** Researched 2026-08-14 and deliberately
-   deferred; these specifics were expensive and two are silent-corruption traps:
+1. **SEC N-PORT as the generic fallback for a future fund with no issuer route.** Items 1 and 2 here
+   were the SMH adapter and an N-PORT adapter for SOXQ/GRID/QTUM; **all four now have issuer feeds**
+   (2026-08-16), which are T-1 rather than 75–136 days old, so N-PORT is no longer needed for
+   anything held. It is worth keeping as the escape hatch for the next US-registered fund bought
+   without an issuer route — and **structurally unreachable for Irish and Luxembourg UCITS**, which
+   are not SEC registrants, so it can never be the answer for VWCE. The research is expensive to
+   redo and two points are silent-corruption traps:
    - **Key on ISIN, never ticker.** `company_tickers_mf.json` maps `SMH → CIK 1137360` (VanEck's *US*
      fund) and `XAIX → CIK 1503123` (a US namesake of the Xtrackers UCITS we already fetch) — a ticker
      lookup silently returns the wrong vehicle for **two of our twelve funds**. Verified:
@@ -1695,16 +1773,25 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
      entries, zero `S000…` strings, 22 accessions filed in one day). Use
      `efts.sec.gov/LATEST/search-index?q=%22S000026919%22&forms=NPORT-P`, then
      `/Archives/edgar/data/{cik}/{accession}/primary_doc.xml` (49–141 kB). `/cgi-bin/` is
-     robots-disallowed; `/Archives/` is allowed.
+     robots-disallowed; `/Archives/` is allowed. A descriptive User-Agent is **mandatory** —
+     omitting it is a 403 plus a ~10-minute IP block.
    - **Assert `formData/genInfo/seriesId`** before using a row — a sibling series is a silently
      100%-wrong basket.
    - **As-of is `repPdDate`, not `repPdEnd`** (the latter is the fiscal year end), and fiscal
      quarters are not calendar quarters.
    - **QTUM's `pctVal` sums to 104.61%** (sec-lending collateral). Filter to `assetCat ∈ {EC, EP}`
      with an `<isin>`, then renormalise, or every weight inflates ~4.6%.
-   - ISIN coverage is **100%** on all three live filings, so no CUSIP→ISIN derivation is needed.
-   - Arrives **75–136 days old**, which is why `ADAPTER_STALE_DAYS` is per-source: give it its own
-     entry rather than raising the default.
+   - Arrives **75–136 days old**, so it needs its own `ADAPTER_STALE_DAYS` entry rather than a raised
+     default.
+
+2. **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
+   holdings array is the paywalled field at every vendor: FMP's free Basic is 250 calls/day but
+   holdings are Ultimate-tier and US exchanges only; API Ninjas models UCITS domicile correctly but
+   gates `holdings` behind premium; EODHD's Fundamentals feed costs 10 calls against a 20/day quota
+   and is the $59.99 tier, not the $19.99 one; Intrinio has genuine global coverage at enterprise
+   pricing. **Never wire up FMP's "ETF Holder" endpoint** — it returns the institutional investors
+   who own shares *of* the ETF, the reverse direction, and it returns plausible-looking garbage that
+   passes a smoke test.
 
 3. **Make look-through coverage keep itself current.** The baskets and identities are refreshed by
    hand today, and a basket goes stale silently — the tab badges it past 45 days, but nothing warns.
@@ -1714,12 +1801,13 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    threaded through `ALL_SYNC_HOURS` and the three deploy-guard copies `test_deploy_guard_hours.py`
    keeps in step. The read path must stay pure DB either way.
 
-   Then, once every held fund has a basket: the `sector` and `country` columns on `etf_holdings` are
-   already populated and deliberately **unserved**, and they are the raw material for replacing
-   `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones. That needs a
-   country-to-region map with its own test first — `countryOfRisk` is a country and the charts bucket
+   Then, once every held fund has a basket: `etf_holdings.sector` and `.country` are the raw material
+   for replacing `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones.
+   `sector` is now normalised through `sector_taxonomy.py` and served for **grouping** the
+   look-through treemap, which is half the work already done; `country` is still unserved and needs a
+   country-to-region map with its own test — `countryOfRisk` is a country and the charts bucket
    regions — so it is a real project rather than a flag. The precondition is written into
-   `etf_mappings.py`'s docstring, and the reason not to serve two sector answers at once is in
+   `etf_mappings.py`'s docstring, and the reason not to serve two sector *totals* at once is in
    CLAUDE.md.
 
 4. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
@@ -1826,6 +1914,17 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-16 (evening)** — "cluster by sector, and look at the missing data too". The missing data
+  was a **research failure, not a gap**: all four funds recorded as unreachable single-page apps had
+  keyless routes, and each old note was wrong differently — the SPA was only the product page, the
+  "no ISINs" fund had a CUSIP column, the table was on another path. Lesson: *fetch it once before
+  writing down that it cannot be fetched.* Then the trap underneath — the CUSIP column is not all
+  CUSIPs (77 CINS, 20 SEDOLs), and `US` + a CINS is a **check-digit-valid ISIN belonging to
+  nothing**, so the naive conversion fabricates identifiers that pass every validity test. One live
+  OpenFIGI request also killed the plan's own instruction: `ID_CUSIP` on a CINS returns zero rows
+  with no error, and the endpoint returns no ISIN at all. Check the contract before coding against
+  a remembered one.
+
 - **2026-08-16** — "some charts for the seethrough, maybe a treemap or a Kreischart". The useful part
   was declining half the request: a pie cannot render a 50-row distribution spanning three orders of
   magnitude, so the treemap took the companies and a stacked bar took the coverage split. Two things
@@ -1866,12 +1965,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   number, then replay the computation on the real payload** — the wrongness was in a *flag*, not a
   figure — and **a caveat inside a collapsed card is absent**, which is where the dagger and its
   footnote both were.
-- **2026-08-07 (morning)** — asked to ingest a statement carrying the 08-06 VT/GRID/QTUM/META buys.
-  It could not: downloaded 05:40 Berlin, it still read `to=20260805`, because `whenGenerated` is **US
-  Eastern** and 05:40 Berlin is 23:40 the previous day in New York. The window rolls at midnight ET,
-  so the 06:00 Berlin job twenty minutes later got the day for free. Ingested the file anyway as
-  asked — a clean no-op, and only safe because production still lacked the three. Then the question
-  "why does full sync fail" turned up the real finding: **IBKR generates one statement per ET day**,
-  the 06:00 slot takes it, and 08:00's market-data half was gated on 08:00's IBKR half — so the
-  730-day pass had not run since 08-03 with nothing on any screen to say so. The lens: when a step is
-  *skipped* rather than failed, it reports nothing at all, so its own warnings go missing too.
