@@ -1,6 +1,12 @@
 # Working state
 
-**Last updated: 2026-08-14.** Latest: **a Look-through tab — company-level exposure, with ETFs
+**Last updated: 2026-08-16.** Latest: **the Look-through tab got its two charts** — a treemap of
+company exposure and a composition bar showing how much of the book the look-through can attribute
+at all. Both refuse to renormalise: the treemap carries the truncated tail and the unattributed
+remainder as tiles, so a tile's area really is its share of the whole. Details in
+*Shipped 2026-08-16*.
+
+Before that (2026-08-14): **a Look-through tab — company-level exposure, with ETFs
 decomposed into their constituents and one company rendered as one row.** Three of the four largest
 true positions were previously invisible *as positions*, because one company occupies several rows:
 against a snapshot of production it now reads ASML 5,999 (8.5%), Alphabet 5,832 (8.2%) across three
@@ -181,6 +187,46 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   meantime is a browser download through `app/cli/ingest_flex_xml.py`, which is idempotent and
   spends no token budget.
 
+- **Every piece of look-through data is a one-off snapshot taken 2026-08-14, and nothing renews
+  any of it.** This is the weakest part of the feature and the thing most likely to mislead later,
+  because the numbers stay confidently on screen while the baskets behind them age. Populated on
+  production that evening: 6 baskets, 16,138 constituent rows, 505 identities. Three different
+  decay clocks:
+
+  | data | issuer republishes | as-of now | badged `†` after | renewed by |
+  |---|---|---|---|---|
+  | XNAS, XAIX (DWS) | **daily** | 2026-08-14 *(fetch date — DWS publishes none)* | 7 days | nobody |
+  | SXR8, IWDA, EMIM (BlackRock) | **daily** | 2026-08-13 (issuer's own) | 7 days | nobody |
+  | VT (Vanguard US) | month-end, ~6wk lag | 2026-06-30 (issuer's own) | 75 days → ~09-13 | nobody |
+  | VWCE, SMH, SOXQ, GRID, QTUM | — | no basket at all | permanently amber | a hand download |
+  | DBPG | — | excluded by design | never | n/a |
+  | 505 ISIN identities | LEIs never change | — | nothing warns | nobody |
+
+  **So five of the six baskets will be badged stale within a week of that date**, the coverage card
+  will read *"5 baskets ageing"*, and no job will do anything about it. Refresh is
+  `fetch_etf_baskets --all` plus the import lines it prints, by hand.
+
+  **Identity drift is the quieter half.** A positive answer is cached forever, which is right — but
+  a fund rebalance introduces constituent ISINs nobody has asked about, and **a newly bought
+  security's ISIN is never resolved either**, so it will not fold with an existing holding of the
+  same company until `resolve_identities --constituents` is re-run. `unresolved_value_eur` (3.0% of
+  the book on 08-14) drifts upward silently. Same shape as the documented "run
+  `POST /api/allocation/sync` by hand after buying" rough edge.
+
+  **There is no alarm, only a badge.** Prices, IBKR syncs and dividends all have a
+  `warnings[]` check hung off the market-data job; baskets have none. `find_stale_etf_baskets()`
+  is *Worth doing next* item 3, and it is the piece that turns this from "decays silently" into
+  "tells you". Until it exists, the tab's own `†` and the coverage card's *"N baskets ageing"* are
+  the only signals, and both require someone to look.
+
+- **The TSMC ADR override has never fired on real data.** `ISSUER_OVERRIDES` folds
+  `US8740391003` (the TSM ADR) into the Taiwanese ordinary, and it is pinned from both sides in
+  `test_company_identity.py` — but **zero stored baskets contain the ADR** (checked 08-14: EMIM and
+  VT both hold the *ordinary*, `TW0002330008`). So the entry is inert today and will first matter
+  the day SOXQ or SMH gets a basket, since the US semiconductor funds are what hold the ADR. Not a
+  defect; just untested against production, so treat the first SOXQ/SMH import as the moment to
+  check TSMC does not appear twice.
+
 - **`find_flex_generation_gap` has never fired.** New on 2026-08-08: it warns after 2 ET days with
   no successful IBKR sync, which is the actual margin under a 3-day Flex window — `find_stale_ibkr_sync`
   at 7 days fires four days after the trades are gone. It runs from the market-data job, so it
@@ -285,6 +331,38 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-16 — the Look-through tab's two charts
+
+Asked for "some charts, maybe a treemap or a pie chart". Shipped the treemap; **did not ship a
+pie**, and the reason is worth keeping: the company ranking is ~50 rows over three orders of
+magnitude, which is the distribution angles are worst at. The part-to-whole that a ring *could*
+have served is the coverage split, and even there three long-named segments read better as a
+horizontal stacked bar at 390px.
+
+- **`Where the value sits`** — one bar: held directly / through funds / not attributed, with each
+  segment's value and a sentence saying what it is.
+- **`Company exposure`** — a treemap above the existing table, sharing its Top 25/50/100 control.
+  Tiles are coloured by how the company is held, and clicking one opens the drill-down that was
+  already there. Companies reachable only through a fund are the point of the colour.
+
+What to check on prod once it deploys, in order of how quietly it would be wrong:
+
+- the treemap's grey `Not attributed to a company` tile is **present and large** (~21% of the book
+  at today's coverage). If it is missing, the tiles have been renormalised and every company tile
+  is overstated — with no axis to give it away.
+- the two legends do not share a phrase. The bar says *Held directly*; the treemap says
+  *Direct only*. They mean different things and a company held both ways is in both charts at once.
+- both themes. The `--viz-*` palette is the first here that is stepped separately for light and
+  dark; every other chart hardcodes one set. Verified locally that the two resolve to different
+  hexes, which eyeballing the screenshots could not settle.
+
+Verified before pushing: frontend **448 passed** (17 new), `tsc -b` and `npm run build` clean, and
+the browser suite against a locally seeded DB — `mobile` 50/50 at 390x844, `a11y` 17/17,
+`sweep` 18/18, `csp` 4/4, `chunks` 37/37, `errors` 18/18. The look-through chunk went 3.5 kB → 5.6 kB
+gzipped; Recharts was already eager on the Performance tab, so nothing extra is downloaded.
+
+Backend untouched — the endpoint already carried every field both charts read.
 
 ## Shipped 2026-08-14 — the Look-through tab: one company, one row
 
@@ -1748,6 +1826,15 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-16** — "some charts for the seethrough, maybe a treemap or a Kreischart". The useful part
+  was declining half the request: a pie cannot render a 50-row distribution spanning three orders of
+  magnitude, so the treemap took the companies and a stacked bar took the coverage split. Two things
+  only came out of *looking at the render* — SVG text cannot be measured before layout, so the
+  label-fit estimate has to budget for shouted IBKR names or they cross their own tile edges; and the
+  first draft gave the bar and the treemap the same word for two different quantities forty pixels
+  apart. Also a local-DB lesson: `insert or ignore` silently swallowed 2,635 NOT NULL violations and
+  the script cheerfully reported inserting them.
+
 - **2026-08-14** — asked for a "seethrough" view breaking ETFs into single stocks, with GOOG/GOOGL/ABEA
   combined "not by string match, but a smarter way". Two lenses paid off. **First: measure the
   premise before designing on it.** Web research produced confident answers that were wrong for this
@@ -1788,11 +1875,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   the 06:00 slot takes it, and 08:00's market-data half was gated on 08:00's IBKR half — so the
   730-day pass had not run since 08-03 with nothing on any screen to say so. The lens: when a step is
   *skipped* rather than failed, it reports nothing at all, so its own warnings go missing too.
-- **2026-08-06 (evening)** — pushed the sixteen-thread audit batch (25 commits, rebased over one remote
-  docs commit, conflicting only in this file's header) and prepared for three ETFs that do not exist
-  yet. The request was to backfill VT/GRID/QTUM prices *first* and ingest the statement after; the
-  order is not available, because `market_prices` is keyed on a `security_id` and only the statement
-  creates one. What **was** available without the securities: proving the three bare tickers resolve on
-  Yahoo in USD, and writing their look-through entries. Worth remembering as a shape — "fetch the data
-  for X" can be blocked by X not existing yet, and the useful move is to do every part that does not
-  depend on it rather than to wait.

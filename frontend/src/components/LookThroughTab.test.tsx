@@ -315,4 +315,74 @@ describe('LookThroughTab coverage tone', () => {
     expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
     expect(screen.getByText(/1 basket\(s\) ageing/)).toBeTruthy()
   })
+
+  /*
+   * The charts. jsdom gives `ResponsiveContainer` a zero-width parent, so the treemap's own
+   * SVG never renders here — which is fine, because the tile arithmetic is pinned in
+   * `lib/lookthroughChart.test.ts` and what a component test can uniquely see is whether the
+   * *wording* around the chart survives. That wording is the honest half: a legend that names
+   * each colour, and a bar whose accessible name states the share no company row accounts for.
+   */
+  it('leads with a composition bar naming the share no company row accounts for', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Where the value sits')
+    const bar = screen.getByRole('img', { name: /Portfolio composition/ })
+    // 1700 direct, 1800 through funds, and 1500 + 200 + 0 attributed to nothing, of 5200.
+    expect(bar.getAttribute('aria-label')).toContain('Held directly 32.7%')
+    expect(bar.getAttribute('aria-label')).toContain('Through funds 34.6%')
+    expect(bar.getAttribute('aria-label')).toContain('Not attributed 32.7%')
+  })
+
+  it('names every colour it uses, so nothing on the charts is carried by hue alone', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Company exposure')
+    // Alphabet is held both ways and Nvidia only through a fund — the distinction the whole
+    // feature exists to make — plus the grey that keeps the areas shares of the whole book.
+    expect(screen.getAllByText('Direct + funds').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Funds only').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Not attributed').length).toBeGreaterThan(0)
+    // Nothing here is held direct-only, and a legend naming a colour with no tile invites the
+    // reader to hunt for one.
+    expect(screen.queryByText('Direct only')).toBeNull()
+  })
+
+  it('does not reuse one phrase for two meanings across the bar and the treemap', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Company exposure')
+    // The bar splits value and the treemap classifies companies, so "Held directly" (a share
+    // of the book) and "Direct only" (a company with no fund component) must stay separate
+    // words. Alphabet is in both charts at once and belongs to different groups in each.
+    expect(screen.getAllByText('Held directly')).toHaveLength(1)
+    expect(screen.queryByText('Both')).toBeNull()
+  })
+
+  it('draws no chart at all when nothing could be priced', async () => {
+    // A zero-total book has an unknown shape. Rectangles drawn from it would be confident and
+    // wrong, which is the `concentrationPct` refusal rather than a missing empty state.
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        total_market_value_eur: 0,
+        direct_equity_eur: 0,
+        looked_through_equity_eur: 0,
+        fund_residual_eur: 0,
+        nested_fund_eur: 0,
+        uncovered_fund_eur: 0,
+        coverage_pct: 0,
+        companies: [],
+        companies_shown: 0,
+        shown_value_eur: 0,
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Company exposure')
+    expect(screen.queryByText('Where the value sits')).toBeNull()
+    expect(screen.queryByRole('img', { name: /Portfolio composition/ })).toBeNull()
+  })
 })

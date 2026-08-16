@@ -1868,6 +1868,55 @@ base-currency projection is inherited and the total **cannot disagree with
   cost would be fabricated, not merely approximate. Stated in the schema docstring so it is not
   "completed" later.
 
+### The two charts, and why neither is a pie
+
+`lib/lookthroughChart.ts` builds both; `LookThroughCharts.tsx` draws them. The arithmetic is in
+`lib/` for the reason `portfolioKpis.ts` is — the interesting mistakes are numeric and testable
+in `node` without paying jsdom's startup.
+
+**A treemap for the companies, a stacked bar for the partition, and a pie for neither.** The
+company ranking is ~50 rows spanning three orders of magnitude, where comparing angles fails
+completely; the partition is three segments with long names, where a horizontal bar reads left
+to right at 390px and a ring does not. A pie is only ever right for a part-to-whole of ≤6
+roughly-comparable slices, which describes neither.
+
+Four rules, three of which restate rules this feature already has:
+
+- **The treemap's tiles cover the whole portfolio**, so the truncated tail and the unattributed
+  remainder are tiles. Drawing only the companies would fill the card with the ~79% that could
+  be attributed and render it as the whole — the renormalisation refused everywhere else, this
+  time in a form where nobody would notice, since a treemap has no axis to disagree with.
+- **The composition bar folds `fund_residual` + `nested_fund` + `uncovered_fund` into one
+  segment.** They are one thing to a reader — value no company row accounts for — and three
+  categorical hues spent on a distinction the fund table below makes in full is how a chart
+  becomes a worse table. The partition still closes; it is summed one level up.
+- **The two legends must not share a phrase**, and this is the one that is easy to get wrong.
+  The bar splits *value* while the treemap classifies *companies*, so "Held directly" would
+  mean a share of the book in one and a company with no fund component in the other, forty
+  pixels apart — and Alphabet is in both charts at once, in different groups. Hence the
+  treemap's `Direct only` / `Direct + funds` / `Funds only` against the bar's
+  `Held directly` / `Through funds` / `Not attributed`. Pinned by
+  `test_does_not_reuse_one_phrase_for_two_meanings`.
+- **A zero total draws nothing**, not an empty frame. Same refusal as `concentrationPct`.
+
+**The palette is the first in this app that is *chosen* per theme rather than one set of hexes
+taking its chances against both surfaces.** `--viz-*` in `index.css`, five roles, two sets, each
+run through a CVD/contrast validator against the surface it actually renders on
+(`#ffffff` / `#020817`) on the **all-pairs** pairlist, because a treemap can seat any tile next
+to any other. Two details are load-bearing:
+
+- **Hue meaning is fixed across both charts** — blue is always exposure chosen directly, orange
+  always exposure that arrived inside a fund. A reader must not relearn a colour mid-page.
+- **Tile labels are `hsl(var(--foreground))`, never a hardcoded white.** White clears 3:1 on
+  only two of the five light-mode fills (aqua measures 2.82:1); the theme's own ink clears
+  4.4:1 on all five in light and 3.4:1 in dark. The existing charts hardcode white and get away
+  with it because their fills happen to be dark, which is not a property anything enforces.
+
+The remaining estimate is the tile label's *fit*: SVG text cannot be measured before layout, so
+`UPPERCASE_ADVANCE_PX` budgets for the worst glyphs, because IBKR names arrive shouted
+(`NU HOLDINGS LTD/CAYMAN ISL-A`). Budgeting for mixed case put `ARISTA NETWOR…` over both edges
+of its own tile. Under-filling costs a character; overflowing costs the tile boundary.
+
 ### One fundness predicate, keyed on ISIN
 
 `ETF_ALLOCATIONS` entries now declare `"isins": [...]`, and `fund_isins()` /
@@ -1902,6 +1951,19 @@ A future quarterly source (SEC N-PORT arrives 75–136 days old) needs its own e
 raised default. Staleness deliberately **does not reduce `coverage_pct`** — the percentage answers
 "how much is attributed", not "how current is it" — which is exactly why the age has to be surfaced
 on the card rather than only in the fund table.
+
+**Nothing schedules any of this, and that is the feature's weakest property.** Baskets and
+identities are populated by a deliberate CLI run and then decay in place: `fetch_etf_baskets --all`
+plus the import lines it prints, and `resolve_identities --constituents`. The read path is pure DB,
+so a basket nobody re-downloads keeps contributing its full share of `coverage_pct` while describing
+an older index — which is exactly why staleness is surfaced on the card and not only in the fund
+table. Three different clocks matter: Xtrackers and iShares republish **daily** (so their baskets
+are `†` within a week), Vanguard US publishes **month-end with a ~6-week lag** (75 days), and
+identities never expire but are also never *extended* — a fund rebalance brings in constituent ISINs
+nobody has asked about, and a newly bought security's ISIN is unresolved until the CLI is re-run, so
+it will not fold with an existing holding of the same company. `unresolved_value_eur` is the figure
+that shows this drifting. A `find_stale_etf_baskets()` warning hung off the market-data job is the
+missing piece; until it exists the badge is the only signal and someone has to look at it.
 
 **`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not.**
 Xtrackers publishes none at all — not in the CSV, not in a `Last-Modified` header (verified).

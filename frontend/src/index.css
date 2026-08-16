@@ -80,6 +80,55 @@
     }
   }
 
+  /**
+   * The look-through charts' palette, as custom properties so the two themes are each
+   * *chosen* rather than one being an automatic wash of the other.
+   *
+   * Every other chart in this app hardcodes one set of hexes and lets dark mode take them
+   * unchanged, which is why several sector tiles go muddy against the near-black card. These
+   * five are stepped twice and both sets were run through a contrast/CVD validator against
+   * the surfaces they actually render on (`--card`: #ffffff light, #020817 dark) on the
+   * all-pairs pairlist, because a treemap can seat any tile next to any other:
+   *
+   *   light  #2a78d6 #eb6834 #1baf7a  worst CVD dE 9.2, worst normal-vision dE 24.0
+   *   dark   #3987e5 #d95926 #199e70  worst CVD dE 9.4, worst normal-vision dE 20.9
+   *
+   * Light-mode aqua sits at 2.82:1 against white, under the 3:1 bar. That is allowed only
+   * because identity is never carried by colour alone here: the legend names every role and
+   * the company table below repeats every value.
+   *
+   * **The meaning of a hue is fixed across both charts** — blue is always exposure you chose
+   * directly, orange is always exposure that arrived inside a fund. The composition bar and
+   * the treemap are different decompositions of the same book, so a reader who learns the
+   * colour once must not have to relearn it thirty pixels lower.
+   *
+   * The two greys are structural, not categorical: they mark value that is on the chart to
+   * keep the areas honest rather than to be compared with the companies. `unattributed` is
+   * the stronger of the two on purpose — it is the larger share and the one carrying the
+   * caveat, while `other` is a truncated tail nobody needs to study.
+   *
+   * **Tile labels are `--foreground`, never a hardcoded white.** White clears 3:1 on only
+   * two of the five light-mode fills (aqua measures 2.82:1), whereas the theme's own ink
+   * clears 4.4:1 on all five in light and 3.4:1 on all five in dark. Reaching for white
+   * because the fill "looks dark" is how the label on the biggest tile ends up unreadable in
+   * exactly one theme, which nobody testing in the other will see.
+   */
+  :root {
+    --viz-direct: #2a78d6;
+    --viz-both: #1baf7a;
+    --viz-via-funds: #eb6834;
+    --viz-other: #a8a69f;
+    --viz-unattributed: #8f8d88;
+  }
+
+  .dark {
+    --viz-direct: #3987e5;
+    --viz-both: #199e70;
+    --viz-via-funds: #d95926;
+    --viz-other: #3a3937;
+    --viz-unattributed: #4e4d4a;
+  }
+
   html {
     /* iOS Safari inflates type in landscape unless told not to, and the scale here is
        already chosen per breakpoint. */

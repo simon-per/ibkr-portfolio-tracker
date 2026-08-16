@@ -7,6 +7,8 @@ import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
+import { buildExposureTiles, buildPartition } from '@/lib/lookthroughChart'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -329,6 +331,9 @@ export function LookThroughTab() {
   const coverageColumns = useMemo(() => fundColumns({ formatCurrency }), [formatCurrency])
   const selectedRow = data?.companies.find((r) => r.company_key === selected) ?? null
 
+  const tiles = useMemo(() => (data ? buildExposureTiles(data) : []), [data])
+  const partition = useMemo(() => (data ? buildPartition(data) : []), [data])
+
   // A fund contributes nothing to the company table while it reads either of these. `excluded`
   // is NOT one of them: DBPG is a settled decision, not an outstanding gap, so counting it here
   // would make the card permanently amber for a reason nobody can act on.
@@ -436,6 +441,28 @@ export function LookThroughTab() {
             </div>
           )}
 
+          {/*
+            Its own card rather than a strip inside the one below, because the Top 25/50/100
+            control belongs to the company table and this bar is not scoped by it — a
+            portfolio-wide split sitting under a truncation control reads as though truncation
+            moved it.
+          */}
+          {partition.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Where the value sits</CardTitle>
+                <CardDescription>
+                  Every {data.base_currency} in the portfolio, by how the look-through reaches
+                  it. The three shares are of the whole book and always sum to it — nothing is
+                  rescaled onto the part that could be decomposed.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CompositionBar segments={partition} formatCurrency={formatCurrency} />
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
               <div>
@@ -467,6 +494,12 @@ export function LookThroughTab() {
                 </p>
               ) : (
                 <>
+                  <ExposureTreemap
+                    tiles={tiles}
+                    selected={selected}
+                    onSelect={(key) => setSelected(key === selected ? null : key)}
+                    formatCurrency={formatCurrency}
+                  />
                   <DataTable
                     rows={data.companies}
                     columns={companyColumns}
