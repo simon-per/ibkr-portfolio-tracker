@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -86,6 +86,49 @@ class EtfBasketRepository:
                 out.setdefault(row.fund_isin, []).append(row)
         return out
 
+    async def unresolved_identifiers(self) -> List[str]:
+        """
+        Distinct identifiers on holdings that have neither an ISIN nor a resolved FIGI.
+
+        These are the CINS and SEDOL lines three of the US issuers publish instead of ISINs.
+        Distinct rather than per-row because one identifier can appear in several funds — the
+        same company inside GRID and QTUM is one question, not two.
+        """
+        rows = (
+            await self.session.execute(
+                select(EtfHolding.constituent_identifier)
+                .where(
+                    EtfHolding.constituent_identifier.isnot(None),
+                    EtfHolding.constituent_isin.is_(None),
+                    EtfHolding.constituent_share_class_figi.is_(None),
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        return sorted({r.strip().upper() for r in rows if r and r.strip()})
+
+    async def apply_resolved_identifiers(self, figi_by_identifier: Dict[str, str]) -> int:
+        """
+        Stamp resolved shareClassFIGIs onto every holding carrying those identifiers.
+
+        Writes the FIGI only — `constituent_isin` stays NULL and `constituent_identifier` stays
+        as the issuer published it, so the row still says where each part of its identity came
+        from. Flushed, not committed: the caller owns the transaction, as everywhere else here.
+        """
+        updated = 0
+        for identifier, figi in figi_by_identifier.items():
+            result = await self.session.execute(
+                update(EtfHolding)
+                .where(
+                    EtfHolding.constituent_identifier == identifier,
+                    EtfHolding.constituent_share_class_figi.is_(None),
+                )
+                .values(constituent_share_class_figi=figi)
+            )
+            updated += result.rowcount or 0
+        await self.session.flush()
+        return updated
+
     async def replace_basket(self, parsed, force: bool = False) -> ReplaceResult:
         """
         Replace one fund's basket wholesale, or refuse and change nothing.
@@ -137,6 +180,10 @@ class EtfBasketRepository:
                 "fund_isin": fund_isin,
                 "line_no": row.line_no,
                 "constituent_isin": row.isin,
+                "constituent_identifier": row.identifier,
+                # Never carried in from a parse: it is OpenFIGI's answer, and a
+                # replacement basket has not been asked about yet.
+                "constituent_share_class_figi": None,
                 "constituent_ticker": row.ticker,
                 "constituent_name": row.name,
                 "weight_pct": row.weight_pct,

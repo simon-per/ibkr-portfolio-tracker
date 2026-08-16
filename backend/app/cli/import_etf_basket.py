@@ -3,9 +3,9 @@ Parse one fund's downloaded holdings file and store it as that fund's basket. No
 
 The offline half of the pair: `app/cli/fetch_etf_baskets.py` writes response bodies,
 this parses and stores them. It works just as well on a file downloaded by hand from an
-issuer's website, which is the *only* route for VWCE, SMH, SOXQ, GRID and QTUM — Vanguard
-Europe serves holdings through a GraphQL endpoint needing an undocumented header and its
-robots.txt disallows automated agents, and the other three serve single-page apps.
+issuer's website, which is the only route for **VWCE** — Vanguard Europe publishes complete
+holdings on request by email, not on the web — and the fallback for any adapter whose route
+breaks.
 
 Touches **no** network at all, so neither rule at the top of CLAUDE.md applies. Re-running is
 safe and idempotent: a basket is replaced wholesale, and an incoming file with the same as-of
@@ -46,9 +46,14 @@ from app.repositories.etf_basket_repository import (
 )
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.etf_basket_parsers import (
+    PARSERS,
     BasketParseError,
+    parse_defiance,
     parse_dws,
+    parse_first_trust,
+    parse_invesco,
     parse_ishares,
+    parse_vaneck,
     parse_vanguard_us,
 )
 
@@ -68,21 +73,38 @@ def _fetched_on(paths: List[Path]) -> date:
     return min(date.fromtimestamp(p.stat().st_mtime) for p in paths)
 
 
-def parse_file(fund_isin: str, paths: List[Path], adapter: str):
-    """Dispatch to the adapter's parser. Pure apart from reading the files."""
+def parse_file(fund_isin: str, paths: List[Path], adapter: str, symbol: str):
+    """
+    Dispatch to the adapter's parser. Pure apart from reading the files.
+
+    `symbol` reaches the two HTML adapters because their routes are keyed by ticker in a query
+    string or a path segment, so a redirect can serve another fund's holdings under a 200 —
+    they check it against the page's `<title>`, which is their equivalent of the
+    `ShareClass ISIN` echo `parse_dws` checks on every row.
+    """
     bodies = [p.read_bytes() for p in paths]
-    if adapter == "dws":
-        if len(bodies) != 1:
-            raise BasketParseError("dws exports are a single file; several were given")
-        return parse_dws(bodies[0], fund_isin, _fetched_on(paths))
-    if adapter == "blackrock":
-        if len(bodies) != 1:
-            raise BasketParseError("blackrock responses are a single file; several were given")
-        return parse_ishares(bodies[0], fund_isin)
+    single = len(bodies) == 1
+
     if adapter == "vanguard_us":
         return parse_vanguard_us(bodies, fund_isin)
+    if not single:
+        raise BasketParseError(
+            f"{adapter} responses are a single file; {len(bodies)} were given"
+        )
+    if adapter == "dws":
+        return parse_dws(bodies[0], fund_isin, _fetched_on(paths))
+    if adapter == "blackrock":
+        return parse_ishares(bodies[0], fund_isin)
+    if adapter == "invesco":
+        return parse_invesco(bodies[0], fund_isin)
+    if adapter == "first_trust":
+        return parse_first_trust(bodies[0], fund_isin, symbol)
+    if adapter == "defiance":
+        return parse_defiance(bodies[0], fund_isin, symbol, _fetched_on(paths))
+    if adapter == "vaneck":
+        return parse_vaneck(bodies[0], fund_isin)
     raise BasketParseError(
-        f"no parser for adapter {adapter!r}. Known: dws, blackrock, vanguard_us — pass "
+        f"no parser for adapter {adapter!r}. Known: {', '.join(sorted(PARSERS))} — pass "
         f"--adapter to override what app/etf_sources.py declares"
     )
 
@@ -119,15 +141,19 @@ async def import_basket(
     symbol = symbol_for_fund_isin(fund_isin) or fund_isin
 
     try:
-        basket = parse_file(fund_isin, paths, adapter)
+        basket = parse_file(fund_isin, paths, adapter, symbol)
     except (BasketParseError, OSError) as e:
         print(f"FAILED - nothing was written: {e}", file=sys.stderr)
         return 1
 
     print(f"Fund:    {symbol} ({fund_isin}) via {adapter}")
+    # Two adapters reach this branch for different reasons — Xtrackers publishes no date at
+    # all, Defiance publishes one in the future — so the note says the date is ours rather
+    # than guessing which.
     print(f"As of:   {basket.as_of_date}"
-          + ("" if basket.as_of_is_issuer_stated else "  (the issuer publishes none; this is "
-                                                     "the file's date)"))
+          + ("" if basket.as_of_is_issuer_stated
+             else "  (not the issuer's own; this is the file's date, so the basket may be "
+                  "older)"))
     print(f"Rows:    {len(basket.rows)} parsed from {basket.source_rows} source row(s)")
     print(f"Weights: {basket.total_weight_pct:.4f}% total, "
           f"{basket.equity_weight_pct:.4f}% in securities"

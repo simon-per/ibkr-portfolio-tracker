@@ -9,7 +9,7 @@ iShares holdings URL answers **HTTP 200 with `Content-Type: text/csv` and an HTM
 fetcher that parsed inline would have nothing to hand a test.
 
 Touches **no** Yahoo and **no** IBKR, so neither rule at the top of CLAUDE.md applies. It does
-reach three issuer sites, as a guest rather than a customer: a descriptive User-Agent carrying
+reach seven issuer sites, as a guest rather than a customer: a descriptive User-Agent carrying
 `LOOKTHROUGH_CONTACT_EMAIL` when set, one request at a time, a pause between them, and no
 retry storm. These files are the funds' own regulatory portfolio disclosures — fine to cache
 privately for one portfolio, and not ours to redistribute.
@@ -35,6 +35,7 @@ from typing import Dict, List, Tuple
 import httpx
 
 from app.etf_sources import FUND_SOURCES, FundSource, user_agent
+from app.services.security_identifiers import cusip_from_isin
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,32 @@ VANGUARD_URL = (
 VANGUARD_PAGE = 500
 VANGUARD_MAX_PAGES = 60
 
+# Keyed by the fund's own CUSIP, which is the ISIN with its country prefix and check digit
+# removed — so nothing has to be discovered or kept in step, unlike BlackRock's portfolio id.
+INVESCO_URL = (
+    "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund"
+)
+INVESCO_PARAMS = {"idType": "cusip", "productType": "ETF"}
+
+FIRST_TRUST_URL = "https://www.ftportfolios.com/retail/etf/etfholdings.aspx"
+
+# `-full-holdings`, NOT the plain product page: that one renders its table client-side, so a
+# fetch of it returns a document with no holdings in it at all and the parser rightly refuses.
+DEFIANCE_URL = "https://www.defianceetfs.com/{slug}-full-holdings/"
+
+# The locale is pinned rather than left to geo-resolution, so the same file comes back from
+# any machine. Two GETs, not one: the first is only there to be handed the consent cookies
+# that the second needs, without which this URL loops its redirects indefinitely.
+VANECK_URL = "https://www.vaneck.com/nl/en/investments/{slug}/downloads/holdings/"
+VANECK_CONSENT_URL = "https://www.vaneck.com/nl/en/investments/{slug}/"
+
+
+# Every adapter `--all` will attempt. Derived from the fetchers below rather than from
+# `etf_sources.ADAPTERS`, which also names `manual` — a real answer, not a route.
+AUTOMATED_ADAPTERS = frozenset({
+    "dws", "blackrock", "vanguard_us", "invesco", "first_trust", "defiance", "vaneck",
+})
+
 
 class FetchError(Exception):
     """The download failed — reported, and no file written for that fund."""
@@ -82,7 +109,7 @@ def _resolve_targets(names: List[str], fetch_all: bool) -> List[Tuple[str, FundS
     if fetch_all:
         return sorted(
             ((isin, src) for isin, src in FUND_SOURCES.items()
-             if src.adapter in ("dws", "blackrock", "vanguard_us")),
+             if src.adapter in AUTOMATED_ADAPTERS),
             key=lambda pair: pair[1].symbol,
         )
 
@@ -170,6 +197,76 @@ async def _fetch_vanguard(
     return paths
 
 
+async def _fetch_invesco(
+    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
+) -> List[Path]:
+    cusip = cusip_from_isin(isin)
+    if not cusip:
+        raise FetchError(
+            f"{source.symbol}: {isin} is not a US ISIN, so no CUSIP can be taken from it — "
+            f"this endpoint has no other key"
+        )
+    response = await client.get(
+        INVESCO_URL.format(cusip=cusip), params=INVESCO_PARAMS,
+        headers={"Accept": "application/json"},
+    )
+    response.raise_for_status()
+    path = out_dir / f"{isin}.invesco.json"
+    path.write_bytes(response.content)
+    return [path]
+
+
+async def _fetch_first_trust(
+    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
+) -> List[Path]:
+    response = await client.get(FIRST_TRUST_URL, params={"Ticker": source.symbol})
+    response.raise_for_status()
+    path = out_dir / f"{isin}.first_trust.html"
+    path.write_bytes(response.content)
+    return [path]
+
+
+async def _fetch_defiance(
+    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
+) -> List[Path]:
+    slug = source.params.get("slug") or source.symbol.lower()
+    response = await client.get(DEFIANCE_URL.format(slug=slug))
+    response.raise_for_status()
+    path = out_dir / f"{isin}.defiance.html"
+    path.write_bytes(response.content)
+    return [path]
+
+
+async def _fetch_vaneck(
+    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
+) -> List[Path]:
+    """
+    Two GETs: the product page to be given the geo/consent cookies, then the download.
+
+    Without the first, the download URL bounces between locale and consent redirects until
+    `follow_redirects` gives up — the failure looks like a network fault rather than a missing
+    cookie, which is why it is worth a comment. `httpx.AsyncClient` keeps the jar itself.
+    """
+    slug = source.params.get("slug")
+    if not slug:
+        raise FetchError(f"{source.symbol}: no slug declared in app/etf_sources.py")
+
+    await client.get(VANECK_CONSENT_URL.format(slug=slug))
+    await asyncio.sleep(BETWEEN_REQUESTS_S)
+    response = await client.get(VANECK_URL.format(slug=slug))
+    response.raise_for_status()
+    # Checked here as well as in the parser, so a consent page is named at the point it
+    # arrived rather than as an obscure zip error two commands later.
+    if not response.content.startswith(b"PK\x03\x04"):
+        raise FetchError(
+            f"{source.symbol}: the download is not an XLSX (it starts "
+            f"{response.content[:16]!r}) — the consent cookies were probably not accepted"
+        )
+    path = out_dir / f"{isin}.vaneck.xlsx"
+    path.write_bytes(response.content)
+    return [path]
+
+
 async def fetch_baskets(
     names: List[str], out_dir: Path, fetch_all: bool = False
 ) -> int:
@@ -200,6 +297,14 @@ async def fetch_baskets(
                     paths = await _fetch_blackrock(client, isin, source, out_dir)
                 elif source.adapter == "vanguard_us":
                     paths = await _fetch_vanguard(client, isin, source, out_dir)
+                elif source.adapter == "invesco":
+                    paths = await _fetch_invesco(client, isin, source, out_dir)
+                elif source.adapter == "first_trust":
+                    paths = await _fetch_first_trust(client, isin, source, out_dir)
+                elif source.adapter == "defiance":
+                    paths = await _fetch_defiance(client, isin, source, out_dir)
+                elif source.adapter == "vaneck":
+                    paths = await _fetch_vaneck(client, isin, source, out_dir)
                 else:
                     print(
                         f"{source.symbol}: adapter {source.adapter!r} has no fetcher — "

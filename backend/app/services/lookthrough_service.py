@@ -78,6 +78,14 @@ BASKET_STALE_DAYS = 45
 ADAPTER_STALE_DAYS = {
     "dws": 7,
     "blackrock": 7,
+    # The four US issuer feeds all republish every business day, so a week-old basket from any
+    # of them is a fetch that did not happen. Defiance stamps its file with the *next* business
+    # day, which `parse_defiance` clamps back — so the age measured here is real, not an
+    # artefact of that convention.
+    "invesco": 7,
+    "first_trust": 7,
+    "defiance": 7,
+    "vaneck": 7,
     "vanguard_us": 75,
     "manual": 45,
 }
@@ -95,7 +103,17 @@ COMPANY_LIMIT_MAX = 200
 # user-switchable, and a fixed floor would silently change the resolved set when the user flips
 # a display toggle. The cap bounds one run's duration — GLEIF is one request per ISIN at ~1/s.
 IDENTITY_COVERAGE_TARGET_PCT = Decimal("99.5")
-IDENTITY_MAX_ISINS = 500
+
+# A runaway guard on one CLI run, not the real bound — `IDENTITY_COVERAGE_TARGET_PCT` is, being
+# value-based where a count is not. Raised from 500 once `OPENFIGI_API_KEY` became supported:
+# with a key OpenFIGI takes 100 jobs a request at 250 requests/minute, so it is no longer what
+# limits a run.
+#
+# **GLEIF is.** It has no batch form for an ISIN filter, so it costs one request per ISIN at
+# ~1.1s — about 45 minutes at this cap, against a couple of minutes for OpenFIGI's share. That
+# is why `resolve_identities` prints an estimate and why `--limit` exists: a definitive answer
+# is cached, so three bounded runs are equivalent to one long one.
+IDENTITY_MAX_ISINS = 2500
 
 
 class LookthroughService:
@@ -254,6 +272,12 @@ class LookthroughService:
                     IdentityMember(
                         ref=ref,
                         isin=row.constituent_isin,
+                        # For the three US issuers that publish a CINS or a SEDOL rather than
+                        # an ISIN, this is the only identity the row has — filled by
+                        # `resolve_identities --constituents`, and unioned on by
+                        # `company_groups` exactly as a directly-held security's is. Without
+                        # it Eaton appears twice: once from GRID and once from MSCI World.
+                        share_class_figi=row.constituent_share_class_figi,
                         fallback_name=row.constituent_name,
                         weight=row_value,
                     )
@@ -521,7 +545,11 @@ class LookthroughService:
                 IdentityMember(
                     ref=member.ref,
                     isin=member.isin,
-                    share_class_figi=row.share_class_figi,
+                    # `or member.share_class_figi` because this rebuild drops anything it does
+                    # not list, and a constituent can arrive already carrying a FIGI resolved
+                    # from its CINS. The cache wins when it has one, since it was keyed by a
+                    # real ISIN.
+                    share_class_figi=row.share_class_figi or member.share_class_figi,
                     lei=row.lei,
                     legal_name=row.issuer_name,
                     figi_name=row.figi_name,

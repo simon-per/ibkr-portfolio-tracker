@@ -109,6 +109,36 @@ class EtfHolding(Base):
     constituent_isin: Mapped[Optional[str]] = mapped_column(
         String(12), nullable=True, index=True
     )
+
+    # The identifier the issuer published when it is NOT an ISIN and no ISIN could be derived
+    # from it locally — a CINS or a SEDOL. Three of the four US adapters publish nine-character
+    # identifiers rather than ISINs, and on GRID 77 of 128 rows are CINS, including its three
+    # largest holdings. Without somewhere to keep the raw value, those companies could never
+    # fold with the same company held elsewhere, however many providers were asked.
+    #
+    # **`resolve_identities --constituents` reads it and fills the FIGI below**, leaving this
+    # column exactly as the issuer published it, so the row keeps what was said beside what we
+    # made of it.
+    constituent_identifier: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # The shareClassFIGI OpenFIGI returned for that identifier, which is what actually folds
+    # the row: `IdentityMember` already unions on shareClassFIGI, so a constituent with one is
+    # grouped with the same company held directly or inside another fund without any ISIN
+    # existing for it anywhere.
+    #
+    # **A FIGI and not an ISIN, because OpenFIGI's mapping endpoint does not return one** —
+    # measured 2026-08-16: `ID_CINS G29183103` gives 104 venue rows, every field a FIGI, ticker
+    # or exchange code, and no ISIN among them. Writing a fabricated ISIN into
+    # `constituent_isin` to make the fold work would put an invented identifier in the column
+    # every other reader trusts, which is the SBI failure in a new place.
+    #
+    # Wiped by a re-import along with everything else on the row, which is correct: it is
+    # re-derivable from two OpenFIGI requests, and a cached identity outliving the basket row
+    # it described is the harder thing to reason about.
+    constituent_share_class_figi: Mapped[Optional[str]] = mapped_column(
+        String(12), nullable=True
+    )
+
     constituent_ticker: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     constituent_name: Mapped[str] = mapped_column(String(200), nullable=False)
 

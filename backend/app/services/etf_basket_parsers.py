@@ -18,7 +18,8 @@ partially-parsed basket is indistinguishable afterwards from a complete one, and
 plausibility gate in `EtfBasketRepository.replace_basket` keeps the previous basket when this
 module refuses.
 
-Three shapes, three sets of hazards, all observed on 2026-08-14:
+Seven issuers, seven sets of hazards, every one observed on a live file rather than imagined
+(the first three on 2026-08-14, the four US feeds on 2026-08-16):
 
 - **Xtrackers/DWS** — semicolon-delimited CSV, weights are **fractions summing to 1.0**, no
   asset-class column at all, and no as-of date anywhere (not in the body, not in a
@@ -32,16 +33,42 @@ Three shapes, three sets of hazards, all observed on 2026-08-14:
 - **Vanguard US** — paginated JSON, 500 rows a page, month-end as-of that lags ~6 weeks.
   Its stock endpoint returns equities only, so what is missing from Σ is genuinely the
   non-equity remainder.
+- **Invesco** — keyless JSON keyed by the fund's own CUSIP. Names arrive HTML-escaped, one row
+  carries a null weight, and `effectiveDate` is a day *later* than the `effectiveBusinessDate`
+  the holdings actually describe.
+- **First Trust** — a server-rendered HTML table nested inside layout tables, whose
+  `Classification` column looks like an asset class and holds an industry. Its currency rows
+  are marked only by a `$`-prefixed ticker.
+- **Defiance** — HTML again, at `/{ticker}-full-holdings/` (the plain product page renders its
+  table client-side and carries none of it). Its as-of is stamped with the *next* business day.
+- **VanEck** — an XLSX, read with `zipfile` + `ElementTree` rather than a new dependency. The
+  only source here that publishes an ISIN on every row.
+
+**The three US HTML/JSON feeds share one hazard the others do not have: their nine-character
+identifier column is not all CUSIPs.** It mixes CUSIPs, CINS (foreign issuers, letter-leading)
+and — on Defiance — SEDOLs. `app/services/security_identifiers.py` tells them apart by shape
+and check digit, converts only what can be converted, and hands the rest to `ConstituentRow
+.identifier` for OpenFIGI. Prefixing a CINS with `US` yields a check-digit-valid ISIN belonging
+to nothing, which is the silent-fabrication direction this codebase refuses everywhere.
 """
 import csv
 import io
 import json
 import logging
 import re
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import List, Optional, Sequence
+from html import unescape
+from html.parser import HTMLParser
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from app.services.security_identifiers import (
+    derive_north_american_isin,
+    identifier_kind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +128,13 @@ class ConstituentRow:
     asset_class: Optional[str] = None
     sector: Optional[str] = None
     country: Optional[str] = None
+
+    # The identifier the issuer published, kept verbatim when it is NOT an ISIN — a CINS or a
+    # SEDOL that `app/services/security_identifiers.py` refuses to convert locally. It exists
+    # so identity resolution has something to send OpenFIGI: on GRID that is 77 of 128 rows,
+    # including its three largest holdings, so discarding it would leave most of the fund
+    # permanently unfoldable. Empty whenever `isin` is set, so there is one answer per row.
+    identifier: Optional[str] = None
 
 
 @dataclass
@@ -213,20 +247,28 @@ class ParsedBasket:
 _HTML_SNIFF = re.compile(rb"^\s*(<!doctype|<html|<\?xml|\{\"errors)", re.I)
 
 
+def _refuse_if_empty(body: bytes, adapter: str) -> None:
+    if not (body or b"").strip():
+        raise BasketParseError(f"{adapter}: empty response body")
+
+
 def _refuse_if_not_data(body: bytes, adapter: str) -> None:
     """
     The lying-content-type guard.
 
     The retired iShares holdings URL still answers 200 with `Content-Type: text/csv` and an
     HTML body, so this is checked on the bytes rather than on any header.
+
+    **Not for the adapters whose payload really is a web page** — First Trust and Defiance
+    publish their baskets as HTML tables, so for those the equivalent guard is finding the
+    holdings table at all (`_pick_table`), which a consent page or an error page fails.
     """
     if _HTML_SNIFF.match(body or b""):
         raise BasketParseError(
             f"{adapter}: the response body is a web page, not a holdings file — the endpoint "
             f"has probably moved. Status codes and content types are not evidence here"
         )
-    if not (body or b"").strip():
-        raise BasketParseError(f"{adapter}: empty response body")
+    _refuse_if_empty(body, adapter)
 
 
 def _decimal(raw, what: str) -> Decimal:
@@ -274,6 +316,168 @@ def _isin(value) -> Optional[str]:
     # 12 alphanumerics, two-letter country prefix. A blank, a '-' or a CUSIP is left as None
     # rather than stored as a broken identifier that would fold two companies together.
     return text if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", text) else None
+
+
+def _resolve_identifier(
+    raw, is_security: bool = True
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Split a published identifier into `(isin, unresolved_identifier)`.
+
+    One rule for the three US issuers that publish nine-character identifiers, because they
+    make the same two mistakes available: a CINS prefixed `US` is a *syntactically valid* ISIN
+    belonging to nothing, and a SEDOL sitting in a column headed "CUSIP" is neither. Whatever
+    cannot be converted here is carried forward verbatim for OpenFIGI rather than dropped —
+    see `ConstituentRow.identifier`.
+
+    `is_security=False` for a row the issuer has already called cash: `CASHUSD00` has the shape
+    of a CINS and asking a provider about it would be noise.
+    """
+    text = (_clean(raw) or "").upper()
+    if not text or not is_security:
+        return None, None
+    kind = identifier_kind(text)
+    if kind == "ISIN":
+        return text, None
+    if kind == "CUSIP":
+        # Digit-leading, so derivable. `derive_north_american_isin` assumes the US form; the
+        # Canadian one exists in the same numeric space and only one of the two is real.
+        return derive_north_american_isin(text), None
+    if kind in ("CINS", "SEDOL"):
+        return None, text
+    return None, None
+
+
+class _TableCollector(HTMLParser):
+    """
+    Every `<table>` on a page, as a list of rows of plain-text cells.
+
+    `html.parser` rather than a regex because both issuer pages nest tables inside layout
+    tables — First Trust's holdings table is the sixth of eight — and `<table>.*?</table>` finds
+    the wrong closing tag the moment that happens. A stack keeps each cell with its innermost
+    table. Deliberately tolerant of unclosed tags, which is what real markup looks like.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tables: List[List[List[str]]] = []
+        self._stack: List[List[List[str]]] = []
+        self._row: Optional[List[str]] = None
+        self._cell: Optional[List[str]] = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._stack.append([])
+        elif tag == "tr" and self._stack:
+            self._row = []
+        elif tag in ("td", "th") and self._row is not None:
+            self._cell = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "tr" and self._row is not None and self._stack:
+            if self._row:
+                self._stack[-1].append(self._row)
+            self._row = None
+        elif tag == "table" and self._stack:
+            # Innermost first, so a nested table is a table in its own right and the outer one
+            # simply does not contain its cells.
+            self.tables.append(self._stack.pop())
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def close(self):  # pragma: no cover - only reached on malformed markup
+        super().close()
+        while self._stack:
+            self.tables.append(self._stack.pop())
+
+
+def _html_tables(body: bytes, adapter: str) -> List[List[List[str]]]:
+    _refuse_if_empty(body, adapter)
+    collector = _TableCollector()
+    collector.feed(body.decode("utf-8", errors="replace"))
+    collector.close()
+    return collector.tables
+
+
+def _pick_table(
+    tables: Sequence[Sequence[Sequence[str]]], required: Sequence[str], adapter: str
+) -> List[List[str]]:
+    """
+    The first table whose header row carries every required column, matched case-insensitively.
+
+    Positional selection ("the sixth table") would break the first time the issuer adds a
+    banner, and silently: the sixth table would still parse, just as something else. Matching on
+    the headers means a layout change fails loudly with the headers it did find.
+    """
+    wanted = [w.strip().lower() for w in required]
+    for table in tables:
+        if not table:
+            continue
+        header = [c.strip().lower() for c in table[0]]
+        if all(w in header for w in wanted) and len(table) > 1:
+            return [list(row) for row in table]
+    seen = [t[0] for t in tables if t]
+    raise BasketParseError(
+        f"{adapter}: no table on the page carries the columns {list(required)} — the layout "
+        f"changed, or the response is a consent/error page. Headers seen: {seen[:8]}"
+    )
+
+
+def _column_index(header: Sequence[str], name: str, adapter: str) -> int:
+    lowered = [c.strip().lower() for c in header]
+    try:
+        return lowered.index(name.strip().lower())
+    except ValueError:  # pragma: no cover - _pick_table has already required the column
+        raise BasketParseError(f"{adapter}: column {name!r} vanished from the header {header}")
+
+
+def _us_date_after(text: str, anchor: str, adapter: str) -> date:
+    """
+    The `M/D/YYYY` that follows a named phrase — never merely the first one on the page.
+
+    The anchor is the whole point. QTUM's page carries **five** date-shaped strings: the as-of,
+    a bond maturity inside a holding's own name (`... Obligations Fund 12/01/2031`), a
+    `17/02/2022` that is not even month-first, and two with impossible years. An unanchored
+    search took the `17/02/2022` and refused the file — which was the lucky outcome; the
+    maturity date would have parsed cleanly and dated the basket to 2031.
+
+    Refused rather than defaulted when absent: every issuer here publishes one, so its absence
+    means the page is not the page we think it is.
+    """
+    pattern = re.escape(anchor) + r"[^0-9]{0,20}(\d{1,2})/(\d{1,2})/(\d{4})"
+    match = re.search(pattern, text or "", re.I)
+    if not match:
+        raise BasketParseError(f"{adapter}: no date follows {anchor!r} on the page")
+    month, day, year = (int(g) for g in match.groups())
+    try:
+        return date(year, month, day)
+    except ValueError:
+        raise BasketParseError(
+            f"{adapter}: {month}/{day}/{year} after {anchor!r} is not a date"
+        )
+
+
+def _require_ticker(body: bytes, ticker: str, adapter: str) -> None:
+    """
+    Refuse a page whose `<title>` does not name the fund we asked for.
+
+    Both routes are keyed by ticker in a query string or a path segment, so a redirect — a
+    retired ticker, a typo, a locale bounce — serves another fund's holdings under a 200. This
+    is the HTML equivalent of the `ShareClass ISIN` echo `parse_dws` checks on every row.
+    """
+    text = body.decode("utf-8", errors="replace")
+    match = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
+    title = unescape(match.group(1)).strip() if match else ""
+    if ticker.upper() not in title.upper():
+        raise BasketParseError(
+            f"{adapter}: the page is titled {title[:80]!r}, which does not name {ticker} — it "
+            f"is another fund's holdings, or a consent page"
+        )
 
 
 # ------------------------------------------------------------------------ Xtrackers / DWS
@@ -566,4 +770,452 @@ def _vanguard_as_of(payload) -> Optional[date]:
         raise BasketParseError(f"vanguard_us: cannot read asOfDate {raw!r}")
 
 
-PARSERS = {"dws": parse_dws, "blackrock": parse_ishares, "vanguard_us": parse_vanguard_us}
+# ------------------------------------------------------------------------------ Invesco
+
+# What Invesco's `securityTypeName` means in the vocabulary `counts_as_invested` speaks.
+# Translated at the adapter boundary rather than by widening `INVESTED_ASSET_CLASSES`: the
+# whitelist there is the shared rule, and every issuer that invents a new label would otherwise
+# have to be admitted to it. Measured on the live SOXQ basket, which carries six distinct values.
+INVESCO_ASSET_CLASSES = {
+    "common stock": "Equity",
+    "american depository receipt": "Equity",
+    "american depository receipt - ny": "Equity",
+    "preferred stock": "Preferred",
+    "currency": "Cash",
+    "uninvestible cash": "Cash",
+    "cash": "Cash",
+}
+
+
+def _invesco_asset_class(raw: Optional[str]) -> Optional[str]:
+    """
+    Invesco's own type, mapped to the shared vocabulary — and deliberately not exhaustive.
+
+    A value nobody has mapped is returned verbatim, which matters for the one that must keep
+    working without an entry: `Money Market Fund, Taxable` contains "fund", so
+    `counts_as_invested` routes it to the nested-fund bucket on its own. Coercing unmapped
+    values to "Equity" would turn that into a top-50 company.
+    """
+    text = (raw or "").strip()
+    return INVESCO_ASSET_CLASSES.get(text.lower(), text or None)
+
+
+def parse_invesco(body: bytes, fund_isin: str) -> ParsedBasket:
+    """
+    Invesco's keyless holdings JSON, keyed by the fund's own CUSIP.
+
+    Two properties make this the least fragile adapter here: the endpoint takes an identifier
+    derivable from the fund ISIN, so there is no hand-discovered id to keep in step the way
+    BlackRock's `portfolio_id` needs, and it echoes that CUSIP back so a redirect serving
+    another fund is caught on the response rather than assumed away.
+
+    Constituents carry a CUSIP and no ISIN, so the ISIN is derived where the identifier is
+    North American and left absent where it is a CINS — see `app/services/cusip.py` for why
+    prefixing a CINS with `US` is the dangerous option.
+    """
+    _refuse_if_not_data(body, "invesco")
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    except ValueError as exc:
+        raise BasketParseError(f"invesco: response is not JSON ({exc})")
+
+    holdings = payload.get("holdings")
+    if not isinstance(holdings, list):
+        raise BasketParseError("invesco: payload carries no 'holdings' list")
+
+    wanted = fund_isin.strip().upper()
+    echoed = (payload.get("cusip") or "").strip().upper()
+    if echoed and derive_north_american_isin(echoed) not in (None, wanted):
+        raise BasketParseError(
+            f"invesco: the response is for CUSIP {echoed}, not for the requested {wanted} — "
+            f"the endpoint served a different fund"
+        )
+
+    declared = payload.get("totalNumberOfHoldings")
+    if isinstance(declared, int) and declared != len(holdings):
+        raise BasketParseError(
+            f"invesco: the payload declares {declared} holdings but carries {len(holdings)} — "
+            f"a truncated response, whose weights would still sum plausibly"
+        )
+
+    as_of = _invesco_as_of(payload)
+    rows: List[ConstituentRow] = []
+    skipped = 0
+    for index, holding in enumerate(holdings, start=1):
+        raw_weight = holding.get("percentageOfTotalNetAssets")
+        if raw_weight is None:
+            # Measured: `USD Pending Dividends` carries a null weight and no CUSIP. A row the
+            # issuer gave no weight contributes nothing and is counted rather than guessed at.
+            skipped += 1
+            continue
+        asset_class = _invesco_asset_class(holding.get("securityTypeName"))
+        row_isin, unresolved = _resolve_identifier(
+            holding.get("cusip"), is_security=counts_as_invested(asset_class, True)
+        )
+        # `issuerName` arrives HTML-escaped ("Invesco Government &amp; Agency Portfolio"),
+        # which is the only place in these four sources that happens.
+        rows.append(ConstituentRow(
+            line_no=index,
+            name=_label(unescape(_clean(holding.get("issuerName")) or ""), row_isin,
+                        holding.get("ticker")),
+            weight_pct=_decimal(raw_weight, f"invesco row {index} weight"),
+            isin=row_isin,
+            identifier=unresolved,
+            ticker=_clean(holding.get("ticker")),
+            asset_class=asset_class,
+        ))
+
+    basket = ParsedBasket(
+        fund_isin=wanted, as_of_date=as_of, source="invesco", adapter="invesco",
+        rows=rows, source_rows=len(holdings), skipped_rows=skipped,
+        as_of_is_issuer_stated=True, asset_class_available=True,
+    )
+    basket.validate()
+    return basket
+
+
+def _invesco_as_of(payload) -> date:
+    """
+    `effectiveBusinessDate`, not `effectiveDate`.
+
+    They differ — measured 2026-08-14 against 2026-08-15 — and the business date is the one the
+    holdings describe. Taking the later of the two would make every basket look a day fresher
+    than it is, in the direction a staleness alarm must never err.
+    """
+    for key in ("effectiveBusinessDate", "effectiveDate"):
+        raw = (payload.get(key) or "").strip()
+        if raw:
+            try:
+                return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+    raise BasketParseError("invesco: no usable effective date on the payload")
+
+
+# -------------------------------------------------------------------------- First Trust
+
+FIRST_TRUST_COLUMNS = {
+    "name": "Security Name",
+    "ticker": "Identifier",
+    "cusip": "CUSIP",
+    "sector": "Classification",
+    "weight": "Weighting",
+}
+
+
+def _first_trust_asset_class(identifier: Optional[str]) -> Optional[str]:
+    """
+    Read First Trust's cash rows off its ticker convention, since the page states no class.
+
+    `Classification` looks like an asset-class column and is not: it holds an *industry*
+    (`Diversified Industrials`, `Electrical Components`). The nine currency lines are marked
+    only by a `$`-prefixed ticker — `$GBP`, `$KRW`, `$CHF` — which is unmistakable, since no
+    real ticker begins with one. Same shape as `_dws_asset_class`: only the negatives are
+    derived, because asserting "Equity" for everything else would be wrong for a bond fund.
+    """
+    text = (identifier or "").strip()
+    return "Cash" if text.startswith("$") else None
+
+
+def parse_first_trust(body: bytes, fund_isin: str, ticker: str) -> ParsedBasket:
+    """
+    First Trust's holdings page: a server-rendered HTML table, one row per constituent.
+
+    The identifiers are the reason this adapter is careful. 77 of GRID's 128 rows carry a
+    **CINS** rather than a CUSIP — including its three largest holdings, Eaton, Schneider and
+    Johnson Controls, all Irish or French issuers — so `US`-prefixing the column wholesale
+    would fabricate an identifier for 60% of the fund. Those rows keep the raw value for
+    OpenFIGI instead; see `_resolve_identifier`.
+    """
+    # Emptiness first, so a truncated response is reported as empty rather than as a
+    # page with an unhelpful title.
+    _refuse_if_empty(body, "first_trust")
+    _require_ticker(body, ticker, "first_trust")
+    tables = _html_tables(body, "first_trust")
+    table = _pick_table(tables, list(FIRST_TRUST_COLUMNS.values()), "first_trust")
+    header = table[0]
+    at = {key: _column_index(header, name, "first_trust")
+          for key, name in FIRST_TRUST_COLUMNS.items()}
+
+    rows: List[ConstituentRow] = []
+    skipped = 0
+    for index, record in enumerate(table[1:], start=1):
+        if len(record) <= max(at.values()):
+            skipped += 1
+            continue
+        raw_weight = _clean(record[at["weight"]])
+        if not raw_weight:
+            skipped += 1
+            continue
+        row_ticker = _clean(record[at["ticker"]])
+        asset_class = _first_trust_asset_class(row_ticker)
+        row_isin, unresolved = _resolve_identifier(
+            record[at["cusip"]], is_security=counts_as_invested(asset_class, False)
+        )
+        sector = _clean(record[at["sector"]])
+        rows.append(ConstituentRow(
+            line_no=index,
+            name=_label(record[at["name"]], row_isin, row_ticker),
+            weight_pct=_decimal(raw_weight, f"first_trust row {index} weight"),
+            isin=row_isin,
+            identifier=unresolved,
+            ticker=row_ticker,
+            asset_class=asset_class,
+            # `Other` is what the page writes for a row it has not classified, so storing it
+            # would put a sector on a row that simply has none — the rule `parse_dws` applies
+            # to its own literal 'unknown'.
+            sector=None if (sector or "").lower() == "other" else sector,
+        ))
+
+    basket = ParsedBasket(
+        fund_isin=fund_isin.strip().upper(),
+        as_of_date=_us_date_after(
+            body.decode("utf-8", errors="replace"), "as of", "first_trust"
+        ),
+        source="first_trust", adapter="first_trust",
+        rows=rows, source_rows=len(table) - 1, skipped_rows=skipped,
+        # The industry column is not an asset class, so the equity filter genuinely cannot run
+        # and the API says so. The cash rows are still excluded, by the convention above.
+        asset_class_available=False,
+    )
+    basket.validate()
+    return basket
+
+
+# ----------------------------------------------------------------------------- Defiance
+
+DEFIANCE_COLUMNS = {
+    "ticker": "Ticker",
+    "name": "Name",
+    "cusip": "CUSIP",
+    "weight": "ETF Weight",
+}
+
+
+def _defiance_asset_class(identifier: Optional[str]) -> Optional[str]:
+    """Defiance's cash lines are the ones whose identifier column starts with `CASH`."""
+    return "Cash" if (identifier or "").strip().upper().startswith("CASH") else None
+
+
+def parse_defiance(body: bytes, fund_isin: str, ticker: str, fetched_on: date) -> ParsedBasket:
+    """
+    Defiance's full-holdings page — note `/{ticker}-full-holdings/`, not `/{ticker}/`, whose
+    table is rendered client-side and absent from the response.
+
+    **Its column headed "CUSIP" holds three different things.** Measured on QTUM's 89 rows:
+    68 nine-character CUSIPs and CINS, **20 SEDOLs** (`B056381` Global Unichip, `6640400` NEC),
+    and the literal `Cash&Other`. `_resolve_identifier` tells them apart by shape and check
+    digit rather than by the heading.
+
+    **And its stated date is an effective date, not a portfolio date.** `Data as of 08/17/2026`
+    on a file fetched on the 16th, describing Friday the 14th's close — the same T+1 convention
+    Invesco makes explicit by publishing `effectiveDate` beside `effectiveBusinessDate`. A
+    future as-of would make a stale basket look fresh, and staleness must only ever err old, so
+    it is clamped to the fetch date and `as_of_is_issuer_stated` says the date is ours.
+    """
+    # Emptiness first, so a truncated response is reported as empty rather than as a
+    # page with an unhelpful title.
+    _refuse_if_empty(body, "defiance")
+    _require_ticker(body, ticker, "defiance")
+    tables = _html_tables(body, "defiance")
+    table = _pick_table(tables, list(DEFIANCE_COLUMNS.values()), "defiance")
+    header = table[0]
+    at = {key: _column_index(header, name, "defiance")
+          for key, name in DEFIANCE_COLUMNS.items()}
+
+    rows: List[ConstituentRow] = []
+    skipped = 0
+    for index, record in enumerate(table[1:], start=1):
+        if len(record) <= max(at.values()):
+            skipped += 1
+            continue
+        raw_weight = _clean(record[at["weight"]])
+        if not raw_weight:
+            skipped += 1
+            continue
+        raw_id = _clean(record[at["cusip"]])
+        asset_class = _defiance_asset_class(raw_id)
+        row_isin, unresolved = _resolve_identifier(
+            raw_id, is_security=counts_as_invested(asset_class, False)
+        )
+        rows.append(ConstituentRow(
+            line_no=index,
+            name=_label(record[at["name"]], row_isin, record[at["ticker"]]),
+            weight_pct=_decimal(raw_weight, f"defiance row {index} weight"),
+            isin=row_isin,
+            identifier=unresolved,
+            ticker=_clean(record[at["ticker"]]),
+            asset_class=asset_class,
+        ))
+
+    stated = _us_date_after(
+        body.decode("utf-8", errors="replace"), "Data as of", "defiance"
+    )
+    basket = ParsedBasket(
+        fund_isin=fund_isin.strip().upper(),
+        as_of_date=min(stated, fetched_on),
+        source="defiance", adapter="defiance",
+        rows=rows, source_rows=len(table) - 1, skipped_rows=skipped,
+        as_of_is_issuer_stated=stated <= fetched_on,
+        asset_class_available=False,
+    )
+    basket.validate()
+    return basket
+
+
+# ------------------------------------------------------------------------------- VanEck
+
+XLSX_MAGIC = b"PK\x03\x04"
+_XLSX_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+VANECK_COLUMNS = {
+    "name": "Holding Name",
+    "ticker": "Ticker",
+    "isin": "ISIN",
+    "weight": "% of Net Assets",
+}
+# What VanEck writes in a cell that has no value — on the `Other/Cash` line, in every column.
+VANECK_BLANK = "--"
+
+
+def _xlsx_rows(body: bytes) -> List[List[str]]:
+    """
+    An XLSX's first worksheet as rows of strings, using only the standard library.
+
+    `zipfile` + `ElementTree` rather than `openpyxl`, which would be a new dependency in the
+    deploy path for one 5 kB file a week. Cells are placed by their `r` reference rather than
+    by document order, because a sheet may omit an empty cell entirely and appending in order
+    would then shift every later column of that row into the wrong heading.
+    """
+    if not body.startswith(XLSX_MAGIC):
+        raise BasketParseError(
+            "vaneck: the response is not a zip archive, so it is not an XLSX — the download "
+            "most likely returned the consent page instead of the file"
+        )
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(body))
+        shared = [
+            "".join(node.text or "" for node in item.iter(_XLSX_NS + "t"))
+            for item in ET.fromstring(archive.read("xl/sharedStrings.xml"))
+        ] if "xl/sharedStrings.xml" in archive.namelist() else []
+        sheets = sorted(n for n in archive.namelist() if n.startswith("xl/worksheets/sheet"))
+        if not sheets:
+            raise BasketParseError("vaneck: the workbook has no worksheet")
+        sheet = ET.fromstring(archive.read(sheets[0]))
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as exc:
+        raise BasketParseError(f"vaneck: cannot read the workbook ({exc})")
+
+    out: List[List[str]] = []
+    for row in sheet.iter(_XLSX_NS + "row"):
+        cells: Dict[int, str] = {}
+        for cell in row.findall(_XLSX_NS + "c"):
+            index = _xlsx_column_index(cell.get("r") or "")
+            kind = cell.get("t")
+            if kind == "inlineStr":
+                node = cell.find(_XLSX_NS + "is")
+                text = "".join(t.text or "" for t in node.iter(_XLSX_NS + "t")) if node is not None else ""
+            else:
+                value = cell.find(_XLSX_NS + "v")
+                text = value.text or "" if value is not None else ""
+                if kind == "s" and text:
+                    try:
+                        text = shared[int(text)]
+                    except (ValueError, IndexError):
+                        raise BasketParseError(
+                            f"vaneck: cell {cell.get('r')} references shared string {text}, "
+                            f"which the workbook does not contain"
+                        )
+            cells[index] = text.strip()
+        values = [cells.get(i, "") for i in range(max(cells) + 1)] if cells else []
+        # A wholly-blank row is layout, not data — the workbook ends with one, and counting it
+        # as `skipped_rows` would report a spacer as a row we failed to parse.
+        if any(v for v in values):
+            out.append(values)
+    return out
+
+
+def _xlsx_column_index(ref: str) -> int:
+    """`D4` -> 3. Zero-based, so it indexes a list directly."""
+    letters = "".join(c for c in ref if c.isalpha()).upper()
+    index = 0
+    for char in letters:
+        index = index * 26 + (ord(char) - 64)
+    return max(index - 1, 0)
+
+
+def parse_vaneck(body: bytes, fund_isin: str) -> ParsedBasket:
+    """
+    VanEck's holdings workbook — the only one of these sources that publishes real ISINs.
+
+    That makes it the least interesting adapter and the most valuable basket: every row folds
+    against a direct holding without a provider round-trip, including the ASML NY registry line
+    (`USN070592100`) whose CINS the other three would have had to send to OpenFIGI.
+
+    The header is not on the first row — row 1 carries `All Holdings  08/14/2026`, which is also
+    where the as-of comes from — so both are found by scanning rather than by position.
+    """
+    rows_in = _xlsx_rows(body)
+    header_at = next(
+        (i for i, row in enumerate(rows_in)
+         if all(any(c.strip().lower() == want.lower() for c in row)
+                for want in VANECK_COLUMNS.values())),
+        None,
+    )
+    if header_at is None:
+        raise BasketParseError(
+            f"vaneck: no row carries the columns {list(VANECK_COLUMNS.values())} — the "
+            f"workbook layout changed"
+        )
+    header = rows_in[header_at]
+    at = {key: _column_index(header, name, "vaneck") for key, name in VANECK_COLUMNS.items()}
+
+    as_of = _us_date_after(
+        " ".join(" ".join(r) for r in rows_in[:header_at]), "All Holdings", "vaneck"
+    )
+
+    rows: List[ConstituentRow] = []
+    skipped = 0
+    for index, record in enumerate(rows_in[header_at + 1:], start=1):
+        if len(record) <= max(at.values()):
+            skipped += 1
+            continue
+        raw_weight = _clean(record[at["weight"]])
+        if not raw_weight or raw_weight == VANECK_BLANK:
+            skipped += 1
+            continue
+        raw_ticker = _clean(record[at["ticker"]])
+        # The `Other/Cash` line writes `--` in every identifier column, which is the workbook's
+        # own way of saying the row is not a security. Nothing else in the file does that.
+        is_security = raw_ticker != VANECK_BLANK
+        row_isin, unresolved = _resolve_identifier(record[at["isin"]], is_security=is_security)
+        rows.append(ConstituentRow(
+            line_no=index,
+            name=_label(record[at["name"]], row_isin, raw_ticker),
+            weight_pct=_decimal(raw_weight, f"vaneck row {index} weight"),
+            isin=row_isin,
+            identifier=unresolved,
+            # `AMD US` is a Bloomberg ticker; the exchange half is dropped so it reads like
+            # every other ticker in this table.
+            ticker=(raw_ticker.split()[0] if raw_ticker and is_security else None),
+            asset_class=None if is_security else "Cash",
+        ))
+
+    basket = ParsedBasket(
+        fund_isin=fund_isin.strip().upper(), as_of_date=as_of,
+        source="vaneck", adapter="vaneck",
+        rows=rows, source_rows=max(len(rows_in) - header_at - 1, 0), skipped_rows=skipped,
+        asset_class_available=False,
+    )
+    basket.validate()
+    return basket
+
+
+PARSERS = {
+    "dws": parse_dws,
+    "blackrock": parse_ishares,
+    "vanguard_us": parse_vanguard_us,
+    "invesco": parse_invesco,
+    "first_trust": parse_first_trust,
+    "defiance": parse_defiance,
+    "vaneck": parse_vaneck,
+}

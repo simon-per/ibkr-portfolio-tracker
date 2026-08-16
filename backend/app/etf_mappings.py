@@ -23,21 +23,33 @@ different instruments with different domiciles. So every entry declares the ISIN
 covers, and `fund_isins()` / `is_known_etf_isin()` / `symbol_for_fund_isin()` below are
 **the** fundness predicates. CLAUDE.md records that this predicate has already diverged
 once (`securities.asset_type` said "Stock" while this table said "ETF"); a third answer
-would be the same bug a third time, so nothing outside this module may decide it —
-`tests/test_fund_predicate_family.py` walks the AST to enforce that.
+would be the same bug a third time, so nothing outside this module may decide it.
+`tests/test_etf_source_registry.py::test_every_declared_source_is_a_known_fund` holds the
+line the one place it could realistically be crossed, by requiring `FUND_SOURCES` and
+`ETF_ALLOCATIONS` to name the same ISINs in **both** directions. (Earlier revisions of
+this docstring cited a `tests/test_fund_predicate_family.py` that has never existed — a
+claimed guard is worse than an acknowledged gap, since it stops anyone looking.)
 
 **The successor to the two percent blocks is `etf_holdings`, and the precondition for
 migrating is written down here so the two do not silently diverge.** Real constituent
 files carry a sector and a country of risk *per holding*, so once every held fund has a
 stored basket the `sector` and `geographic` blocks here become measurable rather than
-estimated. That switch is deliberately not made yet, for three reasons: coverage is 6
-of 12 funds, so the Allocation tab's numbers would start depending on whether a scraper
-succeeded; `countryOfRisk` is a **country** while `geographic` buckets are **regions**,
-so switching needs a new hand-maintained country-to-region map — a new drift surface
-rather than a removed one; and iShares' `sectorName` is a third taxonomy beside Yahoo's
-and `AllocationTab.tsx`'s `SECTOR_MAPPING`. Until all three are resolved, **this table
-is the live answer for the three allocation charts** and `lookthrough_service` says so
-from its own side.
+estimated. That switch is deliberately not made yet, and one of its three original
+blockers is now cleared:
+
+- coverage is **10 of 12 funds** (was 6), but VWCE alone is 9.2% of the book and has no
+  machine-readable basket at all, so the Allocation tab's numbers would still start
+  depending on whether a scraper succeeded;
+- `countryOfRisk` is a **country** while `geographic` buckets are **regions**, so
+  switching needs a new hand-maintained country-to-region map — a new drift surface
+  rather than a removed one;
+- ~~a third sector taxonomy~~ **resolved**: `app/services/sector_taxonomy.py` normalises
+  Yahoo's, iShares', DWS's and First Trust's spellings into the eleven names
+  `AllocationTab.tsx` already displays, and the look-through view groups on it.
+
+Until the first two are resolved, **this table is the live answer for the three
+allocation charts** and `lookthrough_service` says so from its own side — it serves a
+per-company sector for *grouping* and publishes no sector total anywhere.
 """
 
 ETF_ALLOCATIONS = {

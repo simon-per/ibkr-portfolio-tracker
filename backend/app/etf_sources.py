@@ -34,7 +34,10 @@ from app.services.company_identity import IssuerOverride
 # `app/cli/import_etf_basket.py` — a real answer, not a placeholder: for VWCE it is the
 # permanent one, because Vanguard Europe's GraphQL endpoint requires an undocumented
 # header, and it publishes only its top ten holdings — complete holdings are request-only.
-ADAPTERS = frozenset({"blackrock", "dws", "vanguard_us", "manual"})
+ADAPTERS = frozenset({
+    "blackrock", "dws", "vanguard_us", "invesco", "first_trust", "defiance", "vaneck",
+    "manual",
+})
 
 
 @dataclass(frozen=True)
@@ -119,7 +122,7 @@ FUND_SOURCES: Dict[str, FundSource] = {
         params={"ticker": "vt"},
     ),
 
-    # --- No programmatic route: import a downloaded file ---------------------------
+    # --- Vanguard Europe: no programmatic route, import a downloaded file ----------
     # The largest single position in the account, so its basket matters more than any other —
     # and there is genuinely nothing to fetch. **The blocker is that the data is not published,
     # NOT that we are forbidden to read it**, and getting that backwards (as an earlier revision
@@ -136,39 +139,51 @@ FUND_SOURCES: Dict[str, FundSource] = {
         name="Vanguard FTSE All-World UCITS ETF",
         adapter="manual",
     ),
-    # **A route exists and is worth building** — this entry is `manual` only because the adapter
-    # has not been written yet, not because nothing is fetchable. Verified 2026-08-14:
-    # `https://www.vaneck.com/nl/en/investments/semiconductor-etf/downloads/holdings/` returns a
-    # ~5 kB XLSX carrying `Holding Name | Ticker | ISIN | Shares | Market Value | % of Net
-    # Assets`, **as-of T-1** — fresher than every feed here except the Xtrackers CSV, and the
-    # smallest unit of work of any remaining gap. Two things it needs: a **cookie jar** (a
-    # cookieless GET loops the geo/consent redirects indefinitely) and the `/nl/en/` locale
-    # **pinned** rather than trusting `/ucits/` to geo-resolve the same way twice. Parse the zip
-    # with `zipfile` + `ElementTree` rather than adding an `openpyxl` dependency.
-    # Do NOT substitute the US SMH's SEC filing: different index variant, different membership.
+    # --- VanEck ---------------------------------------------------------------------
+    # An XLSX download, and the **only** source here that publishes real ISINs on every row,
+    # so its basket folds against direct holdings with no provider round-trip at all. Two
+    # things are load-bearing and neither is obvious from the URL: it needs a **cookie jar**
+    # (a cookieless GET loops the geo/consent redirects indefinitely) and the `/nl/en/` locale
+    # must be **pinned** rather than trusting `/ucits/` to geo-resolve the same way twice.
+    # Do NOT substitute the US SMH's SEC filing: the fund held here is the Irish UCITS line,
+    # a different index variant with different membership.
     "IE00BMC38736": FundSource(
         symbol="SMH",
         name="VanEck Semiconductor UCITS ETF",
-        adapter="manual",
+        adapter="vaneck",
+        params={"slug": "semiconductor-etf"},
     ),
-    # Invesco serves a single-page app; the documented holdings URL returns the shell.
+
+    # --- Invesco --------------------------------------------------------------------
+    # The *product page* is a single-page app, which is what an earlier revision of this file
+    # recorded as "no route". The API behind it is keyless JSON and is keyed by the fund's own
+    # CUSIP — derivable from the ISIN, so unlike BlackRock's `portfolio_id` there is nothing to
+    # discover and nothing to keep in step. It echoes that CUSIP back, which the parser checks.
     "US46138G6153": FundSource(
         symbol="SOXQ",
         name="Invesco PHLX Semiconductor ETF",
-        adapter="manual",
+        adapter="invesco",
     ),
-    # First Trust renders a server-side HTML table with tickers but no ISINs, so even a
-    # successful scrape could not be folded against a direct holding reliably.
+
+    # --- First Trust ----------------------------------------------------------------
+    # A server-rendered HTML table. The earlier note here concluded that "tickers but no
+    # ISINs" made a scrape pointless; it missed the CUSIP column beside them. What it got
+    # right by accident is that the identifiers do not fold on their own: 77 of 128 rows are
+    # CINS, so most of this fund needs `resolve_identities --constituents` to be foldable.
     "US33737A1088": FundSource(
         symbol="GRID",
         name="First Trust Nasdaq Clean Edge Smart Grid Infrastructure Index Fund",
-        adapter="manual",
+        adapter="first_trust",
     ),
-    # Defiance publishes a WordPress table carrying CUSIPs but no ISINs.
+
+    # --- Defiance -------------------------------------------------------------------
+    # Note the path: `/qtum-full-holdings/`, not `/qtum/`, whose table is rendered client-side
+    # and simply absent from the response body.
     "US26922A4206": FundSource(
         symbol="QTUM",
         name="Defiance Quantum ETF",
-        adapter="manual",
+        adapter="defiance",
+        params={"slug": "qtum"},
     ),
 
     # --- Excluded ------------------------------------------------------------------
