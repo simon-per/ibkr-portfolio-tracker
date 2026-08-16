@@ -8,7 +8,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
-import { buildExposureTiles, buildPartition } from '@/lib/lookthroughChart'
+import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -331,7 +331,7 @@ export function LookThroughTab() {
   const coverageColumns = useMemo(() => fundColumns({ formatCurrency }), [formatCurrency])
   const selectedRow = data?.companies.find((r) => r.company_key === selected) ?? null
 
-  const tiles = useMemo(() => (data ? buildExposureTiles(data) : []), [data])
+  const sectorGroups = useMemo(() => (data ? buildExposureGroups(data) : []), [data])
   const partition = useMemo(() => (data ? buildPartition(data) : []), [data])
 
   // A fund contributes nothing to the company table while it reads either of these. `excluded`
@@ -495,7 +495,7 @@ export function LookThroughTab() {
               ) : (
                 <>
                   <ExposureTreemap
-                    tiles={tiles}
+                    groups={sectorGroups}
                     selected={selected}
                     onSelect={(key) => setSelected(key === selected ? null : key)}
                     formatCurrency={formatCurrency}

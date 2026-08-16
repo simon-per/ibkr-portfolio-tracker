@@ -10,29 +10,18 @@ import { RefreshCw, X } from 'lucide-react'
 import { RebalanceCard } from './RebalanceCard'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { allocationSectorPaint, neutralPaint, type SectorPaint } from '@/lib/sectorColors'
 
-// Semantic colors for sectors
-const SECTOR_COLORS: Record<string, string> = {
-  'Technology': '#3b82f6',
-  'Information Technology': '#3b82f6',
-  'Financials': '#10b981',
-  'Financial Services': '#10b981',
-  'Healthcare': '#ef4444',
-  'Health Care': '#ef4444',
-  'Consumer Cyclical': '#f59e0b',
-  'Consumer Discretionary': '#f59e0b',
-  'Industrials': '#6366f1',
-  'Communications': '#8b5cf6',
-  'Communication Services': '#8b5cf6',
-  'Consumer Defensive': '#14b8a6',
-  'Consumer Staples': '#14b8a6',
-  'Energy': '#f97316',
-  'Real Estate': '#84cc16',
-  'Utilities': '#06b6d4',
-  'Basic Materials': '#a855f7',
-  'Materials': '#a855f7',
-}
-
+/**
+ * Sector colours now come from `lib/sectorColors.ts`, shared with the Look-through treemap so
+ * one sector is one colour across the app.
+ *
+ * The eighteen-entry map that used to live here was measurably broken: `#8b5cf6` Communications
+ * against `#a855f7` Basic Materials scored **ΔE 0.3 under protanopia and 5.1 with full colour
+ * vision** — indistinguishable, on the chart whose only job is to distinguish. Half its keys
+ * were dead anyway, because `mergeAllocation` renames `Information Technology` to `Technology`
+ * *before* the colour lookup runs, so the GICS spellings were never reached.
+ */
 const REGION_COLORS: Record<string, string> = {
   'North America': '#3b82f6',
   'United States': '#3b82f6',
@@ -55,11 +44,11 @@ const REGION_COLORS: Record<string, string> = {
   'Ireland': '#6366f1',
 }
 
-const FALLBACK_COLORS = [
-  '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#06b6d4', '#ec4899', '#10b981', '#f97316', '#6366f1',
-  '#84cc16', '#14b8a6', '#f43f5e', '#a855f7', '#eab308',
-]
+/** Two real classes plus the bucket for "nobody has run the allocation sync against this yet". */
+const ASSET_TYPE_COLORS: Record<string, string> = {
+  Stock: 'var(--viz-sector-1)',
+  ETF: 'var(--viz-sector-4)',
+}
 
 // Normalize sector names for consistency
 const SECTOR_MAPPING: Record<string, string> = {
@@ -98,8 +87,20 @@ function normalize(name: string, mapping: Record<string, string>): string {
   return mapping[name] || name
 }
 
-function getColor(name: string, colorMap: Record<string, string>, index: number): string {
-  return colorMap[name] || FALLBACK_COLORS[index % FALLBACK_COLORS.length]
+/**
+ * Colour by identity, never by row position.
+ *
+ * This used to fall back to `FALLBACK_COLORS[index % 15]`, so any category the map did not
+ * cover — `Unknown` on the sector and region charts among them — changed colour whenever the
+ * ordering changed. A reader who learned "Unknown is orange" was misled by the next sync.
+ */
+function mappedColor(colorMap: Record<string, string>) {
+  return (name: string): SectorPaint => {
+    const fill = colorMap[name]
+    // The mapped region and asset-type hexes are all mid-to-dark, so white carries them; the
+    // neutral ramp supplies its own ink for the same reason.
+    return fill ? { fill, ink: '#ffffff' } : neutralPaint(name)
+  }
 }
 
 // Custom treemap content renderer
@@ -111,11 +112,12 @@ interface TreemapContentProps {
   name: string
   percentage: number
   fill: string
+  ink: string
   depth: number
 }
 
 function CustomTreemapContent(props: TreemapContentProps) {
-  const { x, y, width, height, name, percentage, fill, depth } = props
+  const { x, y, width, height, name, percentage, fill, ink, depth } = props
   if (depth !== 1) return null
 
   const showLabel = width > 60 && height > 30
@@ -140,7 +142,7 @@ function CustomTreemapContent(props: TreemapContentProps) {
           y={y + height / 2 - (showPct ? 8 : 0)}
           textAnchor="middle"
           dominantBaseline="central"
-          fill="#fff"
+          fill={ink}
           fontSize={Math.min(14, width / 8)}
           fontWeight={600}
           className="pointer-events-none"
@@ -154,7 +156,8 @@ function CustomTreemapContent(props: TreemapContentProps) {
           y={y + height / 2 + 12}
           textAnchor="middle"
           dominantBaseline="central"
-          fill="rgba(255,255,255,0.85)"
+          fill={ink}
+          opacity={0.85}
           fontSize={Math.min(12, width / 9)}
           className="pointer-events-none"
         >
@@ -300,13 +303,13 @@ function AllocationTreemap({
   title,
   description,
   allocation,
-  colorMap,
+  colorFor,
   isLoading,
 }: {
   title: string
   description: string
   allocation: Record<string, AllocationCategory>
-  colorMap: Record<string, string>
+  colorFor: (name: string) => SectorPaint
   isLoading: boolean
 }) {
   const formatCurrency = useFormatCurrency()
@@ -346,12 +349,13 @@ function AllocationTreemap({
     )
   }
 
-  const treemapData = entries.map(([name, cat], i) => ({
+  const treemapData = entries.map(([name, cat]) => ({
     name,
     size: cat.percentage,
     percentage: cat.percentage,
     market_value_eur: cat.market_value_eur,
-    fill: getColor(name, colorMap, i),
+    fill: colorFor(name).fill,
+    ink: colorFor(name).ink,
   }))
 
   return (
@@ -374,7 +378,7 @@ function AllocationTreemap({
                 dataKey="size"
                 aspectRatio={4 / 3}
                 isAnimationActive={false}
-                content={<CustomTreemapContent x={0} y={0} width={0} height={0} name="" percentage={0} fill="" depth={1} />}
+                content={<CustomTreemapContent x={0} y={0} width={0} height={0} name="" percentage={0} fill="" ink="#ffffff" depth={1} />}
                 onClick={(node: any) => {
                   if (node?.name) {
                     setSelected(selected === node.name ? null : node.name)
@@ -400,7 +404,7 @@ function AllocationTreemap({
 
           {/* Legend */}
           <div className="w-full space-y-1.5 sm:w-[200px] sm:shrink-0 sm:pt-2">
-            {entries.map(([name, cat], i) => (
+            {entries.map(([name, cat]) => (
               <button
                 key={name}
                 onClick={() => setSelected(selected === name ? null : name)}
@@ -413,7 +417,7 @@ function AllocationTreemap({
                     width: '12px',
                     height: '12px',
                     borderRadius: '3px',
-                    backgroundColor: getColor(name, colorMap, i),
+                    backgroundColor: colorFor(name).fill,
                     flexShrink: 0,
                   }}
                 />
@@ -566,7 +570,7 @@ export function AllocationTab() {
         title="Sector Breakdown"
         description="Portfolio allocation by sector"
         allocation={sectorAllocation}
-        colorMap={SECTOR_COLORS}
+        colorFor={allocationSectorPaint}
         isLoading={isLoading}
       />
 
@@ -580,7 +584,7 @@ export function AllocationTab() {
           title="Geographic Breakdown"
           description="Portfolio allocation by region"
           allocation={geoAllocation}
-          colorMap={REGION_COLORS}
+          colorFor={mappedColor(REGION_COLORS)}
           isLoading={isLoading}
         />
 
@@ -588,11 +592,7 @@ export function AllocationTab() {
           title="Asset Type"
           description="Stocks vs ETFs"
           allocation={assetAllocation}
-          colorMap={{
-            'Stock': '#3b82f6',
-            'ETF': '#22c55e',
-            'Unknown': '#6b7280',
-          }}
+          colorFor={mappedColor(ASSET_TYPE_COLORS)}
           isLoading={isLoading}
         />
       </div>

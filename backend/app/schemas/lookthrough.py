@@ -45,6 +45,17 @@ class LookthroughCompanyRow(BaseModel):
         ..., description="lei | share_class_figi | isin | unidentified"
     )
     name: str
+    sector: str = Field(
+        ...,
+        description=(
+            "One of `sector_taxonomy.CANONICAL_SECTORS`, or 'Unknown'. Resolved per company by "
+            "value-weighted vote across its listings and the funds holding it, preferring the "
+            "issuer basket over Yahoo. Used to GROUP the companies on this response and nothing "
+            "else — there is deliberately no portfolio-level sector rollup here, because that "
+            "would be a second answer beside the Allocation tab's, computed over a different "
+            "denominator (this one covers only what could be decomposed)."
+        ),
+    )
     value_eur: float
     pct_of_portfolio: float = Field(
         ...,

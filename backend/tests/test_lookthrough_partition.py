@@ -24,6 +24,7 @@ from typing import Optional
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -35,7 +36,7 @@ from app.models.isin_identity import IsinIdentity
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
-from app.schemas.lookthrough import LookthroughResponse
+from app.schemas.lookthrough import LookthroughCompanyRow, LookthroughResponse
 from app.services.lookthrough_service import LookthroughService
 
 TODAY = date.today()
@@ -136,11 +137,12 @@ def _basket(
 
 def _holding(
     fund_isin: str, line_no: int, isin: Optional[str], name: str, weight: str,
-    asset_class: Optional[str] = "Equity",
+    asset_class: Optional[str] = "Equity", sector: Optional[str] = None,
 ) -> EtfHolding:
     return EtfHolding(
         fund_isin=fund_isin, line_no=line_no, constituent_isin=isin,
         constituent_name=name, weight_pct=Decimal(weight), asset_class=asset_class,
+        sector=sector,
     )
 
 
@@ -185,6 +187,16 @@ async def _standard_book(session: AsyncSession) -> None:
         _identity(NVIDIA_ISIN, NVIDIA_LEI, "NVIDIA CORPORATION"),
     ])
     await session.flush()
+
+
+async def _holding_row(session: AsyncSession, fund_isin: str, line_no: int) -> EtfHolding:
+    """`EtfHolding`'s primary key is a surrogate `id`; `UNIQUE(fund_isin, line_no)` is the
+    business key, so fetch on that rather than on a composite `session.get()`."""
+    return (await session.execute(
+        select(EtfHolding).where(
+            EtfHolding.fund_isin == fund_isin, EtfHolding.line_no == line_no
+        )
+    )).scalars().one()
 
 
 def _row(report: dict, name_fragment: str) -> dict:
@@ -598,6 +610,38 @@ async def test_the_service_and_the_response_model_agree_in_both_directions(sessi
     LookthroughResponse.model_validate(report)
 
 
+@pytest.mark.asyncio
+async def test_the_company_row_and_its_model_agree_in_both_directions(session):
+    """
+    The same check one level down, and it was missing until a per-row field needed it.
+
+    The test above compares only the response's TOP-level keys, so a field added to a company row
+    and not to `LookthroughCompanyRow` is dropped from the wire by the same silent filter — with
+    every existing assertion still green, because nothing else inspects a row's key set.
+    `test_api_contract_drift.py` does not close it either: it checks that the TypeScript interface
+    is a subset of the Pydantic model, which is the opposite direction.
+
+    Nested models are exactly where this is easiest to miss, which is why it is pinned rather
+    than trusted.
+    """
+    await _standard_book(session)
+    report = await LookthroughService(session).get_lookthrough()
+    assert report["companies"], "fixture must produce at least one company row"
+
+    model_fields = set(LookthroughCompanyRow.model_fields)
+    for row in report["companies"]:
+        row_keys = set(row)
+        assert row_keys - model_fields == set(), (
+            f"the service puts {sorted(row_keys - model_fields)} on a company row, which the "
+            f"response model would drop from the wire silently"
+        )
+        assert model_fields - row_keys == set(), (
+            f"the model declares {sorted(model_fields - row_keys)} on a company row, which the "
+            f"service never sets — each would silently take its default"
+        )
+        LookthroughCompanyRow.model_validate(row)
+
+
 @pytest.mark.parametrize("direct_price,uncovered_price,fund_price,weight", [
     # Sub-cent prices, so several buckets carry a fraction that rounds the same way and the
     # errors accumulate. Each of these fails if the residual is published as its own rounded
@@ -652,3 +696,99 @@ async def test_the_published_buckets_close_whatever_the_rounding(
         Decimal(str(report["direct_equity_eur"]))
         + Decimal(str(report["looked_through_equity_eur"]))
     )) <= Decimal("0.02")
+
+
+# ---------------------------------------------------------------- sector, per company
+
+@pytest.mark.asyncio
+async def test_a_company_takes_the_sector_of_its_largest_classified_contributor(session):
+    """
+    A folded company can be classified more than once and the sources genuinely differ — a fund
+    may carry a stale classification, or none. The vote is weighted by value so the largest
+    contributor decides, which is the rule `display_name()` already uses to pick the row's name.
+    They must agree: a row showing one issuer's name beside another's sector is incoherent.
+
+    Here Alphabet is 1,700 direct (Yahoo: Communication Services) against 600 through XNAS, whose
+    basket deliberately disagrees. The direct side is larger, so it wins — and both spellings
+    normalise to the same canonical name anyway, which is the point of the taxonomy module.
+    """
+    await _standard_book(session)
+    # Overwrite XNAS's Alphabet row with a *different* classification than Yahoo's.
+    holding = await _holding_row(session, XNAS_ISIN, 2)
+    holding.sector = "Information Technology"
+    for sec_id in (1, 2, 3):
+        (await session.get(Security, sec_id)).sector = "Communication Services"
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    assert _row(report, "ALPHABET")["sector"] == "Communications"
+
+
+@pytest.mark.asyncio
+async def test_a_fund_only_company_takes_its_sector_from_the_basket(session):
+    """NVIDIA is held through XNAS and nowhere directly, so `securities.sector` cannot answer."""
+    await _standard_book(session)
+    holding = await _holding_row(session, XNAS_ISIN, 1)
+    holding.sector = "Information Technology"
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    assert _row(report, "NVIDIA")["sector"] == "Technology"
+
+
+@pytest.mark.asyncio
+async def test_a_company_nothing_classifies_is_unknown_rather_than_absent(session):
+    """
+    Vanguard publishes no sector on any of its rows and `securities.sector` is NULL until someone
+    runs the allocation sync by hand, so this is the common case, not the edge. Dropping the row
+    would shrink the whole and make every other company's share read high — the failure
+    `allocation_service` fixed for its own charts in 2026-08-05.
+    """
+    await _standard_book(session)   # no sector set anywhere
+    report = await LookthroughService(session).get_lookthrough()
+
+    assert report["companies"], "companies must still be present"
+    assert all(r["sector"] == "Unknown" for r in report["companies"])
+    rows_total = sum((Decimal(str(r["value_eur"])) for r in report["companies"]), Decimal("0"))
+    assert rows_total == (
+        Decimal(str(report["direct_equity_eur"]))
+        + Decimal(str(report["looked_through_equity_eur"]))
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_exactly_tied_sector_vote_does_not_depend_on_arrival_order(session):
+    """
+    `company_identity`'s own 25x shuffle compares keys, names and membership — it cannot see a
+    field the service adds afterwards, so the determinism the pure module guarantees has to be
+    re-checked where the vote actually happens.
+
+    A `max()` over a dict returns the FIRST key holding the maximum, and dict order is insertion
+    order, which follows member order. That is stable within one process, so "run it five times
+    and compare" passes against the bug — verified by mutation. What discriminates is **swapping
+    which security carries which sector**: the two members keep their arrival order, so an
+    order-dependent implementation flips its answer while a name-ordered one does not.
+    """
+    await _standard_book(session)
+    for sec_id in (1, 2):                      # equal weights: neither can win on value
+        lot = (await session.execute(
+            select(TaxLot).where(TaxLot.security_id == sec_id)
+        )).scalars().first()
+        lot.quantity = Decimal("5")
+    (await session.get(Security, 3)).sector = None   # GOOG abstains, or it breaks the tie
+
+    answers = []
+    for first, second in (("Financials", "Technology"), ("Technology", "Financials")):
+        (await session.get(Security, 1)).sector = first
+        (await session.get(Security, 2)).sector = second
+        await session.flush()
+        report = await LookthroughService(session).get_lookthrough()
+        row = _row(report, "ALPHABET")
+        # 500 + 500 tied, plus 500 from the abstaining GOOG listing.
+        assert row["direct_value_eur"] == 1500.0
+        answers.append(row["sector"])
+
+    assert answers[0] == answers[1], (
+        f"the tie resolved to {answers[0]!r} then {answers[1]!r} — it is being decided by the "
+        f"order the members arrived in, not by the sector name"
+    )

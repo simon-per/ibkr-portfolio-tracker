@@ -270,6 +270,12 @@ export interface LookthroughCompanyRow {
   company_key: string;
   key_type: 'lei' | 'share_class_figi' | 'isin' | 'unidentified';
   name: string;
+  /**
+   * A canonical sector, or 'Unknown'. Groups the treemap and nothing else — there is no
+   * portfolio-level sector total on this response, deliberately: that would be a second answer
+   * beside the Allocation tab's, over a different denominator.
+   */
+  sector: string;
   value_eur: number;
   /** Share of the WHOLE portfolio — never renormalised onto the decomposed subset. */
   pct_of_portfolio: number;

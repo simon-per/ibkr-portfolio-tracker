@@ -81,52 +81,76 @@
   }
 
   /**
-   * The look-through charts' palette, as custom properties so the two themes are each
-   * *chosen* rather than one being an automatic wash of the other.
+   * The look-through treemap's SECTOR palette — four hues, and that number is a measurement
+   * rather than a preference.
    *
-   * Every other chart in this app hardcodes one set of hexes and lets dark mode take them
-   * unchanged, which is why several sector tiles go muddy against the near-black card. These
-   * five are stepped twice and both sets were run through a contrast/CVD validator against
-   * the surfaces they actually render on (`--card`: #ffffff light, #020817 dark) on the
-   * all-pairs pairlist, because a treemap can seat any tile next to any other:
+   * A treemap can seat any group beside any other, so the honest colourblind check is
+   * "all pairs", not "adjacent pairs". Brute-forcing every subset of the eight-hue
+   * categorical set against both surfaces found that **no set of five clears it** and exactly
+   * two sets of four do; this is one of them (blue / yellow / magenta / green). The Allocation
+   * tab's existing eleven sector colours fail badly on the same test — `#3b82f6` Technology
+   * against `#8b5cf6` Communications measures ΔE 1.3 under deuteranopia and 12.0 with full
+   * colour vision, and those are the two largest groups on this book.
    *
-   *   light  #2a78d6 #eb6834 #1baf7a  worst CVD dE 9.2, worst normal-vision dE 24.0
-   *   dark   #3987e5 #d95926 #199e70  worst CVD dE 9.4, worst normal-vision dE 20.9
+   * **Hues bind to the first four entries of `sector_taxonomy.CANONICAL_SECTORS`, permanently,
+   * and every other sector folds into one muted "Other sectors" group.** Assigning them to
+   * whichever sectors happen to be largest would be colour-follows-rank: buy into healthcare
+   * and Technology silently turns yellow. The cost is that a sector outside the first four
+   * cannot get its own hue however large it grows — which is visible rather than hidden, since
+   * "Other sectors" carries its own share on screen. If it ever gets big, re-order the tuple.
    *
-   * Light-mode aqua sits at 2.82:1 against white, under the 3:1 bar. That is allowed only
-   * because identity is never carried by colour alone here: the legend names every role and
-   * the company table below repeats every value.
+   * **Label ink is per slot, not per theme, and dark Communications is why.** White clears 3:1
+   * on three of the four dark fills and measures 2.94 on `#c98500`; re-stepping that yellow
+   * darker to fix it pushed it to ΔE 4.1 against the green under protanopia, so the fill stays
+   * and the ink flips instead. Every pair below is >= 3.0 against its own fill.
    *
-   * **The meaning of a hue is fixed across both charts** — blue is always exposure you chose
-   * directly, orange is always exposure that arrived inside a fund. The composition bar and
-   * the treemap are different decompositions of the same book, so a reader who learns the
-   * colour once must not have to relearn it thirty pixels lower.
+   * The three neutrals are structural, not categorical — they carry value that is on the chart
+   * to keep the areas honest. Ordered by prominence: "Not attributed" is the strongest of the
+   * three because it is the caveat, "Other sectors" the faintest.
+   */
+  :root {
+    --viz-sector-1: #2a78d6;   /* Technology        */ --viz-sector-1-ink: #020817;
+    --viz-sector-2: #eda100;   /* Communications    */ --viz-sector-2-ink: #020817;
+    --viz-sector-3: #e87ba4;   /* Financials        */ --viz-sector-3-ink: #020817;
+    --viz-sector-4: #008300;   /* Consumer Cyclical */ --viz-sector-4-ink: #020817;
+    --viz-sector-other: #c9c7c0;      --viz-sector-other-ink: #020817;
+    --viz-other: #aeaca5;             --viz-other-ink: #020817;
+    --viz-unattributed: #8f8d88;      --viz-unattributed-ink: #020817;
+  }
+
+  .dark {
+    --viz-sector-1: #3987e5;   --viz-sector-1-ink: #f8fafc;
+    --viz-sector-2: #c98500;   --viz-sector-2-ink: #020817;   /* white measures 2.94 here */
+    --viz-sector-3: #d55181;   --viz-sector-3-ink: #f8fafc;
+    --viz-sector-4: #008300;   --viz-sector-4-ink: #f8fafc;
+    --viz-sector-other: #3f3e3a;      --viz-sector-other-ink: #f8fafc;
+    --viz-other: #55534e;             --viz-other-ink: #f8fafc;
+    --viz-unattributed: #6b6963;      --viz-unattributed-ink: #f8fafc;
+  }
+
+  /**
+   * The composition bar's two hues, kept apart from the sector slots above because they answer
+   * a different question and must not be mistaken for sectors.
    *
-   * The two greys are structural, not categorical: they mark value that is on the chart to
-   * keep the areas honest rather than to be compared with the companies. `unattributed` is
-   * the stronger of the two on purpose — it is the larger share and the one carrying the
-   * caveat, while `other` is a truncated tail nobody needs to study.
-   *
-   * **Tile labels are `--foreground`, never a hardcoded white.** White clears 3:1 on only
-   * two of the five light-mode fills (aqua measures 2.82:1), whereas the theme's own ink
-   * clears 4.4:1 on all five in light and 3.4:1 on all five in dark. Reaching for white
-   * because the fill "looks dark" is how the label on the biggest tile ends up unreadable in
-   * exactly one theme, which nobody testing in the other will see.
+   * Validated against both surfaces on the all-pairs list. Blue is the same `--viz-sector-1`
+   * step by arithmetic rather than by reference: the bar's "held directly" and the treemap's
+   * Technology group genuinely are the same blue, which is harmless because the bar carries no
+   * sector and the treemap carries no holding mode — the two vocabularies never appear on one
+   * mark. Aliasing them to one variable would be worse: a future re-step of either would move
+   * the other for no reason.
    */
   :root {
     --viz-direct: #2a78d6;
-    --viz-both: #1baf7a;
     --viz-via-funds: #eb6834;
-    --viz-other: #a8a69f;
-    --viz-unattributed: #8f8d88;
+    --viz-direct-ink: #020817;
+    --viz-via-funds-ink: #020817;
   }
 
   .dark {
     --viz-direct: #3987e5;
-    --viz-both: #199e70;
     --viz-via-funds: #d95926;
-    --viz-other: #3a3937;
-    --viz-unattributed: #4e4d4a;
+    --viz-direct-ink: #f8fafc;
+    --viz-via-funds-ink: #f8fafc;
   }
 
   html {

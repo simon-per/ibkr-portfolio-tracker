@@ -56,6 +56,7 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
         company_key: '5493006MHB84DD0ZWV18',
         key_type: 'lei',
         name: 'ALPHABET INC.',
+        sector: 'Communications',
         value_eur: 2300,
         pct_of_portfolio: 44.23,
         direct_value_eur: 1700,
@@ -72,6 +73,7 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
         company_key: 'US67066G1040',
         key_type: 'isin',
         name: 'NVIDIA CORP',
+        sector: 'Technology',
         value_eur: 1200,
         pct_of_portfolio: 23.08,
         direct_value_eur: 0,
@@ -340,26 +342,24 @@ describe('LookThroughTab coverage tone', () => {
     withProviders(<LookThroughTab />)
 
     await screen.findByText('Company exposure')
-    // Alphabet is held both ways and Nvidia only through a fund — the distinction the whole
-    // feature exists to make — plus the grey that keeps the areas shares of the whole book.
-    expect(screen.getAllByText('Direct + funds').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Funds only').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Not attributed').length).toBeGreaterThan(0)
-    // Nothing here is held direct-only, and a legend naming a colour with no tile invites the
-    // reader to hunt for one.
-    expect(screen.queryByText('Direct only')).toBeNull()
+    // The treemap legend names each sector group it drew, plus the grey that keeps the areas
+    // shares of the whole book. Alphabet is Communications and Nvidia Technology in the fixture.
+    expect(screen.getAllByText('Technology').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Communications').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Not attributed to a company').length).toBeGreaterThan(0)
+    // No sector is on the chart that no company belongs to.
+    expect(screen.queryByText('Financials')).toBeNull()
   })
 
-  it('does not reuse one phrase for two meanings across the bar and the treemap', async () => {
+  it('keeps the composition bar vocabulary out of the treemap legend', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
     await screen.findByText('Company exposure')
-    // The bar splits value and the treemap classifies companies, so "Held directly" (a share
-    // of the book) and "Direct only" (a company with no fund component) must stay separate
-    // words. Alphabet is in both charts at once and belongs to different groups in each.
+    // The bar splits value by how it is held; the treemap groups companies by sector. Sharing a
+    // word between them would make one legend look like a key to the other chart.
     expect(screen.getAllByText('Held directly')).toHaveLength(1)
-    expect(screen.queryByText('Both')).toBeNull()
+    expect(screen.getAllByText('Through funds')).toHaveLength(1)
   })
 
   it('draws no chart at all when nothing could be priced', async () => {

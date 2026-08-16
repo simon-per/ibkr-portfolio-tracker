@@ -52,6 +52,7 @@ from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
 from app.services.company_identity import IdentityMember, company_groups
 from app.services.etf_basket_parsers import counts_as_invested
+from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,12 @@ class LookthroughService:
         nested_total = Decimal("0")
         uncovered_total = Decimal("0")
 
+        # `securities.sector` is the only sector a directly-held company has, and it reaches this
+        # service nowhere else: `get_positions_breakdown()` builds its dicts from the ORM rows but
+        # never copies the column. Widening that helper would change `/api/portfolio/positions` and
+        # the `Position` contract for two consumers that do not want it, so the lookup is local.
+        direct_sectors = await self._direct_sectors(direct_positions)
+
         for pos in direct_positions:
             ref = f"sec:{pos['security_id']}"
             direct_equity += pos["_mv"]
@@ -154,6 +161,7 @@ class LookthroughService:
                 "kind": "direct",
                 "value": pos["_mv"],
                 "listing": f"{pos['symbol']}@{pos['exchange'] or '?'}",
+                "sector": direct_sectors.get(pos["security_id"], UNKNOWN),
             }
             members.append(
                 IdentityMember(
@@ -238,6 +246,9 @@ class LookthroughService:
                     "fund_isin": isin,
                     "fund_symbol": entry["symbol"],
                     "weight_pct": Decimal(row.weight_pct),
+                    # Already loaded — `get_holdings()` selects whole entities, so reading this
+                    # costs no query and no column list to keep in step.
+                    "sector": normalise_sector(row.sector),
                 }
                 members.append(
                     IdentityMember(
@@ -363,6 +374,29 @@ class LookthroughService:
             out.append(isin)
             running += value
         return out
+
+    async def _direct_sectors(self, positions: List[Dict]) -> Dict[int, str]:
+        """
+        Canonical sector per directly-held security id, from `securities.sector`.
+
+        Expect gaps and do not read them as breakage: only `POST /api/allocation/sync` writes that
+        column and nothing schedules it, so an IBKR-ingested security carries NULL until someone
+        runs it by hand. Measured on this account, 27 of 39 held securities have one — but the
+        issuer baskets answer 97 of the 103 ISINs behind the top companies, so this is the *weaker*
+        of the two sources and exists to cover holdings that appear in no fund at all.
+        """
+        if not positions:
+            return {}
+        from sqlalchemy import select
+        from app.models.security import Security
+
+        ids = [p["security_id"] for p in positions if p.get("security_id") is not None]
+        if not ids:
+            return {}
+        result = await self.db.execute(
+            select(Security.id, Security.sector).where(Security.id.in_(ids))
+        )
+        return {row[0]: normalise_sector(row[1]) for row in result.all()}
 
     # ------------------------------------------------------------------ classification
 
@@ -514,12 +548,23 @@ class LookthroughService:
             via_funds: Dict[str, Dict] = {}
             listings: List[str] = []
             value = Decimal("0")
+            sector_votes: Dict[str, Decimal] = {}
 
             for member in group.members:
                 contribution = contributions.get(member.ref)
                 if contribution is None:
                     continue
                 value += contribution["value"]
+                # A company folded across several listings and funds can be classified more than
+                # once, and the sources genuinely differ (a fund may carry a stale classification,
+                # or none at all). Weight the vote by value so the largest contributor decides,
+                # which is the rule `display_name()` already uses to pick the row's name — the two
+                # must agree or a row could show one issuer's name beside another's sector.
+                sector = contribution.get("sector") or UNKNOWN
+                if sector != UNKNOWN:
+                    sector_votes[sector] = (
+                        sector_votes.get(sector, Decimal("0")) + contribution["value"]
+                    )
                 if contribution["kind"] == "direct":
                     direct += contribution["value"]
                     listings.append(contribution["listing"])
@@ -544,10 +589,19 @@ class LookthroughService:
             if group.partially_resolved:
                 partially += 1
 
+            # Ties break on the sector name so the answer cannot depend on dict insertion order,
+            # which depends on member order, which the caller is free to shuffle.
+            sector = (
+                max(sector_votes.items(), key=lambda kv: (kv[1], kv[0]))[0]
+                if sector_votes
+                else UNKNOWN
+            )
+
             rows.append({
                 "company_key": group.key,
                 "key_type": group.key_type,
                 "name": group.name,
+                "sector": sector,
                 "value_eur": value,
                 "direct_value_eur": direct,
                 "via_funds_value_eur": value - direct,

@@ -123,11 +123,18 @@ class EtfHolding(Base):
     # next new value ('Rights', 'Warrant', 'Preferred') as a company.
     asset_class: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
-    # Stored and deliberately UNSERVED. Real constituent files carry these, and
-    # re-fetching later would mean re-scraping — but serving them would put a second
-    # sector answer on the Allocation tab beside `etf_mappings.py`'s, which is this
-    # codebase's dominant failure mode. See that module's docstring for the exact
-    # precondition for switching the charts over.
+    # `sector` is read by ONE consumer, and the boundary is narrower than it looks.
+    # `lookthrough_service` normalises it through `sector_taxonomy` to group the companies on
+    # its own response — per company, with no portfolio-level rollup anywhere. It is NOT a
+    # second answer to the question the Allocation tab asks: that one covers the whole book
+    # from `etf_mappings.py`'s hand-maintained fund-level percentages, this one covers only
+    # the ~79% that could be decomposed, and neither is derivable from the other. Serving a
+    # sector *total* from here would be the dominant failure mode; grouping is not.
+    #
+    # `country` remains UNSERVED, and the reason is specific rather than inherited: it is a
+    # country while every geographic bucket in the app is a region, so using it needs a
+    # hand-maintained country-to-region map — a new drift surface, not a removed one. See
+    # `etf_mappings.py`'s docstring for the full precondition.
     sector: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 

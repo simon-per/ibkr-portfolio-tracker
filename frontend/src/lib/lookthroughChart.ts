@@ -1,4 +1,5 @@
-import type { LookthroughResponse, LookthroughCompanyRow } from './api'
+import type { LookthroughResponse } from './api'
+import { UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
 
 /**
  * What the two look-through charts draw, as pure data.
@@ -13,17 +14,18 @@ import type { LookthroughResponse, LookthroughCompanyRow } from './api'
  * the whole — silently inflating each one by the undecomposed remainder. So the remainder is
  * a tile. It is a large grey block, and that is the honest picture rather than a defect in
  * it: `coverage_pct` says the same thing in a number nobody looks at twice.
+ *
+ * The treemap groups companies by **sector**; it used to colour them by whether they were held
+ * directly, through funds, or both. That was dropped at the owner's request — the table's
+ * Direct / Via funds columns and the drill-down still carry it, and only the treemap's one
+ * colour channel had to choose.
  */
-
-/** How a company's exposure reaches the portfolio. Drives tile colour in both charts. */
-export type HoldingKind = 'direct' | 'both' | 'via_funds'
 
 /**
- * A treemap tile. The two structural roles are not companies — they carry value that belongs
- * on the chart so the areas mean what the header says, and they open no drill-down.
+ * A leaf: one company, or one of the two structural blocks. The structural ones are not
+ * companies — they carry value that belongs on the chart so the areas mean what the header
+ * says — and they open no drill-down.
  */
-export type TileRole = HoldingKind | 'other_companies' | 'unattributed'
-
 export interface ExposureTile {
   /** React key. Prefixed for the structural tiles so it cannot collide with a company_key. */
   key: string
@@ -31,23 +33,24 @@ export interface ExposureTile {
   value: number
   /** Share of the WHOLE portfolio, matching the table's own column. */
   pct: number
-  role: TileRole
+  /** The company's real sector, for the tooltip — not the group it was folded into. */
+  sector: string
   /** Set only for real companies, so a click can open the existing drill-down. */
   companyKey: string | null
   /** Recharts sizes a Treemap by a numeric dataKey; this is that key. */
   size: number
 }
 
-/**
- * Whether a company is held directly, through funds, or both.
- *
- * The `both` case is the one worth having: it is what tells "I own Nvidia and my funds also
- * own Nvidia" apart from "my funds own Apple and I never bought any", which is the single
- * observation this whole feature exists to make possible.
- */
-export function holdingKind(row: LookthroughCompanyRow): HoldingKind {
-  if (row.direct_value_eur > 0 && row.via_funds_value_eur > 0) return 'both'
-  return row.direct_value_eur > 0 ? 'direct' : 'via_funds'
+/** A depth-1 node: a sector, or one of the two structural blocks. */
+export interface ExposureGroup {
+  key: string
+  name: string
+  value: number
+  pct: number
+  /** Which paint slot to use — a canonical sector, `Other sectors`, or a structural role. */
+  paintKey: string
+  size: number
+  children: ExposureTile[]
 }
 
 /** Everything the look-through could not attribute to a company. */
@@ -56,59 +59,103 @@ export function unattributedValue(data: LookthroughResponse): number {
 }
 
 /**
- * The treemap's tiles: the companies on screen, the truncated tail, and the unattributed
- * remainder — which together cover the whole portfolio.
+ * The treemap, as sector groups of company tiles plus the two structural blocks.
  *
- * Returns empty when there is no total to take a share of. That is the `concentrationPct`
- * refusal rather than a special case: a chart built from an unpriced portfolio would draw
- * confident rectangles out of nothing.
+ * **The structural blocks are top-level groups, not tiles inside a sector**, because neither is a
+ * sector: the truncated tail spans all of them and the unattributed remainder belongs to no
+ * company at all. Keeping them at depth 1 is also what preserves the partition — every leaf still
+ * sums to the whole portfolio, which is the one property worth testing.
+ *
+ * Returns empty when there is no total to take a share of. That is the `concentrationPct` refusal
+ * rather than a special case: a chart built from an unpriced portfolio would draw confident
+ * rectangles out of nothing.
  */
-export function buildExposureTiles(data: LookthroughResponse): ExposureTile[] {
+export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] {
   const total = data.total_market_value_eur
   if (!(total > 0)) return []
 
   const pctOf = (value: number) => (value / total) * 100
-  const tiles: ExposureTile[] = data.companies.map((row) => ({
-    key: row.company_key,
-    name: row.name,
-    value: row.value_eur,
-    pct: row.pct_of_portfolio,
-    role: holdingKind(row),
-    companyKey: row.company_key,
-    size: row.value_eur,
-  }))
+  const bySector = new Map<string, ExposureTile[]>()
 
-  if (data.other_companies_eur > 0) {
-    tiles.push({
-      key: 'tile:other',
-      name:
-        data.other_companies_count > 0
-          ? `${data.other_companies_count} smaller companies`
-          : 'Smaller companies',
-      value: data.other_companies_eur,
-      pct: pctOf(data.other_companies_eur),
-      role: 'other_companies',
-      companyKey: null,
-      size: data.other_companies_eur,
+  for (const row of data.companies) {
+    if (!(row.value_eur > 0)) continue
+    const group = sectorGroup(row.sector)
+    const tile: ExposureTile = {
+      key: row.company_key,
+      name: row.name,
+      value: row.value_eur,
+      pct: row.pct_of_portfolio,
+      // The row's own sector, not `group` — a company folded into `Other sectors` must still be
+      // able to say what it actually is, or the fold looks like missing data.
+      sector: row.sector || UNKNOWN_SECTOR,
+      companyKey: row.company_key,
+      size: row.value_eur,
+    }
+    const bucket = bySector.get(group)
+    if (bucket) bucket.push(tile)
+    else bySector.set(group, [tile])
+  }
+
+  const groups: ExposureGroup[] = []
+  for (const [name, children] of bySector) {
+    children.sort((a, b) => b.value - a.value || a.key.localeCompare(b.key))
+    const value = children.reduce((acc, tile) => acc + tile.value, 0)
+    groups.push({
+      key: `sector:${name}`,
+      name,
+      value,
+      pct: pctOf(value),
+      paintKey: name,
+      size: value,
+      children,
     })
   }
 
-  const unattributed = unattributedValue(data)
-  if (unattributed > 0) {
-    tiles.push({
-      key: 'tile:unattributed',
-      name: 'Not attributed to a company',
-      value: unattributed,
-      pct: pctOf(unattributed),
-      role: 'unattributed',
+  const structural = (
+    key: 'other_companies' | 'unattributed',
+    name: string,
+    value: number,
+  ): void => {
+    if (!(value > 0)) return
+    const tile: ExposureTile = {
+      key: `tile:${key}`,
+      name,
+      value,
+      pct: pctOf(value),
+      sector: '',
       companyKey: null,
-      size: unattributed,
+      size: value,
+    }
+    groups.push({
+      key: `group:${key}`,
+      name,
+      value,
+      pct: pctOf(value),
+      paintKey: key,
+      size: value,
+      // A single child so every leaf in the tree is an `ExposureTile` and the sum test can
+      // walk one shape. Recharts draws the child, which is what carries the label.
+      children: [tile],
     })
   }
 
-  // A treemap cannot draw a zero and Recharts would still seat it in the hover layer, where
-  // a phantom 0.00% row is indistinguishable from a real holding worth nothing.
-  return tiles.filter((tile) => tile.size > 0)
+  structural(
+    'other_companies',
+    data.other_companies_count > 0
+      ? `${data.other_companies_count} smaller companies`
+      : 'Smaller companies',
+    data.other_companies_eur,
+  )
+  structural('unattributed', 'Not attributed to a company', unattributedValue(data))
+
+  // Largest first, ties on name, so the layout cannot shuffle between requests.
+  groups.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+  return groups
+}
+
+/** Every leaf across every group — what the partition assertion walks. */
+export function allTiles(groups: ExposureGroup[]): ExposureTile[] {
+  return groups.flatMap((group) => group.children)
 }
 
 /** One segment of the composition bar. */
