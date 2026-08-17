@@ -1,6 +1,14 @@
 # Working state
 
-**Last updated: 2026-08-17 (late evening).** Latest: **every held fund decomposes — coverage 98.97%,
+**Last updated: 2026-08-17 (night).** Latest: **a bug sweep found four more members of the
+`unpriced_holdings` family and the look-through's baskets finally have an alarm.** The four are all
+the same shape this file keeps rediscovering — a figure computed from an incomplete valuation and
+served as a measurement — and the worst of them rendered a *green* reassurance: with a stalled feed
+covering the whole selected range, Current Drawdown read `0.00%` captioned "Never below its opening
+value". Details in *Shipped 2026-08-17 (night)*. Nothing here needs an operational step; it is code
+plus tests.
+
+Before that, the same day: **every held fund decomposes — coverage 98.97%,
 `uncovered_fund_eur` 0.00**, and `OPENFIGI_API_KEY` is live on the VPS. Two funds get there by proxy: VWCE via VT and DBPG via VOO, both at the
 owner's instruction and both badged. DBPG's 2x leverage is *stated* rather than scaled, since
 scaling a bucket would break the partition. Before that, the same day: **VWCE borrows VT's basket** — and the ~8% a broad fund's weights fall short by is explained on
@@ -282,11 +290,17 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   the book on 08-14) drifts upward silently. Same shape as the documented "run
   `POST /api/allocation/sync` by hand after buying" rough edge.
 
-  **There is no alarm, only a badge.** Prices, IBKR syncs and dividends all have a
-  `warnings[]` check hung off the market-data job; baskets have none. `find_stale_etf_baskets()`
-  is *Worth doing next* item 3, and it is the piece that turns this from "decays silently" into
-  "tells you". Until it exists, the tab's own `†` and the coverage card's *"N baskets ageing"* are
-  the only signals, and both require someone to look.
+  **There is an alarm now, as of 2026-08-17 (night).** `find_stale_etf_baskets()` runs after every
+  market-data sync and contributes to `warnings[]`, per adapter, for held funds only — so the decay
+  above tells you rather than only badging a tab someone has to open. What it deliberately does
+  **not** say anything about: a fund excluded by design, and one whose only route is a hand download
+  with nothing to borrow. Neither can be cleared by running anything.
+
+  **It has never fired on production**, because it shipped after the 08-17 CLI run left every basket
+  fresh. Expect it in `warnings[]` about a week later: nine of the ten feeds republish daily, so the
+  first sync past the 7-day mark should name them. If it is silent then, check the market-data job's
+  `details` — the detector is separately guarded, so an exception in it is a log line rather than a
+  failed sync. The *second* half of item 3 — a staleness-guarded automatic refresh — is still open.
 
 - **The TSMC ADR override is about to fire for the first time.** `ISSUER_OVERRIDES` folds
   `US8740391003` (the TSM ADR) into the Taiwanese ordinary, pinned from both sides in
@@ -400,6 +414,67 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-17 (night) — four more incomplete valuations, and the basket alarm
+
+A bug sweep using this repo's own lenses: *what would this metric's stand-in value claim?*, *which
+other code publishes the same name?*, and an AST sweep for functions defined in more than one module.
+Four defects, all one family — **a figure built from an incomplete valuation, presented as
+complete.** CLAUDE.md records that family being closed for the timeline, `/summary`,
+`/attribution`, `dailyReturnSeries`, `betaAndCorrelation` and `computeModifiedDietzReturn`; these are
+the members missed each time.
+
+Ranked by *plausibility*, not size, which is the rule that ranks them correctly:
+
+1. **Current Drawdown claimed the portfolio never fell, in green, over a range it could not
+   measure.** `maxDrawdownPct` returned `0` when `dailyReturnSeries` yielded nothing, and
+   `RiskMetricsCards` read that zero as licence to print *"Never below its opening value"* — with a
+   green tone, because the current drawdown was `0` too. Reachable when every point in the range is
+   unmeasurable: a multi-day market-data stall on a 7D range, or MTD in the first days of a month
+   over a freshly bought holding with no price — the same reachability that got Sharpe fixed on
+   08-05. Both drawdowns are `number | null` now, plus a `sampleDays` count in
+   `betaAndCorrelation`'s shape, and a measured zero still says "never fell" because that statement
+   is true.
+2. **XIRR discarded `unpriced_holdings`.** `calculate_xirr` values both window endpoints with
+   `_calculate_daily_value` — which returns the count — and read only the value. The tax-lot
+   purchases are unconditional flows while the endpoint valuation omits the unpriceable holdings, so
+   **Annual Return (XIRR)** understated, and so did the **Calmar** built on it. Reported rather than
+   excluded (dropping the security would leave a cost with no matching value, unlike
+   `/attribution` where exclusion is right), via a `last_xirr_unpriced` latch — the documented
+   precedent, because one router and six assertions unpack that 5-tuple. `AnnualizedReturnResponse`
+   declares the field with the "a response_model is a filter" note its sibling already carries, and
+   `test_api_smoke.py` pins it non-zero on the fixture's unpriced TSMC.
+3. **Win Rate counted every unpriced holding as a losing position.** `get_positions_breakdown`
+   values an unvaluable holding at 0.00, so its `gain_loss_eur` is `−cost` — it left the numerator
+   and stayed in the denominator. Live rather than theoretical: `unpriced_holdings` read **3** on
+   2026-08-07 in the gap before the new ETFs were priced, ≈7.7 pp on this book, and the card's own
+   footnote stated it as fact ("36 of 39 profitable"). Now `winRate()` in `portfolioKpis.ts` beside
+   the two concentration figures that already refused this condition, excluding from both sides and
+   naming the count, `null` when nothing is priced. It uses the **two-clause** predicate
+   (`market_price === null || market_value_eur <= 0`) cited from `rebalance.ts`, because a missing FX
+   rate leaves the price populated and zeroes the value.
+4. **`computeModifiedDietzReturn` fell through to `0`** when its denominator was not positive, while
+   already returning `null` for its two other undefined cases. Defensive rather than observed — it
+   needs outflows exceeding the opening valuation — but a `0.00%` cell reads as a quiet month.
+
+Plus the improvement this file has listed as *Worth doing next* item 3: **`find_stale_etf_baskets()`**,
+hung off the market-data job beside its four siblings (that slot succeeds while Flex is refusing).
+Held funds only; the basket a fund actually reads comes from
+`LookthroughService._alias_proxied_baskets` rather than a second copy of the proxy rule, and the
+threshold from the existing per-adapter `stale_after_days`. **Nothing unclearable warns** — a fund
+excluded by design, or one whose only route is a hand download with nothing to borrow, stays silent,
+because a warning that can never clear is the always-present-Flex-banner pathology. But "has a route"
+follows the proxy: VWCE's own adapter is `manual` while VT is fetchable, so a missing VT *is*
+actionable. That last rule was a real gap in the first draft, caught by writing the test.
+
+Verified: backend **1183 passed** (was 1168), frontend **479** (was 466), `tsc -b` and
+`npm run build` clean. **Every fix was mutation-checked** — revert it, watch the new test fail — for
+the eleven mutants across both halves, because this repo has twice had a test pass against the bug it
+was written for. A twelfth check pins the *wiring*: an AST walk over `sync_market_data` asserting all
+five detectors are actually called, since a detector nobody calls is the same silence as no detector.
+
+`e2e/ledger.mjs` is fixed but **not run** — it needs a production DB snapshot, and none was pulled.
+See *Known rough edges*.
 
 ## Shipped 2026-08-17 (late) — DBPG decomposes through VOO
 
@@ -1466,20 +1541,23 @@ twenty rows carrying it, since every holding is continuously held.
 
 ## Known rough edges (accepted, not bugs)
 
-- **`e2e/ledger.mjs` fails 2 of 7, and it is the check that has aged rather than the app.**
-  Found on 2026-08-14 while running the browser suite for the look-through work; **unrelated to it**
-  — none of `ActivityTab.tsx`, `activity_service.py` or `ledger.mjs` is touched by that change. Its
-  two transfer assertions read the *rendered* Activity panel, and the account's only transfer is the
-  in-kind arrival of **2026-01-21**. The default range (`1Y`) still reaches it, but the window now
-  holds 175 rows and the transfers are the oldest of them, so they sit past the first page and no
-  longer appear in the panel text. The API is correct: `/api/portfolio/activity?limit=400` returns
-  all 22 `TRANSFER_IN` rows, badged.
-  **This will stay red and get worse as rows accumulate**, which is exactly the pattern that trains
-  a reader to ignore red — so fix it rather than living with it. The cheap fix is to have the script
-  narrow to transfers before asserting (the `kind` filter, or the `ALL`/`YTD` range) instead of
-  hoping they land on page one. Deliberately not changed as part of the look-through work: quietly
-  editing another check's semantics while shipping an unrelated feature is how a guard stops
-  guarding.
+- **`e2e/ledger.mjs` is FIXED but has not been run — it needs a production DB snapshot.**
+  It was 2 of 7 red from 2026-08-14, and the check had aged rather than the app: its two transfer
+  assertions read the rendered Activity panel, the account's only transfer is the in-kind arrival of
+  **2026-01-21**, and while the default `1Y` window still reaches it the window now holds ~175 rows
+  — so the transfers, being the oldest, fell past the first page of 100. The API was always correct
+  (`/api/portfolio/activity?limit=400` returns all 22 `TRANSFER_IN` rows, badged).
+
+  Fixed 2026-08-17 (night) the way this entry prescribed: it clicks the **Cash** event-type filter
+  before asserting anything about transfers, so it stays stable as trades accumulate (47 cash rows
+  against a `PAGE_SIZE` of 100). The trade-shaped assertions run on the unfiltered panel first, and a
+  narrowing check sits between them so a renamed button cannot silently restore the old behaviour —
+  8 checks now, not 7.
+
+  **Unverified**, and that is the honest state: running it needs a `sqlite3 .backup` snapshot of
+  production on this machine, which was deliberately not done. Nothing about the change is
+  data-dependent beyond the button's accessible name (`Cash`, from `KIND_LABELS`), but nobody has
+  watched it go green. Run it next time a snapshot is down for another reason.
 - **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
   far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
   shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
@@ -1948,13 +2026,15 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    who own shares *of* the ETF, the reverse direction, and it returns plausible-looking garbage that
    passes a smoke test.
 
-3. **Make look-through coverage keep itself current.** The baskets and identities are refreshed by
-   hand today, and a basket goes stale silently — the tab badges it past 45 days, but nothing warns.
-   In order: a `find_stale_etf_baskets()` contributing `warnings[]`, hung off the **market-data** job
-   for the documented reason (that slot succeeds while others refuse); then a staleness-guarded
-   refresh on the existing 18:00 `full_sync` rather than a new slot, because a new hour has to be
-   threaded through `ALL_SYNC_HOURS` and the three deploy-guard copies `test_deploy_guard_hours.py`
-   keeps in step. The read path must stay pure DB either way.
+3. **Make look-through coverage keep itself current — half done.** `find_stale_etf_baskets()`
+   shipped 2026-08-17 (night), so a stale basket now *warns* instead of only badging the tab. What
+   remains is the automatic half: a staleness-guarded refresh on the existing 18:00 `full_sync`
+   rather than a new slot, because a new hour has to be threaded through `ALL_SYNC_HOURS` and the
+   three deploy-guard copies `test_deploy_guard_hours.py` keeps in step. The read path must stay pure
+   DB either way, and the refresh has to reuse the detector's verdict rather than re-deriving
+   "which basket is stale" — that predicate now exists in exactly one place and should stay there.
+   Identities are still hand-run and have no detector at all; `unresolved_value_eur` is the figure
+   that shows them drifting.
 
    Then, once every held fund has a basket: `etf_holdings.sector` and `.country` are the raw material
    for replacing `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones.
@@ -2069,6 +2149,18 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-17 (night)** — "find bugs and improvements and implement them". Four defects, and all four
+  turned out to be the *same* family this file has now closed seven times: a figure built from an
+  incomplete valuation, served as a measurement. The lens that found them is the one CLAUDE.md
+  already states — **ask what a metric's stand-in value would claim** — and its corollary is the real
+  lesson: *severity tracks plausibility, not magnitude.* The nastiest was not the largest error but a
+  green `0.00%` drawdown captioned "Never below its opening value", which a stalled price feed
+  produces on demand. Two process notes: **the family lens beats the instance lens** (XIRR and Win
+  Rate were both reachable by asking "who else reads an incomplete valuation?", and neither shares a
+  function name with anything), and **writing the test found the design bug** — the basket detector's
+  first draft keyed "is this fixable?" on the held fund's own adapter, which silently skipped VWCE,
+  the one case that actually is.
+
 - **2026-08-17** — "assume VT's values for VWCE", plus "why does VT only have a ratio of 91.86%, it
   should be nearly 100% stocks". The second was the interesting one: it *is* nearly 100% stocks, and
   the shortfall is **rounding published as fact** — 8,007 of VT's 10,032 rows are printed at 0.00%
@@ -2119,12 +2211,6 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   a cent from summing rounded buckets, and *US DOLLAR* rendered as a company because Xtrackers ships
   no asset-class column. The first test written for the cent bug **passed against it**; a mutation
   check is what exposed that.
-- **2026-08-08** — "fix the flexquery, it always errors out". It never errored: it succeeds once a
-  day, and every attempt *after* that success is refused. **IBKR issues about one Flex generation per
-  US-Eastern calendar day**, so two of three slots plus every manual Sync press failed by
-  construction — twelve days of production history, zero counterexamples — and each refusal spent
-  `Code=1025` lockout budget. The code now asks `sync_runs` before asking IBKR. The lens: **a symptom
-  described as constant failure was a schedule asking a question that could only be answered once.**
-  Also a decision worth remembering as a decision — the owner moved the primary slot to 18:00 Berlin
-  against the evidence (it captures no extra trades, because the window rolls at midnight ET, not at
-  generation time); it is recorded in the code beside the constant rather than argued again.
+*(The 2026-08-08 Flex-generation entry was dropped here to keep this list at five. Its lesson is
+durable and lives in CLAUDE.md — the once-per-day ET generation rule and why the 18:00 Berlin slot
+was chosen — rather than in a perishable log line.)*

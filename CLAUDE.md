@@ -1611,6 +1611,33 @@ The chart still *plots* those days — a hole in the line would be its own kind 
 `PortfolioValueChart` renders a `role="alert"` naming how many days and how many holdings, and saying the
 dip is missing price data rather than a loss.
 
+**Guarding the consumers was necessary and not sufficient, and 2026-08-17 found the rest.** Excluding
+an unmeasurable day is only half the answer: the *result* of excluding every day still has to be
+distinguishable from a measured one, and three surfaces could not do it.
+
+- **`maxDrawdownPct` and `drawdownDetail` return `null`** when `dailyReturnSeries` yields nothing,
+  because `RiskMetricsCards` reads a zero max as licence to print *"Never below its opening value"* —
+  in prose, and in green, since the current drawdown is zero too. So the guard above turned a
+  fabricated `−100%` into a fabricated *reassurance*, which is worse: the loud version invites doubt.
+  A measured zero still says "never fell", and `sampleDays` rides along in `betaAndCorrelation`'s
+  shape so a thin window can declare itself.
+- **`calculate_xirr` latches `last_xirr_unpriced`** and `/annualized-return` declares it. XIRR values
+  both endpoints through `_calculate_daily_value` and had been reading only `market_value_eur`, so a
+  holding it could not value left the terminal inflow while its purchases stayed in the flow list —
+  the **Annual Return (XIRR)** card and the **Calmar** derived from it both understated. It
+  **reports** rather than excluding, unlike `/attribution`: the lot purchases come from `taxlots` and
+  are unconditional, so dropping the security would leave a cost with no matching value.
+- **`winRate()` excludes an unvaluable holding from both sides** and returns `null` when nothing is
+  priced. It had counted one as a *loser* — an unpriced position is valued at 0.00, so its
+  `gain_loss_eur` is `−cost` — leaving the numerator while staying in the denominator, with the
+  card's footnote stating it as fact ("36 of 39 profitable"). It lives in `portfolioKpis.ts` beside
+  the two concentration figures that already refused this condition, and uses the **two-clause**
+  predicate `market_price === null || market_value_eur <= 0` cited from `rebalance.ts`, because a
+  missing FX rate leaves the price populated and zeroes the value.
+
+The lens that found all three, and the one to reuse: **ask which other code reads an incomplete
+valuation**, not which code shares a name — none of these three shares a function name with anything.
+
 **Absent means complete**, deliberately: the field only exists from 2026-08-05, so reading `undefined` as
 unmeasurable would put a permanent warning on every chart served by an older backend. Same choice
 `externalFlow` makes about its own optional field.
@@ -2035,8 +2062,28 @@ VanEck) badge `†` within a week, Vanguard US publishes **month-end with a ~6-w
 Identities never expire but are also never *extended* — a fund rebalance brings in constituent ISINs
 nobody has asked about, and a newly bought security's ISIN is unresolved until the CLI is re-run, so
 it will not fold with an existing holding of the same company. `unresolved_value_eur` is the figure
-that shows this drifting. A `find_stale_etf_baskets()` warning hung off the market-data job is the
-missing piece; until it exists the badge is the only signal and someone has to look at it.
+that shows this drifting.
+
+**A stale basket does warn now** (`SchedulerService.find_stale_etf_baskets`, 2026-08-17), hung off
+the market-data job beside its four siblings for the documented reason: those slots succeed while
+Flex is refusing. Four rules carry it, and each is wrong the other way round:
+
+- **Held funds only**, mirroring `find_stale_priced_securities`' restriction to open lots — a basket
+  for a fund nobody holds moves no figure.
+- **The basket a fund actually reads comes from `LookthroughService._alias_proxied_baskets`**, not
+  from a second copy of the proxy rule, so the age reported is the age of the file the numbers came
+  from. For a proxied fund that is the *source's*, which is also where the threshold comes from.
+- **The threshold is `stale_after_days`**, the same per-adapter table the tab badges on. A second
+  constant here would be the third definition of "stale", after the one that already badged Vanguard
+  permanently.
+- **Nothing unclearable warns.** A fund excluded by design, and one whose only route is a hand
+  download *with nothing to borrow*, stay silent — the tab's fund table names them instead. But
+  **"has a route" follows the proxy**: VWCE's own adapter is `manual` while VT is fetchable, so a
+  missing VT is actionable and must not be skipped just because the held fund has no route of its
+  own. That was the first draft's bug, and the test is what found it.
+
+Identities still have no detector, and the automatic refresh is still unbuilt — `unresolved_value_eur`
+is the only signal for the first, and someone has to run the CLI for the second.
 
 **`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not** —
 and one issuer publishes a date that is *worse* than none. Xtrackers publishes nothing at all: not
@@ -2357,11 +2404,25 @@ from one dominant one.
   A `0` volatility looks broken and gets noticed; a `0` Sharpe and a `0%` concentration both look like
   answers, and the concentration one looks like a *good* answer. Severity tracks plausibility, not
   magnitude.
+
+  **The ladder's top rung is a stand-in that makes a claim in *prose*, and the drawdown pair was
+  it** (fixed 2026-08-17). `maxDrawdownPct` returned `0` with no measurable returns and
+  `RiskMetricsCards` renders a zero max as *"Never below its opening value"* — green, because the
+  current drawdown is zero too. Both are `number | null` now, with `sampleDays` beside them; a
+  measured zero keeps saying "never fell", because there the sentence is true. Same sweep:
+  **`winRate` had counted an unvaluable holding as a losing one** (valued at 0.00, so its gain is
+  `−cost`) and is now `null` with the excluded count named. Note where the zeros in this family come
+  from — `0` for unknown, `100` for `_compute_rsi`, and now a *sentence* — so the question is what
+  the stand-in asserts, never what value it happens to be.
 - **`dailyReturnSeries` exists because `dailyReturns` drops days with nothing to divide by**, so the
   nth return is not the nth calendar point. Indexing the input by return position to name a
   drawdown's peak picks the wrong day.
 - **The *current* drawdown leads and the worst one is the footnote.** Showing only the max reads as a
   live warning long after the recovery.
+- **`winRate` judges only what could be valued**, and reports how many it left out. It excludes on
+  the two-clause predicate `market_price === null || market_value_eur <= 0`, shared in spirit with
+  `rebalance.ts` — a missing FX rate leaves the price populated and zeroes the value, so the
+  one-clause form reads the holding as priced and gives it a real-looking loss.
 
 ### Target allocation and drift (`rebalance.ts`)
 
@@ -2591,7 +2652,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (933 backend + 431 frontend as of 2026-08-14, all offline — no IBKR, Yahoo or FX-provider
+Tests (1183 backend + 479 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -2785,6 +2846,10 @@ Tests: `tests/test_currency_fallback.py`.
 | Beta is blank with a benchmark selected | Fewer than the 20 flow-free days a regression needs; the count so far is in the footnote. Flow days are excluded by design |
 | Sharpe, Volatility and Sortino all read `—` on a short range | Expected, and now consistent: all three need 5 daily returns. MTD in the first days of a month gives 2–3. Sharpe used to show `0.00` here instead, which looked like a measurement |
 | Top 5 Weight reads `—` / *No priced positions* | Nothing held resolved a price, so there is no weight to concentrate. Deliberately not `0.0%`, which the tone ladder would have drawn **green** — a reassuring all-clear from no data |
+| Current Drawdown and Max Drawdown both read `—` | No daily return in the selected range was measurable, so there is no decline to measure. It is **not** "never fell": that sentence needs a *measured* zero, and printing it over a stalled price feed was the worst instance of the zero-for-unknown family this app has had. Find the security in the market-data sync's `warnings[]` |
+| Win Rate says *N unpriced, not judged*, or reads `—` | Holdings the backend could not value are excluded from both sides rather than counted as losses — an unpriced position is valued at 0.00, so its gain is `−cost` and it used to read as an ordinary loser. `—` means nothing at all could be valued |
+| A yellow notice sits above the Performance KPI row | `annualized-return`'s `unpriced_holdings > 0`: a holding had no usable price at one end of the selected period, so the return is measured against a partial valuation while the purchases still count as money in. Annual Return and Calmar both understate. Same cause and same fix as the notice above the summary cards |
+| A market-data sync warns that a fund's basket is stale | `find_stale_etf_baskets`. Nothing refreshes baskets automatically, so this is a real chore rather than noise: run `fetch_etf_baskets --all`, the import lines it prints, then `resolve_identities --constituents` — in that order, because a re-import clears the CINS/SEDOL resolutions on purpose. The threshold is the issuer's own cadence, so a Vanguard basket is not stale at 30 days and an iShares one is |
 
 ---
 
