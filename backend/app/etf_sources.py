@@ -16,7 +16,8 @@ once between `securities.asset_type` and the mapping table.
 **The read path never touches `adapter`.** It reads `etf_baskets` / `etf_holdings` and, if
 a fund has no stored basket, reports it as uncovered whatever this file claims. So an
 adapter named here before it is implemented degrades to "no basket yet", never to a wrong
-number.
+number. The one field it *does* read is `basket_proxy_isin`, and only when the fund has no
+basket of its own — so declaring a proxy can never override a real file, in either order.
 
 Network etiquette, since these are third-party sites rather than an API we are a customer
 of: a descriptive User-Agent carrying a contact address, one request at a time, no retry
@@ -34,6 +35,7 @@ from app.services.company_identity import IssuerOverride
 # `app/cli/import_etf_basket.py` — a real answer, not a placeholder: for VWCE it is the
 # permanent one, because Vanguard Europe's GraphQL endpoint requires an undocumented
 # header, and it publishes only its top ten holdings — complete holdings are request-only.
+# Until such a file exists VWCE borrows VT's basket; see `basket_proxy_isin` below.
 ADAPTERS = frozenset({
     "blackrock", "dws", "vanguard_us", "invesco", "first_trust", "defiance", "vaneck",
     "manual",
@@ -54,6 +56,17 @@ class FundSource:
     # reintroduce a 50% understatement from the leverage it forgot about.
     replication: str = "physical"
     leverage: float = 1.0
+
+    # Another fund's basket, borrowed because this fund publishes none of its own. An
+    # approximation by construction, so `basket_proxy_reason` is mandatory (by test) and
+    # the API reports the proxy everywhere it would otherwise report an issuer's own file.
+    #
+    # **Borrowed at read time, never copied into `etf_baskets`.** A copy would be a second
+    # implementation of one basket, drifting the moment the source is refetched — this
+    # file's opening warning, applied to data instead of code. One stored basket, two
+    # readers: refresh the source and the proxy follows.
+    basket_proxy_isin: Optional[str] = None
+    basket_proxy_reason: str = ""
 
     # Non-empty means: do not look this fund through, and say this instead. Surfaced to
     # the API verbatim, so the explanation lives where it is read.
@@ -134,10 +147,36 @@ FUND_SOURCES: Dict[str, FundSource] = {
     # there is no EU analogue to SEC N-PORT. Vanguard Funds plc's own disclosure policy makes
     # complete holdings request-only (month-end + 15 days, by email). The semiannual report PDF
     # does carry every holding but no ISINs at all, and our pipeline is ISIN-keyed.
+    #
+    # Until a real file is imported it borrows **VT's** basket, at the account owner's
+    # instruction. That is an approximation and is reported as one on every surface, but it
+    # is a defensible one and the arithmetic says which way it errs:
+    #
+    # - The two track the same index family. VT is FTSE Global All Cap, VWCE is FTSE
+    #   All-World; the difference is small-cap inclusion. `ETF_ALLOCATIONS` already pins
+    #   their regional splits together for exactly this reason, so the judgement is not new
+    #   here — what is new is applying it to 10,032 company rows instead of four regions.
+    # - The sleeve VWCE omits is almost entirely the part of VT's file that carries **no
+    #   weight anyway**: Vanguard publishes to 2dp and 8,007 of VT's 10,032 rows are printed
+    #   at 0.00%, so they contribute nothing to a look-through whichever fund is asked.
+    # - The residual small-cap weight makes VT's published percentages *smaller* than
+    #   VWCE's true ones (the same names, renormalised over a narrower index), so every
+    #   company figure this proxy produces is an **understatement** and the shortfall lands
+    #   in the residual. That is the direction this codebase chooses everywhere else.
+    #
+    # Importing a real hand-downloaded basket overrides it with no code change: a stored
+    # basket for this ISIN wins, because the proxy is only consulted when there is none.
     "IE00BK5BQT80": FundSource(
         symbol="VWCE",
         name="Vanguard FTSE All-World UCITS ETF",
         adapter="manual",
+        basket_proxy_isin="US9220427424",
+        basket_proxy_reason=(
+            "Vanguard Europe publishes no machine-readable basket, so VT's is used: the "
+            "same index family (FTSE Global All Cap vs FTSE All-World), differing by a "
+            "small-cap sleeve that VT itself publishes at 0.00% weight. Every company "
+            "figure for this fund is therefore approximate and errs low."
+        ),
     ),
     # --- VanEck ---------------------------------------------------------------------
     # An XLSX download, and the **only** source here that publishes real ISINs on every row,
@@ -228,6 +267,17 @@ def source_for_fund_isin(isin: str) -> Optional[FundSource]:
     if not isin:
         return None
     return FUND_SOURCES.get(isin.strip().upper())
+
+
+def basket_proxy_for(isin: str) -> Optional[str]:
+    """
+    The ISIN of the fund whose basket stands in for this one, if any.
+
+    Chains are refused rather than followed (`test_etf_source_registry.py` pins it): a proxy
+    of a proxy compounds two approximations under one label, and nothing here needs it.
+    """
+    source = source_for_fund_isin(isin)
+    return source.basket_proxy_isin if source else None
 
 
 def user_agent() -> str:

@@ -99,12 +99,14 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
         reason: 'No machine-readable holdings file is published for this fund.',
         basket_as_of: null, stale: false, constituents: 0, equity_weight_pct: null,
         residual_eur: 0, asset_class_available: true, source: null,
+        proxy_for_symbol: null, unweighted_constituents: 0,
       },
       {
         symbol: 'XNAS', fund_isin: 'IE00BMFKG444', market_value_eur: 2000,
         status: 'looked_through', reason: null, basket_as_of: '2026-08-13', stale: false,
         constituents: 106, equity_weight_pct: 90, residual_eur: 200,
         asset_class_available: true, source: 'dws',
+        proxy_for_symbol: null, unweighted_constituents: 0,
       },
     ],
     oldest_basket_as_of: '2026-08-13',
@@ -254,6 +256,7 @@ describe('LookThroughTab coverage tone', () => {
             status: 'no_basket', reason: 'No machine-readable holdings file.',
             basket_as_of: null, stale: false, constituents: 0, equity_weight_pct: null,
             residual_eur: 0, asset_class_available: true, source: null,
+            proxy_for_symbol: null, unweighted_constituents: 0,
           },
         ],
       }),
@@ -277,6 +280,7 @@ describe('LookThroughTab coverage tone', () => {
             status: 'looked_through', reason: null, basket_as_of: '2026-08-13', stale: false,
             constituents: 106, equity_weight_pct: 100, residual_eur: 0,
             asset_class_available: true, source: 'dws',
+            proxy_for_symbol: null, unweighted_constituents: 0,
           },
           {
             symbol: 'DBPG', fund_isin: 'LU0411078552', market_value_eur: 2703,
@@ -284,6 +288,7 @@ describe('LookThroughTab coverage tone', () => {
             reason: 'Synthetic swap-based fund: the basket it publishes is collateral.',
             basket_as_of: null, stale: false, constituents: 0, equity_weight_pct: null,
             residual_eur: 0, asset_class_available: true, source: null,
+            proxy_for_symbol: null, unweighted_constituents: 0,
           },
         ],
       }),
@@ -305,6 +310,7 @@ describe('LookThroughTab coverage tone', () => {
             status: 'looked_through', reason: null, basket_as_of: '2026-03-31', stale: true,
             constituents: 3500, equity_weight_pct: 99, residual_eur: 60,
             asset_class_available: false, source: 'manual',
+            proxy_for_symbol: null, unweighted_constituents: 0,
           },
         ],
       }),
@@ -316,6 +322,54 @@ describe('LookThroughTab coverage tone', () => {
     // invisibly, and the percentage never moves when it does.
     expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
     expect(screen.getByText(/1 basket\(s\) ageing/)).toBeTruthy()
+  })
+
+  it('is not green when a fund is decomposed from another fund\'s basket', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        // Every fund reads `looked_through`, so the unresolved list is empty and the card
+        // would have gone green on the old rule — while a tenth of the book was attributed
+        // from a different fund's file. A borrowed basket is a real gap and it can be closed.
+        coverage_pct: 96.8,
+        funds: [
+          {
+            symbol: 'VWCE', fund_isin: 'IE00BK5BQT80', market_value_eur: 6510,
+            status: 'looked_through', reason: null, basket_as_of: '2026-06-30', stale: false,
+            constituents: 10032, equity_weight_pct: 91.86, residual_eur: 530,
+            asset_class_available: false, source: 'vanguard_us',
+            proxy_for_symbol: 'VT', unweighted_constituents: 8007,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    expect(coverageCard().querySelector('.text-green-600')).toBeNull()
+    expect(screen.getByText(/1 fund\(s\) use another fund's basket/)).toBeTruthy()
+    // And the fund's own row must say which, rather than a green "Decomposed".
+    expect(screen.getByText('Via VT')).toBeTruthy()
+  })
+
+  it('explains a broad fund\'s shortfall as rounding rather than leaving it to read as cash', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        funds: [
+          {
+            symbol: 'VT', fund_isin: 'US9220427424', market_value_eur: 4000,
+            status: 'looked_through', reason: null, basket_as_of: '2026-06-30', stale: false,
+            constituents: 10032, equity_weight_pct: 91.86, residual_eur: 326,
+            asset_class_available: false, source: 'vanguard_us',
+            proxy_for_symbol: null, unweighted_constituents: 8007,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    expect(screen.getByText('91.86%')).toBeTruthy()
+    expect(screen.getByText('8,007 rows at 0%')).toBeTruthy()
   })
 
   /*

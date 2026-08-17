@@ -36,7 +36,12 @@ from app.models.isin_identity import IsinIdentity
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
-from app.schemas.lookthrough import LookthroughCompanyRow, LookthroughResponse
+from app.etf_sources import FUND_SOURCES
+from app.schemas.lookthrough import (
+    LookthroughCompanyRow,
+    LookthroughFundCoverage,
+    LookthroughResponse,
+)
 from app.services.lookthrough_service import LookthroughService
 
 TODAY = date.today()
@@ -50,6 +55,7 @@ NVIDIA_LEI = "LEI_NVIDIA_FIXTURE01"            # a fixture value, not a claim ab
 XNAS_ISIN = "IE00BMFKG444"
 XAIX_ISIN = "IE00BGV5VN51"
 VWCE_ISIN = "IE00BK5BQT80"
+VT_ISIN = "US9220427424"                       # VWCE's declared basket proxy
 DBPG_ISIN = "LU0411078552"
 
 # Every top-level money field, classified. The partition test sums the first group; the
@@ -159,7 +165,9 @@ async def _standard_book(session: AsyncSession) -> None:
     Total 5,200:
       Alphabet held three ways     1,700  (GOOGL 1,000 + ABEA 200 + GOOG 500)
       XNAS fund                    2,000  (basket: 60% NVDA, 30% Alphabet-A, 10% cash)
-      VWCE fund                    1,000  (no basket at all)
+      VWCE fund                    1,000  (no basket at all — and none for the fund it
+                                           proxies either, which is what keeps it the
+                                           uncovered case the tests below rely on)
       DBPG fund                      500  (synthetic, excluded)
     """
     session.add_all([
@@ -640,6 +648,143 @@ async def test_the_company_row_and_its_model_agree_in_both_directions(session):
             f"service never sets — each would silently take its default"
         )
         LookthroughCompanyRow.model_validate(row)
+
+
+@pytest.mark.asyncio
+async def test_the_fund_row_and_its_model_agree_in_both_directions(session):
+    """
+    And one level down again, on the other nested model — same filter, same silence.
+
+    Written when the fund row gained two fields at once: a key the service sets and the model
+    does not declare never reaches the screen, which for `proxy_for_symbol` would mean a fund
+    decomposed from another fund's basket rendering as an ordinary one.
+    """
+    await _standard_book(session)
+    report = await LookthroughService(session).get_lookthrough()
+    assert report["funds"], "fixture must produce at least one fund row"
+
+    model_fields = set(LookthroughFundCoverage.model_fields)
+    for row in report["funds"]:
+        row_keys = set(row)
+        assert row_keys - model_fields == set(), (
+            f"the service puts {sorted(row_keys - model_fields)} on a fund row, which the "
+            f"response model would drop from the wire silently"
+        )
+        assert model_fields - row_keys == set(), (
+            f"the model declares {sorted(model_fields - row_keys)} on a fund row, which the "
+            f"service never sets — each would silently take its default"
+        )
+        LookthroughFundCoverage.model_validate(row)
+
+
+# --------------------------------------------------------------- borrowed baskets
+#
+# VWCE publishes no machine-readable holdings file, so `etf_sources` declares VT's basket as
+# its stand-in. The fixture's `_standard_book` deliberately stores no VT basket, which is what
+# keeps VWCE the "no basket at all" case every other test in this file relies on — these add
+# one explicitly.
+
+
+def _vt_basket_and_rows():
+    """VT's basket plus two rows, one of which is Alphabet — so the fold is exercised too."""
+    return [
+        _basket(VT_ISIN, "100"),
+        _holding(VT_ISIN, 1, ALPHABET_A_ISIN, "Alphabet Inc Class A", "40"),
+        _holding(VT_ISIN, 2, NVIDIA_ISIN, "NVIDIA Corp", "60"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_fund_with_no_basket_of_its_own_borrows_the_one_it_proxies(session):
+    await _standard_book(session)
+    session.add_all(_vt_basket_and_rows())
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    vwce = next(f for f in report["funds"] if f["fund_isin"] == VWCE_ISIN)
+
+    assert vwce["status"] == "looked_through"
+    assert vwce["proxy_for_symbol"] == "VT"
+    assert vwce["constituents"] == 2
+    # Its value is attributed, not left in the uncovered bucket.
+    assert report["uncovered_fund_eur"] < 1000.0
+
+
+@pytest.mark.asyncio
+async def test_a_borrowed_basket_still_closes_the_partition(session):
+    """The whole point of aliasing rather than copying: nothing downstream has a proxy branch."""
+    await _standard_book(session)
+    session.add_all(_vt_basket_and_rows())
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    buckets = sum(Decimal(str(report[f])) for f in BUCKET_FIELDS)
+    assert buckets == Decimal(str(report["total_market_value_eur"]))
+
+
+@pytest.mark.asyncio
+async def test_a_fund_that_publishes_its_own_basket_ignores_the_proxy(session):
+    """
+    A real import must win, in either order and with no code change — otherwise a declared
+    proxy would quietly outrank the file it was only ever meant to stand in for.
+    """
+    await _standard_book(session)
+    session.add_all(_vt_basket_and_rows())
+    session.add_all([
+        _basket(VWCE_ISIN, "100"),
+        _holding(VWCE_ISIN, 1, NVIDIA_ISIN, "NVIDIA Corp", "100"),
+    ])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    vwce = next(f for f in report["funds"] if f["fund_isin"] == VWCE_ISIN)
+
+    assert vwce["proxy_for_symbol"] is None
+    assert vwce["constituents"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_borrowed_basket_says_so_in_a_warning_and_gives_the_reason(session):
+    """
+    The badge alone is not enough: `warnings[]` is the surface rendered outside every
+    collapsible, and an approximation the reader cannot see is indistinguishable from a
+    measurement.
+    """
+    await _standard_book(session)
+    session.add_all(_vt_basket_and_rows())
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    borrowed = [w for w in report["warnings"] if "VWCE" in w and "VT" in w]
+    assert borrowed, report["warnings"]
+    # The declared reasoning travels with it rather than being re-worded here.
+    assert FUND_SOURCES[VWCE_ISIN].basket_proxy_reason in borrowed[0]
+
+
+@pytest.mark.asyncio
+async def test_rows_published_at_zero_weight_are_counted_rather_than_inferred(session):
+    """
+    A broad fund's residual is its rounded-away tail, not cash. VT publishes 8,007 of 10,032
+    rows at 0.00%, and without this count the 8.14% shortfall reads as an uninvested balance —
+    the plausible-looking answer, which is the dangerous kind.
+    """
+    await _standard_book(session)
+    session.add_all([
+        # 91.00 rather than 100: VT's real file sums to 91.86 for exactly this reason, and it
+        # must stay clear of MIN_BASKET_COVERAGE_PCT or the fund reads as implausible instead.
+        _basket(VT_ISIN, "91"),
+        _holding(VT_ISIN, 1, NVIDIA_ISIN, "NVIDIA Corp", "91"),
+        _holding(VT_ISIN, 2, ALPHABET_A_ISIN, "Alphabet Inc Class A", "0"),
+        _holding(VT_ISIN, 3, ALPHABET_C_ISIN, "Alphabet Inc Class C", "0"),
+    ])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    vwce = next(f for f in report["funds"] if f["fund_isin"] == VWCE_ISIN)
+    assert vwce["unweighted_constituents"] == 2
+
+    xnas = next(f for f in report["funds"] if f["fund_isin"] == XNAS_ISIN)
+    assert xnas["unweighted_constituents"] == 0
 
 
 @pytest.mark.parametrize("direct_price,uncovered_price,fund_price,weight", [

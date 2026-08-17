@@ -147,6 +147,24 @@ class LookthroughFundCoverage(BaseModel):
         ),
     )
     source: Optional[str] = None
+    proxy_for_symbol: Optional[str] = Field(
+        None,
+        description=(
+            "Set when this fund publishes no basket and another fund's was used instead, "
+            "naming that fund. Its companies are approximate — see the warning, which "
+            "carries the reason the substitution is defensible and which way it errs. "
+            "`status` stays looked_through because the value IS attributed; the proxy is "
+            "a statement about provenance, not about the partition."
+        ),
+    )
+    unweighted_constituents: int = Field(
+        0,
+        description=(
+            "Rows the issuer published at 0.00%. For a broad fund this explains the whole "
+            "residual and it is rounding, not cash: Vanguard prints weights to 2dp, so "
+            "8,007 of VT's 10,032 holdings carry no weight and its file sums to 91.86%."
+        ),
+    )
 
     class Config:
         from_attributes = True

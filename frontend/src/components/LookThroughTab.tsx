@@ -25,6 +25,13 @@ import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
 const LIMITS = [25, 50, 100] as const
 type LimitOption = (typeof LIMITS)[number]
 
+/**
+ * Thousands separators, pinned to `en-US` exactly as `formatCurrency` and `formatPercent` are.
+ * A bare `toLocaleString()` renders 8,007 as "8.007" under a German runtime, so the separator
+ * would follow whoever is looking rather than the rest of the page.
+ */
+const GROUPED = new Intl.NumberFormat('en-US')
+
 /** How a fund's status reads, and whether it counts against coverage. */
 const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
   looked_through: 'Decomposed',
@@ -160,15 +167,20 @@ function fundColumns(deps: {
       header: 'Status',
       shortHeader: 'Status',
       mobile: 'badge',
+      // A proxied fund is `looked_through` — its value really is attributed — but a green
+      // "Decomposed" would claim its companies came from its own issuer, which is the one
+      // thing this badge exists to say. Amber, naming the fund it borrowed from.
       cell: (row) => (
         <span
           className={
-            row.status === 'looked_through'
+            row.status === 'looked_through' && !row.proxy_for_symbol
               ? 'text-xs rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
               : 'text-xs rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
           }
         >
-          {FUND_STATUS_LABEL[row.status]}
+          {row.proxy_for_symbol
+            ? `Via ${row.proxy_for_symbol}`
+            : FUND_STATUS_LABEL[row.status]}
         </span>
       ),
     },
@@ -215,8 +227,24 @@ function fundColumns(deps: {
         description:
           "How much of the fund the stored basket attributes to securities. Genuinely below 100% for real funds: their files carry cash, FX and futures rows, and a broad fund also loses weight to rounding — Vanguard publishes weights to 2dp, so thousands of VT's smallest holdings round to zero.",
       },
-      cell: (row) =>
-        row.equity_weight_pct === null ? '—' : `${row.equity_weight_pct.toFixed(2)}%`,
+      // The count of zero-weight rows sits HERE rather than beside `constituents`, because it
+      // is the explanation for this number and not for that one: a broad fund's shortfall is
+      // its rounded-away tail, not cash. Table view only — the phone card renders a detail
+      // into `shrink-0 tabular-nums`, which is what pushed this page 1,282px sideways once;
+      // the column hint carries the same explanation on both viewports.
+      cell: (row, view) => {
+        if (row.equity_weight_pct === null) return '—'
+        const pct = `${row.equity_weight_pct.toFixed(2)}%`
+        if (view !== 'table' || row.unweighted_constituents === 0) return pct
+        return (
+          <span className="inline-flex flex-col items-end">
+            <span>{pct}</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {GROUPED.format(row.unweighted_constituents)} rows at 0%
+            </span>
+          </span>
+        )
+      },
     },
   ]
 }
@@ -340,6 +368,12 @@ export function LookThroughTab() {
   const unresolvedFunds = (data?.funds ?? []).filter(
     (f) => f.status === 'no_basket' || f.status === 'implausible',
   )
+  // A proxied fund IS attributed, so it never reaches the list above — but its companies come
+  // from another fund's file, and a green "every fund decomposed" over that would be the
+  // reassuring-zero failure this codebase keeps finding. It stays amber and, unlike a
+  // percentage threshold, it can actually clear: importing a real basket for that fund wins
+  // over the proxy with no code change.
+  const proxiedFunds = (data?.funds ?? []).filter((f) => f.proxy_for_symbol)
   // Ageing baskets are the other way coverage lies: the percentage does not move, but the
   // holdings behind it describe an older index. Surfaced on the card, not only in the table.
   const staleFunds = (data?.funds ?? []).filter((f) => f.stale)
@@ -391,13 +425,19 @@ export function LookThroughTab() {
               value={
                 data.total_market_value_eur > 0 ? `${data.coverage_pct.toFixed(1)}%` : null
               }
-              tone={unresolvedFunds.length === 0 ? 'positive' : 'warning'}
+              tone={
+                unresolvedFunds.length === 0 && proxiedFunds.length === 0
+                  ? 'positive'
+                  : 'warning'
+              }
               sub={
-                unresolvedFunds.length === 0
-                  ? staleFunds.length > 0
-                    ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
-                    : 'every fund decomposed or deliberately excluded'
-                  : `${unresolvedFunds.length} fund(s) have no basket`
+                unresolvedFunds.length > 0
+                  ? `${unresolvedFunds.length} fund(s) have no basket`
+                  : proxiedFunds.length > 0
+                    ? `${proxiedFunds.length} fund(s) use another fund's basket`
+                    : staleFunds.length > 0
+                      ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
+                      : 'every fund decomposed or deliberately excluded'
               }
             />
             <KpiCard

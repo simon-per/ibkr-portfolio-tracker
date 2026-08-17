@@ -69,6 +69,48 @@ def test_every_fund_either_has_an_adapter_or_says_why_it_has_none(isin):
 
 
 @pytest.mark.parametrize("isin", sorted(FUND_SOURCES))
+def test_every_basket_proxy_points_somewhere_real_and_says_why(isin):
+    """
+    A borrowed basket is an approximation presented as an answer, so the four ways it could
+    become a silent one are each closed here.
+
+    The reason is mandatory for the same purpose `ISSUER_OVERRIDES` demands its evidence: it
+    is served verbatim in `warnings[]`, so an entry without one produces a fund the UI can
+    only report as decomposed-somehow. Chains are refused rather than followed — two stacked
+    approximations under one label — and self-reference would be an infinite alias.
+    """
+    source = FUND_SOURCES[isin]
+    proxy = source.basket_proxy_isin
+    if proxy is None:
+        assert not source.basket_proxy_reason.strip(), (
+            f"{source.symbol} gives a proxy reason but names no fund to borrow from"
+        )
+        return
+
+    assert source.basket_proxy_reason.strip(), (
+        f"{source.symbol} borrows {proxy}'s basket with no reason recorded, so the API "
+        f"cannot tell anyone why the substitution is defensible"
+    )
+    assert proxy != isin, f"{source.symbol} proxies itself"
+    assert proxy in FUND_SOURCES, (
+        f"{source.symbol} proxies {proxy}, which is not a declared fund"
+    )
+    target = FUND_SOURCES[proxy]
+    assert target.basket_proxy_isin is None, (
+        f"{source.symbol} proxies {target.symbol}, which is itself a proxy — two "
+        f"approximations would compound under one label"
+    )
+    assert target.look_through_eligible, (
+        f"{source.symbol} proxies {target.symbol}, which is excluded from look-through, so "
+        f"its basket must never be attributed to anything"
+    )
+    assert target.adapter and target.adapter != "manual", (
+        f"{source.symbol} proxies {target.symbol}, which has no automated route either — "
+        f"a proxy is only worth having if the fund it borrows from can actually be refreshed"
+    )
+
+
+@pytest.mark.parametrize("isin", sorted(FUND_SOURCES))
 def test_every_entry_carries_the_symbol_and_name_the_ui_labels_it_with(isin):
     source = FUND_SOURCES[isin]
     assert source.symbol.strip()

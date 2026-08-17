@@ -47,7 +47,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
-from app.etf_sources import ISSUER_OVERRIDES, source_for_fund_isin
+from app.etf_sources import ISSUER_OVERRIDES, basket_proxy_for, source_for_fund_isin
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
 from app.services.company_identity import IdentityMember, company_groups
@@ -148,10 +148,18 @@ class LookthroughService:
 
         basket_repo = EtfBasketRepository(self.db)
         held_fund_isins = sorted({p["isin"].strip().upper() for p in fund_positions})
-        baskets = await basket_repo.get_baskets(held_fund_isins)
+        proxy_sources = sorted({
+            src for i in held_fund_isins if (src := basket_proxy_for(i)) and src != i
+        })
+        baskets = await basket_repo.get_baskets(held_fund_isins + proxy_sources)
         holdings = await basket_repo.get_holdings(
-            [i for i in held_fund_isins if i in baskets]
+            [i for i in held_fund_isins + proxy_sources if i in baskets]
         )
+        # A fund with no basket of its own falls back to the one it declares a proxy for.
+        # Aliased rather than copied, so there is one stored basket and two readers of it —
+        # refetching the source updates both. A real import for the proxied fund silently
+        # takes precedence, because this only fills a gap it finds.
+        proxied_from = self._alias_proxied_baskets(held_fund_isins, baskets, holdings)
 
         # `contributions` maps a member ref to what that member is worth and where it came
         # from. Kept beside the identity members rather than inside them so
@@ -209,6 +217,8 @@ class LookthroughService:
                 "residual_eur": Decimal("0"),
                 "asset_class_available": True,
                 "source": None,
+                "proxy_for_symbol": None,
+                "unweighted_constituents": 0,
             }
 
             if status != "looked_through":
@@ -220,6 +230,7 @@ class LookthroughService:
             rows = holdings.get(isin, [])
             age_days = (today - basket.as_of_date).days
             stale_limit = stale_after_days(basket.adapter)
+            proxy_isin = proxied_from.get(isin)
             entry.update(
                 basket_as_of=basket.as_of_date.isoformat(),
                 stale=age_days > stale_limit,
@@ -227,6 +238,17 @@ class LookthroughService:
                 equity_weight_pct=Decimal(basket.equity_weight_pct),
                 asset_class_available=bool(basket.asset_class_available),
                 source=basket.source,
+                proxy_for_symbol=(
+                    symbol_for_fund_isin(proxy_isin) or proxy_isin
+                    if proxy_isin else None
+                ),
+                # Rows the issuer published at 0.00%, which is the whole of a broad fund's
+                # residual and nothing to do with cash. Counted rather than inferred,
+                # because "this fund is 8% cash" is exactly the plausible-looking answer
+                # `MIN_BASKET_COVERAGE_PCT` exists to keep off the screen.
+                unweighted_constituents=sum(
+                    1 for r in rows if Decimal(r.weight_pct) == 0
+                ),
             )
             if entry["stale"]:
                 warnings.append(
@@ -240,6 +262,13 @@ class LookthroughService:
                     f"{entry['symbol']}'s issuer publishes no as-of date, so "
                     f"{basket.as_of_date.isoformat()} is when it was fetched — the basket "
                     f"itself may be older."
+                )
+            if proxy_isin:
+                source_decl = source_for_fund_isin(isin)
+                warnings.append(
+                    f"{entry['symbol']} has no basket of its own and is decomposed using "
+                    f"{entry['proxy_for_symbol']}'s. "
+                    + (source_decl.basket_proxy_reason if source_decl else "")
                 )
 
             company_pct, nested_pct = self._split_weights(rows, basket)
@@ -446,6 +475,35 @@ class LookthroughService:
             enriched = dict(pos, _mv=mv)
             (valuable if mv > 0 else unvaluable).append(enriched)
         return valuable, unvaluable
+
+    @staticmethod
+    def _alias_proxied_baskets(
+        held_fund_isins: List[str],
+        baskets: Dict[str, object],
+        holdings: Dict[str, list],
+    ) -> Dict[str, str]:
+        """
+        Point a fund with no basket at the one it borrows, and report which did so.
+
+        Mutates the two dicts in place so every reader downstream — status, staleness,
+        weights, the partition — sees an ordinary basket and needs no proxy branch. The
+        only thing that must know is the fund table, which has to say so on screen.
+
+        The source's own `adapter` therefore drives staleness, which is the right answer
+        rather than a convenient one: the age that matters is the age of the file the
+        numbers actually came from.
+        """
+        proxied_from: Dict[str, str] = {}
+        for isin in held_fund_isins:
+            if isin in baskets:
+                continue
+            source_isin = basket_proxy_for(isin)
+            if not source_isin or source_isin == isin or source_isin not in baskets:
+                continue
+            baskets[isin] = baskets[source_isin]
+            holdings[isin] = holdings.get(source_isin, [])
+            proxied_from[isin] = source_isin
+        return proxied_from
 
     @staticmethod
     def _fund_status(isin: str, basket) -> Tuple[str, Optional[str]]:

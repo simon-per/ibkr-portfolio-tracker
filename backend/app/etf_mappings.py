@@ -37,9 +37,10 @@ stored basket the `sector` and `geographic` blocks here become measurable rather
 estimated. That switch is deliberately not made yet, and one of its three original
 blockers is now cleared:
 
-- coverage is **10 of 12 funds** (was 6), but VWCE alone is 9.2% of the book and has no
-  machine-readable basket at all, so the Allocation tab's numbers would still start
-  depending on whether a scraper succeeded;
+- coverage is **11 of 12 funds** (was 6), but VWCE — 9.2% of the book — reaches that only
+  by borrowing VT's basket, and DBPG is excluded outright. So the Allocation tab's numbers
+  would start depending on whether a scraper succeeded, and one of them would be an
+  approximation presented in a table that states none;
 - `countryOfRisk` is a **country** while `geographic` buckets are **regions**, so
   switching needs a new hand-maintained country-to-region map — a new drift surface
   rather than a removed one;
@@ -258,6 +259,9 @@ ETF_ALLOCATIONS = {
     # which barely moves a regional weight. Two funds on one index disagreeing in this
     # table would be this codebase's dominant failure mode in miniature, so they are
     # pinned together on purpose: change one and change the other.
+    # `etf_sources.py` now makes the same judgement one level down — VWCE borrows VT's
+    # constituent basket outright — so if the two ever stop being interchangeable, both
+    # places have to move, not just this one.
     "VT": {
         "isins": ["US9220427424"],
         "asset_type": "ETF",

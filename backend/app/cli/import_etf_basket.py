@@ -7,6 +7,10 @@ issuer's website, which is the only route for **VWCE** — Vanguard Europe publi
 holdings on request by email, not on the web — and the fallback for any adapter whose route
 breaks.
 
+VWCE currently borrows VT's basket (`FundSource.basket_proxy_isin`). Importing a real file for
+it here needs nothing un-declared first: the proxy is consulted only when the fund has no
+basket of its own, so a stored basket takes over the moment this writes one.
+
 Touches **no** network at all, so neither rule at the top of CLAUDE.md applies. Re-running is
 safe and idempotent: a basket is replaced wholesale, and an incoming file with the same as-of
 date simply rewrites the same rows.
