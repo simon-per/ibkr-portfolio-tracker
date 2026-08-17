@@ -302,6 +302,43 @@ def test_vanguard_refuses_when_a_page_is_missing():
         ], VT)
 
 
+def test_vanguard_refuses_pages_that_disagree_about_the_fund_size():
+    """
+    A torn read, observed on production 2026-08-17 and reproduced on a re-fetch.
+
+    Vanguard answers this endpoint from a cluster whose nodes can hold different snapshots, so
+    a 21-request walk came back 13 pages saying 10,055 holdings and 8 saying 10,032. The
+    consequence is out of all proportion to those 23: ~8,000 of VT's rows have a 0.00% weight
+    and so no stable order between snapshots, and every page boundary that crossed one
+    duplicated a chunk and dropped another — 10,032 rows carrying 9,114 distinct holdings,
+    against 10,025 in the basket already stored, with the weights still summing to 91.60%.
+
+    The pre-existing count check caught it only because the two totals happened to differ from
+    the assembled length. This names the actual fault, so the operator re-fetches rather than
+    hunting a missing page that was never missing.
+    """
+    with pytest.raises(BasketParseError, match="not one snapshot"):
+        parse_vanguard_us([
+            vanguard_page([("NVDA", "US67066G1040", "NVIDIA Corp.", "3.99")],
+                          size=3, has_next=True),
+            vanguard_page([("AAPL", "US0378331005", "Apple Inc.", "3.50")],
+                          size=4, has_next=True),
+            vanguard_page([("MSFT", "US5949181045", "Microsoft Corp.", "3.20")],
+                          size=3, has_next=False),
+        ], VT)
+
+
+def test_vanguard_accepts_pages_that_agree():
+    """The mirror: one snapshot across every page still imports, so the guard is not a veto."""
+    basket = parse_vanguard_us([
+        vanguard_page([("NVDA", "US67066G1040", "NVIDIA Corp.", "3.99")],
+                      size=2, has_next=True),
+        vanguard_page([("AAPL", "US0378331005", "Apple Inc.", "3.50")],
+                      size=2, has_next=False),
+    ], VT)
+    assert len(basket.rows) == 2
+
+
 # -------------------------------------------------------------------- weight sanity
 
 def test_a_negative_weight_on_a_security_refuses_the_whole_file():

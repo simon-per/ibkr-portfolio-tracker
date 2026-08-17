@@ -696,13 +696,37 @@ def parse_vanguard_us(bodies: Sequence[bytes], fund_isin: str) -> ParsedBasket:
     a fund look like it holds only its largest names, and the weights would still sum
     plausibly.
 
+    **The pages must also agree with each OTHER about that count, and on 2026-08-17 they did
+    not.** Vanguard serves this endpoint from a cluster whose nodes can hold different
+    snapshots, so a 21-request walk can be answered partly from one and partly from another:
+    VT's pages came back 13 saying `size` 10,055 and 8 saying 10,032, twice in a row. The
+    damage is far worse than the 23-row difference implies, because ~8,000 of VT's holdings
+    have a weight of 0.00% and therefore no stable sort order between snapshots — any page
+    boundary that crosses one duplicates a chunk and drops another. Measured: 10,032 rows
+    assembled carrying only **9,114 distinct holdings**, against 10,025 in the basket already
+    stored. Roughly 900 companies would have silently vanished from a fund that is ~11% of
+    this account once VWCE's proxy is counted, and the weights still summed to 91.60%.
+
+    So a `size` that varies across pages is refused as its own fault, named as what it is.
+    That check is exact rather than a threshold, and it is the one that matters: the
+    row-count check above caught this only because the two snapshots happened to disagree on
+    the total. Two snapshots with equal totals and different membership would still get
+    through, which is recorded here rather than guarded, because nothing has been observed to
+    calibrate a duplicate-rate rule against — the legitimate duplicate rate is 7 rows in
+    10,032 (dual listings such as BAM and BEPC), the torn one was 918.
+
+    Pagination is unavoidable: `count` above 500 is not merely capped, it returns a non-JSON
+    body, so the whole basket cannot be taken in one request. Retrying is the operator's move
+    and it is not automatic — a cluster that stays split would spend 21 requests per attempt
+    forever, and the previous basket is kept meanwhile.
+
     Its as-of is a month end and normally lags ~6 weeks. That is Vanguard's publishing
     cadence, not staleness, and must not be treated as a fault.
     """
     if not bodies:
         raise BasketParseError("vanguard_us: no pages supplied")
 
-    declared_size: Optional[int] = None
+    declared_sizes: Dict[int, List[int]] = {}
     as_of: Optional[date] = None
     rows: List[ConstituentRow] = []
 
@@ -713,8 +737,8 @@ def parse_vanguard_us(bodies: Sequence[bytes], fund_isin: str) -> ParsedBasket:
         except json.JSONDecodeError as e:
             raise BasketParseError(f"vanguard_us: page {page_index} is not JSON: {e}")
 
-        if declared_size is None and isinstance(payload.get("size"), int):
-            declared_size = payload["size"]
+        if isinstance(payload.get("size"), int):
+            declared_sizes.setdefault(payload["size"], []).append(page_index)
         if as_of is None:
             as_of = _vanguard_as_of(payload)
 
@@ -743,6 +767,18 @@ def parse_vanguard_us(bodies: Sequence[bytes], fund_isin: str) -> ParsedBasket:
 
     if as_of is None:
         raise BasketParseError("vanguard_us: no asOfDate in any page")
+    if len(declared_sizes) > 1:
+        spread = ", ".join(
+            f"{size} on {len(pages)} page(s)"
+            for size, pages in sorted(declared_sizes.items())
+        )
+        raise BasketParseError(
+            f"vanguard_us: the pages disagree about how many holdings the fund has "
+            f"({spread}), so they are not one snapshot — Vanguard answered this walk from "
+            f"nodes holding different data, and offsets that shift between them duplicate "
+            f"some holdings while dropping others. Re-fetch; the stored basket is kept."
+        )
+    declared_size = next(iter(declared_sizes), None)
     if declared_size is not None and declared_size != len(rows):
         raise BasketParseError(
             f"vanguard_us: the API declares {declared_size} holdings but {len(rows)} were "
