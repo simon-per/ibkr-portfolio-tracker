@@ -1,4 +1,5 @@
 import type { BenchmarkValuePoint } from './api'
+import { isValuable, type ValuablePosition } from './positionValuation'
 
 /** Trading days per year, for annualising a daily return series. */
 const TRADING_DAYS = 252
@@ -310,24 +311,6 @@ export function concentrationPct(
 }
 
 /**
- * Can the backend actually value this position?
- *
- * **Two clauses, not one**, because it fails to value a holding for two reasons: no
- * cached price, and no FX rate for the price's currency. The second leaves
- * `market_price` populated and zeroes `market_value_eur` — so `market_price === null`
- * alone reads the holding as *priced* and gives it a real-looking 0. Frankfurter cannot
- * serve TWD at all, which is why `WARM_CURRENCIES` exists, so this is not hypothetical.
- *
- * Copied in spirit from `rebalance.ts` and `currencyExposure.ts`, which closed the same
- * gap on 2026-08-05. Note it is *narrower* than `summary.unpriced_holdings`, the
- * backend's own count and the one to trust for a headline; this exists only to decide
- * whether one row may enter a client-side statistic.
- */
-function isValuable(position: { market_price: number | null; market_value_eur: number }): boolean {
-  return position.market_price !== null && position.market_value_eur > 0
-}
-
-/**
  * Share of *valued* positions sitting at a gain, plus what had to be left out.
  *
  * An unvaluable holding is excluded from **both** sides. It used to be counted on the
@@ -341,9 +324,13 @@ function isValuable(position: { market_price: number | null; market_value_eur: n
  * `null` — never `0` — when nothing can be valued, for the reason spelled out on
  * {@link concentrationPct}: a 0% win rate is a plausible figure, so nothing about it
  * invites doubt. Its two neighbours in the same KPI memo already refused this condition.
+ *
+ * "Could be valued" comes from `positionValuation.isValuable`, shared with `rebalance.ts`
+ * and `currencyExposure.ts` — three statistics that must agree about which row is
+ * unvaluable, and the rule has already had to be corrected on all of them at once.
  */
 export function winRate(
-  positions: { market_price: number | null; market_value_eur: number; gain_loss_eur: number }[],
+  positions: (ValuablePosition & { gain_loss_eur: number })[],
 ): { pct: number | null; profitable: number; judged: number; excluded: number } {
   const judged = positions.filter(isValuable)
   const profitable = judged.filter((p) => p.gain_loss_eur > 0).length

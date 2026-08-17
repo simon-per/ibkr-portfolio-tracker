@@ -21,6 +21,8 @@
  *    weight to two different holdings.
  */
 
+import { isUnpriced } from './positionValuation'
+
 /** Percent of the whole portfolio, keyed by `security_id`. */
 export type TargetMap = Record<number, number>
 
@@ -79,28 +81,11 @@ export interface RebalancePlan {
 /** Default tolerance in percentage points, absolute rather than relative. */
 export const DEFAULT_BAND_PP = 5
 
-/**
- * A position the portfolio could not value, for **either** reason.
- *
- * `market_price === null` alone is not enough. The backend fails to value a holding two
- * ways, and only one of them clears the price: when the price resolves but its **FX rate
- * does not**, `get_positions_breakdown` sets `market_value_eur = 0.0` and leaves
- * `market_price` populated. Such a position slipped through as *priced* and took a 0%
- * weight, so drift advised buying its entire target — precisely the SBI shape this guard
- * exists to prevent, reached by the route it did not cover. A missing FX rate is not
- * hypothetical here: Frankfurter cannot serve TWD at all, which is why `WARM_CURRENCIES`
- * exists.
- *
- * This used to exclude a zero market value on the grounds that a *fully-sold* holding is
- * priced and genuinely 0%. That premise was false: `get_positions_breakdown` selects
- * `is_open == True`, so a sold-out security has no open lots and never reaches this
- * function. What a zero value on a priced position actually means is the FX failure above
- * — or a zero-quantity open lot, which is a data anomaly that should likewise not drive
- * "buy the whole target".
- */
-function isUnpriced(p: DriftInput): boolean {
-  return p.market_price === null || p.market_value_eur <= 0
-}
+// `isUnpriced` is shared with `currencyExposure.ts` and `winRate` rather than spelled out
+// here: it was three identical copies, each carrying its own copy of the reasoning, and
+// the one-clause form these two were corrected away from on 2026-08-05 is exactly what a
+// drifting copy would revert to. The FX case, the false fully-sold premise and why this is
+// narrower than `summary.unpriced_holdings` all live in `positionValuation.ts`.
 
 export function computeRebalancePlan(
   positions: DriftInput[],

@@ -25,6 +25,8 @@
  *   the base currency.
  */
 
+import { isUnpriced } from './positionValuation'
+
 export interface CurrencyExposureInput {
   security_id: number
   symbol: string
@@ -58,16 +60,11 @@ export interface CurrencyExposure {
   lookThroughCount: number
 }
 
-/**
- * Unpriced for **either** reason — see the fuller note in `rebalance.ts`. A price that
- * resolves while its FX rate does not leaves `market_value_eur` at 0 with `market_price`
- * still set, which would otherwise count the holding as a real member of its currency
- * bucket while contributing nothing to it, and keep it out of `unpricedCount` where the
- * caveat is stated.
- */
-function isUnpriced(p: CurrencyExposureInput): boolean {
-  return p.market_price === null || p.market_value_eur <= 0
-}
+// `isUnpriced` is shared — see `positionValuation.ts`. What it means here specifically: a
+// price that resolves while its FX rate does not leaves `market_value_eur` at 0 with
+// `market_price` still set, which would count the holding as a real member of its currency
+// bucket while contributing nothing to it, and keep it out of `unpricedCount` where the
+// caveat is stated.
 
 /**
  * `fundSymbols` names the positions whose quote currency should not be read as
