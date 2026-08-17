@@ -430,6 +430,13 @@ class SchedulerService:
                     diagnostics += await self.find_stale_ibkr_sync(db)
                 except Exception as e:
                     logger.warning(f"Could not check IBKR sync freshness: {e}")
+                # The look-through's baskets are the one decaying dataset with no alarm:
+                # a CLI snapshot that ages in place while the tab keeps serving it. Same
+                # slot and same separate guard as the four above.
+                try:
+                    diagnostics += await self.find_stale_etf_baskets(db)
+                except Exception as e:
+                    logger.warning(f"Could not check ETF basket freshness: {e}")
                 if diagnostics:
                     # Append: the rate-limit abort above may already have put a
                     # warning here, and a plain assignment would drop the one
@@ -700,6 +707,126 @@ class SchedulerService:
                 f"{len(warnings)} security(ies) hold dividend estimates older than "
                 f"their ticker mapping"
             )
+        return warnings
+
+    async def find_stale_etf_baskets(
+        self, db: AsyncSession, as_of: Optional[date] = None
+    ) -> list:
+        """
+        Held funds whose constituent basket is missing or older than its issuer's cadence.
+
+        Every other decaying dataset here has a detector — prices, IBKR freshness, the
+        Flex generation gap, dividend provenance — and the look-through's baskets had
+        none. They are populated by a deliberate CLI run and then decay in place while
+        the numbers stay confidently on screen: nine of the ten feeds republish daily, so
+        a week after a fetch the whole tab describes an older index. The tab's own `†`
+        badge was the only signal, and it requires someone to look.
+
+        Runs from the **market-data** job, like its siblings and for the same reason:
+        those slots succeed while Flex is refusing.
+
+        Four rules, each of which would be wrong the other way:
+
+        - **Held funds only.** Mirrors `find_stale_priced_securities` restricting itself
+          to open lots — a basket for a fund nobody holds moves no figure.
+        - **The basket a fund actually reads comes from
+          `LookthroughService._alias_proxied_baskets`, never from a second copy of the
+          proxy rule.** Two implementations of "which basket does this fund use" is this
+          codebase's dominant failure mode; the age reported here has to be the age of
+          the file the numbers came from, which for a proxied fund is the *source's*.
+        - **The threshold is `lookthrough_service.stale_after_days`**, the existing
+          per-adapter table. A single global constant meant two different things once and
+          badged Vanguard permanently for publishing month-end as documented.
+        - **Nothing unclearable warns.** A fund excluded from look-through by design, and
+          one whose only route is a hand-downloaded file, can never be fixed by running
+          anything — and a warning that can never clear is the always-present-Flex-banner
+          pathology, which teaches the reader to skip the banner that also carries a
+          skipped tax lot. A held fund with no basket that *does* have a route warns,
+          because that is what a newly bought fund looks like and one CLI run clears it.
+          **"Has a route" follows the proxy**: VWCE's own adapter is `manual`, but it
+          reads VT's basket and VT is fetchable, so a missing VT is actionable and must
+          not be silently skipped just because the *held* fund has no route of its own.
+        """
+        from app.cli.fetch_etf_baskets import AUTOMATED_ADAPTERS
+        from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
+        from app.etf_sources import basket_proxy_for, source_for_fund_isin
+        from app.repositories.etf_basket_repository import EtfBasketRepository
+        from app.services.lookthrough_service import (
+            LookthroughService,
+            stale_after_days,
+        )
+
+        as_of = as_of or date.today()
+
+        held = await db.execute(
+            select(distinct(Security.isin))
+            .join(TaxLot, TaxLot.security_id == Security.id)
+            .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
+        )
+        fund_isins = sorted({
+            isin.strip().upper() for (isin,) in held.all()
+            if isin and is_known_etf_isin(isin)
+        })
+        if not fund_isins:
+            return []
+
+        # Load each held fund's own basket plus any it borrows, then let the read path's
+        # own resolver decide which one each fund actually uses.
+        proxy_sources = sorted({
+            src for i in fund_isins if (src := basket_proxy_for(i)) and src != i
+        })
+        repo = EtfBasketRepository(db)
+        baskets = await repo.get_baskets(fund_isins + proxy_sources)
+        LookthroughService._alias_proxied_baskets(fund_isins, baskets, {})
+
+        warnings = []
+        for isin in fund_isins:
+            source = source_for_fund_isin(isin)
+            if source is not None and not source.look_through_eligible:
+                continue  # excluded by design: no run of anything would clear it
+            name = symbol_for_fund_isin(isin) or isin
+            basket = baskets.get(isin)
+
+            if basket is None:
+                # `AUTOMATED_ADAPTERS` is imported from the fetcher CLI rather than
+                # re-listed here, and that direction is deliberate: the set has to name
+                # the fetchers that actually exist, which is a property of that module —
+                # its own comment says so, and a copy here would go stale the first time
+                # an adapter is added. Follow the proxy, so a fund whose basket is
+                # borrowed is judged by whether the *source* can be fetched.
+                route = source.adapter if source else None
+                if route not in AUTOMATED_ADAPTERS:
+                    proxy = basket_proxy_for(isin)
+                    proxy_source = source_for_fund_isin(proxy) if proxy else None
+                    route = proxy_source.adapter if proxy_source else None
+                if route not in AUTOMATED_ADAPTERS:
+                    # Nothing the reader could run fixes this — a hand download, or no
+                    # published file at all. The look-through tab names it in the fund
+                    # table, where it does not train anyone to ignore a banner.
+                    continue
+                warnings.append(
+                    f"{name}: no constituent basket has ever been fetched, so its whole "
+                    f"value is missing from the look-through's company rows. Run "
+                    f"`python -m app.cli.fetch_etf_baskets --all` and the import line it "
+                    f"prints, then `python -m app.cli.resolve_identities --constituents`"
+                )
+                continue
+
+            limit = stale_after_days(basket.adapter)
+            age = (as_of - basket.as_of_date).days
+            if age <= limit:
+                continue
+            warnings.append(
+                f"{name}: its basket is dated {basket.as_of_date:%Y-%m-%d} ({age} days "
+                f"old against a {limit}-day expectation for {basket.adapter}), so every "
+                f"company figure it contributes describes an older index. Re-run "
+                f"`python -m app.cli.fetch_etf_baskets --all` plus the import lines, "
+                f"then `python -m app.cli.resolve_identities --constituents` — a "
+                f"re-import clears the CINS/SEDOL resolutions on purpose"
+            )
+
+        if warnings:
+            logger.warning(f"{len(warnings)} held fund(s) with a missing or stale basket")
         return warnings
 
     async def sync_exchange_rates(self, days_back: int = 30) -> dict:
