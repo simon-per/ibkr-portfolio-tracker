@@ -23,10 +23,7 @@ await page.waitForTimeout(4000)
 
 const panel = await page.getByRole('tabpanel').innerText()
 
-log(/Transfer/.test(panel), 'a Transfer row is visible in the ledger')
-log(/not money in/.test(panel), 'transfers are badged "not money in"')
-log(/Deposit/.test(panel), 'a Deposit row is visible')
-
+// The trade-shaped assertions read the UNFILTERED panel, so they must come first.
 // The three defects the prod-data pass caught, each pinned so they cannot come back.
 log(!/\b0\.00\b.*realized/i.test(panel), 'no BUY row asserts a 0.00 realized result')
 const region = page.getByRole('region', { name: /Activity table/ })
@@ -36,6 +33,28 @@ log((await region.count()) === 1, 'the wide table is a named, keyboard-reachable
 // A quantity column of bare "0" or "-0" is the rounding bug.
 const zeroQty = (panel.match(/(^|\s)-?0(\s|$)/gm) || []).length
 log(zeroQty === 0, `no quantity rounds to 0 or -0 (found ${zeroQty})`)
+
+// Narrow to cash before asserting anything about transfers.
+//
+// These two used to read the default panel and went red as the account aged rather than
+// because anything broke: the only transfer is the in-kind arrival of 2026-01-21, the
+// default `1Y` window still reaches it, but the window now holds ~175 rows and the
+// transfers are the oldest of them — so they sit past the first page of 100 and simply
+// are not in the panel text. Hoping they land on page one is not an assertion.
+//
+// The kind filter is what makes it stable as rows accumulate: the account has 47 cash
+// rows against a PAGE_SIZE of 100, and trades are what grow.
+await page.getByRole('button', { name: 'Cash', exact: true }).click()
+await page.waitForTimeout(3000)
+const cash = await page.getByRole('tabpanel').innerText()
+
+// Assert the filter actually took, or the three checks below could pass on an unfiltered
+// panel and the fix above would be undone silently by a renamed button.
+log(!/Dividend/.test(cash), 'the Cash filter narrowed the ledger to cash rows')
+
+log(/Transfer/.test(cash), 'a Transfer row is visible in the ledger')
+log(/not money in/.test(cash), 'transfers are badged "not money in"')
+log(/Deposit/.test(cash), 'a Deposit row is visible')
 
 log(errors.length === 0, `no console errors (${errors.length}): ${errors.slice(0, 3).join(' | ')}`)
 

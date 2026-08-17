@@ -87,6 +87,15 @@ quantities, a deposit row. The local `backend/portfolio.db` predates trades, cas
 dividend era, so every assertion in it fails there. Take a snapshot with `sqlite3 .backup` on the
 VPS, point `DATABASE_URL` at it, and **delete it afterwards**: it is real account data.
 
+It **narrows to the Cash event type before asserting anything about transfers**, and that is not
+cosmetic: the account's only transfer is the in-kind arrival of 2026-01-21, and while the default
+`1Y` window still reaches it, that window now holds ~175 rows — so the transfers, being the oldest,
+fell past the first page of 100 and the two assertions went red as the account aged rather than
+because anything broke. Trades are what accumulate; the 47 cash rows will not. The trade-shaped
+assertions (realized-P&L, fractional quantities) therefore run on the unfiltered panel first, and a
+narrowing check sits between them so a renamed filter button cannot silently restore the old
+behaviour.
+
 `chunks.mjs` runs against the *built* output because chunk boundaries do not exist in the dev
 server. It also fails deliberately if someone lazy-loads Recharts — three components on the default
 Performance tab use it, so deferring it moves the wait rather than removing it.
