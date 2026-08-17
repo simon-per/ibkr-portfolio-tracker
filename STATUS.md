@@ -1,7 +1,7 @@
 # Working state
 
-**Last updated: 2026-08-17 (evening).** Latest: **every held fund decomposes — coverage 98.97%,
-`uncovered_fund_eur` 0.00.** Two funds get there by proxy: VWCE via VT and DBPG via VOO, both at the
+**Last updated: 2026-08-17 (late evening).** Latest: **every held fund decomposes — coverage 98.97%,
+`uncovered_fund_eur` 0.00**, and `OPENFIGI_API_KEY` is live on the VPS. Two funds get there by proxy: VWCE via VT and DBPG via VOO, both at the
 owner's instruction and both badged. DBPG's 2x leverage is *stated* rather than scaled, since
 scaling a bucket would break the partition. Before that, the same day: **VWCE borrows VT's basket** — and the ~8% a broad fund's weights fall short by is explained on
 screen as the rounding it is. Measured on a snapshot of production: coverage goes **78.6% → 87.0%**
@@ -120,12 +120,16 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   **VT will keep refusing until Vanguard's cluster serves one snapshot.** Not a fault to force past —
   see *Ran on production 2026-08-17*. Its stored basket is kept and VT publishes month-end.
 
-- **`OPENFIGI_API_KEY` still needs adding to the VPS's `backend/.env`.** The owner supplied it on
-  2026-08-17; it is set and verified locally (an 11-job batch returns 200, which a keyless request
-  refuses) but the container reads its own file. Use `docker compose up -d`, **not** `restart`, or the
-  container keeps its old environment and reports success anyway. **Low urgency**: the 2026-08-17 run
-  needed OpenFIGI for 105 non-ISIN identifiers, about 11 keyless requests. GLEIF's one request per
-  ISIN is what actually costs the ~37 minutes, so the key buys tidiness rather than time.
+- **`OPENFIGI_API_KEY` is DONE — set on the VPS and read by the app** (2026-08-17 evening,
+  `configured: True, length: 36`). Nothing is outstanding here. Note it was never blocking: the
+  identity backfill that took unresolved value from 4,281 to 516 CHF ran **keyless**, and GLEIF's one
+  request per ISIN is what costs the ~37 minutes, not OpenFIGI's batch size.
+
+  Two traps it cost, both now in CLAUDE.md. The app reads **`backend/.env`**, never the repo-root
+  `.env` — `config.py` resolves `BACKEND_ROOT / ".env"` and compose resolves `env_file` relative to
+  itself, which is also `backend/`. And a hand-run `docker compose up -d` must carry
+  `GIT_COMMIT=<sha>`, or `/health` reports `commit: "unknown"` on current code and never recovers
+  until the next push.
 
 - **VWCE's basket is CLOSED as a task — the VT proxy is the accepted answer.** Do not re-open it,
   do not chase Vanguard for the real file, and do not reinstate the prohibition this entry used to
@@ -159,9 +163,14 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 - **Two credentials are unrotated, and they are different things.**
   - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
-    a curl command line carrying the header). **The owner was asked and chose to accept the risk.**
-    Recorded so it is not rediscovered and re-raised as new — *do not bring this up again unless
-    the owner does.*
+    a curl command line carrying the header). The owner was asked and **chose to accept that one** —
+    do not re-raise the 08-07 incident.
+
+    **It happened a second time on 2026-08-17**, and this one has not been ruled on: an agent ran
+    `od -c` over the last 60 bytes of the VPS `backend/.env` to check for a trailing newline, and the
+    file's last line is that token, so most of its tail is in that transcript. Put to the owner, no
+    answer yet. **The lesson is cheap and belongs in any agent's habits: never dump bytes from a file
+    that holds secrets.** `tail -c 1 | xxd` answers the newline question, or just append defensively.
   - **The IBKR Flex token** is the genuinely outstanding one — see the entry below.
 
 - **Pushing is NOT blocked for an agent, despite what this file claimed until 2026-08-04.** The
@@ -428,9 +437,9 @@ is no urgency. `parse_vanguard_us` now refuses a size disagreement as **its own 
 rather than reporting "a page is missing", which sends the operator hunting something that was
 never missing. Committed, **not pushed** — see below.
 
-**`OPENFIGI_API_KEY` is still not on the VPS**, and it matters less than this file implied: the
-run needs it for 105 non-ISIN identifiers, ~11 keyless requests. GLEIF's one-request-per-ISIN
-is the whole 37 minutes.
+**`OPENFIGI_API_KEY` went on the VPS later the same evening** and the app reads it. It was never
+blocking — the run above needed it for 105 non-ISIN identifiers, ~11 keyless requests, while GLEIF's
+one-request-per-ISIN is the whole 37 minutes.
 
 ## Shipped 2026-08-17 — a borrowed basket, and an 8% shortfall that was never cash
 
@@ -2046,7 +2055,14 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   "thousands of holdings round to 0.00" and had never been counted or put on screen. The proxy ask
   crossed a prohibition this file had written down; it was implemented as an approximation that
   *declares itself* (amber badge, warning carrying the reason, Coverage card refusing to go green)
-  rather than either refusing the instruction or quietly obeying it.
+  rather than either refusing the instruction or quietly obeying it. Later the same day: DBPG got the
+  same treatment via VOO, which answers its collateral disqualifier and **not** its 2x leverage — so
+  the leverage is stated in `warnings[]` rather than scaled, because scaling a bucket would break the
+  partition. Coverage finished at **98.97% with no undecomposed fund**. Two operational lessons worth
+  more than the features: **a guard that fires is not a bug** (VT's import refused a torn paginated
+  read that would have dropped ~900 companies from 11% of the book while the weights still looked
+  plausible), and **never dump bytes from a file holding secrets** — an `od -c` newline check leaked
+  the tail of `API_ADMIN_TOKEN` into the transcript.
 
 - **2026-08-16 (evening)** — "cluster by sector, and look at the missing data too". The missing data
   was a **research failure, not a gap**: all four funds recorded as unreachable single-page apps had

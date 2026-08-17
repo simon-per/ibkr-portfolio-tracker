@@ -2523,6 +2523,20 @@ This bit us turning on `API_ADMIN_TOKEN` (2026-07-31): the token was in `.env`, 
 reported success, and `write_auth_enabled` stayed `false` — a site that looks locked down and isn't.
 **Always confirm against `/health` rather than the command's exit status.**
 
+**And pass `GIT_COMMIT` when you do, or `/health` starts lying about which build is live.** The sha
+is not baked into the image — `docker-compose.yml` sets `GIT_COMMIT: ${GIT_COMMIT:-unknown}` from the
+environment and only `deploy.sh` exports it (line 59). So a bare `docker compose up -d` run by hand
+recreates the container with `commit: "unknown"` while serving perfectly current code, and it does
+**not** self-heal: nothing re-exports it until the next push. That breaks the one lookup this file
+prescribes for "which build is live", including the check `ops/finish-deploy.*` and every deploy
+verification make. Hit while putting `OPENFIGI_API_KEY` on production (2026-08-17). The fix needs no
+rebuild:
+
+```bash
+cd /root/IBKR_investment_tracker/backend && \
+  GIT_COMMIT=$(git -C /root/IBKR_investment_tracker rev-parse HEAD) docker compose up -d
+```
+
 **`deploy.sh` pulls the repo itself (line 13), so a deploy that changes `deploy.sh` runs the OLD
 copy once.** Bash does not reload a running script. Any behaviour newly added to `deploy.sh` is
 therefore absent from exactly the deploy that introduces it, and appears from the next one on. That
@@ -2740,6 +2754,7 @@ Tests: `tests/test_currency_fallback.py`.
 | A write returns 401 | `API_ADMIN_TOKEN` is set and the browser has no key. Lock button in the header; the same value goes in `backend/.env` |
 | A request returns 429 with `Retry-After` | Either the sync cooldown (`single_flight`) or the per-IP limit (`RATE_LIMIT_PER_MINUTE`). The response body says which |
 | "Which build is live?" | `curl /health` — it reports `version`, `commit`, `scheduler_enabled`, `write_auth_enabled` and `scheduler_jobstore_persistent`. Same line in the app footer |
+| `/health` reports `commit: "unknown"` on a running site | Somebody ran `docker compose up -d` by hand without exporting `GIT_COMMIT` — only `deploy.sh` sets it, and it is not baked into the image. The code is whatever the last deploy built, so **`git -C /root/IBKR_investment_tracker rev-parse HEAD` is the real answer** meanwhile. It never self-heals on its own; re-run `up -d` with `GIT_COMMIT=<sha>` (no rebuild needed) or wait for the next push |
 | A missed sync was **not** recovered after a restart | `curl /health` for `scheduler_jobstore_persistent`. `false` means the store fell back to memory, so misfire recovery is off — `/api/scheduler/status` still lists every job and cannot tell you this. Check the compose mount is the `scheduler-data` **directory** |
 | A 500 with no detail | By design. Grep the container log for its `request_id`, which is in the body and the `X-Request-ID` header |
 | The container log has no `app.*` lines | Fixed 2026-08-04. `settings.log_level` configured nothing, so Python's last-resort handler emitted WARNING+ only and every `logger.info` was discarded. If it recurs, check `_configure_logging()` still runs and still passes `force=True` — uvicorn installs handlers first, and `basicConfig` is a silent no-op when one exists |
