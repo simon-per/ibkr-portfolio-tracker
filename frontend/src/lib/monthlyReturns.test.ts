@@ -177,4 +177,20 @@ describe('days the backend could not fully value', () => {
     expect(r).not.toBeNull()
     expect(r?.partial).toBeUndefined()
   })
+
+  it('refuses when there is nothing to divide by, rather than printing a flat month', () => {
+    // Modified Dietz's denominator is `startMV + weightedFlow`, so an early outflow
+    // larger than the opening value drives it to zero or below and the return is
+    // undefined. It used to fall through to `0`, which renders as a real, quiet 0.00%
+    // month — the one branch here that did not already refuse, while `startMV === 0` and
+    // a single-point window both returned null. Defensive rather than observed: it needs
+    // outflows exceeding the opening valuation, which a trimmed window can produce.
+    expect(computeModifiedDietzReturn([
+      point('2026-03-01', 1000, 1000, 0),
+      point('2026-03-08', 0, 0, -2000),
+      point('2026-03-15', 0, 0, 0),
+      point('2026-03-22', 0, 0, 0),
+      point('2026-03-31', 0, 0, 0),
+    ])).toBeNull()
+  })
 })

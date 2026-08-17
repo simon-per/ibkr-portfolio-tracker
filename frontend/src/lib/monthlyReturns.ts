@@ -76,9 +76,15 @@ export function computeModifiedDietzReturn(points: PortfolioValuePoint[]): Month
 
   const gain = endMV - startMV - netCashFlow
   const denominator = startMV + weightedCashFlow
+  // Nothing to divide by means the return is undefined, not flat. Reachable when a
+  // withdrawal early in the period exceeds the starting value — the weighted flow then
+  // outweighs it — and a `0.00%` cell claiming a quiet month is exactly the plausible
+  // stand-in this codebase keeps having to remove. The two undefined cases above already
+  // return null and every caller renders a dash for it.
+  if (!(denominator > 0)) return null
 
   return {
-    returnPercent: denominator > 0 ? (gain / denominator) * 100 : 0,
+    returnPercent: (gain / denominator) * 100,
     startValue: startMV,
     endValue: endMV,
     newInvestment: netCashFlow,
