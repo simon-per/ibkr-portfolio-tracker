@@ -53,6 +53,7 @@ import {
   maxDrawdownPct,
   sharpeRatio,
   sortinoRatio,
+  winRate,
 } from '@/lib/portfolioKpis'
 import { rangeFor, TIME_RANGES, type TimeRange } from '@/lib/dateRanges'
 import { RefreshCw, Download, Clock } from 'lucide-react'
@@ -287,15 +288,18 @@ export function Dashboard() {
     const maxDrawdown = maxDrawdownPct(valueOverTime)
     const sharpe = sharpeRatio(valueOverTime)
 
-    // 4. Win Rate (percentage of profitable positions)
-    const profitablePositions = positions.filter(p => p.gain_loss_eur > 0).length
-    const winRate = positions.length > 0 ? (profitablePositions / positions.length) * 100 : 0
+    // 4. Win Rate. Extracted and unit-tested for the same reason as the two
+    // concentration figures below: it counted every holding the backend could not value
+    // as a *losing* position, since an unpriced holding is valued at 0.00 and so carries
+    // a gain of -cost. Excluded from both sides now, with the count reported.
+    const wins = winRate(positions)
 
     // 5. Calmar Ratio (XIRR / |Max Drawdown|) — needs an ANNUALIZED numerator,
     // so it goes blank on short ranges where only a period return exists.
-    const calmarRatio = xirr !== null && xirrMethod === 'xirr' && maxDrawdown < 0
-      ? xirr / Math.abs(maxDrawdown)
-      : null
+    const calmarRatio =
+      xirr !== null && xirrMethod === 'xirr' && maxDrawdown !== null && maxDrawdown < 0
+        ? xirr / Math.abs(maxDrawdown)
+        : null
 
     // 6. Top 5 Concentration, footnoted with the effective holdings it cannot express:
     // a top-5 weight reads the same for five equal positions and one dominant one.
@@ -305,11 +309,16 @@ export function Dashboard() {
     return {
       xirr,
       xirrMethod,
+      // Completeness of the valuation the return was measured against. Reported rather
+      // than corrected: the tax-lot purchases are unconditional flows, so excluding the
+      // security would leave a cost with no matching value.
+      xirrUnpriced: annualizedReturn?.unpriced_holdings ?? 0,
       maxDrawdown,
       sharpeRatio: sharpe,
-      winRate,
-      profitablePositions,
-      totalPositions: positions.length,
+      winRate: wins.pct,
+      profitablePositions: wins.profitable,
+      totalPositions: wins.judged,
+      unvaluedPositions: wins.excluded,
       calmarRatio,
       top5Weight,
       effectiveHoldings,

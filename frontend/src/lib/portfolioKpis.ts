@@ -106,12 +106,27 @@ function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
   return { mean, stdDev: Math.sqrt(variance) }
 }
 
-/** Worst peak-to-trough decline of the flow-adjusted value, as a negative percent. */
-export function maxDrawdownPct(series: ValueSeriesPoint[]): number {
+/**
+ * Worst peak-to-trough decline of the flow-adjusted value, as a negative percent.
+ *
+ * `null` — never `0` — when there is not one measurable daily return to walk, because a
+ * `0` there does not merely fail to inform: it *asserts* the portfolio never fell. That
+ * is the reassuring-zero shape `concentrationPct` and Sharpe were both fixed for, and it
+ * is worse here, since `RiskMetricsCards` reads a zero as licence to print "Never below
+ * its opening value" in prose, in green.
+ *
+ * Reachable exactly when a stalled price feed covers the whole selected range — every
+ * point unmeasurable, so `dailyReturns` drops every pair — which is the one situation
+ * where "it never fell" is the last thing anyone should be told.
+ */
+export function maxDrawdownPct(series: ValueSeriesPoint[]): number | null {
+  const returns = dailyReturns(series)
+  if (returns.length === 0) return null
+
   let worst = 0
   let value = series.length ? series[0].market_value_eur : 0
   let peak = value
-  for (const r of dailyReturns(series)) {
+  for (const r of returns) {
     value *= 1 + r
     if (value > peak) peak = value
     if (peak > 0) {
@@ -131,14 +146,32 @@ export function maxDrawdownPct(series: ValueSeriesPoint[]): number {
  * a live warning long after the recovery. The current drawdown is the one that
  * describes now; the max describes the worst the account has survived.
  * `recoveredDate` is null while the trough is still underwater.
+ *
+ * **Both percentages are `null` when there is nothing measurable to walk**, and
+ * `sampleDays` says how thin the window was — the shape `betaAndCorrelation` uses so a
+ * refused estimate can explain itself instead of showing a confident number. A `0` here
+ * is a claim ("never fell"), not an absence; see {@link maxDrawdownPct}.
  */
 export function drawdownDetail(series: ValueSeriesPoint[]): {
-  maxDrawdownPct: number
+  maxDrawdownPct: number | null
   peakDate: string | null
   troughDate: string | null
   recoveredDate: string | null
-  currentDrawdownPct: number
+  currentDrawdownPct: number | null
+  sampleDays: number
 } {
+  const measurable = dailyReturnSeries(series)
+  if (measurable.length === 0) {
+    return {
+      maxDrawdownPct: null,
+      peakDate: null,
+      troughDate: null,
+      recoveredDate: null,
+      currentDrawdownPct: null,
+      sampleDays: 0,
+    }
+  }
+
   let value = series.length ? series[0].market_value_eur : 0
   let peak = value
   let peakDate = series.length ? series[0].date : null
@@ -149,7 +182,7 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
   let recoveredDate: string | null = null
   let current = 0
 
-  for (const { date, ret } of dailyReturnSeries(series)) {
+  for (const { date, ret } of measurable) {
     value *= 1 + ret
     if (value >= peak) {
       // A new high closes out whatever drawdown was open. Only the *worst*
@@ -177,6 +210,7 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
     troughDate: worst < 0 ? troughDate : null,
     recoveredDate,
     currentDrawdownPct: current,
+    sampleDays: measurable.length,
   }
 }
 
@@ -273,6 +307,52 @@ export function concentrationPct(
     .slice(0, topN)
     .reduce((s, p) => s + p.market_value_eur, 0)
   return (top / total) * 100
+}
+
+/**
+ * Can the backend actually value this position?
+ *
+ * **Two clauses, not one**, because it fails to value a holding for two reasons: no
+ * cached price, and no FX rate for the price's currency. The second leaves
+ * `market_price` populated and zeroes `market_value_eur` — so `market_price === null`
+ * alone reads the holding as *priced* and gives it a real-looking 0. Frankfurter cannot
+ * serve TWD at all, which is why `WARM_CURRENCIES` exists, so this is not hypothetical.
+ *
+ * Copied in spirit from `rebalance.ts` and `currencyExposure.ts`, which closed the same
+ * gap on 2026-08-05. Note it is *narrower* than `summary.unpriced_holdings`, the
+ * backend's own count and the one to trust for a headline; this exists only to decide
+ * whether one row may enter a client-side statistic.
+ */
+function isValuable(position: { market_price: number | null; market_value_eur: number }): boolean {
+  return position.market_price !== null && position.market_value_eur > 0
+}
+
+/**
+ * Share of *valued* positions sitting at a gain, plus what had to be left out.
+ *
+ * An unvaluable holding is excluded from **both** sides. It used to be counted on the
+ * losing side of both: `get_positions_breakdown` values it at 0.00, so `gain_loss_eur`
+ * becomes `-cost_basis` — a large negative — and the holding left the numerator while
+ * staying in the denominator. Win Rate then read low, and its own footnote stated it as
+ * fact ("36 of 39 profitable"), turning three unmeasured positions into three losses.
+ * Live rather than theoretical: three newly-bought ETFs sat unpriced for hours on
+ * 2026-08-07, which is ~7.7 pp on this book.
+ *
+ * `null` — never `0` — when nothing can be valued, for the reason spelled out on
+ * {@link concentrationPct}: a 0% win rate is a plausible figure, so nothing about it
+ * invites doubt. Its two neighbours in the same KPI memo already refused this condition.
+ */
+export function winRate(
+  positions: { market_price: number | null; market_value_eur: number; gain_loss_eur: number }[],
+): { pct: number | null; profitable: number; judged: number; excluded: number } {
+  const judged = positions.filter(isValuable)
+  const profitable = judged.filter((p) => p.gain_loss_eur > 0).length
+  return {
+    pct: judged.length > 0 ? (profitable / judged.length) * 100 : null,
+    profitable,
+    judged: judged.length,
+    excluded: positions.length - judged.length,
+  }
 }
 
 /**

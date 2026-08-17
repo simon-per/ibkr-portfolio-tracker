@@ -13,6 +13,7 @@ import {
   maxDrawdownPct,
   sharpeRatio,
   sortinoRatio,
+  winRate,
 } from './portfolioKpis'
 import type { ValueSeriesPoint } from './portfolioKpis'
 import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
@@ -279,7 +280,9 @@ describe('drawdownDetail', () => {
 
   it('agrees with maxDrawdownPct', () => {
     const series = compounded([0.3, -0.2, 0.1, -0.35, 0.4])
-    expect(drawdownDetail(series).maxDrawdownPct).toBeCloseTo(maxDrawdownPct(series), 10)
+    const standalone = maxDrawdownPct(series)
+    expect(standalone).not.toBeNull()
+    expect(drawdownDetail(series).maxDrawdownPct).toBeCloseTo(standalone!, 10)
   })
 
   it('has no peak or trough to name when nothing ever fell', () => {
@@ -510,5 +513,83 @@ describe('incomplete valuations are not measured', () => {
     const noField = [point(day(0), 1000, 1000, 0), point(day(1), 1100, 1000, 0)]
     expect(dailyReturns(noField)).toHaveLength(1)
     expect(isMeasurable(noField[0])).toBe(true)
+  })
+
+  it('refuses a drawdown outright when NOTHING in the range is measurable', () => {
+    /**
+     * The window the guard above could not save: every point unpriced, so every pair is
+     * dropped and there is not one return to walk. `0` there is not an absence, it is a
+     * claim — `RiskMetricsCards` reads a zero max as licence to print "Never below its
+     * opening value", in green, which is the worst possible answer for a stalled feed.
+     * Reachable on a 7D range during a multi-day sync outage, or on MTD in the first days
+     * of a month over a freshly bought holding with no price yet — the same reachability
+     * that got Sharpe fixed.
+     */
+    const blind: PortfolioValuePoint[] = [
+      { ...point(day(0), 600, 1000, 0), unpriced_holdings: 2 },
+      { ...point(day(1), 400, 1000, 0), unpriced_holdings: 3 },
+      { ...point(day(2), 0, 1000, 0), unpriced_holdings: 5 },
+    ]
+    expect(dailyReturns(blind)).toHaveLength(0)
+    expect(maxDrawdownPct(blind)).toBeNull()
+
+    const detail = drawdownDetail(blind)
+    expect(detail.maxDrawdownPct).toBeNull()
+    expect(detail.currentDrawdownPct).toBeNull()
+    // The count says how thin the window was, the way betaAndCorrelation's does.
+    expect(detail.sampleDays).toBe(0)
+  })
+
+  it('still reports a measured zero as zero, which is a different statement', () => {
+    // A portfolio that genuinely only ever rose. "Never fell" is true here and must stay
+    // sayable — the fix must not turn every flat window into an absence.
+    const rising = compounded([0.1, 0.1, 0.1])
+    expect(maxDrawdownPct(rising)).toBe(0)
+    expect(drawdownDetail(rising).maxDrawdownPct).toBe(0)
+    expect(drawdownDetail(rising).sampleDays).toBe(3)
+  })
+})
+
+describe('winRate', () => {
+  const pos = (mv: number, cost: number, price: number | null = 1) => ({
+    market_price: price,
+    market_value_eur: mv,
+    gain_loss_eur: mv - cost,
+  })
+
+  it('is the share of judged positions sitting at a gain', () => {
+    const positions = [pos(120, 100), pos(90, 100), pos(150, 100), pos(80, 100)]
+    const { pct, profitable, judged, excluded } = winRate(positions)
+    expect(pct).toBeCloseTo(50, 6)
+    expect([profitable, judged, excluded]).toEqual([2, 4, 0])
+  })
+
+  it('does not count an unpriced holding as a loss', () => {
+    /**
+     * The bug: `get_positions_breakdown` values an unpriceable holding at 0.00, so its
+     * gain is −cost — a large negative. It therefore left the numerator and stayed in the
+     * denominator, and the card's footnote stated it as fact ("3 of 4 profitable"). Three
+     * newly bought ETFs sat in exactly this state for hours on 2026-08-07.
+     */
+    const positions = [pos(120, 100), pos(150, 100), pos(130, 100), pos(0, 100, null)]
+    const { pct, profitable, judged, excluded } = winRate(positions)
+    expect(pct).toBeCloseTo(100, 6)      // was 75 — the unpriced row read as a loser
+    expect([profitable, judged, excluded]).toEqual([3, 3, 1])
+  })
+
+  it('catches the FX-rate failure, where market_price survives and the value does not', () => {
+    // The narrower `market_price === null` predicate misses this: the backend zeroes the
+    // value when it has no rate for the price currency and leaves the price populated.
+    // Frankfurter cannot serve TWD at all, which is why WARM_CURRENCIES exists.
+    const { pct, judged, excluded } = winRate([pos(120, 100), pos(0, 100, 4.79)])
+    expect(pct).toBeCloseTo(100, 6)
+    expect([judged, excluded]).toEqual([1, 1])
+  })
+
+  it('is null, never 0, when nothing can be valued', () => {
+    // A 0% win rate is a plausible figure, so nothing about it invites doubt — the same
+    // reasoning as concentrationPct, whose zero was worse still for being reassuring.
+    expect(winRate([pos(0, 100, null), pos(0, 200, null)]).pct).toBeNull()
+    expect(winRate([]).pct).toBeNull()
   })
 })

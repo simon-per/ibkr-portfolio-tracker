@@ -21,8 +21,14 @@ export interface RiskBeta {
 export interface RiskMetrics {
   volatilityPct: number | null
   sortino: number | null
-  currentDrawdownPct: number
-  maxDrawdownPct: number
+  /**
+   * Both drawdowns are `null` when not one daily return in the range was measurable.
+   * A `0` cannot stand in for that: this card reads a zero max as licence to print
+   * "Never below its opening value", so an unmeasurable window rendered a green
+   * reassurance — which is what a stalled price feed produces.
+   */
+  currentDrawdownPct: number | null
+  maxDrawdownPct: number | null
   troughDate: string | null
   recoveredDate: string | null
   beta: RiskBeta | null
@@ -131,7 +137,8 @@ export function RiskMetricsCards({
   // The current fall is the one that describes now; the max describes the worst
   // the account has survived. Showing only the max reads as a live warning long
   // after the recovery.
-  const inDrawdown = metrics.currentDrawdownPct < -0.05
+  const inDrawdown =
+    metrics.currentDrawdownPct !== null && metrics.currentDrawdownPct < -0.05
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
@@ -178,15 +185,25 @@ export function RiskMetricsCards({
         icon={<TrendingDown
           className={`h-4 w-4 ${inDrawdown ? 'text-red-600' : 'text-muted-foreground'}`}
         />}
-        value={`${metrics.currentDrawdownPct.toFixed(2)}%`}
-        tone={inDrawdown ? 'negative' : 'positive'}
-        sub={metrics.maxDrawdownPct === 0
-          ? 'Never below its opening value'
-          : metrics.recoveredDate !== null
-            ? `Recovered ${shortDate(metrics.recoveredDate)} from ${metrics.maxDrawdownPct.toFixed(1)}%`
-            : `Worst ${metrics.maxDrawdownPct.toFixed(1)}%${
-                metrics.troughDate ? ` on ${shortDate(metrics.troughDate)}` : ''
-              }`}
+        value={metrics.currentDrawdownPct !== null
+          ? `${metrics.currentDrawdownPct.toFixed(2)}%`
+          : null}
+        tone={metrics.currentDrawdownPct === null ? 'muted'
+          : inDrawdown ? 'negative' : 'positive'}
+        // "Never below its opening value" is a CLAIM, so it may only be made about a
+        // measured zero. With no measurable daily return in the range there is nothing to
+        // claim — and that is exactly what a stalled price feed looks like, so a green
+        // reassurance was the worst available answer. Worded like the Sharpe card, which
+        // distinguishes its two absences for the same reason.
+        sub={metrics.maxDrawdownPct === null
+          ? 'Not enough history in this range'
+          : metrics.maxDrawdownPct === 0
+            ? 'Never below its opening value'
+            : metrics.recoveredDate !== null
+              ? `Recovered ${shortDate(metrics.recoveredDate)} from ${metrics.maxDrawdownPct.toFixed(1)}%`
+              : `Worst ${metrics.maxDrawdownPct.toFixed(1)}%${
+                  metrics.troughDate ? ` on ${shortDate(metrics.troughDate)}` : ''
+                }`}
       />
 
       {/* The portfolio's dividend rate. This IS the market-value-weighted average of

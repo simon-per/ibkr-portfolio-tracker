@@ -113,6 +113,20 @@ describe('RiskMetricsCards', () => {
     expect(screen.getByText('Never below its opening value')).toBeTruthy()
   })
 
+  it('does not claim the portfolio never fell over a range it could not measure', () => {
+    /**
+     * The worst instance of the zero-for-unknown pattern in this app: `maxDrawdownPct`
+     * returned 0 when not one daily return in the range was measurable, and this card
+     * read that zero as licence to print a positive claim in prose — in green, because
+     * the current drawdown was 0 too. A stalled price feed is exactly what produces it,
+     * so the reassurance arrived precisely when it was least true.
+     */
+    renderWith({ currentDrawdownPct: null, maxDrawdownPct: null, troughDate: null })
+    expect(screen.queryByText('Never below its opening value')).toBeNull()
+    expect(screen.queryByText('0.00%')).toBeNull()
+    expect(screen.getAllByText('Not enough history in this range').length).toBeGreaterThan(0)
+  })
+
   it('shows six loading placeholders, matching the grid it fills', () => {
     const { container } = render(<RiskMetricsCards metrics={null} isLoading />)
     expect(container.querySelectorAll('.animate-pulse')).toHaveLength(6)
