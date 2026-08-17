@@ -228,9 +228,11 @@ def main() -> int:
     parser.add_argument(
         "--constituents", action="store_true",
         help=(
-            "Also resolve the largest fund constituents, down to 99.5%% of cumulative "
-            "look-through value and capped at 500 ISINs. Without this, a company held only "
-            "inside funds groups on its ISIN alone, so two of its ISINs would not fold"
+            "Also resolve the largest fund constituents, down to "
+            "IDENTITY_COVERAGE_TARGET_PCT of cumulative look-through value and capped at "
+            "IDENTITY_MAX_ISINS. Without this, a company held only inside funds groups on "
+            "its ISIN alone, so two of its ISINs would not fold — and the CINS/SEDOL rows "
+            "GRID and QTUM publish have no identity at all until this runs"
         ),
     )
     args = parser.parse_args()
