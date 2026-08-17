@@ -488,10 +488,12 @@ check is the sharp part: reintroducing a local copy leaves `rebalance.test.ts` *
 the family test fails, which is what "a correct copy is still a copy" looks like in practice.
 
 Verified: backend **1183 passed** (was 1168), frontend **485** (was 466), `tsc -b` and
-`npm run build` clean. **Every fix was mutation-checked** — revert it, watch the new test fail — for
-the eleven mutants across both halves, because this repo has twice had a test pass against the bug it
-was written for. A twelfth check pins the *wiring*: an AST walk over `sync_market_data` asserting all
-five detectors are actually called, since a detector nobody calls is the same silence as no detector.
+`npm run build` clean. **Every fix was mutation-checked** — revert it, watch the named test fail —
+**14 mutants, all caught**, because this repo has twice had a test pass against the bug it was
+written for. Two of the 14 are worth knowing as *checks* rather than as fixes: an AST walk over
+`sync_market_data` asserting all five detectors are actually called (a detector nobody calls is the
+same silence as no detector), and the `isUnpriced` family test, whose mutant leaves
+`rebalance.test.ts` green and fails only the family assertion.
 
 `e2e/ledger.mjs` is fixed but **not run** — it needs a production DB snapshot, and none was pulled.
 See *Known rough edges*.
