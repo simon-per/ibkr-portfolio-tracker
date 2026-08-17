@@ -263,12 +263,26 @@ class LookthroughService:
                     f"{basket.as_of_date.isoformat()} is when it was fetched — the basket "
                     f"itself may be older."
                 )
+            source_decl = source_for_fund_isin(isin)
             if proxy_isin:
-                source_decl = source_for_fund_isin(isin)
                 warnings.append(
                     f"{entry['symbol']} has no basket of its own and is decomposed using "
                     f"{entry['proxy_for_symbol']}'s. "
                     + (source_decl.basket_proxy_reason if source_decl else "")
+                )
+            # A leveraged fund is decomposed at its market value, because the five buckets
+            # must sum to the portfolio's market value to the cent and scaling one of them
+            # breaks the identity this whole feature rests on. So the understatement is
+            # stated instead of corrected — and it is stated here rather than left implicit
+            # in `replication`/`leverage`, because a company row reading 0.9% when the real
+            # exposure is 1.8% is a plausible figure, which is the dangerous kind.
+            if source_decl and source_decl.leverage != 1.0:
+                warnings.append(
+                    f"{entry['symbol']} is {source_decl.leverage:g}x leveraged and is "
+                    f"decomposed at its market value, so its true exposure to each company "
+                    f"below is about {source_decl.leverage:g}x what is shown. The buckets "
+                    f"still sum to the portfolio, which is why this is reported rather than "
+                    f"scaled."
                 )
 
             company_pct, nested_pct = self._split_weights(rows, basket)
@@ -492,10 +506,20 @@ class LookthroughService:
         The source's own `adapter` therefore drives staleness, which is the right answer
         rather than a convenient one: the age that matters is the age of the file the
         numbers actually came from.
+
+        **A synthetic fund's own basket loses to its proxy**, rather than the proxy merely
+        filling a gap. DBPG's published basket is substitute collateral — Mastercard and
+        Altria, for an S&P 500 product — so it is not a rougher version of the answer, it is
+        a different set of companies. Letting a stored basket win there would silently
+        un-proxy the fund, which is the failure its exclusion used to prevent outright.
         """
         proxied_from: Dict[str, str] = {}
         for isin in held_fund_isins:
-            if isin in baskets:
+            declared = source_for_fund_isin(isin)
+            own_basket_speaks_for_the_fund = (
+                declared is None or declared.replication != "synthetic"
+            )
+            if isin in baskets and own_basket_speaks_for_the_fund:
                 continue
             source_isin = basket_proxy_for(isin)
             if not source_isin or source_isin == isin or source_isin not in baskets:

@@ -56,6 +56,7 @@ XNAS_ISIN = "IE00BMFKG444"
 XAIX_ISIN = "IE00BGV5VN51"
 VWCE_ISIN = "IE00BK5BQT80"
 VT_ISIN = "US9220427424"                       # VWCE's declared basket proxy
+VOO_ISIN = "US9229083632"                      # DBPG's declared basket proxy; not held
 DBPG_ISIN = "LU0411078552"
 
 # Every top-level money field, classified. The partition test sums the first group; the
@@ -348,14 +349,80 @@ async def test_a_fund_with_no_basket_is_named_and_never_silently_dropped(session
 
 
 @pytest.mark.asyncio
-async def test_the_synthetic_fund_is_excluded_with_its_reason_verbatim(session):
+async def test_the_synthetic_fund_is_not_decomposed_until_its_proxy_has_a_basket(session):
+    """
+    DBPG was `excluded` outright until 2026-08-17 and is now proxied to VOO. With no VOO
+    basket stored it must still contribute no companies — a declared proxy is not data.
+    """
     await _standard_book(session)
     report = await LookthroughService(session).get_lookthrough()
 
     dbpg = _fund(report, "DBPG")
-    assert dbpg["status"] == "excluded"
-    assert "collateral" in dbpg["reason"].lower()
+    assert dbpg["status"] == "no_basket"
     # And none of its published collateral names reach the company table.
+    assert not [r for r in report["companies"] if "collateral" in r["name"].lower()]
+
+
+@pytest.mark.asyncio
+async def test_the_synthetic_fund_decomposes_through_its_proxy_and_declares_the_leverage(
+    session,
+):
+    """
+    The owner's instruction, and the half of it the proxy cannot fix.
+
+    VOO's basket answers "the disclosed names are collateral, not the index". It does nothing
+    about the 2x leverage: the fund is decomposed at its market value, because scaling one
+    bucket would break the partition. So the understatement has to be *said*, and a company
+    row showing half the real exposure is a plausible figure — the dangerous kind.
+    """
+    await _standard_book(session)
+    session.add_all([
+        _basket(VOO_ISIN, "100"),
+        _holding(VOO_ISIN, 1, NVIDIA_ISIN, "NVIDIA Corp", "100"),
+    ])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    dbpg = _fund(report, "DBPG")
+
+    assert dbpg["status"] == "looked_through"
+    assert dbpg["proxy_for_symbol"] == "VOO"
+    assert [w for w in report["warnings"] if "DBPG" in w and "collateral" in w.lower()]
+    # Keyed on the phrase unique to the leverage line: the proxy line quotes the declared
+    # reason, which mentions the leverage too, so "2x" alone matches both.
+    leverage = [
+        w for w in report["warnings"] if "DBPG" in w and "sum to the portfolio" in w
+    ]
+    assert leverage, report["warnings"]
+    assert "2x leveraged" in leverage[0]
+
+    # Stated, never scaled — the identity still has to close exactly.
+    buckets = sum(Decimal(str(report[f])) for f in BUCKET_FIELDS)
+    assert buckets == Decimal(str(report["total_market_value_eur"]))
+
+
+@pytest.mark.asyncio
+async def test_a_synthetic_funds_own_basket_loses_to_its_proxy(session):
+    """
+    The collateral disclosure is not a rougher answer, it is a different set of companies —
+    so importing one must not silently un-proxy the fund. This is the protection the outright
+    exclusion used to provide, kept after the exclusion was lifted.
+    """
+    await _standard_book(session)
+    session.add_all([
+        _basket(VOO_ISIN, "100"),
+        _holding(VOO_ISIN, 1, NVIDIA_ISIN, "NVIDIA Corp", "100"),
+        # What DBPG itself publishes: an S&P 500 product disclosing Altria at 5.7%.
+        _basket(DBPG_ISIN, "100"),
+        _holding(DBPG_ISIN, 1, ALPHABET_C_ISIN, "Altria-ish collateral name", "100"),
+    ])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    dbpg = _fund(report, "DBPG")
+
+    assert dbpg["proxy_for_symbol"] == "VOO"
+    assert dbpg["constituents"] == 1
     assert not [r for r in report["companies"] if "collateral" in r["name"].lower()]
 
 

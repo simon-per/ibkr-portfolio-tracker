@@ -225,18 +225,45 @@ FUND_SOURCES: Dict[str, FundSource] = {
         params={"slug": "qtum"},
     ),
 
-    # --- Excluded ------------------------------------------------------------------
+    # --- Vanguard US, held only as a basket donor ------------------------------------
+    # NOT held. It is declared solely so DBPG can borrow its basket: DBPG tracks the S&P 500
+    # and publishes collateral instead of constituents, and VOO is the plainest full-
+    # replication S&P 500 fund with a machine-readable file. Same paginated endpoint as VT,
+    # so the same torn-read hazard applies — see `parse_vanguard_us`.
+    "US9229083632": FundSource(
+        symbol="VOO",
+        name="Vanguard S&P 500 ETF",
+        adapter="vanguard_us",
+        params={"ticker": "voo"},
+    ),
+
+    # --- Synthetic, decomposed only through a proxy ----------------------------------
+    # **Its own published basket must never be used**, which is why `replication` stays
+    # `synthetic` rather than being cleared along with `exclude_reason`: the 46 names it
+    # discloses are substitute collateral (measured top holdings Mastercard 6.6%, Altria
+    # 5.7%, Tesla 4.9% — for an S&P 500 product). `_alias_proxied_baskets` therefore
+    # prefers the proxy for a synthetic fund even if a basket of its own is ever stored, so
+    # importing the collateral file cannot silently un-proxy it.
+    #
+    # **`leverage` is still 2.0 and still load-bearing.** Decomposing at the fund's market
+    # value attributes 1x, so the company figures understate its real S&P 500 exposure by
+    # about half. Attributing 2x is not an option — the five buckets must sum to the
+    # portfolio's market value to the cent, and doubling one of them breaks that identity,
+    # which is the single assertion this whole feature rests on. So the understatement is
+    # stated in `warnings[]` instead, driven off this field: clearing it would delete the
+    # second disqualifier, which is exactly what recording the two separately was for.
     "LU0411078552": FundSource(
         symbol="DBPG",
         name="Xtrackers S&P 500 2x Leveraged Daily Swap UCITS ETF",
         adapter=None,
         replication="synthetic",
         leverage=2.0,
-        exclude_reason=(
-            "Synthetic swap-based fund: the basket it publishes is substitute collateral, "
-            "not the index it tracks (measured top holdings Mastercard 6.6%, Altria 5.7%, "
-            "Tesla 4.9% for an S&P 500 product). It is also 2x leveraged, so even the real "
-            "index basket would understate its exposure by half."
+        basket_proxy_isin="US9229083632",
+        basket_proxy_reason=(
+            "Synthetic swap-based fund whose published basket is substitute collateral, not "
+            "the index, so VOO's S&P 500 constituents are used at the account owner's "
+            "instruction. It is also 2x leveraged and is decomposed at its market value, so "
+            "its real exposure to every company below is roughly double what is shown."
         ),
     ),
 }

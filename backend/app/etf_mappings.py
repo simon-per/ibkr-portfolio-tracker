@@ -126,6 +126,34 @@ ETF_ALLOCATIONS = {
         },
     },
 
+    # Vanguard S&P 500 (VOO) — **not held.** Present only because `etf_sources.py` declares
+    # it as DBPG's basket proxy, and `test_etf_source_registry.py` requires the two tables to
+    # name the same ISINs in both directions. Both blocks are deliberately identical to SXR8
+    # and DBPG above: all three track the S&P 500, and three entries for one index disagreeing
+    # in this table would be the dominant failure mode in miniature. Change one, change all
+    # three. Nothing reads these while the fund is unheld — they exist so that buying it
+    # cannot land it in an *Unknown* bucket.
+    "VOO": {
+        "isins": ["US9229083632"],
+        "asset_type": "ETF",
+        "geographic": {
+            "United States": 100.0,
+        },
+        "sector": {
+            "Technology": 30.0,
+            "Financial Services": 13.0,
+            "Healthcare": 12.0,
+            "Consumer Cyclical": 11.0,
+            "Communication Services": 9.0,
+            "Industrials": 8.0,
+            "Consumer Defensive": 6.0,
+            "Energy": 4.0,
+            "Real Estate": 3.0,
+            "Utilities": 2.0,
+            "Basic Materials": 2.0,
+        },
+    },
+
     # Xtrackers NASDAQ 100 (XNAS)
     "XNAS": {
         "isins": ["IE00BMFKG444"],

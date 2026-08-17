@@ -54,13 +54,17 @@ def test_neither_fund_table_knows_a_fund_the_other_does_not():
 @pytest.mark.parametrize("isin", sorted(FUND_SOURCES))
 def test_every_fund_either_has_an_adapter_or_says_why_it_has_none(isin):
     """
-    'No basket' must always be explainable on screen. An entry with neither an adapter nor a
-    reason produces a fund the UI can only report as mysteriously absent.
+    'No basket' must always be explainable on screen. An entry with neither an adapter, a
+    proxy, nor a reason produces a fund the UI can only report as mysteriously absent.
+
+    A declared proxy counts as an answer: DBPG has no adapter of its own — it must never be
+    read from its own collateral disclosure — but it does have a stated source for its
+    constituents, which is what the fund table shows.
     """
     source = FUND_SOURCES[isin]
     if source.adapter is None:
-        assert source.exclude_reason.strip(), (
-            f"{source.symbol} has no adapter and no exclude_reason"
+        assert source.exclude_reason.strip() or source.basket_proxy_isin, (
+            f"{source.symbol} has no adapter, no basket proxy and no exclude_reason"
         )
     else:
         assert source.adapter in ADAPTERS, (
@@ -151,21 +155,53 @@ def test_no_two_funds_share_a_vanguard_ticker():
         seen[ticker] = source.symbol
 
 
-def test_the_synthetic_leveraged_fund_is_excluded_for_both_of_its_reasons():
+def test_the_synthetic_leveraged_fund_still_carries_both_of_its_disqualifiers():
     """
-    DBPG is disqualified twice: its published basket is substitute collateral rather than
-    the index, AND it is 2x leveraged. The two are recorded separately so a future "we found
-    the swap reference basket" change cannot clear the first and silently reintroduce a 50%
-    understatement from the second.
+    DBPG is disqualified twice: its published basket is substitute collateral rather than the
+    index, AND it is 2x leveraged. It was excluded outright until 2026-08-17, when the owner
+    asked for it to be decomposed from VOO's S&P 500 basket — which answers the *first*
+    disqualifier and not the second.
+
+    So this no longer asserts exclusion. It asserts the two facts that must survive the
+    change, because clearing either quietly is precisely what recording them separately was
+    meant to prevent:
+
+    - `replication` stays `synthetic`, which is what makes `_alias_proxied_baskets` prefer the
+      proxy over any basket of DBPG's own. Clear it and importing the collateral file would
+      silently un-proxy the fund.
+    - `leverage` stays 2.0, which is what makes the service emit the understatement warning.
+      Clear it and every company row would understate DBPG's real exposure by half with
+      nothing saying so.
     """
     dbpg = source_for_fund_isin("LU0411078552")
     assert dbpg is not None and dbpg.symbol == "DBPG"
     assert dbpg.replication == "synthetic"
     assert dbpg.leverage == 2.0
-    assert not dbpg.look_through_eligible
-    reason = dbpg.exclude_reason.lower()
-    assert "collateral" in reason, "the reason must say the basket is not the index"
+    assert dbpg.basket_proxy_isin, (
+        "a synthetic fund may only be decomposed through a proxy — its own published basket "
+        "is collateral, not constituents"
+    )
+    reason = dbpg.basket_proxy_reason.lower()
+    assert "collateral" in reason, "the reason must say its own basket is not the index"
     assert "leverage" in reason or "2x" in reason, "the reason must also name the leverage"
+
+
+@pytest.mark.parametrize("isin", sorted(FUND_SOURCES))
+def test_a_synthetic_fund_is_never_decomposed_from_its_own_basket(isin):
+    """
+    The family form of the rule above, so a second swap-based fund cannot arrive without it.
+
+    A synthetic fund's disclosure is collateral rather than index membership, so it is only
+    ever attributable through a proxy — or not at all. Being look-through-eligible with
+    neither is the state that produces confident, wrong company rows.
+    """
+    source = FUND_SOURCES[isin]
+    if source.replication != "synthetic":
+        return
+    assert source.basket_proxy_isin or not source.look_through_eligible, (
+        f"{source.symbol} is synthetic, has no basket proxy, and is not excluded — it would "
+        f"be decomposed from its own collateral disclosure"
+    )
 
 
 @pytest.mark.parametrize("isin", sorted(ISSUER_OVERRIDES))

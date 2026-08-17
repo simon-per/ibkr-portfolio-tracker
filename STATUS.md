@@ -367,6 +367,33 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
+## Shipped 2026-08-17 (late) — DBPG decomposes through VOO
+
+Owner's instruction: use VOO's S&P 500 basket for DBPG, overwriting whatever DBPG itself
+publishes; the position is being replaced with IQQ later anyway. So DBPG is no longer `excluded`
+and **every held fund now decomposes**.
+
+**Half the objection is answered and half is not, which is why the two were recorded separately.**
+VOO's basket fixes "the disclosed names are collateral, not the index". It does nothing about the
+**2x leverage**: DBPG is decomposed at its market value, so its real exposure to each company is
+about double what the table shows. Scaling it is not available — the five buckets must sum to the
+portfolio to the cent — so `leverage` now drives a `warnings[]` line instead, and clearing that
+field would delete the second disqualifier silently.
+
+`replication` stays `synthetic`, which makes the proxy **beat** a stored basket rather than merely
+fill a gap: importing DBPG's collateral file can no longer un-proxy it. Pinned as a family rule
+(`test_a_synthetic_fund_is_never_decomposed_from_its_own_basket`) so a second swap fund cannot
+arrive without it.
+
+**VOO is declared in both fund tables but is NOT held** — a basket donor only. Its `ETF_ALLOCATIONS`
+blocks are byte-identical to SXR8's and DBPG's, which were already identical to each other: three
+S&P 500 trackers, one set of numbers, change one and change all three. ISIN `US9229083632` verified
+against OpenFIGI rather than recalled.
+
+**Still to do on production: fetch and import VOO's basket** (`fetch_etf_baskets VOO`). Until then
+DBPG reads `no_basket` — a declared proxy is not data. VOO is ~500 holdings, so 2 pages rather than
+VT's 21, which makes the torn-read hazard far smaller but not zero.
+
 ## Ran on production 2026-08-17 — the runbook, and what it caught
 
 **Identity resolution completed** (`manual_identity_resolve`, success): 1,998 ISINs resolved — 893

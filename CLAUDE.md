@@ -2041,11 +2041,29 @@ the true as-of can only be *older*, so a stood-in or forward date makes a basket
 than it is, which is the wrong direction for a staleness alarm. So `parse_defiance` clamps to
 `min(stated, fetched_on)`, and both cases set `as_of_is_issuer_stated=False` rather than hiding it.
 
-**DBPG is excluded and carries two independent disqualifiers.** It is a synthetic swap-based S&P
-500 **2× leveraged** ETF: the 46-name basket it publishes is substitute collateral (measured top
-holdings Mastercard 6.6%, Altria 5.7%, Tesla 4.9% — the tell), *and* even the real index basket
-would understate its exposure by half. `replication` and `leverage` are recorded **separately**,
-so a future "we found the swap reference" change cannot clear one and silently reintroduce the other.
+**DBPG carries two independent disqualifiers, and only one of them has been answered.** It is a
+synthetic swap-based S&P 500 **2× leveraged** ETF: the 46-name basket it publishes is substitute
+collateral (measured top holdings Mastercard 6.6%, Altria 5.7%, Tesla 4.9% — the tell), *and* even
+the real index basket understates its exposure by half. `replication` and `leverage` are recorded
+**separately** for exactly this reason, and the split earned itself on 2026-08-17: the account owner
+asked for DBPG to be decomposed from **VOO's** S&P 500 basket, which answers the collateral
+objection and does nothing about the leverage.
+
+So it is no longer `excluded`, and both fields still do work:
+
+- **`replication == "synthetic"` makes the proxy beat its own basket**, not merely fill a gap.
+  `_alias_proxied_baskets` skips a stored basket for a synthetic fund, so importing the collateral
+  file cannot silently un-proxy it — which is the protection the outright exclusion used to give.
+- **`leverage == 2.0` drives a `warnings[]` line** saying its true exposure to each company is
+  about double what is shown. It is **stated rather than scaled** because the five buckets must sum
+  to the portfolio's market value to the cent, and multiplying one of them breaks the one identity
+  this feature rests on. A row reading 0.9% where the truth is 1.8% is a plausible figure, which is
+  the dangerous kind, so it cannot be left implicit.
+
+`test_a_synthetic_fund_is_never_decomposed_from_its_own_basket` enforces the first as a family rule
+rather than as DBPG's detail, so a second swap-based fund cannot arrive without it. **VOO is declared
+in both fund tables but is not held** — it exists only as a basket donor, and its `ETF_ALLOCATIONS`
+blocks are pinned identical to SXR8's and DBPG's because all three track the S&P 500.
 
 ### Sources, and what still needs a hand download
 
@@ -2062,15 +2080,17 @@ has no route at all, and it borrows VT's basket until one exists.
 | **Defiance** | `defianceetfs.com/<ticker>-full-holdings/` | **not** `/<ticker>/`, whose table is rendered client-side and absent from the response |
 | **VanEck** | `vaneck.com/nl/en/investments/<slug>/downloads/holdings/` | XLSX. Needs a **cookie jar** (a cookieless GET loops the consent redirects) and the `/nl/en/` locale **pinned**. Parsed with `zipfile` + `ElementTree`; do not add `openpyxl` for one 5 kB file a week |
 
-**11 of 12 funds decompose, one of them by proxy.** DBPG is excluded by design and VWCE has no
-route of its own — Vanguard Europe publishes complete holdings by email on request, month-end
-+ 15 days. The read path never dereferences `adapter`, so a declared-but-unimplemented one
-degrades to "no basket yet", never to a wrong number.
+**All 12 funds decompose, two of them by proxy** (VWCE via VT, DBPG via VOO). Neither of those two
+has a usable route of its own: Vanguard Europe publishes VWCE's holdings only by email on request
+(month-end + 15 days), and DBPG publishes collateral rather than constituents. The read path never
+dereferences `adapter`, so a declared-but-unimplemented one degrades to "no basket yet", never to a
+wrong number.
 
 ### A borrowed basket, and the three ways it could have become a silent one
 
 `FundSource.basket_proxy_isin` lets a fund with no published basket be decomposed using
-another fund's. **One entry: VWCE borrows VT's**, at the account owner's instruction. It is an
+another fund's. **Two entries: VWCE borrows VT's and DBPG borrows VOO's**, both at the account owner's
+instruction. It is an
 approximation stated as one, and four things make it safe to have in a file whose governing
 rule is that an unjustifiable figure is absent rather than invented:
 
@@ -2732,7 +2752,7 @@ Tests: `tests/test_currency_fallback.py`.
 | A recently bought holding sits in an *Unknown* sector or region | Expected, and correct rather than missing. `sync_helper` never writes `sector`/`country`, so an IBKR-ingested security has both NULL while `asset_type` has a `"Stock"` column default. Only `POST /api/allocation/sync` fills them and **nothing schedules it** (it needs Yahoo), so run it by hand. Before 2026-08-05 the holding was silently dropped from those two charts instead, which made them sum to under 100% under a "% of portfolio" label. A **mapped ETF** is the exception and needs no sync at all — `app/etf_mappings.py` supplies its sector, region *and* asset type live at read time |
 | A fund's Equity weight reads ~92% and its Value looks fully invested | Rounding, not cash, and the cell says which: the muted `N rows at 0%` beneath it. Vanguard publishes weights to 2dp and VT has 10,032 holdings, so its 8,007 smallest are printed at 0.00% and its file sums to 91.86%. Nothing is missing and nothing is misparsed — check `stored_rows == source_rows` on the sync run if you want to confirm. Deliberately not renormalised |
 | A fund's status badge reads *Via VT* rather than *Decomposed* | It publishes no basket of its own and is decomposed using another fund's — see *A borrowed basket*. Its companies are approximate and err **low**; the reason is spelled out in the yellow notice above. The Coverage card stays amber while any fund is in this state, and clears the moment a real basket is imported for it |
-| Look-through coverage is below 100% | Expected, and it cannot reach 100%. DBPG is excluded by design and no basket attributes 100% of its fund, so those are a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| Look-through coverage is below 100% | Expected, and it cannot reach 100%: no basket attributes 100% of its own fund, so each decomposed fund's residual is a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
 | The Coverage card is amber at a high percentage | It tones on whether any fund is *unresolved*, not on a threshold — green means every held fund is either decomposed or deliberately excluded. That is deliberate: a percentage threshold could not be green even with every obtainable basket loaded, so it would have been a warning that never clears. Amber names the count of funds still missing a basket |
 | A basket is badged `†` stale but its issuer publishes slowly | `ADAPTER_STALE_DAYS` is per-source, so `†` means *the issuer has newer holdings we failed to fetch* rather than *this feed is slow*: 7 days for the six that republish daily (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck), 75 for Vanguard US (month-end, ~6-week lag by design), 45 for a hand import. A quarterly source needs its own entry — do not raise the global default to silence it |
 | A company appears twice in the look-through table | The two rows share no identifier, and there are three causes in order of likelihood. (1) `key_type: ISIN` — no LEI and no shareClassFIGI on record, so run `python -m app.cli.resolve_identities`. (2) The row came out of **GRID or QTUM**, whose issuers publish a CINS or a SEDOL and no ISIN, so it has no identity at all until `resolve_identities --constituents` runs — and note a **basket re-import deliberately clears that resolution**, so it is the second half of every import for those two funds. Set `OPENFIGI_API_KEY` first. (3) Both rows are already resolved, which is a genuine gap no identifier closes — an ADR against its ordinary, or a dual-listed company with two legitimate LEIs — and needs an `ISSUER_OVERRIDES` entry with its evidence |
