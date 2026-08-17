@@ -95,6 +95,17 @@ class AnnualizedReturnResponse(BaseModel):
     start_date: str = Field(..., description="Start date of the calculation period")
     end_date: str = Field(..., description="End date of the calculation period")
     num_cash_flows: int = Field(..., description="Number of cash flows used in calculation")
+    # Held securities that could not be valued at one of the window's two endpoints.
+    # Above 0 means the return is computed from a partial valuation: the tax-lot
+    # purchases are unconditional flows while the endpoint value omits those holdings,
+    # so the figure understates (or overstates, when it is the start that is short).
+    #
+    # Declared here because a response_model is a FILTER: the router can pass this key
+    # all it likes and an undeclared field is dropped from the wire in silence -- the
+    # trap `test_dividend_summary_contract.py` exists for, and the same reason
+    # `PerformanceAttributionResponse` carries this note. Defaulted, so the paths that
+    # return before either valuation runs stay valid.
+    unpriced_holdings: int = 0
 
     class Config:
         from_attributes = True

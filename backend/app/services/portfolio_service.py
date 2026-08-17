@@ -104,11 +104,18 @@ class PortfolioService:
     # through `__new__` in a test can still read it.
     last_snapshot_skipped: List[str] = []
 
+    # Held securities `calculate_xirr` could not value at one of its two window
+    # endpoints, on its most recent run. Same latch shape and same reason as above:
+    # one router unpacks its 5-tuple and six assertions in `tests/test_xirr.py` do
+    # too, so a sixth return value would be six edits to say one thing.
+    last_xirr_unpriced: int = 0
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.market_data_service = MarketDataService(db)
         self.currency_service = CurrencyService(db)
         self.last_snapshot_skipped = []
+        self.last_xirr_unpriced = 0
 
     async def get_base_currency(self) -> str:
         """Return the configured base (display) currency."""
@@ -1101,8 +1108,28 @@ class PortfolioService:
         Returns: (return_pct or None, num_cash_flows, eff_start, eff_end, method)
         where method is "xirr" (annualized) or "simple_period" (<30 days — a raw
         period return, which the UI must not label as annual).
+
+        **Completeness rides on `self.last_xirr_unpriced`, not on the tuple.** Both
+        endpoint valuations can be partial, and this is the last member of the
+        `unpriced_holdings` family to learn it: the timeline, `/summary` and
+        `/attribution` all report their own incompleteness, and a return computed from
+        an incomplete terminal value was still being served as a measurement. The
+        purchase outflows come from `taxlots` and are unconditional, so an unpriced
+        holding drops out of the terminal inflow while its cost stays in the flow
+        list, and the return reads LOW — or high, when it is the *start* that is short.
+
+        Reported rather than excluded, unlike `/attribution`: dropping a security from
+        the valuations while keeping its purchases as flows is strictly worse than
+        saying the valuation is partial, which is the choice the timeline and the
+        summary card both make.
         """
         import pyxirr
+
+        # Reset on entry, not only in __init__: a caller measuring two windows off one
+        # service would otherwise read the first window's completeness against the
+        # second window's number. Same reason `last_snapshot_skipped` resets on its
+        # early-return path.
+        self.last_xirr_unpriced = 0
 
         # Get ALL taxlots (open + closed) for correct historical XIRR
         result = await self.db.execute(
@@ -1148,6 +1175,14 @@ class PortfolioService:
 
         start_mv = start_value["market_value_eur"]
         end_mv = end_value["market_value_eur"]
+
+        # The count at the WORSE endpoint, not a union of the two: the endpoints are
+        # separate valuations and `_calculate_daily_value` returns a count rather than
+        # the set of ids, so there is nothing to union. Either endpoint being short is
+        # enough to make the return an understatement, which is all the caller needs.
+        self.last_xirr_unpriced = max(
+            start_value["unpriced_holdings"], end_value["unpriced_holdings"]
+        )
 
         # Build cash flows
         dates = []

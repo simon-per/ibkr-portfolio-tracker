@@ -153,7 +153,11 @@ async def get_annualized_return(
         annualized_return_pct=round(xirr_pct, 2) if xirr_pct is not None else None,
         start_date=eff_start.isoformat(),
         end_date=eff_end.isoformat(),
-        num_cash_flows=num_cash_flows
+        num_cash_flows=num_cash_flows,
+        # A latch rather than a sixth tuple element — see calculate_xirr. Above 0 means
+        # this return was measured against a partial valuation, which the client says so
+        # about rather than presenting a plausible understatement as a measurement.
+        unpriced_holdings=portfolio_service.last_xirr_unpriced,
     )
 
 

@@ -178,6 +178,83 @@ async def test_short_windows_are_labelled_simple_period():
 
 
 @pytest.mark.asyncio
+async def test_an_unpriced_endpoint_is_reported_rather_than_hidden():
+    """
+    A holding the backend cannot value at the window end drops out of the terminal
+    inflow while its purchase stays in the flow list, so the return understates — the
+    same shape `/attribution` and the timeline already report. XIRR read only
+    `market_value_eur` and threw the count away, so nothing on the wire said the
+    figure was measured against a partial book.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add_all([
+            _lot(1, Y_START, "10", "100"),
+            _lot(2, Y_START, "10", "100"),
+            _price(1, Y_START, "10"), _price(1, Y_END, "12"),
+            # BBB is priced at the start and goes quiet: a year past its last close it
+            # is far outside the lookback, so the end valuation cannot include it.
+            _price(2, Y_START, "10"),
+        ])
+        await session.flush()
+        service = PortfolioService(session)
+        pct, _, _, _, method = await service.calculate_xirr(Y_START, Y_END)
+
+        assert service.last_xirr_unpriced == 1
+        # Still served: a partial valuation is the best available answer, and the
+        # count is what stops it reading as a complete one.
+        assert method == "xirr" and pct is not None
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_fully_priced_window_reports_no_unpriced_holdings():
+    """The other side of the same field: it must be able to say 'complete'."""
+    engine, session = await _make_session()
+    try:
+        session.add_all([
+            _lot(1, Y_START, "10", "100"),
+            _price(1, Y_START, "10"), _price(1, Y_END, "12"),
+        ])
+        await session.flush()
+        service = PortfolioService(session)
+        await service.calculate_xirr(Y_START, Y_END)
+        assert service.last_xirr_unpriced == 0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_unpriced_latch_does_not_leak_between_windows():
+    """
+    One service, two windows: the second answer must not inherit the first's
+    completeness. `last_snapshot_skipped` learned this on its early-return path, and a
+    latch that only resets in __init__ is the same bug waiting for a second caller.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add_all([
+            _lot(1, Y_START, "10", "100"),
+            _lot(2, Y_START, "10", "100"),
+            _price(1, Y_START, "10"), _price(1, MID, "11"), _price(1, Y_END, "12"),
+            _price(2, Y_START, "10"), _price(2, MID, "11"),
+        ])
+        await session.flush()
+        service = PortfolioService(session)
+
+        await service.calculate_xirr(Y_START, Y_END)      # BBB unvaluable at Y_END
+        assert service.last_xirr_unpriced == 1
+        await service.calculate_xirr(Y_START, MID)        # both priced at MID
+        assert service.last_xirr_unpriced == 0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_window_starting_before_the_first_purchase_is_well_posed():
     engine, session = await _make_session()
     try:

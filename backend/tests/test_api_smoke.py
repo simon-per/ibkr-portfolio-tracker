@@ -367,6 +367,18 @@ def test_the_shapes_that_broke_production_serialize(client):
     # unpriced must not also appear as a contributor with a fabricated -start_value.
     assert "TSMC" not in {r["symbol"] for r in attr["attributions"]}
 
+    # XIRR is the last member of that family, and it reports rather than excludes: the
+    # tax-lot purchases are unconditional flows, so dropping the security would leave a
+    # cost with no matching value. Same fixture, same unpriced TSMC, so this is the
+    # non-zero case and not an assertion true of any book.
+    ann = client.get(
+        f"/api/portfolio/annualized-return?start_date={START}&end_date={TODAY}"
+    ).json()
+    assert "unpriced_holdings" in ann, (
+        "AnnualizedReturnResponse dropped unpriced_holdings from the wire"
+    )
+    assert ann["unpriced_holdings"] >= 1
+
     # The tax report's honesty fields survive the HTTP layer. holdings_snapshot_total
     # is nullable now — a failed snapshot is a missing wealth-tax base, not a zero
     # one — so the route must not coerce None to 0.0 or drop the flag.
