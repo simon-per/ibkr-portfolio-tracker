@@ -93,30 +93,37 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Needs a human
 
-- **The Look-through tab needs three CLI runs on production, in this order.** None is scheduled,
-  deliberately (they reach third parties, and the read path is pure DB), and until they run the tab
-  shows every fund as `no_basket` — honest, but not useful. None touches Yahoo or IBKR, so all are
-  safe at any hour:
+- **The Look-through CLI runs are DONE as of 2026-08-17 and will need redoing as baskets age.**
+  Ran on production that evening: 10 baskets fetched (0 failed), 9 imported, identity resolution
+  completed. Coverage 95.16%, `unresolved_value_eur` 516 CHF. Nothing is scheduled, so this is a
+  recurring chore, not a one-off — the six daily feeds badge `†` after 7 days and Vanguard after 75
+  (`ADAPTER_STALE_DAYS`). `find_stale_etf_baskets()` is still the missing piece; until it exists the
+  badge in the fund table is the only signal. None of it touches Yahoo or IBKR, so it is safe at any
+  hour:
 
   ```bash
-  # 1. baskets — 10 funds now have an automated route (was 6)
   docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
-  #    then the import line it prints for each fund (--dry-run first)
-  # 2. identity: ISINs. Bounded by GLEIF at ~1.1s each, and it prints an estimate first.
+  #   then the import line it prints per fund (--dry-run first). VT's line carries a *.json glob and
+  #   `docker exec` runs no shell, so wrap that one in `sh -c` or list the 21 pages.
   docker exec backend-portfolio-backend-1 python -m app.cli.resolve_identities --constituents
   ```
 
-  **Order matters now**: step 2 also resolves the CINS/SEDOL identifiers step 1 stores, so running it
-  first leaves GRID's and QTUM's companies unfolded. A **basket re-import deliberately clears** those
-  resolutions (it keeps the raw identifier), so step 2 is the second half of every basket refresh.
+  **Order matters**: the second step resolves the CINS/SEDOL identifiers the first stores, so running
+  it first leaves GRID's and QTUM's companies unfolded. A **basket re-import deliberately clears**
+  those resolutions (it keeps the raw identifier), so it is the second half of every basket refresh.
+  The resolve step **commits once at the end** — do not deploy while it is running, and do not use
+  `pgrep` to check on it (not installed in the container; it always reports one match). Read the
+  `manual_identity_resolve` row in `sync_runs` instead.
 
-  **`OPENFIGI_API_KEY` has to go in the VPS's `backend/.env` before step 2.** The owner supplied it
-  on 2026-08-17 and it is set and verified locally (an 11-job batch returns 200, which a keyless
-  request would refuse) — but the container reads its own file, so production is still keyless
-  until someone adds it there. Remember `docker compose up -d`, **not** `restart`, or the container
-  keeps its old environment and reports success anyway. It takes the batch from 10 identifiers per
-  request to 100 and the rate from 25 requests/minute to 250, which is what makes
-  `IDENTITY_MAX_ISINS` (raised 500 → 2500) affordable.
+  **VT will keep refusing until Vanguard's cluster serves one snapshot.** Not a fault to force past —
+  see *Ran on production 2026-08-17*. Its stored basket is kept and VT publishes month-end.
+
+- **`OPENFIGI_API_KEY` still needs adding to the VPS's `backend/.env`.** The owner supplied it on
+  2026-08-17; it is set and verified locally (an 11-job batch returns 200, which a keyless request
+  refuses) but the container reads its own file. Use `docker compose up -d`, **not** `restart`, or the
+  container keeps its old environment and reports success anyway. **Low urgency**: the 2026-08-17 run
+  needed OpenFIGI for 105 non-ISIN identifiers, about 11 keyless requests. GLEIF's one request per
+  ISIN is what actually costs the ~37 minutes, so the key buys tidiness rather than time.
 
 - **VWCE's basket is CLOSED as a task — the VT proxy is the accepted answer.** Do not re-open it,
   do not chase Vanguard for the real file, and do not reinstate the prohibition this entry used to
