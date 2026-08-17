@@ -87,8 +87,8 @@ Four threads are genuinely open. In descending order of what they cost:
 3. **The Flex window is 3 days**, which is a two-day margin → *Watching*, Flex period entry, and
    CLAUDE.md's *The Flex Query* for the arithmetic.
 4. **Two credentials are knowingly unrotated, both by owner decision** → *Needs a human*. Neither is
-   a task and neither may be re-litigated. The one genuinely open item there is the 2026-08-17
-   re-exposure of `API_ADMIN_TOKEN`, which has not been ruled on.
+   a task, neither may be re-litigated, and both transcript exposures of `API_ADMIN_TOKEN` were
+   likewise accepted. **There is no open security item.**
 
 The durable half of these findings is in **CLAUDE.md**, not here: the once-per-day rule, the guard
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
@@ -167,11 +167,17 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
     a curl command line carrying the header). The owner was asked and **chose to accept that one** —
     do not re-raise the 08-07 incident.
 
-    **It happened a second time on 2026-08-17**, and this one has not been ruled on: an agent ran
-    `od -c` over the last 60 bytes of the VPS `backend/.env` to check for a trailing newline, and the
-    file's last line is that token, so most of its tail is in that transcript. Put to the owner, no
-    answer yet. **The lesson is cheap and belongs in any agent's habits: never dump bytes from a file
-    that holds secrets.** `tail -c 1 | xxd` answers the newline question, or just append defensively.
+    **It happened a second time on 2026-08-17** — an agent ran `od -c` over the last 60 bytes of the
+    VPS `backend/.env` to check for a trailing newline, and the file's last line is that token, so
+    most of its tail is in that transcript. **The owner was asked and accepted this one too**, on the
+    reasoning that the exposure is a local `.jsonl` transcript plus the vendor's logs rather than
+    anything reachable from the internet — unlike the 07-28 Flex leak, which was genuinely served over
+    HTTPS. *Do not re-raise either.* Both credentials and both exposures are now settled; there is no
+    open security item.
+
+    **The lesson is the part worth keeping, and it is cheap: never dump bytes from a file that holds
+    secrets.** `tail -c 1 | xxd` answers the trailing-newline question without printing a value, and
+    appending defensively answers it without asking at all.
   - **The IBKR Flex token** was the other one, and it is now **also accepted rather than rotated** — the owner decided on 2026-08-17. See the entry below for the blast radius that makes that reasonable. Neither credential is an open task; only the 08-17 `API_ADMIN_TOKEN` re-exposure is still unruled.
 
 - **Pushing is NOT blocked for an agent, despite what this file claimed until 2026-08-04.** The
