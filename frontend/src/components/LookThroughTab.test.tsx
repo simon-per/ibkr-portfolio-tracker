@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LookThroughTab } from './LookThroughTab'
 import { CurrencyProvider } from '@/lib/CurrencyContext'
@@ -150,6 +150,70 @@ describe('LookThroughTab', () => {
     expect(screen.getAllByText('44.23%').length).toBeGreaterThan(0)
     // A fund-only company has no direct value and says so with a dash, not a zero.
     expect(screen.getByText('NVIDIA CORP')).toBeTruthy()
+  })
+
+  /**
+   * Reported by the owner: pressing Breakdown showed the positions "below the whole block
+   * of holdings" rather than under the row. It did — the panel was rendered outside the
+   * card that holds the table, so at the default Top 50 the answer landed after row 50 and
+   * both footnotes, and the button looked inert.
+   *
+   * **These assert placement, not presence.** The obvious check — is "Held directly as" on
+   * the page — passed against the bug for the whole time it existed, because the panel was
+   * always in the document, just in the wrong place.
+   */
+  it('opens the breakdown inside the row that asked for it', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('ALPHABET INC.')
+    const rows = () => Array.from(document.querySelectorAll('tbody tr'))
+    expect(rows().some((r) => r.textContent?.includes('Held directly as'))).toBe(false)
+
+    const alphabetRow = rows().find((r) => r.textContent?.includes('ALPHABET INC.'))!
+    fireEvent.click(within(alphabetRow as HTMLElement).getByRole('button', { name: 'Breakdown' }))
+
+    // The panel is the row IMMEDIATELY after Alphabet's, not somewhere further down.
+    const after = rows()
+    const owner = after.findIndex((r) => r.textContent?.includes('ALPHABET INC.'))
+    expect(after[owner + 1]?.textContent).toContain('Held directly as')
+    expect(after[owner + 1]?.textContent).toContain('XNAS')
+  })
+
+  it('opens the breakdown for the row pressed, and only that row', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('NVIDIA CORP')
+    const rows = () => Array.from(document.querySelectorAll('tbody tr'))
+    const nvidiaRow = rows().find((r) => r.textContent?.includes('NVIDIA CORP'))!
+    fireEvent.click(within(nvidiaRow as HTMLElement).getByRole('button', { name: 'Breakdown' }))
+
+    // Nvidia is fund-only, so its panel names the fund and no direct listing.
+    const after = rows()
+    const owner = after.findIndex((r) => r.textContent?.includes('NVIDIA CORP'))
+    expect(after[owner + 1]?.textContent).toContain('Held through funds')
+    expect(after[owner + 1]?.textContent).not.toContain('Held directly as')
+    // Exactly one panel open — the toggle is not additive.
+    expect(after.filter((r) => r.textContent?.includes('Held through funds'))).toHaveLength(1)
+  })
+
+  it('closes it again from the same control', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('ALPHABET INC.')
+    const rowFor = (name: string) =>
+      Array.from(document.querySelectorAll('tbody tr')).find((r) =>
+        r.textContent?.includes(name),
+      ) as HTMLElement
+
+    fireEvent.click(within(rowFor('ALPHABET INC.')).getByRole('button', { name: 'Breakdown' }))
+    const hide = within(rowFor('ALPHABET INC.')).getByRole('button', { name: 'Hide' })
+    expect(hide.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(hide)
+    expect(document.body.textContent).not.toContain('Held directly as')
   })
 
   it('names the truncated tail rather than leaving the percentages short', async () => {

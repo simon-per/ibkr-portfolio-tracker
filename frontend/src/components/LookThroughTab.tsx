@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -276,68 +276,65 @@ function FundReasons({ funds }: { funds: LookthroughFundCoverage[] }) {
   )
 }
 
-function CompanyDrillDown({
+/**
+ * One company's breakdown, rendered INSIDE its own table row.
+ *
+ * It used to be a standalone `Card` with a title and a Close button, rendered after the
+ * whole table — so pressing Breakdown on row 3 of 50 put the answer below row 50 and the
+ * footnotes, one to three screens away, and the button looked inert. `DataTable`'s
+ * `expandedRow` slot is what made a row-level home for it possible.
+ *
+ * The Card chrome went with the move rather than being kept: the row above it already
+ * names the company and carries its value and percentage, and the button that opened it
+ * already says **Hide**. A header repeating all three plus a second dismiss control is
+ * noise once the panel is adjacent to its row.
+ */
+function CompanyBreakdown({
   row,
-  onClose,
   formatCurrency,
 }: {
   row: LookthroughCompanyRow
-  onClose: () => void
   formatCurrency: (v: number) => string
 }) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div>
-          <CardTitle className="text-sm">{row.name}</CardTitle>
-          <CardDescription>
-            {formatCurrency(row.value_eur)} · {row.pct_of_portfolio.toFixed(2)}% of the
-            portfolio
-          </CardDescription>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close breakdown">
-          Close
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        {row.listings.length > 0 && (
-          <p>
-            <span className="text-muted-foreground">Held directly as </span>
-            {row.listings.join(', ')}
-            <span className="text-muted-foreground">
-              {' '}
-              — {formatCurrency(row.direct_value_eur)}
-            </span>
-          </p>
-        )}
-        {row.via_funds.length > 0 && (
-          <div>
-            <p className="text-muted-foreground">Held through funds:</p>
-            <ul className="mt-1 space-y-1">
-              {row.via_funds.map((fund) => (
-                <li key={fund.fund_isin} className="flex justify-between gap-4">
-                  <span>{fund.symbol ?? fund.fund_isin}</span>
-                  <span className="text-muted-foreground">
-                    {fund.weight_pct.toFixed(2)}% of the fund ·{' '}
-                    {formatCurrency(fund.value_eur)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">
-          {row.isins.length > 1
-            ? `${row.isins.length} ISINs folded into this company: ${row.isins.join(', ')}`
-            : `ISIN ${row.isins[0] ?? '—'}`}
+    <div className="space-y-3 text-sm">
+      {row.listings.length > 0 && (
+        <p>
+          <span className="text-muted-foreground">Held directly as </span>
+          {row.listings.join(', ')}
+          <span className="text-muted-foreground">
+            {' '}
+            — {formatCurrency(row.direct_value_eur)}
+          </span>
         </p>
-        {row.identity_conflicts.map((conflict) => (
-          <p key={conflict} className="text-xs text-amber-700 dark:text-amber-400">
-            {conflict}
-          </p>
-        ))}
-      </CardContent>
-    </Card>
+      )}
+      {row.via_funds.length > 0 && (
+        <div>
+          <p className="text-muted-foreground">Held through funds:</p>
+          <ul className="mt-1 space-y-1">
+            {row.via_funds.map((fund) => (
+              <li key={fund.fund_isin} className="flex justify-between gap-4">
+                <span>{fund.symbol ?? fund.fund_isin}</span>
+                <span className="text-muted-foreground">
+                  {fund.weight_pct.toFixed(2)}% of the fund ·{' '}
+                  {formatCurrency(fund.value_eur)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {row.isins.length > 1
+          ? `${row.isins.length} ISINs folded into this company: ${row.isins.join(', ')}`
+          : `ISIN ${row.isins[0] ?? '—'}`}
+      </p>
+      {row.identity_conflicts.map((conflict) => (
+        <p key={conflict} className="text-xs text-amber-700 dark:text-amber-400">
+          {conflict}
+        </p>
+      ))}
+    </div>
   )
 }
 
@@ -357,7 +354,21 @@ export function LookThroughTab() {
     [formatCurrency],
   )
   const coverageColumns = useMemo(() => fundColumns({ formatCurrency }), [formatCurrency])
-  const selectedRow = data?.companies.find((r) => r.company_key === selected) ?? null
+
+  // The treemap and the table's Breakdown button share `selected`, so a tile click now
+  // expands a row that may be far below the fold — the tile would look inert, which is the
+  // very bug this change fixes arriving by the other route. So bring the panel into view.
+  //
+  // Two details are load-bearing. `inline: 'nearest'` because the row lives inside
+  // `ScrollableTable`'s horizontal scroll container and the default would yank the table
+  // sideways. And the OPTIONAL call, because jsdom implements no `scrollIntoView` at all —
+  // the same gap that makes `useMediaQuery` fall back to desktop — so an unguarded call
+  // throws in every test that renders this tab.
+  const breakdownRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!selected) return
+    breakdownRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [selected])
 
   const sectorGroups = useMemo(() => (data ? buildExposureGroups(data) : []), [data])
   const partition = useMemo(() => (data ? buildPartition(data) : []), [data])
@@ -550,6 +561,7 @@ export function LookThroughTab() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        aria-expanded={selected === row.company_key}
                         onClick={() =>
                           setSelected(
                             selected === row.company_key ? null : row.company_key,
@@ -559,6 +571,16 @@ export function LookThroughTab() {
                         {selected === row.company_key ? 'Hide' : 'Breakdown'}
                       </Button>
                     )}
+                    // Beneath its own row, which is the whole point of this slot: the panel
+                    // used to render after the entire card, so the answer to "what is inside
+                    // Alphabet" appeared below the other 49 rows and the footnotes.
+                    expandedRow={(row) =>
+                      row.company_key === selected ? (
+                        <div ref={breakdownRef}>
+                          <CompanyBreakdown row={row} formatCurrency={formatCurrency} />
+                        </div>
+                      ) : null
+                    }
                   />
                   {data.other_companies_count > 0 && (
                     <p className="text-xs text-muted-foreground">
@@ -577,14 +599,6 @@ export function LookThroughTab() {
               )}
             </CardContent>
           </Card>
-
-          {selectedRow && (
-            <CompanyDrillDown
-              row={selectedRow}
-              onClose={() => setSelected(null)}
-              formatCurrency={formatCurrency}
-            />
-          )}
 
           {data.funds.length > 0 && (
             <Card>
