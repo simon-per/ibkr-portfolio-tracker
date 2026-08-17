@@ -2134,7 +2134,7 @@ rows, and every figure shrinks silently. On top of that `replace_basket` refuses
 row count collapses below half the stored one, or whose as-of moves backwards, keeping what is
 already there. Both overridable with `--force` for a genuine index reconstitution.
 
-**Nine things real files taught us, all now pinned by tests.** The first four came off the
+**Ten things real files taught us, all now pinned by tests.** The first four came off the
 European feeds, the rest off the four US ones:
 
 - **A negative weight is refused only on an *invested* row.** EMIM publishes five negative cash
@@ -2178,6 +2178,23 @@ European feeds, the rest off the four US ones:
 - **A declared count is worth checking wherever an issuer publishes one.** Invesco's
   `totalNumberOfHoldings` is the same guard as Vanguard's `size` — a truncated response whose
   weights still sum plausibly is the shape that gets through everything else.
+- **And the pages of one paginated read must agree with each other about it.** Vanguard serves
+  from a cluster whose nodes can hold different snapshots, so VT's 21-request walk came back
+  **13 pages saying 10,055 holdings and 8 saying 10,032** — twice in a row, on 2026-08-17. The
+  damage is wildly out of proportion to those 23: ~8,000 of VT's rows carry a **0.00% weight**
+  and therefore no stable sort order between snapshots, so every page boundary crossing one
+  duplicated a chunk and dropped another. Measured: 10,032 rows carrying **9,114 distinct
+  holdings**, against 10,025 in the stored basket — ~900 companies would have vanished from a
+  line that is ~11% of the book once VWCE's proxy is counted, with the weights still summing to
+  a plausible 91.60%. It is refused as its own named fault, because the count check caught this
+  only by the luck of the two totals differing, and "a page is missing" sends the operator
+  hunting something that was never missing. **Pagination cannot be avoided** — `count` above 500
+  returns a non-JSON body, not a capped page — and the retry is deliberately manual, since a
+  cluster that stays split would spend 21 requests an attempt forever while the previous basket
+  is kept anyway. Two snapshots with equal totals and different membership would still get
+  through; that is recorded rather than guarded, because the legitimate duplicate rate (7 rows
+  in 10,032, dual listings like BAM and BEPC) is measured and the torn one was 918, but one
+  observation is not enough to calibrate a threshold on.
 
 `app/cli/resolve_identities.py` resolves identity: a CLI rather than a route, following the
 precedent that there is no upload endpoint for Flex XML and no route for price import. Being a
@@ -2699,6 +2716,7 @@ Tests: `tests/test_currency_fallback.py`.
 | A look-through row is named `台灣積體電路製造…` or similar | GLEIF's legal name is the company's real one in its own script, and it is preferred only when Latin. That row has no OpenFIGI name cached — re-run `resolve_identities`, which fills `figi_name` |
 | Look-through total ≠ the Market Value card | It cannot be: both come from `get_positions_breakdown`, and `test_api_smoke.py` pins them equal. If they differ, one of them is not the deployed build — check `/health`'s commit |
 | A look-through fund reads `Basket rejected` | Its stored basket accounts for less than `MIN_BASKET_COVERAGE_PCT` (80) of the fund, which is a half-parsed file rather than a fund holding mostly cash. Re-import it; the previous basket is kept on a refused import |
+| A VT import refuses with *the pages disagree about how many holdings* | A torn read — Vanguard answered the 21-request walk from cluster nodes holding different snapshots. **Not** a missing page, and not something to point `--force` at: `--force` overrides the row-collapse and backwards-as-of refusals in `replace_basket`, not a parse error. Re-fetch and re-import. The stored basket is untouched meanwhile and VT publishes month-end, so there are weeks of slack before it matters |
 | Beta is blank with a benchmark selected | Fewer than the 20 flow-free days a regression needs; the count so far is in the footnote. Flow days are excluded by design |
 | Sharpe, Volatility and Sortino all read `—` on a short range | Expected, and now consistent: all three need 5 daily returns. MTD in the first days of a month gives 2–3. Sharpe used to show `0.00` here instead, which looked like a measurement |
 | Top 5 Weight reads `—` / *No priced positions* | Nothing held resolved a price, so there is no weight to concentrate. Deliberately not `0.0%`, which the tone ladder would have drawn **green** — a reassuring all-clear from no data |

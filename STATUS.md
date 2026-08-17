@@ -367,6 +367,29 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
+## Ran on production 2026-08-17 — the runbook, and what it caught
+
+**Coverage is 95.14% and DBPG is the only fund not looked through.** Fetched all 10 baskets
+(0 failed) and imported 9; SMH, SOXQ, GRID and QTUM stored for the first time. Identity
+resolution is running detached in the container (~37 min, GLEIF-bound) — **do not deploy until
+it finishes**, because `docker compose down` kills it.
+
+**VT's import refused, and the guard earned its keep.** Vanguard serves that endpoint from a
+cluster holding different snapshots: the 21-page walk came back 13 pages declaring 10,055
+holdings and 8 declaring 10,032, twice in a row. Because ~8,000 of VT's rows have a 0.00%
+weight and no stable order between snapshots, the assembled set carried **9,114 distinct
+holdings in 10,032 rows** against 10,025 in the stored basket — ~900 companies would have
+disappeared from ~11% of the book, with weights summing to a plausible 91.60%.
+
+Nothing is lost: the refusal keeps the 2026-06-30 basket, and VT publishes month-end so there
+is no urgency. `parse_vanguard_us` now refuses a size disagreement as **its own named fault**
+rather than reporting "a page is missing", which sends the operator hunting something that was
+never missing. Committed, **not pushed** — see below.
+
+**`OPENFIGI_API_KEY` is still not on the VPS**, and it matters less than this file implied: the
+run needs it for 105 non-ISIN identifiers, ~11 keyless requests. GLEIF's one-request-per-ISIN
+is the whole 37 minutes.
+
 ## Shipped 2026-08-17 — a borrowed basket, and an 8% shortfall that was never cash
 
 Two asks from the owner, plus the answer to a question that turned out to be a documentation gap.
