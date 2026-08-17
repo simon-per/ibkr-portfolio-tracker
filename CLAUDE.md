@@ -313,9 +313,14 @@ before widening or narrowing it again:
   four days before that warning fires. `find_flex_generation_gap` (2 ET days) is the one that
   fires in time; see *Sync schedule*.
 
-Prior tax years need a one-off period change (e.g. 2025), then set back. Ingestion is idempotent
-(upserts keyed on `ib_key`), so re-syncing is safe — which is also the recovery if a bounded window
-ever *does* miss something: download a wider statement from Client Portal and ingest it offline.
+Prior tax years would need a one-off period change, then setting back — but **for this account
+there is nothing to reach**: the owner did not trade at IBKR before 2026. The holdings arrived by
+in-kind transfer from Trading 212, Scalable Capital and Trade Republic in early 2026, so IBKR has no
+2025 trades, dividends or cash transactions to generate whatever the period says. Widening the window
+for a prior year is therefore only ever useful for a *later* account, not this one — see *Prior years
+are permanently estimates here*. Ingestion is idempotent (upserts keyed on `ib_key`), so re-syncing is
+safe — which is also the recovery if a bounded window ever *does* miss something: download a wider
+statement from Client Portal and ingest it offline.
 
 **The rolling window ends *yesterday*, so today's activity cannot be ingested today.** "Last N
 Calendar Days" means the N days ending on the last *completed* statement day, not the N up to now.
@@ -1081,7 +1086,7 @@ authoritative for the whole history. This design took three attempts; the reason
 `money_in_method` reports which applied: `deposits` \| `spliced` \| `deployed`.
 
 Lot cost basis reaches back through the pre-IBKR years because the early-2026 portfolio transfer from
-Scalable Capital and Trading 212 carried every lot across with its **original `openDateTime` and original
+Trading 212, Scalable Capital and Trade Republic carried every lot across with its **original `openDateTime` and original
 cost basis** — verified, not assumed: securities have as many distinct `costBasisPrice` values as they
 have lots (DBPG 75 lots / 72 prices, XNAS 110/107, XAIX 54/54), which a transfer-date re-basing could not
 produce. Lots then survive indefinitely because reconciliation deletes **open** lots only and splits a
@@ -1123,8 +1128,10 @@ Two details. It keys on the earliest row of **any** type, not the earliest depos
 an in-kind transfer can trade before any cash is deposited, and anchoring on the first deposit would
 leave that window on the lot side where a rotation inflates it. A transfer is never money in, but it *is*
 evidence the account existed. And the clamp is applied at **read** time rather than stored, so it needs no
-migration, a later YTD sync can't undo it, and a prior-year import — planned for the 2025 tax backfill —
-can't silently move the boundary back into an era the ledger has nothing for.
+migration, a later YTD sync can't undo it, and a prior-year import can't silently move the boundary
+back into an era the ledger has nothing for. (No such import is planned any more — the 2025 backfill
+was closed on 2026-08-17 because IBKR holds nothing from before 2026 for this account. The clamp still
+earns its place: it is what covers the weeks of January 2026 before the ledger's first row.)
 
 Do **not** "simplify" this by splicing at the transfer date instead. Deposits into the new account
 routinely start *before* the positions arrive, and those deposits fund purchases made after it; a
@@ -2724,7 +2731,7 @@ Tests: `tests/test_currency_fallback.py`.
 | The Sync button says *Already up to date* | Working as intended, and not an error. IBKR issues about one statement per US-Eastern day; today's has landed, so there is nothing to fetch. The panel says when the next one becomes available. *Sync anyway* is only worth pressing after editing the Flex Query in the portal — the one thing that resets the daily generation — because a forced refusal spends `Code=1025` budget |
 | A scheduled run reads `skipped` in the history | Two different causes, told apart by `reason`. `already_generated_today` is the 00:00 Berlin slot correctly doing nothing because 18:00 succeeded — the normal daily state. `pipeline_busy` is a `single_flight` collision, where the next slot recovers freshness |
 | Sync 200 but 0 trades | Flex Query section/period not covering them |
-| `dividend_source` stuck on `yfinance_estimate` | No `<CashTransactions>` ingested — check the section + Withholding Tax option |
+| `dividend_source` stuck on `yfinance_estimate` | For **2026 or later**: no `<CashTransactions>` ingested — check the section + Withholding Tax option. For **2025 or earlier**: correct and permanent, not a gap. This account did not use IBKR before 2026 (everything transferred in-kind from Trading 212 / Scalable Capital / Trade Republic), so no Flex period can produce rows that were never at IBKR. Don't change the query period chasing it |
 | Yahoo 404/429 | **Stop.** Wait 30-60 min. Check `yfinance >= 1.1.0` |
 | A position is missing from the portfolio | Check `taxlots_skipped` + `warnings[]` on the sync run — usually a currency neither FX provider covers |
 | The value chart declines toward zero over recent days | The chart says so itself now — a yellow notice above it names the day and holding counts. It means `unpriced_holdings > 0`: holdings whose price fell outside the 14-day lookback are counted at cost but not at value, and past 15 days every one drops out and it reads −100%. The cause is a stalled market-data sync, not a loss. The risk metrics already exclude those days |
@@ -2883,6 +2890,12 @@ Cross-checked against IBKR via the MCP connector: IBKR lists **282 YTD trades = 
 conversions, correctly filtered out) **+ 64 `STK`**, and the 64 match ours symbol-for-symbol. Same-day,
 same-price pairs (e.g. NU 7 @ 17.205 twice on 2026-02-04) are **genuine separate fills**, not duplicates.
 
-**Prior years remain estimates** — the rolling 30-day query can't reach them. Backfilling 2025 needs a one-off period
-change in the Flex Query (see the tax section); until then 2025 correctly reports
-`dividend_source='yfinance_estimate'`.
+**Prior years are permanently estimates here, and that is the correct answer rather than a pending
+task.** The rolling window cannot reach them, but widening it would not help either: **the owner did
+not use IBKR before 2026.** Everything came across by in-kind transfer from Trading 212, Scalable
+Capital and Trade Republic in early 2026, so IBKR holds no 2025 executions, dividends or cash
+transactions at all — a 2025 statement would generate empty. So 2025's `dividend_source =
+'yfinance_estimate'` is not a gap awaiting a backfill; it is the only source that exists, and the flag
+is doing exactly its job by saying so. Closed by the owner on 2026-08-17: **do not re-open it, and do
+not change the Flex Query period chasing it.** (A pre-2026 realized-gains or Steuerwert figure has the
+same ceiling, and for the same reason.)

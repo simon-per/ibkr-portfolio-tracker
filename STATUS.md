@@ -194,12 +194,15 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   was served by the public `/api/scheduler/history` until the 2026-07-28 scrub. `app/redact.py` now
   redacts on write *and* on read, so it cannot recur — but redaction cannot un-leak what was already
   reachable. Only Simon can rotate it (IBKR portal → Reports → Settings → Flex Web Service).
-- **Backfill the 2025 tax year.** The Flex Query period cannot reach it, so 2025 correctly reports
-  `dividend_source='yfinance_estimate'`. Needs a one-off period change on the query (or a browser
-  download ingested via `app/cli/ingest_flex_xml.py`), then set it back to the rolling window.
-  Ingestion is idempotent, so this is safe to repeat. The UI no longer hardcodes 2024 as the earliest tax year —
-  both it and the chart's ALL range read `min(taxlots.open_date)` — so the backfilled year appears
-  on its own once ingested.
+- **The 2025 tax-year backfill is CLOSED — there is nothing at IBKR to backfill.** The owner
+  confirmed on 2026-08-17 that they did not use IBKR before 2026: the holdings arrived by in-kind
+  transfer from Trading 212, Scalable Capital and Trade Republic in early 2026. So IBKR holds no 2025
+  executions, dividends or cash transactions, and a 2025 Flex statement would generate empty. 2025's
+  `dividend_source='yfinance_estimate'` is the only source that exists, and the flag saying so is the
+  feature working. **Do not change the Flex Query period chasing this**, and do not re-raise it as an
+  open task. Pre-2026 realized gains and Steuerwert have the same ceiling for the same reason; the lot
+  cost basis that *does* reach back came across with the transfer, which is why contributions splice at
+  `coverage_from` rather than trusting the ledger for those years.
 
 ## Watching
 
