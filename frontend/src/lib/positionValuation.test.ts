@@ -38,7 +38,12 @@ describe('nothing else spells this rule out for itself', () => {
   // `?raw` rather than `node:fs`, following tableFamily.test.tsx and breakpoints.test.ts:
   // tsconfig.app.json restricts `types` to `vite/client`, so the node builtins are not
   // typed here and importing them fails `tsc -b` while the test itself passes.
-  const sources = import.meta.glob('./*.ts', {
+  //
+  // Components are scanned too, not just `lib/`. The three consumers today are all pure
+  // modules by convention — the interesting mistakes here are numeric — but a card
+  // deciding for itself which position counts is exactly the fourth copy this is for, and
+  // scoping the guard to where the existing copies happen to live would miss it.
+  const sources = import.meta.glob(['./*.ts', '../components/**/*.tsx'], {
     query: '?raw',
     import: 'default',
     eager: true,
@@ -48,7 +53,7 @@ describe('nothing else spells this rule out for itself', () => {
   const code = (source: string) =>
     source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 
-  it('has no second definition of the unpriced predicate in lib/', () => {
+  it('has no second definition of the unpriced predicate anywhere', () => {
     const offenders = Object.entries(sources)
       .filter(([path]) => !path.includes('positionValuation') && !path.includes('.test.'))
       .filter(([, source]) => /market_price\s*===\s*null/.test(code(source)))
@@ -64,8 +69,11 @@ describe('nothing else spells this rule out for itself', () => {
 
   it('is actually scanning something, so the check above cannot pass vacuously', () => {
     // A glob that matches nothing satisfies the assertion above trivially — the same
-    // shape as the Sharpe clamp test that asserted `abs(0) <= 10`.
-    expect(Object.keys(sources).length).toBeGreaterThan(5)
-    expect(Object.keys(sources).some((p) => p.includes('rebalance'))).toBe(true)
+    // shape as the Sharpe clamp test that asserted `abs(0) <= 10`. Both halves of the
+    // pattern are pinned, since one silently matching nothing is the likelier slip.
+    const paths = Object.keys(sources)
+    expect(paths.some((p) => p.includes('rebalance'))).toBe(true)
+    expect(paths.some((p) => p.includes('/components/'))).toBe(true)
+    expect(paths.length).toBeGreaterThan(20)
   })
 })
