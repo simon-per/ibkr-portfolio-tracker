@@ -258,6 +258,16 @@ export interface PortfolioAllocationResponse {
   geographic_allocation: Record<string, AllocationCategory>;
   asset_type_allocation: Record<string, AllocationCategory>;
   total_market_value_eur: number;
+  /**
+   * Holdings excluded from all three breakdowns because they could not be valued.
+   *
+   * Above 0 means these charts describe less than the portfolio while labelling every
+   * slice "% of portfolio" — and the percentages still sum to 100, so nothing about the
+   * picture gives it away. Optional: absent means a backend older than 2026-08-17, read
+   * as complete, the same choice the timeline's own field makes.
+   */
+  unpriced_holdings?: number;
+  unpriced_symbols?: string[];
 }
 
 /**

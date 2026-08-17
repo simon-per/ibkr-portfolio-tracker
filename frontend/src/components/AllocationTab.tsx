@@ -508,6 +508,32 @@ export function AllocationTab() {
         </Card>
       )}
 
+      {/* Completeness of all three breakdowns below. Above the charts and outside every
+          collapsible, the rule MonthlyReturnsHeatmap and PerformanceAttribution both had
+          to learn: the figure it qualifies is on screen either way.
+
+          This one hides especially well. Every slice is labelled "% of portfolio" and the
+          percentages still sum to 100, because they are shares of the value that could be
+          *priced* — so an unvaluable holding is not a visible zero, it is an absence from a
+          picture that looks complete. */}
+      {(allocation?.unpriced_holdings ?? 0) > 0 && (
+        <div
+          role="alert"
+          className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+        >
+          <span className="font-medium">
+            These charts exclude {allocation!.unpriced_holdings}{' '}
+            {allocation!.unpriced_holdings === 1 ? 'holding' : 'holdings'} with no usable
+            price
+            {allocation!.unpriced_symbols?.length
+              ? ` (${allocation!.unpriced_symbols.join(', ')})`
+              : ''}
+          </span>
+          {' '}— every percentage below is a share of what could be valued, not of the whole
+          portfolio. Check the market-data sync's warnings and the position's ticker mapping.
+        </div>
+      )}
+
       {/* Sync Status */}
       {needsSync && (
         <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950">
