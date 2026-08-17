@@ -169,10 +169,14 @@ async def test_a_fully_categorised_portfolio_grows_no_unknown_bucket(db):
 @pytest.mark.asyncio
 async def test_an_unpriced_holding_does_not_break_the_percentages(db):
     """
-    A holding the backend cannot value takes a 0% weight — `market_value_eur` is
-    0.00 — so it must not stop the remaining charts adding up. This is the guard
-    on the guard: bucketing it under 'Unknown' with a zero weight is fine, adding
-    a NaN or dividing by a zero total is not.
+    A holding the backend cannot value must not stop the remaining charts adding up:
+    adding a NaN or dividing by a zero total is the failure this guards.
+
+    **Note what summing to 100 does NOT prove**, which took until 2026-08-17 to say out
+    loud: the three breakdowns sum to exactly 100 whether the unvaluable holding is
+    excluded or included at a 0% weight, so this assertion is blind to the holding being
+    silently absent from a chart labelling every slice "% of portfolio". Here, summing to
+    100 is what being wrong looks like — see the test below, which is the missing half.
     """
     await _hold(db, symbol="PRICED", isin="US0000000001", conid=1,
                 sector="Technology", country="United States")
@@ -198,15 +202,104 @@ async def test_an_unpriced_holding_does_not_break_the_percentages(db):
 
 
 @pytest.mark.asyncio
+async def test_an_unpriced_holding_is_named_rather_than_silently_absent(db):
+    """
+    The missing half of the test above.
+
+    Every slice on this tab is labelled "% of portfolio", and the percentages are shares of
+    the value that could be *priced* — so an unvaluable holding does not render as a visible
+    zero, it renders as an **absence** from a picture that still adds to 100. That is the
+    same failure the look-through reports as `unvaluable_positions` and the summary card as
+    `unpriced_holdings`, reaching the one surface in that family with no signal at all.
+
+    Live rather than theoretical: three newly bought ETFs were unpriced for hours on
+    2026-08-07, and for that window these three charts quietly described a smaller
+    portfolio than the one on the card above them.
+    """
+    await _hold(db, symbol="PRICED", isin="US0000000001", conid=1,
+                sector="Technology", country="United States")
+    unpriced = Security(
+        isin="US0000000002", symbol="DARK", description="No price on record",
+        currency="EUR", conid=2, asset_category="STK", exchange="NASDAQ",
+        sector="Healthcare", country="Germany", asset_type="Stock",
+    )
+    db.add(unpriced)
+    await db.flush()
+    db.add(TaxLot(
+        security_id=unpriced.id, open_date=date.today() - timedelta(days=200),
+        quantity=Decimal("10"), cost_basis=Decimal("500"),
+        price_per_unit=Decimal("50"), currency="EUR",
+        cost_basis_eur=Decimal("500"), is_open=True,
+    ))
+    await db.commit()
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    assert allocation["unpriced_holdings"] == 1
+    assert allocation["unpriced_symbols"] == ["DARK"]
+    # Excluded from both sides rather than carried at 0.00, matching the look-through and
+    # the forward yield: a zero-weight row in a chart legend is noise, and the count is
+    # what actually informs.
+    everywhere = [
+        p["symbol"]
+        for breakdown in BREAKDOWNS
+        for cat in allocation[breakdown].values()
+        for p in cat["positions"]
+    ]
+    assert "DARK" not in everywhere
+    # ...and its sector must not have been invented into existence by a zero-weight row.
+    assert "Healthcare" not in allocation["sector_allocation"]
+
+
+@pytest.mark.asyncio
+async def test_a_portfolio_with_nothing_priced_still_reports_what_it_dropped(db):
+    """The early-return path needs the field too, or the one case where the charts are
+    entirely empty is the one that explains nothing."""
+    unpriced = Security(
+        isin="US0000000003", symbol="DARK", description="No price on record",
+        currency="EUR", conid=3, asset_category="STK", exchange="NASDAQ",
+        sector=None, country=None, asset_type="Stock",
+    )
+    db.add(unpriced)
+    await db.flush()
+    db.add(TaxLot(
+        security_id=unpriced.id, open_date=date.today() - timedelta(days=200),
+        quantity=Decimal("10"), cost_basis=Decimal("500"),
+        price_per_unit=Decimal("50"), currency="EUR",
+        cost_basis_eur=Decimal("500"), is_open=True,
+    ))
+    await db.commit()
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    assert allocation["total_market_value_eur"] == 0.0
+    assert allocation["unpriced_holdings"] == 1
+    assert allocation["unpriced_symbols"] == ["DARK"]
+
+
+@pytest.mark.asyncio
+async def test_a_fully_priced_portfolio_reports_no_omission(db):
+    """The other side, so the field cannot be a hardcoded count."""
+    await _hold(db, symbol="PRICED", isin="US0000000001", conid=1,
+                sector="Technology", country="United States")
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    assert allocation["unpriced_holdings"] == 0
+    assert allocation["unpriced_symbols"] == []
+
+
+@pytest.mark.asyncio
 async def test_a_fund_is_a_fund_in_all_three_charts(db):
     """
     The three charts must not answer "is this a fund?" by different rules.
 
-    Sector and geography branch on `is_known_etf(symbol)` — a live table lookup that
-    needs no sync. The asset-type chart read `securities.asset_type`, which is written
-    *only* by `POST /api/allocation/sync`; `sync_helper` never writes it and nothing
-    schedules that route, so an IBKR-ingested fund keeps the column default "Stock"
-    indefinitely.
+    All three now read one `allocation_for_fund_isin` lookup — a live table lookup that
+    needs no sync, keyed on ISIN because a ticker is not an identity (see
+    `test_fundness_predicate.py`). The asset-type chart read `securities.asset_type`,
+    which is written *only* by `POST /api/allocation/sync`; `sync_helper` never writes it
+    and nothing schedules that route, so an IBKR-ingested fund keeps the column default
+    "Stock" indefinitely.
 
     The result was one holding described two ways on one tab: a Stock in the asset-type
     chart, and simultaneously an ETF spread across eleven sectors a few pixels below.

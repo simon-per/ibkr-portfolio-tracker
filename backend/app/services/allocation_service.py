@@ -13,7 +13,7 @@ import yfinance as yf
 
 from app.models.security import Security
 from app.services.yahoo_rate_limit import is_rate_limit
-from app.etf_mappings import get_etf_allocation, is_known_etf
+from app.etf_mappings import allocation_for_fund_isin
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,11 @@ class AllocationService:
         """
         logger.info(f"Fetching allocation for {security.symbol}...")
 
-        # Check if it's a known ETF
-        if is_known_etf(security.symbol):
-            etf_data = get_etf_allocation(security.symbol)
+        # Check if it's a known fund — by ISIN, never by ticker. A symbol lookup would
+        # write `asset_type='ETF'` onto any holding whose ticker happens to collide with a
+        # row in the table, and that write is persistent.
+        etf_data = allocation_for_fund_isin(security.isin)
+        if etf_data:
             logger.info(f"Using ETF mapping for {security.symbol}")
             return {
                 'success': True,
@@ -235,11 +237,26 @@ class AllocationService:
         """
         Get current portfolio allocation breakdown by sector and geography.
         Returns weighted percentages with position-level detail for drill-down.
+
+        **A holding that cannot be valued is excluded and named.** It used to be included
+        at a 0% weight, which is the quietest form of this app's most repeated failure:
+        every slice is labelled "% of portfolio", the three breakdowns still sum to exactly
+        100, and the missing holding is simply *absent* from a picture that looks complete.
+        `test_an_unpriced_holding_does_not_break_the_percentages` pinned the sums and could
+        not see it — summing to 100 is what being wrong looks like here.
+
+        Same predicate and same exclude-and-count rule as `LookthroughService`'s
+        `_split_by_valuability` and the forward yield: `market_value_eur > 0`, which covers
+        both ways the backend fails to value a holding (no price, and no FX rate for the
+        price's currency) without the client-side two-clause form.
         """
         from app.services.portfolio_service import PortfolioService
 
         portfolio_service = PortfolioService(self.db)
-        positions = await portfolio_service.get_positions_breakdown()
+        all_positions = await portfolio_service.get_positions_breakdown()
+
+        positions = [p for p in all_positions if p['market_value_eur'] > 0]
+        unvaluable = [p for p in all_positions if p['market_value_eur'] <= 0]
 
         if not positions:
             return {
@@ -247,6 +264,8 @@ class AllocationService:
                 'geographic_allocation': {},
                 'asset_type_allocation': {},
                 'total_market_value_eur': 0.0,
+                'unpriced_holdings': len(unvaluable),
+                'unpriced_symbols': [p['symbol'] for p in unvaluable],
             }
 
         total_value = sum(pos['market_value_eur'] for pos in positions)
@@ -304,23 +323,28 @@ class AllocationService:
             #
             # The look-through table wins over the column, because otherwise this chart
             # and the two below answer "is this a fund?" by different rules. They decide
-            # it from `is_known_etf(symbol)` alone — a live lookup needing no sync — while
-            # `securities.asset_type` is written *only* by `POST /api/allocation/sync`,
-            # which nothing schedules. `sync_helper` never writes it, so an IBKR-ingested
-            # fund carries the column default "Stock" indefinitely: it would be a Stock
-            # here and an ETF distributed across eleven sectors a few pixels away, on the
-            # same tab. Every entry declares `asset_type: "ETF"` and
-            # `test_etf_mappings.py` pins that, so the table is the better source.
-            etf_entry = get_etf_allocation(sym)
+            # it from a live table lookup needing no sync, while `securities.asset_type` is
+            # written *only* by `POST /api/allocation/sync`, which nothing schedules.
+            # `sync_helper` never writes it, so an IBKR-ingested fund carries the column
+            # default "Stock" indefinitely: it would be a Stock here and an ETF
+            # distributed across eleven sectors a few pixels away, on the same tab. Every
+            # entry declares `asset_type: "ETF"` and `test_etf_mappings.py` pins that, so
+            # the table is the better source.
+            #
+            # **Resolved once, by ISIN, and reused by all three charts.** These were three
+            # separate symbol-keyed lookups, which is two problems: a ticker is not an
+            # identity (the UCITS SMH held here shares its ticker with the US one, and a
+            # *stock* colliding with a row would be spread across eleven sectors as if it
+            # were a fund), and three lookups is three chances for the charts to disagree
+            # about one holding — which they have already done twice.
+            etf_data = allocation_for_fund_isin(security.isin)
             asset_type = (
-                etf_entry['asset_type'] if etf_entry else security.asset_type
+                etf_data['asset_type'] if etf_data else security.asset_type
             ) or 'Unknown'
             _add_to_category(asset_alloc, asset_type, pos_weight, pos_value, sym, desc)
 
-            # ETFs: distribute across sectors/regions
-            if is_known_etf(security.symbol):
-                etf_data = get_etf_allocation(security.symbol)
-
+            # Funds: distribute across sectors/regions
+            if etf_data:
                 for sector, pct in etf_data['sector'].items():
                     w = pos_weight * (pct / 100)
                     mv = pos_value * (pct / 100)
@@ -371,4 +395,10 @@ class AllocationService:
             'geographic_allocation': _finalize(geo_alloc),
             'asset_type_allocation': _finalize(asset_alloc),
             'total_market_value_eur': round(total_value, 2),
+            # The completeness of all three breakdowns above. Every percentage is a share
+            # of `total_market_value_eur`, which is the value that could be *priced* — so
+            # anything above 0 means these charts describe less than the portfolio while
+            # labelling each slice "% of portfolio".
+            'unpriced_holdings': len(unvaluable),
+            'unpriced_symbols': [p['symbol'] for p in unvaluable],
         }

@@ -374,19 +374,30 @@ ETF_ALLOCATIONS = {
 
 def get_etf_allocation(symbol: str) -> dict:
     """
-    Get allocation data for a known ETF.
-    Returns None if ETF is not in our mapping.
+    This table's own row for a symbol, or None.
+
+    **Not a fundness predicate for a holding.** It answers "does the table have a row
+    under this label", which is only the same question when the label is an identity —
+    and a ticker is not. Reach a *holding's* row through `allocation_for_fund_isin`;
+    this exists for that function and for tests over the table itself.
     """
     return ETF_ALLOCATIONS.get(symbol)
 
 
 def is_known_etf(symbol: str) -> bool:
     """
-    Check if a symbol is a known ETF in our mappings.
+    Does the table have a row under this symbol?
 
-    Prefer `is_known_etf_isin` for anything new. A symbol is not an identity — see the
-    `SMH` collision in the module docstring — and this form survives only because
-    `allocation_service` merges its output by symbol anyway.
+    **Not the fundness predicate — use `is_known_etf_isin`.** A symbol is not an
+    identity: this account holds the *UCITS* VanEck fund `IE00BMC38736`, and the far
+    better-known US `SMH` shares its ticker, so a symbol lookup cannot tell them apart
+    and would hand one fund the other's sector and region split. Worse, a *stock* whose
+    ticker collides with a row here would be distributed across eleven sectors as though
+    it were a fund — a fabricated allocation rather than a caveat.
+
+    Kept for lookups over the table itself (and because `symbol_for_fund_isin` is the
+    inverse), never for classifying a security. `tests/test_fundness_predicate.py` fails
+    any service that calls this on a holding.
     """
     return symbol in ETF_ALLOCATIONS
 
@@ -439,3 +450,19 @@ def symbol_for_fund_isin(isin: str):
     if not isin:
         return None
     return _ISIN_TO_SYMBOL.get(isin.strip().upper())
+
+
+def allocation_for_fund_isin(isin: str):
+    """
+    A held security's allocation row, resolved from its **ISIN**, or None.
+
+    The accessor `allocation_service` should use, and the reason it is one function rather
+    than a composition at the call site: the two-step form
+    `get_etf_allocation(symbol_for_fund_isin(isin))` is what a caller writes when it means
+    this, and it is one missing None-check away from a `TypeError` and one habit away from
+    reverting to the symbol lookup. Three call sites decided this question by symbol until
+    2026-08-17, which made "is this a fund?" answerable two ways in one app — the ISIN way
+    on the Look-through tab and the ticker way on the Allocation tab.
+    """
+    symbol = symbol_for_fund_isin(isin)
+    return ETF_ALLOCATIONS.get(symbol) if symbol else None
