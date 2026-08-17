@@ -1523,7 +1523,7 @@ handler answer 429 honestly instead of replying `"started"` to a run the backgro
 `t=` URL parameter and `requests` transport errors stringify with the full URL, so a plain `str(e)` from
 a failed SendRequest carries it — and those went verbatim into `sync_runs.message`, which the public
 `/api/scheduler/status` and `/history` re-serve forever. Production really did leak it (found and
-scrubbed 2026-07-28; **rotate the token if this ever recurs**). `SyncRunRepository.record()` redacts on
+scrubbed 2026-07-28; **rotate the token if this ever recurs** — that instruction is about a *new* leak, which would mean the redaction below had failed. The 07-28 exposure itself the owner decided on 2026-08-17 to accept rather than rotate; STATUS.md records why, and it is not to be re-raised). `SyncRunRepository.record()` redacts on
 write and `to_dict()` again on read, so rows written before the fix or restored from a backup can't leak
 either; the routers redact their `HTTPException` details. The `q=` query id stays readable — public in
 these docs and useless alone. Tests: `tests/test_secret_redaction.py`.

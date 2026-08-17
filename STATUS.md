@@ -86,8 +86,9 @@ Four threads are genuinely open. In descending order of what they cost:
    It only shows on a run where IBKR refuses, which the guard now makes rarer.
 3. **The Flex window is 3 days**, which is a two-day margin → *Watching*, Flex period entry, and
    CLAUDE.md's *The Flex Query* for the arithmetic.
-4. **Two credentials are knowingly unrotated** → *Needs a human*. One is an accepted risk and must
-   not be re-litigated; the other is a real outstanding task.
+4. **Two credentials are knowingly unrotated, both by owner decision** → *Needs a human*. Neither is
+   a task and neither may be re-litigated. The one genuinely open item there is the 2026-08-17
+   re-exposure of `API_ADMIN_TOKEN`, which has not been ruled on.
 
 The durable half of these findings is in **CLAUDE.md**, not here: the once-per-day rule, the guard
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
@@ -161,7 +162,7 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   *Shipped 2026-08-16 (evening)*. **DBPG never was on it** — it is excluded by design, not for want
   of data.
 
-- **Two credentials are unrotated, and they are different things.**
+- **Two credentials are knowingly unrotated, both by owner decision, and they are different things.** Neither is a task. What IS open is one re-exposure, noted below.
   - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
     a curl command line carrying the header). The owner was asked and **chose to accept that one** —
     do not re-raise the 08-07 incident.
@@ -171,7 +172,7 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
     file's last line is that token, so most of its tail is in that transcript. Put to the owner, no
     answer yet. **The lesson is cheap and belongs in any agent's habits: never dump bytes from a file
     that holds secrets.** `tail -c 1 | xxd` answers the newline question, or just append defensively.
-  - **The IBKR Flex token** is the genuinely outstanding one — see the entry below.
+  - **The IBKR Flex token** was the other one, and it is now **also accepted rather than rotated** — the owner decided on 2026-08-17. See the entry below for the blast radius that makes that reasonable. Neither credential is an open task; only the 08-17 `API_ADMIN_TOKEN` re-exposure is still unruled.
 
 - **Pushing is NOT blocked for an agent, despite what this file claimed until 2026-08-04.** The
   entry here said it was "refused by the permission classifier". It was tried, and it worked
@@ -190,10 +191,23 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   fresh shell silently passes empty strings and `scp`/`ssh` print usage. Use literal paths, or
   re-run the script.
 
-- **Rotate the IBKR Flex token.** It travelled as a `t=` URL parameter into `sync_runs.message` and
-  was served by the public `/api/scheduler/history` until the 2026-07-28 scrub. `app/redact.py` now
-  redacts on write *and* on read, so it cannot recur — but redaction cannot un-leak what was already
-  reachable. Only Simon can rotate it (IBKR portal → Reports → Settings → Flex Web Service).
+- **The IBKR Flex token will NOT be rotated — the owner decided this on 2026-08-17.** Recorded so it
+  is not rediscovered and re-raised as new: *do not bring this up again unless the owner does.*
+
+  The history, so the decision stays informed rather than just remembered: the token travelled as a
+  `t=` URL parameter into `sync_runs.message` and was served by the public
+  `/api/scheduler/history` until the 2026-07-28 scrub. `app/redact.py` now redacts on write *and* on
+  read, so it cannot recur — but redaction cannot un-leak what was already reachable.
+
+  What an exposed Flex token permits, since that is what the decision turns on: the Flex **Web
+  Service is read-only reporting**. It cannot place trades, move cash or change the account. It can
+  pull this account's statements, and it can spend the token's generation budget — which is how
+  `Code=1025` lockouts happen, so the practical damage is *our own syncs stopping*, not money moving.
+  That bounded blast radius is what makes accepting it defensible.
+
+  **The tell if it ever is being used by someone else**: successful generations appearing in
+  `sync_runs` at hours no job runs, or a `1025` lockout with no failed attempts of ours preceding it.
+  `find_flex_generation_gap` would surface the second one within 2 ET days.
 - **The 2025 tax-year backfill is CLOSED — there is nothing at IBKR to backfill.** The owner
   confirmed on 2026-08-17 that they did not use IBKR before 2026: the holdings arrived by in-kind
   transfer from Trading 212, Scalable Capital and Trade Republic in early 2026. So IBKR holds no 2025
