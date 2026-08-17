@@ -1,7 +1,9 @@
 # Working state
 
-**Last updated: 2026-08-17.** Latest: **VWCE borrows VT's basket, so every held fund is now either
-decomposed or excluded by design** — and the ~8% a broad fund's weights fall short by is explained on
+**Last updated: 2026-08-17 (evening).** Latest: **every held fund decomposes — coverage 98.97%,
+`uncovered_fund_eur` 0.00.** Two funds get there by proxy: VWCE via VT and DBPG via VOO, both at the
+owner's instruction and both badged. DBPG's 2x leverage is *stated* rather than scaled, since
+scaling a bucket would break the partition. Before that, the same day: **VWCE borrows VT's basket** — and the ~8% a broad fund's weights fall short by is explained on
 screen as the rounding it is. Measured on a snapshot of production: coverage goes **78.6% → 87.0%**
 from the proxy alone, before the four new baskets are even imported, and the partition still closes
 to the cent. The proxy is stated everywhere the real thing would be (amber *Via VT* badge, a
@@ -390,9 +392,11 @@ blocks are byte-identical to SXR8's and DBPG's, which were already identical to 
 S&P 500 trackers, one set of numbers, change one and change all three. ISIN `US9229083632` verified
 against OpenFIGI rather than recalled.
 
-**Still to do on production: fetch and import VOO's basket** (`fetch_etf_baskets VOO`). Until then
-DBPG reads `no_basket` — a declared proxy is not data. VOO is ~500 holdings, so 2 pages rather than
-VT's 21, which makes the torn-read hazard far smaller but not zero.
+**Fetched and imported on production the same evening**: 503 rows, as-of 2026-07-31, 100% ISIN
+coverage, weights summing to 99.94%. **Coverage went 95.16% -> 98.97% and `uncovered_fund_eur` is
+now 0.00 — every held fund decomposes.** Both pages declared 503 and 503 arrived, so VT's torn-read
+hazard does not reach VOO in practice: 2 page boundaries against 21, and none of VOO's rows carry a
+0.00% weight.
 
 ## Ran on production 2026-08-17 — the runbook, and what it caught
 
