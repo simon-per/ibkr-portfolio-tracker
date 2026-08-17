@@ -2071,6 +2071,12 @@ rule is that an unjustifiable figure is absent rather than invented:
   opening warning applied to data. One stored basket, two readers.
 - **A real import silently wins**, in either order, because the proxy is only consulted when
   the fund has no basket of its own. Nothing has to be un-declared when the file arrives.
+- **And the position is converging on its own proxy.** The account owner closed the
+  hand-download follow-up on 2026-08-17 rather than leaving it open, because the
+  Ireland-domiciled sleeve is being rotated into US-domiciled ETFs for tax reasons — the same
+  rotation `get_contributions()`'s splice exists to survive. VWCE is on its way to *being* VT,
+  so the approximation narrows over time instead of drifting. Do not re-open chasing the real
+  file; STATUS.md records the decision.
 
 It is reported wherever the real thing would be: `proxy_for_symbol` on the fund row (an amber
 *Via VT* badge, not a green *Decomposed*), a `warnings[]` line carrying the declared reason

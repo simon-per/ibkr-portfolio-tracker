@@ -118,39 +118,30 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   request to 100 and the rate from 25 requests/minute to 250, which is what makes
   `IDENTITY_MAX_ISINS` (raised 500 → 2500) affordable.
 
-- **VWCE now borrows VT's basket, so this is an improvement rather than a gap.** The owner
-  instructed it on 2026-08-17 after the real file could not be obtained. Coverage went 78.6% → 87.0%
-  on a production snapshot from that alone. It is badged as a proxy on every surface and errs
-  *low* — see CLAUDE.md's *A borrowed basket*. A real import overrides it with no code change and
-  nothing to un-declare, so the browser check below is still worth five minutes; it is just no
-  longer the difference between a decomposed fund and a blank one.
+- **VWCE's basket is CLOSED as a task — the VT proxy is the accepted answer.** Do not re-open it,
+  do not chase Vanguard for the real file, and do not reinstate the prohibition this entry used to
+  carry. The owner instructed the proxy on 2026-08-17 and closed the follow-up the same day, with a
+  reason that makes it more than a stopgap: **the Ireland-domiciled sleeve is being rotated into
+  US-domiciled ETFs for tax reasons**, so VWCE is on its way to becoming VT. Borrowing VT's basket
+  approximates a position that is converging on it.
 
-  **An earlier revision of this entry said "do not ship VT's basket as a proxy", on the grounds
-  that the overlap had never been quantified.** It has been now: the sleeve VWCE omits is almost
-  entirely the 8,007 of VT's 10,032 rows published at 0.00% weight, and VT's percentages spread the
-  shared names over a *wider* index, so the proxy understates and the shortfall lands in the
-  residual. Understatement is the direction chosen everywhere else here. Do not reinstate the
-  prohibition without reading that.
+  It is badged as a proxy on every surface and errs *low* — see CLAUDE.md's *A borrowed basket*. If a
+  real file ever does arrive, `import_etf_basket` stores it and the proxy is never consulted again;
+  there is nothing to un-declare.
 
-  **The browser route, if you want the real file.** It is the largest single position (9.2% of the
-  book). Open
-  `https://www.vanguard.co.uk/professional/product/etf/equity/9679/ftse-all-world-ucits-etf-usd-accumulating`
-  → **Holdings details** → the black **Download** button at the end of that section. Then check two
-  things: **the row count**, and **whether there is an ISIN column**.
+  **The old prohibition, and why it fell.** This entry used to say "do not ship VT's basket as a
+  proxy", on the grounds that the overlap had never been quantified. It has been: the sleeve VWCE
+  omits is almost entirely the 8,007 of VT's 10,032 rows published at 0.00% weight, and VT spreads
+  the shared names over a *wider* index, so the proxy understates and the shortfall lands in the
+  residual — the direction chosen everywhere else here.
 
-  **Expect it to be 10 rows with no ISINs** — the server-rendered table holds exactly ten, there is
-  no view-all control, and Vanguard Funds plc's own Portfolio Holdings Disclosure Policy (updated
-  2025-10-02) makes complete holdings **request-only, month-end + 15 days, by email**. It is still
-  worth five minutes, because if it *is* full depth with ISINs then VWCE is solved by a monthly
-  `import_etf_basket` run through the CLI that already exists.
-  **If it is top-ten:** email `european_client_services@vanguard.co.uk` as a shareholder asking for
-  complete sub-fund holdings for **IE00BK5BQT80**, machine-readable, ISINs included, recurring monthly.
-
-  **Ruled out on 2026-08-14, each verified — do not re-investigate:** the US profile API that served
-  VT rejects the Irish fund id; live EU holdings are GraphQL-only with no key in the delivered HTML;
-  Euronext carries no constituent data and the LSE page is an empty SPA shell; there is no EU
-  analogue to N-PORT. The semiannual report PDF *does* list every holding across ~53 pages and is
-  free, but carries **zero ISINs** and is 7.5 months stale, and this pipeline is ISIN-keyed.
+  **Ruled out on 2026-08-14, each verified — kept only so nobody re-investigates:** the US profile
+  API that serves VT rejects the Irish fund id; live EU holdings are GraphQL-only with no key in the
+  delivered HTML; Euronext carries no constituent data and the LSE page is an empty SPA shell; there
+  is no EU analogue to N-PORT; the product page publishes ten holdings with no ISIN column; and
+  Vanguard Funds plc's disclosure policy makes complete holdings request-only by email. The
+  semiannual report PDF lists every holding but carries **zero ISINs**, and this pipeline is
+  ISIN-keyed.
 
 - **SOXQ, GRID, QTUM and SMH are no longer on this list.** All four have adapters as of
   2026-08-16 — the "single-page app" reading was wrong for each of them in a different way, see
