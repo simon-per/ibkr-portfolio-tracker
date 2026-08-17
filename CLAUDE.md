@@ -179,7 +179,8 @@ recomputes by hand is the one that is wrong. The known instances:
 | the Yahoo rate-limit breaker | `market_data_service` latched on a 429 and abandoned the pass; the **five other** services importing `yfinance` — fundamentals, ratings, watchlist, allocation, dividends — plus the benchmark warm-up all caught, logged and asked again seconds later. Extracted to `yahoo_rate_limit.is_rate_limit`, with an AST test over every module that imports `yfinance` |
 | `_to_eur`'s third site | after the tax copy and then the dividend copy were both fixed to return `None` on FX failure, `compute_dividend_income` **still had the original `gross_eur = gross_amount  # fallback: store unconverted`** — a few dozen lines below the helper it never called. Fixing a helper is not fixing the file; grep the *pattern*, not the function |
 | the three allocation charts | one function buckets each holding three times, and only asset type used `or 'Unknown'`. Sector and geography used `if security.sector:` / `if security.country:` and **dropped** the holding, so those two summed to under 100% while the UI printed every slice as "% of portfolio". Not one module copied into another — three adjacent call sites of the same helper, one of which got the rule |
-| "is this holding a fund?" | the same three call sites again, a rule later. Sector and geography ask `is_known_etf(symbol)` — a live look-through-table lookup needing no sync — while the asset-type chart read `securities.asset_type`, which **only** `POST /api/allocation/sync` writes and nothing schedules. `sync_helper` never writes it, so an IBKR-ingested fund keeps the `"Stock"` column default indefinitely and was drawn as a Stock in one chart while being distributed across eleven sectors as an ETF a few pixels below. Two sources for one predicate, one of them needing a manual step the other doesn't; the table wins now |
+| "is this holding a fund?" | the same three call sites again, a rule later. Sector and geography asked a live look-through-table lookup needing no sync, while the asset-type chart read `securities.asset_type`, which **only** `POST /api/allocation/sync` writes and nothing schedules. `sync_helper` never writes it, so an IBKR-ingested fund keeps the `"Stock"` column default indefinitely and was drawn as a Stock in one chart while being distributed across eleven sectors as an ETF a few pixels below. Two sources for one predicate, one of them needing a manual step the other doesn't; the table wins now |
+| "is this holding a fund?", **the third time** | the same three call sites, a *third* rule later — and this one had drifted from a different module entirely: they asked the table by **ticker** while `lookthrough_service` asked it by **ISIN**, so one app answered one question two ways. Found 2026-08-17 by asking which other code publishes the same predicate, not by reading either file. Nothing was wrong on this account, because every held fund's symbol happened to be unique — the failure needs a colliding ticker, and then it either hands the UCITS `SMH` the US fund's split or spreads a plain stock across eleven sectors. All three now share one `allocation_for_fund_isin`, resolved once per holding, and `test_fundness_predicate.py` fails any service that asks by ticker. **Three visits to three call sites is the lesson**: adjacent call sites of one helper are where this codebase's rules go to diverge, and each visit fixed the rule it came for and left the next one |
 | the 12-month deployment average | `ContributionsStrip` renders the server's `avg_deployed_per_month_eur`; `MonthlyDeploymentCard`, on the same tab a few hundred pixels below, recomputed it as `monthly.slice(-12)` divided by its own length. `monthly` omits months with no activity, so that takes the last twelve *rows* — which can span more than twelve months — and divides by a count smaller than the period covered. Both errors push it up. **Two numbers under one name on one screen** is the cheapest instance of this failure to find and the easiest to leave: neither is obviously wrong on its own |
 | `isUnpriced` | "can the backend value this position?" was inline in `rebalance.ts` and `currencyExposure.ts` — identical, correct, each carrying its own copy of the reasoning — and `winRate` was about to make it three. Caught **while writing the third copy**, which is the only cheap moment to catch one. Note what makes it more than tidiness: the two existing copies had already needed correcting *together* on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the FX case — so the drift had already happened once, in lockstep, by luck. Extracted to `positionValuation.ts`, with a family test that strips comments (the rule is *documented* in `api.ts`, deliberately) and fails naming any `lib/` module that tests the columns itself |
 
@@ -1636,8 +1637,18 @@ distinguishable from a measured one, and three surfaces could not do it.
   predicate `market_price === null || market_value_eur <= 0` cited from `rebalance.ts`, because a
   missing FX rate leaves the price populated and zeroes the value.
 
-The lens that found all three, and the one to reuse: **ask which other code reads an incomplete
-valuation**, not which code shares a name — none of these three shares a function name with anything.
+- **`/api/allocation/portfolio` excludes an unvaluable holding and names it**
+  (`unpriced_holdings` / `unpriced_symbols`), where it used to carry it at a 0% weight. This is
+  the quietest member of the family and the last one found: every slice is labelled
+  "% of portfolio", the three breakdowns sum to **exactly 100** whether the holding is in or
+  out, and so the failure renders as an *absence* from a picture that looks complete. Note what
+  that did to the test suite — `test_an_unpriced_holding_does_not_break_the_percentages` pinned
+  the sums for months and was structurally blind to it, because here summing to 100 is what
+  being wrong looks like. When a completeness bug can satisfy the assertion you already have,
+  the assertion is measuring the wrong thing.
+
+The lens that found all four, and the one to reuse: **ask which other code reads an incomplete
+valuation**, not which code shares a name — none of them shares a function name with anything.
 
 **Absent means complete**, deliberately: the field only exists from 2026-08-05, so reading `undefined` as
 unmeasurable would put a permanent warning on every chart served by an older backend. Same choice
@@ -2018,13 +2029,33 @@ of its own tile. Under-filling costs a character; overflowing costs the tile bou
 ### One fundness predicate, keyed on ISIN
 
 `ETF_ALLOCATIONS` entries now declare `"isins": [...]`, and `fund_isins()` /
-`is_known_etf_isin()` / `symbol_for_fund_isin()` are **the** fundness predicates. The live
+`is_known_etf_isin()` / `symbol_for_fund_isin()` / `allocation_for_fund_isin()` are **the**
+fundness predicates. The live
 collision that forced it: this account holds the **UCITS** VanEck fund `IE00BMC38736` (LSE), not
 the far better-known US `SMH`, and a symbol-keyed lookup cannot tell them apart. `app/etf_sources.py`
 holds only *how to fetch* and is cross-checked against `ETF_ALLOCATIONS` in both directions by
 `test_etf_source_registry.py`; a third census of what counts as a fund would be the same
 divergence a third time. `_build_isin_index()` raises **at import** on a duplicate ISIN, because
 two funds sharing one would silently give one the other's basket.
+
+**`allocation_service` asked it by ticker until 2026-08-17, so the app carried two answers to
+one question** — the ISIN way on the Look-through tab and the ticker way on the Allocation tab,
+which is this file's opening warning in its purest form. Nothing was wrong on this account when it
+was found (every held fund's symbol happened to be unique), and that is what *latent* means here
+rather than a reason to leave it: the symbol form is the one that decides a **figure**. Two ways it
+bites, in ascending order of how quiet it is — the UCITS `SMH` gets the US fund's sector and region
+split (two semiconductor funds, so the numbers stay plausible), and a plain **stock** whose ticker
+collides with a row is distributed across eleven sectors as though it were a fund, which is a
+fabricated allocation rather than an approximate one. Note the contrast with `currencyExposure.ts`,
+which matches funds **by symbol on purpose**: there the output is a stated caveat, and CLAUDE.md
+accepts it for exactly that reason. A caveat may be approximate; a percentage may not.
+
+`allocation_for_fund_isin(isin)` is the accessor those three call sites now share — one lookup
+resolved once per holding rather than three, because three lookups is three chances for the charts
+to disagree about one holding, which they have already done twice. `get_etf_allocation` and
+`is_known_etf` survive as lookups over the *table* (the first is what the ISIN accessor is built
+on), and `tests/test_fundness_predicate.py` fails any **service** that calls either — the family
+form, so the next call site is caught rather than these three.
 
 ### Baskets, and DBPG
 
@@ -2653,7 +2684,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1183 backend + 485 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
+Tests (1195 backend + 489 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -2850,6 +2881,8 @@ Tests: `tests/test_currency_fallback.py`.
 | Current Drawdown and Max Drawdown both read `—` | No daily return in the selected range was measurable, so there is no decline to measure. It is **not** "never fell": that sentence needs a *measured* zero, and printing it over a stalled price feed was the worst instance of the zero-for-unknown family this app has had. Find the security in the market-data sync's `warnings[]` |
 | Win Rate says *N unpriced, not judged*, or reads `—` | Holdings the backend could not value are excluded from both sides rather than counted as losses — an unpriced position is valued at 0.00, so its gain is `−cost` and it used to read as an ordinary loser. `—` means nothing at all could be valued |
 | A yellow notice sits above the Performance KPI row | `annualized-return`'s `unpriced_holdings > 0`: a holding had no usable price at one end of the selected period, so the return is measured against a partial valuation while the purchases still count as money in. Annual Return and Calmar both understate. Same cause and same fix as the notice above the summary cards |
+| A yellow notice sits above the Allocation charts | `unpriced_holdings > 0` on `/api/allocation/portfolio`: a holding could not be valued, so all three breakdowns exclude it and every percentage is a share of what *could* be valued. The charts still sum to 100, which is why this needs saying — the holding is absent, not visibly zero. The notice names the symbols; fix the `ticker_mappings` row |
+| A holding is missing from the Allocation charts but shows in Positions | Same cause as the notice above, and the notice should be there. If it is not, `/health`'s commit predates 2026-08-17 |
 | A market-data sync warns that a fund's basket is stale | `find_stale_etf_baskets`. Nothing refreshes baskets automatically, so this is a real chore rather than noise: run `fetch_etf_baskets --all`, the import lines it prints, then `resolve_identities --constituents` — in that order, because a re-import clears the CINS/SEDOL resolutions on purpose. The threshold is the issuer's own cadence, so a Vanguard basket is not stale at 30 days and an iShares one is |
 
 ---

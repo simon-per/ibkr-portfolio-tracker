@@ -1,6 +1,11 @@
 # Working state
 
-**Last updated: 2026-08-17 (night).** Latest: **a bug sweep found four more members of the
+**Last updated: 2026-08-17 (night).** Latest: **the Allocation tab carried both of this codebase's
+signature bugs at once** — it answered "is this a fund?" by ticker while the Look-through tab
+answered by ISIN, and its three charts silently dropped a holding they could not value while every
+slice claimed to be a "% of portfolio". Details in *Shipped 2026-08-17 (night, second pass)*.
+
+Before that, the same evening: **a bug sweep found four more members of the
 `unpriced_holdings` family and the look-through's baskets finally have an alarm.** The four are all
 the same shape this file keeps rediscovering — a figure computed from an incomplete valuation and
 served as a measurement — and the worst of them rendered a *green* reassurance: with a stalled feed
@@ -499,6 +504,49 @@ still a copy" looks like when you run it.
 
 `e2e/ledger.mjs` is fixed but **not run** — it needs a production DB snapshot, and none was pulled.
 See *Known rough edges*.
+
+## Shipped 2026-08-17 (night, second pass) — the Allocation tab had both classes of bug
+
+Asked "is there any other bugs?" after the batch above, so the same two lenses were pointed at a
+surface the first pass had not touched. Both hit, in one service:
+
+**1. The app answered "is this holding a fund?" two ways.** `allocation_service` asked the
+`ETF_ALLOCATIONS` table by **ticker** at three call sites while `lookthrough_service` asked it by
+**ISIN** — so the Look-through tab and the Allocation tab used different rules for the same
+question. Nothing was wrong on this account, because every held fund's symbol happens to be
+unique; that is what *latent* means here, not a reason to leave it, because the symbol form decides
+a **figure**. It bites two ways: the UCITS `SMH` held here shares its ticker with the far
+better-known US fund and would get its sector/region split (both semiconductor funds, so the
+numbers stay plausible), and a plain **stock** whose ticker collides with a row is spread across
+eleven sectors as though it were a fund — fabricated, not approximate.
+
+All three sites now share one `allocation_for_fund_isin`, resolved once per holding.
+`test_fundness_predicate.py` fails any *service* that asks by ticker, so the next call site is
+caught rather than these three. Safe by construction: all 13 table rows declare an ISIN, and the
+look-through's **98.97% production coverage already proves** the ISIN path resolves every held
+fund, since that number requires it.
+
+Worth noting what is *deliberately* left asking by symbol: `currencyExposure.ts` matches funds by
+ticker on purpose, because its output is a stated caveat rather than a number. A caveat may be
+approximate; a percentage may not.
+
+**2. The three charts silently excluded an unvaluable holding.** It was carried at a 0% weight, so
+it vanished from a picture where every slice is labelled "% of portfolio" — and the breakdowns sum
+to **exactly 100** either way, which is why nothing looked wrong. Live rather than theoretical:
+three newly bought ETFs were unpriced for hours on 2026-08-07, and for that window this tab
+described a smaller portfolio than the card above it. The endpoint now excludes-and-names
+(`unpriced_holdings` / `unpriced_symbols`, the look-through's own rule) and `AllocationTab` renders
+a `role="alert"` above the charts.
+
+**The test-suite lesson is the part worth keeping.**
+`test_an_unpriced_holding_does_not_break_the_percentages` had pinned those sums for months and was
+structurally blind to this: summing to 100 is what being wrong looks like here. Its docstring now
+says so, beside the test that covers the other half. **When a completeness bug can satisfy the
+assertion you already have, the assertion is measuring the wrong thing.**
+
+Verified: backend **1195**, frontend **489** (new `AllocationTab.test.tsx`), `tsc -b` and
+`npm run build` clean, three mutants confirmed caught — including that reverting to the ticker
+lookup fails the family scan by name.
 
 ## Shipped 2026-08-17 (late) — DBPG decomposes through VOO
 
@@ -2173,17 +2221,22 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
-- **2026-08-17 (night)** — "find bugs and improvements and implement them". Four defects, and all four
-  turned out to be the *same* family this file has now closed seven times: a figure built from an
-  incomplete valuation, served as a measurement. The lens that found them is the one CLAUDE.md
-  already states — **ask what a metric's stand-in value would claim** — and its corollary is the real
-  lesson: *severity tracks plausibility, not magnitude.* The nastiest was not the largest error but a
-  green `0.00%` drawdown captioned "Never below its opening value", which a stalled price feed
-  produces on demand. Two process notes: **the family lens beats the instance lens** (XIRR and Win
-  Rate were both reachable by asking "who else reads an incomplete valuation?", and neither shares a
-  function name with anything), and **writing the test found the design bug** — the basket detector's
-  first draft keyed "is this fixable?" on the held fund's own adapter, which silently skipped VWCE,
-  the one case that actually is.
+- **2026-08-17 (night)** — "find bugs and improvements and implement them", then "is there any other
+  bugs?". Six defects over two passes, and the striking part is that they were **two families and
+  nothing else**: five were a figure built from an incomplete valuation and served as a measurement,
+  one was a predicate answered two ways in one app. The lenses that found them are the two CLAUDE.md
+  already states, and the corollary is the real lesson: *severity tracks plausibility, not
+  magnitude.* The nastiest was not the largest error but a green `0.00%` drawdown captioned "Never
+  below its opening value", which a stalled price feed produces on demand. Four process notes worth
+  more than the fixes. **The family lens beats the instance lens** — XIRR, Win Rate and the
+  Allocation charts were all reached by asking "who else reads an incomplete valuation?", and none
+  shares a function name with anything. **Writing the test found a design bug**: the basket
+  detector's first draft keyed "is this fixable?" on the held fund's own adapter, silently skipping
+  VWCE, the one case that actually is. **Fixing a bug created one** — `winRate` needed a predicate
+  that already existed inline twice, so the fix was about to be a third copy; caught, extracted, and
+  the mutant proves why (a local copy leaves `rebalance.test.ts` green). And **a passing test can be
+  the thing hiding the bug**: the allocation charts sum to exactly 100 whether or not they drop a
+  holding, so the assertion that had guarded them for months could never have seen it.
 
 - **2026-08-17** — "assume VT's values for VWCE", plus "why does VT only have a ratio of 91.86%, it
   should be nearly 100% stocks". The second was the interesting one: it *is* nearly 100% stocks, and
