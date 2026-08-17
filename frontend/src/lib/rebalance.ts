@@ -82,10 +82,11 @@ export interface RebalancePlan {
 export const DEFAULT_BAND_PP = 5
 
 // `isUnpriced` is shared with `currencyExposure.ts` and `winRate` rather than spelled out
-// here: it was three identical copies, each carrying its own copy of the reasoning, and
-// the one-clause form these two were corrected away from on 2026-08-05 is exactly what a
-// drifting copy would revert to. The FX case, the false fully-sold premise and why this is
-// narrower than `summary.unpriced_holdings` all live in `positionValuation.ts`.
+// here: it was two identical copies each carrying its own copy of the reasoning, and
+// `winRate` would have made a third. The one-clause form both were corrected away from on
+// 2026-08-05 is exactly what a drifting copy would revert to. The FX case, the false
+// fully-sold premise and why this is narrower than `summary.unpriced_holdings` all live in
+// `positionValuation.ts`.
 
 export function computeRebalancePlan(
   positions: DriftInput[],
