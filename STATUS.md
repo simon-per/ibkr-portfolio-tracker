@@ -1,11 +1,19 @@
 # Working state
 
-**Last updated: 2026-08-16 (evening).** Latest: **the look-through treemap clusters by sector, and
+**Last updated: 2026-08-17.** Latest: **VWCE borrows VT's basket, so every held fund is now either
+decomposed or excluded by design** — and the ~8% a broad fund's weights fall short by is explained on
+screen as the rounding it is. Measured on a snapshot of production: coverage goes **78.6% → 87.0%**
+from the proxy alone, before the four new baskets are even imported, and the partition still closes
+to the cent. The proxy is stated everywhere the real thing would be (amber *Via VT* badge, a
+`warnings[]` line, the Coverage card staying amber), because "every fund decomposed" over a borrowed
+basket would be a reassuring zero. `OPENFIGI_API_KEY` is now set locally and verified against the
+live API; **it still has to go on the VPS** — see *Needs a human*.
+
+Before that (2026-08-16, evening): **the look-through treemap clusters by sector, and
 four more funds have an automated basket route.** SOXQ, GRID, QTUM and SMH were listed here as
-needing a hand download; all four turned out to have keyless, login-free routes, so **10 of 12 funds
-now decompose** and only VWCE is a genuine gap. Watch for one thing on prod: three of the four US
-issuers publish a **CINS or a SEDOL instead of an ISIN**, which fold only after
-`resolve_identities --constituents` runs. Details in *Shipped 2026-08-16 (evening)*.
+needing a hand download; all four turned out to have keyless, login-free routes. Watch for one thing
+on prod: three of the four US issuers publish a **CINS or a SEDOL instead of an ISIN**, which fold
+only after `resolve_identities --constituents` runs. Details in *Shipped 2026-08-16 (evening)*.
 
 Before that, the same day: **the Look-through tab got its two charts** — a treemap of company
 exposure and a composition bar showing how much of the book the look-through can attribute at all.
@@ -102,14 +110,30 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   first leaves GRID's and QTUM's companies unfolded. A **basket re-import deliberately clears** those
   resolutions (it keeps the raw identifier), so step 2 is the second half of every basket refresh.
 
-  **Set `OPENFIGI_API_KEY` in `backend/.env` before step 2** — free and instant from
-  <https://www.openfigi.com/api>, no payment details. It takes the batch from 10 identifiers per
+  **`OPENFIGI_API_KEY` has to go in the VPS's `backend/.env` before step 2.** The owner supplied it
+  on 2026-08-17 and it is set and verified locally (an 11-job batch returns 200, which a keyless
+  request would refuse) — but the container reads its own file, so production is still keyless
+  until someone adds it there. Remember `docker compose up -d`, **not** `restart`, or the container
+  keeps its old environment and reports success anyway. It takes the batch from 10 identifiers per
   request to 100 and the rate from 25 requests/minute to 250, which is what makes
-  `IDENTITY_MAX_ISINS` (raised 500 → 2500) affordable. Remember `docker compose up -d`, **not**
-  `restart`, or the container keeps its old environment and reports success anyway.
+  `IDENTITY_MAX_ISINS` (raised 500 → 2500) affordable.
 
-- **VWCE's basket needs one browser click, and it decides ±9 pp of coverage.** It is the largest
-  single position (9.2% of the book) and worth ~1.9× everything SEC N-PORT could add. Open
+- **VWCE now borrows VT's basket, so this is an improvement rather than a gap.** The owner
+  instructed it on 2026-08-17 after the real file could not be obtained. Coverage went 78.6% → 87.0%
+  on a production snapshot from that alone. It is badged as a proxy on every surface and errs
+  *low* — see CLAUDE.md's *A borrowed basket*. A real import overrides it with no code change and
+  nothing to un-declare, so the browser check below is still worth five minutes; it is just no
+  longer the difference between a decomposed fund and a blank one.
+
+  **An earlier revision of this entry said "do not ship VT's basket as a proxy", on the grounds
+  that the overlap had never been quantified.** It has been now: the sleeve VWCE omits is almost
+  entirely the 8,007 of VT's 10,032 rows published at 0.00% weight, and VT's percentages spread the
+  shared names over a *wider* index, so the proxy understates and the shortfall lands in the
+  residual. Understatement is the direction chosen everywhere else here. Do not reinstate the
+  prohibition without reading that.
+
+  **The browser route, if you want the real file.** It is the largest single position (9.2% of the
+  book). Open
   `https://www.vanguard.co.uk/professional/product/etf/equity/9679/ftse-all-world-ucits-etf-usd-accumulating`
   → **Holdings details** → the black **Download** button at the end of that section. Then check two
   things: **the row count**, and **whether there is an ISIN column**.
@@ -127,9 +151,6 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   Euronext carries no constituent data and the LSE page is an empty SPA shell; there is no EU
   analogue to N-PORT. The semiannual report PDF *does* list every holding across ~53 pages and is
   free, but carries **zero ISINs** and is 7.5 months stale, and this pipeline is ISIN-keyed.
-  **And do not ship VT's basket as a proxy** — different index (Global All Cap ~10k vs All-World
-  ~3,500), the overlap was never quantified, and 9.2% of the book entering the charts under another
-  fund's index is the fabricated-plausible-figure failure this codebase refuses everywhere else.
 
 - **SOXQ, GRID, QTUM and SMH are no longer on this list.** All four have adapters as of
   2026-08-16 — the "single-page app" reading was wrong for each of them in a different way, see
@@ -346,6 +367,42 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
+## Shipped 2026-08-17 — a borrowed basket, and an 8% shortfall that was never cash
+
+Two asks from the owner, plus the answer to a question that turned out to be a documentation gap.
+
+**VWCE borrows VT's basket.** Declared in `etf_sources.py` as `basket_proxy_isin`, aliased at read
+time so nothing downstream has a proxy branch and there is one stored basket with two readers —
+a copy would drift the moment VT is refetched. Measured on a production snapshot: coverage
+**78.6% → 87.02%**, partition closes exactly, VWCE reports 10,032 constituents with `proxy_for_symbol
+= VT`. Once the four new baskets are imported it should land around **95%**, the rest being DBPG
+(3.8%, excluded) and per-fund residuals.
+
+It is an approximation and says so on every surface: an amber *Via VT* badge instead of a green
+*Decomposed*, a `warnings[]` line carrying the declared reason verbatim, and the Coverage card
+**staying amber** while any fund is proxied. That last one is the point — with VWCE resolved the
+unresolved list empties, so the old rule would have turned the card green over a fund decomposed
+from someone else's file. Unlike a percentage threshold this badge can clear: import a real basket
+and the proxy is never consulted again.
+
+Five guards in `test_etf_source_registry.py` (no reason, self-proxy, chain, excluded target,
+`manual` target) and five in `test_lookthrough_partition.py`, including that a real basket wins and
+that the partition still closes.
+
+**Why VT's equity weight reads 91.86% — it is rounding, and now it says so.** Asked as "it should be
+nearly 100% stocks", and it is. Vanguard publishes weights to 2dp, the smallest non-zero weight in
+the file is `0.01`, and **8,007 of VT's 10,032 rows are printed at exactly 0.00%** — that tail *is*
+the missing 8.14%. Nothing was truncated or misparsed (`stored_rows == source_rows == 10032`,
+`skipped_rows = 0`, identifier coverage 100%). EMIM is the same shape at 2,279 of 4,042. The fund
+table now shows `N rows at 0%` under the percentage, because an unexplained 8% next to a fund's
+value reads as an uninvested cash balance — plausible, and wrong.
+
+**`OPENFIGI_API_KEY` is set locally and verified** against the live API with an 11-job batch (which
+a keyless request refuses). Still needs adding on the VPS — *Needs a human*.
+
+One incidental fix: the new count used a bare `toLocaleString()`, which renders 8,007 as "8.007"
+under a German runtime. Pinned to `en-US` like `formatCurrency` and `formatPercent`.
+
 ## Shipped 2026-08-16 (evening) — sector clustering, and four funds that were never unreachable
 
 Two follow-ups on the charts: cluster the treemap **by sector** rather than by how a company is
@@ -363,8 +420,9 @@ All four have keyless, login-free routes, and each old note was wrong in its own
 | QTUM | "a WordPress table carrying CUSIPs but no ISINs" | the table is on `/qtum-full-holdings/`, not `/qtum/`; and the identifiers are not all CUSIPs |
 | SMH | needed a hand download | an XLSX with a real ISIN on **every** row — the best-identified feed of the seven |
 
-**10 of 12 funds decompose now.** Only VWCE is a genuine gap (Vanguard Europe publishes complete
-holdings by email on request) and DBPG stays excluded by design.
+**10 of 12 funds gained an automated fetch route.** VWCE has none (Vanguard Europe publishes
+complete holdings by email on request) and DBPG stays excluded by design — VWCE decomposes anyway
+as of the following day, by borrowing VT's basket.
 
 **The trap that would have been silent, and the reason this took a live API check.** Three of the
 four publish nine-character identifiers, and most of them are not CUSIPs:
@@ -1914,6 +1972,17 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-17** — "assume VT's values for VWCE", plus "why does VT only have a ratio of 91.86%, it
+  should be nearly 100% stocks". The second was the interesting one: it *is* nearly 100% stocks, and
+  the shortfall is **rounding published as fact** — 8,007 of VT's 10,032 rows are printed at 0.00%
+  because Vanguard rounds to 2dp, so the tail that makes up 8.14% of the fund is recorded as nothing.
+  Nobody had looked, and the fund table said only "91.86%", which reads as cash. Lesson: **a figure
+  that survives because it is nearly right is still unexplained** — the rounding was in CLAUDE.md as
+  "thousands of holdings round to 0.00" and had never been counted or put on screen. The proxy ask
+  crossed a prohibition this file had written down; it was implemented as an approximation that
+  *declares itself* (amber badge, warning carrying the reason, Coverage card refusing to go green)
+  rather than either refusing the instruction or quietly obeying it.
+
 - **2026-08-16 (evening)** — "cluster by sector, and look at the missing data too". The missing data
   was a **research failure, not a gap**: all four funds recorded as unreachable single-page apps had
   keyless routes, and each old note was wrong differently — the SPA was only the product page, the
@@ -1955,13 +2024,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   Also a decision worth remembering as a decision — the owner moved the primary slot to 18:00 Berlin
   against the evidence (it captures no extra trades, because the window rolls at midnight ET, not at
   generation time); it is recorded in the code beside the constant rather than argued again.
-
-- **2026-08-07 (afternoon)** — "the monthly returns are not right". Replaying the client's Dietz
-  arithmetic against the live endpoint reproduced the screenshot exactly, which ruled the frontend out
-  and pointed at the data: **MBGL's tax lots predate the spinoff that created it**, because IBKR carries
-  the parent's holding period and cost basis over, so 166 days counted a held security with no listing
-  yet. One 0.2% holding blanked six months of returns and turned "YTD" into six weeks (+3.1% against a
-  real +23.5%) while every total on every other screen stayed correct. Two lenses did it: **disbelieve a
-  number, then replay the computation on the real payload** — the wrongness was in a *flag*, not a
-  figure — and **a caveat inside a collapsed card is absent**, which is where the dagger and its
-  footnote both were.

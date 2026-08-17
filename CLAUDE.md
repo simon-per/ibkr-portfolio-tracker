@@ -2033,7 +2033,7 @@ so a future "we found the swap reference" change cannot clear one and silently r
 ### Sources, and what still needs a hand download
 
 **Seven adapters, all keyless and login-free, all verified against live files.** Only **VWCE**
-has no route at all.
+has no route at all, and it borrows VT's basket until one exists.
 
 | adapter | route | the thing that bites |
 |---|---|---|
@@ -2045,10 +2045,44 @@ has no route at all.
 | **Defiance** | `defianceetfs.com/<ticker>-full-holdings/` | **not** `/<ticker>/`, whose table is rendered client-side and absent from the response |
 | **VanEck** | `vaneck.com/nl/en/investments/<slug>/downloads/holdings/` | XLSX. Needs a **cookie jar** (a cookieless GET loops the consent redirects) and the `/nl/en/` locale **pinned**. Parsed with `zipfile` + `ElementTree`; do not add `openpyxl` for one 5 kB file a week |
 
-**10 of 12 funds decompose.** The remainder is VWCE (a real gap — Vanguard Europe publishes
-complete holdings by email on request, month-end + 15 days) and DBPG (excluded by design). The
-read path never dereferences `adapter`, so a declared-but-unimplemented one degrades to "no
-basket yet", never to a wrong number.
+**11 of 12 funds decompose, one of them by proxy.** DBPG is excluded by design and VWCE has no
+route of its own — Vanguard Europe publishes complete holdings by email on request, month-end
++ 15 days. The read path never dereferences `adapter`, so a declared-but-unimplemented one
+degrades to "no basket yet", never to a wrong number.
+
+### A borrowed basket, and the three ways it could have become a silent one
+
+`FundSource.basket_proxy_isin` lets a fund with no published basket be decomposed using
+another fund's. **One entry: VWCE borrows VT's**, at the account owner's instruction. It is an
+approximation stated as one, and four things make it safe to have in a file whose governing
+rule is that an unjustifiable figure is absent rather than invented:
+
+- **The judgement is not new here.** `ETF_ALLOCATIONS` already pins VT's regional split to
+  VWCE's *deliberately*, with the reasoning written down: FTSE Global All Cap and FTSE
+  All-World are the same index family differing by small-cap inclusion. What is new is
+  applying it to 10,032 company rows instead of four regions.
+- **It errs low, measurably.** The sleeve VWCE omits is almost exactly the part of VT's file
+  that carries no weight anyway (8,007 of 10,032 rows are published at 0.00%), and VT's
+  percentages are the shared names spread over a *wider* index — so every company figure this
+  produces is smaller than the truth and the shortfall lands in the residual. Understatement
+  is the direction chosen everywhere else in this feature.
+- **It is aliased at read time, never copied into `etf_baskets`.** A copy would be two
+  implementations of one basket, drifting the moment the source is refetched — this file's
+  opening warning applied to data. One stored basket, two readers.
+- **A real import silently wins**, in either order, because the proxy is only consulted when
+  the fund has no basket of its own. Nothing has to be un-declared when the file arrives.
+
+It is reported wherever the real thing would be: `proxy_for_symbol` on the fund row (an amber
+*Via VT* badge, not a green *Decomposed*), a `warnings[]` line carrying the declared reason
+verbatim, and the Coverage card staying **amber** — because "every fund decomposed" over a
+borrowed basket is the reassuring-zero failure this codebase keeps rediscovering, and unlike a
+percentage threshold this badge can actually clear. Staleness comes from the *source* basket's
+adapter, since the age that matters is the age of the file the numbers came from.
+
+`test_etf_source_registry.py` refuses a proxy with no reason, a self-proxy, a chain (two
+approximations compounding under one label), a target that is excluded from look-through, and
+a target that is itself `manual` — a proxy is only worth having if the fund it borrows from
+can be refreshed.
 
 **Do not re-derive the four US routes from the old comments in `etf_sources.py`'s history.**
 They said SOXQ/GRID/QTUM were unreachable, and each was wrong in a different way: Invesco's SPA
@@ -2119,9 +2153,13 @@ European feeds, the rest off the four US ones:
 - **`fund_residual_eur` is the rounded remainder, not its own rounded sum.** Five independently
   rounded buckets summed to a cent more than the rounded total on the real book — a partition
   that misses by a cent still misses. The residual carries the correction because "whatever is
-  left" is its definition. Note the residual is mostly *rounding*, not cash, for a broad fund:
-  Vanguard publishes weights to 2dp, so thousands of VT's 10,032 holdings round to 0.00 and its
-  weights sum to ~92%. Not renormalised — that would invent the attribution.
+  left" is its definition. Note the residual is mostly *rounding*, not cash, for a broad fund —
+  and the counts say so rather than being inferred. Measured on production: Vanguard publishes
+  weights to 2dp, the smallest non-zero weight in VT's file is `0.01`, and **8,007 of its
+  10,032 rows are published at exactly 0.00%**, which is the whole of the 8.14% its weights fall
+  short by. (EMIM is the same shape at 2,279 of 4,042.) Not renormalised — that would invent
+  the attribution — and `unweighted_constituents` rides on each fund row so an 8% shortfall
+  cannot read as an uninvested cash balance, which is the plausible wrong answer here.
 - **Invesco HTML-escapes its names.** `Invesco Government &amp; Agency Portfolio` is the only
   place in seven feeds that happens, and an unescaped name reaches the screen.
 - **`Money Market Fund, Taxable` is deliberately absent from `INVESCO_ASSET_CLASSES`.** An
@@ -2652,7 +2690,9 @@ Tests: `tests/test_currency_fallback.py`.
 | A drift or currency panel says it couldn't load positions | The positions query failed. The panel refuses to build a plan from absent data rather than reporting a portfolio of unheld rows |
 | Currency exposure looks wrong for an ETF | It is quote currency, not economic exposure, and deliberately not re-attributed — a EUR-listed S&P tracker is EUR-quoted with USD risk. The fund share is named on screen |
 | A recently bought holding sits in an *Unknown* sector or region | Expected, and correct rather than missing. `sync_helper` never writes `sector`/`country`, so an IBKR-ingested security has both NULL while `asset_type` has a `"Stock"` column default. Only `POST /api/allocation/sync` fills them and **nothing schedules it** (it needs Yahoo), so run it by hand. Before 2026-08-05 the holding was silently dropped from those two charts instead, which made them sum to under 100% under a "% of portfolio" label. A **mapped ETF** is the exception and needs no sync at all — `app/etf_mappings.py` supplies its sector, region *and* asset type live at read time |
-| Look-through coverage is below 100% | Expected, and it cannot reach 100%. VWCE publishes no machine-readable basket at all and DBPG is excluded by design, so those two are a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| A fund's Equity weight reads ~92% and its Value looks fully invested | Rounding, not cash, and the cell says which: the muted `N rows at 0%` beneath it. Vanguard publishes weights to 2dp and VT has 10,032 holdings, so its 8,007 smallest are printed at 0.00% and its file sums to 91.86%. Nothing is missing and nothing is misparsed — check `stored_rows == source_rows` on the sync run if you want to confirm. Deliberately not renormalised |
+| A fund's status badge reads *Via VT* rather than *Decomposed* | It publishes no basket of its own and is decomposed using another fund's — see *A borrowed basket*. Its companies are approximate and err **low**; the reason is spelled out in the yellow notice above. The Coverage card stays amber while any fund is in this state, and clears the moment a real basket is imported for it |
+| Look-through coverage is below 100% | Expected, and it cannot reach 100%. DBPG is excluded by design and no basket attributes 100% of its fund, so those are a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
 | The Coverage card is amber at a high percentage | It tones on whether any fund is *unresolved*, not on a threshold — green means every held fund is either decomposed or deliberately excluded. That is deliberate: a percentage threshold could not be green even with every obtainable basket loaded, so it would have been a warning that never clears. Amber names the count of funds still missing a basket |
 | A basket is badged `†` stale but its issuer publishes slowly | `ADAPTER_STALE_DAYS` is per-source, so `†` means *the issuer has newer holdings we failed to fetch* rather than *this feed is slow*: 7 days for the six that republish daily (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck), 75 for Vanguard US (month-end, ~6-week lag by design), 45 for a hand import. A quarterly source needs its own entry — do not raise the global default to silence it |
 | A company appears twice in the look-through table | The two rows share no identifier, and there are three causes in order of likelihood. (1) `key_type: ISIN` — no LEI and no shareClassFIGI on record, so run `python -m app.cli.resolve_identities`. (2) The row came out of **GRID or QTUM**, whose issuers publish a CINS or a SEDOL and no ISIN, so it has no identity at all until `resolve_identities --constituents` runs — and note a **basket re-import deliberately clears that resolution**, so it is the second half of every import for those two funds. Set `OPENFIGI_API_KEY` first. (3) Both rows are already resolved, which is a genuine gap no identifier closes — an ADR against its ordinary, or a dual-listed company with two legitimate LEIs — and needs an `ISSUER_OVERRIDES` entry with its evidence |
