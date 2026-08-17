@@ -138,6 +138,16 @@ export interface AnnualizedReturnResponse {
   start_date: string;
   end_date: string;
   num_cash_flows: number;
+  /**
+   * Held securities the backend could not value at one of the window's two endpoints.
+   * Above 0 means this return was measured against a partial book: the tax-lot purchases
+   * are unconditional cash flows while the endpoint valuation omits those holdings, so
+   * the figure understates (or overstates, when the *start* is the short one).
+   *
+   * Optional for the same reason the timeline's field is: absent means an older backend,
+   * read as complete, rather than a permanent warning on every chart.
+   */
+  unpriced_holdings?: number;
 }
 
 export interface SchedulerJob {

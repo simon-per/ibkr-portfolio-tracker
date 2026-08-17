@@ -95,6 +95,50 @@ describe('PerformanceMetricsCards', () => {
   })
 })
 
+/**
+ * Both of these read a figure computed from an incomplete valuation. The backend reports
+ * its own completeness now; this row's job is to not present the number as a measurement
+ * anyway.
+ */
+describe('an incomplete valuation is stated, not absorbed', () => {
+  it('says so above the row when the return was measured against unpriced holdings', () => {
+    renderWith({ xirrUnpriced: 2 })
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toMatch(/2 holdings had no usable price/)
+    // The caveat sits outside the cards, in the row's own flow: a qualifier you have to
+    // open or hover something to reach does not exist on a touch device.
+    expect(alert.textContent).toMatch(/Calmar/)
+  })
+
+  it('says nothing when the valuation was complete', () => {
+    renderWith({ xirrUnpriced: 0 })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not count an unpriced holding as a losing position', () => {
+    // The count beside the ratio, not only in the alert: an unpriced holding is valued at
+    // 0.00 and so carries a gain of -cost, which used to make it an ordinary-looking
+    // loser. Three of them did exactly that for hours on 2026-08-07.
+    renderWith({ winRate: 100, profitablePositions: 36, totalPositions: 36, unvaluedPositions: 3 })
+    expect(screen.getByText('36 of 36 profitable · 3 unpriced, not judged')).toBeTruthy()
+  })
+
+  it('has no win rate at all when nothing could be valued', () => {
+    // Not 0.0%: a zero win rate is a plausible figure, so nothing about it invites doubt.
+    renderWith({ winRate: null, profitablePositions: 0, totalPositions: 0, unvaluedPositions: 4 })
+    expect(screen.getByText('No priced positions')).toBeTruthy()
+    expect(screen.queryByText('0.0%')).toBeNull()
+  })
+
+  it('does not report a drawdown of 0.00% for a range it could not measure', () => {
+    // A stalled feed over the whole range leaves no measurable daily return, and "0.00%"
+    // there claims the portfolio never fell.
+    renderWith({ maxDrawdown: null })
+    expect(screen.queryByText('0.00%')).toBeNull()
+    expect(screen.getAllByText('Not enough history in this range').length).toBeGreaterThan(0)
+  })
+})
+
 describe('a backend failure is stated, not silent', () => {
   it('says the backend did not respond instead of rendering nothing', () => {
     const { container } = render(<PerformanceMetricsCards metrics={null} isError />)

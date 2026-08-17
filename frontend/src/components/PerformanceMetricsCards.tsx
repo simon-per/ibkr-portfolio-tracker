@@ -6,13 +6,26 @@ interface PerformanceMetricsCardsProps {
   metrics: {
     xirr: number | null
     xirrMethod?: string
-    maxDrawdown: number
+    /**
+     * Holdings the backend could not value at one end of the window the return covers.
+     * Above 0 means XIRR — and the Calmar built on it — was measured against a partial
+     * book, so the notice above the row says so rather than letting a plausible
+     * understatement pass as a measurement.
+     */
+    xirrUnpriced?: number
+    /** `null` when no daily return in the range was measurable. A `0` would claim the
+     *  portfolio never fell, which is what a stalled price feed looks like. */
+    maxDrawdown: number | null
     /** `null` below the minimum sample or with no volatility to divide by — a 0.00 there
      *  is a plausible-looking Sharpe and so the worst possible stand-in for "unknown". */
     sharpeRatio: number | null
-    winRate: number
+    /** `null` when nothing could be valued. Unvaluable holdings are excluded from both
+     *  sides — counted as losses, they read this figure ~8 pp low on a real morning. */
+    winRate: number | null
     profitablePositions: number
+    /** Positions actually judged, i.e. excluding the unvaluable ones. */
     totalPositions: number
+    unvaluedPositions?: number
     calmarRatio: number | null
     /** `null` when nothing is priced. A 0 here reads as *good* concentration, so it is
      *  the one absence in this row that actively reassures. */
@@ -66,9 +79,31 @@ export function PerformanceMetricsCards({
 
   const isPositiveXIRR = metrics.xirr !== null && metrics.xirr >= 0
   const isPositiveSharpe = metrics.sharpeRatio !== null && metrics.sharpeRatio >= 0
+  const xirrUnpriced = metrics.xirrUnpriced ?? 0
+  const unvalued = metrics.unvaluedPositions ?? 0
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
+      {/* Outside the cards, in the row's own flow — the rule MonthlyReturnsHeatmap and
+          PerformanceAttribution both had to learn: a caveat you have to open something to
+          reach is as good as absent, and the figure it qualifies is on screen either way.
+          Same shape and colours as PortfolioSummaryCards' notice, because it is the same
+          condition reaching a different set of numbers. */}
+      {xirrUnpriced > 0 && (
+        <div
+          role="alert"
+          className="col-span-2 md:col-span-3 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+        >
+          <span className="font-medium">
+            Annual Return is measured against an incomplete valuation — {xirrUnpriced}{' '}
+            {xirrUnpriced === 1 ? 'holding had' : 'holdings had'} no usable price at one end
+            of this period
+          </span>
+          {' '}— their purchases still count as money in, so the return and the Calmar ratio
+          understate. Check the market-data sync's warnings and the position's ticker mapping.
+        </div>
+      )}
+
       {/* Annual Return (XIRR). A window under 30 days reports simple_period instead, and
           the label follows it rather than annualising a few days of noise. */}
       <KpiCard
@@ -86,9 +121,13 @@ export function PerformanceMetricsCards({
       <KpiCard
         label="Max Drawdown"
         icon={<TrendingDown className="h-4 w-4 text-red-600" />}
-        value={`${metrics.maxDrawdown.toFixed(2)}%`}
-        tone="negative"
-        sub="Largest peak-to-trough decline"
+        value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
+        tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
+        // Not "no decline": with nothing measurable in the range there is no decline to
+        // measure, and the two must not share a rendering.
+        sub={metrics.maxDrawdown !== null
+          ? 'Largest peak-to-trough decline'
+          : 'Not enough history in this range'}
       />
 
       <KpiCard
@@ -106,8 +145,14 @@ export function PerformanceMetricsCards({
       <KpiCard
         label="Win Rate"
         icon={<Target className="h-4 w-4 text-muted-foreground" />}
-        value={`${metrics.winRate.toFixed(1)}%`}
-        sub={`${metrics.profitablePositions} of ${metrics.totalPositions} profitable`}
+        value={metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : null}
+        // The excluded count belongs beside the ratio, not only in the alert above: a
+        // holding valued at 0.00 carries a gain of -cost, so counting it would move this
+        // figure while looking like an ordinary loser.
+        sub={metrics.winRate === null
+          ? 'No priced positions'
+          : `${metrics.profitablePositions} of ${metrics.totalPositions} profitable` +
+            (unvalued > 0 ? ` · ${unvalued} unpriced, not judged` : '')}
       />
 
       <KpiCard
