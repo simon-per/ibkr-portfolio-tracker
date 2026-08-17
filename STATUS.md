@@ -76,10 +76,10 @@ Check `/health`'s commit against `git rev-parse origin/main` before assuming a s
 
 Four threads are genuinely open. In descending order of what they cost:
 
-1. **The 18:00 Berlin IBKR slot is unproven** → *Watching*, first entry. The schedule change
-   shipped today runs against the measured evidence, at the owner's explicit request. The first
-   18:00 Berlin run after deploy will *skip* (the old 06:00 slot spent that ET day), so the first
-   real test is the evening after. This is the item to watch.
+1. **The 18:00 Berlin IBKR slot is proven, and this thread is closing** → *Watching*, first entry.
+   Nine ET days measured on 2026-08-17: 12:00 ET is **7 of 9**, and the one miss was recovered by
+   the 00:00 Berlin slot the same ET day. The old "mid-session is fatal" reading was confounded —
+   13:00 and 20:00 Berlin also ran *after* an earlier slot had spent the day's generation.
 2. **The `full_sync` decoupling is deployed but still unobserved** → *Watching*, `full_sync` entry.
    It only shows on a run where IBKR refuses, which the guard now makes rarer.
 3. **The Flex window is 3 days**, which is a two-day margin → *Watching*, Flex period entry, and
@@ -185,12 +185,14 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Watching
 
-- **The IBKR primary slot is now 18:00 Berlin (12:00 ET) and that hour is unproven.** Shipped
-  2026-08-08 at the owner's explicit request, reaffirmed after the trade-off was put to them twice.
-  It runs against the measurements: 12:00 ET is mid-session, where 13:00 Berlin went 0-for-6 and
-  20:00 Berlin 1-for-8, and it captures no extra trades because the Flex window rolls at midnight
-  ET rather than at generation time. Recorded in CLAUDE.md beside `IBKR_ONLY_HOURS` so it reads as
-  a decision, not a drift.
+- **The IBKR primary slot is 18:00 Berlin (12:00 ET), and nine ET days say it works.** Shipped
+  2026-08-08 at the owner's explicit request against the measurements available then. Measured
+  2026-08-17: **12:00 ET succeeded seven days straight (08-09 → 08-15)**, failed 08-16 and was
+  recovered by 00:00 Berlin the same ET day, and failed again 08-17 with the recovery slot still to
+  come. 7 of 9, against 1-of-8 for the retired 20:00 Berlin slot. The old reading blamed
+  mid-session; the confound was that those slots also ran *after* the day's generation was spent.
+  CLAUDE.md's *The 18:00 Berlin slot* now carries the table. It still captures no extra trades,
+  because the Flex window rolls at midnight ET rather than at generation time.
 
   **The transition is the confusing part, so expect it.** On the deploy day the old 06:00 Berlin
   slot has already spent that ET day's generation, so the first 18:00 run will record
@@ -256,7 +258,7 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`find_flex_generation_gap` has never fired.** New on 2026-08-08: it warns after 2 ET days with
   no successful IBKR sync, which is the actual margin under a 3-day Flex window — `find_stale_ibkr_sync`
   at 7 days fires four days after the trades are gone. It runs from the market-data job, so it
-  surfaces while Flex is refusing. Given the unproven hour above, this is the alarm that matters;
+  surfaces while Flex is refusing. With only two attempts per ET day, this is the alarm that matters;
   if it appears in `warnings[]`, act rather than waiting.
 
 - **`full_sync`'s market-data half is decoupled from its IBKR half and has not yet been observed
@@ -359,6 +361,17 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   actually runs daily. See the section below for why it had not.
 
 ## Ran on production 2026-08-17 — the runbook, and what it caught
+
+**Identity resolution completed** (`manual_identity_resolve`, success): 1,998 ISINs resolved — 893
+LEI, 1,988 shareClassFIGI — plus **108 fund constituent rows folded by CINS/SEDOL**, which is
+GRID's and QTUM's issuer identifiers becoming companies. `unresolved_value_eur` fell from
+**4,281 → 516 CHF** (0.7% of the book); coverage 95.16%.
+
+Two things about the run worth keeping. It **commits once at the very end**
+(`resolve_identities.py:165`), so an interrupted run loses everything including the `*_checked_at`
+stamps — do not deploy while one is in flight. And **`pgrep` is not installed in the container**, so
+a `pgrep -f … | wc -l` liveness check counts the *error line* and always returns 1; use the
+`sync_runs` row to tell whether it finished.
 
 **Coverage is 95.14% and DBPG is the only fund not looked through.** Fetched all 10 baskets
 (0 failed) and imported 9; SMH, SOXQ, GRID and QTUM stored for the first time. Identity

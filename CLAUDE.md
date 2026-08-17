@@ -1341,25 +1341,42 @@ The concrete consequence used to be that **the earliest job starves the later on
 why `full_sync`'s market-data half must not be gated on its IBKR half. Since the guard, the later
 ones skip instead of failing, but the gating rule stands for its own reasons.
 
-### The 18:00 Berlin slot — chosen against the evidence, on purpose
+### The 18:00 Berlin slot — chosen against the evidence, and since vindicated by it
 
 The primary IBKR slot moved from 06:00 to **18:00 Berlin (12:00 ET)** on 2026-08-08 at the account
-owner's request, reaffirmed after the trade-off was put to them twice. It is written down here
-because the schedule now contradicts the measurements above, and the next person to read a run of
-`1001`s must know this was a decision rather than a drift:
+owner's request, reaffirmed after the trade-off was put to them twice. It was recorded here as a
+decision made against the measurements, so that a run of `1001`s would not read as a drift.
+
+**Nine ET days later it is working, and the "mid-session is fatal" reading does not survive them.**
+Read off `sync_runs` on 2026-08-17:
+
+| ET day | 12:00 ET (18:00 Berlin) | 18:00 ET (00:00 Berlin) |
+|---|---|---|
+| 08-09 … 08-15 | **success, seven for seven** | skipped — the day's generation was already spent |
+| 08-16 | error | **success** — the second slot recovered it |
+| 08-17 | error | pending at the time of writing |
+
+So 12:00 ET is **7 of 9**, against the 1-of-8 the retired 20:00 Berlin slot managed and the 0-of-6 of
+13:00 Berlin. Those two were never simply "mid-session": they also ran *after* an earlier slot had
+already taken the day's generation, which is the confound named above. With one primary slot in that
+band the band turns out to be fine. **Do not "restore" 06:00 Berlin on the strength of the old
+table** — and equally, do not read this as licence to add slots, because the once-per-day rule is
+unchanged and every extra attempt is a failed generation that `Code=1025` counts.
+
+Two properties of the choice are unchanged and still worth knowing:
 
 - **It captures no additional trades.** The window ends yesterday *measured in US Eastern* and rolls
   at midnight ET, not at generation time — so 12:00 ET and 00:00 ET on the same day both cover
   D−3…D−1. Identical statement, ~12 hours later. Reaching *today's* trades needs a custom date range
   set by hand in the portal, which is not a schedule change.
-- **12:00 ET is mid-session**, the band where the table above shows 13:00 Berlin 0-for-6 and 20:00
-  Berlin 1-for-8. It is unproven at this specific hour.
-- **Attempts drop from three per ET day to two**, both in the weaker band, against a 3-day window
-  whose entire margin is two consecutive failed days.
+- **There are two attempts per ET day, not three**, against a 3-day window whose entire margin is two
+  consecutive failed days. 08-16 spent one of those two and recovered on the second slot, which is
+  the design working rather than a warning.
 
 What makes it survivable is that the guard reduces the cost of a doomed attempt to zero, and that
-`find_flex_generation_gap` (below) now alarms in time to act. **If generations start failing, moving
-the primary back to 06:00 Berlin — the instant the window rolls — is the fix.**
+`find_flex_generation_gap` (below) alarms in time to act. **If both slots start failing on the same
+ET day repeatedly, moving the primary back to 06:00 Berlin — the instant the window rolls — is still
+the fix.** A single failed 12:00 ET is not that signal; it is Sunday's shape too.
 
 **`find_flex_generation_gap` warns after `FLEX_GENERATION_GAP_WARN_DAYS` (2) ET days with no
 successful IBKR sync**, and it exists because `find_stale_ibkr_sync` at 7 days *cannot see the
