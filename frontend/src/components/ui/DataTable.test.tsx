@@ -240,6 +240,72 @@ describe('the awkward shapes', () => {
   })
 })
 
+/**
+ * `expandedRow` exists because there was nowhere to put a per-row panel: the Look-through
+ * tab's company breakdown had to be rendered *outside* the table, which put it below every
+ * row and both footnotes — one to three screens from the button that opened it, so the
+ * button looked inert.
+ *
+ * The assertions that matter are about *placement*, not presence. A panel rendered anywhere
+ * in the document satisfies "is the text there", which is exactly how the original bug
+ * passed every check that existed.
+ */
+describe('expandedRow puts a panel under its own row', () => {
+  const expansion = (r: Holding) =>
+    r.symbol === 'ASML' ? <p>Inside {r.symbol}</p> : null
+
+  it('renders in both modes from one render function', () => {
+    const { tableView, cardView } = renderBoth({ expandedRow: expansion })
+    expect(tableView.textContent).toContain('Inside ASML')
+    expect(cardView.textContent).toContain('Inside ASML')
+  })
+
+  it('renders only for the rows that return content', () => {
+    const { tableView, cardView } = renderBoth({ expandedRow: expansion })
+    expect(tableView.textContent).not.toContain('Inside AAPL')
+    expect(cardView.textContent).not.toContain('Inside AAPL')
+    // One extra <tr> beyond header + rows, not one per row.
+    expect(tableView.querySelectorAll('tr')).toHaveLength(ROWS.length + 2)
+  })
+
+  it('places the panel IMMEDIATELY after its own row, not after the table', () => {
+    // The whole point. Asserting only that the text exists passes against a panel
+    // rendered below every row, which is the bug this slot was added to fix.
+    const { tableView } = renderBoth({ expandedRow: expansion })
+    const bodyRows = Array.from(tableView.querySelectorAll('tbody tr'))
+    const owner = bodyRows.findIndex(tr => tr.textContent?.includes('ASML'))
+    expect(owner).toBeGreaterThanOrEqual(0)
+    expect(bodyRows[owner + 1]?.textContent).toContain('Inside ASML')
+  })
+
+  it('places it inside its own card on a phone, not after the list', () => {
+    const { cardView } = renderBoth({ expandedRow: expansion })
+    const items = Array.from(cardView.querySelectorAll('li'))
+    const owner = items.find(li => li.textContent?.includes('ASML Holding NV'))
+    expect(owner?.textContent).toContain('Inside ASML')
+    // ...and not in a sibling card, which is the same misplacement one level down.
+    const others = items.filter(li => li !== owner)
+    expect(others.some(li => li.textContent?.includes('Inside ASML'))).toBe(false)
+  })
+
+  it('spans every column, counting the rowActions one', () => {
+    // A hardcoded colSpan is what the footer code records as lying silently once a column
+    // is added, so this pins the span against the real column count.
+    const actions = () => <button type="button">Go</button>
+    const { tableView } = renderBoth({ expandedRow: expansion, rowActions: actions })
+    const visible = COLUMNS.filter(c => c.desktop !== 'hide').length
+    const cell = tableView.querySelector('tbody tr td[colspan]')
+    expect(cell?.getAttribute('colspan')).toBe(String(visible + 1))
+  })
+
+  it('changes nothing when the caller passes no expandedRow', () => {
+    const { tableView, cardView } = renderBoth()
+    expect(tableView.querySelector('td[colspan]')).toBeNull()
+    expect(tableView.querySelectorAll('tr')).toHaveLength(ROWS.length + 1)
+    expect(cardView.querySelectorAll('li')).toHaveLength(ROWS.length)
+  })
+})
+
 describe('the hint glossary', () => {
   it('lists every hinted column, in both modes, from one source', () => {
     // The desktop `title=` and the phone glossary read the same `hint`, so a

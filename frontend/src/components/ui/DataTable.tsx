@@ -165,6 +165,18 @@ export interface DataTableProps<Row, SortKey extends string = never> {
   minWidthClassName?: string
   footer?: readonly FooterCell[]
   rowActions?: (row: Row) => React.ReactNode
+  /**
+   * Content rendered directly BENEATH a row. Return `null`/`undefined` for a row that is
+   * not expanded — the caller owns which one is, since it already owns the control in
+   * `rowActions` that toggles it.
+   *
+   * Shaped like `rowActions` on purpose: one function, both renderings, so a breakdown
+   * cannot reach the table and miss the phone. It exists because there was nowhere to put
+   * one — the Look-through tab's company breakdown had to be rendered *outside* the table
+   * entirely, which put it below every row plus the footnotes, one to three screens from
+   * the button that opened it.
+   */
+  expandedRow?: (row: Row) => React.ReactNode
   /** Detail pairs shown before a "Show all N" disclosure. Omit to show all of them. */
   detailLimit?: number
   /** Wraps BOTH modes, so a caller's section divider survives on the phone. */
@@ -194,6 +206,7 @@ export function DataTable<Row, SortKey extends string = never>({
   minWidthClassName,
   footer,
   rowActions,
+  expandedRow,
   detailLimit,
   className,
   density = 'normal',
@@ -227,6 +240,7 @@ export function DataTable<Row, SortKey extends string = never>({
                 columns={columns}
                 detailLimit={detailLimit}
                 actions={rowActions?.(row)}
+                expanded={expandedRow?.(row)}
               />
             ))}
             {footer && footer.length > 0 && (
@@ -247,6 +261,7 @@ export function DataTable<Row, SortKey extends string = never>({
             minWidthClassName={minWidthClassName}
             footer={footer}
             rowActions={rowActions}
+            expandedRow={expandedRow}
             density={density}
           />
         </>
@@ -267,11 +282,12 @@ function WideTable<Row, SortKey extends string>({
   minWidthClassName,
   footer,
   rowActions,
+  expandedRow,
   density,
 }: Required<Pick<DataTableProps<Row, SortKey>, 'rows' | 'columns' | 'getRowKey' | 'label' | 'density'>> &
   Pick<
     DataTableProps<Row, SortKey>,
-    'caption' | 'sort' | 'minWidthClassName' | 'footer' | 'rowActions'
+    'caption' | 'sort' | 'minWidthClassName' | 'footer' | 'rowActions' | 'expandedRow'
   >) {
   const visible = columns.filter(c => c.desktop !== 'hide')
   const pad = DENSITY[density]
@@ -321,25 +337,43 @@ function WideTable<Row, SortKey extends string>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={getRowKey(row, index)} className="border-b last:border-0">
-              {visible.map(col => (
-                <td
-                  key={col.key}
-                  className={cn(
-                    pad,
-                    ALIGN_CELL[col.align ?? 'left'],
-                    (col.align ?? 'left') === 'right' && 'tabular-nums',
-                    col.tone?.(row),
-                    col.cellClassName,
-                  )}
-                >
-                  {col.cell(row, 'table')}
-                </td>
-              ))}
-              {rowActions && <td className={pad}>{rowActions(row)}</td>}
-            </tr>
-          ))}
+          {rows.map((row, index) => {
+            const key = getRowKey(row, index)
+            const expansion = expandedRow?.(row)
+            return (
+              <React.Fragment key={key}>
+                {/* The border moves to the expansion when there is one, so the panel
+                    reads as part of its row rather than as a detached band below a rule. */}
+                <tr className={cn(!expansion && 'border-b last:border-0')}>
+                  {visible.map(col => (
+                    <td
+                      key={col.key}
+                      className={cn(
+                        pad,
+                        ALIGN_CELL[col.align ?? 'left'],
+                        (col.align ?? 'left') === 'right' && 'tabular-nums',
+                        col.tone?.(row),
+                        col.cellClassName,
+                      )}
+                    >
+                      {col.cell(row, 'table')}
+                    </td>
+                  ))}
+                  {rowActions && <td className={pad}>{rowActions(row)}</td>}
+                </tr>
+                {expansion && (
+                  <tr className="border-b last:border-0">
+                    {/* `columnCount` rather than a literal: it already counts the
+                        rowActions column, and a hardcoded span is what the footer code
+                        below records as lying silently once a column is added. */}
+                    <td colSpan={columnCount} className={cn(pad, 'bg-muted/30')}>
+                      {expansion}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            )
+          })}
         </tbody>
         {footer && footer.length > 0 && (
           <tfoot>
@@ -385,11 +419,13 @@ function CompactRow<Row, SortKey extends string>({
   columns,
   detailLimit,
   actions,
+  expanded: expansion,
 }: {
   row: Row
   columns: readonly Column<Row, SortKey>[]
   detailLimit?: number
   actions?: React.ReactNode
+  expanded?: React.ReactNode
 }) {
   const [expanded, setExpanded] = React.useState(false)
 
@@ -469,6 +505,12 @@ function CompactRow<Row, SortKey extends string>({
       )}
 
       {actions && <div className="mt-2 flex justify-end gap-2">{actions}</div>}
+
+      {/* Below the actions, so the control that opened it stays adjacent to its own card
+          rather than being pushed away by the panel it toggles. */}
+      {expansion && (
+        <div className="mt-2 rounded-md bg-muted/30 px-3 py-2">{expansion}</div>
+      )}
     </li>
   )
 }
