@@ -181,6 +181,7 @@ recomputes by hand is the one that is wrong. The known instances:
 | the three allocation charts | one function buckets each holding three times, and only asset type used `or 'Unknown'`. Sector and geography used `if security.sector:` / `if security.country:` and **dropped** the holding, so those two summed to under 100% while the UI printed every slice as "% of portfolio". Not one module copied into another — three adjacent call sites of the same helper, one of which got the rule |
 | "is this holding a fund?" | the same three call sites again, a rule later. Sector and geography ask `is_known_etf(symbol)` — a live look-through-table lookup needing no sync — while the asset-type chart read `securities.asset_type`, which **only** `POST /api/allocation/sync` writes and nothing schedules. `sync_helper` never writes it, so an IBKR-ingested fund keeps the `"Stock"` column default indefinitely and was drawn as a Stock in one chart while being distributed across eleven sectors as an ETF a few pixels below. Two sources for one predicate, one of them needing a manual step the other doesn't; the table wins now |
 | the 12-month deployment average | `ContributionsStrip` renders the server's `avg_deployed_per_month_eur`; `MonthlyDeploymentCard`, on the same tab a few hundred pixels below, recomputed it as `monthly.slice(-12)` divided by its own length. `monthly` omits months with no activity, so that takes the last twelve *rows* — which can span more than twelve months — and divides by a count smaller than the period covered. Both errors push it up. **Two numbers under one name on one screen** is the cheapest instance of this failure to find and the easiest to leave: neither is obviously wrong on its own |
+| `isUnpriced` | "can the backend value this position?" was inline in `rebalance.ts` and `currencyExposure.ts` — identical, correct, each carrying its own copy of the reasoning — and `winRate` was about to make it three. Caught **while writing the third copy**, which is the only cheap moment to catch one. Note what makes it more than tidiness: the two existing copies had already needed correcting *together* on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the FX case — so the drift had already happened once, in lockstep, by luck. Extracted to `positionValuation.ts`, with a family test that strips comments (the rule is *documented* in `api.ts`, deliberately) and fails naming any `lib/` module that tests the columns itself |
 
 **The lens that finds them**, and which found the last four: walk the AST for function names defined in
 more than one module, ignore trivial bodies, and read each cluster. Router-to-service pairs and
@@ -2652,7 +2653,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1183 backend + 479 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
+Tests (1183 backend + 485 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash

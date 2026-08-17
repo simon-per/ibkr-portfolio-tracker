@@ -297,10 +297,20 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   with nothing to borrow. Neither can be cleared by running anything.
 
   **It has never fired on production**, because it shipped after the 08-17 CLI run left every basket
-  fresh. Expect it in `warnings[]` about a week later: nine of the ten feeds republish daily, so the
-  first sync past the 7-day mark should name them. If it is silent then, check the market-data job's
-  `details` — the detector is separately guarded, so an exception in it is a log line rather than a
-  failed sync. The *second* half of item 3 — a staleness-guarded automatic refresh — is still open.
+  fresh. When to expect it, computed from the registry rather than guessed:
+
+  | fund | judged on | expectation | first warns |
+  |---|---|---|---|
+  | IWDA, SXR8, EMIM, XNAS, XAIX, SMH, SOXQ, GRID, QTUM | own basket, as-of ~08-17 | 7 days | **~08-24** |
+  | VOO, and DBPG through it | VOO's basket, as-of 07-31 | 75 days | ~10-14 |
+  | VT, and VWCE through it | VT's basket, as-of 06-30 (its refresh refused) | 75 days | **~09-13** |
+
+  So a quiet `warnings[]` before 08-24 is correct, and **VWCE staying quiet while the nine are
+  flagged is also correct** — it is judged by Vanguard's cadence because that is whose file it
+  reads, not by the 45-day default its own `manual` adapter would have given it. If nothing appears
+  after 08-24, check the market-data job's `details`: the detector is separately guarded, so an
+  exception in it is a log line rather than a failed sync. The *second* half of item 3 — a
+  staleness-guarded automatic refresh — is still open.
 
 - **The TSMC ADR override is about to fire for the first time.** `ISSUER_OVERRIDES` folds
   `US8740391003` (the TSM ADR) into the Taiwanese ordinary, pinned from both sides in
@@ -467,7 +477,17 @@ because a warning that can never clear is the always-present-Flex-banner patholo
 follows the proxy: VWCE's own adapter is `manual` while VT is fetchable, so a missing VT *is*
 actionable. That last rule was a real gap in the first draft, caught by writing the test.
 
-Verified: backend **1183 passed** (was 1168), frontend **479** (was 466), `tsc -b` and
+**One extraction came out of writing the fix, not out of reading the code.** `winRate` needed
+"can this position be valued?", which was already inline in `rebalance.ts` *and*
+`currencyExposure.ts` — so the fix was about to become the third copy of the predicate. It is
+`positionValuation.ts` now, with a family test that names any `lib/` module testing the columns
+itself. What makes it more than tidiness: those two copies had already needed correcting
+**together** on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the
+FX case — the drift had happened once already and only stayed in lockstep by luck. The mutation
+check is the sharp part: reintroducing a local copy leaves `rebalance.test.ts` **green** and only
+the family test fails, which is what "a correct copy is still a copy" looks like in practice.
+
+Verified: backend **1183 passed** (was 1168), frontend **485** (was 466), `tsc -b` and
 `npm run build` clean. **Every fix was mutation-checked** — revert it, watch the new test fail — for
 the eleven mutants across both halves, because this repo has twice had a test pass against the bug it
 was written for. A twelfth check pins the *wiring*: an AST walk over `sync_market_data` asserting all
