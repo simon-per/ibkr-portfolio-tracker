@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services.peg_ratio import peg_from_growth
+from app.services.safe_numbers import safe_float
 from app.services.watchlist_service import WatchlistService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 from app.repositories.watchlist_repository import WatchlistRepository
@@ -119,12 +121,36 @@ async def sync_watchlist(
 
 
 def _compute_peg(item):
-    """Derive PEG at read time if not stored: P/E ÷ Fwd EPS growth %."""
+    """
+    Derive PEG at read time when the column is NULL, through the shared helper.
+
+    This used to be a fourth hand-written PEG — after the watchlist's and the
+    fundamentals service's copies were extracted into `peg_ratio.py` precisely to stop
+    that, with the router left behind. The arithmetic was a faithful copy of the
+    forward-EPS tier (x100, round to 4) and the *guard* was not: `if item.trailing_pe`
+    is a truthiness test, so a **negative** P/E passed it where `peg_from_growth`
+    refuses `trailing_pe <= 0` on the stated grounds that a loss-making company has no
+    meaningful PEG.
+
+    A loss-making growth name with `trailing_pe = -15.0` and 50% forward EPS growth
+    therefore printed **-0.30** in the PEG column — a number that, on a PEG scale, reads
+    as spectacularly cheap. And the NULL column that makes this function fire at all is
+    exactly the state such a company is in, because both fallbacks in the sync path
+    correctly refused it. `/api/fundamentals/portfolio` showed blank for the same
+    company at the same moment.
+
+    `is_fraction=True` because `fwd_eps_growth` is stored as a decimal, matching the
+    forward-EPS tier the copy came from — the tier whose inference bug turned 222%
+    growth into 2.2245% and a PEG of 0.25 into 24.56.
+    """
     if item.peg_ratio is not None:
         return item.peg_ratio
-    if item.trailing_pe and item.fwd_eps_growth and item.fwd_eps_growth > 0:
-        return round(item.trailing_pe / (item.fwd_eps_growth * 100), 4)
-    return None
+    # Through `safe_float` for the same reason the sync path is: it rounds to 4dp, and
+    # a derived PEG that rounds differently from a stored one is the `_safe_float`
+    # divergence CLAUDE.md records — the same ratio reading differently on two screens.
+    return safe_float(
+        peg_from_growth(item.trailing_pe, item.fwd_eps_growth, is_fraction=True)
+    )
 
 
 def _item_to_response(item) -> WatchlistItemResponse:

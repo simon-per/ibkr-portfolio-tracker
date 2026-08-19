@@ -4,11 +4,11 @@ Allocation service for fetching and caching sector/geographic data for securitie
 import asyncio
 import logging
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta
 from app.clock import utcnow
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 import yfinance as yf
 
 from app.models.security import Security
@@ -26,6 +26,29 @@ logger = logging.getLogger(__name__)
 #: drifting — the tab would simply have described a different set than the sync
 #: refreshed.
 ALLOCATION_STALE_DAYS = 7
+
+
+def needs_allocation_refresh(cutoff: datetime):
+    """
+    The one SQL predicate for "this security's allocation data needs fetching".
+
+    `IS NULL` is the half that kept getting lost. SQL comparison against NULL is not
+    true, so `allocation_last_updated < cutoff` silently excludes every security that
+    has never been attempted — which on a fresh install is all of them, since nothing
+    schedules `sync_allocation_data`. `/api/allocation/status` counted that way and
+    answered `stale_securities: 0` beside a sync that was about to issue forty Yahoo
+    requests, and its comment claimed it used "the same threshold the sync selects on".
+    The *threshold* was shared; the predicate was not. Exactly the sentence CLAUDE.md
+    already records for `stale_metrics: 0`, and the same tell — a comment asserting
+    alignment.
+
+    Returns a clause rather than a bool so the status count and the sync's own selection
+    are the same expression evaluated by the same engine.
+    """
+    return or_(
+        Security.allocation_last_updated.is_(None),
+        Security.allocation_last_updated < cutoff,
+    )
 
 
 class AllocationService:
@@ -138,21 +161,15 @@ class AllocationService:
         """
         logger.info("Syncing allocation data for securities")
 
-        # Get all securities
-        result = await self.db.execute(select(Security))
-        securities = list(result.scalars().all())
-
-        # Filter securities that need updates
+        # Selected through the shared predicate rather than filtered in Python, so
+        # `/api/allocation/status` and this loop cannot disagree about which securities
+        # are pending — see needs_allocation_refresh.
         cutoff_date = utcnow() - timedelta(days=ALLOCATION_STALE_DAYS)
-        securities_to_update = []
-
-        for security in securities:
-            if force_refresh:
-                securities_to_update.append(security)
-            elif security.allocation_last_updated is None:
-                securities_to_update.append(security)
-            elif security.allocation_last_updated < cutoff_date:
-                securities_to_update.append(security)
+        query = select(Security)
+        if not force_refresh:
+            query = query.where(needs_allocation_refresh(cutoff_date))
+        result = await self.db.execute(query)
+        securities_to_update = list(result.scalars().all())
 
         if not securities_to_update:
             logger.info("All securities have fresh allocation data")

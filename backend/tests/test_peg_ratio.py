@@ -16,6 +16,9 @@ Offline: pure arithmetic plus one structural check, no network.
 
 import inspect
 
+import ast
+import pathlib
+
 import pytest
 
 from app.services.peg_ratio import growth_pct_from_estimate, peg_from_growth
@@ -161,3 +164,97 @@ def test_a_non_positive_growth_is_still_refused_under_the_flag():
     for bad in (None, 0, -0.2):
         assert growth_pct_from_estimate(bad, is_fraction=True) is None
         assert peg_from_growth(20.0, bad, is_fraction=True) is None
+
+
+# ── The family rule ─────────────────────────────────────────────────────────
+
+
+class _Item:
+    """The two columns `_compute_peg` reads, plus the stored value it prefers."""
+
+    def __init__(self, trailing_pe, fwd_eps_growth, peg_ratio=None):
+        self.trailing_pe = trailing_pe
+        self.fwd_eps_growth = fwd_eps_growth
+        self.peg_ratio = peg_ratio
+
+
+def test_the_read_time_peg_refuses_a_loss_making_company():
+    """
+    `routers/watchlist.py::_compute_peg` was a fourth hand-written PEG — written after
+    the watchlist's and the fundamentals service's copies had been extracted into
+    `peg_ratio.py` precisely to stop that, and left behind by the extraction.
+
+    Its arithmetic was a faithful copy of the forward-EPS tier. Its *guard* was not:
+    `if item.trailing_pe` is a truthiness test, so a negative P/E sailed through where
+    `peg_from_growth` refuses `trailing_pe <= 0` on the stated grounds that a
+    loss-making company has no meaningful PEG.
+
+    The result is the dangerous kind of wrong — not a blank, a number. On a PEG scale
+    **-0.30** reads as spectacularly cheap. And the NULL `peg_ratio` column that makes
+    this function fire at all is exactly the state such a company is in, because both
+    fallbacks in the sync path correctly refused it: the read path resurrected precisely
+    what the write path had declined to store.
+    """
+    from app.routers.watchlist import _compute_peg
+
+    assert _compute_peg(_Item(-15.0, 0.5)) is None
+    assert peg_from_growth(-15.0, 0.5, is_fraction=True) is None
+
+
+def test_the_read_time_peg_still_answers_the_ordinary_case():
+    """The refusal must not have taken the feature with it."""
+    from app.routers.watchlist import _compute_peg
+
+    assert _compute_peg(_Item(30.0, 0.5)) == pytest.approx(0.6)
+    # A stored value always wins; this only fills a NULL.
+    assert _compute_peg(_Item(30.0, 0.5, peg_ratio=1.23)) == 1.23
+    assert _compute_peg(_Item(30.0, None)) is None
+    assert _compute_peg(_Item(30.0, 0.0)) is None
+
+
+def test_the_read_time_peg_rounds_like_the_sync_path():
+    """
+    The sync path wraps `peg_from_growth` in `_safe_float`, which rounds to 4dp. A
+    derived PEG rounding differently from a stored one is the `_safe_float` divergence
+    CLAUDE.md records — one ratio reading differently on two screens.
+    """
+    from app.routers.watchlist import _compute_peg
+
+    derived = _compute_peg(_Item(30.0, 0.37))
+    assert derived == round(derived, 4)
+
+
+def test_nobody_computes_peg_without_the_shared_helper():
+    """
+    The family form, so the *fifth* copy is caught rather than these four.
+
+    Any module dividing a P/E by a growth figure is computing a PEG and must reach
+    `peg_ratio.peg_from_growth`, which owns the two rules that keep being lost: refuse a
+    non-positive P/E, and know whether the growth input is a fraction or a percent.
+    Routers are in scope here precisely because that is where the last one hid —
+    `test_fundness_predicate.py` scans only `app/services/` and could not have seen it.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+    for path in sorted(list((root / "services").glob("*.py")) + list((root / "routers").glob("*.py"))):
+        if path.name == "peg_ratio.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        code = chr(10).join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+        if "peg" not in code.lower():
+            continue
+        # A division whose left side mentions a P/E and whose right mentions growth is
+        # a PEG by any other name.
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+                continue
+            left = ast.dump(node.left).lower()
+            right = ast.dump(node.right).lower()
+            if ("_pe" in left or "pe_" in left) and "growth" in right:
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, (
+        f"a hand-rolled PEG reappeared at {offenders}; call peg_ratio.peg_from_growth, "
+        "which refuses a non-positive P/E and knows the growth convention"
+    )

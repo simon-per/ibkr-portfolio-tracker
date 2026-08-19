@@ -81,8 +81,41 @@ class WatchlistService:
         rsi = 100.0 - (100.0 / (1.0 + rs))
         return round(rsi, 2)
 
+    # The inputs the score is built from. Every one of them has a neutral fallback, so
+    # the score is defined for any subset — including the empty one, which is the
+    # problem this list exists to detect.
+    _SCORE_INPUTS = (
+        "peg_ratio", "forward_pe", "trailing_pe", "ev_to_ebitda",
+        "rsi14", "pct_from_52w_high", "pct_from_ma200",
+        "profit_margins", "revenue_growth", "earnings_growth",
+        "analyst_rating", "analyst_target",
+    )
+
     def _compute_buy_score(self, data: Dict) -> Optional[float]:
-        """Compute composite 0-100 buy score from valuation, technicals, quality, and analyst data."""
+        """
+        Composite 0-100 buy score from valuation, technicals, quality and analyst data.
+
+        Returns **None** when not one of `_SCORE_INPUTS` was available, rather than the
+        48.0 that every neutral fallback summed to. That 48 was not a cautious estimate,
+        it was a claim: `watchlistColumns.tsx` paints anything at or above 40 yellow and
+        `WatchlistTab` sorts by this column *by default*, so a ticker nothing is known
+        about — halted, delisted, thinly covered, or simply mistyped — sorted above every
+        genuinely measured 35-47 and presented as a middling opportunity.
+
+        The honest branch already existed on both sides: the return type says Optional,
+        `api.ts` declares `buy_score: number | null`, and the column has a grey
+        no-score badge. Nothing ever produced the None. Same shape as `_compute_rsi`
+        answering 100 for a flat series — a stand-in whose value makes an assertion.
+
+        Note what this deliberately does *not* do: refuse a thin score. A score built
+        from two of twelve inputs is still mostly fallback, and nothing on screen says
+        so. Distinguishing those needs a coverage figure on the wire (the shape
+        `forecast_samples` uses for dividend cadence), which is a migration; recorded in
+        STATUS.md rather than guessed at here.
+        """
+        if all(data.get(field) is None for field in self._SCORE_INPUTS):
+            return None
+
 
         # --- Valuation (0-25) ---
         peg = data.get("peg_ratio")
@@ -295,6 +328,23 @@ class WatchlistService:
         data["week52_low"] = self._safe_float(info.get("fiftyTwoWeekLow"))
         data["ma200"] = self._safe_float(info.get("twoHundredDayAverage"))
         data["ma50"] = self._safe_float(info.get("fiftyDayAverage"))
+
+        # These three are assigned unconditionally, None included, and that is the whole
+        # point.
+        #
+        # `WatchlistRepository.update_cached_data` iterates `data.items()`, so a key that
+        # is simply *absent* leaves the previous column value in place — while
+        # `last_synced` is always present and always refreshed. So a day on which
+        # `.info` came back without `fiftyTwoWeekHigh`, or `history` came back empty,
+        # republished yesterday's RSI and %-from-high under today's timestamp. Nothing
+        # anywhere could tell that apart from a genuine reading.
+        #
+        # It also made a security disagree with itself: `_compute_buy_score` reads this
+        # dict, so it scored the missing RSI at the neutral 5 while the table went on
+        # displaying the stale 72.4 that would have scored 0.
+        data["pct_from_52w_high"] = None
+        data["pct_from_ma200"] = None
+        data["rsi14"] = None
 
         # % from 52-week high (using current_price from .info)
         if current_price and data["week52_high"] and data["week52_high"] > 0:

@@ -64,13 +64,22 @@ def test_too_short_a_series_still_refuses():
     assert service._compute_rsi(np.full(5, 100.0)) is None
 
 
+# Every case below carries `profit_margins` alongside the RSI it is actually about.
+# `_compute_buy_score` now refuses outright when not one of its twelve inputs is
+# present, so a dict holding only `{"rsi14": None}` means "nothing is known about this
+# security" and correctly scores None — which would make these two assertions about the
+# *RSI branch* untestable. One measurable input keeps the score defined so the branch
+# under test is the thing being compared.
+_OTHERWISE_KNOWN = {"profit_margins": 0.20}
+
+
 def test_a_flat_series_no_longer_costs_ten_points_of_buy_score():
     """
     The reason the refusal matters. Scored through the real function, an unmeasurable
     RSI must land on the neutral branch rather than the worst one.
     """
-    flat = {"rsi14": service._compute_rsi(np.full(60, 100.0))}
-    overbought = {"rsi14": 100.0}
+    flat = {**_OTHERWISE_KNOWN, "rsi14": service._compute_rsi(np.full(60, 100.0))}
+    overbought = {**_OTHERWISE_KNOWN, "rsi14": 100.0}
 
     assert flat["rsi14"] is None
     # 5 (neutral, unknown) vs 0 (measured and maximally overbought)
@@ -83,7 +92,32 @@ def test_the_neutral_branch_is_genuinely_the_midpoint():
     that branch ever changed to 0, refusing would stop being better than guessing and
     this whole change would be inert.
     """
-    unknown = service._compute_buy_score({"rsi14": None})
-    worst = service._compute_buy_score({"rsi14": 100.0})
-    best = service._compute_buy_score({"rsi14": 10.0})
+    unknown = service._compute_buy_score({**_OTHERWISE_KNOWN, "rsi14": None})
+    worst = service._compute_buy_score({**_OTHERWISE_KNOWN, "rsi14": 100.0})
+    best = service._compute_buy_score({**_OTHERWISE_KNOWN, "rsi14": 10.0})
     assert worst < unknown < best
+
+
+def test_a_security_nothing_is_known_about_scores_nothing():
+    """
+    The empty dict used to score **48.0** — every dimension's neutral fallback summed.
+    That is not a cautious estimate: `watchlistColumns.tsx` paints anything from 40 up
+    yellow, and `WatchlistTab` sorts by this column by default, so a ticker with no data
+    at all outranked every genuinely measured 35-47 and read as a middling opportunity.
+
+    Reachable in one click — add a halted, delisted or thinly covered ticker and
+    `yf.Ticker().info` comes back sparse.
+    """
+    assert service._compute_buy_score({}) is None
+    assert service._compute_buy_score({field: None for field in service._SCORE_INPUTS}) is None
+    # Fields that are not scoring inputs must not rescue it.
+    assert service._compute_buy_score({"symbol": "XYZ", "current_price": 12.0}) is None
+
+
+def test_one_measurable_input_is_enough_to_produce_a_score():
+    """
+    The refusal is "nothing is known", not "not everything is known". Demanding a full
+    set would blank the column for most of a real watchlist, which is the opposite
+    failure.
+    """
+    assert service._compute_buy_score({"profit_margins": 0.30}) is not None

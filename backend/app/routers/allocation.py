@@ -6,7 +6,11 @@ from app.clock import utcnow
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.allocation_service import ALLOCATION_STALE_DAYS, AllocationService
+from app.services.allocation_service import (
+    ALLOCATION_STALE_DAYS,
+    AllocationService,
+    needs_allocation_refresh,
+)
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 
 
@@ -73,13 +77,19 @@ async def get_allocation_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(func.count(Security.id)).where(has_allocation))
     securities_with_data = result.scalar()
 
-    # Count stale data (>7 days old)
-    # The same threshold the sync selects on — see ALLOCATION_STALE_DAYS.
+    # Counted through the sync's own predicate, not a re-derived one.
+    #
+    # This used to be `allocation_last_updated < cutoff` — which never matches NULL, so
+    # every security that has *never* been attempted was invisible to it. Nothing
+    # schedules `sync_allocation_data`, so on a fresh install that is all of them: the
+    # endpoint answered `stale_securities: 0` while `POST /api/allocation/sync` was
+    # about to issue a Yahoo request per security. The comment here claimed it used "the
+    # same threshold the sync selects on", and it did — the threshold was shared and the
+    # predicate was not, which is the same sentence CLAUDE.md already records for
+    # `stale_metrics: 0` and the same tell: a comment asserting alignment.
     cutoff_date = utcnow() - timedelta(days=ALLOCATION_STALE_DAYS)
     result = await db.execute(
-        select(func.count(Security.id)).where(
-            Security.allocation_last_updated < cutoff_date
-        )
+        select(func.count(Security.id)).where(needs_allocation_refresh(cutoff_date))
     )
     stale_securities = result.scalar()
 
