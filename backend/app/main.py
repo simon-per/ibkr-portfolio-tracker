@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 
 from app.auth import log_write_auth_state, write_auth_enabled, write_auth_middleware
 from app.config import settings
-from app.database import init_db
 from app.observability import request_id_middleware, unhandled_exception_handler
 from app.rate_limit import rate_limit_middleware
 
@@ -56,9 +55,21 @@ async def lifespan(app: FastAPI):
     Lifecycle manager for the FastAPI application.
     Handles startup and shutdown events.
     """
-    # Startup: Initialize database
-    await init_db()
-    logger.info("Database initialized successfully")
+    # No schema creation here, deliberately.
+    #
+    # This used to call `init_db()` -> `Base.metadata.create_all()` on every boot,
+    # beside the `alembic upgrade head` that backend/Dockerfile's CMD already runs. It
+    # was almost always a no-op, and the exception was the problem: a model added
+    # without a migration got its table created silently, worked in production, and then
+    # made the migration written for it later fail with "table already exists" at some
+    # unrelated future deploy — a boot failure whose cause is months upstream of it.
+    #
+    # `tests/test_model_metadata.py` had already asserted, in prose, that "nothing in
+    # production ever calls Base.metadata.create_all()". That is true now.
+    # `tests/test_migrations.py` runs the chain and compares the result against
+    # Base.metadata in both directions, which is what makes the safety net unnecessary
+    # rather than merely absent. `init_db` itself stays in app/database.py for tests and
+    # scripts that want a schema without a migration run.
 
     # Initialize default ticker mappings
     from app.database import AsyncSessionLocal

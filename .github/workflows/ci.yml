@@ -48,6 +48,21 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # `Settings` declares ibkr_token and ibkr_query_id with no default, on purpose —
+      # a production container must not boot without a token. The cost is that merely
+      # *importing* `app.config` fails without `backend/.env`, which is gitignored, so a
+      # fresh clone cannot run the suite at all. CI found that on its first run.
+      #
+      # Placeholders rather than secrets, and that is the point: every test in this
+      # suite is offline (`tests/test_api_smoke.py` installs a raiser for yfinance, and
+      # nothing here reaches Flex), so a value that could not authenticate anywhere is
+      # exactly the right value. A real token in CI would be a credential on a public
+      # repo's runners with nothing to spend it on but this account's lockout budget.
+      - name: Provide placeholder credentials (all tests are offline)
+        run: |
+          echo "IBKR_TOKEN=ci-placeholder-not-a-token" > .env
+          echo "IBKR_QUERY_ID=0" >> .env
+
       # `python -m pytest`, not bare `pytest`: there is no pytest.ini or pyproject, so
       # rootdir inference puts tests/ on sys.path but not backend/, and every
       # `from app...` import fails. The documented local command has the same shape for
