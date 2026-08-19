@@ -7,10 +7,24 @@ DOMAIN="portfolio.srv1211053.hstgr.cloud"
 echo "=== IBKR Portfolio Tracker - Deploy ==="
 
 # 1. Pull latest code
+#
+# `DEPLOY_NO_PULL=1` skips this, and ops/auto-deploy.sh sets it on BOTH of its
+# invocations. Without it the automated rollback could not roll back: it does
+# `git reset --hard <last good>` and then calls this script, and because auto-deploy has
+# already proven the last-good commit is an *ancestor* of origin/main, this pull
+# fast-forwards straight back to the commit that just failed its health check. Cleanly,
+# with no conflict and no error — so the "rollback" rebuilt and redeployed the broken
+# build, then logged that the rollback had failed. It had never run.
+#
+# Default off, so a human typing ./deploy.sh still gets the pull they expect.
 echo ""
-echo "--- Pulling latest code ---"
 cd "$REPO_DIR"
-git pull origin main
+if [ "${DEPLOY_NO_PULL:-0}" = "1" ]; then
+    echo "--- Skipping pull (DEPLOY_NO_PULL=1); deploying $(git rev-parse --short HEAD) as checked out ---"
+else
+    echo "--- Pulling latest code ---"
+    git pull origin main
+fi
 
 # 2. Ensure backend/.env exists
 if [ ! -f backend/.env ]; then
