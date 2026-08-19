@@ -1,0 +1,23 @@
+# Log rotation for the deploy and backup scripts.
+#
+#     install -m 644 ops/logrotate-ibkr /etc/logrotate.d/ibkr
+#
+# `/root/auto-deploy.log` had no rotation at all and is appended with the *entire*
+# output of `deploy.sh` — `npm ci` plus `docker compose build --no-cache` — on every
+# deploy. It was 3.7 MB when this was written and only ever grows, on the same disk
+# that holds the database and its backups. `docker-compose.yml` already caps the
+# container logs at 10m x 5; this is the one log CLAUDE.md tells you to read, and it
+# was the one with no bound.
+#
+# `copytruncate` rather than `create`: both writers are long-lived shells appending
+# with `>>`, and rotating the inode out from under a running deploy would send the rest
+# of its output to a file nobody looks at.
+/root/auto-deploy.log /root/backup-db.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
