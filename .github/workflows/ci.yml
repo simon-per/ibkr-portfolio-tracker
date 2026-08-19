@@ -1,0 +1,84 @@
+# Runs both test suites on every push and pull request.
+#
+# Until 2026-08-19 nothing did. `ops/auto-deploy.sh` deploys whatever lands on
+# origin/main within ten minutes and gated only on `/health`, which issues no database
+# query and touches no router — so a commit that 500s every /api/portfolio/* route
+# deployed, passed the gate, and was logged SUCCESS. 84 test files existed and none of
+# them ran between a commit and production.
+#
+# This is only half of that fix. The other half is in ops/auto-deploy.sh, which asks the
+# GitHub check-runs API what these jobs concluded and refuses to deploy a red commit.
+# Keep the two in step: renaming a job here is fine (the gate reads conclusions, not
+# names), but removing one silently widens what can reach production.
+#
+# No secrets, deliberately. Every test in both suites is offline — CLAUDE.md's first
+# rule is that Yahoo is never called casually, `tests/test_api_smoke.py` installs a
+# raiser for yfinance, and nothing here has an IBKR token. A CI run must never be able
+# to spend the Flex generation budget or this account's Yahoo quota.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A second push supersedes the first; there is no value in finishing a run for a commit
+# that is already behind, and the deploy gate only ever asks about the newest sha.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.11 to match backend/Dockerfile's python:3.11-slim. Local development runs
+      # 3.12, so this is the version that actually ships.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # `python -m pytest`, not bare `pytest`: there is no pytest.ini or pyproject, so
+      # rootdir inference puts tests/ on sys.path but not backend/, and every
+      # `from app...` import fails. The documented local command has the same shape for
+      # the same reason.
+      - run: python -m pytest tests/ -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # 20 to match what deploy.sh installs on the VPS.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run test
+
+      # `npm run build` is `tsc -b && vite build`, so this is the type check too.
+      - run: npm run build
+
+  # e2e/ is deliberately absent: it needs a running stack and, for two of its scripts, a
+  # production database snapshot. Its docblock explains why it is not a frontend
+  # devDependency either. `npm run lint` is also absent — it is currently red with 17
+  # errors that are almost all `react-refresh/only-export-components` plus one false
+  # positive on deliberate test code, which is a config decision rather than a bug.
