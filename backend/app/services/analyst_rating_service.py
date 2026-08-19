@@ -162,6 +162,16 @@ class AnalystRatingService:
             return rating_data
 
         except Exception as e:
+            # A rate limit is not this security's problem and must not be absorbed as
+            # if it were. This `except` wrapped the whole yfinance call, so the 429 was
+            # converted to `None`, the caller read it as "no ratings available for this
+            # one", and the pass asked the same IP about the remaining ~37 securities
+            # two to four seconds apart — the exact behaviour rule 1 in CLAUDE.md
+            # forbids, and the exact shape that was fixed across five other services on
+            # 2026-08-04. The loop's `is_rate_limit(e)` break was unreachable the whole
+            # time: nothing it could catch was ever raised.
+            if is_rate_limit(e):
+                raise
             logger.error(f"Error fetching rating for {security.symbol}: {e}")
             return None
 

@@ -10,11 +10,16 @@ No database is touched: every assertion here lands on a middleware before a hand
 runs, or on /health, which has no dependencies.
 """
 import pytest
+import asyncio
+
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app import rate_limit
 from app.auth import API_KEY_HEADER, MUTATING_METHODS
 from app.config import settings
+from app.database import Base, get_db
 from app.main import app
 from app.observability import REQUEST_ID_HEADER
 
@@ -27,8 +32,46 @@ def client(monkeypatch):
     rate_limit.reset()
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
     monkeypatch.setattr(settings, "api_admin_token", "", raising=False)
-    yield TestClient(app)
-    rate_limit.reset()
+
+    # Its own in-memory schema, for two reasons that only became visible when CI ran the
+    # suite on a machine that had never run the app.
+    #
+    # Without the override these tests resolve `get_db` to the real `AsyncSessionLocal`,
+    # which is bound to `settings.database_url` — `./portfolio.db`, the developer's own
+    # database, holding real account data. The read assertions passed locally purely
+    # because that file happened to exist with tables in it. On a clean checkout they
+    # fail with `no such table: app_settings`, and they failed that way regardless of
+    # `Base.metadata.create_all()` being in the lifespan or not: `TestClient(app)` is
+    # deliberately not used as a context manager here (that would run the lifespan and
+    # start the scheduler), so no startup hook ever ran for these tests in the first
+    # place.
+    #
+    # Same shape as `tests/test_api_smoke.py`'s fixture, which had it right already.
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    session = AsyncSession(engine, expire_on_commit=False)
+    loop = asyncio.new_event_loop()
+
+    async def _setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    loop.run_until_complete(_setup())
+
+    async def _override():
+        yield session
+
+    app.dependency_overrides[get_db] = _override
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+        loop.run_until_complete(session.close())
+        loop.run_until_complete(engine.dispose())
+        loop.close()
+        rate_limit.reset()
 
 
 # ── write auth ────────────────────────────────────────────────────────────────

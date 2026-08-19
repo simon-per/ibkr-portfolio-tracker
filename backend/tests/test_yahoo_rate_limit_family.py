@@ -31,10 +31,16 @@ from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
 from app.models.watchlist_item import WatchlistItem
+import app.services.analyst_rating_service as ratings_module
 from app.services.analyst_rating_service import AnalystRatingService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.watchlist_service import WatchlistService
 from app.services.yahoo_rate_limit import is_rate_limit
+
+
+async def _no_sleep(_seconds):
+    """The per-security courtesy pacing is not what these tests measure."""
+    return None
 
 
 class RateLimited(Exception):
@@ -138,22 +144,73 @@ async def test_fundamentals_abandons_the_pass(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_analyst_ratings_abandons_the_pass(db, monkeypatch):
+    """
+    Driven from the yfinance boundary, not from the method under test.
+
+    The previous version of this test monkeypatched `fetch_rating_for_security` itself
+    with a function that raises — and that method is precisely the one that could not
+    raise, because it wrapped the whole yfinance call in `except Exception: return
+    None`. So the 429 never reached the loop, `is_rate_limit(e)` there was unreachable,
+    and after a limit the pass went on asking Yahoo about the remaining securities two
+    to four seconds apart. The test replaced the broken part with a working one and then
+    measured the replacement: it passed for months against the bug it was written for,
+    which is the third time that has happened in this repository.
+
+    Patching `yf.Ticker` keeps the real error path in the picture — the raise has to
+    travel out through `fetch_rating_for_security` for this to go green.
+    """
     await _seed_securities(db)
     service = AnalystRatingService(db)
 
     calls = []
 
-    async def _raise(security):
-        calls.append(security.symbol)
-        raise RateLimited()
+    class _Exploding:
+        def __init__(self, ticker):
+            calls.append(ticker)
 
-    monkeypatch.setattr(service, "fetch_rating_for_security", _raise)
+        @property
+        def recommendations(self):
+            raise RateLimited()
+
+    monkeypatch.setattr(ratings_module.yf, "Ticker", _Exploding)
+    # The 1-3s per-security courtesy sleep would otherwise make this test slow for no
+    # coverage; the pacing itself is not what is under test here.
+    monkeypatch.setattr(ratings_module.asyncio, "sleep", _no_sleep)
 
     result = await service.sync_ratings_for_securities()
 
     assert len(calls) == 1, f"kept fetching after a 429: {calls}"
     assert result["rate_limited"] is True
-    assert result["warnings"]
+    assert result["warnings"], "a pass that stopped early must say so"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_ratings_error_still_only_skips_one_security(db, monkeypatch):
+    """
+    The mirror image, and the reason the fix re-raises selectively rather than removing
+    the handler. A ticker Yahoo has never heard of must cost that security and no more.
+    """
+    await _seed_securities(db, n=4)
+    service = AnalystRatingService(db)
+
+    calls = []
+
+    class _Unknown:
+        def __init__(self, ticker):
+            calls.append(ticker)
+
+        @property
+        def recommendations(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr(ratings_module.yf, "Ticker", _Unknown)
+    monkeypatch.setattr(ratings_module.asyncio, "sleep", _no_sleep)
+
+    result = await service.sync_ratings_for_securities()
+
+    assert len(calls) == 4, "an unknown ticker must not abandon the pass"
+    assert result["rate_limited"] is False
+    assert not result.get("warnings")
 
 
 @pytest.mark.asyncio
@@ -310,3 +367,94 @@ async def test_two_failures_in_one_pass_do_not_crash_it(db, monkeypatch):
 
     assert len(seen) == 5, "the pass stopped early on an ordinary error"
     assert result["errors"] == 5
+
+
+def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
+    """
+    The check the module's other family test could not make, and the reason it could
+    not.
+
+    `test_every_yahoo_looping_service_consults_the_shared_predicate` asks whether the
+    string `is_rate_limit` appears in a module — which is true of **dead code**.
+    `analyst_rating_service` satisfied it for months while its breaker was unreachable:
+    `fetch_rating_for_security` wrapped the whole yfinance call in
+    `except Exception: logger.error(...); return None`, so the 429 became a `None` the
+    caller read as "this security has no ratings", and the loop's `is_rate_limit(e)` one
+    level up — which looked entirely correct — never saw anything to test.
+
+    So this asks a structural question: when a `try` block *itself* contains the Yahoo
+    call, a broad handler on it must mention `is_rate_limit`. Re-raising, returning a
+    message the caller inspects (the watchlist does this), or latching are all fine.
+    Discarding silently is not, because the caller then cannot tell "no data for this
+    one" from "stop asking".
+
+    Deliberately narrow on three axes: only handlers catching `Exception`/
+    `BaseException` (a `except KeyError` around a field lookup is not this family's
+    problem); only when the guarded block reaches yfinance directly (an earlier draft
+    flagged 22 fine-grained `.info` extraction handlers and would have been silenced
+    rather than read); and only when the handler *discards* what it caught.
+
+    That third axis is the rule rather than an exemption. `allocation_service` catches
+    broadly and returns `{'success': False, 'error': str(e)}`, and its caller runs
+    `is_rate_limit(result.get('error'))` — the message reaches the predicate, just by
+    value instead of by exception. `watchlist_service` does the same. What must not
+    happen is the text going nowhere, because then no caller can tell the two cases
+    apart no matter how carefully it is written.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+
+    def reaches_yahoo(nodes) -> bool:
+        for node in nodes:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name):
+                    if sub.value.id in {"yf", "yfinance"}:
+                        return True
+        return False
+
+    def is_broad(handler: ast.ExceptHandler) -> bool:
+        t = handler.type
+        if t is None:
+            return True
+        names = [t] if isinstance(t, ast.Name) else (list(t.elts) if isinstance(t, ast.Tuple) else [])
+        return any(isinstance(n, ast.Name) and n.id in {"Exception", "BaseException"} for n in names)
+
+    def _discards_the_exception(handler: ast.ExceptHandler) -> bool:
+        """
+        True when nothing downstream can learn what was caught.
+
+        Three ways to be fine: consult `is_rate_limit` here; re-raise (bare or the bound
+        name); or hand the caller the exception text so it can consult the predicate
+        itself, which is what allocation and the watchlist do.
+        """
+        for node in ast.walk(handler):
+            if isinstance(node, ast.Name) and node.id == "is_rate_limit":
+                return False
+            if isinstance(node, ast.Raise):
+                return False
+        if handler.name:
+            for node in ast.walk(handler):
+                if isinstance(node, ast.Return) and node.value is not None:
+                    for sub in ast.walk(node.value):
+                        if isinstance(sub, ast.Name) and sub.id == handler.name:
+                            return False
+        return True
+
+    for path in sorted((root / "services").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try) or not reaches_yahoo(node.body):
+                continue
+            for handler in node.handlers:
+                if not is_broad(handler):
+                    continue
+                if not _discards_the_exception(handler):
+                    continue
+                offenders.append(f"{path.name}:{handler.lineno}")
+
+    assert not offenders, (
+        "these handlers wrap a yfinance call, catch everything, and never ask whether "
+        f"it was a rate limit: {sorted(set(offenders))}. A swallowed 429 makes the "
+        "caller's breaker unreachable — exactly how analyst_rating_service went on "
+        "asking after a limit while appearing to be covered."
+    )
