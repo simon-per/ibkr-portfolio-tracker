@@ -1,0 +1,25 @@
+# Line endings are load-bearing for two of these and nothing enforced them.
+#
+# `deploy.sh` and everything in `ops/` is checked out on the VPS and executed by bash.
+# A shell script committed with CRLF fails there as `bad interpreter: /bin/bash^M` — and
+# on the deploy path that is not a broken script, it is a site that does not come back.
+# Today the repository is safe only because this machine happens to have
+# `core.autocrlf=true`, which normalises on commit; a contributor, a container, or a CI
+# checkout with `autocrlf=input` or `false` would commit exactly what its editor wrote.
+# This makes the guarantee a property of the repository instead of a property of one
+# developer's config.
+#
+# Caught while committing the deploy fixes: files rewritten by a Python script on
+# Windows came out CRLF in the working tree, and `git ls-files --eol` was the only thing
+# that could say whether that reached the index.
+* text=auto
+
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf
+*.conf  text eol=lf
+
+*.db    binary
+*.xlsx  binary
+*.png   binary
