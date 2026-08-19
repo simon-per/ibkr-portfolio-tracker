@@ -325,6 +325,68 @@ class SchedulerService:
                     "timestamp": utc_iso(utcnow())
                 }
 
+    async def collect_market_data_diagnostics(self, db) -> list[str]:
+        """
+        Every "nobody would otherwise notice" check that belongs after a market-data
+        pass, in one place because there are now two callers.
+
+        The scheduled job ran all five; `POST /api/market-data/sync` ran none. The loop
+        itself was extracted to `MarketDataService.sync_securities` after the 2026-08-04
+        divergence, and the detectors hanging off it were not — so the *public* route
+        answered `{"status": "success", "securities_processed": 40}` and said nothing,
+        at the exact moment someone reaches for it: seeing a holding at 0.00 and
+        clicking Sync Market Data is precisely when `find_stale_priced_securities` would
+        have named the security and its `ticker_mappings` row.
+
+        They belong to the **market-data** pass specifically, and that is not an
+        accident of where they were written: those slots succeed while Flex is refusing,
+        so hanging the IBKR-freshness ones off an IBKR job would silence them in exactly
+        the outage they exist to report.
+
+        Each is guarded separately. These are diagnostics — one of them raising must
+        never be the reason a sync that actually fetched prices reports failure, and it
+        must never hide the other four.
+        """
+        diagnostics = []
+        try:
+            diagnostics += await self.find_stale_priced_securities(db)
+        except Exception as e:
+            logger.warning(f"Could not check for stale prices: {e}")
+        # Same shape, same reasoning, for the dividend side: an estimate row
+        # older than its mapping came from a different ticker and silently
+        # keeps driving the forecast. Separately guarded so one diagnostic
+        # failing cannot hide the other.
+        try:
+            diagnostics += await self.find_dividends_predating_their_mapping(db)
+        except Exception as e:
+            logger.warning(f"Could not check dividend provenance: {e}")
+        # IBKR freshness is checked from the *market-data* job on purpose: those
+        # slots succeed even while Flex is refusing, so the warning still reaches
+        # `warnings[]`. Hanging it off the IBKR job instead would silence it in
+        # exactly the outage it exists to report.
+        #
+        # Two detectors, two horizons, and they are not redundant. The 7-day one
+        # is the backstop for a broken token; the 2-day one is what actually
+        # protects the data, because a `Last 3 Calendar Days` statement loses
+        # trades permanently once two consecutive ET days go by with no
+        # successful generation — four days before the 7-day one says anything.
+        try:
+            diagnostics += await self.find_flex_generation_gap(db)
+        except Exception as e:
+            logger.warning(f"Could not check the Flex generation gap: {e}")
+        try:
+            diagnostics += await self.find_stale_ibkr_sync(db)
+        except Exception as e:
+            logger.warning(f"Could not check IBKR sync freshness: {e}")
+        # The look-through's baskets are the one decaying dataset with no alarm:
+        # a CLI snapshot that ages in place while the tab keeps serving it. Same
+        # slot and same separate guard as the four above.
+        try:
+            diagnostics += await self.find_stale_etf_baskets(db)
+        except Exception as e:
+            logger.warning(f"Could not check ETF basket freshness: {e}")
+        return diagnostics
+
     async def sync_market_data(self, days_back: int = 730) -> dict:
         """
         Sync market prices from Yahoo Finance for all securities.
@@ -399,44 +461,7 @@ class SchedulerService:
                 #
                 # Guarded on its own: this is a diagnostic, and it must never be the
                 # reason a sync that actually fetched prices reports failure.
-                diagnostics = []
-                try:
-                    diagnostics += await self.find_stale_priced_securities(db)
-                except Exception as e:
-                    logger.warning(f"Could not check for stale prices: {e}")
-                # Same shape, same reasoning, for the dividend side: an estimate row
-                # older than its mapping came from a different ticker and silently
-                # keeps driving the forecast. Separately guarded so one diagnostic
-                # failing cannot hide the other.
-                try:
-                    diagnostics += await self.find_dividends_predating_their_mapping(db)
-                except Exception as e:
-                    logger.warning(f"Could not check dividend provenance: {e}")
-                # IBKR freshness is checked from the *market-data* job on purpose: those
-                # slots succeed even while Flex is refusing, so the warning still reaches
-                # `warnings[]`. Hanging it off the IBKR job instead would silence it in
-                # exactly the outage it exists to report.
-                #
-                # Two detectors, two horizons, and they are not redundant. The 7-day one
-                # is the backstop for a broken token; the 2-day one is what actually
-                # protects the data, because a `Last 3 Calendar Days` statement loses
-                # trades permanently once two consecutive ET days go by with no
-                # successful generation — four days before the 7-day one says anything.
-                try:
-                    diagnostics += await self.find_flex_generation_gap(db)
-                except Exception as e:
-                    logger.warning(f"Could not check the Flex generation gap: {e}")
-                try:
-                    diagnostics += await self.find_stale_ibkr_sync(db)
-                except Exception as e:
-                    logger.warning(f"Could not check IBKR sync freshness: {e}")
-                # The look-through's baskets are the one decaying dataset with no alarm:
-                # a CLI snapshot that ages in place while the tab keeps serving it. Same
-                # slot and same separate guard as the four above.
-                try:
-                    diagnostics += await self.find_stale_etf_baskets(db)
-                except Exception as e:
-                    logger.warning(f"Could not check ETF basket freshness: {e}")
+                diagnostics = await self.collect_market_data_diagnostics(db)
                 if diagnostics:
                     # Append: the rate-limit abort above may already have put a
                     # warning here, and a plain assignment would drop the one

@@ -108,6 +108,24 @@ async def _sync_market_data_locked(days_back: int, db: AsyncSession):
             f"their previous prices. Do not retry — wait for the next scheduled slot"
         ]
 
+    # The same five checks the scheduled pass runs, through the same collector.
+    #
+    # This route ran none of them. The securities loop was extracted to
+    # `MarketDataService.sync_securities` after the 2026-08-04 divergence; the
+    # diagnostics hanging off it in the scheduler were left behind — so the *public*
+    # path answered `{"status": "success", "securities_processed": 40}` and said
+    # nothing, at exactly the moment somebody reaches for it. Seeing a holding at 0.00
+    # and pressing Sync Market Data is precisely when `find_stale_priced_securities`
+    # would name the security and tell you to check its `ticker_mappings` row.
+    #
+    # Appended rather than assigned: the rate-limit branch above may already have put
+    # the one warning here that explains why the rest of the pass is missing.
+    from app.services.scheduler_service import get_scheduler
+
+    diagnostics = await get_scheduler().collect_market_data_diagnostics(db)
+    if diagnostics:
+        result["warnings"] = (result.get("warnings") or []) + diagnostics
+
     return result
 
 

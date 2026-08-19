@@ -247,7 +247,9 @@ def test_every_detector_is_actually_wired_into_the_market_data_job():
     import inspect
     import textwrap
 
-    source = textwrap.dedent(inspect.getsource(SchedulerService.sync_market_data))
+    source = textwrap.dedent(
+        inspect.getsource(SchedulerService.collect_market_data_diagnostics)
+    )
     called = {
         node.func.attr
         for node in ast.walk(ast.parse(source))
@@ -260,4 +262,48 @@ def test_every_detector_is_actually_wired_into_the_market_data_job():
         "find_stale_ibkr_sync",
         "find_stale_etf_baskets",
     ):
-        assert detector in called, f"{detector} is never called by sync_market_data"
+        assert detector in called, (
+            f"{detector} is never called by collect_market_data_diagnostics"
+        )
+
+
+def test_every_path_that_syncs_market_data_collects_the_diagnostics():
+    """
+    The half the check above could not see, and the half that was actually broken.
+
+    Asserting that the detectors are wired into *a* function says nothing about whether
+    every caller reaches that function. `POST /api/market-data/sync` ran the identical
+    securities loop — extracted to `MarketDataService.sync_securities` after the
+    2026-08-04 divergence, precisely so the two could not drift — and ran none of the
+    five checks hanging off it in the scheduler. So the public path returned a clean
+    success at exactly the moment someone reaches for it: seeing a holding at 0.00 and
+    pressing Sync Market Data is when `find_stale_priced_securities` would have named
+    the security.
+
+    Keyed on `sync_securities`, so the rule is "anything that sweeps the securities for
+    prices must also collect the diagnostics" rather than a list of two known callers.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+    for path in sorted(list((root / "routers").glob("*.py")) + list((root / "services").glob("*.py"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            attrs = {
+                node.func.attr
+                for node in ast.walk(fn)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            }
+            if "sync_securities" not in attrs:
+                continue
+            if "collect_market_data_diagnostics" not in attrs:
+                offenders.append(f"{path.name}:{fn.name}")
+
+    assert not offenders, (
+        f"{offenders} sweep the securities for prices but never collect the sync "
+        "diagnostics, so a stale or unpriced holding goes unreported on that path"
+    )

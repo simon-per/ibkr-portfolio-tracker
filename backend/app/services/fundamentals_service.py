@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.clock import utcnow
 import logging
 import yfinance as yf
@@ -164,7 +164,20 @@ class FundamentalsService:
                     earnings_dt = datetime.fromisoformat(str(date_idx))
 
                 if earnings_dt.tzinfo is not None:
-                    earnings_dt = earnings_dt.replace(tzinfo=None)
+                    # Convert, then drop the tzinfo. `replace(tzinfo=None)` alone
+                    # *discards* the offset and keeps the wall clock, which stored
+                    # exchange-local time in a column `app/clock.py` declares to be naive
+                    # UTC — and `get_upcoming_earnings` compares these rows against
+                    # `utcnow()`.
+                    #
+                    # Apple reporting at 16:30 America/New_York (20:30 UTC) was stored as
+                    # 16:30, so from 16:30 UTC — 12:30 ET, four hours before the release
+                    # and before the US market even closes — the event dropped off the
+                    # upcoming calendar and reappeared under history with
+                    # `reported_eps` still NULL. The mirror case runs the other way: TSMC
+                    # at 14:00 Asia/Taipei (06:00 UTC) stayed "upcoming" for eight hours
+                    # after it had already happened.
+                    earnings_dt = earnings_dt.astimezone(timezone.utc).replace(tzinfo=None)
 
                 eps_estimate = self._safe_float(row.get('EPS Estimate'))
                 reported_eps = self._safe_float(row.get('Reported EPS'))
