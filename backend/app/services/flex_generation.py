@@ -156,3 +156,95 @@ async def generation_already_spent(
             "anyway rather than skipping a sync", e,
         )
         return None
+
+
+# Fallback window length, in calendar days, when no successful statement is on record
+# to measure — a fresh install, or a `details` blob that carries no span.
+#
+# Three, and deliberately the narrowest period this account has ever run, because the
+# only consumer is an alarm threshold and the two ways to be wrong are not symmetric:
+# guessing narrow warns early (cost: one warning line against a window that had slack),
+# guessing wide warns late (cost: trades no future statement contains). Same asymmetry
+# `generation_already_spent` resolves by failing open.
+FLEX_WINDOW_DAYS_FALLBACK = 3
+
+# How many recent successful runs `flex_window_days` will look through for a recorded
+# span. More than one because a success is not guaranteed to carry the keys — a run
+# recorded before the span was persisted, or one whose `details` were truncated, would
+# otherwise send the measurement to the fallback while a perfectly good statement sat one
+# row below. Small enough that a genuine period change is still picked up within a day.
+_WINDOW_MEASUREMENT_RUNS = 5
+
+
+def _statement_span(details: Optional[dict]) -> Optional[tuple[date, date]]:
+    """
+    The `data_from`/`data_to` a recorded run reports, from either shape it is written in.
+
+    Two shapes exist because two callers record it: the scheduled jobs nest their IBKR
+    step under `details['ibkr_result']`, while the manual endpoint and the offline CLI
+    put the same keys at the top level. Reading only one of them is how this measurement
+    would go quietly blind on half the history.
+    """
+    if not isinstance(details, dict):
+        return None
+    for scope in (details, details.get('ibkr_result')):
+        if not isinstance(scope, dict):
+            continue
+        raw_from, raw_to = scope.get('data_from'), scope.get('data_to')
+        if not raw_from or not raw_to:
+            continue
+        try:
+            return date.fromisoformat(str(raw_from)), date.fromisoformat(str(raw_to))
+        except ValueError:
+            continue
+    return None
+
+
+async def flex_window_days(
+    db: AsyncSession, as_of: Optional[datetime] = None
+) -> Optional[int]:
+    """
+    How many calendar days the Flex Query actually reaches back, measured not declared.
+
+    **The period is a portal setting, so no constant in this repo can be trusted to
+    match it.** It has been `Year to Date`, then `Last 30 Calendar Days`, then
+    `Last 3 Calendar Days`, and on 2026-08-24 the live query was found to be back at 30
+    while `FLEX_GENERATION_GAP_WARN_DAYS` was still derived from 3 — so the gap alarm
+    fired 26 days before the margin it was protecting had actually run out, with a
+    message asserting trades were "about to become unreachable" when ~28 days of slack
+    remained. A threshold hand-derived from a number a human maintains in a comment is
+    a threshold that is wrong whenever somebody edits the portal and not this file.
+
+    So it is read off the statement IBKR served: `data_to - data_from`, inclusive, from
+    the most recent successful run. That span is already recorded on every run and needs
+    no new column, no new request, and nobody to remember anything.
+
+    Measured over `FLEX_API_SYNC_TYPES` only, which is the same distinction the two type
+    sets above exist for. An `ibkr_manual_xml` ingest is a browser download whose period
+    is whatever the operator typed — that is the documented *recovery* for a gap, often
+    deliberately wider than the query — so letting it define the window would take one
+    hand-widened statement and quietly relax the alarm for every day after it.
+
+    `None` when nothing is on record, leaving the threshold to
+    `FLEX_WINDOW_DAYS_FALLBACK` rather than to a guess made here.
+    """
+    result = await db.execute(
+        select(SyncRun.details)
+        .where(
+            and_(
+                SyncRun.sync_type.in_(FLEX_API_SYNC_TYPES),
+                SyncRun.status == 'success',
+            )
+        )
+        .order_by(SyncRun.finished_at.desc())
+        .limit(_WINDOW_MEASUREMENT_RUNS)
+    )
+    for (details,) in result.all():
+        span = _statement_span(details)
+        if span is None:
+            continue
+        start, end = span
+        days = (end - start).days + 1
+        if days >= 1:
+            return days
+    return None

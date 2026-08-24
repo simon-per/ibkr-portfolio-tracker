@@ -19,8 +19,10 @@ from app.database import AsyncSessionLocal
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 from app.services.ibkr_service import IBKRService, FLEX_RETRY_DELAYS_PATIENT
 from app.services.flex_generation import (
+    FLEX_WINDOW_DAYS_FALLBACK,
     IBKR_SYNC_TYPES,
     et_date,
+    flex_window_days,
     generation_already_spent,
     next_generation_opens_at,
 )
@@ -97,27 +99,38 @@ STALE_PRICE_DAYS = 5
 # consecutive failures before it fires, so it cannot cry wolf over a `1025` lockout
 # (~14h) or a bad night.
 #
-# **Seven days is far too slow to be the alarm for a 3-day Flex window**, and that is
-# not a flaw in this constant but the reason `find_flex_generation_gap` exists beside
-# it: trades fall out of a `Last 3 Calendar Days` statement after two consecutive
-# missed days, four days before this one says a word. This stays as the backstop for a
-# genuinely broken token; the two-day one is the alarm that protects the data.
+# **Which of the two alarms fires first depends on the query period, and both orders
+# are correct.** `find_flex_generation_gap` warns at N-1 ET days for an N-day window, so
+# under the `Last 3 Calendar Days` period this account ran in August it fired at 2 — days
+# before this one, because seven days is far too slow to protect a 3-day window. Under
+# the `Last 30 Calendar Days` period actually in force it fires at 29, and *this* one
+# leads. That is not a regression in either: they answer different questions. This one
+# says the token or the schedule is broken and somebody should look; that one says the
+# trades themselves are about to become unrecoverable. Under a wide window the operational
+# problem genuinely does deserve attention weeks before the data is at risk.
 IBKR_SYNC_STALE_DAYS = 7
 
-# ET days without a successful IBKR sync before `find_flex_generation_gap` warns.
+# The floor under `find_flex_generation_gap`'s threshold, in ET days.
 #
-# Two, because that is the actual margin. The Flex Query period is `Last N Calendar
-# Days` with N=3, so a statement generated on day D covers D-3..D-1 and a trade on day
-# T is reachable from T+1, T+2 or T+3 and **gone from T+4**. One generation is
-# available per ET day, so two consecutive missed days leaves exactly one day of slack
-# to notice and recover by hand.
+# The threshold itself is **derived from the window IBKR actually served** — see
+# `flex_generation.flex_window_days` — because the period is a portal setting no constant
+# here can track. A statement covering N calendar days makes a trade on day T reachable
+# from T+1..T+N and gone from T+N+1, and one generation is available per ET day, so the
+# margin is N and the alarm belongs at N-1: one day of slack to notice and recover by
+# hand, since the recovery is a browser download through `app/cli/ingest_flex_xml.py`
+# and needs a human awake.
 #
-# It fires one day earlier than strictly necessary on purpose: the recovery is manual
-# (a browser download through `app/cli/ingest_flex_xml.py`) and needs a human awake.
-# The cost of a day's false alarm is one warning line; the cost of being a day late is
-# trades that no future statement contains. **Re-derive this if the Flex Query period
-# changes** — it is N-1, not a preference.
-FLEX_GENERATION_GAP_WARN_DAYS = 2
+# Two is the floor rather than the answer. It is what N=3 produces, and it is also the
+# shortest threshold that cannot fire on an ordinary weekend: IBKR issues no statement
+# Saturday or Sunday, so a Friday success is two ET days old by Sunday through no fault
+# of anything. A threshold of 1 would warn every weekend, which is how a warnings list
+# stops being read.
+FLEX_GENERATION_GAP_WARN_DAYS_FLOOR = 2
+
+# Kept under the old name because `tests/test_flex_daily_generation.py` and
+# `tests/test_stale_etf_baskets.py` import it, and because it is still the threshold
+# whenever nothing is on record to measure.
+FLEX_GENERATION_GAP_WARN_DAYS = FLEX_GENERATION_GAP_WARN_DAYS_FLOOR
 
 # `IBKR_SYNC_TYPES` — the sync types that actually reach IBKR — now comes from
 # `app/services/flex_generation.py` (imported at the top of this module, and still
@@ -540,15 +553,27 @@ class SchedulerService:
         self, db: AsyncSession, as_of: Optional[datetime] = None
     ) -> list:
         """
-        Warn after `FLEX_GENERATION_GAP_WARN_DAYS` ET days with no successful IBKR sync.
+        Warn once a gap in successful IBKR syncs threatens the Flex window's margin.
 
         **This is the alarm that protects the data; `find_stale_ibkr_sync` is only the
-        backstop.** The Flex Query period is `Last 3 Calendar Days`, so a statement
-        generated on day D covers D-3..D-1 and a trade on day T is unreachable from T+4
-        onward. With one generation available per ET day, two consecutive missed days
-        is the entire margin — and the 7-day detector fires four days after the trades
-        have already gone from every future statement. Warning at 7 about a 3-day
-        window is warning after the loss.
+        backstop.** A statement covering N calendar days is generated on day D for
+        D-N..D-1, so a trade on day T is reachable from T+1..T+N and unreachable from
+        T+N+1 onward. One generation is available per ET day, so N consecutive missed
+        days is the entire margin and the alarm fires at N-1.
+
+        **N is measured, not declared.** It comes from `flex_window_days`, which reads
+        the span off the last statement IBKR actually served. The period is a portal
+        setting, so a constant in this file tracks it only for as long as nobody edits
+        the portal — and on 2026-08-24 nobody had edited this file: the live query was
+        `Last 30 Calendar Days` while the threshold was still the 2 that N=3 implies, so
+        this fired on the first ordinary two-day gap and told the reader trades were
+        "about to become unreachable" with four weeks of slack in hand. A false alarm
+        that names a data-loss risk is worse than silence, because the next true one
+        reads the same.
+
+        Bounded below by `FLEX_GENERATION_GAP_WARN_DAYS_FLOOR` so a narrow window cannot
+        put it on a hair trigger over a weekend, and the message states the window it
+        measured so a wrong reading is visible rather than inferred.
 
         Counted in **ET days**, not in elapsed hours, because that is the unit IBKR
         issues statements in: a failure at 23:00 ET and one at 01:00 ET the next day are
@@ -582,15 +607,34 @@ class SchedulerService:
             return []
 
         missed = (et_date(as_of) - et_date(newest)).days
-        if missed < FLEX_GENERATION_GAP_WARN_DAYS:
+
+        window = await flex_window_days(db)
+        measured = window is not None
+        window = window if measured else FLEX_WINDOW_DAYS_FALLBACK
+        threshold = max(FLEX_GENERATION_GAP_WARN_DAYS_FLOOR, window - 1)
+        if missed < threshold:
             return []
 
+        # `window - missed` is how many more ET days the oldest at-risk trade survives.
+        # Zero or less means it is already gone from every future statement, which is a
+        # different instruction to the reader than "act now", so say which.
+        remaining = window - missed
+        provenance = (
+            f"reaches back {window} calendar days"
+            if measured
+            else f"window length is unknown, assuming {window} calendar days"
+        )
+        urgency = (
+            f"about {remaining} day(s) of margin left"
+            if remaining > 0
+            else "that margin is already gone"
+        )
         return [
             f"IBKR: no statement has been generated for {missed} US-Eastern days (last "
-            f"success {et_date(newest):%Y-%m-%d} ET). The Flex Query window only reaches "
-            f"back a few days, so trades are about to become unreachable from every "
-            f"future statement — download the statement from Client Portal with a wider "
-            f"period and ingest it via app/cli/ingest_flex_xml.py"
+            f"success {et_date(newest):%Y-%m-%d} ET). The Flex Query {provenance}, so "
+            f"{urgency} before those trades become unreachable from every future "
+            f"statement — download the statement from Client Portal with a wider period "
+            f"and ingest it via app/cli/ingest_flex_xml.py"
         ]
 
     async def find_stale_ibkr_sync(

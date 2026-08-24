@@ -142,9 +142,18 @@ async def _fetch_blackrock(
     portfolio_id = source.params.get("portfolio_id")
     if not portfolio_id:
         raise FetchError(f"{source.symbol}: no portfolio_id declared in app/etf_sources.py")
-    response = await client.get(
-        BLACKROCK_URL, params={**BLACKROCK_PARAMS, "portfolioId": portfolio_id}
-    )
+    # One host serves every iShares domicile, but the **locale** selects which catalogue it
+    # looks the portfolio up in, and a fund absent from that catalogue is a flat
+    # `400 BAD_REQUEST_INVALID_PARAM_VALUES` rather than an empty basket. Measured against
+    # IQQ (a US-listed fund) on 2026-08-24: `en_GB` 400s, `en_US` returns all 106 rows from
+    # the same URL. So the default stays `en_GB` for the UCITS lines and a fund overrides it
+    # rather than this gaining a second endpoint — the payload shape is identical, which is
+    # why `parse_ishares` needs no branch.
+    params = {**BLACKROCK_PARAMS, "portfolioId": portfolio_id}
+    locale = source.params.get("locale")
+    if locale:
+        params["locale"] = locale
+    response = await client.get(BLACKROCK_URL, params=params)
     response.raise_for_status()
     path = out_dir / f"{isin}.blackrock.json"
     path.write_bytes(response.content)

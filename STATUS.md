@@ -1,6 +1,14 @@
 # Working state
 
-**Last updated: 2026-08-17 (night).** Latest: **the Allocation tab carried both of this codebase's
+**Last updated: 2026-08-24 (evening).** Latest: **the Flex Query period is not what this repo said
+it was, and a threshold derived from the wrong number cried wolf.** The live query is
+`Last 30 Calendar Days`; CLAUDE.md recorded `N=3` and `FLEX_GENERATION_GAP_WARN_DAYS` was the 2 that
+implies, so a routine two-day gap produced a banner saying trades were "about to become unreachable"
+with ~28 days of slack in hand. The threshold is now measured off the statement IBKR actually
+served. Same session: the 08-21 rotation's two replacement funds were **undeclared**, so a
+Nasdaq-100 ETF was being drawn as a company. Details in *Shipped 2026-08-24*.
+
+Before that: **the Allocation tab carried both of this codebase's
 signature bugs at once** — it answered "is this a fund?" by ticker while the Look-through tab
 answered by ISIN, and its three charts silently dropped a holding they could not value while every
 slice claimed to be a "% of portfolio". Details in *Shipped 2026-08-17 (night, second pass)*.
@@ -109,13 +117,35 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Needs a human
 
+- **Decide what the Flex Query period should actually be — the portal and this repo disagree.**
+  Measured 2026-08-24: the live query is `Last 30 Calendar Days` (the portal download's header says
+  `period="Last30CalendarDays"`, and `data_from`/`data_to` on successful API syncs span 30 days,
+  consistently, back through 07-01). CLAUDE.md recorded it as **narrowed to N=3 on 2026-08-06, "a
+  deliberate choice by the account owner, reaffirmed after the trade-off was put to them"**. Either
+  that portal edit was never applied or it was set back; nothing in `sync_runs` shows a 3-day
+  statement at any point.
+
+  **Nothing is broken either way** — the code now measures the window rather than believing a
+  constant, so the alarm is correct at whatever N is in force, and 30 days is the *safer* of the two
+  (weeks of recovery margin instead of two days). But the file asserted a decision the account was
+  not running, so the decision is worth re-making explicitly:
+
+  - **Keep 30.** More margin against failed syncs, and the reason it was narrowed — `Code=1001` at
+    the request step — has not recurred in the way it did under Year-to-Date. Nothing to do.
+  - **Re-narrow to 3.** Faster statement generation, but the entire margin becomes two consecutive
+    failed days, and 08-23/08-24 was exactly such a pair. Requires a portal edit, which also resets
+    the day's generation — the one thing observed to do so.
+
+  Whichever is chosen, do not re-introduce a hardcoded threshold: `flex_window_days()` reads it.
+
 - **The Look-through CLI runs are DONE as of 2026-08-17 and will need redoing as baskets age.**
   Ran on production that evening: 10 baskets fetched (0 failed), 9 imported, identity resolution
   completed. Coverage 95.16%, `unresolved_value_eur` 516 CHF. Nothing is scheduled, so this is a
   recurring chore, not a one-off — the six daily feeds badge `†` after 7 days and Vanguard after 75
-  (`ADAPTER_STALE_DAYS`). `find_stale_etf_baskets()` is still the missing piece; until it exists the
-  badge in the fund table is the only signal. None of it touches Yahoo or IBKR, so it is safe at any
-  hour:
+  (`ADAPTER_STALE_DAYS`). `find_stale_etf_baskets()` exists as of 2026-08-17 (night) and fired for
+  real on 2026-08-24, naming GRID and SOXQ at 10 days against their 7-day expectation — so the sync
+  warnings are the signal now, not just the badge in the fund table. Both were refreshed that
+  evening. None of it touches Yahoo or IBKR, so it is safe at any hour:
 
   ```bash
   docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
@@ -429,6 +459,70 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-24 — a threshold derived from a number nobody had checked
+
+Three things, from one banner on the dashboard.
+
+**1. The gap alarm measured nothing and asserted everything.** `FLEX_GENERATION_GAP_WARN_DAYS = 2`
+was derived, correctly, as N−1 for the `Last 3 Calendar Days` period CLAUDE.md documented. The live
+period is **30 days**, so the constant was wrong by 27 and the alarm fired on the first ordinary
+two-day gap — with a message telling the reader trades were "about to become unreachable from every
+future statement" when about four weeks of margin remained.
+
+The fix is not a bigger constant. `flex_generation.flex_window_days()` reads `data_to - data_from`
+off the last successful statement, which every run already records, and the threshold is
+`max(FLOOR, N-1)`. Three details earn their place:
+
+- **It measures over `FLEX_API_SYNC_TYPES` only.** An `ibkr_manual_xml` ingest is the documented
+  *recovery* for a gap and its period is whatever the operator typed into the portal — routinely
+  wider than the query. Letting one hand-widened download define the window would relax the alarm
+  for every day after it. Same distinction the two type sets already existed for.
+- **The floor is 2, not 1.** IBKR issues no statement at the weekend, so a Friday success is two ET
+  days old by Sunday through no fault of anything; a threshold of 1 would warn every weekend.
+- **The message states the window it measured** (`reaches back 30 calendar days`, or
+  `window length is unknown, assuming 3` when nothing is on record), and says whether the margin is
+  *remaining* or *already gone* — those are different instructions to whoever reads it.
+
+The lesson is the familiar one in a new place: a false alarm that names a data-loss risk is worse
+than no alarm, because the next true one reads identically. And a threshold hand-derived from a
+number a human maintains in a comment is wrong the moment somebody edits the portal and not the file.
+
+**2. Two funds from the 08-21 rotation were undeclared, so a Nasdaq-100 ETF was a "company".**
+The rotation out of the Ireland-domiciled sleeve bought **IQQ** (iShares Nasdaq 100, US-domiciled)
+and, on 08-24, **QQQM** (Invesco NASDAQ 100). Neither had an `ETF_ALLOCATIONS` or `FUND_SOURCES`
+entry, and an undeclared fund is not loudly broken — it takes the `securities.asset_type` column
+default of `"Stock"`. So IQQ was drawn as a company in the allocation charts and appeared in the
+look-through as a single company row (`ISHRS NASDAQ 100 ETF`, sector `Unknown`, 0.22%), while
+`uncovered_fund_eur` stayed `0.00` and coverage read a cheerful 99.74%. Nothing reported it.
+
+Both are declared now, with their allocation blocks **pinned identical to XNAS's** — three wrappers
+around one index, so a different split would be three answers to one question. Both verified against
+the issuers' own APIs before being written down, rather than from a web lookup: QQQM's CUSIP
+`46138G649` is reproduced from its ISIN by `derive_north_american_isin` and echoed back by Invesco
+(109 holdings, NVDA 8.32%), and the two independently-sourced baskets agree to about a basis point
+on every top holding — which is the real check that both declarations name the right funds.
+
+**3. iShares' `locale` decides whether a fund is findable at all.** IQQ needed one adapter change:
+the varnish host serves every domicile, but the default `en_GB` catalogue answers a flat
+`400 BAD_REQUEST_INVALID_PARAM_VALUES` for a US-domiciled fund, while `en_US` returns all 106 rows
+from the identical URL. So a US entry declares `params={"locale": "en_US"}` rather than the adapter
+growing a second endpoint — the payload shape is identical and `parse_ishares` needed no branch. A
+family rule keyed on the ISIN's country prefix catches the next one by declaration.
+
+Worth knowing for later: IQQ's `portfolio_id` equals the id in its product-page URL and the UCITS
+entries' do not (IWDA is `/products/251882/` against 287737). Do not generalise from IQQ.
+
+**Also done on production that evening, none of it code:** the 08-24 portal statement was ingested
+offline (a confirmatory no-op — the server already held everything through 08-21), and GRID's and
+SOXQ's baskets were refreshed from 08-14 to 08-21 with `resolve_identities --constituents` after.
+
+**Not fixed, because it is not broken:** the 08-23 and 08-24 sync failures themselves. 08-23 18:00
+ET got a reference code and timed out after the full 900 s of polling (a `ReadTimeout` from IBKR);
+08-24 12:00 ET was a plain `1001` at the request step. Neither re-requested, so no `1025` budget was
+spent, and the portal download succeeding 25 minutes after the 12:07 refusal is the two-channel
+design working. Backend suite 1272 passing.
+
 
 ## Shipped 2026-08-17 (night) — four more incomplete valuations, and the basket alarm
 
@@ -2221,6 +2315,16 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-24** — "get the newest data onto the server, and check why the errors happened." The data
+  half was a no-op: the server already held everything through 08-21, which is all IBKR has. The
+  errors were two ordinary Flex failures — but the *warning about them* was miscalibrated, because
+  the alarm's threshold was derived from a query period the portal had not been running for weeks.
+  The lesson is narrow and reusable: **a constant that mirrors a setting in someone else's system is
+  wrong from the moment they change it, so derive it from what that system actually sent.** The span
+  was already recorded on every run; nothing new had to be stored. A second finding came free from
+  the user simply saying what they had bought — two funds from the 08-21 rotation were undeclared,
+  and an undeclared fund fails *quietly*, as a plausible-looking company row.
+
 - **2026-08-17 (night)** — "find bugs and improvements and implement them", then "is there any other
   bugs?". Six defects over two passes, and the striking part is that they were **two families and
   nothing else**: five were a figure built from an incomplete valuation and served as a measurement,
@@ -2275,19 +2379,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   first draft gave the bar and the treemap the same word for two different quantities forty pixels
   apart. Also a local-DB lesson: `insert or ignore` silently swallowed 2,635 NOT NULL violations and
   the script cheerfully reported inserting them.
-
-- **2026-08-14** — asked for a "seethrough" view breaking ETFs into single stocks, with GOOG/GOOGL/ABEA
-  combined "not by string match, but a smarter way". Two lenses paid off. **First: measure the
-  premise before designing on it.** Web research produced confident answers that were wrong for this
-  account — four fund ISINs (GRID, SOXQ, QTUM, and the US VanEck SMH instead of the UCITS line
-  actually held) — while running the two identifier APIs against our *own* ISINs settled the design
-  in one pass: GLEIF and OpenFIGI are **complementary**, GLEIF having no record at all for TSMC,
-  Samsung, SK Hynix, Credo or Marvell. **Second: the obvious key ladder was the bug.**
-  `lei or figi or isin` splits a company whose ISINs resolve to different depths and reports nothing
-  wrong, so grouping is a union. And two defects showed up only on real data — a partition missing by
-  a cent from summing rounded buckets, and *US DOLLAR* rendered as a company because Xtrackers ships
-  no asset-class column. The first test written for the cent bug **passed against it**; a mutation
-  check is what exposed that.
-*(The 2026-08-08 Flex-generation entry was dropped here to keep this list at five. Its lesson is
-durable and lives in CLAUDE.md — the once-per-day ET generation rule and why the 18:00 Berlin slot
-was chosen — rather than in a perishable log line.)*

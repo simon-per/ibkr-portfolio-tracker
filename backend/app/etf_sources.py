@@ -108,6 +108,20 @@ FUND_SOURCES: Dict[str, FundSource] = {
         params={"portfolio_id": "264659"},
     ),
 
+    # The first **US-domiciled** iShares line held here, and the only entry needing a
+    # `locale`. The same varnish host serves it, but the locale chooses which catalogue the
+    # portfolio is looked up in: `en_GB` answers a flat 400 for a US fund while `en_US`
+    # returns the full basket from the identical URL (measured 2026-08-24, 106 rows, as-of
+    # 2026-08-21). Its `portfolio_id` is also the id in its product-page URL — true here and
+    # NOT true of the UCITS entries above, where the two differ, so read it from the sitemap
+    # rather than assuming this generalises.
+    "US46438T3095": FundSource(
+        symbol="IQQ",
+        name="iShares Nasdaq 100 ETF",
+        adapter="blackrock",
+        params={"portfolio_id": "351653", "locale": "en_US"},
+    ),
+
     # --- Xtrackers / DWS -----------------------------------------------------------
     # Keyed by the fund's own ISIN, so there is nothing to discover and nothing to keep
     # in step. The export echoes `ShareClass ISIN` on every row, which the parser checks
@@ -201,6 +215,15 @@ FUND_SOURCES: Dict[str, FundSource] = {
     "US46138G6153": FundSource(
         symbol="SOXQ",
         name="Invesco PHLX Semiconductor ETF",
+        adapter="invesco",
+    ),
+    # CUSIP 46138G649, which `derive_north_american_isin` reproduces from this ISIN and which
+    # the API echoes back. Confirmed live before being written down (2026-08-24: 109 holdings,
+    # NVDA 8.32%, effectiveBusinessDate 2026-08-21) rather than taken from a web lookup — the
+    # note above this table records four identifiers a web lookup got wrong.
+    "US46138G6492": FundSource(
+        symbol="QQQM",
+        name="Invesco NASDAQ 100 ETF",
         adapter="invesco",
     ),
 

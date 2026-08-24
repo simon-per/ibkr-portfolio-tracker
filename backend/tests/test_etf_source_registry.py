@@ -288,3 +288,79 @@ def test_every_mapped_fund_declares_at_least_one_isin(symbol):
         assert len(isin) == 12 and isin == isin.strip().upper(), (
             f"{symbol} declares {isin!r}, which is not a normalised ISIN"
         )
+
+
+# ── the iShares locale, which decides whether a fund is reachable at all ───────────────
+
+
+def _blackrock_funds():
+    return {i: src for i, src in FUND_SOURCES.items() if src.adapter == "blackrock"}
+
+
+@pytest.mark.parametrize("isin", sorted(_blackrock_funds()))
+def test_a_us_domiciled_ishares_fund_declares_the_locale_that_can_find_it(isin):
+    """
+    One varnish host serves every iShares domicile, but `locale` chooses which catalogue the
+    portfolio is looked up in — and a fund missing from that catalogue answers a flat
+    `400 BAD_REQUEST_INVALID_PARAM_VALUES`, not an empty basket. Measured on IQQ (2026-08-24):
+    `en_GB` 400s, `en_US` returns all 106 rows from the identical URL.
+
+    So the default `en_GB` in `BLACKROCK_PARAMS` is correct only for the UCITS lines, and a
+    US-domiciled entry that forgets to override it is unreachable. Keyed on the ISIN's own
+    country prefix so the next US iShares fund is caught by declaration rather than by
+    somebody debugging a 400.
+    """
+    source = _blackrock_funds()[isin]
+    locale = source.params.get("locale")
+    if isin.upper().startswith("US"):
+        assert locale and not locale.endswith("_GB"), (
+            f"{source.symbol} ({isin}) is US-domiciled, so the default en_GB catalogue will "
+            f"400 on it — declare params={{'locale': 'en_US'}}"
+        )
+    else:
+        assert locale is None or locale == "en_GB", (
+            f"{source.symbol} ({isin}) is a UCITS line and should use the default locale"
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
+    """
+    The override is a single key on an existing param dict, which is exactly the kind of
+    change that silently applies to every fund or to none. Both directions are asserted, and
+    no network is touched — the request is captured, not sent.
+    """
+    import app.cli.fetch_etf_baskets as fetch
+    from pathlib import Path
+    import tempfile
+
+    captured = []
+
+    class _Client:
+        async def get(self, url, params=None):
+            captured.append((url, dict(params or {})))
+
+            class _R:
+                content = b"{}"
+
+                def raise_for_status(self):
+                    return None
+
+            return _R()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        await fetch._fetch_blackrock(
+            _Client(), "US46438T3095", FUND_SOURCES["US46438T3095"], out
+        )
+        await fetch._fetch_blackrock(
+            _Client(), "IE00B4L5Y983", FUND_SOURCES["IE00B4L5Y983"], out
+        )
+
+    us_params, uk_params = captured[0][1], captured[1][1]
+    assert us_params["locale"] == "en_US", "the declared locale did not reach the request"
+    assert uk_params["locale"] == "en_GB", "the override leaked onto a UCITS fund"
+    assert us_params["portfolioId"] == "351653"
+    # Everything other than locale and portfolioId must be identical, or the override has
+    # quietly become a second endpoint.
+    assert {k: v for k, v in us_params.items() if k not in ("locale", "portfolioId")} ==            {k: v for k, v in uk_params.items() if k not in ("locale", "portfolioId")}

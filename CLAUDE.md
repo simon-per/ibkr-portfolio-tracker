@@ -288,7 +288,8 @@ money at all. **Transfers** exists only so an incoming broker transfer can be to
 — see the contributions section. Both are inert until parsed: `extract_cash_transactions` filters to the
 three dividend types, so ticking them early cannot disturb anything.
 
-**General config that matters:** Format **XML**; Period **Last N Calendar Days, N=3** (see below);
+**General config that matters:** Format **XML**; Period **Last N Calendar Days** (N is measured, not
+assumed — see below);
 Date `yyyyMMdd`, Time `HHmmss`, separator `;`. **Never use `dd/MM/yyyy`** — ibflex assumes US
 `MM/dd/yyyy` for ambiguous formats and would silently swap month and day.
 
@@ -296,24 +297,43 @@ Date `yyyyMMdd`, Time `HHmmss`, separator `;`. **Never use `dd/MM/yyyy`** — ib
 `Code=1001` failures (see *Sync schedule*). Trades/CashTransactions contain only rows *inside* the
 period, so the window has to exceed the longest plausible run of failed syncs.
 
-**It has been `Last N Calendar Days` with N=3 since 2026-08-06, narrowed from 30 — a deliberate
-choice by the account owner, reaffirmed after the trade-off was put to them.** Know what it costs
-before widening or narrowing it again:
+**The live period is `Last 30 Calendar Days`, and no constant in this repo is allowed to assert
+that any more.** An earlier revision of this file recorded it as narrowed to N=3 on 2026-08-06,
+"a deliberate choice by the account owner, reaffirmed after the trade-off was put to them" — and
+on 2026-08-24 every measurement said 30: the portal download's own header
+(`period="Last30CalendarDays"`), and `data_from`/`data_to` on three successful API syncs spanning
+07-01…07-30, 07-16…08-14 and 07-23…08-21. Whether the portal edit was never applied or was set
+back, the file was wrong and the code derived from it was wrong with it. **The period is a portal
+setting; treat any number written down here as hearsay and read `data_to − data_from` off a
+successful sync instead.**
 
-- A statement generated on day *D* covers **D−3 … D−1**. So a trade on day *T* is reachable from a
-  statement generated on *T+1*, *T+2* or *T+3*, and **unreachable from T+4 onward**.
+That is now what the code does: `flex_generation.flex_window_days()` measures the span off the
+last statement IBKR served, and `find_flex_generation_gap` warns at **N−1 ET days** rather than at
+a hardcoded 2. Know what the window costs, whatever N turns out to be:
+
+- A statement generated on day *D* covers **D−N … D−1**. So a trade on day *T* is reachable from a
+  statement generated on *T+1 … T+N*, and **unreachable from T+N+1 onward**.
 - The account gets about **one successful IBKR sync per day** (see the once-per-day rule under
-  *Sync schedule*), so the margin is roughly **two consecutive failed days**, not the ~90 that 30
-  days bought. Two-day gaps have happened: 08-02 and 08-03 both failed at the day's first attempt
-  and were recovered by the second.
+  *Sync schedule*), so the margin is roughly **N consecutive failed days**. At N=30 that is weeks;
+  at N=3 it was two, and two-day gaps have happened (08-02 and 08-03 both failed at the day's first
+  attempt and were recovered by the second; 08-23 and 08-24 both failed outright).
 - Only the `<Trades>` / `<CashTransactions>` rows are at risk. **OpenPositions is
   period-independent**, so the lots and holdings still arrive whatever the window — what would be
   lost is the execution record the Activity ledger, XIRR's flow terms and realized P&L read.
 - Recovery is a browser download with a wider period ingested through `app/cli/ingest_flex_xml.py`,
-  which is idempotent. That is the reason a short window is survivable at all, and
-  `find_stale_ibkr_sync` (7 days) is **too slow to be the alarm for it** — at N=3 the data is gone
-  four days before that warning fires. `find_flex_generation_gap` (2 ET days) is the one that
-  fires in time; see *Sync schedule*.
+  which is idempotent. That is the reason a short window is survivable at all.
+- **Which alarm fires first depends on N, and both orders are correct.** At N=3,
+  `find_flex_generation_gap` (N−1 = 2 ET days) leads and `find_stale_ibkr_sync` (7 days) is far too
+  slow — the data is gone four days before it speaks. At N=30 the 7-day one leads, because an
+  operational fault deserves attention weeks before the trades are actually at risk. They answer
+  different questions: *the schedule is broken* versus *the trades are about to become
+  unrecoverable*.
+
+**Also note the window ends at the last completed *trading* day, not simply "yesterday".** A
+statement generated Monday 2026-08-24 at 12:32 ET came back `toDate=20260821` — Friday, not
+Sunday. Tuesday-to-Saturday generations do reach the previous day; a Monday one reaches back to
+Friday. So a Monday purchase is first reachable on Tuesday, and "I bought today and it is not
+there" is the expected answer on any day, not a fault.
 
 Prior tax years would need a one-off period change, then setting back — but **for this account
 there is nothing to reach**: the owner did not trade at IBKR before 2026. The holdings arrived by
@@ -1376,25 +1396,38 @@ Two properties of the choice are unchanged and still worth knowing:
 
 - **It captures no additional trades.** The window ends yesterday *measured in US Eastern* and rolls
   at midnight ET, not at generation time — so 12:00 ET and 00:00 ET on the same day both cover
-  D−3…D−1. Identical statement, ~12 hours later. Reaching *today's* trades needs a custom date range
+  D−N…D−1. Identical statement, ~12 hours later. Reaching *today's* trades needs a custom date range
   set by hand in the portal, which is not a schedule change.
-- **There are two attempts per ET day, not three**, against a 3-day window whose entire margin is two
-  consecutive failed days. 08-16 spent one of those two and recovered on the second slot, which is
-  the design working rather than a warning.
+- **There are two attempts per ET day, not three.** Against a 3-day window that is a margin of two
+  consecutive failed days; against the 30-day period actually in force it is weeks. 08-16 spent one
+  of those attempts and recovered on the second slot, which is the design working rather than a
+  warning.
 
 What makes it survivable is that the guard reduces the cost of a doomed attempt to zero, and that
 `find_flex_generation_gap` (below) alarms in time to act. **If both slots start failing on the same
 ET day repeatedly, moving the primary back to 06:00 Berlin — the instant the window rolls — is still
 the fix.** A single failed 12:00 ET is not that signal; it is Sunday's shape too.
 
-**`find_flex_generation_gap` warns after `FLEX_GENERATION_GAP_WARN_DAYS` (2) ET days with no
-successful IBKR sync**, and it exists because `find_stale_ibkr_sync` at 7 days *cannot see the
-failure it was written for* once the query period is 3 days: trades fall out of the window after
-two missed days, four days before the 7-day alarm says a word. Warning at 7 about a 3-day window is
-warning after the loss. It counts in **ET days** rather than elapsed hours — a failure at 23:00 ET
-and one at 01:00 ET the next day are two missed generations two hours apart — and it runs from the
-**market-data** job for the same reason its sibling does: those slots succeed while Flex is
-refusing. Re-derive the 2 if the Flex Query period changes; it is N−1, not a preference.
+**`find_flex_generation_gap` warns after **N−1** ET days with no successful IBKR sync, where N is
+the window `flex_window_days()` measures off the last statement IBKR served.** It exists because
+`find_stale_ibkr_sync` at 7 days *cannot see the failure it was written for* under a narrow period:
+at N=3 trades fall out after two missed days, four days before the 7-day alarm says a word, and
+warning at 7 about a 3-day window is warning after the loss. It counts in **ET days** rather than
+elapsed hours — a failure at 23:00 ET and one at 01:00 ET the next day are two missed generations
+two hours apart — and it runs from the **market-data** job for the same reason its sibling does:
+those slots succeed while Flex is refusing.
+
+**The threshold used to be the hardcoded 2 that N=3 implies, and on 2026-08-24 that was a false
+alarm with four weeks of margin in hand.** The live query was `Last 30 Calendar Days` (see *The
+Flex Query*), so an ordinary two-day gap produced a banner telling the reader trades were "about to
+become unreachable" when ~28 days of slack remained. A false alarm that names a data-loss risk is
+worse than no alarm, because the next true one reads identically. Two things follow, and both are
+now enforced rather than written down: the threshold is derived from the measured span, and the
+message **states the window it measured** (`reaches back 30 calendar days`, or
+`window length is unknown, assuming 3` when nothing is on record) so a wrong reading is visible
+instead of inferred. `FLEX_GENERATION_GAP_WARN_DAYS_FLOOR` (2) keeps a pathologically narrow period
+off a hair trigger — IBKR issues nothing at the weekend, so a Friday success is two ET days old by
+Sunday through no fault of anything.
 
 **`full_sync` runs its 730-day market-data pass whether or not IBKR succeeded, and gating it
 was a silent outage (fixed 2026-08-07).** `_full_sync_job_locked` used to wrap step 3 in
@@ -2166,7 +2199,21 @@ has no route at all, and it borrows VT's basket until one exists.
 | **Defiance** | `defianceetfs.com/<ticker>-full-holdings/` | **not** `/<ticker>/`, whose table is rendered client-side and absent from the response |
 | **VanEck** | `vaneck.com/nl/en/investments/<slug>/downloads/holdings/` | XLSX. Needs a **cookie jar** (a cookieless GET loops the consent redirects) and the `/nl/en/` locale **pinned**. Parsed with `zipfile` + `ElementTree`; do not add `openpyxl` for one 5 kB file a week |
 
-**All 12 funds decompose, two of them by proxy** (VWCE via VT, DBPG via VOO). Neither of those two
+**The BlackRock row has a second dimension: `locale` selects the catalogue, and a fund missing
+from it 400s rather than returning nothing.** One host serves every domicile, but the default
+`en_GB` in `BLACKROCK_PARAMS` only finds the UCITS lines — the US-domiciled **IQQ** answers
+`400 BAD_REQUEST_INVALID_PARAM_VALUES` under `en_GB` and returns all 106 rows under `en_US` from
+the identical URL. So a US iShares fund declares `params={"locale": "en_US"}` rather than the
+adapter growing a second endpoint; the payload shape is identical, which is why `parse_ishares`
+has no branch for it. Pinned by a family rule keyed on the ISIN's country prefix, so the next US
+iShares fund is caught by declaration rather than by somebody debugging a 400.
+
+**Note also that IQQ's `portfolio_id` happens to equal the id in its product-page URL, and the
+UCITS entries' do not** — IWDA's page is `/products/251882/` against `portfolio_id` 287737. Read
+it from the sitemap and confirm by row count, as the comment in `etf_sources.py` says; do not
+generalise from IQQ.
+
+**All 14 funds decompose, two of them by proxy** (VWCE via VT, DBPG via VOO). Neither of those two
 has a usable route of its own: Vanguard Europe publishes VWCE's holdings only by email on request
 (month-end + 15 days), and DBPG publishes collateral rather than constituents. The read path never
 dereferences `adapter`, so a declared-but-unimplemented one degrades to "no basket yet", never to a
@@ -2821,6 +2868,8 @@ Tests: `tests/test_currency_fallback.py`.
 | Yield on cost looks low after buying more, or after selling and rebuying | Fixed 2026-08-05. It is the *projected* annual rate over cost, so it tracks the shares held now. A rebuy at a higher price genuinely lowers it — more capital for the same income. If it still looks off, `forward_yield_pct ÷ yield_on_cost_pct` must equal market value ÷ cost for that row |
 | `Code=1025` | Token lockout, usually self-inflicted. **Wait**, don't retry. The schedule recovers it |
 | `Code=1001` | Not ready. Polled while retrieving; **fatal at the request step** — never re-request, a later job handles it. Since 2026-08-08 the common cause of a *run* of these is gone: the guard skips a slot once the ET day's generation is spent, so a `1001` now means a genuine refusal |
+| I bought something today and it is not in the app | Expected on any day, and not a settlement delay — the rolling window ends at the last completed *trading* day, so today is structurally never in today's statement. A Monday purchase is first reachable Tuesday; a Friday one on Saturday. Nothing to force. Verify with `toDate` in the statement header rather than the generation time |
+| A newly bought **fund** is drawn as a Stock, or shows as a single company in Look-through | It is not declared. `ETF_ALLOCATIONS` / `FUND_SOURCES` are keyed by fund ISIN, and an undeclared one takes the `securities.asset_type` column default of `"Stock"` — so it is bucketed as a company at a plausible weight, `uncovered_fund_eur` stays `0.00`, and coverage still reads high. Nothing reports it, which is why it is here: IQQ sat in that state from 2026-08-21 to 08-24. Add both entries, pin the allocation blocks to any sibling tracking the same index, then fetch and import its basket |
 | The Sync button says *Already up to date* | Working as intended, and not an error. IBKR issues about one statement per US-Eastern day; today's has landed, so there is nothing to fetch. The panel says when the next one becomes available. *Sync anyway* is only worth pressing after editing the Flex Query in the portal — the one thing that resets the daily generation — because a forced refusal spends `Code=1025` budget |
 | A scheduled run reads `skipped` in the history | Two different causes, told apart by `reason`. `already_generated_today` is the 00:00 Berlin slot correctly doing nothing because 18:00 succeeded — the normal daily state. `pipeline_busy` is a `single_flight` collision, where the next slot recovers freshness |
 | Sync 200 but 0 trades | Flex Query section/period not covering them |

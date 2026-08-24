@@ -171,6 +171,45 @@ ETF_ALLOCATIONS = {
         },
     },
 
+    # iShares Nasdaq 100 (IQQ) and Invesco NASDAQ 100 (QQQM) — the US-domiciled replacements
+    # bought during the 2026-08 rotation out of the Ireland-domiciled sleeve.
+    #
+    # Both blocks are **pinned identical to XNAS above**, for the reason VOO / SXR8 / DBPG are
+    # pinned to each other: all three track the Nasdaq-100, so a different split here would not
+    # be new information, it would be three answers to one question drifting apart — and the
+    # Allocation tab would show the same index differently depending on which wrapper was held.
+    # Change one and change all three.
+    "IQQ": {
+        "isins": ["US46438T3095"],
+        "asset_type": "ETF",
+        "geographic": {
+            "United States": 100.0,
+        },
+        "sector": {
+            "Technology": 55.0,
+            "Communication Services": 18.0,
+            "Consumer Cyclical": 15.0,
+            "Healthcare": 6.0,
+            "Industrials": 4.0,
+            "Consumer Defensive": 2.0,
+        },
+    },
+    "QQQM": {
+        "isins": ["US46138G6492"],
+        "asset_type": "ETF",
+        "geographic": {
+            "United States": 100.0,
+        },
+        "sector": {
+            "Technology": 55.0,
+            "Communication Services": 18.0,
+            "Consumer Cyclical": 15.0,
+            "Healthcare": 6.0,
+            "Industrials": 4.0,
+            "Consumer Defensive": 2.0,
+        },
+    },
+
     # Xtrackers S&P 500 2x Leveraged (DBPG)
     "DBPG": {
         "isins": ["LU0411078552"],

@@ -95,6 +95,39 @@ def test_the_two_ftse_global_funds_do_not_drift_apart():
     )
 
 
+def test_the_three_nasdaq_100_funds_do_not_drift_apart():
+    """
+    XNAS, IQQ and QQQM are three wrappers around one index, held across the 2026-08 rotation
+    out of the Ireland-domiciled sleeve (XNAS sold, IQQ and QQQM bought). Both blocks are
+    compared, not just geography: unlike VT/VWCE above there is no small-cap difference to
+    excuse a divergence, so a different sector split here would mean the Allocation tab
+    described the Nasdaq-100 differently depending on which wrapper the account happened to
+    hold — three answers to one question, which is this codebase's oldest failure mode.
+    """
+    for dimension in ("geographic", "sector"):
+        xnas = get_etf_allocation("XNAS")[dimension]
+        for symbol in ("IQQ", "QQQM"):
+            assert get_etf_allocation(symbol)[dimension] == xnas, (
+                f"{symbol} and XNAS both track the Nasdaq-100, so their {dimension} blocks "
+                f"must stay identical. If one gained better data, all three belong in the "
+                f"same commit."
+            )
+
+
+def test_the_funds_bought_in_the_august_rotation_are_mapped():
+    """
+    The rotation on 2026-08-21 sold the Ireland-domiciled sleeve and bought US-domiciled
+    replacements. An unmapped fund is not loudly broken — it takes the `securities.asset_type`
+    column default of "Stock", so it is drawn as a *company* in the allocation charts and as a
+    single company row in the look-through, at a plausible weight and with nothing reporting
+    it. IQQ sat in exactly that state until 2026-08-24.
+    """
+    for symbol in ("IQQ", "QQQM"):
+        allocation = get_etf_allocation(symbol)
+        assert allocation is not None, f"{symbol} was bought and is not mapped"
+        assert allocation["asset_type"] == "ETF"
+
+
 def test_an_unmapped_symbol_reports_itself_rather_than_guessing():
     # The caller branches on `is_known_etf`, so the None is the contract.
     assert not is_known_etf("NOT_AN_ETF")
