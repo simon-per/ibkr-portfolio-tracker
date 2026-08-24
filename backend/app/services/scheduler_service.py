@@ -379,10 +379,12 @@ class SchedulerService:
         # exactly the outage it exists to report.
         #
         # Two detectors, two horizons, and they are not redundant. The 7-day one
-        # is the backstop for a broken token; the 2-day one is what actually
-        # protects the data, because a `Last 3 Calendar Days` statement loses
-        # trades permanently once two consecutive ET days go by with no
-        # successful generation — four days before the 7-day one says anything.
+        # is the backstop for a broken token; the other is what protects the
+        # data, at N-1 ET days for the window `flex_window_days` measures. Which
+        # fires first depends on N and both orders are right: at N=3 the gap one
+        # leads (a statement loses trades four days before the 7-day one speaks),
+        # at N=30 this one leads (an operational fault deserves attention weeks
+        # before the trades are actually at risk).
         try:
             diagnostics += await self.find_flex_generation_gap(db)
         except Exception as e:

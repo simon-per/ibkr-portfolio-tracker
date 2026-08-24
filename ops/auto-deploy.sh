@@ -226,7 +226,7 @@ BACKUP_SCRIPT="/root/backup-db.sh"
 
 # A failed backup now ABORTS the deploy instead of warning and continuing. The next
 # step runs `alembic upgrade head` unattended against the account's only copy of data
-# that cannot be re-fetched from IBKR (the Flex window is 3 days), and a deploy is never
+# that cannot be re-fetched from IBKR (the Flex window is bounded), and a deploy is never
 # urgent — the next tick is ten minutes away. Continuing was defensible while the
 # backup was a `cp` nobody trusted; it is not defensible now that a failure means the
 # snapshot genuinely could not be taken or did not verify.

@@ -30,10 +30,12 @@
 #    two days old purely because nobody had committed. A daily run makes the backup
 #    interval a property of time rather than of development activity.
 #
-# What matters about this data: it cannot be re-fetched. The Flex Query window is 3
-# days and IBKR holds nothing before 2026 for this account, so trades, cash flows,
-# corporate actions and the IBKR dividend ledger exist only here. OpenPositions is
-# period-independent, so lots would come back from a sync; nothing else would.
+# What matters about this data: it cannot be re-fetched. The Flex Query window is
+# bounded — a portal setting, measured rather than assumed since 2026-08-24, and it has
+# been 3 days and 30 days at different times — and IBKR holds nothing before 2026 for
+# this account, so trades, cash flows, corporate actions and the IBKR dividend ledger
+# exist only here. OpenPositions is period-independent, so lots would come back from a
+# sync; nothing else would.
 
 set -uo pipefail
 
