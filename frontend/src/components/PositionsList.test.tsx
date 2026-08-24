@@ -125,3 +125,84 @@ describe('PositionsList rendering', () => {
     expect(symbols).toHaveLength(3)
   })
 })
+
+/**
+ * An unpriced holding is the SBI shape, and it reached this table as a −100% loss.
+ *
+ * `get_positions_breakdown` values a holding it cannot price at `market_value_eur = 0.0`
+ * — so `gain_loss_eur` is `−cost` and `gain_loss_percent` is exactly `−100.00`. The
+ * table printed both in red, weighted the row at `0.00%`, and marked it in no way at
+ * all. Meanwhile the Win Rate card three rows above already said "N unpriced, not
+ * judged": the app named the condition there and published the fabricated loss here, on
+ * the one screen a reader opens to find out *which* holding.
+ *
+ * Two routes into the state, and the second is why the shared predicate is imported
+ * rather than `market_price === null` tested locally: a missing FX rate leaves the price
+ * populated and zeroes the value. Frankfurter cannot serve TWD at all.
+ */
+describe('a holding the backend could not value', () => {
+  const NO_PRICE = position({
+    security_id: 4, symbol: 'TSMC', market_price: null,
+    market_value_eur: 0, cost_basis_eur: 3180, gain_loss_eur: -3180,
+    gain_loss_percent: -100,
+  })
+  const NO_FX = position({
+    security_id: 5, symbol: 'TWDX', market_price: 42,   // priced, but unconvertible
+    market_value_eur: 0, cost_basis_eur: 1000, gain_loss_eur: -1000,
+    gain_loss_percent: -100,
+  })
+  const cellFor = (key: string, p: Position) =>
+    cols().find((c) => c.key === key)!.cell(p, 'table')
+
+  it.each([['no cached price', NO_PRICE], ['no FX rate', NO_FX]])(
+    'renders a dash rather than a −100%% loss (%s)',
+    (_label, p) => {
+      expect(cellFor('gain_loss_percent', p)).toBe('—')
+      expect(cellFor('gain_loss', p)).toBe('—')
+      expect(cellFor('market_value', p)).toBe('—')
+      expect(cellFor('weight', p)).toBe('—')
+    }
+  )
+
+  it('does not paint it red', () => {
+    // The tone ladder is the half that makes the number look like a measurement rather
+    // than a gap: a muted dash invites a question, a red −100% invites a conclusion.
+    const tone = cols().find((c) => c.key === 'gain_loss')!.tone!
+    expect(tone(NO_PRICE)).toBe('text-muted-foreground')
+    expect(tone(PAYER)).toBe('text-green-600')
+  })
+
+  it('still shows what IS known about the row', () => {
+    // Refusing the derived figures must not blank the position itself — cost basis and
+    // quantity came from the tax lots and are not in doubt.
+    expect(cellFor('cost_basis', NO_PRICE)).toBe(money(3180))
+    expect(cellFor('quantity', NO_PRICE)).toBe('10.00')
+  })
+
+  it('names the holdings on screen and says why', () => {
+    render(<PositionsList positions={[PAYER, NO_PRICE]} />)
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toMatch(/1 holding could not be valued/)
+    expect(alert.textContent).toMatch(/TSMC/)
+    // The reader must be able to act on it, not merely notice it.
+    expect(alert.textContent).toMatch(/ticker_mappings/)
+  })
+
+  it('says nothing when every holding is valued', () => {
+    // A notice that is always present is the always-present-Flex-banner pathology.
+    render(<PositionsList positions={[PAYER, ETF]} />)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('leaves an unpriced holding out of the weight denominator', () => {
+    // It contributes 0.00 either way, so this is about the two describing one set:
+    // the rows allowed a weight, and the total those weights are shares of.
+    const priced = position({ security_id: 6, symbol: 'AAA', market_value_eur: 300 })
+    const columns = positionColumns({
+      formatCurrency: money, totalMarketValue: 300, yieldOnCost: YIELDS,
+    })
+    const weight = columns.find((c) => c.key === 'weight')!
+    expect(weight.cell(priced, 'table')).toBe('100.00%')
+    expect(weight.cell(NO_PRICE, 'table')).toBe('—')
+  })
+})

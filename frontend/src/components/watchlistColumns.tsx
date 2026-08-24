@@ -1,3 +1,4 @@
+import { formatMarketCap } from '@/lib/utils'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
 
@@ -50,13 +51,9 @@ export function formatPercent(value: number | null): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
 }
 
-export function formatMarketCap(value: number | null): string {
-  if (value === null) return '-'
-  if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`
-  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`
-  if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`
-  return value.toLocaleString()
-}
+// Re-exported so existing importers of this module keep working; the definition
+// lives in lib/utils.ts, because it was byte-identical here and in FundamentalsTab.
+export { formatMarketCap }
 
 export function colorClass(value: number | null, invertGood?: boolean): string {
   if (value === null) return 'text-muted-foreground'

@@ -74,3 +74,33 @@ export function formatDate(date: string | Date): string {
     day: "numeric",
   }).format(d)
 }
+
+/**
+ * A plain integer with thousands separators, pinned to `en-US`.
+ *
+ * The pin is the whole point, and `LookThroughTab` writes down why: a bare
+ * `toLocaleString()` renders 8,007 as **"8.007"** under a German runtime, which does not
+ * look malformed — it looks like eight point oh oh seven. Every other formatter in this
+ * file is already pinned; the call sites that were not are the ones that grew their own
+ * formatting inline.
+ */
+export function formatCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value)
+}
+
+/**
+ * A market capitalisation as T / B / M, falling back to a separated integer.
+ *
+ * Extracted because it existed **byte-identically** in `FundamentalsTab.tsx` and
+ * `watchlistColumns.tsx` — one defect that had to be fixed twice, which is the shape
+ * CLAUDE.md opens with. Its sub-million branch was the worst instance of the locale bug
+ * in the app: a market cap of 850,000 rendered as "850.000" under a German runtime,
+ * reading as eight hundred fifty *thousandths* of a currency unit.
+ */
+export function formatMarketCap(value: number | null): string {
+  if (value === null) return '-'
+  if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`
+  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`
+  if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`
+  return formatCount(value)
+}

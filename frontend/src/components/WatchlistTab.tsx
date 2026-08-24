@@ -23,7 +23,14 @@ export function WatchlistTab() {
   const [tickerInput, setTickerInput] = useState('')
   const [sortColumn, setSortColumn] = useState<SortColumn>('buy_score')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-  const { data: items, isLoading } = useQuery({
+  // `isError` captured, not dropped. Without it the only non-loading fallback was the
+  // empty state, so a backend that is redeploying or 502-ing rendered "No stocks on your
+  // watchlist yet" — a confident claim about the user's own data manufactured out of an
+  // outage, followed by a call to action whose POST would also fail. CLAUDE.md states
+  // this rule as spanning every panel: `undefined` means *not loaded*, an empty array
+  // means *nothing held*, and collapsing the two lets a panel build an answer out of a
+  // failure. `FundamentalsTab` one tab over captures it on all three of its queries.
+  const { data: items, isLoading, isError } = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => api.getWatchlist(),
     staleTime: 5 * 60 * 1000,
@@ -262,6 +269,13 @@ export function WatchlistTab() {
       {isLoading ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">Loading watchlist...</CardContent>
+        </Card>
+      ) : isError ? (
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            Couldn't load your watchlist — the backend didn't respond. It retries
+            automatically. This is not an empty watchlist.
+          </CardContent>
         </Card>
       ) : !sortedItems.length ? (
         <Card>

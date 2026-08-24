@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { formatMarketCap } from '@/lib/utils'
 import { api } from '@/lib/api'
 import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -11,14 +12,6 @@ import { RefreshCw } from 'lucide-react'
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
 type SortDir = 'asc' | 'desc'
-
-function formatMarketCap(value: number | null): string {
-  if (value === null) return '-'
-  if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`
-  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`
-  if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`
-  return value.toLocaleString()
-}
 
 function formatPct(value: number | null): string {
   if (value === null) return '-'

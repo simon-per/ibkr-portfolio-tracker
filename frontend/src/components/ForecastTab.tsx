@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { formatCount } from '@/lib/utils'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -42,7 +43,7 @@ const projectionColumns = (
     mobile: 'value',
     tone: () => 'text-green-600 dark:text-green-400',
     cellClassName: 'font-semibold',
-    cell: (p) => `${curSym}${p.futureValue.toLocaleString()}`,
+    cell: (p) => `${curSym}${formatCount(p.futureValue)}`,
   },
   {
     key: 'gains',
@@ -51,14 +52,14 @@ const projectionColumns = (
     align: 'right',
     mobile: 'delta',
     tone: () => 'text-blue-600 dark:text-blue-400',
-    cell: (p) => `${curSym}${p.investmentGains.toLocaleString()}`,
+    cell: (p) => `${curSym}${formatCount(p.investmentGains)}`,
   },
   {
     key: 'contributions',
     header: 'Total Contributions',
     shortHeader: 'Total contributions',
     align: 'right',
-    cell: (p) => `${curSym}${p.totalContributions.toLocaleString()}`,
+    cell: (p) => `${curSym}${formatCount(p.totalContributions)}`,
   },
 ]
 
@@ -92,12 +93,21 @@ export function ForecastTab() {
   }, [forecastYears])
 
   // Fetch current portfolio value
-  const { data: summary } = useQuery({
+  const { data: summary, isError: summaryError } = useQuery({
     queryKey: ['portfolio', 'summary'],
     queryFn: () => api.getPortfolioSummary(),
   })
 
-  const currentValue = startFromZero ? 0 : (summary?.total_market_value_eur || 0)
+  // `summary?.total_market_value_eur || 0` on its own made a failed request
+  // indistinguishable from an empty portfolio — and "Current" is the *selected* starting
+  // point, so the whole projection quietly became contributions-only, understating by
+  // the compounded value of the entire book with nothing on screen saying so. A user
+  // reads a wrong forecast as their forecast.
+  //
+  // The figure still falls back to 0 (there is nothing else to project from), but the
+  // failure is now stated, and the Current button says so rather than advertising a
+  // portfolio value of zero.
+  const currentValue = startFromZero ? 0 : (summary?.total_market_value_eur ?? 0)
 
   // Calculate projections
   const projections = useMemo(() => {
@@ -347,7 +357,7 @@ export function ForecastTab() {
                       : 'bg-background hover:bg-accent hover:text-accent-foreground'
                   }`}
                 >
-                  Current ({curSym}{Math.round(summary?.total_market_value_eur || 0).toLocaleString()})
+                  Current ({summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(currentValue))}`})
                 </button>
                 <button
                   onClick={() => setStartFromZero(true)}
@@ -370,7 +380,7 @@ export function ForecastTab() {
         <CardHeader>
           <CardTitle>Projected Portfolio Growth ({forecastYears} {forecastYears === 1 ? 'Year' : 'Years'})</CardTitle>
           <CardDescription>
-            Based on {expectedReturn}% annual return and {curSym}{monthlyContribution.toLocaleString()} monthly contribution
+            Based on {expectedReturn}% annual return and {curSym}{formatCount(monthlyContribution)} monthly contribution
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
@@ -392,7 +402,7 @@ export function ForecastTab() {
                 width={isCompact ? 48 : 80}
               />
               <Tooltip
-                formatter={(value: number | undefined) => value != null ? `${curSym}${value.toLocaleString()}` : '—'}
+                formatter={(value: number | undefined) => value != null ? `${curSym}${formatCount(value)}` : '—'}
                 labelFormatter={(label) => `Year ${label}`}
               />
               {/* This two-series stacked area had no legend at all, at any width — the
@@ -454,7 +464,7 @@ export function ForecastTab() {
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {curSym}{scenario.value.toLocaleString()}
+                    {curSym}{formatCount(scenario.value)}
                   </div>
                 </div>
               </div>

@@ -108,13 +108,22 @@ export function PerformanceMetricsCards({
           the label follows it rather than annualising a few days of noise. */}
       <KpiCard
         label={metrics.xirrMethod === 'simple_period' ? 'Period Return' : 'Annual Return (XIRR)'}
-        icon={isPositiveXIRR
-          ? <TrendingUp className="h-4 w-4 text-green-600" />
-          : <TrendingDown className="h-4 w-4 text-red-600" />}
+        // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
+        // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
+        // window, which 1W on a week with no trades produces — drew a red downward
+        // arrow and `tone: 'negative'` over a dash. A tone ladder asserting a loss about
+        // a value the backend declined to compute. `KpiCard` forces a null value to a
+        // muted tone, but the icon is chosen here, so that guard could not reach it.
+        // Every sibling card on these two rows already branches to muted.
+        icon={metrics.xirr === null
+          ? <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          : isPositiveXIRR
+            ? <TrendingUp className="h-4 w-4 text-green-600" />
+            : <TrendingDown className="h-4 w-4 text-red-600" />}
         value={metrics.xirr !== null
           ? `${isPositiveXIRR ? '+' : ''}${metrics.xirr.toFixed(2)}%`
           : null}
-        tone={isPositiveXIRR ? 'positive' : 'negative'}
+        tone={metrics.xirr === null ? 'muted' : isPositiveXIRR ? 'positive' : 'negative'}
         sub="Money-weighted, adjusted for deposits"
       />
 

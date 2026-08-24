@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { PortfolioValuePoint, BenchmarkValuePoint } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, parseLocalDate } from '@/lib/utils'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
@@ -143,7 +143,14 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
    * it does not fix the problem.
    */
   const formatXAxisTick = (value: string) => {
-    const date = new Date(value)
+    // `parseLocalDate`, not `new Date(value)`. The API speaks date-only strings, which
+    // `Date` parses as **UTC midnight** — so for any viewer west of Greenwich the point
+    // dated 2026-01-01 becomes 2025-12-31 local and this tick prints "Dec 25" while the
+    // tooltip for the very same point, which already goes through `formatDate` ->
+    // `parseLocalDate`, prints "Jan 1, 2026". Axis and tooltip disagreeing on one screen,
+    // and every month-boundary tick naming the wrong month. `utils.ts` exists for exactly
+    // this and this was its last unconverted call site.
+    const date = parseLocalDate(value)
     if (Number.isNaN(date.getTime())) return ''
     return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
   }

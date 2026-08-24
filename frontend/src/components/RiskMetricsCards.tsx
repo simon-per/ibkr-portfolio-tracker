@@ -111,10 +111,18 @@ export function RiskMetricsCards({
   // query: gating this row on it would hide four already-computed metrics behind the
   // slowest of three requests, and a retrying dividend endpoint would keep the whole
   // row a skeleton for seconds.
-  const dividendUnavailable = dividendError === true || dividend === undefined
+  // `undefined` is *in flight*, not failed — the docstring on the prop two lines up says
+  // so, and this line contradicted it. Because `isLoading` deliberately excludes the
+  // dividend query, `undefined` is the state on every single page load, so both cards
+  // stated "Couldn't load dividend data" for the second or two before the response
+  // arrived and then flipped to a number. Announcing a failure that is not happening is
+  // how a reader learns to ignore the message that matters when it is.
+  const dividendUnavailable = dividendError === true
   const dividendSub = dividendUnavailable
     ? "Couldn't load dividend data"
-    : dividend === null
+    : dividend === undefined
+      ? 'Loading…'
+      : dividend === null
       ? 'No projected dividends'
       : [
           `${formatCurrency(dividend.annual_eur)}/yr`,
@@ -231,9 +239,11 @@ export function RiskMetricsCards({
                the gap is the part a current-yield figure hides."
         sub={dividendUnavailable
           ? "Couldn't load dividend data"
-          : dividend?.on_cost_pct == null
-            ? 'No projected dividends'
-            : 'Same income over what it cost'}
+          : dividend === undefined
+            ? 'Loading…'
+            : dividend?.on_cost_pct == null
+              ? 'No projected dividends'
+              : 'Same income over what it cost'}
       />
     </div>
   )

@@ -1,6 +1,13 @@
 # Working state
 
-**Last updated: 2026-08-24 (evening).** Latest: **the Flex Query period is not what this repo said
+**Last updated: 2026-08-24 (late).** Latest: **the Positions table published a fabricated −100%
+loss, on the one screen you open to find out which holding.** An unvaluable position is valued at
+0.00, so its gain is `−cost` — printed in red at `0.00%` weight with no marker, forty pixels below
+KPI cards already saying *"N unpriced, not judged"*. Last member of the `unpriced_holdings` family,
+and the one it should have started with. Shipped with `formatMarketCap`, which existed
+byte-identically in two files. Details in *Shipped 2026-08-24 (late)*.
+
+Before that, the same day: **the Flex Query period is not what this repo said
 it was, and a threshold derived from the wrong number cried wolf.** The live query is
 `Last 30 Calendar Days`; CLAUDE.md recorded `N=3` and `FLEX_GENERATION_GAP_WARN_DAYS` was the 2 that
 implies, so a routine two-day gap produced a banner saying trades were "about to become unreachable"
@@ -459,6 +466,42 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-08-24 (late) — the last unpriced holding, and a formatter that existed twice
+
+Work that had been sitting uncommitted in the working tree; tested end to end and shipped.
+
+**The Positions table was the family's blind spot.** `PositionsList` rendered a holding the backend
+could not value as an ordinary, very bad position — `market_value_eur` is 0.00, so
+`gain_loss_percent` is exactly **−100.00**, in red, at `0.00%` weight, unmarked. What makes it the
+sharpest instance rather than just another one: the KPI cards *directly above* already report
+*"N unpriced, not judged"*, so the app named the condition and then contradicted it on the same
+screen — and this is the screen you open precisely to find out **which** holding.
+
+Now the three derived cells show a dash, the tone goes muted rather than red, and a `role="alert"`
+above the table names the symbols and says what to check. Two details carry weight: the weight cell
+is `null` rather than `0` (a `0.00%` asserts the holding is a negligible part of the book — the
+`concentrationPct` lesson), and unpriced rows leave the weight *denominator*, so it describes the
+same set as the rows allowed a weight. It reads `isUnpriced` from `positionValuation.ts` rather
+than testing `market_price === null`, because a missing FX rate is the second route into this state
+and leaves the price populated.
+
+**`formatMarketCap` existed byte-identically in `FundamentalsTab.tsx` and `watchlistColumns.tsx`.**
+CLAUDE.md's opening failure mode, so it is extracted to `lib/utils.ts` beside a new `formatCount`,
+both pinned to `en-US`. The pin is the point: its sub-million branch was the worst locale bug in the
+app — a market cap of 850,000 rendering as **"850.000"** under a German runtime, which does not look
+malformed, it looks like eight hundred fifty thousandths. The call sites that had grown their own
+formatting inline were exactly the ones that were not pinned.
+
+**Tested end to end before committing**, which is worth recording because most sessions here stop at
+the unit suites: backend **1272**, frontend **505** across 37 files, `tsc -b` and `vite build` clean,
+and **144 browser checks** over six e2e scripts — `a11y` 17/17, `sweep` 18/18, `mobile` 50/50 at
+390x844, `csp` 4/4, `chunks` 37/37, `errors` 18/18. Nothing needed fixing.
+
+**Two scripts could not run and are not "passing":** `ledger.mjs` and `axis.mjs` need real
+executions and the local database has 942 open lots but **0 trades and 0 cash flows**. They need a
+production snapshot, which was deliberately not taken this session.
+
 
 ## Shipped 2026-08-24 — a threshold derived from a number nobody had checked
 
@@ -2315,6 +2358,13 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-24 (late)** — "test everything, then commit." The testing was the deliverable and it
+  found nothing, which is itself the finding: the uncommitted work was sound and the full stack —
+  1272 backend, 505 frontend, 144 browser checks — went green first time. The reusable part is the
+  bug that was already fixed in that WIP: **the app named a condition in one component and
+  contradicted it in the component directly below**, which is what the `unpriced_holdings` family
+  looks like once every *aggregate* has been guarded and only the itemised screen is left.
+
 - **2026-08-24** — "get the newest data onto the server, and check why the errors happened." The data
   half was a no-op: the server already held everything through 08-21, which is all IBKR has. The
   errors were two ordinary Flex failures — but the *warning about them* was miscalibrated, because
@@ -2370,12 +2420,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   OpenFIGI request also killed the plan's own instruction: `ID_CUSIP` on a CINS returns zero rows
   with no error, and the endpoint returns no ISIN at all. Check the contract before coding against
   a remembered one.
-
-- **2026-08-16** — "some charts for the seethrough, maybe a treemap or a Kreischart". The useful part
-  was declining half the request: a pie cannot render a 50-row distribution spanning three orders of
-  magnitude, so the treemap took the companies and a stacked bar took the coverage split. Two things
-  only came out of *looking at the render* — SVG text cannot be measured before layout, so the
-  label-fit estimate has to budget for shouted IBKR names or they cross their own tile edges; and the
-  first draft gave the bar and the treemap the same word for two different quantities forty pixels
-  apart. Also a local-DB lesson: `insert or ignore` silently swallowed 2,635 NOT NULL violations and
-  the script cheerfully reported inserting them.

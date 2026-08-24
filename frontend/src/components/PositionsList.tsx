@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
 import { formatPercent } from '@/lib/utils'
+import { isUnpriced } from '@/lib/positionValuation'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -58,8 +59,27 @@ const getRatingScore = (consensus: string | undefined): number => {
 
 const exchangeOf = (p: Position) => p.exchange || 'N/A'
 
+/**
+ * A holding the backend could not value, on the shared two-clause predicate.
+ *
+ * The table used to render these as an ordinary, very bad position. `market_value_eur`
+ * is 0.00 for an unpriced holding, so `gain_loss_eur` is `-cost` and
+ * `gain_loss_percent` is exactly `-100.00` — printed in red, weighted at 0.00%, with no
+ * marker of any kind. Three rows of KPI cards above, Win Rate already says "N unpriced,
+ * not judged": the app named the condition there and published the fabricated loss
+ * here, on the one screen a reader opens to find out *which* holding.
+ *
+ * A missing FX rate is the second route into this state and does not clear the price,
+ * which is why `isUnpriced` is imported rather than `market_price === null` tested here
+ * — see `lib/positionValuation.ts`.
+ */
+const cannotValue = (p: Position) => isUnpriced(p)
+
+/** What every figure derived from a valuation shows when there is no valuation. */
+const NO_VALUE = '—'
+
 const gainTone = (p: Position) =>
-  p.gain_loss_eur >= 0 ? 'text-green-600' : 'text-red-600'
+  cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-green-600' : 'text-red-600'
 
 /**
  * The positions table, described once for both renderings.
@@ -88,8 +108,13 @@ export function positionColumns(deps: {
   yieldOnCost: Map<number, number | null>
 }): Column<Position, SortColumn>[] {
   const { formatCurrency, totalMarketValue, yieldOnCost } = deps
-  const weightOf = (p: Position) =>
-    totalMarketValue > 0 ? (p.market_value_eur / totalMarketValue) * 100 : 0
+  // `null` rather than 0 for a holding with no weight to compute — a 0.00% here reads
+  // as "this is a negligible part of the book", which is a claim, and `RebalanceCard`'s
+  // Current column already prints a dash for the same row.
+  const weightOf = (p: Position): number | null =>
+    cannotValue(p) || totalMarketValue <= 0
+      ? null
+      : (p.market_value_eur / totalMarketValue) * 100
   const yocOf = (p: Position) => yieldOnCost.get(p.security_id) ?? null
 
   return [
@@ -171,7 +196,7 @@ export function positionColumns(deps: {
       sortKey: 'market_value_eur',
       align: 'right',
       mobile: 'value',
-      cell: (p) => formatCurrency(p.market_value_eur),
+      cell: (p) => (cannotValue(p) ? NO_VALUE : formatCurrency(p.market_value_eur)),
     },
     {
       key: 'gain_loss_percent',
@@ -181,7 +206,7 @@ export function positionColumns(deps: {
       align: 'right',
       mobile: 'delta',
       tone: gainTone,
-      cell: (p) => formatPercent(p.gain_loss_percent),
+      cell: (p) => (cannotValue(p) ? NO_VALUE : formatPercent(p.gain_loss_percent)),
     },
     {
       key: 'quantity',
@@ -206,7 +231,7 @@ export function positionColumns(deps: {
       sortKey: 'gain_loss_eur',
       align: 'right',
       tone: gainTone,
-      cell: (p) => formatCurrency(p.gain_loss_eur),
+      cell: (p) => (cannotValue(p) ? NO_VALUE : formatCurrency(p.gain_loss_eur)),
     },
     {
       key: 'weight',
@@ -215,7 +240,10 @@ export function positionColumns(deps: {
       sortKey: 'portfolio_percent',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      cell: (p) => `${weightOf(p).toFixed(2)}%`,
+      cell: (p) => {
+        const w = weightOf(p)
+        return w === null ? NO_VALUE : `${w.toFixed(2)}%`
+      },
     },
     {
       key: 'yoc',
@@ -264,11 +292,20 @@ export function PositionsList({
   const [sortColumn, setSortColumn] = useState<SortColumn>('market_value_eur')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
-  // Calculate total portfolio market value for percentage calculations
+  // Calculate total portfolio market value for percentage calculations.
+  // Unpriced holdings contribute 0.00 anyway, so this is unchanged in value — but
+  // reading it through the predicate keeps the denominator and the rows that are
+  // allowed a weight describing the same set.
   const totalMarketValue = useMemo(() => {
     if (!positions || positions.length === 0) return 0
-    return positions.reduce((sum, pos) => sum + pos.market_value_eur, 0)
+    return positions.reduce((sum, p) => (cannotValue(p) ? sum : sum + p.market_value_eur), 0)
   }, [positions])
+
+  /** Named on screen, in the order the table shows them. */
+  const unpriced = useMemo(
+    () => (positions ?? []).filter(cannotValue),
+    [positions]
+  )
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -408,6 +445,26 @@ export function PositionsList({
         <CardTitle>Positions ({positions.length})</CardTitle>
       </CardHeader>
       <CardContent>
+        {unpriced.length > 0 && (
+          // Outside no collapsible here — the table is always open — but stated above
+          // it rather than as a footnote, for the reason `MonthlyReturnsHeatmap` learned:
+          // the qualifier has to be where the figures are read. Every affected row shows
+          // a dash rather than a number, so without this the reader knows *that*
+          // something is missing and not *why* or what to do about it.
+          <div
+            role="alert"
+            className="mb-4 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-900 dark:text-yellow-200"
+          >
+            <span className="font-medium">
+              {unpriced.length} {unpriced.length === 1 ? 'holding' : 'holdings'} could not be valued
+            </span>{' '}
+            ({unpriced.map((p) => p.symbol).join(', ')}). Their value, gain and weight
+            show a dash rather than a figure — the backend has no cached price, or no FX
+            rate for the currency it trades in. Check the market-data sync's warnings and
+            that security's <code>ticker_mappings</code> row. Totals elsewhere on this
+            page exclude them too.
+          </div>
+        )}
         <DataTable
           rows={sortedPositions}
           columns={columns}
