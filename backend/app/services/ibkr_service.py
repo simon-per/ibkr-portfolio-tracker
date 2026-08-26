@@ -127,6 +127,9 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
     "EquitySummaryByReportDateInBase": frozenset({
         "reportDate", "cash", "stock", "total",
     }),
+    "CashReportCurrency": frozenset({
+        "currency", "endingCash", "levelOfDetail", "toDate",
+    }),
     # Read by parse_flex_xml itself, not by an extractor.
     "FlexStatement": frozenset({"accountId", "fromDate", "toDate"}),
 }
@@ -979,6 +982,68 @@ class IBKRService:
                 'cash': cash,
                 'stock': _dec(getattr(row, 'stock', None)),
                 'total': _dec(getattr(row, 'total', None)),
+            })
+        return rows
+
+    async def extract_cash_report(self, flex_data: Dict) -> List[Dict]:
+        """
+        Ending cash from the ``<CashReport>`` section — the *other* way IBKR will tell us
+        a balance, and the one actually reachable in this account's Flex Query editor.
+
+        It is coarser than `<EquitySummaryInBase>`: one row per **currency** covering the
+        whole statement period, rather than one row per day. So it yields a single
+        authoritative anchor dated `toDate` per sync instead of a daily series — which is
+        enough, because syncs land about daily and `_apply_measured` interpolates with
+        derived movement between anchors rather than holding the level flat.
+
+        Two shapes come back depending on which portal option is ticked, and both are
+        handled rather than one being required:
+
+        - **Base Currency Summary** emits a single row with `currency="BASE_SUMMARY"`
+          (and `levelOfDetail` naming the base), already summed into the account's base.
+        - **Currency Breakout** emits one row per currency held. Those need converting
+          and summing, which the caller does — this account trades in five currencies, so
+          it is a real case rather than a defensive one.
+
+        Ticking both emits both, so the base row is flagged and the caller prefers it;
+        summing a breakout *and* its own summary would double the balance.
+
+        `endingCash`, not `endingSettledCash`: unsettled sale proceeds are still the
+        account's money, and the derived series books a trade on its trade date, so the
+        settled figure would disagree with everything around it by a couple of days'
+        activity.
+        """
+        statement = flex_data['statement']
+        section = getattr(statement, 'CashReport', None)
+        if not section:
+            return []
+
+        account_info = getattr(statement, 'AccountInformation', None)
+        base_currency = getattr(account_info, 'currency', None) if account_info else None
+
+        rows: List[Dict] = []
+        for row in section:
+            to_date = _as_date(getattr(row, 'toDate', None))
+            ending = _dec(getattr(row, 'endingCash', None))
+            # No date or no figure carries nothing. Skipped rather than defaulted: a zero
+            # balance is a real answer and must not be manufactured from a missing one.
+            if not to_date or ending is None:
+                continue
+            currency = getattr(row, 'currency', None)
+            level = getattr(row, 'levelOfDetail', None) or ''
+            # Two independent tells, because neither is documented as stable and the cost
+            # of misreading one is a doubled balance.
+            is_base = (
+                (currency or '').upper() == 'BASE_SUMMARY'
+                or level.strip().lower().startswith('base')
+            )
+            rows.append({
+                'report_date': to_date,
+                # A base-summary row's "currency" is the literal BASE_SUMMARY, which is
+                # not a currency — the account's own base is what it is denominated in.
+                'currency': (base_currency if is_base else currency),
+                'ending_cash': ending,
+                'is_base_summary': is_base,
             })
         return rows
 

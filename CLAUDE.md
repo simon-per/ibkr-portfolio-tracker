@@ -284,13 +284,22 @@ Required sections and the fields the parsers actually read:
 | **Cash Transactions** | Dividends, Payment in Lieu, **Withholding Tax**, **Deposits & Withdrawals** | `type`, `conid`, `symbol`, `settleDate`/`dateTime`, `amount`, `currency`, `transactionID` |
 | **Corporate Actions** | Detail | `type`, `conid`, `symbol`, `dateTime`/`reportDate`, `quantity`, `value`, `proceeds`, `actionDescription`, `transactionID` |
 | **Transfers** | — | `type`, `direction`, `date`/`reportDate`, `cashTransfer`, `positionAmount`, `symbol`, `conid`, `company`, `transactionID` |
-| **Cash Report** | **Equity Summary** *(optional)* | `reportDate`, `cash`, `stock`, `total` |
+| **Cash Report** *(optional)* | **Base Currency Summary** | `currency`, `toDate`, `endingCash`, `levelOfDetail` |
+| **Equity Summary in Base** *(optional)* | — | `reportDate`, `cash`, `stock`, `total` |
 
-**Cash Report / Equity Summary is the one optional section**, and the only one whose absence is a
-supported steady state rather than a gap: without it `CashService` derives the balance from the
-trade, deposit and dividend ledgers and every surface badges it `derived`. Tick it and IBKR's own
-end-of-day figure takes over per day, which is the only way the app can see broker interest,
-account fees and FX spread. It adds one row per day of the window — see *Cash*.
+**The two cash sections are the only optional ones**, and the only ones whose absence is a supported
+steady state rather than a gap: without either, `CashService` derives the balance from the trade,
+deposit and dividend ledgers and every surface badges it `derived`. Enabling one lets IBKR's own
+figure take over, which is the only way the app can see broker interest, account fees and FX spread.
+
+**They are different sections and not interchangeable.** `Cash Report` is per **currency** over the
+whole statement period, so it yields one anchor dated `toDate` per sync; `Equity Summary in Base` is
+per **day** in the account's base. Either works — `resolve_cash_balances` collapses both onto one
+row-per-date shape and the daily series wins where both cover a date. Cash Report is the one to
+reach for first: it appears in every Flex Query editor, and **Base Currency Summary** is the option
+to tick, because a Currency Breakout has to be converted and summed and this account holds five
+currencies. Ticking both options emits both shapes, and the summary row is preferred so the breakout
+is not added to a total that already contains it. See *Cash*.
 
 **Deposits & Withdrawals** feeds the contributions report; without it there is no record of external
 money at all. **Transfers** exists only so an incoming broker transfer can be told apart from a deposit
@@ -1181,10 +1190,20 @@ percent apart.
 ### `<EquitySummaryInBase>` is the measured answer, and it is off by default
 
 `extract_equity_summary` reads IBKR's own end-of-day `cash` / `stock` / `total` into
-`cash_balances`. It requires ticking **Cash Report → Equity Summary** in the Flex portal
-and costs one row per day of the window — trivial against the sections that scan every
-trade. Until then the table is empty, and **that is a supported state rather than a
-pending migration**.
+`cash_balances`, and `extract_cash_report` reads `<CashReport>`'s `endingCash` for the
+same table. Either section will do and **both are off by default**; until one is enabled
+the table is empty, and that is a supported state rather than a pending migration.
+
+`resolve_cash_balances` collapses the two schemas onto one row-per-date shape, so
+`CashService` reads one thing. **The daily series wins on any date both cover** — they
+describe the same quantity and should agree, and deterministic precedence is what stops a
+re-sync flipping a stored value depending on write order. A Cash Report **Currency
+Breakout** is converted to EUR at the report date and summed; an unconvertible currency
+abandons that date rather than storing a partial total, because a balance short by one
+currency is a plausible figure and it would overwrite a derived one that is already
+better. A **Base Currency Summary** row is taken as-is and beats its own breakout, since
+summing both doubles the balance — the one arithmetic error here that would look entirely
+plausible on screen.
 
 `_apply_measured` splices them in as *corrections*: a measured row is a level while the
 timeline sweeps deltas, so each becomes `measured − derived-so-far`. That keeps the whole
@@ -3049,7 +3068,7 @@ Tests: `tests/test_currency_fallback.py`.
 | `Code=1001` | Not ready. Polled while retrieving; **fatal at the request step** — never re-request, a later job handles it. Since 2026-08-08 the common cause of a *run* of these is gone: the guard skips a slot once the ET day's generation is spent, so a `1001` now means a genuine refusal |
 | I bought something today and it is not in the app | Expected on any day, and not a settlement delay — the rolling window ends at the last completed *trading* day, so today is structurally never in today's statement. A Monday purchase is first reachable Tuesday; a Friday one on Saturday. Nothing to force. Verify with `toDate` in the statement header rather than the generation time |
 | The value chart dips hard after a big sale, or Market Value looks far too low | Fixed 2026-08-26 by tracking cash — check `/health`'s commit predates it before looking further. Selling moves value from holdings into a cash balance nothing used to record, so a rotation drew a cliff and the headline card understated the account by the idle balance. The chart now pairs **Total Value** (holdings + cash) with **Money In**, and neither steps on a trade. The risk metrics were always right about this: they net the flow out |
-| The cash figure disagrees with IBKR's by a small amount | Expected while `cash_source` is `derived`: it is computed from the trade, deposit and dividend ledgers, so it cannot see broker interest, account fees or FX conversion spread. On this account that ran to about −250 CHF over eight months, 0.36%. Tick **Cash Report → Equity Summary** in the Flex portal and IBKR's own end-of-day figure takes over — expect one visible step on the first measured day, which is the accumulated difference becoming visible |
+| The cash figure disagrees with IBKR's by a small amount | Expected while `cash_source` is `derived`: it is computed from the trade, deposit and dividend ledgers, so it cannot see broker interest, account fees or FX conversion spread. On this account that ran to about −250 CHF over eight months, 0.36%. Enable the **Cash Report** section (option: Base Currency Summary) or **Equity Summary in Base** in the Flex portal and IBKR's own figure takes over — expect one visible step on the first measured day, which is the accumulated difference becoming visible |
 | The chart still says Cost Basis / Market Value | `cash_source` is `unknown`, meaning no trade or cash-flow row exists to derive a balance from — a fresh install, or a Flex query with none of the cash-bearing sections enabled. Deliberately not relabelled: a holdings-only line called "Total Value" over a 0.00 cash figure asserts a completeness nothing established |
 | A Cash slice appears in the sector and geography charts | Intended. Cash has no sector and no country, but putting it only in the asset-type chart would give that endpoint two denominators and leave the other two summing to under 100 while every slice says "% of portfolio". Named `Cash` rather than folded into `Unknown`, which means something else there: a holding whose sector nobody has fetched yet |
 | A negative cash balance, and a notice above the allocation charts | A margin debit. It cannot be drawn as a slice, so those charts leave it out of both the slice and the denominator rather than renormalising around it, and say so. The value chart still plots it — the cash line simply goes below zero |

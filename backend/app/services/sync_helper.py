@@ -20,6 +20,7 @@ day. Comparing total quantity per security is immune to that drift.
 """
 import logging
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Set
 
@@ -115,14 +116,19 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         CashFlowRepository(db), currency_service, cash_flows_data, transfers_data,
     )
 
-    # IBKR's own end-of-day cash balance, if the <EquitySummaryInBase> section has been
-    # enabled in the portal. Empty is the normal, supported state — CashService derives a
-    # balance from the trade/deposit/dividend ledgers and only *prefers* these rows where
-    # they exist, so nothing here is required for cash to work. Ingested unconditionally
-    # rather than behind a flag, so ticking the section in the portal is the whole setup.
+    # IBKR's own cash balance, from whichever of the two sections is enabled — the daily
+    # <EquitySummaryInBase>, or <CashReport>'s period-end figure. Empty is the normal,
+    # supported state: CashService derives a balance from the trade/deposit/dividend
+    # ledgers and only *prefers* these rows where they exist, so nothing here is required
+    # for cash to work. Ingested unconditionally rather than behind a flag, so ticking a
+    # section in the portal is the whole setup.
     equity_summary = await ibkr_service.extract_equity_summary(flex_data)
+    cash_report = await ibkr_service.extract_cash_report(flex_data)
     cash_balance_repo = CashBalanceRepository(db)
-    for row in equity_summary:
+    cash_balances = await resolve_cash_balances(
+        currency_service, equity_summary, cash_report
+    )
+    for row in cash_balances:
         await cash_balance_repo.upsert(row)
 
     # Record how far back the deposit ledger is complete — the splice point between
@@ -248,6 +254,87 @@ def _transfer_to_flow(transfer: Dict) -> Dict:
         "currency": transfer.get("currency"),
         "description": " ".join(str(p) for p in parts)[:255] or None,
     }
+
+
+async def resolve_cash_balances(
+    currency_service, equity_summary: List[Dict], cash_report: List[Dict]
+) -> List[Dict]:
+    """
+    Turn whichever cash section IBKR delivered into `cash_balances` rows.
+
+    Two sections can each answer "what was the balance", and they are not equivalent:
+    `<EquitySummaryInBase>` gives one row **per day** already in the account's base,
+    while `<CashReport>` gives one row **per currency** covering the whole period. So
+    this exists to collapse both onto the one shape the table stores — a balance for a
+    date — rather than teaching `CashService` to read two schemas.
+
+    **The daily series wins on any date both cover.** They describe the same quantity and
+    should agree; where they do not, the per-day figure is the more specific measurement,
+    and preferring it deterministically is what stops a re-sync from flipping a stored
+    value depending on which section happened to be written last.
+
+    A Currency Breakout is converted to EUR at the report date and summed, which is the
+    only place a balance is assembled rather than read. An unconvertible currency
+    **abandons that date** rather than storing a partial total: a balance short by one
+    currency is a plausible figure, which is the dangerous kind, and the derived series
+    it would otherwise correct is already the better answer.
+    """
+    by_date: Dict[date, Dict] = {}
+
+    # CashReport first, so the daily rows below overwrite it where they overlap.
+    per_date: Dict[date, List[Dict]] = defaultdict(list)
+    for row in cash_report:
+        per_date[row['report_date']].append(row)
+
+    for report_date, rows in per_date.items():
+        base_rows = [r for r in rows if r['is_base_summary']]
+        if base_rows:
+            # Already summed into the account's base by IBKR — nothing to convert, and
+            # nothing to add, since a summary row and its own breakout would double.
+            chosen = base_rows[0]
+            by_date[report_date] = {
+                'report_date': report_date,
+                'currency': chosen['currency'],
+                'cash': chosen['ending_cash'],
+                'stock': None,
+                'total': None,
+            }
+            continue
+
+        total_eur = Decimal("0")
+        for row in rows:
+            amount, currency = row['ending_cash'], row['currency']
+            if not amount:
+                # Zero is zero in every currency, and demanding a rate for an emptied
+                # currency balance would discard the whole date over a row worth nothing.
+                continue
+            if currency and currency != "EUR":
+                try:
+                    amount = await currency_service.convert_to_eur(
+                        amount=amount, from_currency=currency, target_date=report_date
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Cash report: no %s->EUR rate for %s (%s); skipping the balance "
+                        "for that date rather than storing a partial one",
+                        currency, report_date, e,
+                    )
+                    total_eur = None
+                    break
+            total_eur += amount
+        if total_eur is not None:
+            by_date[report_date] = {
+                'report_date': report_date,
+                'currency': 'EUR',
+                'cash': total_eur,
+                'stock': None,
+                'total': None,
+            }
+
+    for row in equity_summary:
+        by_date[row['report_date']] = row
+
+    return [by_date[d] for d in sorted(by_date)]
 
 
 async def persist_cash_flows(

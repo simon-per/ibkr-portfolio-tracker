@@ -34,6 +34,7 @@ from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.services.cash_service import CashService, DERIVED, MEASURED, UNKNOWN
 from app.services.portfolio_service import BaseFx, PortfolioService
+from app.services.sync_helper import resolve_cash_balances
 
 EUR = BaseFx("EUR", {})
 
@@ -396,3 +397,141 @@ async def test_the_chart_and_the_strip_agree_about_money_in():
         assert all_time["money_in_eur"] == pytest.approx(6500)
     finally:
         await engine.dispose()
+
+
+# --------------------------------------------------------------- the Cash Report path
+
+
+class _FakeCurrency:
+    """Converts at a fixed rate, and refuses one currency to exercise the skip."""
+
+    def __init__(self, rates):
+        self.rates = rates
+
+    async def convert_to_eur(self, amount, from_currency, target_date):
+        if from_currency not in self.rates:
+            raise ValueError(f"no rate for {from_currency}")
+        return amount * self.rates[from_currency]
+
+
+@pytest.mark.asyncio
+async def test_a_base_summary_row_is_taken_as_is():
+    """
+    "Base Currency Summary" in the portal emits one row already summed into the account's
+    base, whose `currency` is the literal `BASE_SUMMARY` — not a currency. The account's
+    own base is what it is denominated in.
+    """
+    rows = await resolve_cash_balances(
+        _FakeCurrency({}),
+        [],
+        [{'report_date': date(2026, 8, 21), 'currency': 'CHF',
+          'ending_cash': Decimal("12212.62"), 'is_base_summary': True}],
+    )
+    assert rows == [{
+        'report_date': date(2026, 8, 21), 'currency': 'CHF',
+        'cash': Decimal("12212.62"), 'stock': None, 'total': None,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_a_currency_breakout_is_converted_and_summed():
+    """Real case, not defensive: this account trades in five currencies."""
+    rows = await resolve_cash_balances(
+        _FakeCurrency({'USD': Decimal("0.9")}),
+        [],
+        [
+            {'report_date': date(2026, 8, 21), 'currency': 'EUR',
+             'ending_cash': Decimal("100"), 'is_base_summary': False},
+            {'report_date': date(2026, 8, 21), 'currency': 'USD',
+             'ending_cash': Decimal("200"), 'is_base_summary': False},
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0]['currency'] == 'EUR'
+    assert rows[0]['cash'] == Decimal("280")  # 100 + 200*0.9
+
+
+@pytest.mark.asyncio
+async def test_a_summary_row_beside_its_own_breakout_is_not_double_counted():
+    """
+    Ticking both portal options emits both shapes. Summing a breakout *and* the summary
+    that already contains it doubles the balance, which is the one arithmetic error here
+    that would look entirely plausible on screen.
+    """
+    rows = await resolve_cash_balances(
+        _FakeCurrency({'USD': Decimal("0.9")}),
+        [],
+        [
+            {'report_date': date(2026, 8, 21), 'currency': 'EUR',
+             'ending_cash': Decimal("100"), 'is_base_summary': False},
+            {'report_date': date(2026, 8, 21), 'currency': 'USD',
+             'ending_cash': Decimal("200"), 'is_base_summary': False},
+            {'report_date': date(2026, 8, 21), 'currency': 'CHF',
+             'ending_cash': Decimal("280"), 'is_base_summary': True},
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0]['cash'] == Decimal("280")
+    assert rows[0]['currency'] == 'CHF'
+
+
+@pytest.mark.asyncio
+async def test_an_unconvertible_currency_abandons_the_date():
+    """
+    A total short by one currency is a *plausible* figure, which is the dangerous kind —
+    and it would overwrite a derived balance that is already the better answer. So the
+    date is dropped entirely rather than stored partial.
+    """
+    rows = await resolve_cash_balances(
+        _FakeCurrency({}),  # no rates at all
+        [],
+        [
+            {'report_date': date(2026, 8, 21), 'currency': 'EUR',
+             'ending_cash': Decimal("100"), 'is_base_summary': False},
+            {'report_date': date(2026, 8, 21), 'currency': 'TWD',
+             'ending_cash': Decimal("5000"), 'is_base_summary': False},
+        ],
+    )
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_a_zero_currency_balance_needs_no_rate():
+    """An emptied currency must not discard the date over a row worth nothing."""
+    rows = await resolve_cash_balances(
+        _FakeCurrency({}),
+        [],
+        [
+            {'report_date': date(2026, 8, 21), 'currency': 'EUR',
+             'ending_cash': Decimal("100"), 'is_base_summary': False},
+            {'report_date': date(2026, 8, 21), 'currency': 'TWD',
+             'ending_cash': Decimal("0"), 'is_base_summary': False},
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0]['cash'] == Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_the_daily_series_wins_where_both_sections_are_enabled():
+    """
+    Both sections answer the same question and should agree; where they do not, the
+    per-day figure is the more specific measurement. Deterministic precedence is what
+    stops a re-sync from flipping a stored value depending on write order.
+    """
+    rows = await resolve_cash_balances(
+        _FakeCurrency({}),
+        [{'report_date': date(2026, 8, 21), 'currency': 'CHF',
+          'cash': Decimal("999"), 'stock': Decimal("50000"), 'total': Decimal("50999")}],
+        [{'report_date': date(2026, 8, 21), 'currency': 'CHF',
+          'ending_cash': Decimal("111"), 'is_base_summary': True}],
+    )
+    assert len(rows) == 1
+    assert rows[0]['cash'] == Decimal("999")
+    assert rows[0]['stock'] == Decimal("50000")
+
+
+@pytest.mark.asyncio
+async def test_both_sections_absent_is_not_an_error():
+    """The default state of the Flex query, and a supported one."""
+    assert await resolve_cash_balances(_FakeCurrency({}), [], []) == []

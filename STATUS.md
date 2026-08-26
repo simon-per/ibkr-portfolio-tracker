@@ -138,11 +138,22 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Needs a human
 
-- **Tick "Cash Report → Equity Summary" in the Flex Query, and the cash balance stops being ours.**
-  One checkbox in the IBKR portal on query `App_OpenLots` (1389408). Everything else is already
-  built and deployed: `extract_equity_summary` reads the section, `cash_balances` stores it, and
-  `CashService._apply_measured` prefers it per day the moment rows arrive. Nothing needs a code
-  change or a redeploy — the next successful sync picks it up.
+- **Enable the Cash Report section in the Flex Query, and the cash balance stops being ours.**
+  On query `App_OpenLots` (1389408), add the **Cash Report** section and tick **Base Currency
+  Summary** plus the fields `Currency`, `To Date`, `Ending Cash` and `Level of Detail`. Everything
+  else is already built and deployed: `extract_cash_report` reads it, `resolve_cash_balances`
+  normalises it, `cash_balances` stores it, and `CashService._apply_measured` prefers it the moment
+  rows arrive. Nothing needs a code change or a redeploy — the next successful sync picks it up.
+
+  **Base Currency Summary, not Currency Breakout.** The breakout works too, but it emits one row
+  per currency and this account holds five, so the total has to be assembled by converting each at
+  the report date — one missing FX rate and the whole date is discarded. The summary row arrives
+  already summed. Ticking both is harmless: the summary is preferred rather than added to its own
+  breakout.
+
+  There is also an **Equity Summary in Base** section, which is strictly better where it exists —
+  one row per *day* rather than one per statement period — and the code prefers it automatically.
+  Add it too if the section list offers it; Cash Report is the one that is always there.
 
   **Why it is worth doing.** The derived balance is built from trades, deposits and dividends, so it
   structurally cannot see broker interest, account fees or the spread on an FX conversion. Measured
@@ -548,8 +559,12 @@ call. Now `native_amounts.NativeToBase`; new row in CLAUDE.md's divergence table
 cash — it had been inflating every row by 21%), and all three allocation breakdowns as a `Cash`
 bucket. Not returns, not the dividend-yield or rebalance denominators.
 
-**`<EquitySummaryInBase>` ingestion shipped too but is inert** until one portal checkbox — see
-*Needs a human*. Empty is a supported steady state, not a pending migration.
+**Ingestion for both of IBKR's cash sections shipped too, and both are inert** until one is enabled
+in the portal — see *Needs a human*. Empty is a supported steady state, not a pending migration.
+`<CashReport>` was added after the owner looked and found only that one in the Flex editor: it is
+per-currency and per-period rather than daily, so it yields one anchor per sync instead of a series,
+which `_apply_measured` already handles because it interleaves corrections with derived movement
+rather than holding a level flat. `resolve_cash_balances` collapses both schemas onto one shape.
 
 **Verified end to end against a production snapshot**, which is what this needed rather than
 fixtures. Migration `s2b9d6e3f7a8` applied to the real database and round-tripped (downgrade,
