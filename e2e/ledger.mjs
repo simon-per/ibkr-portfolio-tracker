@@ -48,9 +48,20 @@ await page.getByRole('button', { name: 'Cash', exact: true }).click()
 await page.waitForTimeout(3000)
 const cash = await page.getByRole('tabpanel').innerText()
 
-// Assert the filter actually took, or the three checks below could pass on an unfiltered
-// panel and the fix above would be undone silently by a renamed button.
-log(!/Dividend/.test(cash), 'the Cash filter narrowed the ledger to cash rows')
+// The ROWS, not the panel. The panel's own text carries the filter buttons ("Dividends")
+// and the card description ("Every trade, dividend, deposit and corporate action"), so a
+// `/Dividend/` test over `innerText` can never pass however well the filter works —
+// which is what it did the first time this script was run against a production snapshot
+// (2026-08-26). The check had been written, reviewed and never executed: the local
+// database has no trades or cash flows, so there was nothing for it to filter.
+//
+// Reading the rows is also what the assertion was always *for*: it exists so the three
+// checks below cannot pass against an unfiltered panel.
+const cashRows = await page.locator('tbody tr').allInnerTexts()
+log(
+  cashRows.length > 0 && !cashRows.some((r) => /Dividend/.test(r)),
+  `the Cash filter narrowed the ledger to cash rows (${cashRows.length} rows)`
+)
 
 log(/Transfer/.test(cash), 'a Transfer row is visible in the ledger')
 log(/not money in/.test(cash), 'transfers are badged "not money in"')
