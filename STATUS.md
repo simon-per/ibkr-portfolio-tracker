@@ -165,12 +165,13 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   and the chart, the hero card and the positions table all print the caveat in prose. The number is
   right to well under a percent.
 
-  **DONE on 2026-08-26** — the section was enabled, a statement downloaded, and the row
-  ingested: `2026-08-25 | CHF | 12,501.583565`. IBKR's figure is **289 CHF above** what
-  the ledger derived (12,212.62), which is the accumulated broker interest, fees and FX
-  spread the derivation structurally cannot see — the direction and roughly the size the
-  design predicted. From 08-25 onward `cash_source` reads `ibkr`; before it, `derived`.
-  Nothing further is needed unless the query is edited again.
+  **DONE and live on production, 2026-08-26.** The section was enabled, a statement
+  downloaded and ingested offline, and the row is on the server:
+  `2026-08-25 | CHF | 12,501.583565`. IBKR's figure is **289 CHF above** what the ledger
+  derived (12,212.62) — the accumulated broker interest, fees and FX spread the
+  derivation structurally cannot see, in the direction and roughly the size the design
+  predicted. From 08-25 onward `cash_source` reads `ibkr`; before it, `derived`. Nothing
+  further is needed unless the query is edited again.
 
   Two things to expect when it is enabled, neither of which is a fault:
   - **One visible step in the cash line on the first measured day.** That is the accumulated
@@ -603,6 +604,30 @@ written, reviewed and never executed, because the local database has no trades o
 filter — STATUS.md said so in as many words. It reads `tbody tr` now. **A check that has never been
 run is not a passing check**, and this is the second one in this repo to be written against a bug it
 could not see.
+
+## Ran on production 2026-08-26 — deployed, ingested, verified
+
+**Deployed `b326d0a` at 19:02 UTC**, health 200, migration `s2b9d6e3f7a8` applied on the live
+database. `/health` reports `scheduler_jobstore_persistent: true` and `write_auth_enabled: true`.
+
+**One thing to know about the deploy, because it looks like a fault and is not.** The 18:50 UTC
+cron tick lost a race with the push by seconds: it fetched, saw `LOCAL = REMOTE`, and exited
+**silently** — that path does not log. So for ten minutes the log's last entry was two days old
+while cron was demonstrably running (`/var/log/syslog` shows the 18:40 and 18:50 ticks). The 19:00
+tick deployed normally. If a push ever seems not to deploy, check `syslog` for the tick and
+`git rev-parse origin/main` on the VPS before assuming the script is broken.
+
+**The statement was then ingested offline** (`ibkr_manual_xml`), because today's 18:00 Berlin sync
+had run at 16:00 UTC — *before* the portal edit — so it carried no Cash Report, and the 00:00 Berlin
+slot would skip on the once-per-ET-day guard. Result exactly as rehearsed against a snapshot:
+743 lots synced, **0 closed, 0 partial, 0 skipped**, and `cash_balances_seen 1`. The only new fact
+in the file was the cash row; everything else was a confirmatory no-op.
+
+**Verified on the live site**: summary `total_value_eur` 69,342.79 = 56,841.21 holdings +
+12,501.583565 cash to the cent, `cash_source: ibkr`, `unpriced_holdings: 0`; the timeline reads
+`derived` up to 08-24 and `ibkr` from 08-25; and a browser pass found **no console errors**, the
+measured split on the hero card, and the derived caveat correctly **gone** from the chart note.
+The 08-21 cliff is absent from the chart.
 
 ## Shipped 2026-08-24 (late) — the last unpriced holding, and a formatter that existed twice
 
