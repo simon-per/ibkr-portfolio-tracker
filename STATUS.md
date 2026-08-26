@@ -165,6 +165,13 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   and the chart, the hero card and the positions table all print the caveat in prose. The number is
   right to well under a percent.
 
+  **DONE on 2026-08-26** — the section was enabled, a statement downloaded, and the row
+  ingested: `2026-08-25 | CHF | 12,501.583565`. IBKR's figure is **289 CHF above** what
+  the ledger derived (12,212.62), which is the accumulated broker interest, fees and FX
+  spread the derivation structurally cannot see — the direction and roughly the size the
+  design predicted. From 08-25 onward `cash_source` reads `ibkr`; before it, `derived`.
+  Nothing further is needed unless the query is edited again.
+
   Two things to expect when it is enabled, neither of which is a fault:
   - **One visible step in the cash line on the first measured day.** That is the accumulated
     interest/fees/spread being corrected, not a jump in the balance.
@@ -559,16 +566,32 @@ call. Now `native_amounts.NativeToBase`; new row in CLAUDE.md's divergence table
 cash — it had been inflating every row by 21%), and all three allocation breakdowns as a `Cash`
 bucket. Not returns, not the dividend-yield or rebalance denominators.
 
-**Ingestion for both of IBKR's cash sections shipped too, and both are inert** until one is enabled
-in the portal — see *Needs a human*. Empty is a supported steady state, not a pending migration.
+**Ingestion for both of IBKR's cash sections shipped too, and the Cash Report one is now live** —
+the owner enabled it the same evening and the first measured row is in (see *Needs a human*).
+Enabling it found two defects the fixtures could not: the base-summary row's currency, and a
+round trip that moved the figure. Both below. Empty is a supported steady state, not a pending migration.
 `<CashReport>` was added after the owner looked and found only that one in the Flex editor: it is
 per-currency and per-period rather than daily, so it yields one anchor per sync instead of a series,
 which `_apply_measured` already handles because it interleaves corrections with derived movement
 rather than holding a level flat. `resolve_cash_balances` collapses both schemas onto one shape.
 
+**The real statement found three things no fixture had.** All three were invisible until a document
+IBKR actually produced went through the pipeline, which is the reusable point:
+
+- **`<AccountInformation>` is an optional section and this query does not have it**, so the
+  base-summary row arrived with no currency. Read as EUR, its 12,501.58 **CHF** would have been
+  projected to ~13,400 — a 7% overstatement replacing a derived figure that was already within a
+  couple of percent. The base now comes from the unanimous `toCurrency` on `<ConversionRates>`,
+  which the query already emits, and an unresolvable one is dropped rather than labelled.
+- **`cash_balances_seen` reported 0 for a statement that stored a row**, because the counter still
+  read the Equity Summary section alone. A zero there tells an operator the portal edit did not
+  take, about an edit that did.
+- **A balance already in the display currency was round-tripped through EUR**, and the stored
+  native→EUR and EUR→base rates are not exact inverses: 12,501.58 came back 12,502.03.
+
 **Verified end to end against a production snapshot**, which is what this needed rather than
 fixtures. Migration `s2b9d6e3f7a8` applied to the real database and round-tripped (downgrade,
-re-upgrade). Backend **1295** (was 1272), frontend **512** across 38 files, `tsc -b` and
+re-upgrade). Backend **1301** (was 1272), frontend **512** across 38 files, `tsc -b` and
 `vite build` clean, and **160 browser checks** over all eight e2e scripts — a11y 17/17, sweep 18/18,
 mobile 50/50 at 390x844, errors 18/18, ledger 8/8, axis 8/8, csp 4/4, chunks 37/37.
 

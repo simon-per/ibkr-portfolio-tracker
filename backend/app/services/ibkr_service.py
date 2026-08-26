@@ -130,6 +130,9 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
     "CashReportCurrency": frozenset({
         "currency", "endingCash", "levelOfDetail", "toDate",
     }),
+    # Read only to establish the account's base currency — see _base_currency.
+    "ConversionRate": frozenset({"toCurrency"}),
+    "AccountInformation": frozenset({"currency"}),
     # Read by parse_flex_xml itself, not by an extractor.
     "FlexStatement": frozenset({"accountId", "fromDate", "toDate"}),
 }
@@ -964,8 +967,7 @@ class IBKRService:
         if not section:
             return []
 
-        account_info = getattr(statement, 'AccountInformation', None)
-        currency = getattr(account_info, 'currency', None) if account_info else None
+        currency = self._base_currency(statement)
 
         rows: List[Dict] = []
         for row in section:
@@ -984,6 +986,43 @@ class IBKRService:
                 'total': _dec(getattr(row, 'total', None)),
             })
         return rows
+
+    @staticmethod
+    def _base_currency(statement) -> Optional[str]:
+        """
+        The account's own base currency — what a `*InBase` figure is denominated in.
+
+        It is **not** the app's `app_settings.base_currency`, and it must never be
+        defaulted to one. A cash balance stamped with a currency it has not earned is
+        the SBI failure exactly: 12,501.58 CHF read as EUR becomes ~13,400 CHF after
+        projection, a 7% error on a figure that looks entirely reasonable.
+
+        Two sources, because the obvious one is optional. `AccountInformation` carries
+        it directly but is a **section that has to be enabled**, and this account's query
+        does not have it — measured on the 2026-08-26 statement, which is exactly the
+        configuration this had to work for. So the fallback reads `<ConversionRates>`,
+        whose every row converts *into* the base: 1,014 rows on that statement, all
+        `toCurrency="CHF"`, and it is already present because the query sets
+        `Include Currency Rates? Yes`.
+
+        **Unanimity is required**, not a majority or a first row. The section's whole
+        premise is that one currency is the base, so a split answer means the premise is
+        wrong and guessing which half to believe is how a plausible wrong number gets
+        made. `None` then, and the caller drops the figure rather than labelling it.
+        """
+        account_info = getattr(statement, 'AccountInformation', None)
+        stated = getattr(account_info, 'currency', None) if account_info else None
+        if stated:
+            return stated
+
+        rates = getattr(statement, 'ConversionRates', None) or ()
+        targets = {
+            getattr(r, 'toCurrency', None) for r in rates
+            if getattr(r, 'toCurrency', None)
+        }
+        if len(targets) == 1:
+            return targets.pop()
+        return None
 
     async def extract_cash_report(self, flex_data: Dict) -> List[Dict]:
         """
@@ -1018,8 +1057,7 @@ class IBKRService:
         if not section:
             return []
 
-        account_info = getattr(statement, 'AccountInformation', None)
-        base_currency = getattr(account_info, 'currency', None) if account_info else None
+        base_currency = self._base_currency(statement)
 
         rows: List[Dict] = []
         for row in section:

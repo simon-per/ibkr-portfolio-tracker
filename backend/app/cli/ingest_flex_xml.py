@@ -62,6 +62,12 @@ async def ingest(path: Path, dry_run: bool = False) -> int:
             "cash_flows": len(await service.extract_cash_flows(flex_data)),
             "transfers": len(await service.extract_transfers(flex_data)),
             "taxlots": len(await service.extract_taxlots(flex_data)),
+            # Both cash sections, so a dry run says whether the portal edit took.
+            # A silently-absent count reads exactly like a silently-empty section.
+            "cash_balances": (
+                len(await service.extract_equity_summary(flex_data))
+                + len(await service.extract_cash_report(flex_data))
+            ),
         }
         print("DRY RUN - nothing written. Would ingest:")
         for key, value in counts.items():

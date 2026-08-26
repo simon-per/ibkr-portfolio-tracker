@@ -77,6 +77,16 @@ class NativeToBase:
         if not amount:
             return Decimal("0")
 
+        # Already in the display currency: a round trip through EUR costs a rate lookup
+        # and buys only rounding error, because the stored native->EUR rate and the
+        # EUR->base rate are not exact inverses. Measured on a real IBKR cash balance of
+        # 12,501.58 CHF under a CHF base, which came back 12,502.03 — 0.45 out, on the
+        # one figure in this app people reconcile against a broker statement line for
+        # line. The EUR/EUR case was already short-circuited by the two clauses below;
+        # this is the same exemption for every other base.
+        if currency and currency == self._base_fx.base_currency:
+            return amount
+
         eur = amount
         if currency and currency != "EUR":
             rate = await self.rate(currency, on_date)

@@ -1205,6 +1205,23 @@ better. A **Base Currency Summary** row is taken as-is and beats its own breakou
 summing both doubles the balance — the one arithmetic error here that would look entirely
 plausible on screen.
 
+**A base-summary row says how much and never in what, so the base currency has to come
+from elsewhere — and `AccountInformation` is an optional section this account does not
+have enabled.** `IBKRService._base_currency` reads it where it exists and otherwise takes
+the unanimous `toCurrency` off `<ConversionRates>`, which the query already emits (1,014
+rows on the 2026-08-26 statement, every one `CHF`). **Unanimity, not a majority**: the
+section's premise is that one currency is the base, so a split answer means the premise
+is wrong. When neither source answers, the figure is **dropped rather than labelled** —
+read as EUR, a CHF balance is ~7% high after projection, and it would overwrite a derived
+balance that was already right to within a couple of percent. Guarded at both the ingest
+and the reader, because rows written before the refusal existed still reach the reader.
+
+**And a balance already in the display currency is not round-tripped through EUR.**
+`NativeToBase.convert` short-circuits when the row's currency equals the base, because
+the stored native→EUR and EUR→base rates are not exact inverses: 12,501.58 CHF came back
+as 12,502.03 under a CHF base. Four significant figures in, on the one number in this app
+people reconcile against a broker statement line by line.
+
 `_apply_measured` splices them in as *corrections*: a measured row is a level while the
 timeline sweeps deltas, so each becomes `measured − derived-so-far`. That keeps the whole
 thing one sorted event list, which is what stops the chart, the summary card and the
@@ -2929,7 +2946,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1295 backend + 512 frontend as of 2026-08-26, all offline — no IBKR, Yahoo or FX-provider
+Tests (1301 backend + 512 frontend as of 2026-08-26, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash

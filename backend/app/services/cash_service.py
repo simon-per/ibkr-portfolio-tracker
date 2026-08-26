@@ -163,6 +163,17 @@ class CashService:
         applied = Decimal("0")
         i = 0
         for row in measured:
+            # An unlabelled level cannot be projected: `NativeToBase` reads a None
+            # currency as EUR, which is right for the EUR-converted breakout path and
+            # catastrophically wrong for a base-summary row in some other currency. The
+            # ingest already refuses to store one, so this is the second gate rather
+            # than the first — rows written before that refusal existed still reach here.
+            if not row.currency:
+                logger.warning(
+                    "Cash: the measured balance on %s carries no currency; keeping the "
+                    "derived figure for that day", row.report_date,
+                )
+                continue
             level = await to_base.convert(row.cash, row.currency, row.report_date)
             if level is None:
                 logger.warning(

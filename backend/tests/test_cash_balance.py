@@ -675,3 +675,141 @@ async def test_a_statement_without_the_section_yields_nothing():
     svc, flex_data, _ = _parse(no_section)
     assert await svc.extract_cash_report(flex_data) == []
     assert await svc.extract_equity_summary(flex_data) == []
+
+
+@pytest.mark.asyncio
+async def test_a_balance_already_in_the_base_currency_is_not_round_tripped():
+    """
+    IBKR reports its base-summary balance in the account's base. When that equals the
+    display base, converting it to EUR and back costs only rounding — and this is the
+    one figure in the app people reconcile against a broker statement line for line.
+
+    Measured: 12,501.583564544 CHF came back as 12,502.03 before the short-circuit,
+    because the stored CHF->EUR rate and the EUR->CHF rate are not exact inverses.
+    """
+    engine, session = await _make_session()
+    try:
+        chf = BaseFx("CHF", {date(2026, 8, 25): Decimal("0.93")})
+        session.add(CashBalance(
+            report_date=date(2026, 8, 25), currency="CHF",
+            cash=Decimal("12501.583564544"),
+        ))
+        await session.flush()
+
+        service = CashService(session)
+        events = await service.balance_events(chf)
+        # 6dp, not 9: `cash` is Numeric(18, 6), so the column truncates the ninth
+        # decimal IBKR sends. That is storage precision and not conversion drift —
+        # which is the whole point, because the round trip this pins moved the figure
+        # in the *fourth* significant place, 0.45 CHF.
+        assert service.balance_as_of(events, date(2026, 8, 25)) == Decimal("12501.583565")
+    finally:
+        await engine.dispose()
+
+
+# ------------------------------------------- what a *InBase figure is denominated in
+
+
+#: The live query's actual shape, and the case the first draft got wrong: **no
+#: `<AccountInformation>` section**. It is optional in the Flex editor and this account
+#: does not have it enabled, so the base currency has to come from somewhere else.
+#:
+#: `<ConversionRates>` is that somewhere: every row converts *into* the base, and the
+#: query already emits it (`Include Currency Rates? Yes`). On the real 2026-08-26
+#: statement that is 1,014 rows, all `toCurrency="CHF"`.
+#:
+#: Getting this wrong is silent and expensive. An unlabelled figure is read as EUR by
+#: `NativeToBase`, so 12,501.58 CHF becomes ~13,400 after projection — a 7% overstatement
+#: of a balance that looks entirely reasonable, overwriting a derived figure that was
+#: already right to within a couple of percent.
+NO_ACCOUNT_INFO_XML = """<FlexQueryResponse queryName="App_OpenLots" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U1234567" fromDate="20260727" toDate="20260825"
+ period="Last30CalendarDays" whenGenerated="20260826;142958">
+ <CashReport>
+  <CashReportCurrency accountId="U1234567" currency="BASE_SUMMARY"
+   toDate="20260825" endingCash="12501.583564544" levelOfDetail="BaseCurrency" />
+ </CashReport>
+ <ConversionRates>
+  <ConversionRate reportDate="20260727" fromCurrency="MXN" toCurrency="CHF" rate="0.046935" />
+  <ConversionRate reportDate="20260728" fromCurrency="USD" toCurrency="CHF" rate="0.9" />
+ </ConversionRates>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>""".encode()
+
+
+@pytest.mark.asyncio
+async def test_the_base_currency_comes_from_conversion_rates_when_unstated():
+    svc, flex_data, _ = _parse(NO_ACCOUNT_INFO_XML)
+    assert svc._base_currency(flex_data["statement"]) == "CHF"
+
+    rows = await svc.extract_cash_report(flex_data)
+    assert len(rows) == 1
+    assert rows[0]["currency"] == "CHF"
+    assert rows[0]["ending_cash"] == Decimal("12501.583564544")
+
+
+@pytest.mark.asyncio
+async def test_a_stated_account_currency_beats_the_inference():
+    """`AccountInformation` is the direct answer where the section is enabled."""
+    with_info = NO_ACCOUNT_INFO_XML.replace(
+        b" <CashReport>",
+        b' <AccountInformation accountId="U1234567" currency="USD" name="T" />\n <CashReport>',
+    )
+    svc, flex_data, _ = _parse(with_info)
+    assert svc._base_currency(flex_data["statement"]) == "USD"
+
+
+@pytest.mark.asyncio
+async def test_disagreeing_conversion_targets_yield_no_currency_at_all():
+    """
+    The section's whole premise is that one currency is the base, so a split answer
+    means the premise is wrong. Guessing which half to believe is how a plausible wrong
+    number gets made — `None`, and the caller drops the figure.
+    """
+    split = NO_ACCOUNT_INFO_XML.replace(
+        b'fromCurrency="USD" toCurrency="CHF"', b'fromCurrency="USD" toCurrency="EUR"'
+    )
+    svc, flex_data, _ = _parse(split)
+    assert svc._base_currency(flex_data["statement"]) is None
+
+    rows = await svc.extract_cash_report(flex_data)
+    assert rows[0]["currency"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_unlabelled_base_summary_is_dropped_rather_than_assumed():
+    """
+    The refusal that makes the `None` above safe. Storing it would put a CHF figure in
+    an EUR-labelled column and overwrite a derived balance that was already close —
+    `import_prices.py` refuses a whole file for the same reason.
+    """
+    balances = await resolve_cash_balances(
+        _FakeCurrency({}),
+        [],
+        [{'report_date': date(2026, 8, 25), 'currency': None,
+          'ending_cash': Decimal("12501.58"), 'is_base_summary': True}],
+    )
+    assert balances == []
+
+
+@pytest.mark.asyncio
+async def test_the_reader_refuses_an_unlabelled_row_too():
+    """
+    Second gate, for rows written before the ingest learned to refuse them. `NativeToBase`
+    reads a None currency as EUR, which is right for the EUR-converted breakout path and
+    wrong for a base-summary row — so the distinction cannot be left to it.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_flow(date(2026, 1, 9), "1000", "D1"))
+        session.add(CashBalance(
+            report_date=date(2026, 1, 31), currency=None, cash=Decimal("5000"),
+        ))
+        await session.flush()
+
+        # The derived balance stands; the unlabelled 5000 is not applied.
+        assert await _balance(session, date(2026, 2, 28)) == Decimal("1000")
+    finally:
+        await engine.dispose()

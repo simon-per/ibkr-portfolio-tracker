@@ -206,9 +206,12 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         "transfers_seen": flows["transfers_seen"],
         "deposits_reclassified_as_transfer": flows["deposits_reclassified_as_transfer"],
         "cash_flows_covered_from": str(coverage_from) if coverage_from else None,
-        # 0 is the expected value until the <EquitySummaryInBase> section is enabled in
-        # the Flex portal; the cash balance stays derived until it is non-zero.
-        "cash_balances_seen": len(equity_summary),
+        # The count of balances actually STORED, not of one section's raw rows: a
+        # Currency Breakout collapses several rows into one date, and reading the
+        # Equity Summary alone reported 0 for a statement whose Cash Report had just
+        # been enabled — which says "the portal edit did not take" about an edit that
+        # did. A count nobody can act on is worse than no count.
+        "cash_balances_seen": len(cash_balances),
         "total_cost_basis_eur": float(recon["total_cost_basis_eur"]),
         "account_id": flex_data['account_id'],
         "data_from": str(flex_data['from_date']) if flex_data['from_date'] else None,
@@ -292,6 +295,20 @@ async def resolve_cash_balances(
             # Already summed into the account's base by IBKR — nothing to convert, and
             # nothing to add, since a summary row and its own breakout would double.
             chosen = base_rows[0]
+            if not chosen['currency']:
+                # A base-summary row says how much, never in what. `_base_currency`
+                # could not establish it from AccountInformation or ConversionRates, so
+                # the figure is dropped rather than labelled: read as EUR, a CHF balance
+                # is ~7% high after projection, and it would overwrite a derived balance
+                # that is already right to within a couple of percent. The same refusal
+                # `import_prices.py` makes about a currency it cannot verify.
+                logger.warning(
+                    "Cash report: the base-summary balance for %s carries no currency "
+                    "(no AccountInformation section, and ConversionRates did not agree "
+                    "on one target) — keeping the derived balance for that date",
+                    report_date,
+                )
+                continue
             by_date[report_date] = {
                 'report_date': report_date,
                 'currency': chosen['currency'],
