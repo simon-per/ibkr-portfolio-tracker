@@ -514,16 +514,22 @@ class BenchmarkService:
         benchmark_key: str = "sp500",
     ) -> List[Dict]:
         """
-        Simulate investing every tax lot into the benchmark index instead.
+        Simulate contributing the same money to the benchmark index instead.
 
         Uses a persistent cache: historical values never change, so we compute
-        once and only recompute missing/recent days.
+        once and only recompute missing/recent days. **A change to what this
+        function computes therefore requires clearing that cache** — see
+        `clear_cache`, and the note in Step 5 about why the basis changed.
 
-        For each tax lot:
-          1. Convert cost_basis_eur → benchmark currency on the lot's open_date
+        For each contribution (the era-spliced `money_in` legs — lot cost basis
+        before `coverage_from`, real deposits after):
+          1. Convert the EUR amount → benchmark currency on the leg's own date
           2. Divide by index price on that date → hypothetical_shares
         Then for each business day:
           benchmark_value_eur = sum(shares_i * index_price) * fx_to_eur_rate
+
+        `cost_basis_eur` on each point is the running contribution total, so it is
+        the same series the portfolio chart draws as `money_in_eur`.
         """
         bench = BENCHMARKS.get(benchmark_key)
         if not bench:
@@ -566,9 +572,26 @@ class BenchmarkService:
         if not taxlots_with_securities:
             return []
 
-        # Earliest tax lot date determines how far back we need benchmark prices
-        earliest_lot_date = min(tl.open_date for tl, _ in taxlots_with_securities)
-        price_start = min(earliest_lot_date, start_date)
+        # ── Step 1b: The contributions this hypothetical invests ─────
+        # In EUR, because the whole benchmark pipeline computes in EUR and
+        # `_apply_base_currency` projects once at read time. `BaseFx("EUR", {})` is a
+        # documented pass-through, so this asks the shared splice for raw EUR legs.
+        from app.services.portfolio_service import BaseFx, PortfolioService
+        contributions = await PortfolioService(self.db)._contribution_inputs(
+            BaseFx("EUR", {}),
+            lot_rows=[
+                (tl.open_date, tl.close_date, tl.cost_basis_eur)
+                for tl, _ in taxlots_with_securities
+            ],
+        )
+        money_in_legs = contributions["money_in_legs"]
+        if not money_in_legs:
+            return []
+
+        # Prices must reach back to the first contribution, which is the first lot's
+        # open date whenever the pre-coverage era contributes anything at all.
+        earliest_leg_date = min(d for d, _ in money_in_legs)
+        price_start = min(earliest_leg_date, start_date)
 
         # ── Step 2: Ensure benchmark prices are cached ───────────────
         try:
@@ -590,41 +613,50 @@ class BenchmarkService:
         if not is_eur_benchmark:
             fx_rates = await self._preload_fx_rates(currency, price_start, end_date)
 
-        # ── Step 5: Compute hypothetical shares for each tax lot ─────
-        # Build event lists: each lot generates an open event (+shares, +cost)
-        # and optionally a close event (-shares, -cost) if the lot is closed.
+        # ── Step 5: Turn every contribution into hypothetical index shares ─────
+        #
+        # **Contributions, not tax lots**, and that distinction is the whole point of
+        # this block. Driving it off lots made the benchmark sell whenever the portfolio
+        # sold — `-shares` on a lot's close date — which discards the *gain* those shares
+        # had accumulated, permanently. Measured on the 2026-08-21 rotation: the
+        # benchmark went 61,654 -> 38,766 -> 51,680 and never recovered, losing 4,193 CHF
+        # of gain to a day on which no money left the account. It also cliffed on a chart
+        # whose portfolio line no longer does, so the comparison read as a huge
+        # outperformance that was pure artefact.
+        #
+        # A contribution-driven hypothetical answers the question people actually ask —
+        # *what if I had put the same money into the index instead* — and it is
+        # rotation-neutral by construction, because selling one holding to buy another is
+        # not a contribution. That makes it the honest partner for the `Money In` line it
+        # is drawn beside: both move only when money genuinely enters or leaves.
+        #
+        # A **negative** leg (a withdrawal) sells shares at that day's price, which is
+        # right: the money left, and the hypothetical has to fund it from the index too.
         share_events: List[Tuple[date, Decimal]] = []
         cost_events: List[Tuple[date, Decimal]] = []
 
-        for taxlot, _security in taxlots_with_securities:
-            lot_date = taxlot.open_date
-            index_price = self._get_with_fallback(bench_prices, lot_date)
-
+        for leg_date, amount_eur in money_in_legs:
+            if not amount_eur:
+                continue
+            index_price = self._get_with_fallback(bench_prices, leg_date)
             if not index_price:
-                logger.warning(f"No benchmark price for {lot_date}, skipping lot")
+                logger.warning(f"No benchmark price for {leg_date}, skipping contribution")
                 continue
 
             if is_eur_benchmark:
-                shares = taxlot.cost_basis_eur / index_price
+                shares = amount_eur / index_price
             else:
-                fx_rate = self._get_with_fallback(fx_rates, lot_date)
+                fx_rate = self._get_with_fallback(fx_rates, leg_date)
                 if not fx_rate or fx_rate == 0:
                     logger.warning(
-                        f"Cannot compute benchmark shares for lot on {lot_date}: "
-                        f"fx_rate={fx_rate}"
+                        f"Cannot compute benchmark shares for the contribution on "
+                        f"{leg_date}: fx_rate={fx_rate}"
                     )
                     continue
-                cost_foreign = taxlot.cost_basis_eur / fx_rate
-                shares = cost_foreign / index_price
+                shares = (amount_eur / fx_rate) / index_price
 
-            # Open event: add shares and cost basis
-            share_events.append((lot_date, shares))
-            cost_events.append((lot_date, taxlot.cost_basis_eur))
-
-            # Close event: subtract shares and cost basis when lot was sold
-            if taxlot.close_date:
-                share_events.append((taxlot.close_date, -shares))
-                cost_events.append((taxlot.close_date, -taxlot.cost_basis_eur))
+            share_events.append((leg_date, shares))
+            cost_events.append((leg_date, amount_eur))
 
         if not share_events:
             return []

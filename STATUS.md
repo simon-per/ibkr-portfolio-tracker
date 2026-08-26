@@ -592,7 +592,7 @@ IBKR actually produced went through the pipeline, which is the reusable point:
 
 **Verified end to end against a production snapshot**, which is what this needed rather than
 fixtures. Migration `s2b9d6e3f7a8` applied to the real database and round-tripped (downgrade,
-re-upgrade). Backend **1301** (was 1272), frontend **512** across 38 files, `tsc -b` and
+re-upgrade). Backend **1306** (was 1272), frontend **512** across 38 files, `tsc -b` and
 `vite build` clean, and **160 browser checks** over all eight e2e scripts — a11y 17/17, sweep 18/18,
 mobile 50/50 at 390x844, errors 18/18, ledger 8/8, axis 8/8, csp 4/4, chunks 37/37.
 
@@ -604,6 +604,33 @@ written, reviewed and never executed, because the local database has no trades o
 filter — STATUS.md said so in as many words. It reads `tbody tr` now. **A check that has never been
 run is not a passing check**, and this is the second one in this repo to be written against a bug it
 could not see.
+
+## Shipped 2026-08-26 (late) — the benchmark was still selling on every rotation
+
+Reported as "the benchmark still looks weird" after the cash work landed, and it was a
+real defect rather than a mismatch of style.
+
+The hypothetical was built from **tax lots**: a lot's `close_date` emitted `-shares`,
+unwinding at the number of shares originally bought while also removing its cost — so the
+gain those shares had accumulated was discarded. Measured on production, S&P 500 in CHF:
+`61,654 → 38,766 → 51,680`, and it never came back. **4,193 CHF of gain destroyed by a
+day on which no money left the account.** It also cliffed on a chart whose portfolio line
+no longer does, so the picture read as a ~6k outperformance that was entirely artefact.
+
+It now invests the **same `money_in_legs` the chart draws**, which is rotation-neutral by
+construction. After the fix, over the same window: `59,075 → 57,695`, moving with the
+index and nothing else.
+
+**Two things about it are deliberately *not* claimed.** Before `coverage_from` a rotation
+still moves it, because that era has no deposit ledger and lot cost basis genuinely
+cannot survive one — the same limitation `get_contributions` reports as `deployed`, and
+it is pinned as a test so nobody "fixes" it into a false claim. And the benchmark's
+baseline is still projected differently from the portfolio's (each point's date vs each
+leg's own date), a few percent apart under CHF; invisible on the chart because only the
+value line is drawn, so it stays *Worth doing next* rather than being smuggled in here.
+
+**`benchmark_timeline_cache` was cleared on production** as part of the deploy — 1,569
+rows. The cache is sound only for a fixed basis, so changing the arithmetic requires it.
 
 ## Ran on production 2026-08-26 — deployed, ingested, verified
 
@@ -2429,7 +2456,12 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    about automating a deleter over financial rows: the value is small and the downside is silent.
    If it is built, it must reuse the CLI's predicate rather than re-deriving one.
 
-6. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
+6. **Project the benchmark's baseline the way the portfolio's is projected — now one quantity,
+   not two lookalikes.** Since 2026-08-26 the benchmark invests the *same* `money_in_legs` the
+   chart draws, so this stopped being "two similar series" and became one series projected two
+   ways: 50,255 against 53,330 on the day that shipped, a few percent under CHF. Still invisible
+   on the chart (only the benchmark's value line is drawn) and it does not reach beta, which
+   excludes flow days — which is why it is here rather than in that change. Originally found while
    fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running
    cost basis at each point's date; `_calculate_timeline_swept` converts each lot's cost at its own
    `open_date`. Same tax lots, two conversion rules — the *dominant failure mode* in CLAUDE.md, in

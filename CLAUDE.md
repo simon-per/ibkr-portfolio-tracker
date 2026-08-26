@@ -1264,6 +1264,45 @@ When cash is not tracked the chart falls back to the old pair, labels included. 
 means "this backend does not track cash", never "cash is zero" — the same
 backward-compatible reading `unpriced_holdings` and `external_flow_eur` both make.
 
+### The benchmark invests contributions, not tax lots
+
+`calculate_benchmark_value_over_time` buys hypothetical index shares from the **same
+`money_in_legs`** the chart draws, so the comparison line and the baseline it is measured
+against are one series rather than two.
+
+**It was driven off tax lots until 2026-08-26, and that was wrong twice over.** A lot's
+`close_date` emitted `-shares` — unwinding the position at the *number of shares bought*
+while also removing its cost, so the gain those shares had accumulated simply vanished.
+Read off production for the 08-21 restructuring, S&P 500 in CHF: `61,654 → 38,766 →
+51,680`, never recovering. **4,193 CHF of gain destroyed by a day on which no money left
+the account.** And it cliffed on a chart whose portfolio line no longer does, so the
+picture read as a large outperformance that was pure artefact.
+
+Contributions are rotation-neutral by construction — selling one holding to buy another
+is not a contribution — which is exactly the property that makes them the right partner
+for `total_value_eur`. A **negative** leg (a withdrawal) sells shares at that day's
+price, because the money really did leave and the hypothetical has to fund it too.
+
+Two consequences worth knowing:
+
+- **Before `coverage_from` it still moves on a rotation, and that is honest rather than
+  broken.** That era has no deposit ledger, so lot cost basis is the only signal and it
+  cannot survive a rotation — the same limitation `get_contributions` reports as
+  `money_in_method: "deployed"`. The benchmark inherits it instead of inventing a better
+  answer. Pinned from both sides in `tests/test_benchmark_basis.py`.
+- **`benchmark_timeline_cache` must be cleared when this arithmetic changes.** Historical
+  points never change *given a fixed basis*, which is what makes the cache sound and also
+  what makes it wrong the moment the basis moves. `clear_cache()` exists for this; it was
+  run on production when this shipped.
+
+A gap remains, and it is CLAUDE.md's *dominant failure mode* in its mildest form:
+`_apply_base_currency` converts the benchmark's running baseline at **each point's
+date**, while the portfolio converts each leg at **its own date**. Same legs, two
+projection rules, so the two baselines differ by a few percent under a non-EUR base
+(50,255 against 53,330 on the day this shipped). It is invisible on the chart — only the
+benchmark's *value* line is drawn — so it is recorded rather than fixed here; see
+*Worth doing next* in STATUS.md.
+
 ### Where cash reaches, and where it deliberately does not
 
 - **The value chart and the summary hero card.** The card names the split in its footnote
@@ -2946,7 +2985,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1301 backend + 512 frontend as of 2026-08-26, all offline — no IBKR, Yahoo or FX-provider
+Tests (1306 backend + 512 frontend as of 2026-08-26, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
