@@ -1444,8 +1444,8 @@ All three had drifted by 2026-08-04, the finish-deploy pair for four days, in th
 chain is closed end to end. Whole hours only — the guards reason in hours, so a half-hour slot
 could not be expressed on their side and would run unprotected.
 
-The two IBKR-only jobs exist because a transient `Code=1001` at 08:00 used to cost a full day of
-freshness. They deliberately **skip** market data and yfinance dividends — see rule 1. Pinned by
+The IBKR-only job exists because a transient `Code=1001` at 08:00 used to cost a full day of
+freshness. It deliberately **skips** market data and yfinance dividends — see rule 1. Pinned by
 `tests/test_scheduler_jobs.py`. Status: `GET /api/scheduler/status`.
 
 **Market data was repriced three times a day until 2026-08-04 and now runs seven times, five of
@@ -2028,7 +2028,7 @@ the 72% got there.
 companies inside it, folded across listings and share classes. Pure DB read — no provider, safe
 at any hour.
 
-It exists because **48% of this account sits in twelve ETFs**, so "how much do I own of Nvidia"
+It exists because **a large part of this account sits in ETFs**, so "how much do I own of Nvidia"
 was unanswerable — and the *direct* side was already fragmented, because one company routinely
 occupies several rows of Positions. The three shapes are all different, which is why this is not
 a string match on names or symbols:
@@ -2300,7 +2300,7 @@ identities are populated by a deliberate CLI run and then decay in place: `fetch
 plus the import lines it prints, and `resolve_identities --constituents`. The read path is pure DB,
 so a basket nobody re-downloads keeps contributing its full share of `coverage_pct` while describing
 an older index — which is exactly why staleness is surfaced on the card and not only in the fund
-table. Two clocks matter: the five daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance,
+table. Two clocks matter: the six daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance,
 VanEck) badge `†` within a week, Vanguard US publishes **month-end with a ~6-week lag** (75 days).
 Identities never expire but are also never *extended* — a fund rebalance brings in constituent ISINs
 nobody has asked about, and a newly bought security's ISIN is unresolved until the CLI is re-run, so
@@ -2391,7 +2391,7 @@ UCITS entries' do not** — IWDA's page is `/products/251882/` against `portfoli
 it from the sitemap and confirm by row count, as the comment in `etf_sources.py` says; do not
 generalise from IQQ.
 
-**All 14 funds decompose, two of them by proxy** (VWCE via VT, DBPG via VOO). Neither of those two
+**All 15 funds decompose, two of them by proxy** (VWCE via VT, DBPG via VOO). Neither of those two
 has a usable route of its own: Vanguard Europe publishes VWCE's holdings only by email on request
 (month-end + 15 days), and DBPG publishes collateral rather than constituents. The read path never
 dereferences `adapter`, so a declared-but-unimplemented one degrades to "no basket yet", never to a
@@ -2756,7 +2756,7 @@ The app is built to work at **390x844**, and the rule that keeps it that way is 
 phone equivalent come from **one** `Column[]`, not two hand-written trees.
 
 `ui/DataTable.tsx` renders a real `<table>` inside `ScrollableTable` at `>=sm` and a card list below
-it, from the same descriptors. Thirteen tables times two renderings would be twenty-six places a
+it, from the same descriptors. Fifteen tables times two renderings would be thirty places a
 column can be added to one and not the other — the dominant failure mode above, in its worst form:
 a diverging calculation eventually produces a number someone notices, whereas a column missing from
 the phone produces *nothing at all*, on a device the author is not looking at. So `mobile` defaults
@@ -2787,8 +2787,9 @@ did not cause.
   min-content width. One wide table made a single-column track 392px inside a 358px page. The track
   yields, not the card: `[&>*]:min-w-0` on the paired grids.
 - **A responsive base class loses to nothing at `>=640px`.** `p-4 sm:p-6` on `Card` would put
-  `sm:p-6` inside a media query, where it beats a plain call-site `p-0` — and sixteen KPI cards pass
-  `text-sm` to `CardTitle`, fourteen sites override card padding. Hence `--card-padding` and
+  `sm:p-6` inside a media query, where it beats a plain call-site `p-0` — and the sixteen KPI cards
+  that then passed `text-sm` to `CardTitle` are two since `ui/KpiCard.tsx` was extracted, while
+  fourteen sites override card padding. Hence `--card-padding` and
   `--card-title-size` as custom properties, in the bracket form (`p-[var(...)]`) so tailwind-merge
   still classifies them and a call site still wins.
 - **`useMediaQuery`'s no-`matchMedia` fallback is desktop, and that is an invariant.** jsdom
@@ -2909,7 +2910,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1195 backend + 489 frontend as of 2026-08-17, all offline — no IBKR, Yahoo or FX-provider
+Tests (1284 backend + 512 frontend as of 2026-08-26, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
