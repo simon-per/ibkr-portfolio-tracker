@@ -568,7 +568,7 @@ rather than holding a level flat. `resolve_cash_balances` collapses both schemas
 
 **Verified end to end against a production snapshot**, which is what this needed rather than
 fixtures. Migration `s2b9d6e3f7a8` applied to the real database and round-tripped (downgrade,
-re-upgrade). Backend **1284** (was 1272), frontend **512** across 38 files, `tsc -b` and
+re-upgrade). Backend **1291** (was 1272), frontend **512** across 38 files, `tsc -b` and
 `vite build` clean, and **160 browser checks** over all eight e2e scripts — a11y 17/17, sweep 18/18,
 mobile 50/50 at 390x844, errors 18/18, ledger 8/8, axis 8/8, csp 4/4, chunks 37/37.
 
