@@ -4,7 +4,7 @@ Allocation service for fetching and caching sector/geographic data for securitie
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from app.clock import utcnow
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 import yfinance as yf
 
 from app.models.security import Security
+from app.services.cash_service import CashService, UNKNOWN
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
 
@@ -266,6 +267,20 @@ class AllocationService:
         `_split_by_valuability` and the forward yield: `market_value_eur > 0`, which covers
         both ways the backend fails to value a holding (no price, and no FX rate for the
         price's currency) without the client-side two-clause form.
+
+        **Uninvested cash is a bucket in all three breakdowns**, not just the asset-type
+        one. Putting it in one chart and not the others would give this endpoint two
+        denominators — asset type over the whole account, sector and geography over the
+        invested part — and the second pair would sum to under 100 while the UI labels
+        every slice "% of portfolio". That is precisely the failure this docstring's
+        first paragraph describes, arriving by a different route. Cash has no sector and
+        no country, so it is named `Cash` rather than folded into `Unknown`, which means
+        something else here: a holding whose sector nobody has fetched yet.
+
+        A **negative** balance (a margin debit; this account carried about −250 CHF for
+        months) is left out of both the slice and the denominator and reported as
+        `cash_eur` instead. A pie cannot draw a negative slice, and renormalising around
+        one would quietly inflate every other holding.
         """
         from app.services.portfolio_service import PortfolioService
 
@@ -275,17 +290,30 @@ class AllocationService:
         positions = [p for p in all_positions if p['market_value_eur'] > 0]
         unvaluable = [p for p in all_positions if p['market_value_eur'] <= 0]
 
-        if not positions:
+        cash_service = CashService(self.db)
+        cash_source = await cash_service.cash_source()
+        base_fx = await portfolio_service._load_base_fx()
+        cash_eur = float(cash_service.balance_as_of(
+            await cash_service.balance_events(base_fx), date.today()
+        )) if cash_source != UNKNOWN else 0.0
+        # Only a positive balance is a slice — see the docstring.
+        cash_slice = cash_eur if cash_eur > 0 else 0.0
+
+        if not positions and not cash_slice:
             return {
                 'sector_allocation': {},
                 'geographic_allocation': {},
                 'asset_type_allocation': {},
                 'total_market_value_eur': 0.0,
+                'cash_eur': round(cash_eur, 2),
+                'cash_source': cash_source,
+                'total_value_eur': 0.0,
                 'unpriced_holdings': len(unvaluable),
                 'unpriced_symbols': [p['symbol'] for p in unvaluable],
             }
 
-        total_value = sum(pos['market_value_eur'] for pos in positions)
+        holdings_value = sum(pos['market_value_eur'] for pos in positions)
+        total_value = holdings_value + cash_slice
 
         result = await self.db.execute(select(Security))
         securities = {sec.id: sec for sec in result.scalars().all()}
@@ -390,6 +418,13 @@ class AllocationService:
                 _add_to_category(
                     geo_alloc, security.country or 'Unknown', pos_weight, pos_value, sym, desc)
 
+        # Cash, into all three, so the three denominators stay one denominator.
+        if cash_slice > 0:
+            cash_weight = cash_slice / total_value
+            for store in (sector_alloc, geo_alloc, asset_alloc):
+                _add_to_category(
+                    store, 'Cash', cash_weight, cash_slice, 'CASH', 'Uninvested cash')
+
         def _finalize(store: Dict[str, Dict]) -> Dict:
             """Convert weights to percentages, sort, and round."""
             out = {}
@@ -411,7 +446,12 @@ class AllocationService:
             'sector_allocation': _finalize(sector_alloc),
             'geographic_allocation': _finalize(geo_alloc),
             'asset_type_allocation': _finalize(asset_alloc),
-            'total_market_value_eur': round(total_value, 2),
+            # Holdings only, kept under its historical name. The percentages above are
+            # shares of `total_value_eur`, which adds cash — read that one as the base.
+            'total_market_value_eur': round(holdings_value, 2),
+            'cash_eur': round(cash_eur, 2),
+            'cash_source': cash_source,
+            'total_value_eur': round(total_value, 2),
             # The completeness of all three breakdowns above. Every percentage is a share
             # of `total_market_value_eur`, which is the value that could be *priced* — so
             # anything above 0 means these charts describe less than the portfolio while

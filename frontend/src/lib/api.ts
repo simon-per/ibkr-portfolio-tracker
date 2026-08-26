@@ -9,6 +9,20 @@ export interface AppSettings {
   supported_currencies: string[];
 }
 
+/**
+ * Where a cash balance came from.
+ *
+ * `derived` is computed from the trade/deposit/dividend ledgers, so it excludes broker
+ * interest, account fees and FX conversion spread — accurate to well under a percent
+ * here, but our number rather than the broker's, and the surfaces say so. `ibkr` is
+ * IBKR's own end-of-day balance from `<EquitySummaryInBase>`.
+ *
+ * `unknown` means no ledger holds a row to derive from, which is NOT a zero balance:
+ * a derived zero is a real answer for a fully deployed account, and collapsing the two
+ * would render "we have no idea" as "you hold no cash".
+ */
+export type CashSource = 'ibkr' | 'derived' | 'unknown';
+
 export interface PortfolioValuePoint {
   date: string;
   // NOTE: *_eur fields carry values in the selected base_currency (see base_currency).
@@ -34,6 +48,29 @@ export interface PortfolioValuePoint {
    * complete, which is the only backward-compatible reading.
    */
   unpriced_holdings?: number;
+  /**
+   * Uninvested cash that day, in the base currency. A sale moves value from
+   * `market_value_eur` to here rather than out of the account, which is why a rotation
+   * used to draw a cliff: 25,136 CHF sold on 2026-08-21 and 12,682 redeployed on 08-24
+   * read as a 36% collapse followed by a partial recovery, with nothing lost.
+   *
+   * Optional because a backend older than 2026-08-26 does not send it. Absent is read
+   * as "this backend does not track cash", NOT as zero cash — the chart falls back to
+   * the holdings-only lines rather than asserting a fully-deployed account.
+   */
+  cash_eur?: number;
+  /** `market_value_eur + cash_eur`: what the account is actually worth. */
+  total_value_eur?: number;
+  /**
+   * Cumulative contributions, on the same era splice the contributions strip uses.
+   * This is the honest partner for `total_value_eur`: a trade moves value between the
+   * two things that field already contains, so neither line steps on a rotation, and
+   * the gap between them is total profit rather than the unrealized-only
+   * `gain_loss_eur`.
+   */
+  money_in_eur?: number;
+  /** `'ibkr'` (broker's own balance) | `'derived'` (computed here) | `'unknown'`. */
+  cash_source?: CashSource;
   base_currency?: string;
 }
 
@@ -54,6 +91,15 @@ export interface PortfolioSummary {
    * under-reports. Optional because a backend older than 2026-08-05 does not send it.
    */
   unpriced_holdings?: number;
+  /**
+   * Uninvested cash, in the base currency. Excluded from `total_market_value_eur`,
+   * which is holdings only — so `total_value_eur` below is what the account is worth.
+   * Optional: a backend older than 2026-08-26 does not send it.
+   */
+  total_cash_eur?: number;
+  /** `total_market_value_eur + total_cash_eur`: the figure a broker statement shows. */
+  total_value_eur?: number;
+  cash_source?: CashSource;
   date?: string;
   base_currency?: string;
   total_realized_gain_loss_eur: number;
@@ -268,6 +314,20 @@ export interface PortfolioAllocationResponse {
    */
   unpriced_holdings?: number;
   unpriced_symbols?: string[];
+  /**
+   * Uninvested cash. A **positive** balance is a `Cash` bucket in all three breakdowns
+   * — one denominator for the three charts, rather than an asset-type chart covering
+   * the account and two others covering only its invested part while every slice still
+   * says "% of portfolio".
+   *
+   * A negative balance (a margin debit) is reported here and left out of the charts:
+   * a pie cannot draw a negative slice, and renormalising around one would inflate
+   * every other holding.
+   */
+  cash_eur?: number;
+  cash_source?: CashSource;
+  /** The base for every percentage: `total_market_value_eur` plus positive cash. */
+  total_value_eur?: number;
 }
 
 /**

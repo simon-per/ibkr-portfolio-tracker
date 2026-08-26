@@ -17,6 +17,8 @@ from app.models.security import Security
 from app.models.trade import Trade
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
+from app.services.cash_service import CashService
+from app.services.native_amounts import NativeToBase
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
@@ -278,12 +280,32 @@ class PortfolioService:
             d = row["close_date"]
             disposals_by_day[d] = disposals_by_day.get(d, Decimal("0")) + row["proceeds"]
 
+        # Uninvested cash, and the contributions line that is its honest partner.
+        # Both are running balances over the whole history, so they are built once here
+        # and swept alongside the lot events rather than recomputed per point. The lot
+        # rows are handed over so the splice does not re-query what is already loaded.
+        cash_service = CashService(self.db)
+        cash_events = await cash_service.balance_events(base_fx)
+        # The fallback for days before measurement starts — see derived_source().
+        cash_source = await cash_service.derived_source()
+        contributions = await self._contribution_inputs(
+            base_fx,
+            lot_rows=[
+                (lot.open_date, lot.close_date, lot.cost_basis_eur)
+                for lot, _ in taxlots_with_securities
+            ],
+        )
+
         # One sweep over the whole range instead of a per-day × per-lot loop.
         portfolio_timeline = self._calculate_timeline_swept(
             start_date, end_date, taxlots_with_securities, price_cache,
             exchange_rate_cache, price_currency_cache, base_fx,
             disposals_by_day=disposals_by_day,
             position_start=await self._load_position_start_dates(),
+            cash_events=cash_events,
+            money_in_legs=contributions["money_in_legs"],
+            cash_source=cash_source,
+            cash_measured_from=await cash_service.measured_from(),
         )
         for row in portfolio_timeline:
             row["base_currency"] = base_fx.base_currency
@@ -300,6 +322,10 @@ class PortfolioService:
         base_fx: BaseFx,
         disposals_by_day: Optional[Dict[date, Decimal]] = None,
         position_start: Optional[Dict[int, date]] = None,
+        cash_events: Optional[List[Tuple[date, Decimal]]] = None,
+        money_in_legs: Optional[List[Tuple[date, Decimal]]] = None,
+        cash_source: str = "unknown",
+        cash_measured_from: Optional[date] = None,
     ) -> List[Dict]:
         """
         The full timeline in one sweep — numerically identical to calling
@@ -324,6 +350,15 @@ class PortfolioService:
 
         disposals_by_day = disposals_by_day or {}
         position_start = position_start or {}
+        # Cash and money-in are running BALANCES, not per-day flows, so events before
+        # the window are carried into the opening total rather than discarded the way
+        # `pending_flow` discards pre-window purchases. A chart starting in June must
+        # still show the cash that arrived in May.
+        cash_events = sorted(cash_events or [], key=lambda e: e[0])
+        money_in_legs = sorted(money_in_legs or [], key=lambda e: e[0])
+        ci = mi = 0
+        cash_running = Decimal("0")
+        money_in_running = Decimal("0")
         qty_by_sec: Dict[int, Decimal] = {}
         total_cost = Decimal("0")
         timeline: List[Dict] = []
@@ -352,6 +387,13 @@ class PortfolioService:
                     pending_flow += dc
                 i += 1
             pending_flow -= disposals_by_day.get(d, Decimal("0"))
+
+            while ci < len(cash_events) and cash_events[ci][0] <= d:
+                cash_running += cash_events[ci][1]
+                ci += 1
+            while mi < len(money_in_legs) and money_in_legs[mi][0] <= d:
+                money_in_running += money_in_legs[mi][1]
+                mi += 1
 
             if d.weekday() < 5:
                 mv_eur = Decimal("0")
@@ -423,6 +465,28 @@ class PortfolioService:
                     # than a gap; the partial case is worse, because a plausible
                     # +15% invites no doubt at all.
                     "unpriced_holdings": unpriced,
+                    # Uninvested cash. A sale moves value from `market_value_eur` to
+                    # here rather than out of the account, which is why `total_value_eur`
+                    # is flat across a rotation while the holdings line falls off a
+                    # cliff. See CashService for where the balance comes from and what
+                    # it cannot see.
+                    "cash_eur": float(cash_running),
+                    "total_value_eur": float(mv + cash_running),
+                    # Cumulative contributions on the same splice the contributions
+                    # strip uses — lot cost basis before `coverage_from`, real deposits
+                    # after. The honest partner for a line that includes cash: a trade
+                    # moves value between two things `total_value_eur` already contains,
+                    # so neither line steps, and the gap between them is total profit
+                    # (realized + unrealized + dividends) rather than unrealized alone.
+                    "money_in_eur": float(money_in_running),
+                    # Per point, not per response: measured history begins whenever the
+                    # Flex section was enabled, so calling the whole series measured
+                    # because its tail is would overclaim the years before it.
+                    "cash_source": (
+                        "ibkr"
+                        if cash_measured_from is not None and d >= cash_measured_from
+                        else cash_source
+                    ),
                 })
                 pending_flow = Decimal("0")
             d += timedelta(days=1)
@@ -447,6 +511,11 @@ class PortfolioService:
 
         if not taxlots_with_securities:
             realized = await self.get_realized_totals(base_fx=base_fx)
+            # Nothing held is NOT the same as nothing owned: an account that has sold
+            # everything holds its whole value in cash, which is the state this feature
+            # exists for. Reporting 0.00 here would be the reassuring zero in its purest
+            # form — a liquidated account rendered as an empty one.
+            cash = await self._cash_summary(base_fx, today)
             return {
                 "total_cost_basis_eur": 0.0,
                 "total_market_value_eur": 0.0,
@@ -455,6 +524,8 @@ class PortfolioService:
                 "num_positions": 0,
                 "unpriced_holdings": 0,
                 "base_currency": base_fx.base_currency,
+                **cash,
+                "total_value_eur": cash["total_cash_eur"],
                 **realized,
             }
 
@@ -471,6 +542,8 @@ class PortfolioService:
 
         realized = await self.get_realized_totals(base_fx=base_fx)
 
+        cash = await self._cash_summary(base_fx, today)
+
         return {
             "total_cost_basis_eur": daily_value["cost_basis_eur"],
             "total_market_value_eur": daily_value["market_value_eur"],
@@ -485,7 +558,118 @@ class PortfolioService:
             "unpriced_holdings": daily_value["unpriced_holdings"],
             "date": daily_value["date"],
             "base_currency": base_fx.base_currency,
+            **cash,
+            # Holdings plus cash: what the account is actually worth, and what the
+            # Market Value card understated by the whole idle balance until this
+            # existed. Served rather than added on the client so the card and every
+            # chart point come from one derivation.
+            "total_value_eur": daily_value["market_value_eur"] + cash["total_cash_eur"],
             **realized,
+        }
+
+    async def _cash_summary(self, base_fx: BaseFx, on_date: date) -> Dict:
+        """
+        The uninvested balance and its provenance, for the headline cards.
+
+        Split from the caller only because both return paths need it — including the
+        empty-portfolio one, where cash is the *entire* value of the account.
+        """
+        service = CashService(self.db)
+        events = await service.balance_events(base_fx)
+        cash = service.balance_as_of(events, on_date)
+        return {
+            "total_cash_eur": float(cash),
+            "cash_source": await service.cash_source(),
+        }
+
+    async def _contribution_inputs(
+        self, base_fx: BaseFx, lot_rows: Optional[List] = None
+    ) -> Dict:
+        """
+        The raw material behind "money in", shared by the contributions strip and the
+        chart's Money In line.
+
+        Both answer the same question and must never answer it differently, so the
+        splice rule lives here once rather than in a monthly aggregator and a daily
+        one. `money_in_legs` is that rule expressed as events: **positive lot legs
+        strictly before `coverage_from`, then deposits from it onward.** Summing them
+        over any window reproduces all three branches `get_contributions` used to
+        compute inline — deployed-only, deposits-only, and spliced — because the two
+        ranges neither overlap nor leave a hole.
+
+        `lot_rows` lets the chart pass the tax lots it has already loaded instead of
+        re-querying them; the columns it needs are (open_date, close_date,
+        cost_basis_eur).
+        """
+        if lot_rows is None:
+            lot_rows = (await self.db.execute(
+                select(TaxLot.open_date, TaxLot.close_date, TaxLot.cost_basis_eur)
+            )).all()
+
+        # Each lot contributes one positive leg on its open_date (the deployment)
+        # and, once sold, a negative leg on its close_date (capital coming back).
+        # Project into the base currency at the date the leg sits on, then
+        # everything downstream is plain date arithmetic.
+        legs: List[Tuple[date, Decimal]] = []
+        first_open: Optional[date] = None
+        for open_date, close_date, cost_basis_eur in lot_rows:
+            cost = cost_basis_eur or Decimal("0")
+            if open_date:
+                legs.append((open_date, base_fx.convert(cost, open_date)))
+                if first_open is None or open_date < first_open:
+                    first_open = open_date
+            if close_date:
+                legs.append((close_date, -base_fx.convert(cost, close_date)))
+
+        # External cash, if the Flex Query has been set to deliver it. Deposits only:
+        # get_deposits() excludes TRANSFER rows, so capital that arrived by broker
+        # transfer is never read as a contribution.
+        flow_repo = CashFlowRepository(self.db)
+        deposits_from = await flow_repo.earliest_deposit_date()
+        transfer_in_date = await flow_repo.earliest_transfer_in_date()
+        deposit_legs: List[Tuple[date, Decimal]] = [
+            (f.flow_date, base_fx.convert(f.amount_eur or Decimal("0"), f.flow_date))
+            for f in await flow_repo.get_deposits()
+        ]
+
+        # The splice point: where the deposit ledger becomes complete. Recorded from the
+        # statement period start, so a covered week with no deposits still counts as
+        # covered. Falls back to the first deposit for ledgers ingested before the
+        # setting existed, and is None when no deposits exist at all.
+        coverage_from = await AppSettingsRepository(self.db).get_cash_flows_covered_from()
+        if coverage_from is None:
+            coverage_from = deposits_from
+
+        # ...but never before the ledger's first row of any kind. A YTD statement in the
+        # account's first year starts on 1 January while the account was funded weeks
+        # later, and in that gap an empty deposit list means the money went to another
+        # broker — not that none was added. Taking the statement's word for it drops
+        # those purchases from both sides: past the lot cutoff, with no deposit to
+        # replace them. Clamping forward hands the gap back to lot cost basis, which is
+        # the correct source for any era the ledger does not reach.
+        ledger_starts_at = await flow_repo.earliest_flow_date()
+        if coverage_from and ledger_starts_at and ledger_starts_at > coverage_from:
+            coverage_from = ledger_starts_at
+
+        if coverage_from is None:
+            # No ledger at all: lot cost basis is the only source there is, so every
+            # deployment counts. This is the "deployed" method.
+            money_in_legs = [(d, a) for d, a in legs if a > 0]
+        else:
+            money_in_legs = (
+                [(d, a) for d, a in legs if a > 0 and d < coverage_from]
+                + [(d, a) for d, a in deposit_legs if d >= coverage_from]
+            )
+        money_in_legs.sort(key=lambda leg: leg[0])
+
+        return {
+            "legs": legs,
+            "deposit_legs": deposit_legs,
+            "money_in_legs": money_in_legs,
+            "coverage_from": coverage_from,
+            "deposits_from": deposits_from,
+            "transfer_in_date": transfer_in_date,
+            "first_open": first_open,
         }
 
     async def get_contributions(self, as_of: Optional[date] = None) -> Dict:
@@ -532,55 +716,14 @@ class PortfolioService:
         as_of = as_of or date.today()
         base_fx = await self._load_base_fx()
 
-        rows = (await self.db.execute(
-            select(TaxLot.open_date, TaxLot.close_date, TaxLot.cost_basis_eur)
-        )).all()
-
-        # Each lot contributes one positive leg on its open_date (the deployment)
-        # and, once sold, a negative leg on its close_date (capital coming back).
-        # Project into the base currency at the date the leg sits on, then
-        # everything downstream is plain date arithmetic.
-        legs: List[Tuple[date, Decimal]] = []
-        first_open: Optional[date] = None
-
-        for open_date, close_date, cost_basis_eur in rows:
-            cost = cost_basis_eur or Decimal("0")
-            if open_date:
-                legs.append((open_date, base_fx.convert(cost, open_date)))
-                if first_open is None or open_date < first_open:
-                    first_open = open_date
-            if close_date:
-                legs.append((close_date, -base_fx.convert(cost, close_date)))
-
-        # External cash, if the Flex Query has been set to deliver it. Deposits only:
-        # get_deposits() excludes TRANSFER rows, so capital that arrived by broker
-        # transfer is never read as a contribution.
-        flow_repo = CashFlowRepository(self.db)
-        deposits_from = await flow_repo.earliest_deposit_date()
-        transfer_in_date = await flow_repo.earliest_transfer_in_date()
-        deposit_legs: List[Tuple[date, Decimal]] = [
-            (f.flow_date, base_fx.convert(f.amount_eur or Decimal("0"), f.flow_date))
-            for f in await flow_repo.get_deposits()
-        ]
-
-        # The splice point: where the deposit ledger becomes complete. Recorded from the
-        # statement period start, so a covered week with no deposits still counts as
-        # covered. Falls back to the first deposit for ledgers ingested before the
-        # setting existed, and is None when no deposits exist at all.
-        coverage_from = await AppSettingsRepository(self.db).get_cash_flows_covered_from()
-        if coverage_from is None:
-            coverage_from = deposits_from
-
-        # ...but never before the ledger's first row of any kind. A YTD statement in the
-        # account's first year starts on 1 January while the account was funded weeks
-        # later, and in that gap an empty deposit list means the money went to another
-        # broker — not that none was added. Taking the statement's word for it drops
-        # those purchases from both sides: past the lot cutoff, with no deposit to
-        # replace them. Clamping forward hands the gap back to lot cost basis, which is
-        # the correct source for any era the ledger does not reach.
-        ledger_starts_at = await flow_repo.earliest_flow_date()
-        if coverage_from and ledger_starts_at and ledger_starts_at > coverage_from:
-            coverage_from = ledger_starts_at
+        inputs = await self._contribution_inputs(base_fx)
+        legs = inputs["legs"]
+        deposit_legs = inputs["deposit_legs"]
+        money_in_legs = inputs["money_in_legs"]
+        coverage_from = inputs["coverage_from"]
+        deposits_from = inputs["deposits_from"]
+        transfer_in_date = inputs["transfer_in_date"]
+        first_open = inputs["first_open"]
 
         if first_open is None:
             return {
@@ -631,28 +774,27 @@ class PortfolioService:
 
             # Splice at the coverage boundary: lots strictly before it, deposits from it
             # onward. The two ranges don't overlap, so nothing is counted twice, and
-            # together they cover the whole window — no clamped divisor needed.
+            # together they cover the whole window — no clamped divisor needed. The rule
+            # itself lives in _contribution_inputs, because the chart's Money In line
+            # draws the same series daily and two implementations of one splice is this
+            # codebase's dominant failure mode.
+            money_in = sum(
+                (a for d, a in money_in_legs if start <= d <= as_of), Decimal("0")
+            )
             if coverage_from is None:
                 method = "deployed"
                 deposits = Decimal("0")
-                money_in = deployed
             elif start >= coverage_from:
                 method = "deposits"
                 deposits = sum(
                     (a for d, a in deposit_legs if start <= d <= as_of), Decimal("0")
                 )
-                money_in = deposits
             else:
                 method = "spliced"
                 deposits = sum(
                     (a for d, a in deposit_legs if coverage_from <= d <= as_of),
                     Decimal("0"),
                 )
-                pre = sum(
-                    (a for d, a in legs if start <= d < coverage_from and a > 0),
-                    Decimal("0"),
-                )
-                money_in = pre + deposits
 
             windows.append({
                 "label": label,
@@ -692,8 +834,9 @@ class PortfolioService:
         market-price approximation over closed lots).
 
         Each SELL trade already carries IBKR's own FIFO realized P&L
-        (fifoPnlRealized) and proceeds in the trade currency; we convert both to
-        EUR at the trade date, then project into the base currency.
+        (fifoPnlRealized) and proceeds in the trade currency, so both need the
+        native->EUR->base two-step that `NativeToBase` owns — this was one of the
+        three copies of it that forced the extraction.
         """
         trades = (await self.db.execute(select(Trade))).scalars().all()
         # "Some trades exist" is not "realized figures exist": a statement can
@@ -706,6 +849,7 @@ class PortfolioService:
         total_proceeds_eur = Decimal("0")
         total_gain_eur = Decimal("0")
         closed_security_ids: set = set()
+        to_base = NativeToBase(self.currency_service, base_fx)
 
         for t in trades:
             if (t.buy_sell or "").upper() != "SELL":
@@ -714,25 +858,16 @@ class PortfolioService:
             proceeds = t.proceeds if t.proceeds is not None else Decimal("0")
             gain = t.realized_pnl if t.realized_pnl is not None else Decimal("0")
 
-            try:
-                if currency == "EUR":
-                    proceeds_eur = proceeds
-                    gain_eur = gain
-                else:
-                    proceeds_eur = await self.currency_service.convert_to_eur(
-                        amount=proceeds, from_currency=currency, target_date=t.trade_date
-                    )
-                    gain_eur = await self.currency_service.convert_to_eur(
-                        amount=gain, from_currency=currency, target_date=t.trade_date
-                    )
-            except ValueError:
+            proceeds_base = await to_base.convert(proceeds, currency, t.trade_date)
+            gain_base = await to_base.convert(gain, currency, t.trade_date)
+            if proceeds_base is None or gain_base is None:
                 logger.warning(
                     f"Realized: skipping trade {t.ib_key} — no FX for {currency} near {t.trade_date}"
                 )
                 continue
 
-            total_proceeds_eur += base_fx.convert(proceeds_eur, t.trade_date)
-            total_gain_eur += base_fx.convert(gain_eur, t.trade_date)
+            total_proceeds_eur += proceeds_base
+            total_gain_eur += gain_base
             if t.security_id is not None:
                 closed_security_ids.add(t.security_id)
 

@@ -34,6 +34,7 @@ from app.repositories.taxlot_repository import TaxLotRepository
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
 from app.repositories.market_price_repository import MarketPriceRepository
+from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.models.cash_flow import DEPOSIT_WITHDRAW, TRANSFER, TRANSFER_IN, TRANSFER_OUT
 
@@ -114,6 +115,16 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         CashFlowRepository(db), currency_service, cash_flows_data, transfers_data,
     )
 
+    # IBKR's own end-of-day cash balance, if the <EquitySummaryInBase> section has been
+    # enabled in the portal. Empty is the normal, supported state — CashService derives a
+    # balance from the trade/deposit/dividend ledgers and only *prefers* these rows where
+    # they exist, so nothing here is required for cash to work. Ingested unconditionally
+    # rather than behind a flag, so ticking the section in the portal is the whole setup.
+    equity_summary = await ibkr_service.extract_equity_summary(flex_data)
+    cash_balance_repo = CashBalanceRepository(db)
+    for row in equity_summary:
+        await cash_balance_repo.upsert(row)
+
     # Record how far back the deposit ledger is complete — the splice point between
     # "measure contributions from lot cost basis" and "measure them from real deposits".
     # Only widen when deposits were actually present: an export taken without the
@@ -189,6 +200,9 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         "transfers_seen": flows["transfers_seen"],
         "deposits_reclassified_as_transfer": flows["deposits_reclassified_as_transfer"],
         "cash_flows_covered_from": str(coverage_from) if coverage_from else None,
+        # 0 is the expected value until the <EquitySummaryInBase> section is enabled in
+        # the Flex portal; the cash balance stays derived until it is non-zero.
+        "cash_balances_seen": len(equity_summary),
         "total_cost_basis_eur": float(recon["total_cost_basis_eur"]),
         "account_id": flex_data['account_id'],
         "data_from": str(flex_data['from_date']) if flex_data['from_date'] else None,

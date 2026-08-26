@@ -82,6 +82,42 @@ class PortfolioValuePoint(BaseModel):
             "730-day window over 40 securities, which is noise rather than a signal."
         ),
     )
+    cash_eur: float = Field(
+        0.0,
+        description=(
+            "Uninvested cash on this date, in base_currency. A sale moves value from "
+            "market_value_eur to here rather than out of the account, which is why a "
+            "rotation used to draw a cliff: 25,136 CHF sold on 2026-08-21 and 12,682 "
+            "redeployed on 08-24 read as a 36% collapse and a partial recovery."
+        ),
+    )
+    total_value_eur: float = Field(
+        0.0,
+        description=(
+            "market_value_eur + cash_eur — what the account is actually worth. Pair it "
+            "with money_in_eur, not with cost_basis_eur: a trade moves value between "
+            "the two things this field already contains, so neither line steps."
+        ),
+    )
+    money_in_eur: float = Field(
+        0.0,
+        description=(
+            "Cumulative contributions, on the same era splice the contributions strip "
+            "uses (lot cost basis before coverage_from, real deposits after). "
+            "total_value_eur minus this is total profit — realized and unrealized and "
+            "dividends — rather than the unrealized-only gain_loss_eur beside it."
+        ),
+    )
+    cash_source: str = Field(
+        "unknown",
+        description=(
+            "Where cash_eur came from: 'ibkr' is the broker's own end-of-day balance, "
+            "'derived' is computed from the trade/deposit/dividend ledgers and so "
+            "excludes broker interest, account fees and FX spread, and 'unknown' means "
+            "no ledger has a row to derive from — which is NOT the same as a derived "
+            "zero, that being a real answer for a fully deployed account."
+        ),
+    )
     base_currency: str = Field("EUR", description="Currency the *_eur values are expressed in")
 
     class Config:
@@ -200,6 +236,26 @@ class PortfolioSummary(BaseModel):
     total_realized_proceeds_eur: float = Field(0.0, description="Approximate proceeds from closed positions (qty × close-date price × FX)")
     total_realized_cost_basis_eur: float = Field(0.0, description="Cost basis of closed positions")
     num_closed_positions: int = Field(0, description="Number of unique securities with closed lots")
+    total_cash_eur: float = Field(
+        0.0,
+        description=(
+            "Uninvested cash, in base_currency. Excluded from total_market_value_eur, "
+            "which is holdings only — so the two must be added to get what the account "
+            "is worth, and total_value_eur below does exactly that."
+        ),
+    )
+    total_value_eur: float = Field(
+        0.0,
+        description=(
+            "total_market_value_eur + total_cash_eur: the figure a broker statement "
+            "shows. The headline card reported the holdings-only total until this "
+            "existed, understating this account by 18% while a rotation sat in cash."
+        ),
+    )
+    cash_source: str = Field(
+        "unknown",
+        description="See PortfolioValuePoint.cash_source — 'ibkr' | 'derived' | 'unknown'.",
+    )
 
     class Config:
         from_attributes = True

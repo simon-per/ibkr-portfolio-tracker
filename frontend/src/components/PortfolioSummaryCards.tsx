@@ -1,6 +1,7 @@
 import { TrendingUp, TrendingDown, Wallet, Target } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import { DeltaChip } from './DeltaChip'
 import type { PortfolioSummary } from '@/lib/api'
 import { formatPercent } from '@/lib/utils'
@@ -62,6 +63,17 @@ export function PortfolioSummaryCards({
   // said so. Absent means an older backend, read as complete.
   const unpriced = summary.unpriced_holdings ?? 0
 
+  // Holdings plus uninvested cash: what the account is actually worth. The hero card
+  // reported the holdings-only figure until 2026-08-26, so a rotation that left 12,229
+  // CHF undeployed understated this account by 18% with nothing on the page saying so —
+  // the cash was not zero, it was invisible. `cashIsTracked` refuses the two states
+  // that would put a confident 0.00 here instead.
+  const hasCash = cashIsTracked(summary)
+  const cash = summary.total_cash_eur ?? 0
+  const headline = hasCash
+    ? (summary.total_value_eur ?? summary.total_market_value_eur + cash)
+    : summary.total_market_value_eur
+
   return (
     /* Two-up rather than one card per row below `md`: stacked, the three KPI rows came
        to ~1,660px of scrolling past numbers before the chart — about two phone screens,
@@ -73,7 +85,7 @@ export function PortfolioSummaryCards({
           className="col-span-2 lg:col-span-5 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
         >
           <span className="font-medium">
-            Market Value is incomplete — {unpriced}{' '}
+            {hasCash ? 'Total Value' : 'Market Value'} is incomplete — {unpriced}{' '}
             {unpriced === 1 ? 'holding has' : 'holdings have'} no usable price today
           </span>
           {' '}— their cost still counts toward Cost Basis, so the total and both gain figures
@@ -87,9 +99,9 @@ export function PortfolioSummaryCards({
           makes the top of the screen read like a portfolio rather than a dashboard. */}
       <KpiCard
         hero
-        label="Market Value"
+        label={hasCash ? 'Total Value' : 'Market Value'}
         icon={<Wallet className="h-4 w-4 text-muted-foreground" />}
-        value={formatCurrency(summary.total_market_value_eur)}
+        value={formatCurrency(headline)}
         // `footer`, not `sub`: the chip carries its own colours and must not inherit the
         // muted footnote class.
         footer={periodChangePct != null ? (
@@ -104,7 +116,14 @@ export function PortfolioSummaryCards({
             />
           </div>
         ) : undefined}
-        sub={periodChangePct != null ? undefined : 'Current portfolio value'}
+        // The split is stated rather than left to be inferred, and it goes here rather
+        // than in a sixth card: the grid is five wide, and a reader looking at one
+        // number needs to know which two it is made of — especially while a rotation
+        // has a fifth of the account sitting in cash. `sub` renders beside `footer`,
+        // so the period chip is not displaced.
+        sub={hasCash
+          ? `${formatCurrency(summary.total_market_value_eur)} in holdings + ${formatCurrency(cash)} cash`
+          : periodChangePct != null ? undefined : 'Current portfolio value'}
       />
 
       <KpiCard

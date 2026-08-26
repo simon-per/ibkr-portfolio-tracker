@@ -13,6 +13,7 @@ import { formatDate, parseLocalDate } from '@/lib/utils'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
+import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
 
 /**
  * One height for the chart and its three placeholder states, so a range switch or a
@@ -53,9 +54,14 @@ interface PortfolioValueChartProps {
 export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError }: PortfolioValueChartProps) {
   const formatCurrency = useFormatCurrency()
   const curSym = useCurrencySymbol()
-  const [showCostBasis, setShowCostBasis] = useState(true)
-  const [showMarketValue, setShowMarketValue] = useState(true)
+  // Named for their ROLE, not their contents, because what each draws depends on
+  // whether the backend tracks cash: the baseline is Money In when it does and Cost
+  // Basis when it does not, and the value line is the whole account or just its
+  // holdings. See `cashTracked`.
+  const [showBaseline, setShowBaseline] = useState(true)
+  const [showValue, setShowValue] = useState(true)
   const [showProfit, setShowProfit] = useState(true)
+  const [showCash, setShowCash] = useState(false)
   const [visibleBenchmarks, setVisibleBenchmarks] = useState<Set<string>>(new Set())
   const seenBenchmarkKeys = useRef<Set<string>>(new Set())
   // Axis width, tick density and margins are Recharts props, not CSS — the one part of
@@ -75,6 +81,44 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       from: days.length ? days[0].date : null,
     }
   }, [data])
+
+  /** Whether to draw the cash-inclusive pair; see `cashIsTracked` for the refusals. */
+  const cashTracked = useMemo(() => cashIsTracked(data?.[data.length - 1]), [data])
+  const caveat = useMemo(
+    () => cashCaveat(data?.[data.length - 1]?.cash_source),
+    [data]
+  )
+
+  /**
+   * The lines, and what each one means in this mode.
+   *
+   * With cash tracked the pair becomes **Total Value vs Money In**, which is the only
+   * pairing a rotation cannot put a step in: selling moves value from holdings to cash,
+   * and `total_value_eur` already contains both, while `money_in_eur` counts
+   * contributions and a sale is not one. The old pair stepped twice on 2026-08-21 —
+   * market value fell 24,711 and cost basis fell 18,801 — for a day on which the
+   * account lost nothing.
+   *
+   * Profit is then the gap between them, which is TOTAL profit (realized, unrealized
+   * and dividends) rather than the unrealized-only figure the holdings pair produces.
+   * Both are honest; they are different quantities, so the label changes with the mode.
+   */
+  const series = useMemo(() => {
+    const baseline = cashTracked
+      ? { key: 'money_in_eur', name: 'Money In' }
+      : { key: 'cost_basis_eur', name: 'Cost Basis' }
+    const value = cashTracked
+      ? { key: 'total_value_eur', name: 'Total Value' }
+      : { key: 'market_value_eur', name: 'Market Value' }
+    return [
+      { ...baseline, color: '#8b5cf6', show: showBaseline, toggle: () => setShowBaseline(v => !v) },
+      { ...value, color: '#22c55e', show: showValue, toggle: () => setShowValue(v => !v) },
+      ...(cashTracked
+        ? [{ key: 'cash_eur', name: 'Cash', color: '#38bdf8', show: showCash, toggle: () => setShowCash(v => !v) }]
+        : []),
+      { key: 'profit_eur', name: 'Profit/Loss', color: '#f59e0b', show: showProfit, toggle: () => setShowProfit(v => !v) },
+    ]
+  }, [cashTracked, showBaseline, showValue, showCash, showProfit])
 
   // Auto-enable benchmarks when they first appear in the data
   useEffect(() => {
@@ -113,10 +157,18 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     }
 
     return data.map(point => {
+      // Profit follows whichever pair is on screen, so the third line is always the
+      // gap between the other two rather than a quantity of its own.
+      const profit = cashTracked
+        ? (point.total_value_eur ?? 0) - (point.money_in_eur ?? 0)
+        : point.market_value_eur - point.cost_basis_eur
       const row: Record<string, number | string | null> = {
         cost_basis_eur: point.cost_basis_eur,
         market_value_eur: point.market_value_eur,
-        profit_eur: point.market_value_eur - point.cost_basis_eur,
+        total_value_eur: point.total_value_eur ?? null,
+        money_in_eur: point.money_in_eur ?? null,
+        cash_eur: point.cash_eur ?? null,
+        profit_eur: profit,
         date: point.date,
         dateFormatted: formatDate(point.date),
       }
@@ -125,7 +177,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       }
       return row
     })
-  }, [data, benchmarks])
+  }, [data, benchmarks, cashTracked])
 
   const availableBenchmarks = benchmarks.filter(b => b.data.length > 0)
 
@@ -178,9 +230,11 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     // Find the min and max values only from visible lines
     const allValues: number[] = []
     chartData.forEach(point => {
-      if (showCostBasis) allValues.push(point.cost_basis_eur as number)
-      if (showMarketValue) allValues.push(point.market_value_eur as number)
-      if (showProfit) allValues.push(point.profit_eur as number)
+      for (const s of series) {
+        if (!s.show) continue
+        const v = point[s.key] as number | null
+        if (v != null) allValues.push(v)
+      }
       for (const b of availableBenchmarks) {
         if (visibleBenchmarks.has(b.key)) {
           const v = point[`bench_${b.key}`] as number | null
@@ -218,7 +272,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     // used to be a fixed 200/1000/2500/10000 step ladder chosen from the range alone,
     // which is how eight labels ended up 35px apart in a 280px-tall phone chart.
     return niceTicks(domainMin, domainMax, isCompact ? 4 : 8, floor)
-  }, [chartData, showCostBasis, showMarketValue, showProfit, visibleBenchmarks, availableBenchmarks, isCompact])
+  }, [chartData, series, visibleBenchmarks, availableBenchmarks, isCompact])
 
   if (isLoading) {
     return (
@@ -274,42 +328,34 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
         </div>
       )}
 
+      {cashTracked && caveat && (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Total Value</span> is holdings plus
+          uninvested cash, and <span className="font-medium text-foreground">Money In</span> is
+          what you contributed — so a sale moves value between the lines instead of off the
+          chart, and the gap between them is total profit. Cash is {caveat}.
+        </p>
+      )}
+
       {/* Toggle Buttons. Already wrapping; the min-height is the touch target. */}
       <div className="flex gap-2 flex-wrap items-center sm:gap-3 [&>button]:min-h-11 sm:[&>button]:min-h-0">
         <span className="text-sm text-muted-foreground">Show:</span>
-        <button
-          onClick={() => setShowCostBasis(!showCostBasis)}
-          className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
-            showCostBasis
-              ? 'bg-[#8b5cf6]/10 text-[#8b5cf6] font-medium'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-          }`}
-        >
-          <div className={`w-2.5 h-2.5 rounded-full ${showCostBasis ? 'bg-[#8b5cf6]' : 'bg-muted-foreground/30'}`} />
-          Cost Basis
-        </button>
-        <button
-          onClick={() => setShowMarketValue(!showMarketValue)}
-          className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
-            showMarketValue
-              ? 'bg-[#22c55e]/10 text-[#22c55e] font-medium'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-          }`}
-        >
-          <div className={`w-2.5 h-2.5 rounded-full ${showMarketValue ? 'bg-[#22c55e]' : 'bg-muted-foreground/30'}`} />
-          Market Value
-        </button>
-        <button
-          onClick={() => setShowProfit(!showProfit)}
-          className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
-            showProfit
-              ? 'bg-[#f59e0b]/10 text-[#f59e0b] font-medium'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-          }`}
-        >
-          <div className={`w-2.5 h-2.5 rounded-full ${showProfit ? 'bg-[#f59e0b]' : 'bg-muted-foreground/30'}`} />
-          Profit/Loss
-        </button>
+        {series.map(s => (
+          <button
+            key={s.key}
+            onClick={s.toggle}
+            className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
+              s.show ? 'font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            }`}
+            style={s.show ? { backgroundColor: `${s.color}1a`, color: s.color } : undefined}
+          >
+            <div
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: s.show ? s.color : 'hsl(var(--muted-foreground) / 0.3)' }}
+            />
+            {s.name}
+          </button>
+        ))}
         {availableBenchmarks.map(b => (
           <button
             key={b.key}
@@ -365,38 +411,19 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             }}
             formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''}
           />
-          {showCostBasis && (
-            <Line
-              type="monotone"
-              dataKey="cost_basis_eur"
-              stroke="#8b5cf6"
-              strokeWidth={2}
-              name="Cost Basis"
-              dot={false}
-              activeDot={{ r: 6 }}
-            />
-          )}
-          {showMarketValue && (
-            <Line
-              type="monotone"
-              dataKey="market_value_eur"
-              stroke="#22c55e"
-              strokeWidth={2}
-              name="Market Value"
-              dot={false}
-              activeDot={{ r: 6 }}
-            />
-          )}
-          {showProfit && (
-            <Line
-              type="monotone"
-              dataKey="profit_eur"
-              stroke="#f59e0b"
-              strokeWidth={2}
-              name="Profit/Loss"
-              dot={false}
-              activeDot={{ r: 6 }}
-            />
+          {series.map(s =>
+            s.show ? (
+              <Line
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                stroke={s.color}
+                strokeWidth={2}
+                name={s.name}
+                dot={false}
+                activeDot={{ r: 6 }}
+              />
+            ) : null
           )}
           {availableBenchmarks.map(b =>
             visibleBenchmarks.has(b.key) ? (

@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
 import { formatPercent } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
+import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -16,6 +18,19 @@ interface PositionsListProps {
    * before that query resolves — every row simply shows a dash until it does.
    */
   yieldOnCost?: Map<number, number | null>
+  /**
+   * The account's uninvested cash and where it came from, from `/api/portfolio/summary`.
+   *
+   * It belongs here because **weight is a share of the account, not of its holdings**.
+   * With 12,229 CHF of a 68,921 CHF account sitting in cash after a rotation, dividing
+   * by holdings alone inflated every row by 21% and the column still called itself
+   * "% of portfolio" — the same mislabelling the allocation charts carried when they
+   * dropped an unvaluable holding and still summed to 100.
+   *
+   * Optional, and absent means a backend that does not track cash: the denominator then
+   * falls back to holdings, which is what it always was.
+   */
+  cash?: { amount: number; cash_source?: CashSource }
 }
 
 type SortColumn = 'symbol' | 'description' | 'rating' | 'quantity' | 'cost_basis_eur' | 'market_value_eur' | 'gain_loss_eur' | 'gain_loss_percent' | 'portfolio_percent' | 'yield_on_cost'
@@ -95,6 +110,10 @@ const gainTone = (p: Position) =>
  */
 export function positionColumns(deps: {
   formatCurrency: (value: number) => string
+  /**
+   * The denominator for `weight`: holdings **plus** uninvested cash wherever cash is
+   * tracked, because the column is labelled "% of portfolio" and cash is part of one.
+   */
   totalMarketValue: number
   /**
    * Projected next-12-month income over cost, per security, from
@@ -286,7 +305,7 @@ export function positionColumns(deps: {
 const NO_YIELDS: Map<number, number | null> = new Map()
 
 export function PositionsList({
-  positions, isLoading, isError, yieldOnCost = NO_YIELDS,
+  positions, isLoading, isError, yieldOnCost = NO_YIELDS, cash,
 }: PositionsListProps) {
   const formatCurrency = useFormatCurrency()
   const [sortColumn, setSortColumn] = useState<SortColumn>('market_value_eur')
@@ -296,10 +315,13 @@ export function PositionsList({
   // Unpriced holdings contribute 0.00 anyway, so this is unchanged in value — but
   // reading it through the predicate keeps the denominator and the rows that are
   // allowed a weight describing the same set.
-  const totalMarketValue = useMemo(() => {
+  const cashTracked = cashIsTracked(cash)
+  const cashAmount = cashTracked ? cash!.amount : 0
+  const totalHoldings = useMemo(() => {
     if (!positions || positions.length === 0) return 0
     return positions.reduce((sum, p) => (cannotValue(p) ? sum : sum + p.market_value_eur), 0)
   }, [positions])
+  const totalMarketValue = totalHoldings + cashAmount
 
   /** Named on screen, in the order the table shows them. */
   const unpriced = useMemo(
@@ -463,6 +485,22 @@ export function PositionsList({
             rate for the currency it trades in. Check the market-data sync's warnings and
             that security's <code>ticker_mappings</code> row. Totals elsewhere on this
             page exclude them too.
+          </div>
+        )}
+        {cashTracked && totalMarketValue > 0 && (
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+            <span className="font-medium">Cash (uninvested)</span>
+            <span className="tabular-nums">
+              {formatCurrency(cashAmount)}
+              <span className="ml-2 text-muted-foreground">
+                {((cashAmount / totalMarketValue) * 100).toFixed(2)}% of the account
+              </span>
+            </span>
+            <span className="w-full text-xs text-muted-foreground">
+              Not a holding, so it has no row below — but it is part of the account, so
+              every weight in this table is a share of holdings <em>plus</em> this
+              {cashCaveat(cash?.cash_source) ? `. The balance is ${cashCaveat(cash?.cash_source)}` : ''}.
+            </span>
           </div>
         )}
         <DataTable

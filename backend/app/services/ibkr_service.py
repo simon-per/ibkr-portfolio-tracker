@@ -124,6 +124,9 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
         "cashTransfer", "company", "conid", "currency", "date", "direction",
         "positionAmount", "quantity", "reportDate", "symbol", "transactionID", "type",
     }),
+    "EquitySummaryByReportDateInBase": frozenset({
+        "reportDate", "cash", "stock", "total",
+    }),
     # Read by parse_flex_xml itself, not by an extractor.
     "FlexStatement": frozenset({"accountId", "fromDate", "toDate"}),
 }
@@ -933,6 +936,51 @@ class IBKRService:
 
         logger.info(f"Extracted {len(flows)} deposit/withdrawal(s) from Flex <CashTransactions>")
         return flows
+
+    async def extract_equity_summary(self, flex_data: Dict) -> List[Dict]:
+        """
+        IBKR's own end-of-day cash and securities balances, one row per report date,
+        from the ``<EquitySummaryInBase>`` section.
+
+        **Returns [] when the section is not enabled, which is the default state** — the
+        Flex query has to be edited in the portal to deliver it. That is deliberately a
+        supported answer rather than a fault: `CashService` derives a balance from the
+        trade, deposit and dividend ledgers and falls back to it per day, so the feature
+        works without this and gets more accurate with it. See the `CashBalance` model
+        for what the derivation structurally cannot see.
+
+        Amounts are in **IBKR's account base currency**, which need not be the app's
+        display base. The currency is not an attribute of the row — the section is named
+        "InBase" and the base lives on the account — so it is taken from the statement's
+        own `AccountInformation` where present and left None otherwise, never guessed
+        from the app's setting. A label a figure has not earned is how SBI was carried
+        61% high.
+        """
+        statement = flex_data['statement']
+        section = getattr(statement, 'EquitySummaryInBase', None)
+        if not section:
+            return []
+
+        account_info = getattr(statement, 'AccountInformation', None)
+        currency = getattr(account_info, 'currency', None) if account_info else None
+
+        rows: List[Dict] = []
+        for row in section:
+            report_date = _as_date(getattr(row, 'reportDate', None))
+            cash = _dec(getattr(row, 'cash', None))
+            # A row with no date or no cash figure carries nothing this table is for.
+            # Skipped rather than defaulted, because a zero balance is a real answer and
+            # must not be manufactured from a missing one.
+            if not report_date or cash is None:
+                continue
+            rows.append({
+                'report_date': report_date,
+                'currency': currency,
+                'cash': cash,
+                'stock': _dec(getattr(row, 'stock', None)),
+                'total': _dec(getattr(row, 'total', None)),
+            })
+        return rows
 
     async def extract_transfers(self, flex_data: Dict) -> List[Dict]:
         """

@@ -184,6 +184,7 @@ recomputes by hand is the one that is wrong. The known instances:
 | the 12-month deployment average | `ContributionsStrip` renders the server's `avg_deployed_per_month_eur`; `MonthlyDeploymentCard`, on the same tab a few hundred pixels below, recomputed it as `monthly.slice(-12)` divided by its own length. `monthly` omits months with no activity, so that takes the last twelve *rows* — which can span more than twelve months — and divides by a count smaller than the period covered. Both errors push it up. **Two numbers under one name on one screen** is the cheapest instance of this failure to find and the easiest to leave: neither is obviously wrong on its own |
 | `isUnpriced` | "can the backend value this position?" was inline in `rebalance.ts` and `currencyExposure.ts` — identical, correct, each carrying its own copy of the reasoning — and `winRate` was about to make it three. Caught **while writing the third copy**, which is the only cheap moment to catch one. Note what makes it more than tidiness: the two existing copies had already needed correcting *together* on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the FX case — so the drift had already happened once, in lockstep, by luck. Extracted to `positionValuation.ts`, with a family test that strips comments (the rule is *documented* in `api.ts`, deliberately) and fails naming any `lib/` module that tests the columns itself |
 | `formatMarketCap` | the same T/B/M formatter existed **byte-identically** in `FundamentalsTab.tsx` and `watchlistColumns.tsx` — so one defect had to be fixed twice, and its sub-million branch carried the worst instance of the locale bug in the app: a bare `toLocaleString()` renders a market cap of 850,000 as **"850.000"** under a German runtime, reading as eight hundred fifty *thousandths*. Extracted to `lib/utils.ts` beside `formatCount`, both pinned to `en-US` like every other formatter in that file. The call sites that had grown their own formatting inline were exactly the ones that were not pinned |
+| the native→base two-step | `trades` and `corporate_actions` store money in the trade's own currency with no `_eur` column, so they need native→EUR at the row's date *and then* EUR→base — and a single `BaseFx.convert()` is wrong twice over. Three copies: `ActivityService._to_base`, `PortfolioService._realized_from_trades`, and the cash balance was about to be the fourth. Two had already diverged in a way that mattered — the activity one memoized the rate, the realized one issued a query per call. Extracted to `native_amounts.NativeToBase`. Caught **while writing the fourth copy**, which is the only cheap moment |
 
 **The lens that finds them**, and which found the last four: walk the AST for function names defined in
 more than one module, ignore trivial bodies, and read each cluster. Router-to-service pairs and
@@ -283,6 +284,13 @@ Required sections and the fields the parsers actually read:
 | **Cash Transactions** | Dividends, Payment in Lieu, **Withholding Tax**, **Deposits & Withdrawals** | `type`, `conid`, `symbol`, `settleDate`/`dateTime`, `amount`, `currency`, `transactionID` |
 | **Corporate Actions** | Detail | `type`, `conid`, `symbol`, `dateTime`/`reportDate`, `quantity`, `value`, `proceeds`, `actionDescription`, `transactionID` |
 | **Transfers** | — | `type`, `direction`, `date`/`reportDate`, `cashTransfer`, `positionAmount`, `symbol`, `conid`, `company`, `transactionID` |
+| **Cash Report** | **Equity Summary** *(optional)* | `reportDate`, `cash`, `stock`, `total` |
+
+**Cash Report / Equity Summary is the one optional section**, and the only one whose absence is a
+supported steady state rather than a gap: without it `CashService` derives the balance from the
+trade, deposit and dividend ledgers and every surface badges it `derived`. Tick it and IBKR's own
+end-of-day figure takes over per day, which is the only way the app can see broker interest,
+account fees and FX spread. It adds one row per day of the window — see *Cash*.
 
 **Deposits & Withdrawals** feeds the contributions report; without it there is no record of external
 money at all. **Transfers** exists only so an incoming broker transfer can be told apart from a deposit
@@ -510,6 +518,10 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
   Metadata is split from the rows on purpose; `weight_pct` is a **percent**;
   `UNIQUE(fund_isin, line_no)` because `constituent_isin` is nullable and SQLite treats NULLs as
   distinct. Replaced wholesale, never merged row-by-row.
+- **cash_balances** — IBKR's own end-of-day `cash` / `stock` / `total` per `report_date`, from
+  `<EquitySummaryInBase>`. **Empty until that section is enabled in the Flex portal, and that is a
+  supported state** — `CashService` derives a balance instead and every surface badges which. In
+  IBKR's *account* base currency, which `currency` records rather than assumes.
 - **app_settings** — `base_currency`, `last_sync_to_date`. Plus fundamentals + earnings tables.
 - **sync_runs** — one row per sync attempt (`sync_type` ∈ `ibkr` | `ibkr_sync` | `full_sync` |
   `market_data_only` | `ibkr_manual_xml` | `manual_prices` | `manual_mapping` | `manual_cash_flow` |
@@ -1087,6 +1099,158 @@ Forecast toggle **off** it rebuilds from realized income alone (`lib/dividendGro
 only client-side growth arithmetic and copies the server's two rules exactly: adjacent years only,
 never divide by zero. Tests: `tests/test_dividend_growth.py`, `src/lib/dividendGrowth.test.ts`,
 `src/lib/delta.test.ts`.
+
+---
+
+## Cash — the balance a sale becomes
+
+`cash_eur` / `total_value_eur` / `money_in_eur` on `/api/portfolio/value-over-time`,
+`total_cash_eur` / `total_value_eur` on `/api/portfolio/summary`, a `Cash` bucket on
+`/api/allocation/portfolio`, and `CashService` behind all of them.
+
+**It exists because the app valued an account at the market value of its holdings and
+called that the portfolio.** Read off production on 2026-08-26: a restructuring sold
+25,136 CHF of positions on 08-21 and redeployed 12,682 of them on 08-24, so holdings went
+68,342 → 43,631 → 56,161 and the value chart drew a 36% cliff followed by a partial
+recovery — over a period in which the account lost nothing. The headline card reported
+56,708 CHF for an account worth 68,921, an **18% understatement**, and every weight,
+slice and "% of portfolio" divided by that short total.
+
+Note what was *not* wrong, because it decides the scope: the **risk metrics were already
+correct**. `dailyReturnSeries` nets `external_flow_eur` out of every pair, so 08-21 reads
+**+0.76%** and the flow-adjusted max drawdown over the year is −11.49% from March. A sale
+was never a fabricated loss in the statistics — only in the picture and in the totals. So
+this feature deliberately **does not touch returns**: XIRR, Modified Dietz and the
+monthly heatmap still measure the holdings, and a trade is still an external flow to
+them. Making cash part of the measured pot (so only deposits count as flows) is the
+textbook definition and a genuinely better one — it is left undone on purpose, not
+missed.
+
+### Derived from what moved, never from what is held
+
+    cash = Σ trades (proceeds + commission)
+         + Σ cash flows (deposits, withdrawals, cash legs of transfers)
+         + Σ IBKR dividend payments, net of withholding
+
+anchored at **zero before the first record**, which is definitional rather than an
+assumption: the account did not exist.
+
+**Deriving it from trades rather than from tax-lot events is the whole design, and it is
+what makes that anchor safe.** This account's holdings arrived by in-kind transfer
+carrying their *original* open dates and cost bases, back to 2024 — so a lot-event
+derivation reads years of pre-IBKR purchases as cash draining an account that had not
+been opened, and goes tens of thousands negative. A transferred lot has **no trade**, so
+it correctly costs nothing, and the two other ledgers begin when the account does. That
+is also why this is **not** spliced at `coverage_from` the way `get_contributions` is:
+the splice exists because *lot cost basis* cannot survive a rotation, and cash is not
+built from lot cost basis.
+
+Four rules, each of which would be a wrong number the other way:
+
+- **Every cash-flow type counts, not `get_deposits()`'s whitelist.** That one answers
+  "was money *added*", where a transfer must never count; this asks "did cash *move*",
+  where a transfer's cash leg genuinely did. The in-kind rows carry a zero amount, so
+  including them is correct rather than merely harmless.
+- **Dividends are IBKR rows only, and this is the one reader that does not splice.**
+  `_splice_by_era` answers "how much income was earned", for which a pre-ledger estimate
+  is the only evidence there is. A balance asks "how much cash arrived *at this broker*",
+  where an estimate is evidence of nothing — it is a guess about a payment made into a
+  Trading 212 account that IBKR's cash never saw. The rule lives in
+  `DividendService.ibkr_cash_receipts` rather than in `CashService`, beside every other
+  rule about those rows, because a service reaching into the columns itself is what
+  `test_era_splice_boundary` exists to catch.
+- **Each event converts at its own date**, matching how the timeline converts a lot's
+  cost at its `open_date`. The two lines are on one chart and have to agree about which
+  day's rate applies to a franc.
+- **`unknown` is not zero.** No ledger row at all means there is nothing to derive from,
+  and `cash_source` says so; a *derived* zero is a real answer for a fully deployed
+  account. Collapsing them renders "we have no idea" as "you hold no cash" — the
+  reassuring-zero failure this file keeps rediscovering, and `cashIsTracked` in
+  `lib/portfolioCash.ts` is where the client refuses it.
+
+**What it cannot see, which is why it is badged.** Broker interest, account fees (the
+sanitizer already drops a `type="AF"` cash transaction) and the spread on FX conversions
+appear in none of the three ledgers. They accumulate in one direction: on this account
+the derived balance sat about **−250 CHF** for months while it was otherwise fully
+deployed, which is 0.36% and is what a small persistent debit looks like. So `cash_source`
+is `derived` and the UI says so in prose. Two independent derivations agreeing is the
+reason to trust the size of it — the ledger sum gives 12,228.74 CHF and summing the
+timeline's own `external_flow_eur` from `coverage_from` gives 12,212, a tenth of a
+percent apart.
+
+### `<EquitySummaryInBase>` is the measured answer, and it is off by default
+
+`extract_equity_summary` reads IBKR's own end-of-day `cash` / `stock` / `total` into
+`cash_balances`. It requires ticking **Cash Report → Equity Summary** in the Flex portal
+and costs one row per day of the window — trivial against the sections that scan every
+trade. Until then the table is empty, and **that is a supported state rather than a
+pending migration**.
+
+`_apply_measured` splices them in as *corrections*: a measured row is a level while the
+timeline sweeps deltas, so each becomes `measured − derived-so-far`. That keeps the whole
+thing one sorted event list, which is what stops the chart, the summary card and the
+allocation denominator from each deriving a balance. Corrections are **interleaved**
+rather than replacing the derived era — carrying the last measured level flat across a
+weekend or a failed-sync stretch would freeze the balance through real trades. Expect a
+small one-off step on the first measured day: that is the accumulated interest and fees
+becoming visible, not a fault.
+
+**`cash_source` is per point, not per response.** The Flex window is bounded, so measured
+history starts whenever the section was enabled and can never reach the account's start;
+stamping `ibkr` on the years before it because the tail is measured is the same overclaim
+as a badge that cannot clear. Hence `derived_source()` alongside `cash_source()` — the
+first is the fallback for pre-measurement days, and using the second there was a real bug
+caught before it shipped.
+
+### Total Value vs Money In — the only pairing a rotation cannot step
+
+The chart's lines change meaning when cash is tracked: **Total Value** (holdings + cash)
+against **Money In** (cumulative contributions), with Profit/Loss as the gap. That gap is
+*total* profit — realized, unrealized and dividends — rather than the unrealized-only
+figure the old pair produced.
+
+It is the only pairing with no step on a trade, and the two rejected alternatives say
+why. Keeping **Market Value vs Cost Basis** and adding cash as a third line leaves the
+cliff exactly where it was. Pairing total value with **cost + cash** removes the value
+cliff but makes the *baseline* step up by the realized gain on every sale (+6.1k here),
+because cost basis falls by what a lot cost while cash rises by what it sold for. Money
+In steps only when money actually goes in.
+
+**`money_in_eur` is the contributions splice, served daily.** It reuses
+`_contribution_inputs`, which `get_contributions` also consumes — one event list, so the
+strip's all-time figure and the chart's last point cannot disagree. Summing those events
+over any window reproduces all three branches the strip used to compute inline
+(`deployed`, `deposits`, `spliced`), because the two ranges neither overlap nor leave a
+hole. Pinned by `test_the_chart_and_the_strip_agree_about_money_in` — this app has
+already published two numbers under one name on one screen twice.
+
+When cash is not tracked the chart falls back to the old pair, labels included. Absent
+means "this backend does not track cash", never "cash is zero" — the same
+backward-compatible reading `unpriced_holdings` and `external_flow_eur` both make.
+
+### Where cash reaches, and where it deliberately does not
+
+- **The value chart and the summary hero card.** The card names the split in its footnote
+  (`X in holdings + Y cash`) rather than growing a sixth tile.
+- **Positions weights**, whose denominator is now holdings + cash. The column is labelled
+  "% of portfolio" and cash is part of one; dividing by holdings alone inflated every row
+  by 21% here. Cash is a line above the table rather than a synthetic `Position` row.
+- **All three allocation breakdowns**, as a `Cash` bucket. In *all three* on purpose: a
+  cash slice in the asset-type chart alone would give the endpoint two denominators and
+  leave sector and geography summing to under 100 while every slice still said "% of
+  portfolio" — the exact failure that tab was fixed for in August, arriving by a new
+  route. A **negative** balance is excluded from both the slice and the denominator and
+  reported as `cash_eur`, because a pie cannot draw a negative slice and renormalising
+  around one inflates every other holding.
+- **Not returns** — XIRR, Modified Dietz, the monthly heatmap, drawdown, Sharpe, beta.
+  See the top of this section: they were already right, and changing what counts as a
+  flow is a separate decision.
+- **Not the dividend yield or the rebalance drift denominators.** Both would be
+  defensible (a yield on total value; drift against the capital you actually have to
+  allocate) and both were explicitly left out of scope.
+
+Tests: `tests/test_cash_balance.py`, the cash block in `tests/test_api_smoke.py`,
+`src/lib/portfolioCash.test.ts`.
 
 ---
 
@@ -2883,6 +3047,11 @@ Tests: `tests/test_currency_fallback.py`.
 | `Code=1025` | Token lockout, usually self-inflicted. **Wait**, don't retry. The schedule recovers it |
 | `Code=1001` | Not ready. Polled while retrieving; **fatal at the request step** — never re-request, a later job handles it. Since 2026-08-08 the common cause of a *run* of these is gone: the guard skips a slot once the ET day's generation is spent, so a `1001` now means a genuine refusal |
 | I bought something today and it is not in the app | Expected on any day, and not a settlement delay — the rolling window ends at the last completed *trading* day, so today is structurally never in today's statement. A Monday purchase is first reachable Tuesday; a Friday one on Saturday. Nothing to force. Verify with `toDate` in the statement header rather than the generation time |
+| The value chart dips hard after a big sale, or Market Value looks far too low | Fixed 2026-08-26 by tracking cash — check `/health`'s commit predates it before looking further. Selling moves value from holdings into a cash balance nothing used to record, so a rotation drew a cliff and the headline card understated the account by the idle balance. The chart now pairs **Total Value** (holdings + cash) with **Money In**, and neither steps on a trade. The risk metrics were always right about this: they net the flow out |
+| The cash figure disagrees with IBKR's by a small amount | Expected while `cash_source` is `derived`: it is computed from the trade, deposit and dividend ledgers, so it cannot see broker interest, account fees or FX conversion spread. On this account that ran to about −250 CHF over eight months, 0.36%. Tick **Cash Report → Equity Summary** in the Flex portal and IBKR's own end-of-day figure takes over — expect one visible step on the first measured day, which is the accumulated difference becoming visible |
+| The chart still says Cost Basis / Market Value | `cash_source` is `unknown`, meaning no trade or cash-flow row exists to derive a balance from — a fresh install, or a Flex query with none of the cash-bearing sections enabled. Deliberately not relabelled: a holdings-only line called "Total Value" over a 0.00 cash figure asserts a completeness nothing established |
+| A Cash slice appears in the sector and geography charts | Intended. Cash has no sector and no country, but putting it only in the asset-type chart would give that endpoint two denominators and leave the other two summing to under 100 while every slice says "% of portfolio". Named `Cash` rather than folded into `Unknown`, which means something else there: a holding whose sector nobody has fetched yet |
+| A negative cash balance, and a notice above the allocation charts | A margin debit. It cannot be drawn as a slice, so those charts leave it out of both the slice and the denominator rather than renormalising around it, and say so. The value chart still plots it — the cash line simply goes below zero |
 | A newly bought **fund** is drawn as a Stock, or shows as a single company in Look-through | It is not declared. `ETF_ALLOCATIONS` / `FUND_SOURCES` are keyed by fund ISIN, and an undeclared one takes the `securities.asset_type` column default of `"Stock"` — so it is bucketed as a company at a plausible weight, `uncovered_fund_eur` stays `0.00`, and coverage still reads high. Nothing reports it, which is why it is here: IQQ sat in that state from 2026-08-21 to 08-24. Add both entries, pin the allocation blocks to any sibling tracking the same index, then fetch and import its basket |
 | The Sync button says *Already up to date* | Working as intended, and not an error. IBKR issues about one statement per US-Eastern day; today's has landed, so there is nothing to fetch. The panel says when the next one becomes available. *Sync anyway* is only worth pressing after editing the Flex Query in the portal — the one thing that resets the daily generation — because a forced refusal spends `Code=1025` budget |
 | A scheduled run reads `skipped` in the history | Two different causes, told apart by `reason`. `already_generated_today` is the 00:00 Berlin slot correctly doing nothing because 18:00 succeeded — the normal daily state. `pipeline_busy` is a `single_flight` collision, where the next slot recovers freshness |

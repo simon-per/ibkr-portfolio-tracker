@@ -313,6 +313,26 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert all("unpriced_holdings" in p for p in vot)
     assert summary_now["unpriced_holdings"] == vot[-1]["unpriced_holdings"]
 
+    # Cash survives its response_model on both endpoints. A response_model is a FILTER,
+    # so an undeclared key is dropped silently — which for these four would put the
+    # holdings-only total back on the hero card with nothing saying so, and leave the
+    # chart quietly falling back to its pre-cash lines.
+    for key in ("total_cash_eur", "total_value_eur", "cash_source"):
+        assert key in summary_now, f"response_model dropped {key}"
+    assert summary_now["total_value_eur"] == pytest.approx(
+        summary_now["total_market_value_eur"] + summary_now["total_cash_eur"]
+    )
+    for key in ("cash_eur", "total_value_eur", "money_in_eur", "cash_source"):
+        assert all(key in p for p in vot), f"response_model dropped {key}"
+    assert vot[-1]["total_value_eur"] == pytest.approx(
+        vot[-1]["market_value_eur"] + vot[-1]["cash_eur"]
+    )
+    # The fixture carries no trades and no cash flows, so there is nothing to derive a
+    # balance from — and that must read as `unknown` rather than as a confident zero,
+    # which is what would let the chart relabel a holdings-only line "Total Value".
+    assert summary_now["cash_source"] in ("ibkr", "derived", "unknown")
+    assert all(p["cash_source"] == summary_now["cash_source"] for p in vot)
+
     # The forward yield is a SIBLING of growth, not a member — it moves with a market
     # price, so it is neither growth nor history. Same year-invariance, for its own
     # reason: a rate describing the next twelve months cannot depend on the window

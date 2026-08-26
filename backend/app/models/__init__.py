@@ -17,6 +17,7 @@ from app.models.app_settings import AppSetting
 from app.models.trade import Trade
 from app.models.corporate_action import CorporateAction
 from app.models.cash_flow import CashFlow
+from app.models.cash_balance import CashBalance
 from app.models.sync_run import SyncRun
 # These two were missing, so `import app.models` left Base.metadata incomplete — Alembic
 # discovery and any create_all() silently skipped them.
@@ -40,6 +41,7 @@ __all__ = [
     "Trade",
     "CorporateAction",
     "CashFlow",
+    "CashBalance",
     "SyncRun",
     "TickerMapping",
     "BenchmarkTimelineCache",

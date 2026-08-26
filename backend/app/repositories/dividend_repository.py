@@ -118,6 +118,24 @@ class DividendRepository:
         )
         return result.scalar()
 
+    async def get_ibkr_payments(self) -> List[DividendPayment]:
+        """
+        Every authoritative IBKR payment, whole table, ordered by pay date.
+
+        Deliberately narrower than `get_between`/`get_computed_dividends`: those serve
+        the readers that must splice the two sources, and this one serves the cash
+        balance, where a `yfinance_estimate` represents money paid into a *different*
+        broker and must never be added. `DividendService.ibkr_cash_receipts` is the
+        only caller and carries the full reasoning.
+        """
+        on_date = func.coalesce(DividendPayment.pay_date, DividendPayment.ex_date)
+        result = await self.session.execute(
+            select(DividendPayment)
+            .where(DividendPayment.source == "ibkr")
+            .order_by(on_date.asc())
+        )
+        return list(result.scalars().all())
+
     async def get_computed_dividends(
         self,
         start_date: Optional[date] = None,

@@ -43,6 +43,13 @@ class TradeRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_all(self) -> List[Trade]:
+        """Every trade, oldest first — the cash balance runs from the account's start."""
+        result = await self.session.execute(
+            select(Trade).order_by(Trade.trade_date.asc())
+        )
+        return list(result.scalars().all())
+
     async def get_between(self, start: date, end: date) -> List[Trade]:
         """All trades with trade_date in [start, end] (used by the tax report)."""
         result = await self.session.execute(

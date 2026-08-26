@@ -38,6 +38,7 @@ from app.repositories.corporate_action_repository import CorporateActionReposito
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
+from app.services.native_amounts import NativeToBase
 from app.services.dividend_service import DividendService, EX_TO_PAY_MAX_LAG_DAYS
 
 logger = logging.getLogger(__name__)
@@ -113,8 +114,9 @@ class ActivityService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.currency_service = CurrencyService(db)
-        # (currency, date) -> native->EUR rate, or None when none is available.
-        self._rate_memo: Dict[tuple, Optional[Decimal]] = {}
+        # Built lazily by _to_base, because it needs the request's BaseFx. Held on the
+        # instance so its rate memo spans the whole page rather than one row.
+        self._to_base_converter: Optional[NativeToBase] = None
 
     async def get_activity(
         self,
@@ -173,71 +175,24 @@ class ActivityService:
             "end_date": end_date.isoformat(),
         }
 
-    async def _eur_rate(self, currency: str, on_date: date) -> Optional[Decimal]:
-        """
-        The native->EUR rate for one (currency, date), memoized for this request.
-
-        `convert_to_eur` queries the rate table on every call and, on a miss, reaches
-        Frankfurter — so a 500-row page would issue up to 500 queries and, cold, 500
-        provider requests. Rows cluster heavily on a handful of pairs (this account's
-        trades are USD on a few dozen dates), so the memo collapses that to one lookup
-        each. Cached per request rather than per process: rates are backfilled by the
-        syncs, and a long-lived cache would keep serving a miss that has since been filled.
-
-        None means no rate is available; the caller leaves the figure blank.
-        """
-        key = (currency, on_date)
-        if key in self._rate_memo:
-            return self._rate_memo[key]
-
-        rate: Optional[Decimal]
-        try:
-            rate = await self.currency_service.get_exchange_rate(currency, on_date)
-        # convert paths raise ValueError when neither provider covers the pair, but the
-        # read path must survive anything: one unconvertible row must not 500 the page.
-        except Exception as e:
-            logger.warning(
-                "Activity: no %s->EUR rate for %s (%s); leaving the amount blank",
-                currency, on_date, e,
-            )
-            rate = None
-
-        self._rate_memo[key] = rate
-        return rate
-
     async def _to_base(
         self, amount: Optional[Decimal], currency: Optional[str], on_date: date, base_fx
     ) -> Optional[Decimal]:
         """
-        A **native-currency** amount projected into the base currency, in two steps.
+        A **native-currency** amount projected into the base currency.
 
-        `trades` and `corporate_actions` store money in the trade's own currency — there
-        is no `_eur` column on either, unlike `cash_flows.amount_eur` and
-        `dividend_payments.*_eur`, which the ingest pipeline pre-converts. So a single
-        `base_fx.convert()` here is wrong twice over: it skips native→EUR entirely and
-        then applies EUR→base to a number that was never EUR. Caught against production
-        data, where a CAD 30.27 realized gain was reported as CHF 27.85 (the EUR→CHF
-        factor) instead of roughly CHF 18. `_realized_from_trades` already does it in
-        these two steps; this matches it.
+        Delegates to `NativeToBase`, which is where the two-step conversion and the
+        reasoning for it now live — this was one of the three copies that forced the
+        extraction. The converter is built once per request so its rate memo spans the
+        whole page: rows cluster on a handful of (currency, date) pairs, and a
+        500-row page issuing one query each was the reason the memo existed here first.
 
-        Returns None when no rate is available, so the row still appears with the figure
-        blank rather than being dropped or silently mis-scaled — the same rule the tax
-        report follows.
+        Returns None when no rate is available, so the row still appears with the
+        figure blank rather than being dropped or silently mis-scaled.
         """
-        if amount is None:
-            return None
-        # Zero is zero in every currency, and demanding a rate would blank the
-        # commission-free and cash-neutral rows.
-        if not amount:
-            return Decimal("0")
-
-        eur = amount
-        if currency and currency != "EUR":
-            rate = await self._eur_rate(currency, on_date)
-            if rate is None:
-                return None
-            eur = amount * rate
-        return base_fx.convert(eur, on_date)
+        if self._to_base_converter is None:
+            self._to_base_converter = NativeToBase(self.currency_service, base_fx)
+        return await self._to_base_converter.convert(amount, currency, on_date)
 
     async def _trades(self, start: date, end: date, base_fx) -> List[ActivityRow]:
         trades = await TradeRepository(self.db).get_between(start, end)

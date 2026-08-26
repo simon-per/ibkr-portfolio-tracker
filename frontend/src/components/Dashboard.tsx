@@ -37,6 +37,7 @@ const WatchlistTab = lazy(() => import('./WatchlistTab').then(m => ({ default: m
 const TaxTab = lazy(() => import('./TaxTab').then(m => ({ default: m.TaxTab })))
 const DividendsTab = lazy(() => import('./DividendsTab').then(m => ({ default: m.DividendsTab })))
 const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ default: m.LookThroughTab })))
+import { cashIsTracked } from '@/lib/portfolioCash'
 import { ThemeToggle } from './ThemeToggle'
 import { AdminKeyButton } from './AdminKeyButton'
 import { SyncStatusMessage } from './SyncStatusMessage'
@@ -582,7 +583,9 @@ export function Dashboard() {
                   <div className="min-w-0">
                     <CardTitle>Portfolio Value Over Time</CardTitle>
                     <CardDescription>
-                      Cost basis (invested) vs Market value (current worth) in {baseCurrency}
+                      {cashIsTracked(valueOverTime?.[valueOverTime.length - 1])
+                        ? `Money in (contributed) vs Total value (holdings + cash) in ${baseCurrency}`
+                        : `Cost basis (invested) vs Market value (current worth) in ${baseCurrency}`}
                     </CardDescription>
                   </div>
                   <div className="flex min-w-0 items-center gap-2">
@@ -688,6 +691,9 @@ export function Dashboard() {
               isLoading={positionsLoading}
               isError={positionsError}
               yieldOnCost={yieldOnCostBySecurity}
+              // Weight is a share of the account, and cash is part of one — see the
+              // prop's docstring for what dividing by holdings alone did to it.
+              cash={summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined}
             />
           </TabsContent>
 

@@ -498,6 +498,38 @@ class DividendService:
                 logger.info(f"Dividend forecast: no cached {cur}->EUR rate, skipping its per-share amounts")
         return out
 
+    async def ibkr_cash_receipts(self) -> List[tuple]:
+        """
+        Dividend cash that actually landed in the IBKR account: ``(pay_date, net_eur)``.
+
+        **Deliberately not era-spliced, and that is not an oversight.** The splice
+        answers "how much dividend income was earned", for which a `yfinance_estimate`
+        before the ledger begins is the only evidence there is. This answers a
+        different question — "how much cash arrived at *this broker*" — and an estimate
+        is evidence of nothing there: it is a guess about a payment made into a
+        Trading 212 or Scalable Capital account that IBKR's cash balance never saw.
+        Splicing here would credit the account with money it was never paid, which is
+        the one direction a balance must never err in.
+
+        It lives beside `_net_eur` rather than in `CashService` because that is where
+        every other rule about these rows lives, and a reader that reaches into the
+        columns itself is what `test_era_splice_boundary` exists to catch.
+
+        Net, not gross: withholding is deducted before the cash reaches the account.
+        `_is_income` drops the zero rows yfinance's pre-ownership history writes — they
+        carry no cash by definition, and IBKR rows are never zero-valued anyway.
+        """
+        payments = await DividendRepository(self.db).get_ibkr_payments()
+        out = []
+        for p in payments:
+            if not self._is_income(p):
+                continue
+            when = p.pay_date or p.ex_date
+            if when is None:
+                continue
+            out.append((when, self._net_eur(p)))
+        return out
+
     @staticmethod
     def _net_eur(p) -> Decimal:
         """

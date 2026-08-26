@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Treemap, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import type { AllocationCategory } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { RefreshCw, X } from 'lucide-react'
@@ -516,6 +517,19 @@ export function AllocationTab() {
           percentages still sum to 100, because they are shares of the value that could be
           *priced* — so an unvaluable holding is not a visible zero, it is an absence from a
           picture that looks complete. */}
+      {cashIsTracked(allocation) && (allocation!.cash_eur ?? 0) < 0 && (
+        <div
+          role="alert"
+          className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+        >
+          <span className="font-medium">
+            The account carries a negative cash balance
+          </span>{' '}
+          — a margin debit cannot be drawn as a slice, so these charts leave it out
+          entirely and every percentage below is a share of the holdings alone.
+        </div>
+      )}
+
       {(allocation?.unpriced_holdings ?? 0) > 0 && (
         <div
           role="alert"

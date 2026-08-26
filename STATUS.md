@@ -1,6 +1,20 @@
 # Working state
 
-**Last updated: 2026-08-24 (late).** Latest: **the Positions table published a fabricated −100%
+**Last updated: 2026-08-26.** Latest: **the app tracks uninvested cash, so a restructuring is no
+longer drawn as a collapse.** Selling 25,136 CHF of positions on 08-21 and redeploying 12,682 on
+08-24 took holdings 68,342 → 43,631 → 56,161, and the value chart drew a 36% cliff over a period in
+which the account lost nothing. The headline card reported **56,708 CHF for an account worth
+68,921** — an 18% understatement — because ~12,229 CHF was sitting in cash and nothing recorded it.
+The chart now pairs **Total Value** (holdings + cash) with **Money In**, and neither line steps on a
+trade. Details in *Shipped 2026-08-26*.
+
+Two things about it worth knowing before reading further. **The risk metrics were never wrong** —
+`dailyReturnSeries` nets the flow out, so 08-21 reads +0.76% and the year's flow-adjusted max
+drawdown is −11.49% from March. Only the picture and the totals were. And the balance is **derived**
+until someone ticks one box in the Flex portal — see *Needs a human*, which is the one open item
+from this session.
+
+Before that (2026-08-24, late): **the Positions table published a fabricated −100%
 loss, on the one screen you open to find out which holding.** An unvaluable position is valued at
 0.00, so its gain is `−cost` — printed in red at `0.00%` weight with no marker, forty pixels below
 KPI cards already saying *"N unpriced, not judged"*. Last member of the `unpriced_holdings` family,
@@ -123,6 +137,32 @@ that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin w
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
 ## Needs a human
+
+- **Tick "Cash Report → Equity Summary" in the Flex Query, and the cash balance stops being ours.**
+  One checkbox in the IBKR portal on query `App_OpenLots` (1389408). Everything else is already
+  built and deployed: `extract_equity_summary` reads the section, `cash_balances` stores it, and
+  `CashService._apply_measured` prefers it per day the moment rows arrive. Nothing needs a code
+  change or a redeploy — the next successful sync picks it up.
+
+  **Why it is worth doing.** The derived balance is built from trades, deposits and dividends, so it
+  structurally cannot see broker interest, account fees or the spread on an FX conversion. Measured
+  on production: it agreed with an independent derivation to a tenth of a percent, and it also sat
+  at about **−250 CHF** for months while the account was otherwise fully deployed. That is small
+  (0.36%) and it is one-directional, so it grows. IBKR's own end-of-day figure includes all three.
+
+  **Why it is not urgent.** The feature works without it, and says so — `cash_source` is `derived`
+  and the chart, the hero card and the positions table all print the caveat in prose. The number is
+  right to well under a percent.
+
+  Two things to expect when it is enabled, neither of which is a fault:
+  - **One visible step in the cash line on the first measured day.** That is the accumulated
+    interest/fees/spread being corrected, not a jump in the balance.
+  - **Measured history starts that day and never reaches back.** The Flex window is bounded, so
+    every point before it stays `derived`, and `cash_source` is reported per chart point rather than
+    per response for exactly this reason.
+
+  It is also the one thing that resets the day's Flex generation, so the edit itself buys a free
+  extra sync — see *Sync schedule* in CLAUDE.md.
 
 - **Decide what the Flex Query period should actually be — the portal and this repo disagree.**
   Measured 2026-08-24: the live query is `Last 30 Calendar Days` (the portal download's header says
@@ -467,6 +507,65 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
+## Shipped 2026-08-26 — cash, and a rotation that stopped looking like a loss
+
+Asked as "I sold a lot of my portfolio for a restructuring and it shows a large dip — include cash
+everywhere". The dip was real in the data and false in what it implied.
+
+**What was actually wrong, measured before anything was written.** `external_flow_eur` on 08-21 is
+−25,136 and on 08-24 is +12,682, so ~12,229 CHF was undeployed. Holdings 68,342 → 43,631 → 56,161.
+Two independent derivations of the missing balance agreed: summing the trade/deposit/dividend ledger
+gives **12,228.74**, summing the timeline's own `external_flow_eur` from `coverage_from` gives
+**12,212** — a tenth of a percent apart. So the account is worth ~68,921 and the hero card said
+56,708.
+
+**What was NOT wrong, and it changed the scope.** The risk metrics already net the flow out:
+08-21 reads **+0.76%** and the year's flow-adjusted max drawdown is **−11.49%, from March**. "Huge
+drawdown" was the *picture*, not the statistics. So XIRR, Modified Dietz, the heatmap, Sharpe, beta
+and both drawdowns are deliberately untouched — a trade is still an external flow to them. Making
+cash part of the measured pot (only deposits as flows) is the textbook definition and a real
+improvement; it is left undone on purpose and is the obvious follow-up.
+
+**The design decision that carries everything: cash is derived from *trades*, not from lot events.**
+This account's holdings arrived by in-kind transfer carrying open dates back to 2024, so a lot-event
+derivation reads years of pre-IBKR purchases as cash leaving an account that had not been opened. A
+transferred lot has no `Trade` row, so it costs nothing, and the balance anchors at a definitional
+zero rather than at a guessed one. That is also why this is *not* spliced at `coverage_from` the way
+contributions are.
+
+**The chart pairs Total Value with Money In**, which is the only pairing with no step on a trade.
+The two rejected alternatives are recorded in CLAUDE.md: cash as a third line leaves the cliff, and
+total-value-vs-cost-plus-cash moves the step to the baseline (+6.1k, the realized gain). `money_in_eur`
+reuses `_contribution_inputs`, the same event list the contributions strip consumes, pinned equal by
+`test_the_chart_and_the_strip_agree_about_money_in`.
+
+**One extraction came out of writing it, at the cheap moment.** The native→EUR→base two-step had
+three copies (`ActivityService._to_base`, `PortfolioService._realized_from_trades`, and cash was
+about to be the fourth) and two had already diverged — one memoized the rate, one issued a query per
+call. Now `native_amounts.NativeToBase`; new row in CLAUDE.md's divergence table.
+
+**Scope, as chosen:** value chart, summary hero card, positions weights (denominator now holdings +
+cash — it had been inflating every row by 21%), and all three allocation breakdowns as a `Cash`
+bucket. Not returns, not the dividend-yield or rebalance denominators.
+
+**`<EquitySummaryInBase>` ingestion shipped too but is inert** until one portal checkbox — see
+*Needs a human*. Empty is a supported steady state, not a pending migration.
+
+**Verified end to end against a production snapshot**, which is what this needed rather than
+fixtures. Migration `s2b9d6e3f7a8` applied to the real database and round-tripped (downgrade,
+re-upgrade). Backend **1284** (was 1272), frontend **512** across 38 files, `tsc -b` and
+`vite build` clean, and **160 browser checks** over all eight e2e scripts — a11y 17/17, sweep 18/18,
+mobile 50/50 at 390x844, errors 18/18, ledger 8/8, axis 8/8, csp 4/4, chunks 37/37.
+
+**`e2e/ledger.mjs` had a check that could never pass, and running it was how we found out.** Its
+"the Cash filter narrowed the ledger" assertion tested `/Dividend/` against the whole tab panel's
+`innerText`, which carries the filter buttons ("Dividends") and the card description ("Every trade,
+dividend, deposit and corporate action"). The filter works; the assertion could not. It had been
+written, reviewed and never executed, because the local database has no trades or cash flows to
+filter — STATUS.md said so in as many words. It reads `tbody tr` now. **A check that has never been
+run is not a passing check**, and this is the second one in this repo to be written against a bug it
+could not see.
+
 ## Shipped 2026-08-24 (late) — the last unpriced holding, and a formatter that existed twice
 
 Work that had been sitting uncommitted in the working tree; tested end to end and shipped.
@@ -498,9 +597,9 @@ the unit suites: backend **1272**, frontend **505** across 37 files, `tsc -b` an
 and **144 browser checks** over six e2e scripts — `a11y` 17/17, `sweep` 18/18, `mobile` 50/50 at
 390x844, `csp` 4/4, `chunks` 37/37, `errors` 18/18. Nothing needed fixing.
 
-**Two scripts could not run and are not "passing":** `ledger.mjs` and `axis.mjs` need real
-executions and the local database has 942 open lots but **0 trades and 0 cash flows**. They need a
-production snapshot, which was deliberately not taken this session.
+**Two scripts could not run that session:** `ledger.mjs` and `axis.mjs` need real executions and
+the local database has **0 trades and 0 cash flows**. Both were run against a production snapshot on
+2026-08-26 and are green — `ledger.mjs` needed one fix first, see *Shipped 2026-08-26*.
 
 
 ## Shipped 2026-08-24 — a threshold derived from a number nobody had checked
@@ -639,8 +738,9 @@ calls is the same silence as no detector; and the `isUnpriced` family test, whos
 `rebalance.test.ts` **green** and fails only the family assertion — which is what "a correct copy is
 still a copy" looks like when you run it.
 
-`e2e/ledger.mjs` is fixed but **not run** — it needs a production DB snapshot, and none was pulled.
-See *Known rough edges*.
+`e2e/ledger.mjs` is fixed but **not run** here — it needs a production DB snapshot, and none was
+pulled. (Run on 2026-08-26, where the fix turned out to have added an assertion that could never
+pass; see that session.)
 
 ## Shipped 2026-08-17 (night, second pass) — the Allocation tab had both classes of bug
 
@@ -1750,23 +1850,6 @@ twenty rows carrying it, since every holding is continuously held.
 
 ## Known rough edges (accepted, not bugs)
 
-- **`e2e/ledger.mjs` is FIXED but has not been run — it needs a production DB snapshot.**
-  It was 2 of 7 red from 2026-08-14, and the check had aged rather than the app: its two transfer
-  assertions read the rendered Activity panel, the account's only transfer is the in-kind arrival of
-  **2026-01-21**, and while the default `1Y` window still reaches it the window now holds ~175 rows
-  — so the transfers, being the oldest, fell past the first page of 100. The API was always correct
-  (`/api/portfolio/activity?limit=400` returns all 22 `TRANSFER_IN` rows, badged).
-
-  Fixed 2026-08-17 (night) the way this entry prescribed: it clicks the **Cash** event-type filter
-  before asserting anything about transfers, so it stays stable as trades accumulate (47 cash rows
-  against a `PAGE_SIZE` of 100). The trade-shaped assertions run on the unfiltered panel first, and a
-  narrowing check sits between them so a renamed button cannot silently restore the old behaviour —
-  8 checks now, not 7.
-
-  **Unverified**, and that is the honest state: running it needs a `sqlite3 .backup` snapshot of
-  production on this machine, which was deliberately not done. Nothing about the change is
-  data-dependent beyond the button's accessible name (`Cash`, from `KIND_LABELS`), but nobody has
-  watched it go green. Run it next time a snapshot is down for another reason.
 - **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
   far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
   shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
@@ -2200,7 +2283,29 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
-1. **SEC N-PORT as the generic fallback for a future fund with no issuer route.** Items 1 and 2 here
+1. **Decide whether a trade should still count as an external flow, now that cash is tracked.**
+   The 2026-08-26 cash work deliberately stopped at the totals and the charts: XIRR, Modified Dietz,
+   the monthly heatmap, drawdown, Sharpe, Sortino and beta all still read `market_value_eur` and
+   still treat a purchase or a sale as money entering or leaving the measured pot. That was correct
+   before — holdings *were* the pot — and it is now a modelling choice rather than the only option.
+
+   With cash inside the pot the textbook definition applies: **only deposits and withdrawals are
+   external flows**, and a trade is an internal transfer that nets to zero. That makes time-weighted
+   return exact instead of Modified-Dietz-approximate, removes the flow-day exclusions beta needs
+   (`MIN_PAIRED_RETURNS` currently drops every day the portfolio traded), and makes the figures
+   describe the account rather than its invested sleeve.
+
+   It is not free, and the trade-off is why it was not bundled in. Returns would start including the
+   **drag of idle cash**, which is a different question from "how did my investments do" — with
+   12,229 CHF undeployed that is ~18% of the book earning nothing. Both are legitimate; showing one
+   silently in place of the other is not. The likely answer is to serve both and label them, which
+   is a design decision rather than a refactor.
+
+   Whatever is chosen, `externalFlow` and `isMeasurable` in `portfolioKpis.ts` are where it lands,
+   `dailyReturnSeries` has five consumers, and `betaAndCorrelation` derives its own returns
+   separately — so all of them move together or the tab disagrees with itself.
+
+2. **SEC N-PORT as the generic fallback for a future fund with no issuer route.** Items 1 and 2 here
    were the SMH adapter and an N-PORT adapter for SOXQ/GRID/QTUM; **all four now have issuer feeds**
    (2026-08-16), which are T-1 rather than 75–136 days old, so N-PORT is no longer needed for
    anything held. It is worth keeping as the escape hatch for the next US-registered fund bought
@@ -2226,7 +2331,7 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    - Arrives **75–136 days old**, so it needs its own `ADAPTER_STALE_DAYS` entry rather than a raised
      default.
 
-2. **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
+3. **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
    holdings array is the paywalled field at every vendor: FMP's free Basic is 250 calls/day but
    holdings are Ultimate-tier and US exchanges only; API Ninjas models UCITS domicile correctly but
    gates `holdings` behind premium; EODHD's Fundamentals feed costs 10 calls against a 20/day quota
@@ -2235,7 +2340,7 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    who own shares *of* the ETF, the reverse direction, and it returns plausible-looking garbage that
    passes a smoke test.
 
-3. **Make look-through coverage keep itself current — half done.** `find_stale_etf_baskets()`
+4. **Make look-through coverage keep itself current — half done.** `find_stale_etf_baskets()`
    shipped 2026-08-17 (night), so a stale basket now *warns* instead of only badging the tab. What
    remains is the automatic half: a staleness-guarded refresh on the existing 18:00 `full_sync`
    rather than a new slot, because a new hour has to be threaded through `ALL_SYNC_HOURS` and the
@@ -2254,14 +2359,14 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    `etf_mappings.py`'s docstring, and the reason not to serve two sector *totals* at once is in
    CLAUDE.md.
 
-4. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
+5. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
    `prune_empty_dividends.py` is a manual CLI and the ingest window already prevents new junk, so
    there is very little left for a scheduled run to find. Investigating this on 2026-07-31 turned up
    a **defect in the CLI rather than a case for automating it** (below), which is a fair warning
    about automating a deleter over financial rows: the value is small and the downside is silent.
    If it is built, it must reuse the CLI's predicate rather than re-deriving one.
 
-5. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
+6. **Project the benchmark's cost-basis line the way the portfolio's is projected.** Found while
    fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running
    cost basis at each point's date; `_calculate_timeline_swept` converts each lot's cost at its own
    `open_date`. Same tax lots, two conversion rules — the *dominant failure mode* in CLAUDE.md, in
@@ -2358,6 +2463,16 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-08-26** — "I sold a lot of my portfolio for a restructuring and it shows a large dip —
+  include cash everywhere". Two lessons, both about measuring before building. **The complaint named
+  a symptom that was half false**: the chart's cliff was real and the "huge drawdown" was not — the
+  risk metrics already net the flow out and read +0.76% on the sale day — so checking the metric
+  before believing the word cut the scope roughly in half and kept XIRR and friends out of it. And
+  **the missing number was already derivable twice over**: the trade/deposit/dividend ledger and the
+  timeline's own `external_flow_eur` agreed to a tenth of a percent, which is what made a derived
+  balance shippable today instead of waiting on a portal edit. The third thing: running an e2e
+  script that had never been executed found an assertion that could not pass.
+
 - **2026-08-24 (late)** — "test everything, then commit." The testing was the deliverable and it
   found nothing, which is itself the finding: the uncommitted work was sound and the full stack —
   1272 backend, 505 frontend, 144 browser checks — went green first time. The reusable part is the
@@ -2409,14 +2524,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   read that would have dropped ~900 companies from 11% of the book while the weights still looked
   plausible), and **never dump bytes from a file holding secrets** — an `od -c` newline check leaked
   the tail of `API_ADMIN_TOKEN` into the transcript.
-
-- **2026-08-16 (evening)** — "cluster by sector, and look at the missing data too". The missing data
-  was a **research failure, not a gap**: all four funds recorded as unreachable single-page apps had
-  keyless routes, and each old note was wrong differently — the SPA was only the product page, the
-  "no ISINs" fund had a CUSIP column, the table was on another path. Lesson: *fetch it once before
-  writing down that it cannot be fetched.* Then the trap underneath — the CUSIP column is not all
-  CUSIPs (77 CINS, 20 SEDOLs), and `US` + a CINS is a **check-digit-valid ISIN belonging to
-  nothing**, so the naive conversion fabricates identifiers that pass every validity test. One live
-  OpenFIGI request also killed the plan's own instruction: `ID_CUSIP` on a CINS returns zero rows
-  with no error, and the endpoint returns no ISIN at all. Check the contract before coding against
-  a remembered one.
