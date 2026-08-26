@@ -535,3 +535,143 @@ async def test_the_daily_series_wins_where_both_sections_are_enabled():
 async def test_both_sections_absent_is_not_an_error():
     """The default state of the Flex query, and a supported one."""
     assert await resolve_cash_balances(_FakeCurrency({}), [], []) == []
+
+
+# ------------------------------------------------- the real document, end to end
+
+
+#: A `<CashReport>` shaped exactly like the saved App_OpenLots query: the **Base
+#: Currency Summary** option, and the four fields it emits. Two things here are the
+#: point rather than scenery.
+#:
+#: `currency="BASE_SUMMARY"` is **not a currency**, and this document goes through the
+#: real `_fix_currency_codes` -> `_sanitize_flex_xml` -> `ibflex.parser` chain that drops
+#: any attribute ibflex cannot convert. If ibflex ever types that field as a currency
+#: enum, the attribute is dropped, the row stops looking like a base summary, and its
+#: total is silently summed as though it were one currency among several — a doubled
+#: balance that would look entirely plausible. That is why `extract_cash_report` reads
+#: two independent tells and why this test parses rather than stubbing.
+#:
+#: The `<FlexStatement>` also carries `AccountInformation`, because a base-summary row
+#: is denominated in the account's base and `BASE_SUMMARY` cannot say what that is.
+CASH_REPORT_XML = """<FlexQueryResponse queryName="App_OpenLots" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U1234567" fromDate="20260727" toDate="20260825"
+ period="Last30CalendarDays" whenGenerated="20260826;120000">
+ <AccountInformation accountId="U1234567" currency="CHF" name="TEST" />
+ <CashReport>
+  <CashReportCurrency accountId="U1234567" currency="BASE_SUMMARY"
+   fromDate="20260727" toDate="20260825" startingCash="198.43"
+   endingCash="12212.62" levelOfDetail="BaseCurrency" />
+ </CashReport>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>""".encode()
+
+
+#: The same statement under **Currency Breakout**, which is what the other portal option
+#: emits: one row per currency held, plus the summary. Both are present on purpose —
+#: ticking both options is legal, and summing the breakout into a total that already
+#: contains it is the failure this shape exists to catch.
+CASH_REPORT_BOTH_XML = """<FlexQueryResponse queryName="App_OpenLots" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U1234567" fromDate="20260727" toDate="20260825"
+ period="Last30CalendarDays" whenGenerated="20260826;120000">
+ <AccountInformation accountId="U1234567" currency="CHF" name="TEST" />
+ <CashReport>
+  <CashReportCurrency accountId="U1234567" currency="EUR" fromDate="20260727"
+   toDate="20260825" endingCash="100" levelOfDetail="Currency" />
+  <CashReportCurrency accountId="U1234567" currency="USD" fromDate="20260727"
+   toDate="20260825" endingCash="200" levelOfDetail="Currency" />
+  <CashReportCurrency accountId="U1234567" currency="BASE_SUMMARY"
+   fromDate="20260727" toDate="20260825" endingCash="12212.62"
+   levelOfDetail="BaseCurrency" />
+ </CashReport>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>""".encode()
+
+
+def _parse(raw: bytes):
+    """The production chain: currency repair, sanitize, ibflex."""
+    from ibflex import parser as flex_parser
+    from app.services.ibkr_service import IBKRService
+
+    svc = IBKRService(token="t", query_id="q")
+    fixed = svc._fix_currency_codes(raw)
+    sanitized, warnings = svc._sanitize_flex_xml(fixed)
+    statement = flex_parser.parse(sanitized).FlexStatements[0]
+    return svc, {"statement": statement}, warnings
+
+
+@pytest.mark.asyncio
+async def test_a_base_summary_survives_the_sanitizer_and_the_parser():
+    """
+    The check that could not be made against a stub: `BASE_SUMMARY` reaches the
+    extractor intact, and the row is recognised as a base summary rather than as a
+    currency called BASE_SUMMARY.
+    """
+    svc, flex_data, warnings = _parse(CASH_REPORT_XML)
+    rows = await svc.extract_cash_report(flex_data)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["is_base_summary"] is True
+    assert row["report_date"] == date(2026, 8, 25)
+    assert row["ending_cash"] == Decimal("12212.62")
+    # Denominated in the account's base, taken from AccountInformation — never the
+    # literal BASE_SUMMARY, and never guessed from the app's own display setting.
+    assert row["currency"] == "CHF"
+    # Nothing the ingest reads was dropped, so no warning may claim otherwise.
+    assert not [w for w in warnings if "endingCash" in w or "levelOfDetail" in w]
+
+
+@pytest.mark.asyncio
+async def test_the_parsed_document_becomes_one_cash_balance_row():
+    svc, flex_data, _ = _parse(CASH_REPORT_XML)
+    balances = await resolve_cash_balances(
+        _FakeCurrency({}), await svc.extract_equity_summary(flex_data),
+        await svc.extract_cash_report(flex_data),
+    )
+    assert balances == [{
+        "report_date": date(2026, 8, 25), "currency": "CHF",
+        "cash": Decimal("12212.62"), "stock": None, "total": None,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_both_portal_options_together_do_not_double_the_balance():
+    """
+    Ticking Base Currency Summary *and* Currency Breakout emits both shapes in one
+    document. 100 EUR + 200 USD + a 12,212.62 summary must be 12,212.62, not more.
+    """
+    svc, flex_data, _ = _parse(CASH_REPORT_BOTH_XML)
+    rows = await svc.extract_cash_report(flex_data)
+    assert len(rows) == 3
+    assert sum(1 for r in rows if r["is_base_summary"]) == 1
+
+    balances = await resolve_cash_balances(
+        _FakeCurrency({"USD": Decimal("0.9")}), [], rows
+    )
+    assert len(balances) == 1
+    assert balances[0]["cash"] == Decimal("12212.62")
+    assert balances[0]["currency"] == "CHF"
+
+
+@pytest.mark.asyncio
+async def test_a_statement_without_the_section_yields_nothing():
+    """
+    The state every statement was in before the portal edit, and the one a fresh
+    install stays in. It must be silent rather than an error.
+
+    The section is deleted rather than renamed, because ibflex rejects an unknown child
+    *element* outright — `_sanitize_flex_xml` absorbs unknown attributes and values, not
+    unknown sections. That is a real boundary on what a portal edit can safely enable:
+    a section ibflex does not model aborts the whole document, open positions included.
+    """
+    start = CASH_REPORT_XML.index(b" <CashReport>")
+    end = CASH_REPORT_XML.index(b"</CashReport>") + len(b"</CashReport>")
+    no_section = CASH_REPORT_XML[:start] + CASH_REPORT_XML[end:]
+    svc, flex_data, _ = _parse(no_section)
+    assert await svc.extract_cash_report(flex_data) == []
+    assert await svc.extract_equity_summary(flex_data) == []
