@@ -618,8 +618,10 @@ day on which no money left the account.** It also cliffed on a chart whose portf
 no longer does, so the picture read as a ~6k outperformance that was entirely artefact.
 
 It now invests the **same `money_in_legs` the chart draws**, which is rotation-neutral by
-construction. After the fix, over the same window: `59,075 → 57,695`, moving with the
-index and nothing else.
+construction. Measured on production after the cache was cleared, over the same window:
+`60,770 → 61,071 → 61,141 → 61,415` across the rotation, moving with the index and nothing
+else. A full year shows no discontinuity; its only two >6% day-moves are the days money
+was actually contributed, which legitimately move a hypothetical.
 
 **Two things about it are deliberately *not* claimed.** Before `coverage_from` a rotation
 still moves it, because that era has no deposit ledger and lot cost basis genuinely
@@ -629,8 +631,13 @@ baseline is still projected differently from the portfolio's (each point's date 
 leg's own date), a few percent apart under CHF; invisible on the chart because only the
 value line is drawn, so it stays *Worth doing next* rather than being smuggled in here.
 
-**`benchmark_timeline_cache` was cleared on production** as part of the deploy — 1,569
-rows. The cache is sound only for a fixed basis, so changing the arithmetic requires it.
+**`benchmark_timeline_cache` was cleared on production** after the deploy — 1,572 rows.
+The cache is sound only for a fixed basis, so changing the arithmetic requires it, and
+there is **no route or CLI for a full clear**: the scheduler only calls
+`clear_cache_recent_days(7)`. That partial clear is what made the state confusing for a
+while — the last seven days had been recomputed on the new basis while everything older
+was still on the old one, so the cliff was gone but the series had a seam at the 7-day
+boundary. Clearing it is a `docker exec` running `BenchmarkService.clear_cache()`.
 
 ## Ran on production 2026-08-26 — deployed, ingested, verified
 
@@ -2459,7 +2466,10 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
 6. **Project the benchmark's baseline the way the portfolio's is projected — now one quantity,
    not two lookalikes.** Since 2026-08-26 the benchmark invests the *same* `money_in_legs` the
    chart draws, so this stopped being "two similar series" and became one series projected two
-   ways: 50,255 against 53,330 on the day that shipped, a few percent under CHF. Still invisible
+   ways: the benchmark's baseline wobbles with FX (53,308-53,725 across that week) while the
+   portfolio's sits flat at 53,330 — under half a percent either way, not the 3,000 an early
+   verification claimed by double-applying `_apply_base_currency`, which the service already
+   calls before returning. Still invisible
    on the chart (only the benchmark's value line is drawn) and it does not reach beta, which
    excludes flow days — which is why it is here rather than in that change. Originally found while
    fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running

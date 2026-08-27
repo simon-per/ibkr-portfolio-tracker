@@ -1298,10 +1298,19 @@ Two consequences worth knowing:
 A gap remains, and it is CLAUDE.md's *dominant failure mode* in its mildest form:
 `_apply_base_currency` converts the benchmark's running baseline at **each point's
 date**, while the portfolio converts each leg at **its own date**. Same legs, two
-projection rules, so the two baselines differ by a few percent under a non-EUR base
-(50,255 against 53,330 on the day this shipped). It is invisible on the chart — only the
-benchmark's *value* line is drawn — so it is recorded rather than fixed here; see
-*Worth doing next* in STATUS.md.
+projection rules, so under a non-EUR base the benchmark's baseline **wobbles with FX**
+around a portfolio figure that sits still — measured across the week this shipped, 53,308
+to 53,725 against a flat 53,330, so under half a percent either way. It is invisible on
+the chart, because only the benchmark's *value* line is drawn, and it does not reach beta,
+which excludes flow days. Recorded rather than fixed here; see *Worth doing next* in
+STATUS.md.
+
+**And note how the size of that gap was got wrong once.**
+`calculate_benchmark_value_over_time` **already applies `_apply_base_currency` before
+returning**, so a verification script that helpfully called it again measured a
+double-converted series and reported the gap as 3,000 CHF rather than 250 — roughly one
+EUR/CHF factor, which is exactly what a plausible wrong number looks like. Do not
+re-project the return value; it is already in the base currency.
 
 ### Where cash reaches, and where it deliberately does not
 
