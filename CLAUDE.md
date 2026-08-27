@@ -1187,6 +1187,37 @@ reason to trust the size of it — the ledger sum gives 12,228.74 CHF and summin
 timeline's own `external_flow_eur` from `coverage_from` gives 12,212, a tenth of a
 percent apart.
 
+### An FX conversion is cash-to-cash, and idle foreign cash is a known soft spot
+
+**IBKR books every currency conversion as a `<Trade>` with `assetCategory="CASH"`, and
+`extract_trades` filters to `STK`** — so all of them are excluded from the trades ledger
+and therefore from the derived balance. That is correct rather than lucky: a conversion
+gives up one currency and receives another, so in *base* terms it nets to zero and adding
+it would double-count the cash it moves. The 2026-08-26 statement carried **221** of them
+against 37 STK trades, mostly IBKR's automatic per-trade handling (100 `USD.TWD`, 66
+`USD.CHF`); exactly one carried a fee, −1.60, which is the deliberate bulk convert.
+
+**What this does expose is a soft spot in the derived balance.** Cash events are
+projected at *their own date*, which is right for the deployed-capital line they sit
+beside — but an **idle balance held in a foreign currency really does revalue every day**,
+and the derived series cannot see that. When the Ireland-to-US rotation left five figures
+sitting in USD, that stopped being theoretical.
+
+It is bounded rather than fixed, and knowing why is the point:
+
+- **A measured row resets it.** Every successful Flex sync writes one, so the unrevalued
+  window is normally a day. Two days of USDCHF on a 12,500 balance is about ±40 CHF.
+- **The measured figure itself is already right**, because IBKR revalues into its own base
+  before reporting `endingCash`. So whenever `cash_source` reads `ibkr` for a date, the
+  currency mix is handled exactly.
+- **It only grows when syncs fail**, which is the same failure `find_flex_generation_gap`
+  already alarms on.
+
+The clean upgrade, if it ever matters: tick **Currency Breakout** beside Base Currency
+Summary. `resolve_cash_balances` already prefers the summary and would keep doing so, but
+the per-currency rows would give a future revision the balances to revalue daily. Not
+built, because a sub-half-percent correction on one line is not worth a second cash schema.
+
 ### `<EquitySummaryInBase>` is the measured answer, and it is off by default
 
 `extract_equity_summary` reads IBKR's own end-of-day `cash` / `stock` / `total` into
