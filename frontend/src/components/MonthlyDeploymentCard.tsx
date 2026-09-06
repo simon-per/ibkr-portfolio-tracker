@@ -81,6 +81,11 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   const hasLedger = data?.windows.some(w => w.money_in_method !== 'deployed') ?? false
   const showDeployed = !hasMoneyIn || hasLedger
 
+  const legendItems = [
+    ...(hasMoneyIn ? [{ label: 'Money in', color: MONEY_IN_COLOR }] : []),
+    ...(showDeployed ? [{ label: 'Deployed', color: DEPLOYED_COLOR }] : []),
+  ]
+
   // The largest month where deployment exceeded money in, named below the chart. The
   // largest rather than the latest, so the note cannot vanish while the spike it
   // explains is still on screen, and so it points at the bar being looked at.
@@ -181,7 +186,14 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                       }}
                     />
                     <Tooltip content={<DeploymentTooltip hasMoneyIn={hasMoneyIn} />} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    {/* Rendered rather than left to Recharts, which derives its own order
+                        from the children in a way that does not match the order the bars
+                        are DRAWN in: declared money-in-first, the legend still came out
+                        "Deployed, Money in" while the leftmost bar of each pair was money
+                        in. Two orders for one pair of series, and the wrong one puts the
+                        secondary first. (`payload` is not in this version's Legend props,
+                        so `content` is the typed way to say it.) */}
+                    <Legend content={<SeriesLegend items={legendItems} />} />
                     {/* Money in goes negative in a withdrawal month, so the zero line stays. */}
                     <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeWidth={1} />
                     {hasMoneyIn && (
@@ -212,6 +224,24 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
         </CardContent>
       )}
     </Card>
+  )
+}
+
+/** Legend in declaration order, so it reads left-to-right like the bars do. */
+function SeriesLegend({ items }: { items: Array<{ label: string; color: string }> }) {
+  return (
+    <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs">
+      {items.map(i => (
+        <li key={i.label} className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+            style={{ backgroundColor: i.color }}
+            aria-hidden="true"
+          />
+          <span>{i.label}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
