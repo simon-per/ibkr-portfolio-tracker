@@ -5,6 +5,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
 
+from app.accounts import IBKR
 from app.database import Base
 
 # flow_type values. Deposits are selected by an explicit whitelist rather than by
@@ -15,6 +16,19 @@ TRANSFER = "TRANSFER"              # direction unknown
 TRANSFER_IN = "TRANSFER_IN"
 TRANSFER_OUT = "TRANSFER_OUT"
 TRANSFER_TYPES = (TRANSFER, TRANSFER_IN, TRANSFER_OUT)
+
+# Costs and income a broker statement does not itemise but a Pillar 3a export does.
+# They move cash and are emphatically not money added, which the whitelist above
+# already guarantees without naming them. IBKR's equivalents remain invisible — the
+# documented ~-250 CHF drift in the derived balance is exactly these.
+#
+# INCOME covers every inbound distribution (dividend, interest, liquidation
+# proceeds) and exists so a tax-exempt account's income has somewhere to go that is
+# *not* `dividend_payments`. That is an exclusion achieved by not writing the row,
+# rather than by a filter three readers have to remember: the era splice, the
+# forecast and the DA-1 reclaim all stay IBKR-only for free.
+FEE = "FEE"
+INCOME = "INCOME"
 
 
 class CashFlow(Base):
@@ -41,6 +55,11 @@ class CashFlow(Base):
     # bool so the other non-dividend cash types (broker interest, fees) can be added
     # later without a migration.
     flow_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # See app/accounts.py. Pillar 3a cash is locked, so it is derived and reported
+    # separately rather than summed into the balance a purchase could draw on.
+    account: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=IBKR, default=IBKR, index=True
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)  # signed, original currency
     currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     # Pre-converted at flow_date, matching taxlots.cost_basis_eur / dividend_payments.*_eur:

@@ -4,7 +4,17 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from typing import List, Optional
 
+from app.accounts import IBKR
 from app.database import Base
+
+
+# Where this security's prices come from, and therefore whether the Yahoo sync
+# loop may touch it. `sync_securities` iterates every security unfiltered and the
+# variation loop can auto-save a bare-symbol mapping, so a fund whose ticker
+# collides with an unrelated US listing has no way to opt out — the SBI failure
+# shape. `MANUAL` is that opt-out: prices arrive from a statement import instead.
+PRICE_SOURCE_YAHOO = "yahoo"
+PRICE_SOURCE_MANUAL = "manual"
 
 
 class Security(Base):
@@ -20,9 +30,23 @@ class Security(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     description: Mapped[str] = mapped_column(String(200), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)  # USD, EUR, etc.
-    conid: Mapped[int] = mapped_column(nullable=False, unique=True, index=True)  # IBKR unique ID
+    # Nullable since 2026-09-06: an IBKR identifier, and a Pillar 3a fund has none.
+    # Still unique, which SQLite applies per non-NULL value, so many accountless
+    # securities coexist. `SecurityRepository.upsert` keys on it and is therefore
+    # the IBKR path only — a non-IBKR security upserts on (isin, exchange).
+    conid: Mapped[Optional[int]] = mapped_column(nullable=True, unique=True, index=True)
     asset_category: Mapped[str] = mapped_column(String(20), nullable=True)  # STK, OPT, FUT, etc.
     exchange: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # See app/accounts.py. Defaults to IBKR so every pre-existing row is correct
+    # and so code that has never heard of accounts keeps writing valid rows.
+    account: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=IBKR, default=IBKR, index=True
+    )
+    price_source: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=PRICE_SOURCE_YAHOO, default=PRICE_SOURCE_YAHOO,
+    )
 
     # Allocation data
     sector: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

@@ -24,7 +24,21 @@ class SecurityRepository:
         return result.scalar_one_or_none()
 
     async def get_by_conid(self, conid: int) -> Optional[Security]:
-        """Get security by IBKR conid (unique identifier)"""
+        """
+        Get security by IBKR conid (unique identifier).
+
+        Refuses a NULL rather than answering, and the reason is not defensiveness.
+        `conid` is nullable since accounts arrived (a Pillar 3a fund has no IBKR
+        contract id), and SQLAlchemy renders ``conid == None`` as ``IS NULL`` -- so
+        this would not merely fail to find anything, it would **match an arbitrary
+        conid-less security**, or raise MultipleResultsFound once there are two.
+        Resolve a non-IBKR security by ``get_by_isin_exchange`` instead.
+        """
+        if conid is None:
+            raise ValueError(
+                "get_by_conid(None): a conid-less security cannot be found by conid "
+                "-- IS NULL would match an arbitrary one. Use get_by_isin_exchange."
+            )
         result = await self.session.execute(
             select(Security).where(Security.conid == conid)
         )
@@ -58,9 +72,22 @@ class SecurityRepository:
 
     async def upsert(self, security_data: dict) -> Security:
         """
-        Insert or update security.
-        Uses conid as the unique identifier for upsert.
+        Insert or update security, keyed on conid -- so this is **the IBKR path**.
+
+        A security with no conid must go through ``upsert_by_isin_exchange``. Keying
+        on conid here is not an implementation detail that could be relaxed: with a
+        NULL it matches an arbitrary conid-less row (see ``get_by_conid``), so the
+        second import of a second account would overwrite the first fund with the
+        second one's name, ISIN and currency, having looked perfectly fine the first
+        time. Refused loudly instead.
         """
+        if security_data.get('conid') is None:
+            raise ValueError(
+                "SecurityRepository.upsert requires a conid: it is the IBKR upsert "
+                "path. A security without one (Pillar 3a, or any non-IBKR ledger) "
+                "must use upsert_by_isin_exchange, which keys on the constraint that "
+                "actually identifies it."
+            )
         # Try to find existing by conid
         existing = await self.get_by_conid(security_data['conid'])
 
@@ -75,6 +102,27 @@ class SecurityRepository:
         else:
             # Create new
             return await self.create(security_data)
+
+    async def upsert_by_isin_exchange(self, security_data: dict) -> Security:
+        """
+        Insert or update keyed on ``(isin, exchange)`` -- the composite constraint
+        the table already carries, and the only identity a non-IBKR security has.
+
+        Exists because the same ISIN legitimately appears twice (ASML on NASDAQ and
+        on AEB), so the pair is the key and the ISIN alone is not. A caller that
+        holds a conid should use ``upsert``; this one neither reads nor writes it.
+        """
+        existing = await self.get_by_isin_exchange(
+            security_data['isin'], security_data.get('exchange')
+        )
+        if existing:
+            for key, value in security_data.items():
+                if hasattr(existing, key):
+                    setattr(existing, key, value)
+            await self.session.flush()
+            await self.session.refresh(existing)
+            return existing
+        return await self.create(security_data)
 
     async def bulk_upsert(self, securities_data: List[dict]) -> int:
         """

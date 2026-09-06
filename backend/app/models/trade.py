@@ -5,6 +5,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
 
+from app.accounts import IBKR
 from app.database import Base
 
 
@@ -23,6 +24,13 @@ class Trade(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     ib_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    # The source ledger's durable instrument identifier: IBKR's contract id for an
+    # IBKR row, and the **ISIN** for a ledger that issues no such id (Pillar 3a).
+    # Deliberately still NOT NULL -- every IBKR row honours it and weakening the
+    # contract for a case that has a perfectly good stable identifier is a bad trade.
+    # Safe because it is only ever *matched*, never parsed: `get_by_conid_in_range`
+    # is simply never satisfied by a `CH...` string, and `persist_transactions`
+    # filters unresolved conids through `.isdigit()` before `int()`.
     conid: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     security_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("securities.id", ondelete="SET NULL"), nullable=True, index=True
@@ -37,6 +45,12 @@ class Trade(Base):
     currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     realized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)  # fifoPnlRealized
     asset_category: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # See app/accounts.py. Read by the tax report, which must filter realized gains
+    # on the *trade* rather than on its security: the join there is an outer one
+    # because `security_id` is nullable, so a Security-side filter drops unlinked rows.
+    account: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=IBKR, default=IBKR, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 
     __table_args__ = (

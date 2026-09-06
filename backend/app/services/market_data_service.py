@@ -17,6 +17,7 @@ from app.config import settings
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.models.security import Security
 from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_eligibility import is_yahoo_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -572,6 +573,18 @@ class MarketDataService:
         """
         # Yahoo has already told us to back off, so asking again for a different
         # security is the same IP making the same mistake. Ahead of the sleep as
+        # The innermost gate, deliberately duplicated from `sync_securities`. This
+        # function is reachable directly, so a rule enforced only at the loop leaks
+        # the first time somebody calls the inner one -- and what leaks here is a
+        # bare-symbol auto-mapping onto an unrelated listing, which is silent, sticky
+        # and shadows the suffix logic even after the mapping is fixed.
+        if not is_yahoo_eligible(security):
+            logger.debug(
+                f"Not fetching {security.symbol}@{security.exchange}: "
+                f"price_source={security.price_source}"
+            )
+            return 0
+
         # well as the request: once a pass is abandoned there is nothing to pace.
         if self.rate_limited:
             logger.warning(
@@ -678,15 +691,27 @@ class MarketDataService:
 
         Returns counts plus `rate_limited_after` (the symbol we stopped on, or None).
         The caller owns the commit, the response shape and any diagnostics.
+
+        Securities whose prices do not come from Yahoo are skipped and counted in
+        `skipped_not_yahoo` rather than dropped silently -- a loop that quietly
+        processes fewer than it was handed reads as coverage it does not have.
         """
         total_prices = 0
         processed = 0
+        skipped_not_yahoo = 0
         errors: List[str] = []
         rate_limited_after: Optional[str] = None
 
         logger.info(f"Syncing market data for {len(securities)} securities...")
 
         for security in securities:
+            if not is_yahoo_eligible(security):
+                skipped_not_yahoo += 1
+                logger.debug(
+                    f"Skipping {security.symbol}@{security.exchange}: "
+                    f"price_source={security.price_source}, not a Yahoo instrument"
+                )
+                continue
             try:
                 logger.info(
                     f"Fetching prices for {security.symbol} ({security.exchange})..."
@@ -715,6 +740,7 @@ class MarketDataService:
         return {
             "total_prices": total_prices,
             "processed": processed,
+            "skipped_not_yahoo": skipped_not_yahoo,
             "errors": errors,
             "rate_limited_after": rate_limited_after,
         }

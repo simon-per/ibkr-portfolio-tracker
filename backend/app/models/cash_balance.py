@@ -1,10 +1,11 @@
-from sqlalchemy import String, Numeric, Date
+from sqlalchemy import String, Numeric, Date, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
 
+from app.accounts import IBKR
 from app.database import Base
 
 
@@ -33,13 +34,21 @@ class CashBalance(Base):
     detectable rather than silently applied — the SBI lesson, where a price carried a
     currency label it had not earned.
 
-    Idempotent on ``report_date``: the query window re-delivers the same days on every
-    sync, and a later statement's figure for a day supersedes an earlier one.
+    Idempotent on ``(account, report_date)``: the query window re-delivers the same days
+    on every sync, and a later statement's figure for a day supersedes an earlier one.
+    The account is part of the key because a level is a level *of something* — two
+    accounts both reporting a balance for one date is not a conflict, and letting one
+    overwrite the other would splice a foreign correction into `CashService`.
     """
     __tablename__ = "cash_balances"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    report_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, index=True)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    #: See app/accounts.py. `_apply_measured` splices a measured level only into the
+    #: balance of the account that reported it.
+    account: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=IBKR, default=IBKR, index=True
+    )
     #: The currency IBKR reported in — its account base, not necessarily the app's.
     currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     cash: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
@@ -52,6 +61,10 @@ class CashBalance(Base):
     #: cross-check rather than a figure to serve.
     total: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('account', 'report_date', name='uix_cash_balance_account_date'),
+    )
 
     def __repr__(self) -> str:
         return (

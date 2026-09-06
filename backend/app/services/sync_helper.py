@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Set
 
 from sqlalchemy import and_, select
 
+from app.accounts import IBKR
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
@@ -700,7 +701,12 @@ async def reconcile_taxlots(
     # Grouping into a list (not a price-keyed dict) preserves multiple distinct
     # lots that share the same (security_id, open_date, price).
     snapshot: Dict[int, List[Dict]] = defaultdict(list)
-    existing_open_lots = await taxlot_repo.get_open_taxlots()
+    # IBKR only, and this is the line that bounds everything below. `all_security_ids`
+    # is fed straight into a DELETE, so an unscoped read here deletes the open lots of
+    # every account this statement does not mention -- which is every other account,
+    # always, since an IBKR statement cannot mention a Swiss pillar 3a fund. Phase D
+    # would then see the whole position as sold and book a fictitious disposal.
+    existing_open_lots = await taxlot_repo.get_open_taxlots(account=IBKR)
 
     # --- Guard: refuse to wipe the portfolio on an empty/failed statement ---
     # Phase B below deletes every open lot before recreating from incoming data.
@@ -709,10 +715,16 @@ async def reconcile_taxlots(
     # body, network timeout, throttle), NOT a genuine full liquidation. Aborting
     # here — before any delete — leaves existing data intact. A real liquidation
     # is instead evidenced by SELL trades once <Trades> parsing is enabled.
+    # `existing_open_lots` is IBKR-scoped above, which this guard needs in both
+    # directions. Counting another account's lots would make it fire on a genuine
+    # full liquidation of the IBKR book (nothing to protect, but it refuses anyway),
+    # and -- the dangerous half -- an IBKR book that had emptied would be masked by a
+    # pillar 3a holding, so the guard would stay silent on exactly the statement it
+    # exists to catch.
     if not taxlots_data and existing_open_lots:
         raise EmptyStatementError(
             f"IBKR sync returned 0 tax lots but {len(existing_open_lots)} open "
-            f"lot(s) exist; treating as a failed statement and refusing to delete."
+            f"IBKR lot(s) exist; treating as a failed statement and refusing to delete."
         )
 
     all_security_ids = set(conid_to_security_id.values()) | {
@@ -962,12 +974,20 @@ async def restamp_unsourced_closed_lots(
     if trade_repo is None:
         return 0
 
+    # IBKR only. This repairs lots closed by *this* pipeline's old heuristic, and the
+    # SELL trades it matches against are IBKR executions -- so an unscoped scan could
+    # restamp another account's closed lot with an IBKR sale date that has nothing to
+    # do with it, on a quantity collision alone. Belt and braces: the finpension
+    # importer writes an explicit `close_source`, so its lots are never candidates.
     unsourced = (await taxlot_repo.session.execute(
-        select(TaxLot).where(
+        select(TaxLot)
+        .join(Security, TaxLot.security_id == Security.id)
+        .where(
             and_(
                 TaxLot.is_open == False,  # noqa: E712 - SQL comparison, not identity
                 TaxLot.close_source.is_(None),
                 TaxLot.security_id.isnot(None),
+                Security.account == IBKR,
             )
         )
     )).scalars().all()
@@ -976,7 +996,9 @@ async def restamp_unsourced_closed_lots(
 
     sells_by_security: Dict[int, List] = defaultdict(list)
     rows = (await trade_repo.session.execute(
-        select(Trade).where(Trade.security_id.isnot(None))
+        select(Trade).where(
+            and_(Trade.security_id.isnot(None), Trade.account == IBKR)
+        )
     )).scalars().all()
     for trade in rows:
         if (trade.buy_sell or "").upper() == "SELL":

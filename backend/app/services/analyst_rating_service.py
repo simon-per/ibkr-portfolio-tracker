@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.models.security import Security
+from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.analyst_rating import AnalystRating
 from app.services.yahoo_rate_limit import is_rate_limit
 
@@ -186,12 +187,18 @@ class AnalystRatingService:
             Dict with sync statistics
         """
         # Get securities
+        # yahoo_eligible() on both branches, including the explicit-ids one: a
+        # caller passing an id is not asserting Yahoo covers it.
         if security_ids:
             result = await self.db.execute(
-                select(Security).where(Security.id.in_(security_ids))
+                select(Security).where(
+                    Security.id.in_(security_ids), yahoo_eligible()
+                )
             )
         else:
-            result = await self.db.execute(select(Security))
+            result = await self.db.execute(
+                select(Security).where(yahoo_eligible())
+            )
 
         securities = list(result.scalars().all())
 
@@ -311,7 +318,10 @@ class AnalystRatingService:
         The lesson is about the citation rather than the code — a fix justified by
         a sibling's supposed correctness should read the sibling's entry point.
         """
-        result = await self.db.execute(select(Security))
+        # yahoo_eligible(): this builds the candidate list for a Yahoo fetch, so an
+        # ineligible security must never enter it -- otherwise it is "missing a
+        # rating" forever and re-queued on every pass.
+        result = await self.db.execute(select(Security).where(yahoo_eligible()))
         all_securities = list(result.scalars().all())
 
         rated_ids = {r.security_id for r in await self.rating_repo.get_all()}

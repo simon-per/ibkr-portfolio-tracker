@@ -5,6 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.accounts import IBKR
 from app.models.cash_balance import CashBalance
 
 
@@ -16,15 +17,20 @@ class CashBalanceRepository:
         """
         Store one day's balance, replacing whatever was there.
 
-        Idempotent on `report_date`, because the Flex window re-delivers the same days
+        Idempotent on `(account, report_date)`, because the Flex window re-delivers the
+        same days
         on every sync. Last write wins deliberately: a later statement's figure for a
         day supersedes an earlier one, which is how a same-day balance settles once the
         session closes — the same reasoning as `PROVISIONAL_PRICE_DAYS` on market prices.
         """
+        # `account` must be materialised here rather than left to the column default:
+        # ON CONFLICT keys on it, and a value absent from the INSERT is absent from
+        # the conflict target too, so the upsert would silently become an insert.
+        data = {'account': IBKR, **data}
         stmt = sqlite_insert(CashBalance).values(**data)
         await self.session.execute(
             stmt.on_conflict_do_update(
-                index_elements=[CashBalance.report_date],
+                index_elements=[CashBalance.account, CashBalance.report_date],
                 set_={
                     "currency": stmt.excluded.currency,
                     "cash": stmt.excluded.cash,

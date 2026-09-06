@@ -7,6 +7,7 @@ from sqlalchemy import select, delete, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.models.security import Security
 from app.models.taxlot import TaxLot
 
 
@@ -39,14 +40,28 @@ class TaxLotRepository:
         result = await self.session.execute(query.order_by(TaxLot.open_date))
         return list(result.scalars().all())
 
-    async def get_open_taxlots(self) -> List[TaxLot]:
-        """Get all open (active) tax lots with their securities"""
-        result = await self.session.execute(
+    async def get_open_taxlots(self, account: Optional[str] = None) -> List[TaxLot]:
+        """
+        All open (active) tax lots with their securities.
+
+        ``account`` defaults to None, meaning **every** account, because the two
+        callers want opposite things and the safe default is different for each.
+        `/api/sync/status` counts what the database holds and should keep blending.
+        `reconcile_taxlots` passes ``IBKR`` and must: it feeds this straight into
+        `delete_open_by_security_ids`, so an unscoped read there deletes the open
+        lots of every account an IBKR statement does not happen to mention -- which
+        is all of them.
+        """
+        query = (
             select(TaxLot)
             .options(joinedload(TaxLot.security))
             .where(TaxLot.is_open == True)
-            .order_by(TaxLot.open_date)
         )
+        if account is not None:
+            query = query.join(Security, TaxLot.security_id == Security.id).where(
+                Security.account == account
+            )
+        result = await self.session.execute(query.order_by(TaxLot.open_date))
         return list(result.scalars().all())
 
     async def get_all(

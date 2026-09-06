@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 import yfinance as yf
 
 from app.models.security import Security
+from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.cash_service import CashService, UNKNOWN
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
@@ -166,7 +167,9 @@ class AllocationService:
         # `/api/allocation/status` and this loop cannot disagree about which securities
         # are pending — see needs_allocation_refresh.
         cutoff_date = utcnow() - timedelta(days=ALLOCATION_STALE_DAYS)
-        query = select(Security)
+        # yahoo_eligible(): this loop fetches `.info` per security. A fund Yahoo
+        # has never heard of has no sector and no country there either.
+        query = select(Security).where(yahoo_eligible())
         if not force_refresh:
             query = query.where(needs_allocation_refresh(cutoff_date))
         result = await self.db.execute(query)

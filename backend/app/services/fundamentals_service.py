@@ -13,6 +13,7 @@ from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import ttm_growth_from_quarterly
 from app.models.security import Security
+from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,10 @@ class FundamentalsService:
 
     async def sync_fundamentals_data(self, force_refresh: bool = False) -> Dict:
         """Sync fundamental metrics and earnings for all securities."""
-        result = await self.db.execute(select(Security))
+        # yahoo_eligible(): ~5 Yahoo endpoints per security, the most expensive loop
+        # in the app. Its sibling `get_fundamentals_for_portfolio` deliberately does
+        # NOT filter -- that one reads stored rows and must show every holding.
+        result = await self.db.execute(select(Security).where(yahoo_eligible()))
         securities = list(result.scalars().all())
 
         if not securities:

@@ -17,6 +17,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.security import Security
+from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.taxlot import TaxLot
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
@@ -116,7 +117,9 @@ class DividendService:
 
     async def sync_dividend_data(self) -> Dict:
         """Fetch dividend ex-dates from yfinance for all securities."""
-        result = await self.db.execute(select(Security))
+        # yahoo_eligible(). The breakdown reader below deliberately does not filter:
+        # it must name every holding, including ones Yahoo cannot price.
+        result = await self.db.execute(select(Security).where(yahoo_eligible()))
         securities = list(result.scalars().all())
 
         if not securities:

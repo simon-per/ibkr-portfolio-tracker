@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 import app.models  # noqa: F401  register all mappers for relationship config
+from app.accounts import IBKR
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
@@ -74,11 +75,38 @@ async def _make_repos_with_txns():
     )
 
 
-async def _seed_open_lot(repo, security_id, open_date, quantity, price, currency="USD"):
+async def _ensure_security(repo, security_id, account=IBKR, currency="USD"):
+    """
+    Give a seeded lot the `securities` row production guarantees it has.
+
+    `taxlots.security_id` is a NOT NULL foreign key, so a lot without a security is
+    not a state the app can reach -- but SQLite does not enforce FKs unless asked,
+    so these fixtures used to create one anyway. That went unnoticed until
+    `get_open_taxlots(account=...)` had to join `securities` to read the account,
+    at which point the orphan lots vanished and the wipe guard stopped firing.
+    """
+    if await repo.session.get(Security, security_id) is not None:
+        return
+    repo.session.add(Security(
+        id=security_id,
+        isin=f"XX{security_id:010d}",
+        symbol=f"SEC{security_id}",
+        description=f"Security {security_id}",
+        currency=currency,
+        conid=security_id,
+        exchange="NASDAQ",
+        account=account,
+    ))
+    await repo.session.flush()
+
+
+async def _seed_open_lot(repo, security_id, open_date, quantity, price, currency="USD",
+                         account=IBKR):
+    await _ensure_security(repo, security_id, account=account, currency=currency)
     q = Decimal(str(quantity))
     p = Decimal(str(price))
     cost = q * p
-    await repo.create({
+    return await repo.create({
         "security_id": security_id,
         "open_date": open_date,
         "quantity": q,
