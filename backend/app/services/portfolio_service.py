@@ -662,6 +662,24 @@ class PortfolioService:
             )
         money_in_legs.sort(key=lambda leg: leg[0])
 
+        # History starts at the first thing that happened, which is not always a
+        # purchase. Every window in `get_contributions` is clamped to `first_open`, so
+        # anything earlier is outside *all* of them and silently absent from money in.
+        #
+        # That was invisible while there was one account: the IBKR holdings arrived by
+        # in-kind transfer carrying their original 2024-2025 open dates, so the first
+        # lot predates the first deposit by years and no deposit could fall outside.
+        # A retirement account is the opposite shape and the common one -- you pay in,
+        # and it is invested days later -- so 1,758 CHF of real deposits read as 0.00
+        # money in against 1,842 EUR deployed. Not a pillar 3a quirk: an IBKR deposit
+        # made before the first purchase was always dropped the same way.
+        #
+        # Widened rather than replaced: a transferred lot still has to anchor the
+        # history it really belongs to, so this is min(), never the ledger alone.
+        if money_in_legs:
+            earliest_leg = money_in_legs[0][0]
+            first_open = min(first_open, earliest_leg) if first_open else earliest_leg
+
         return {
             "legs": legs,
             "deposit_legs": deposit_legs,

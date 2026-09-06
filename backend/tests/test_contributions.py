@@ -574,3 +574,78 @@ def test_shift_months_clamps_to_the_shorter_target_month():
     assert _shift_months(date(2024, 5, 31), 3) == date(2024, 2, 29)   # leap year
     assert _shift_months(date(2026, 3, 15), 12) == date(2025, 3, 15)
     assert _shift_months(date(2026, 1, 10), 3) == date(2025, 10, 10)  # year boundary
+
+
+@pytest.mark.asyncio
+async def test_a_deposit_before_the_first_purchase_still_counts_as_money_in():
+    """
+    Every window is clamped to the start of history, and history used to start at the
+    first *tax lot*. A deposit made before the first purchase therefore fell outside
+    all of them and read as 0.00 money in against a full deployed figure.
+
+    Invisible while there was one account: the IBKR holdings arrived by in-kind
+    transfer carrying their original open dates, so the first lot predates the first
+    deposit by years. A retirement account is the opposite shape and the common one —
+    you pay in, and it is invested days later — which is how this surfaced. It was
+    never 3a-specific: an IBKR deposit landing before the first purchase was always
+    dropped the same way.
+    """
+    engine, session = await _make_session()
+    try:
+        settings = AppSettingsRepository(session)
+        await settings.widen_cash_flows_covered_from(date(2026, 8, 25))
+        session.add_all([
+            _flow(date(2026, 8, 25), "256.00", "d1"),
+            _flow(date(2026, 8, 26), "1002.00", "d2"),
+            _flow(date(2026, 8, 28), "500.00", "d3"),
+            # Invested a few days later, and for less than was paid in — the rest is
+            # still sitting as cash, which is why deployed must be the smaller figure.
+            _lot(date(2026, 9, 1), "1737.98"),
+        ])
+        await session.flush()
+
+        report = await PortfolioService(session).get_contributions(
+            as_of=date(2026, 9, 6)
+        )
+        all_time = _window(report, "all")
+
+        assert all_time["money_in_eur"] == 1758.00
+        assert all_time["deposits_eur"] == 1758.00
+        assert all_time["money_in_method"] == "deposits"
+        # The gap is the uninvested cash, not a lost deposit.
+        assert all_time["deployed_eur"] == 1737.98
+        # History is anchored on the first deposit, not the first buy.
+        assert report["first_contribution_date"] == "2026-08-25"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_transferred_lot_still_anchors_history_before_the_ledger():
+    """
+    The other direction, so the widening above cannot become a replacement. A lot
+    carried in from a previous broker predates every cash-flow row by design, and it
+    must still set the start of history — otherwise the pre-IBKR years vanish from the
+    all-time average and it divides by a few months instead of a few years.
+    """
+    engine, session = await _make_session()
+    try:
+        settings = AppSettingsRepository(session)
+        await settings.widen_cash_flows_covered_from(date(2026, 1, 9))
+        session.add_all([
+            _lot(date(2024, 3, 15), "5000.00"),
+            _flow(date(2026, 1, 9), "1000.00", "d1"),
+        ])
+        await session.flush()
+
+        report = await PortfolioService(session).get_contributions(
+            as_of=date(2026, 9, 6)
+        )
+        assert report["first_contribution_date"] == "2024-03-15"
+        # Spliced: lot cost basis before the ledger, real deposits from it.
+        assert _window(report, "all")["money_in_method"] == "spliced"
+        assert _window(report, "all")["money_in_eur"] == 6000.00
+    finally:
+        await session.close()
+        await engine.dispose()
