@@ -87,6 +87,31 @@ PRICE_SOURCE_CARRY = "finpension_carry"
 #: could never fire. The carry is exactly what is being bridged.
 CARRIED_PRICE_SOURCES = frozenset({PRICE_SOURCE_CARRY})
 
+
+async def purge_carried_prices(db, security_id: int) -> int:
+    """
+    Drop a security's carried rows, keeping every observed NAV.
+
+    Called the moment a security gains a real price feed. A carry is a *stand-in*
+    for the feed that did not exist, and it is written forward past today — so once
+    a feed arrives the carry does not merely become redundant, it **shadows** it:
+    the read path asks for today, finds a carried row at a weeks-old NAV, and never
+    looks back at the real close a day or two earlier. Measured on production the
+    day this shipped: 448.5281 carried against a 451.23 Yahoo close, a 0.6% gap that
+    would have widened every day until the carry ran out six weeks later.
+
+    Statement rows stay. Those are observations by the provider, they are what the
+    mapping was verified against, and a Yahoo close for the same date supersedes
+    them through the ordinary upsert anyway.
+    """
+    result = await db.execute(
+        delete(MarketPrice).where(
+            MarketPrice.security_id == security_id,
+            MarketPrice.source.in_(CARRIED_PRICE_SOURCES),
+        )
+    )
+    return result.rowcount or 0
+
 #: How far past the last observed NAV a carried price is written.
 #:
 #: Bounded rather than run to today, deliberately. A six-month-stale upload would
@@ -196,7 +221,7 @@ async def ingest_finpension_report(
 
     security_ids: Dict[str, int] = {}
     for isin, name in sorted(report.assets.items()):
-        security = await security_repo.upsert_by_isin_exchange({
+        fields = {
             "isin": isin,
             "exchange": FUND_EXCHANGE,
             # No ticker is published, and `ticker_mappings` keys on (symbol, exchange),
@@ -207,12 +232,18 @@ async def ingest_finpension_report(
             "currency": ACCOUNT_CURRENCY,
             "account": account,
             "asset_type": "ETF",
-            # Manual until a human validates a Yahoo mapping against a statement NAV.
-            # The dangerous default is the safe one: an un-validated fund is never
-            # handed to the variation loop, which is where a bare symbol gets matched
-            # to an unrelated listing and auto-saved.
-            "price_source": PRICE_SOURCE_MANUAL,
-        })
+        }
+        existing = await security_repo.get_by_isin_exchange(isin, FUND_EXCHANGE)
+        if existing is None:
+            # Manual **only on creation**. The dangerous default is the safe one: an
+            # un-validated fund is never handed to the variation loop, which is where a
+            # bare symbol gets matched to an unrelated listing and auto-saved.
+            fields["price_source"] = PRICE_SOURCE_MANUAL
+        # ...and never on update, which is the important half. Re-stating it here would
+        # make every re-upload silently **un-pin** a Yahoo mapping a human had verified
+        # against a published NAV — reverting the fund to statement pricing with nothing
+        # saying so, and writing back the carry that shadows the feed.
+        security = await security_repo.upsert_by_isin_exchange(fields)
         security_ids[isin] = security.id
 
     # --- Wholesale replace -------------------------------------------------------
@@ -352,8 +383,15 @@ async def ingest_finpension_report(
         db.add(TaxLot(**lot))
 
     # --- Prices -------------------------------------------------------------------
+    # Carry only for securities with no feed of their own. Writing it for one that
+    # prices from Yahoo would shadow the feed, for the reason `purge_carried_prices`
+    # spells out — and a re-import must not undo what pinning a mapping fixed.
+    carry_for = {
+        sid for isin, sid in security_ids.items()
+        if (await db.get(Security, sid)).price_source == PRICE_SOURCE_MANUAL
+    }
     counts["prices_written"] = await _write_prices(
-        db, security_ids, observed_navs, report.last_date
+        db, security_ids, observed_navs, report.last_date, carry_for
     )
 
     restated = len(stored_keys - set(seen_keys)) if stored_keys else 0
@@ -429,6 +467,7 @@ def _close_fifo(
 async def _write_prices(
     db, security_ids: Dict[str, int],
     observed: Dict[str, Dict[date, Decimal]], last_date: date,
+    carry_for: set,
 ) -> int:
     """
     Write each observed NAV, then carry it forward over business days.
@@ -456,6 +495,8 @@ async def _write_prices(
             ))
             written += 1
 
+            if security_id not in carry_for:
+                continue
             stop = dates[i + 1] if i + 1 < len(dates) else horizon
             for day in _business_days(nav_date, stop):
                 if day in by_date:

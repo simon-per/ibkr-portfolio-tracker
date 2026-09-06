@@ -479,3 +479,39 @@ async def test_a_malformed_file_is_refused_without_a_sync_run(db, tmp_path):
 
 async def _noop():
     return None
+
+
+@pytest.mark.asyncio
+async def test_a_reimport_does_not_unpin_a_verified_yahoo_mapping(db):
+    """
+    `price_source` is set on **creation only**, and this is the important half.
+
+    Re-stating it on every upsert made each re-upload silently revert a fund a human
+    had pinned to a verified Yahoo ticker back to statement pricing — and write back
+    the carried rows that then shadow the feed. Nothing would have said so: the prices
+    keep arriving, they are just weeks stale and flat.
+    """
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+
+    world = next(s for s in await _rows(db, Security, account=PILLAR3A)
+                 if s.isin == WORLD)
+    world.price_source = "yahoo"
+    await db.commit()
+
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+
+    world = next(s for s in await _rows(db, Security, account=PILLAR3A)
+                 if s.isin == WORLD)
+    assert world.price_source == "yahoo"
+    # And no carry is written back for it, or the purge on the flip was pointless.
+    carried = [p for p in await _rows(db, MarketPrice, security_id=world.id)
+               if p.source == PRICE_SOURCE_CARRY]
+    assert carried == []
+
+    # The still-manual fund keeps its carry — that is what it is for.
+    em = next(s for s in await _rows(db, Security, account=PILLAR3A) if s.isin == EM)
+    assert em.price_source == PRICE_SOURCE_MANUAL
+    assert [p for p in await _rows(db, MarketPrice, security_id=em.id)
+            if p.source == PRICE_SOURCE_CARRY]

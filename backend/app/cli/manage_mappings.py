@@ -47,7 +47,10 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
 from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_YAHOO
-from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
+from app.services.finpension_ingest import (
+    PRICE_SOURCE_STATEMENT,
+    purge_carried_prices,
+)
 from app.services.market_data_service import MarketDataService
 from app.services.yahoo_rate_limit import is_rate_limit
 
@@ -360,11 +363,17 @@ async def cmd_set(
     # without this leaves it inert -- `sync_securities` skips a manual security -- so
     # the flip is the second half of the same action, and it deliberately happens
     # nowhere else: a mapping typed without the NAV check does not earn it.
+    purged = 0
     if verified:
         security.price_source = PRICE_SOURCE_YAHOO
+        # The carry was a stand-in for the feed that did not exist, and it is written
+        # forward past today — so leaving it would let a weeks-old NAV **shadow** the
+        # feed we just pinned, which is the opposite of what pinning it was for.
+        purged = await purge_carried_prices(db, security.id)
         print(
-            f"{symbol}@{exchange} now prices from Yahoo (was manual). Its statement "
-            f"NAVs stay on record and a Yahoo close supersedes them per date."
+            f"{symbol}@{exchange} now prices from Yahoo (was manual). Dropped {purged} "
+            f"carried row(s); its published NAVs stay on record and a Yahoo close "
+            f"supersedes them per date."
         )
     await db.commit()
     print(
@@ -375,6 +384,7 @@ async def cmd_set(
         "action": "set", "symbol": symbol, "exchange": exchange,
         "yahoo_ticker": yahoo_ticker, "previous": before,
         "price_source_flipped_to_yahoo": verified,
+        "carried_rows_purged": purged,
     }
 
 

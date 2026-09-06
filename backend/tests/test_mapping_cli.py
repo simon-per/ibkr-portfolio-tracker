@@ -14,7 +14,7 @@ than waiting to be noticed in the portfolio total.
 Offline: no Yahoo, no IBKR, no network at all.
 """
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from types import SimpleNamespace
@@ -34,6 +34,7 @@ from app.cli import manage_mappings as cli
 from app.cli.manage_mappings import MappingError, build_parser, implied_currency
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
 from app.services.market_data_service import MarketDataService
+from app.services.finpension_ingest import PRICE_SOURCE_CARRY, PRICE_SOURCE_STATEMENT
 
 
 @pytest_asyncio.fixture
@@ -567,3 +568,82 @@ async def test_a_dry_run_verifies_but_writes_nothing(db, monkeypatch):
     security = await db.get(Security, 9)
     assert security.price_source == "manual"
     assert await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND") is None
+
+
+@pytest.mark.asyncio
+async def test_pinning_a_feed_drops_the_carry_that_would_shadow_it(db, monkeypatch):
+    """
+    Found on production the day this shipped, which is why it is pinned from the data
+    side rather than by eye.
+
+    The importer writes a carried NAV forward past today, so a fund is not unpriced for
+    half of every month. The moment a real feed is pinned that carry stops being a
+    bridge and becomes a **screen**: the read path asks for today, finds a carried row
+    at a weeks-old NAV, and never looks back at the real close a day or two earlier.
+    Measured: 448.5281 carried against a 451.23 Yahoo close, widening daily until the
+    carry ran out six weeks later.
+    """
+    await _fund(db, navs=[(date(2026, 9, 1), "448.528100")])
+    # The carry the importer would have written: forward, past "today".
+    for offset in range(1, 30):
+        db.add(MarketPrice(
+            security_id=9, date=date(2026, 9, 1) + timedelta(days=offset),
+            close_price=Decimal("448.528100"), currency="CHF",
+            source=PRICE_SOURCE_CARRY,
+        ))
+    await db.commit()
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 448.32)])
+
+    code, details = await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OD.SW",
+                                      notes=None, dry_run=False)
+    assert code == 0
+    assert details["carried_rows_purged"] == 29
+
+    rows = (await db.execute(
+        select(MarketPrice).where(MarketPrice.security_id == 9)
+    )).scalars().all()
+    # Every carried row is gone...
+    assert [r for r in rows if r.source == PRICE_SOURCE_CARRY] == []
+    # ...and the observed NAV survives: it is a real observation, it is what the
+    # mapping was verified against, and a Yahoo close supersedes it per date anyway.
+    assert [r.date for r in rows if r.source == PRICE_SOURCE_STATEMENT] == [date(2026, 9, 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_yahoo_priced_fund_is_not_given_a_carry_on_reimport(db, monkeypatch):
+    """
+    The other half. Purging on the flip is useless if the next CSV upload writes the
+    carry straight back — a re-import must not undo what pinning a mapping fixed.
+    """
+    from app.services.finpension_ingest import ingest_finpension_report
+    from app.services.finpension_report import parse_transaction_report
+
+    await _fund(db, navs=[(date(2026, 9, 1), "448.528100")])
+    security = await db.get(Security, 9)
+    security.price_source = "yahoo"
+    await db.commit()
+
+    class _Fx:
+        async def convert_to_eur(self, amount, from_currency, target_date):
+            return amount
+
+    header = ("Date;Category;\"Asset Name\";ISIN;\"Number of Shares\";\"Asset Currency\";"
+              "\"Currency Rate\";\"Asset Price in CHF\";\"Cash Flow\";Balance")
+    text = "\n".join([
+        header,
+        '2026-09-01;Deposit;"";;;CHF;1.0000000000;;1300.000000;1300.000000',
+        '2026-09-01;Buy;"Swisscanto";CH1529078078;2.898000;CHF;1.0000000000;'
+        '448.528100;-1299.834434;0.165566',
+    ]) + "\n"
+
+    await ingest_finpension_report(
+        db, parse_transaction_report(text), _Fx(), account="pillar3a"
+    )
+    await db.commit()
+
+    rows = (await db.execute(
+        select(MarketPrice).where(MarketPrice.security_id == 9)
+    )).scalars().all()
+    assert [r for r in rows if r.source == PRICE_SOURCE_CARRY] == []
+    # The observed NAV is still written — that is an observation regardless of feed.
+    assert any(r.source == PRICE_SOURCE_STATEMENT for r in rows)
