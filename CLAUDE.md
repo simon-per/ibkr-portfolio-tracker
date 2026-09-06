@@ -182,6 +182,7 @@ recomputes by hand is the one that is wrong. The known instances:
 | "is this holding a fund?" | the same three call sites again, a rule later. Sector and geography asked a live look-through-table lookup needing no sync, while the asset-type chart read `securities.asset_type`, which **only** `POST /api/allocation/sync` writes and nothing schedules. `sync_helper` never writes it, so an IBKR-ingested fund keeps the `"Stock"` column default indefinitely and was drawn as a Stock in one chart while being distributed across eleven sectors as an ETF a few pixels below. Two sources for one predicate, one of them needing a manual step the other doesn't; the table wins now |
 | "is this holding a fund?", **the third time** | the same three call sites, a *third* rule later — and this one had drifted from a different module entirely: they asked the table by **ticker** while `lookthrough_service` asked it by **ISIN**, so one app answered one question two ways. Found 2026-08-17 by asking which other code publishes the same predicate, not by reading either file. Nothing was wrong on this account, because every held fund's symbol happened to be unique — the failure needs a colliding ticker, and then it either hands the UCITS `SMH` the US fund's split or spreads a plain stock across eleven sectors. All three now share one `allocation_for_fund_isin`, resolved once per holding, and `test_fundness_predicate.py` fails any service that asks by ticker. **Three visits to three call sites is the lesson**: adjacent call sites of one helper are where this codebase's rules go to diverge, and each visit fixed the rule it came for and left the next one |
 | the 12-month deployment average | `ContributionsStrip` renders the server's `avg_deployed_per_month_eur`; `MonthlyDeploymentCard`, on the same tab a few hundred pixels below, recomputed it as `monthly.slice(-12)` divided by its own length. `monthly` omits months with no activity, so that takes the last twelve *rows* — which can span more than twelve months — and divides by a count smaller than the period covered. Both errors push it up. **Two numbers under one name on one screen** is the cheapest instance of this failure to find and the easiest to leave: neither is obviously wrong on its own |
+| which months exist | the same two components, one rule later — and this one is an *omission* rather than a disagreement. `_contribution_inputs` publishes one event list; the value chart's `money_in_running` steps every leg on it, while `get_contributions`' monthly aggregator keyed its output on months with **tax-lot** activity. A month carrying a deposit and no purchase therefore had no row: absent from a chart of contributions, and `Σ monthly != windows['all']` with nothing comparing them. Two readers of one list that agree about every value and disagree about the *index* — which no assertion over the values can see, and which is why the fix shipped with a sum identity rather than a spot check |
 | `isUnpriced` | "can the backend value this position?" was inline in `rebalance.ts` and `currencyExposure.ts` — identical, correct, each carrying its own copy of the reasoning — and `winRate` was about to make it three. Caught **while writing the third copy**, which is the only cheap moment to catch one. Note what makes it more than tidiness: the two existing copies had already needed correcting *together* on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the FX case — so the drift had already happened once, in lockstep, by luck. Extracted to `positionValuation.ts`, with a family test that strips comments (the rule is *documented* in `api.ts`, deliberately) and fails naming any `lib/` module that tests the columns itself |
 | `formatMarketCap` | the same T/B/M formatter existed **byte-identically** in `FundamentalsTab.tsx` and `watchlistColumns.tsx` — so one defect had to be fixed twice, and its sub-million branch carried the worst instance of the locale bug in the app: a bare `toLocaleString()` renders a market cap of 850,000 as **"850.000"** under a German runtime, reading as eight hundred fifty *thousandths*. Extracted to `lib/utils.ts` beside `formatCount`, both pinned to `en-US` like every other formatter in that file. The call sites that had grown their own formatting inline were exactly the ones that were not pinned |
 | the native→base two-step | `trades` and `corporate_actions` store money in the trade's own currency with no `_eur` column, so they need native→EUR at the row's date *and then* EUR→base — and a single `BaseFx.convert()` is wrong twice over. Three copies: `ActivityService._to_base`, `PortfolioService._realized_from_trades`, and the cash balance was about to be the fourth. Two had already diverged in a way that mattered — the activity one memoized the rate, the realized one issued a query per call. Extracted to `native_amounts.NativeToBase`. Caught **while writing the fourth copy**, which is the only cheap moment |
@@ -1453,6 +1454,33 @@ is the useful part**: it is capital churn, not saving.
 **Do not promote it back, and do not "fix" it by averaging `net_eur` instead.** Both were tried. Averaging
 net moves the error rather than removing it — a window then gets debited for a sale of something bought
 *before* it began. The two are duals; `net_eur` survives only for the tooltip and the identity check.
+
+**But "secondary" has to be true on the screen too, and until 2026-09-06 it was not.** `monthly[]` carried
+`deployed_eur` and `net_eur` and **no money in at all**, so the one card whose subject is contributions
+could only ever draw the gross series. Measured on production the month the Ireland→US ETF rotation
+landed: **August 2026 deployed 30,616.82 CHF against 7,211.40 of real money in**, drawn as a bar four
+times the height of any contribution this account has made — and **September read 3,638.82 deployed
+against 0.00 in**, a headline figure for a month in which nothing was paid at all. Both numbers were
+correct and neither was the answer to the question the card asks.
+
+So the series carries `money_in_eur` first, summed from the same `money_in_legs` — no second splice; this
+is that rule's **third** reader after the strip's windows and the chart's daily line, and
+`Σ monthly[].money_in_eur == windows['all'].money_in_eur` is the identity that keeps them honest
+(`test_api_smoke.py`, and all three pinned together in `test_cash_balance.py`). `MonthlyDeploymentCard`
+draws money in as the primary bar, keeps deployed beside it, drops the `net_eur` bar to the tooltip where
+its own docstring already said it belonged, and names the largest rotation month in prose under the chart
+— the **largest** rather than the latest, so the note cannot vanish while the spike it explains is still
+the tallest bar. The deployed bar is suppressed entirely under the `deployed` method, on the same
+condition that suppresses the strip's `/deployed` suffix: with no ledger the two series are one number.
+
+**The months are the union of both key sets, and that was a second bug in the same place.** The series was
+keyed on months with *lot* activity, so **a month carrying a deposit and no purchase had no row** — the
+contribution simply absent from a chart of contributions, with the sum quietly short of the window that
+includes it and nothing saying so. Latent while lots came first (the in-kind transfer carried its 2024-25
+open dates, so every deposit had lot activity around it) and live the moment a retirement account arrived,
+which is the opposite shape: the pillar 3a deposits landed 2026-08-25 against purchases on 09-01. Both
+monthly loops also clamp at `as_of`, as the windows already did, or the identity holds only when no row is
+future-dated.
 
 ### Transfers are never money in
 
@@ -3237,7 +3265,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1401 backend + 517 frontend as of 2026-09-06, all offline — no IBKR, Yahoo or FX-provider
+Tests (1413 backend + 524 frontend as of 2026-09-06, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -3398,6 +3426,7 @@ Tests: `tests/test_currency_fallback.py`.
 | The chart steps at a split date | Cached pre-split closes. A *new* split purges them automatically; for an older one delete that security's `market_prices` and let 08:00 refill |
 | A new currency appears | Nothing to do if it's in `WARM_CURRENCIES` or the ECB set. Otherwise add it there — one edit, no extra request |
 | "Money added" spikes in one month | A transfer booked as a deposit. `manage_cash_flows list`, then `reclassify <ib_key> --as TRANSFER_IN`. **Never** trust an Added figure without eyeballing that list first |
+| The Money In per Month chart shows a huge **Deployed** bar in a month I did not fund | Working as intended, and the note under the chart names it. Deployed is the cost basis of everything *bought*, so selling one holding to buy another counts the same money twice — August 2026 read 30,617 CHF deployed against 7,211 paid in, and September 3,639 against **zero**. The **Money in** bar beside it is the rotation-proof figure and is what the collapsed summary reports. The gap is capital churn; do not net it away, and do not read the deployed average in the strip's `/suffix` as a savings rate |
 | "Money added" is blank or `—` | Expected before `deposits_from`: no IBKR deposit ledger exists for the pre-transfer years. Not a bug — Deployed covers that era |
 | Realized gains look low + a `warnings[]` entry names a currency | No FX rate for that trade date, so the sale was **omitted** rather than mis-scaled. Check `WARM_CURRENCIES` covers it |
 | Steuerwert reads `—` instead of a number | `holdings_snapshot_error`: the snapshot raised. Check the logs — this is deliberately *not* 0.00 |

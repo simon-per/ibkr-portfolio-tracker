@@ -1,6 +1,17 @@
 # Working state
 
-**Last updated: 2026-09-06.** Latest: **the portfolio holds a second account, live on
+**Last updated: 2026-09-06 (late).** Latest: **the Money In per Month chart shows money
+in.** It did not: `monthly[]` carried only gross deployment, which counts a rotation twice
+by design — so the Ireland→US ETF switch drew **30,617 CHF "deployed" in August against
+7,211 actually paid in**, and September read **3,639 against zero**. Both figures were
+correct and neither answered the question the card asks. Money in is now the primary bar
+and the headline, deployed stays beside it as the churn signal, and the largest rotation
+month is named in prose under the chart. A second bug fell out: the series was keyed on
+months with *tax-lot* activity, so a month with a deposit and no purchase had **no row at
+all** — live since the 3a deposits landed a week before their purchases. Details in
+*Shipped 2026-09-06 (late)*.
+
+Before that, the same day: **the portfolio holds a second account, live on
 production.** A Swiss Pillar 3a with finpension is ingested from a transaction CSV and
 folded into the same tables — same charts, totals, allocation, look-through, contributions
 and returns, no second tab. Deployed 17:00 UTC, imported 17:05, verified end to end.
@@ -144,10 +155,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 Check `/health`'s commit against `git rev-parse origin/main` before assuming a symptom is unfixed.
 
-**Read this first if the working tree is on `feat/pillar-3a-account`:** that branch adds a
-second account and is **unpushed and undeployed**. `main` does not have it, so a symptom seen
-on production cannot come from it. See *Shipped 2026-09-06*.
-
 Four threads are genuinely open. In descending order of what they cost:
 
 1. **The 18:00 Berlin IBKR slot is proven, and this thread is closing** → *Watching*, first entry.
@@ -156,8 +163,10 @@ Four threads are genuinely open. In descending order of what they cost:
    13:00 and 20:00 Berlin also ran *after* an earlier slot had spent the day's generation.
 2. **The `full_sync` decoupling is deployed but still unobserved** → *Watching*, `full_sync` entry.
    It only shows on a run where IBKR refuses, which the guard now makes rarer.
-3. **The Flex window is 3 days**, which is a two-day margin → *Watching*, Flex period entry, and
-   CLAUDE.md's *The Flex Query* for the arithmetic.
+3. **The Flex window is whatever the portal is set to, and nothing here may assert a number**
+   → *Watching*, Flex period entry, and CLAUDE.md's *The Flex Query* for the arithmetic. Measured
+   30 calendar days on 2026-08-24, which is weeks of margin; this file said 3 for a month while
+   the alarm derived from it cried wolf. Read `data_to - data_from` off a successful sync.
 4. **Two credentials are knowingly unrotated, both by owner decision** → *Needs a human*. Neither is
    a task, neither may be re-litigated, and both transcript exposures of `API_ADMIN_TOKEN` were
    likewise accepted. **There is no open security item.**
@@ -570,6 +579,53 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-09-06 (late) — money in per month, which the chart had never drawn
+
+**Not yet deployed at the time of writing** — check `/health`'s commit before reading a
+symptom as unfixed.
+
+`monthly[]` on `/api/portfolio/contributions` carried `deployed_eur` and `net_eur` and no
+money in at all, so `MonthlyDeploymentCard` could only draw the gross series. That series
+counts a rotation twice **by design** — CLAUDE.md defines the gap as capital churn and
+forbids netting it — and the August 2026 Ireland→US ETF switch is what made drawing it
+alone untenable.
+
+Measured on a production snapshot, in CHF:
+
+| month | money in | deployed | what the card used to say |
+|---|---|---|---|
+| 2026-08 | **7,211** | 30,617 | a bar 4x any real contribution |
+| 2026-09 | **0** | 3,639 | "Sep 26: CHF 3,639 deployed" — for a month nothing was paid into |
+
+**What changed.** `money_in_eur` per month, summed from the same `money_in_legs` the strip's
+windows and the value chart's daily line already use — the third reader of one splice, never
+a second implementation of it. The card leads with it, keeps deployed as the second bar,
+drops the `net_eur` bar to the tooltip, and names the largest rotation month in prose under
+the chart ("Aug 26 is the largest: CHF 23,405 of the CHF 30,617 deployed was capital already
+invested, not new money"). The deployed bar is suppressed entirely where there is no deposit
+ledger, on the same condition that suppresses the strip's `/deployed` suffix. Card title is
+now **Money In per Month**, which two e2e scripts match on by name.
+
+**The second bug, found while building the first.** The series was keyed on months with
+tax-lot activity, so a month carrying a deposit and no purchase had **no row** — the
+contribution absent from a chart of contributions, and `Σ monthly != windows['all']` with
+nothing comparing them. Latent for as long as lots came first; live since the 3a deposits
+landed 2026-08-25 against purchases on 09-01. Both monthly loops now clamp at `as_of` too.
+
+**Verified against a production snapshot** (copied down, run locally, deleted): the identity
+`Σ monthly[].money_in_eur == windows['all'].money_in_eur == 55,587.74` holds across all
+three readers, including the value chart's last daily point. Window averages reproduce what
+the screenshots showed (all 2,036/3,070 · 12M 2,769/5,122 · 6M 2,776/7,439 · 3M 4,382/13,569),
+which is what confirms the snapshot was current.
+
+**What is deliberately unchanged.** `deployed_eur` is still gross. The strip's `/deployed`
+suffix still shows it. Nothing was netted, renormalised or redefined — the owner was asked
+and chose to keep it, because the gap *is* the measurement.
+
+1413 backend + 524 frontend tests. `e2e/mobile.mjs` was **not** run (it needs a local stack);
+the change is two bars instead of two plus one wrapping paragraph, so overflow risk is low
+but unverified.
 
 ## Shipped 2026-09-06 — a second account, deployed and verified
 
@@ -2703,6 +2759,20 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-06 (late)** — "there are also issues with the monthly deployment logic, since sold
+  and redeployed is double counted", with two screenshots. The report named a bug that did not
+  exist and pointed at a real one: `deployed_eur` counts a rotation twice **on purpose**, and
+  CLAUDE.md forbids netting it — but the chart drew that series **alone**, so the only number on
+  a card about contributions was one nobody should read as a contribution. Saying so in one
+  sentence and then asking what the bars should be was worth more than either agreeing or
+  arguing. Three lessons. **The fix for a misleading figure is often a missing one**, not a
+  changed one: `money_in_legs` already existed and two other surfaces already drew it. **An
+  omission is invisible to every assertion over values** — the second bug, months keyed on lot
+  activity so a deposit-only month had no row, could only be caught by a *sum* identity, which
+  is why one shipped with it. And **the production snapshot is what made it real**: September
+  read 3,639 deployed against 0.00 in, a headline for a month nothing was paid into, and no
+  fixture would have produced that shape.
+
 - **2026-09-06** — "integrate my pillar 3a the same way as my normal portfolio; I do not
   think we need a separate tab". Agreeing with the user was right and was the easy half; the
   work was the five places where merging naively is *wrong* rather than untidy, and four of
@@ -2737,38 +2807,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   was already recorded on every run; nothing new had to be stored. A second finding came free from
   the user simply saying what they had bought — two funds from the 08-21 rotation were undeclared,
   and an undeclared fund fails *quietly*, as a plausible-looking company row.
-
-- **2026-08-17 (night)** — "find bugs and improvements and implement them", then "is there any other
-  bugs?". Six defects over two passes, and the striking part is that they were **two families and
-  nothing else**: five were a figure built from an incomplete valuation and served as a measurement,
-  one was a predicate answered two ways in one app. The lenses that found them are the two CLAUDE.md
-  already states, and the corollary is the real lesson: *severity tracks plausibility, not
-  magnitude.* The nastiest was not the largest error but a green `0.00%` drawdown captioned "Never
-  below its opening value", which a stalled price feed produces on demand. Four process notes worth
-  more than the fixes. **The family lens beats the instance lens** — XIRR, Win Rate and the
-  Allocation charts were all reached by asking "who else reads an incomplete valuation?", and none
-  shares a function name with anything. **Writing the test found a design bug**: the basket
-  detector's first draft keyed "is this fixable?" on the held fund's own adapter, silently skipping
-  VWCE, the one case that actually is. **Fixing a bug created one** — `winRate` needed a predicate
-  that already existed inline twice, so the fix was about to be a third copy; caught, extracted, and
-  the mutant proves why (a local copy leaves `rebalance.test.ts` green). And **a passing test can be
-  the thing hiding the bug**: the allocation charts sum to exactly 100 whether or not they drop a
-  holding, so the assertion that had guarded them for months could never have seen it.
-
-- **2026-08-17** — "assume VT's values for VWCE", plus "why does VT only have a ratio of 91.86%, it
-  should be nearly 100% stocks". The second was the interesting one: it *is* nearly 100% stocks, and
-  the shortfall is **rounding published as fact** — 8,007 of VT's 10,032 rows are printed at 0.00%
-  because Vanguard rounds to 2dp, so the tail that makes up 8.14% of the fund is recorded as nothing.
-  Nobody had looked, and the fund table said only "91.86%", which reads as cash. Lesson: **a figure
-  that survives because it is nearly right is still unexplained** — the rounding was in CLAUDE.md as
-  "thousands of holdings round to 0.00" and had never been counted or put on screen. The proxy ask
-  crossed a prohibition this file had written down; it was implemented as an approximation that
-  *declares itself* (amber badge, warning carrying the reason, Coverage card refusing to go green)
-  rather than either refusing the instruction or quietly obeying it. Later the same day: DBPG got the
-  same treatment via VOO, which answers its collateral disqualifier and **not** its 2x leverage — so
-  the leverage is stated in `warnings[]` rather than scaled, because scaling a bucket would break the
-  partition. Coverage finished at **98.97% with no undecomposed fund**. Two operational lessons worth
-  more than the features: **a guard that fires is not a bug** (VT's import refused a torn paginated
-  read that would have dropped ~900 companies from 11% of the book while the weights still looked
-  plausible), and **never dump bytes from a file holding secrets** — an `od -c` newline check leaked
-  the tail of `API_ADMIN_TOKEN` into the transcript.
