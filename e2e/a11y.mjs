@@ -53,7 +53,7 @@ log(afterHome === 'Performance', `Home returns to the first tab (got ${afterHome
 
 // The four collapsibles on the Performance tab must be real buttons that Enter
 // toggles. The fifth, on Allocation, is checked at the end — see below.
-for (const name of ['Monthly Returns', 'Monthly Deployment', 'Dividend Income', 'Performance Attribution']) {
+for (const name of ['Monthly Returns', 'Money In per Month', 'Dividend Income', 'Performance Attribution']) {
   const btn = page.getByRole('button', { name: new RegExp(name) }).first()
   if ((await btn.count()) === 0) { log(false, `${name}: header is not a button`); continue }
   const before = await btn.getAttribute('aria-expanded')

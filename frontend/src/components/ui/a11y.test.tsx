@@ -9,7 +9,7 @@ import { SortableTh } from './SortableTh'
 
 /**
  * Four cards put onClick on a <CardHeader> div and two tables put it on a <th>, so
- * Monthly Returns, Monthly Deployment, Dividend Income, Performance Attribution and
+ * Monthly Returns, Money In per Month, Dividend Income, Performance Attribution and
  * every sortable column in Fundamentals and Watchlist were mouse-only. These pin the
  * shared components that replaced them.
  */

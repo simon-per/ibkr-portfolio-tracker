@@ -32,7 +32,7 @@ log(
   'the header says the display currency is assumed, not certain',
 )
 
-for (const name of ['Monthly Returns', 'Monthly Deployment', 'Dividend Income', 'Performance Attribution']) {
+for (const name of ['Monthly Returns', 'Money In per Month', 'Dividend Income', 'Performance Attribution']) {
   const btn = page.getByRole('button', { name: new RegExp(name) }).first()
   if ((await btn.count()) === 0) { log(false, `${name}: header missing`); continue }
   await btn.click()
@@ -52,7 +52,7 @@ const hits = (opened.match(/didn't respond/g) || []).length
 // Look-through tab was exactly that mistake, caught by the check failing.
 log(hits >= 10, `${hits} panels report the backend failure explicitly`)
 log(!/Not enough data to compute/.test(opened), 'Monthly Returns does not claim "not enough data"')
-log(!/No contribution history yet/.test(opened), 'Monthly Deployment does not claim "no history"')
+log(!/No contribution history yet/.test(opened), 'Money In per Month does not claim "no history"')
 log(!/No dividend data available/.test(opened), 'Dividend Income does not claim "no dividends"')
 log(/Avg Monthly unavailable/.test(opened), 'the contributions strip says unavailable instead of vanishing')
 

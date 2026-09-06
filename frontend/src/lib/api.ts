@@ -144,7 +144,13 @@ export interface ContributionWindow {
 
 export interface ContributionMonthlyItem {
   month: string;           // "YYYY-MM"
-  deployed_eur: number;    // cost basis of lots opened in the month
+  // The answer, on the same era splice as the strip's headline and the value chart's
+  // Money In line: lot cost basis before `coverage_from`, real deposits after. Optional
+  // because it only exists from 2026-09-06 — absent means "this backend does not publish
+  // per-month money in", and the card falls back to the deployment-only chart rather
+  // than inventing a series. Same backward-compatible reading `unpriced_holdings` makes.
+  money_in_eur?: number;
+  deployed_eur: number;    // cost basis of lots opened in the month, rotation included
   net_eur: number;         // deployed minus released in the month
 }
 

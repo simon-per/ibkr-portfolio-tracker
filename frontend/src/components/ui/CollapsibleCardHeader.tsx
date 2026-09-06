@@ -21,7 +21,7 @@ interface CollapsibleCardHeaderProps {
  * The chevron + title + description header that toggles a card open.
  *
  * Four cards hand-rolled this identically with `onClick` on `<CardHeader>` — a plain
- * `<div>`, so Monthly Returns, Monthly Deployment, Dividend Income and Performance
+ * `<div>`, so Monthly Returns, Money In per Month, Dividend Income and Performance
  * Attribution could not be opened without a mouse at all: no `tabIndex`, no key
  * handler, no `role`, and nothing announcing that they collapse.
  *

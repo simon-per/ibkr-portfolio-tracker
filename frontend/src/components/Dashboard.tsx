@@ -675,7 +675,7 @@ export function Dashboard() {
             {/* Monthly Returns Heatmap */}
             <MonthlyReturnsHeatmap data={valueOverTime} isLoading={chartLoading} isError={chartError} />
 
-            {/* Monthly Deployment (capital put to work per month) */}
+            {/* Money in per month, with capital deployed beside it */}
             <MonthlyDeploymentCard data={contributions} isLoading={contributionsLoading} isError={contributionsError} />
 
             {/* Dividend Income Heatmap */}

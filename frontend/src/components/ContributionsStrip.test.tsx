@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { ContributionsStrip } from './ContributionsStrip'
+import { MonthlyDeploymentCard } from './MonthlyDeploymentCard'
 import type { ContributionsResponse, ContributionWindow } from '@/lib/api'
 
 /**
@@ -36,7 +37,7 @@ function win(over: Partial<ContributionWindow> = {}): ContributionWindow {
 function data(windows: ContributionWindow[]): ContributionsResponse {
   return {
     windows,
-    monthly: [{ month: '2026-07', deployed_eur: 1000, net_eur: 1000 }],
+    monthly: [{ month: '2026-07', money_in_eur: 1000, deployed_eur: 1000, net_eur: 1000 }],
     first_contribution_date: '2024-05-28',
     deposits_from: '2026-01-09',
     coverage_from: '2026-01-09',
@@ -72,5 +73,31 @@ describe('ContributionsStrip', () => {
     // indistinguishable from an account with no contribution history.
     render(<ContributionsStrip data={undefined} isError />)
     expect(screen.getByText(/Avg Monthly unavailable/)).toBeTruthy()
+  })
+})
+
+describe('the strip and the card publish one number under one name', () => {
+  it('renders the same 12M figure in both, from the same server field', () => {
+    // These two have already published two numbers under one name on this screen once.
+    // Since 2026-09-06 they are the same QUANTITY as well — both read
+    // `avg_money_in_per_month_eur` — so an equal pair here is the invariant, not a
+    // coincidence of the fixture. Rendered rather than compared as props, because the
+    // failure was always in what reached the screen.
+    const twelve = win({ label: '12m', months: 12, avg_money_in_per_month_eur: 2769 })
+    const response = data([win(), twelve])
+
+    const { container: stripEl } = render(<ContributionsStrip data={response} />)
+    expect(stripEl.textContent).toMatch(/2,769/)
+
+    cleanup()
+    const { container: cardEl } = render(
+      <MonthlyDeploymentCard data={response} isLoading={false} />,
+    )
+    // The currency symbol comes from CurrencyContext, which neither component is
+    // wrapped in here; the figure is what is under test.
+    expect(cardEl.textContent).toMatch(/12M avg: \S*2,769\/mo/)
+    // And the deployed average must NOT be what the card shows, which is the specific
+    // way these two disagreed before.
+    expect(cardEl.textContent).not.toMatch(/2,023\/mo/)
   })
 })
