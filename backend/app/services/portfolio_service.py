@@ -729,7 +729,19 @@ class PortfolioService:
         check work. Nothing averages it — doing so lets a sale retroactively erase a
         purchase that really happened.
 
-        ``as_of`` defaults to today and exists so tests can pin the windows.
+        ``monthly[]`` carries all three per month, and it carries ``money_in_eur``
+        **first** because the card that draws it is a chart of contributions. It did
+        not until 2026-09-06, and a rotation is what made that matter: selling the
+        Ireland-domiciled sleeve to buy US ETFs deployed ~31k in one month against a
+        few hundred francs of new money, drawn as a bar four times the height of any
+        real contribution the account has ever made. The gross figure was right and it
+        was the only one on the chart. ``Σ monthly[].money_in_eur`` equals the ``all``
+        window's ``money_in_eur``, which is the identity that keeps the two honest.
+
+        ``as_of`` defaults to today and exists so tests can pin the windows. Both
+        monthly loops clamp at it, as the windows already did — a month past the
+        question being asked is not history, and without the clamp that identity holds
+        only when no row is future-dated.
         """
         as_of = as_of or date.today()
         base_fx = await self._load_base_fx()
@@ -756,19 +768,42 @@ class PortfolioService:
 
         monthly_net: Dict[str, Decimal] = defaultdict(Decimal)
         monthly_gross: Dict[str, Decimal] = defaultdict(Decimal)
+        monthly_money_in: Dict[str, Decimal] = defaultdict(Decimal)
         for on_date, amount in legs:
+            if on_date > as_of:
+                continue
             month = on_date.strftime("%Y-%m")
             monthly_net[month] += amount
             if amount > 0:
                 monthly_gross[month] += amount
 
+        # The same `money_in_legs` the windows sum and the chart steps daily, bucketed
+        # by month. Summed rather than re-derived: the era splice lives once, in
+        # _contribution_inputs, and this is now its third reader.
+        for on_date, amount in money_in_legs:
+            if on_date > as_of:
+                continue
+            monthly_money_in[on_date.strftime("%Y-%m")] += amount
+
+        # The UNION of both key sets, which the lot months alone are not. A month
+        # carrying a deposit and no purchase has no leg, so keying on `monthly_net`
+        # dropped it from the series entirely -- the contribution simply absent from a
+        # chart of contributions, and `sum(monthly) != windows['all']` with nothing
+        # saying so. Latent while lots came first: the in-kind transfer carried its
+        # 2024-25 open dates, so every deposit had lot activity around it. A retirement
+        # account is the opposite shape -- pay in one month, invested the next.
+        months = sorted(set(monthly_net) | set(monthly_money_in))
+
         monthly = [
             {
                 "month": month,
-                "net_eur": round(float(monthly_net[month]), 2),
+                # The answer, and what the chart draws first: rotation-proof wherever a
+                # deposit ledger exists. `deployed_eur` beside it is gross on purpose.
+                "money_in_eur": round(float(monthly_money_in[month]), 2),
                 "deployed_eur": round(float(monthly_gross[month]), 2),
+                "net_eur": round(float(monthly_net[month]), 2),
             }
-            for month in sorted(monthly_net)
+            for month in months
         ]
 
         # Elapsed history caps every window's divisor: a four-month-old portfolio

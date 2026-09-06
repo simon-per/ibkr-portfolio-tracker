@@ -363,12 +363,16 @@ async def test_a_liquidated_account_reports_its_cash_rather_than_nothing():
 
 
 @pytest.mark.asyncio
-async def test_the_chart_and_the_strip_agree_about_money_in():
+async def test_the_chart_the_strip_and_the_monthly_series_agree_about_money_in():
     """
-    The chart's Money In line and the contributions strip's all-time figure come from
-    one event list (`_contribution_inputs`), so they cannot answer the same question
-    two ways — the failure mode CLAUDE.md opens with, and one this app has already had
-    twice with the 12-month deployment average.
+    Three readers, one event list (`_contribution_inputs`): the value chart's daily
+    Money In line, the contributions strip's all-time figure, and the monthly series
+    the deployment card draws. They cannot answer the same question three ways — the
+    failure mode CLAUDE.md opens with, and one this app has already had twice with the
+    12-month deployment average, in these very components.
+
+    The third reader arrived on 2026-09-06 and is pinned here from the day it existed
+    rather than after it drifts.
     """
     engine, session = await _make_session()
     try:
@@ -394,8 +398,21 @@ async def test_the_chart_and_the_strip_agree_about_money_in():
         )
         assert timeline
         assert timeline[-1]["money_in_eur"] == pytest.approx(all_time["money_in_eur"])
+        # The monthly series is the third reader. Summing it over all time has to
+        # reproduce the window, which needs both the splice AND the union of months --
+        # the January deposit lands in a month with no lot of its own.
+        assert sum(m["money_in_eur"] for m in report["monthly"]) == pytest.approx(
+            all_time["money_in_eur"]
+        )
         # And it really is the splice, not just an equal pair of zeros.
         assert all_time["money_in_eur"] == pytest.approx(6500)
+        # Spot the shape: pre-coverage months carry lot cost, post-coverage months
+        # carry deposits, and February's 800 EUR purchase contributes nothing.
+        by_month = {m["month"]: m for m in report["monthly"]}
+        assert by_month["2025-06"]["money_in_eur"] == pytest.approx(5000)
+        assert by_month["2026-01"]["money_in_eur"] == pytest.approx(1200)
+        assert by_month["2026-02"]["money_in_eur"] == 0.0
+        assert by_month["2026-02"]["deployed_eur"] == pytest.approx(800)
     finally:
         await engine.dispose()
 

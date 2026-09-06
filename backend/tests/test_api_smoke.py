@@ -333,6 +333,20 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert summary_now["cash_source"] in ("ibkr", "derived", "unknown")
     assert all(p["cash_source"] == summary_now["cash_source"] for p in vot)
 
+    # Contributions: the monthly series must carry money in over the wire. It is the
+    # series the deployment card draws first, and a response_model is a FILTER — an
+    # undeclared key is dropped silently and the chart draws a row of zeros, which
+    # reads as "you contributed nothing" rather than as a missing field.
+    contrib = client.get("/api/portfolio/contributions").json()
+    for row in contrib["monthly"]:
+        for key in ("money_in_eur", "deployed_eur", "net_eur"):
+            assert key in row, f"response_model dropped {key}"
+    # And the identity that keeps the series and the windows honest about each other.
+    all_window = next(w for w in contrib["windows"] if w["label"] == "all")
+    assert sum(m["money_in_eur"] for m in contrib["monthly"]) == pytest.approx(
+        all_window["money_in_eur"]
+    )
+
     # The forward yield is a SIBLING of growth, not a member — it moves with a market
     # price, so it is neither growth nor history. Same year-invariance, for its own
     # reason: a rate describing the next twelve months cannot depend on the window

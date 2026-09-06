@@ -622,8 +622,21 @@ class ContributionWindow(BaseModel):
 
 
 class ContributionMonthlyItem(BaseModel):
-    month: str          # "YYYY-MM"
-    deployed_eur: float  # cost basis of lots opened in the month
+    """
+    One month of the contributions series.
+
+    ``money_in_eur`` leads because it is the answer — the same era splice the windows
+    and the value chart's Money In line use, so a rotation cannot inflate it.
+    ``deployed_eur`` beside it is gross on purpose and exceeds it wherever capital was
+    moved between holdings; that gap is the churn measurement, not an error.
+
+    Declared, not merely returned: ``ContributionsResponse`` is a ``response_model``,
+    which is a filter, so an undeclared key is dropped silently and the chart would draw
+    a row of zeros. Same lesson as ``DividendSummaryResponse``.
+    """
+    month: str           # "YYYY-MM"
+    money_in_eur: float  # spliced: lot cost basis before coverage_from, deposits after
+    deployed_eur: float  # cost basis of lots opened in the month, rotation included
     net_eur: float       # deployed minus released in the month
 
 

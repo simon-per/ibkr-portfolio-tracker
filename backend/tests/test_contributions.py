@@ -116,9 +116,18 @@ async def test_a_sale_releases_capital_in_its_close_month():
 
         report = await PortfolioService(session).get_contributions(as_of=date(2026, 3, 31))
 
-        # Deployed in January, released in March: net zero overall.
-        assert _month(report, "2026-01") == {"month": "2026-01", "deployed_eur": 1000.0, "net_eur": 1000.0}
-        assert _month(report, "2026-03") == {"month": "2026-03", "deployed_eur": 0.0, "net_eur": -1000.0}
+        # Deployed in January, released in March: net zero overall. Asserted as whole
+        # dicts on purpose — a key added to the series has to be looked at, not
+        # absorbed. With no deposit ledger the method is "deployed", so money in IS
+        # deployment and the two agree by definition.
+        assert _month(report, "2026-01") == {
+            "month": "2026-01", "money_in_eur": 1000.0,
+            "deployed_eur": 1000.0, "net_eur": 1000.0,
+        }
+        assert _month(report, "2026-03") == {
+            "month": "2026-03", "money_in_eur": 0.0,
+            "deployed_eur": 0.0, "net_eur": -1000.0,
+        }
         assert _window(report, "all")["net_eur"] == 0.0
 
         # The average is deployment, so the sale does not erase the January buy:
@@ -475,6 +484,117 @@ async def test_a_rotation_does_not_inflate_money_in():
         assert _window(before, "all")["deployed_eur"] == 5000.0
         # And the rotation nets out, so the identity still holds.
         assert _window(after, "all")["net_eur"] == 5000.0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_rotation_does_not_inflate_the_monthly_money_in():
+    """
+    The monthly twin of the test above, and the one the chart reads.
+
+    The windows were rotation-proof from the start; `monthly[]` carried no money in at
+    all until 2026-09-06, so the only series a chart of contributions could draw was
+    the gross one. On this account that meant a ~31k August bar against a few hundred
+    francs of new money — right as an answer to "what was put to work", and wrong by
+    two orders of magnitude as an answer to "what did I pay in".
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(date(2026, 2, 10), "5000"))
+        session.add(_flow(date(2026, 2, 5), "5000", "D1"))
+        await AppSettingsRepository(session).widen_cash_flows_covered_from(date(2026, 1, 1))
+        await session.commit()
+
+        # June: sell the lot and buy an equal-cost replacement. No new cash.
+        held = (await session.execute(select(TaxLot))).scalars().one()
+        held.is_open = False
+        held.close_date = date(2026, 6, 1)
+        held.close_source = "trade"
+        session.add(_lot(date(2026, 6, 1), "5000"))
+        session.add(_flow(date(2026, 6, 20), "300", "D2"))   # a real, small contribution
+        await session.commit()
+
+        report = await PortfolioService(session).get_contributions(as_of=date(2026, 6, 30))
+
+        june = _month(report, "2026-06")
+        assert june["deployed_eur"] == 5000.0    # gross: the rotation, counted
+        assert june["money_in_eur"] == 300.0     # the deposit, and only the deposit
+        assert june["net_eur"] == 0.0            # 5,000 in, 5,000 out
+
+        # February is the contrast: there the deployment WAS the contribution.
+        feb = _month(report, "2026-02")
+        assert feb["deployed_eur"] == 5000.0
+        assert feb["money_in_eur"] == 5000.0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_month_with_a_deposit_and_no_purchase_appears_in_the_series():
+    """
+    The series was keyed on months with LOT activity, so a month that only received
+    money had no row — the contribution simply absent from a chart of contributions,
+    with `sum(monthly)` quietly short of the window that includes it.
+
+    Latent for as long as lots came first: the in-kind broker transfer carried its
+    2024-25 open dates, so every deposit had lot activity around it. A retirement
+    account is the opposite and the common shape — the pillar 3a deposits landed
+    2026-08-25 against purchases on 09-01.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_flow(date(2026, 3, 5), "1000", "D1"))    # March: money in, nothing bought
+        session.add(_lot(date(2026, 4, 2), "1000"))           # April: invested
+        await AppSettingsRepository(session).widen_cash_flows_covered_from(date(2026, 1, 1))
+        await session.commit()
+
+        report = await PortfolioService(session).get_contributions(as_of=date(2026, 4, 30))
+
+        assert [m["month"] for m in report["monthly"]] == ["2026-03", "2026-04"]
+        march = _month(report, "2026-03")
+        assert march["money_in_eur"] == 1000.0
+        assert march["deployed_eur"] == 0.0      # nothing was bought, and that is honest
+        april = _month(report, "2026-04")
+        assert april["money_in_eur"] == 0.0      # the money arrived last month
+        assert april["deployed_eur"] == 1000.0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["rotation", "deposit_only_month", "no_ledger"])
+async def test_the_monthly_series_and_the_windows_agree_about_money_in(shape):
+    """
+    The identity, in family form: `Σ monthly[].money_in_eur == windows['all']`.
+
+    Both read `money_in_legs`, so they cannot disagree unless one of them re-derives
+    the splice or drops a month — which are exactly the two ways this has already gone
+    wrong once each. A fourth reader has to satisfy this too.
+    """
+    engine, session = await _make_session()
+    try:
+        if shape == "rotation":
+            session.add(_lot(date(2026, 2, 10), "5000", close_date=date(2026, 6, 1)))
+            session.add(_lot(date(2026, 6, 1), "5000"))
+            session.add(_flow(date(2026, 2, 5), "5000", "D1"))
+            await AppSettingsRepository(session).widen_cash_flows_covered_from(date(2026, 1, 1))
+        elif shape == "deposit_only_month":
+            session.add(_flow(date(2026, 3, 5), "1000", "D1"))
+            session.add(_flow(date(2026, 5, 5), "250", "D2"))
+            session.add(_lot(date(2026, 4, 2), "1000"))
+            await AppSettingsRepository(session).widen_cash_flows_covered_from(date(2026, 1, 1))
+        else:  # no deposit ledger at all: money in IS deployment
+            session.add(_lot(date(2026, 1, 15), "800"))
+            session.add(_lot(date(2026, 3, 4), "700", close_date=date(2026, 5, 9)))
+        await session.commit()
+
+        report = await PortfolioService(session).get_contributions(as_of=date(2026, 6, 30))
+
+        assert round(sum(m["money_in_eur"] for m in report["monthly"]), 2) ==             _window(report, "all")["money_in_eur"]
     finally:
         await session.close()
         await engine.dispose()
