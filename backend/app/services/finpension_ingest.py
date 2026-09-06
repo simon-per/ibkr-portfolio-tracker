@@ -79,6 +79,14 @@ FUND_EXCHANGE = "FUND"
 PRICE_SOURCE_STATEMENT = "finpension_statement"
 PRICE_SOURCE_CARRY = "finpension_carry"
 
+#: Price sources that are a *carry* rather than an observation.
+#:
+#: `find_stale_priced_securities` must exclude these, and the reason is the whole
+#: point of the two tags: a carry runs 45 days past the last real NAV, so the newest
+#: row of any kind sits in the future and a staleness alarm keyed on `max(date)`
+#: could never fire. The carry is exactly what is being bridged.
+CARRIED_PRICE_SOURCES = frozenset({PRICE_SOURCE_CARRY})
+
 #: How far past the last observed NAV a carried price is written.
 #:
 #: Bounded rather than run to today, deliberately. A six-month-stale upload would

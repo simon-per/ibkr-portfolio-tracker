@@ -48,6 +48,12 @@ from app.services.scheduler_service import (
     ibkr_only_sync_job_entry,
     market_data_only_sync_job_entry,
 )
+from app.services.scheduler_service import MANUAL_PRICE_STALE_DAYS
+from app.models.security import PRICE_SOURCE_MANUAL
+from app.services.finpension_ingest import (
+    CARRY_HORIZON_DAYS, PRICE_SOURCE_CARRY, PRICE_SOURCE_STATEMENT,
+)
+from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 
 # One job per declared hour — pinned by test_scheduler_registers_every_declared_job,
 # which asserts no two of the three groups share one.
@@ -853,3 +859,94 @@ async def test_an_unusable_job_store_degrades_instead_of_killing_the_container(
         assert any("running in memory" in r.getMessage() for r in caplog.records)
     finally:
         svc.shutdown()
+
+
+# ── Staleness for a security priced from provider statements ────────────────
+
+async def _seed_manual(db, security_id, symbol, *, observed_age, carry_to):
+    """
+    A statement-priced fund: one observed NAV `observed_age` days ago, plus the carry
+    the importer materialises forward from it.
+    """
+    db.add(Security(
+        id=security_id, isin=f"CH000000000{security_id}", symbol=symbol,
+        description=symbol, currency="CHF", conid=None, asset_category="STK",
+        exchange="FUND", account="pillar3a", price_source=PRICE_SOURCE_MANUAL,
+    ))
+    db.add(TaxLot(
+        security_id=security_id, open_date=date(2026, 1, 5), quantity=Decimal("10"),
+        cost_basis=Decimal("1000"), price_per_unit=Decimal("100"), currency="CHF",
+        cost_basis_eur=Decimal("1000"), is_open=True,
+    ))
+    observed = date.today() - timedelta(days=observed_age)
+    db.add(MarketPrice(security_id=security_id, date=observed,
+                       close_price=Decimal("120"), currency="CHF",
+                       source=PRICE_SOURCE_STATEMENT))
+    for offset in range(1, carry_to + 1):
+        db.add(MarketPrice(security_id=security_id, date=observed + timedelta(days=offset),
+                           close_price=Decimal("120"), currency="CHF",
+                           source=PRICE_SOURCE_CARRY))
+    await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_a_carried_price_does_not_hide_a_stale_statement(price_db):
+    """
+    The defect this exists to prevent. The importer carries the last NAV forward 45
+    days, so `max(market_prices.date)` sits in the **future** and a staleness alarm
+    keyed on it could never fire — the fund would silently coast on a months-old NAV
+    with nothing asking for a newer export. The alarm must read the newest *observed*
+    row, which is the whole reason the two source tags exist.
+    """
+    await _seed_manual(price_db, 1, "CH1529078078",
+                       observed_age=MANUAL_PRICE_STALE_DAYS + 5, carry_to=45)
+
+    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+
+    assert len(warnings) == 1
+    assert "CH1529078078" in warnings[0]
+    # Actionable for the source that actually feeds it — "check the ticker mapping"
+    # would send the reader hunting a Yahoo symbol this security does not have.
+    assert "Upload a newer statement export" in warnings[0]
+    assert "ticker_mappings" not in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_a_recent_statement_is_quiet_even_though_a_daily_feed_would_warn(price_db):
+    """
+    A monthly upload must not warn every week. Reusing STALE_PRICE_DAYS here would
+    badge it permanently, which is the always-present-never-actionable warning that
+    teaches the reader to skip the banner carrying something real.
+    """
+    await _seed_manual(price_db, 1, "CH1529078078",
+                       observed_age=STALE_PRICE_DAYS + 10, carry_to=45)
+
+    assert await SchedulerService().find_stale_priced_securities(price_db) == []
+
+
+@pytest.mark.asyncio
+async def test_the_warning_arrives_before_the_holding_drops_out_of_the_total():
+    """
+    The ordering, asserted as an invariant rather than as two constants.
+
+    A carried price runs out `CARRY_HORIZON_DAYS` past the last observed NAV, and the
+    read path walks back `PRICE_LOOKBACK_DAYS` beyond that — so the position vanishes
+    from the total on day 59. If the alarm fired later, `unpriced_holdings` would be
+    the first signal, and it points at a broken ticker mapping rather than at a stale
+    upload. There must be no day on which the holding is unvaluable and this is silent.
+    """
+    drops_out_on = CARRY_HORIZON_DAYS + PRICE_LOOKBACK_DAYS
+    assert MANUAL_PRICE_STALE_DAYS < drops_out_on, (
+        f"a statement-priced holding goes unvaluable on day {drops_out_on} but the "
+        f"alarm does not speak until day {MANUAL_PRICE_STALE_DAYS}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_yahoo_security_is_unaffected_by_the_manual_threshold(price_db):
+    """The ordinary case keeps the tight threshold: a daily feed going quiet for a week
+    really is broken."""
+    await _seed(price_db, 1, "OLD", latest_price_age=STALE_PRICE_DAYS + 3)
+    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    assert len(warnings) == 1
+    assert "price feed looks broken" in warnings[0]

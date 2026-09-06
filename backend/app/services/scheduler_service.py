@@ -40,6 +40,9 @@ from app.models.security import Security
 from app.models.sync_run import SyncRun
 from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
+from app.models.security import PRICE_SOURCE_MANUAL
+from app.services.finpension_ingest import CARRIED_PRICE_SOURCES, CARRY_HORIZON_DAYS
+from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 from sqlalchemy import select, distinct, func, and_
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,20 @@ def ensure_jobstore_parent(url: str) -> None:
 # before a market opens, so a warning means something is actually wrong rather than
 # "the market was shut". Five days is roughly one trading week of silence.
 STALE_PRICE_DAYS = 5
+
+#: The same alarm for a security priced from provider statements rather than a feed.
+#:
+#: Per-source rather than one global number, the same judgement `ADAPTER_STALE_DAYS`
+#: makes: five days is right for a daily feed and would badge a monthly upload
+#: permanently, which is the always-present-never-actionable warning CLAUDE.md calls
+#: worse than none.
+#:
+#: **Forty is chosen so the warning arrives before the holding disappears.** The
+#: importer carries a NAV forward `CARRY_HORIZON_DAYS` (45) and the read path walks
+#: back `PRICE_LOOKBACK_DAYS` (14) beyond that, so the position drops out of the
+#: total on day 59. A warning after that would be the wrong alarm: `unpriced_holdings`
+#: would fire first and send the reader hunting a broken ticker mapping.
+MANUAL_PRICE_STALE_DAYS = 40
 
 # How long IBKR may go without a *successful* sync before we say so.
 #
@@ -510,13 +527,15 @@ class SchedulerService:
         """
         as_of = as_of or date.today()
         cutoff = as_of - timedelta(days=STALE_PRICE_DAYS)
+        manual_cutoff = as_of - timedelta(days=MANUAL_PRICE_STALE_DAYS)
 
         # Deliberately two queries rather than one join. Joining taxlots to
         # market_prices multiplies them — a security with 100 open lots and 730 cached
         # closes is 73,000 rows to aggregate, and the portfolio holds 972 lots against
         # 21,000 prices. Two indexed scans and a dict lookup cost nothing by comparison.
         held = await db.execute(
-            select(Security.id, Security.symbol, Security.exchange)
+            select(Security.id, Security.symbol, Security.exchange,
+                   Security.price_source)
             .join(TaxLot, TaxLot.security_id == Security.id)
             .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
             .group_by(Security.id)
@@ -532,19 +551,46 @@ class SchedulerService:
         )
         newest_by_security = dict(newest.all())
 
+        # For a statement-priced security the newest row of *any* kind is useless
+        # here: the importer materialises a carry forward of the last observed NAV,
+        # so `max(date)` sits ~45 days in the FUTURE and this alarm could never fire.
+        # The carry is exactly what is being bridged, so ask when the provider last
+        # actually published something.
+        newest_observed = dict((await db.execute(
+            select(MarketPrice.security_id, func.max(MarketPrice.date))
+            .where(
+                MarketPrice.security_id.in_([row[0] for row in held_rows]),
+                MarketPrice.source.notin_(CARRIED_PRICE_SOURCES),
+            )
+            .group_by(MarketPrice.security_id)
+        )).all())
+
         warnings = []
-        for security_id, symbol, exchange in held_rows:
+        for security_id, symbol, exchange, price_source in held_rows:
             name = f"{symbol}@{exchange}" if exchange else str(symbol)
-            latest = newest_by_security.get(security_id)
+            manual = price_source == PRICE_SOURCE_MANUAL
+            latest = (newest_observed if manual else newest_by_security).get(security_id)
             if latest is None:
                 warnings.append(
+                    f"{name}: no published NAV on record at all — the position is "
+                    f"being valued at 0.00. Import a provider statement for it"
+                    if manual else
                     f"{name}: no cached price at all — the position is being "
                     f"valued at 0.00. Check the ticker_mappings row and the Yahoo symbol"
                 )
-            elif latest < cutoff:
+            elif latest < (manual_cutoff if manual else cutoff):
+                age = (as_of - latest).days
                 warnings.append(
+                    # Actionable for the source that actually feeds it. "Check the
+                    # ticker mapping" would send the reader hunting a Yahoo symbol
+                    # this security deliberately does not have.
+                    f"{name}: the newest NAV its provider published is {latest} "
+                    f"({age} days old), and the carried price runs out before day "
+                    f"{CARRY_HORIZON_DAYS + PRICE_LOOKBACK_DAYS}. Upload a newer "
+                    f"statement export"
+                    if manual else
                     f"{name}: newest price is {latest} "
-                    f"({(as_of - latest).days} days old) — the price feed looks broken"
+                    f"({age} days old) — the price feed looks broken"
                 )
 
         if warnings:
