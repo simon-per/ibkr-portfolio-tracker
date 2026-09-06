@@ -2471,6 +2471,36 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 ## Worth doing next
 
+0. **A security quoted in the base currency is valued ~0.12% high — found 2026-09-06,
+   pre-existing, and previously unreachable.** `get_positions_breakdown` and the
+   valuation walk convert a price **native → EUR → base**, and the two stored rates are
+   not inverses: they are independently rounded ECB quotes, often from different dates.
+   Measured live: `CHF→EUR 1.06450` (2026-09-01) × `EUR→CHF 0.94050` (2026-09-04) =
+   **1.0011622**, so `3.615 × 121.201101 = 438.14198` was served as **438.65**.
+
+   **This is exactly the defect `NativeToBase.convert` already short-circuits for** —
+   "12,501.58 CHF came back as 12,502.03" is the same arithmetic — but the *price* path
+   has no such clause, so the rule exists in the codebase and is not applied here.
+
+   It surfaced only now because until today **no held security was quoted in the base
+   currency**: the book is 26 USD, 2 EUR, 2 KRW, 1 CAD, 1 TWD under a CHF base. The two
+   Swisscanto funds are the first CHF ones.
+
+   **Do not read it as a 2 CHF problem.** `base_currency` is user-switchable from the
+   UI, and switching it to USD makes all 26 USD holdings hit the same round trip — 0.12%
+   of nearly the whole portfolio rather than of 2.4% of it. The visible symptom today is
+   a fund bought five days ago at its only recorded NAV reporting **+0.12%** unrealized
+   gain, which is the plausible-wrong-number shape rather than an obvious one.
+
+   The fix is the short-circuit `NativeToBase` already has — when the price currency
+   equals the base, skip EUR entirely — applied at the five valuation sites
+   (`_calculate_daily_value`, `_calculate_timeline_swept`, `get_positions_breakdown`,
+   `holdings_snapshot_as_of`, `get_performance_attribution`). The first two are pinned
+   byte-for-byte by `test_timeline_equivalence.py`, which is a safety net here rather
+   than an obstacle. Deliberately **not** done in the session that found it: it changes
+   the core valuation arithmetic for every holding, and bolting that onto the end of a
+   deploy is how a plausible wrong number gets introduced rather than removed.
+
 0. **Decompose the World ex CH tranche from the fund that tracks its actual index.** It is
    ~1.9% of the book sitting in `uncovered_fund`, and the donor exists: **iShares World ex
    Switzerland Equity Index Fund (CH), `CH0244028970`**, MSCI Developed World ex
