@@ -1,6 +1,31 @@
 # Working state
 
-**Last updated: 2026-08-26.** Latest: **the app tracks uninvested cash, so a restructuring is no
+**Last updated: 2026-09-06.** Latest: **the portfolio holds a second account.** A Swiss
+Pillar 3a with finpension is ingested from a transaction CSV and folded into the same
+tables — same charts, totals, allocation, look-through, contributions and returns, no
+second tab. Built in six commits on `feat/pillar-3a-account`; **not yet pushed or
+deployed**, and the first production import is a human step (see *Needs a human*).
+
+Three things about it are worth knowing before reading further.
+
+**It was a precondition before it was a feature.** `reconcile_taxlots` deleted *every*
+open tax lot not in the statement it was holding, so the first IBKR sync after a 3a lot
+existed would have deleted it and booked a fictitious disposal. Two sibling paths had the
+same shape. That scoping shipped alone, as a no-op on an IBKR-only database.
+
+**The finpension `Balance` column is an oracle, and it earned its keep twice.** Replaying
+our own bookings against it per row makes a silently dropped category structurally
+impossible; the derived cash came to **20.023586 CHF**, finpension's own closing balance to
+the cent. And the *statement NAVs* are a second oracle: asked to price the EM holding, the
+obvious Yahoo candidate is a perfect name match, the wrong share class, and **+49%** — the
+SBI failure, caught only because the provider had published what the shares were worth.
+
+**An end-to-end run found a latent bug that was never 3a-specific.** Every contributions
+window was clamped to the first *tax lot*, so a deposit before the first purchase read as
+0.00 money in. Invisible with one account, because in-kind transferred lots predate every
+deposit by years; a retirement account is the opposite and commoner shape.
+
+Before that (2026-08-26): **the app tracks uninvested cash, so a restructuring is no
 longer drawn as a collapse.** Selling 25,136 CHF of positions on 08-21 and redeploying 12,682 on
 08-24 took holdings 68,342 → 43,631 → 56,161, and the value chart drew a 36% cliff over a period in
 which the account lost nothing. The headline card reported **56,708 CHF for an account worth
@@ -118,6 +143,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 Check `/health`'s commit against `git rev-parse origin/main` before assuming a symptom is unfixed.
 
+**Read this first if the working tree is on `feat/pillar-3a-account`:** that branch adds a
+second account and is **unpushed and undeployed**. `main` does not have it, so a symptom seen
+on production cannot come from it. See *Shipped 2026-09-06*.
+
 Four threads are genuinely open. In descending order of what they cost:
 
 1. **The 18:00 Berlin IBKR slot is proven, and this thread is closing** → *Watching*, first entry.
@@ -137,6 +166,30 @@ that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin w
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
 ## Needs a human
+
+- **Import the finpension CSV on production, then pin the World ex CH mapping.** The
+  branch is `feat/pillar-3a-account`, unpushed. Once deployed:
+
+  ```bash
+  docker cp transaction_report_YYYYMMDD.csv backend-portfolio-backend-1:/tmp/p3a.csv
+  docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv --dry-run
+  docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv
+  docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings       set CH0117044948 FUND 0P0000S0OD.SW       --notes "Morningstar fund quote; verified against finpension statement NAVs"
+  ```
+
+  The dry run should report **1758.000000 CHF** of deposits and a closing balance of
+  **20.023586**. The mapping command makes one Yahoo request, prints the worst gap against
+  the published NAVs, and flips `price_source` to `yahoo` only if it agrees. **Do not pin
+  anything for `CH1529078078`** — its NAVs are the only price it has, and the plausible
+  candidate is the wrong share class at +49%.
+
+  Then re-run the check that matters: an IBKR sync **after** the import, confirming the 3a
+  lots survive. That is failure #1 and the reason the scoping shipped first.
+
+- **The 3a export needs re-uploading periodically, and nothing reminds you.** Prices carry
+  forward for a bounded window past the last statement NAV and then go unpriced *loudly*,
+  which is the intended end state rather than valuing the fund at a months-old NAV. Once the
+  World ex CH tranche is on Yahoo only the EM one depends on this.
 
 - **Enable the Cash Report section in the Flex Query, and the cash balance stops being ours.**
   On query `App_OpenLots` (1389408), add the **Cash Report** section and tick **Base Currency
@@ -525,6 +578,40 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-09-06 — a second account, on branch, NOT deployed
+
+Six commits on `feat/pillar-3a-account`, off `main` at `a8b70fa`. **Nothing is pushed and
+nothing is on production.** 1401 backend + 517 frontend tests pass.
+
+What to check after the first deploy, in this order:
+
+1. **`/health` reports the new commit**, and `alembic upgrade head` ran clean. The migration
+   (`t3c0e7f4a8b9`) rebuilds `securities` and `cash_balances` through `batch_alter_table`;
+   auto-deploy backs the DB up first. It is a **no-op on data** — every column defaults to
+   `ibkr` / `yahoo`, which is what every existing row already is.
+2. **Nothing changed.** Before importing anything, the totals, charts, tax report and
+   allocation should be byte-identical to before. If they are not, the scoping is wrong in a
+   direction the tests did not cover.
+3. **Then import**, per *Needs a human*.
+4. **Then run an IBKR sync and confirm the 3a lots survive.** This is failure #1: before the
+   scoping, `reconcile_taxlots` would delete them and book a fictitious disposal. Pinned by
+   `test_account_isolation.py` and verified by mutation, but it is the one worth seeing on
+   real data.
+
+Two things are **latent** and will not show until something else changes:
+
+- **The cash partition** does nothing until the Cash Report section is enabled in the Flex
+  portal (the other *Needs a human* item), because `cash_balances` is empty. When it is
+  enabled, watch that the cash line does not sawtooth — that was the defect.
+- **`cash_source: "mixed"`** appears only in that same state. Until then it stays `derived`.
+
+Measured on the real file, worth keeping because they are the reconciliation points:
+deposits **1758.000000 CHF**, invested **1737.976414**, closing balance **20.023586** — and
+the derived balance reproduces that last figure to the cent, which is the Balance oracle
+holding end to end rather than a coincidence.
+
+---
 
 ## Shipped 2026-08-26 — cash, and a rotation that stopped looking like a loss
 
@@ -2378,6 +2465,18 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 ## Worth doing next
 
+0. **Decompose the World ex CH tranche from the fund that tracks its actual index.** It is
+   ~1.9% of the book sitting in `uncovered_fund`, and the donor exists: **iShares World ex
+   Switzerland Equity Index Fund (CH), `CH0244028970`**, MSCI Developed World ex
+   Switzerland, CHF, BlackRock product id **279894**. Two things make it more than a
+   one-line `basket_proxy_isin`: it is a Swiss institutional index fund rather than a UCITS
+   ETF, so holdings come from a product-page `.ajax?fileType=xls` rather than the varnish
+   JSON `parse_ishares` reads, and its `portfolio_id` is **not** the product id (the IQQ
+   coincidence does not generalise — read it from the sitemap and confirm by row count).
+   Deliberately not proxied to IWDA meanwhile: that would put Nestlé, Roche and Novartis
+   into the look-through at ~2.5% of the position, which is a *fabricated* holding rather
+   than the understatement every other proxy here errs toward.
+
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
 1. **Decide whether a trade should still count as an external flow, now that cash is tracked.**
@@ -2568,6 +2667,14 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-06** — "integrate my pillar 3a the same way as my normal portfolio; I do not
+  think we need a separate tab". Agreeing with the user was right and was the easy half; the
+  work was the five places where merging naively is *wrong* rather than untidy, and four of
+  them were invisible from the request. Two lessons. **Measure the input before designing
+  against it**: the CSV's running `Balance` turned "trust the parser" into a structural
+  guarantee, and its NAVs turned "pick a Yahoo ticker" into a check that refused a +49%
+  wrong share class. And **an end-to-end run earns its cost even on green tests** — 1,367
+  passing tests said nothing about a contributions window anchored on the wrong event.
 - **2026-08-26** — "I sold a lot of my portfolio for a restructuring and it shows a large dip —
   include cash everywhere". Two lessons, both about measuring before building. **The complaint named
   a symptom that was half false**: the chart's cliff was real and the "huge drawdown" was not — the
