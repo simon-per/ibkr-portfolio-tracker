@@ -21,7 +21,15 @@ export interface AppSettings {
  * a derived zero is a real answer for a fully deployed account, and collapsing the two
  * would render "we have no idea" as "you hold no cash".
  */
-export type CashSource = 'ibkr' | 'derived' | 'unknown';
+/**
+ * Where the cash figure came from. `'mixed'` arrives once a second account exists
+ * whose balance IBKR cannot measure — a Swiss pillar 3a account, say — because
+ * `'ibkr'` means *read from the broker* and a half-derived total badged that way
+ * claims a provenance for money the broker never saw.
+ *
+ * Absent means the backend does not track cash at all, never that cash is zero.
+ */
+export type CashSource = 'ibkr' | 'mixed' | 'derived' | 'unknown';
 
 export interface PortfolioValuePoint {
   date: string;
@@ -165,6 +173,12 @@ export interface Position {
   security_id: number;
   symbol: string;
   description: string;
+  /**
+   * Which account holds it. Absent means `'ibkr'` — the same backward-compatible
+   * reading `external_flow_eur` and `unpriced_holdings` make about their own optional
+   * fields, so an older backend keeps rendering exactly as it did.
+   */
+  account?: string;
   isin: string;
   currency: string;
   exchange: string | null;
@@ -794,6 +808,23 @@ export interface TaxReport {
   holdings_snapshot_total: number | null;
   holdings_snapshot_error?: boolean;
   holdings_snapshot_note: string;
+  /**
+   * Pillar 3a, when any is tracked. `null` on an IBKR-only book rather than a
+   * zeroed block, because zeros would assert a 3a account holding nothing — a
+   * different statement from having none.
+   *
+   * Its assets are excluded from every other section: 3a capital is not part of
+   * the Steuerwert and its income is not taxable, both being taxed on withdrawal
+   * at a separate reduced rate. The contributions are the figure that *does*
+   * belong on a return — they are deductible from taxable income.
+   */
+  pillar3a?: {
+    tracked: boolean;
+    accounts: string[];
+    contributions: number;
+    holdings_value: number;
+    note: string;
+  } | null;
   /** Omitted rows, FX failures, a fallback taking over — badged in the UI and CSV. */
   warnings?: string[];
 }

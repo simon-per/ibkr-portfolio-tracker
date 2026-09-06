@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import StaticPool
 
+from app.accounts import IBKR, PILLAR3A
 from app.database import Base
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
@@ -32,7 +33,7 @@ from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
-from app.services.cash_service import CashService, DERIVED, MEASURED, UNKNOWN
+from app.services.cash_service import CashService, DERIVED, MEASURED, MIXED, UNKNOWN
 from app.services.portfolio_service import BaseFx, PortfolioService
 from app.services.sync_helper import resolve_cash_balances
 
@@ -811,5 +812,128 @@ async def test_the_reader_refuses_an_unlabelled_row_too():
 
         # The derived balance stands; the unlabelled 5000 is not applied.
         assert await _balance(session, date(2026, 2, 28)) == Decimal("1000")
+    finally:
+        await engine.dispose()
+
+
+# ------------------------------------------------- a second account's locked cash
+
+@pytest.mark.asyncio
+async def test_an_ibkr_measured_level_never_subtracts_another_accounts_balance():
+    """
+    The sharpest defect the account dimension had to fix, and it is latent rather than
+    live: `cash_balances` is empty until the Cash Report section is enabled in the Flex
+    portal, so nothing bites until somebody does that.
+
+    A measured row is IBKR's *level*, and `_apply_measured` turns it into
+    ``level - derived_running``. Differenced against a total that also carried pillar
+    3a money, every measured day would emit a correction that silently subtracts the 3a
+    balance — and every day between two measured rows would put it back. The line would
+    sawtooth, and each individual point would look entirely plausible.
+
+    Here: IBKR holds 1,000 measured, 3a holds 500 derived. The answer is 1,500 on the
+    measured day and 1,500 the day after. Before the partition it was 1,000 and 1,500.
+    """
+    engine, session = await _make_session()
+    try:
+        eur = BaseFx("EUR", {})
+        session.add_all([
+            # IBKR: a derived deposit that the measured level then corrects.
+            CashFlow(ib_key="ibkr-d", flow_date=date(2026, 8, 20),
+                     flow_type=DEPOSIT_WITHDRAW, amount=Decimal("900"),
+                     currency="EUR", amount_eur=Decimal("900"), account=IBKR),
+            CashBalance(report_date=date(2026, 8, 25), currency="EUR",
+                        cash=Decimal("1000"), account=IBKR),
+            # Pillar 3a: derived only, and IBKR has never seen a franc of it.
+            CashFlow(ib_key="fp-d", flow_date=date(2026, 8, 21),
+                     flow_type=DEPOSIT_WITHDRAW, amount=Decimal("500"),
+                     currency="EUR", amount_eur=Decimal("500"), account=PILLAR3A),
+        ])
+        await session.flush()
+
+        service = CashService(session)
+        events = await service.balance_events(eur)
+
+        assert service.balance_as_of(events, date(2026, 8, 25)) == Decimal("1500")
+        assert service.balance_as_of(events, date(2026, 8, 26)) == Decimal("1500")
+        # And the IBKR correction is exactly the 100 it was short, not 100 - 500.
+        assert service.balance_as_of(events, date(2026, 8, 24)) == Decimal("1400")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_each_account_is_corrected_by_its_own_measured_level():
+    """
+    Both accounts measured, and neither level may be applied to the other. A single
+    `cash_balances` row per date used to be enforced by a unique constraint on
+    `report_date` alone, so this shape could not even be stored.
+    """
+    engine, session = await _make_session()
+    try:
+        eur = BaseFx("EUR", {})
+        session.add_all([
+            CashFlow(ib_key="ibkr-d", flow_date=date(2026, 8, 20),
+                     flow_type=DEPOSIT_WITHDRAW, amount=Decimal("100"),
+                     currency="EUR", amount_eur=Decimal("100"), account=IBKR),
+            CashFlow(ib_key="fp-d", flow_date=date(2026, 8, 20),
+                     flow_type=DEPOSIT_WITHDRAW, amount=Decimal("100"),
+                     currency="EUR", amount_eur=Decimal("100"), account=PILLAR3A),
+            CashBalance(report_date=date(2026, 8, 25), currency="EUR",
+                        cash=Decimal("1000"), account=IBKR),
+            CashBalance(report_date=date(2026, 8, 25), currency="EUR",
+                        cash=Decimal("2000"), account=PILLAR3A),
+        ])
+        await session.flush()
+
+        service = CashService(session)
+        events = await service.balance_events(eur)
+        assert service.balance_as_of(events, date(2026, 8, 25)) == Decimal("3000")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cash_source_is_mixed_when_one_account_cannot_be_measured():
+    """
+    `MEASURED` means *read from the broker*. A pillar 3a balance can never be one, so a
+    total that is half derived must not be badged `ibkr` — the same provenance overclaim
+    that `derived_source()` was split out to avoid, arriving by a new route.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add_all([
+            CashFlow(ib_key="ibkr-d", flow_date=date(2026, 8, 20),
+                     flow_type=DEPOSIT_WITHDRAW, amount=Decimal("100"),
+                     currency="EUR", amount_eur=Decimal("100"), account=IBKR),
+            CashBalance(report_date=date(2026, 8, 25), currency="EUR",
+                        cash=Decimal("100"), account=IBKR),
+        ])
+        await session.flush()
+        assert await CashService(session).cash_source() == MEASURED
+
+        session.add(CashFlow(
+            ib_key="fp-d", flow_date=date(2026, 8, 21), flow_type=DEPOSIT_WITHDRAW,
+            amount=Decimal("500"), currency="EUR", amount_eur=Decimal("500"),
+            account=PILLAR3A,
+        ))
+        await session.flush()
+        assert await CashService(session).cash_source() == MIXED
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_pillar3a_only_balance_is_derived_not_measured():
+    """No measured rows anywhere means the old two-way answer still applies."""
+    engine, session = await _make_session()
+    try:
+        session.add(CashFlow(
+            ib_key="fp-d", flow_date=date(2026, 8, 21), flow_type=DEPOSIT_WITHDRAW,
+            amount=Decimal("500"), currency="EUR", amount_eur=Decimal("500"),
+            account=PILLAR3A,
+        ))
+        await session.flush()
+        assert await CashService(session).cash_source() == DERIVED
     finally:
         await engine.dispose()

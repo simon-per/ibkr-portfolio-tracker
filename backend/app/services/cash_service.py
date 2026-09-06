@@ -54,10 +54,12 @@ whenever the section was enabled and can never reach back to the account's start
 import logging
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.accounts import IBKR
 from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.trade_repository import TradeRepository
@@ -74,6 +76,12 @@ MEASURED = "ibkr"
 #: No ledger holds a single row, so there is nothing to derive from. Distinct from a
 #: derived zero, which is a real answer: an account that has deployed everything it has.
 UNKNOWN = "unknown"
+#: Part of the balance is IBKR's own figure and part is derived — the shape the
+#: moment a second account exists, because a pillar 3a balance can never be measured
+#: by IBKR. `MEASURED` over it would stamp a provenance on money IBKR never saw,
+#: which is the same overclaim as a badge that cannot clear. Three-way for the same
+#: reason `dividend_source` is.
+MIXED = "mixed"
 
 
 class CashService:
@@ -91,8 +99,16 @@ class CashService:
         rate applies to a franc; converting the accumulated balance at the valuation
         date instead would make a stationary cash pile drift with EURCHF while the cost
         basis beside it sat still.
+
+        Events are gathered **per account** and spliced against that account's own
+        measured levels before being merged. Doing it in one pot is not a tidiness
+        question: `_apply_measured` turns a level into ``level - derived_running``,
+        so an IBKR level differenced against a total carrying pillar 3a money emits
+        a correction that silently subtracts the 3a balance on every measured day,
+        and puts it back on every day between. The line would sawtooth and each
+        individual point would look plausible.
         """
-        events: List[Tuple[date, Decimal]] = []
+        by_account: Dict[str, List[Tuple[date, Decimal]]] = defaultdict(list)
         to_base = NativeToBase(self.currency_service, base_fx)
 
         # 1. Trades. `proceeds` carries IBKR's sign — negative for a buy, positive for a
@@ -110,7 +126,7 @@ class CashService:
                     t.ib_key, t.currency, t.trade_date,
                 )
                 continue
-            events.append((t.trade_date, amount))
+            by_account[t.account].append((t.trade_date, amount))
 
         # 2. External cash. **Every** flow type, not `get_deposits()`'s whitelist: that
         #    one answers "was this money added", where a transfer must never count. This
@@ -118,7 +134,7 @@ class CashService:
         #    rows this account holds carry a zero amount and so contribute nothing either
         #    way, which is the correct answer rather than a lucky one.
         for f in await CashFlowRepository(self.db).get_all():
-            events.append((
+            by_account[f.account].append((
                 f.flow_date, base_fx.convert(f.amount_eur or Decimal("0"), f.flow_date)
             ))
 
@@ -128,12 +144,24 @@ class CashService:
         #    broker, so crediting it here invents cash the account never received.
         from app.services.dividend_service import DividendService
         for when, net_eur in await DividendService(self.db).ibkr_cash_receipts():
-            events.append((when, base_fx.convert(net_eur, when)))
+            by_account[IBKR].append((when, base_fx.convert(net_eur, when)))
 
-        events.sort(key=lambda e: e[0])
-        return await self._apply_measured(events, to_base)
+        # The union of accounts with derived events and accounts with measured
+        # levels, not just the former: a Flex query can carry the Cash Report
+        # section while <Trades> and <CashTransactions> are still off, and an
+        # account whose only evidence is IBKR's own figure must still get it.
+        accounted = set(by_account) | {
+            row.account
+            for row in await CashBalanceRepository(self.db).get_all()
+        }
+        merged: List[Tuple[date, Decimal]] = []
+        for account in sorted(accounted):
+            events = sorted(by_account.get(account, []), key=lambda e: e[0])
+            merged += await self._apply_measured(events, to_base, account)
+        merged.sort(key=lambda e: e[0])
+        return merged
 
-    async def _apply_measured(self, events, to_base):
+    async def _apply_measured(self, events, to_base, account):
         """
         Snap the derived running balance to IBKR's own figure on every day it reports one.
 
@@ -154,7 +182,7 @@ class CashService:
         the accumulated broker interest, fees and FX spread this service cannot see — it
         is the correction being visible, not a fault.
         """
-        measured = await CashBalanceRepository(self.db).get_all()
+        measured = await CashBalanceRepository(self.db).get_all(account=account)
         if not measured:
             return events
 
@@ -191,8 +219,7 @@ class CashService:
             applied += correction
             corrections.append((row.report_date, correction))
 
-        merged = sorted(events + corrections, key=lambda e: e[0])
-        return merged
+        return sorted(events + corrections, key=lambda e: e[0])
 
     async def cash_source(self) -> str:
         """
@@ -203,10 +230,27 @@ class CashService:
         rows is a different state and a real answer, so the two must not collapse: one
         means "fully deployed", the other means "we have no idea", and rendering the
         second as 0.00 is the reassuring-zero failure this codebase keeps rediscovering.
+
+        `MIXED` once a second account exists whose balance IBKR cannot measure. It is
+        not a hedge: `MEASURED` means *read from the broker*, and reporting a total
+        that half of which the broker has never seen as `ibkr` is precisely the
+        provenance overclaim `derived_source` was split out to avoid.
         """
-        if await CashBalanceRepository(self.db).count():
-            return MEASURED
-        return await self.derived_source()
+        measured_accounts = {
+            row.account
+            for row in await CashBalanceRepository(self.db).get_all()
+        }
+        if not measured_accounts:
+            return await self.derived_source()
+
+        derived_only = await self._accounts_with_activity() - measured_accounts
+        return MIXED if derived_only else MEASURED
+
+    async def _accounts_with_activity(self) -> set:
+        """Every account with a trade or a cash flow — anything a balance derives from."""
+        accounts = {t.account for t in await TradeRepository(self.db).get_all()}
+        accounts |= {f.account for f in await CashFlowRepository(self.db).get_all()}
+        return accounts
 
     async def derived_source(self) -> str:
         """

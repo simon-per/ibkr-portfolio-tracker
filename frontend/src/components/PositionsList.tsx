@@ -75,6 +75,17 @@ const getRatingScore = (consensus: string | undefined): number => {
 const exchangeOf = (p: Position) => p.exchange || 'N/A'
 
 /**
+ * A short label for the account a row belongs to, or null for the brokerage one.
+ *
+ * Null rather than 'IBKR' deliberately: badging every row of a single-account book
+ * is noise that teaches the reader to skip the badge, which is exactly what it must
+ * not do the day a second account appears. Absent `account` reads as IBKR, the same
+ * backward-compatible default the field itself documents.
+ */
+const accountBadge = (p: Position): string | null =>
+  p.account && p.account.startsWith('pillar3a') ? '3a' : null
+
+/**
  * A holding the backend could not value, on the shared two-clause predicate.
  *
  * The table used to render these as an ordinary, very bad position. `market_value_eur`
@@ -143,15 +154,33 @@ export function positionColumns(deps: {
       shortHeader: 'Symbol',
       sortKey: 'symbol',
       mobile: 'title',
-      cell: (p, view) =>
-        view === 'table' ? (
+      cell: (p, view) => {
+        const badge = accountBadge(p)
+        // One Column[] renders both the table and the phone card list, so the badge
+        // reaches mobile without a second edit — the whole reason DataTable exists.
+        const tag = badge ? (
+          <span
+            className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
+            title="Held in your pillar 3a account. Excluded from the tax report's wealth and income sections."
+          >
+            {badge}
+          </span>
+        ) : null
+        return view === 'table' ? (
           <>
-            <div className="font-medium">{p.symbol}</div>
+            <div className="font-medium">
+              {p.symbol}
+              {tag}
+            </div>
             <div className="text-xs text-muted-foreground">{exchangeOf(p)}</div>
           </>
         ) : (
-          p.symbol
-        ),
+          <>
+            {p.symbol}
+            {tag}
+          </>
+        )
+      },
     },
     {
       key: 'description',

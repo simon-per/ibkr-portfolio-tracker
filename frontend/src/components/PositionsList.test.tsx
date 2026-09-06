@@ -206,3 +206,42 @@ describe('a holding the backend could not value', () => {
     expect(weight.cell(NO_PRICE, 'table')).toBe('—')
   })
 })
+
+describe('the account badge', () => {
+  const symbolCell = (p: Position, view: 'table' | 'cards' = 'table') =>
+    render(<>{cols().find((c) => c.key === 'symbol')!.cell(p, view)}</>)
+
+  it('badges a pillar 3a holding', () => {
+    symbolCell(position({ security_id: 9, symbol: 'CH0117044948', account: 'pillar3a' }))
+    expect(screen.getByText('3a')).toBeTruthy()
+  })
+
+  it('badges a second 3a portfolio too', () => {
+    // The label is free-form so a second finpension portfolio can have its own; a
+    // prefix test keeps it badged without an edit here.
+    symbolCell(position({ security_id: 9, symbol: 'X', account: 'pillar3a-2' }))
+    expect(screen.getByText('3a')).toBeTruthy()
+  })
+
+  it('leaves a brokerage holding unbadged', () => {
+    // Not 'IBKR': badging every row of a single-account book is noise that teaches the
+    // reader to skip the badge, which is exactly what it must not do the day a second
+    // account appears.
+    symbolCell(position({ security_id: 1, symbol: 'AVGO', account: 'ibkr' }))
+    expect(screen.queryByText('3a')).toBeNull()
+  })
+
+  it('reads an absent account as the brokerage one', () => {
+    // Older backends do not send the field, and the client must render exactly as it
+    // always did rather than badging everything.
+    symbolCell(position({ security_id: 1, symbol: 'AVGO' }))
+    expect(screen.queryByText('3a')).toBeNull()
+  })
+
+  it('carries the badge into the phone card view', () => {
+    // One Column[] renders both, which is the whole point of DataTable — a badge that
+    // reached only the table would be invisible on the device nobody tests on.
+    symbolCell(position({ security_id: 9, symbol: 'X', account: 'pillar3a' }), 'cards')
+    expect(screen.getByText('3a')).toBeTruthy()
+  })
+})

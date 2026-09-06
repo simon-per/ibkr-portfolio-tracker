@@ -43,7 +43,14 @@ export function cashIsTracked(
  * the broker's figure.
  */
 export function cashCaveat(source: CashSource | undefined): string | null {
-  return source === 'derived'
-    ? 'derived from your trade, deposit and dividend history — it excludes broker interest and fees'
-    : null
+  if (source === 'derived') {
+    return 'derived from your trade, deposit and dividend history — it excludes broker interest and fees'
+  }
+  // Part measured, part derived. Worth its own sentence rather than reusing the
+  // derived one: the caveat applies to a *portion* of the figure, and saying the
+  // whole balance excludes broker interest would be wrong about the measured half.
+  if (source === 'mixed') {
+    return 'partly IBKR’s own figure and partly derived from your history — the derived part excludes fees and interest'
+  }
+  return null
 }

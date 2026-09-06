@@ -325,6 +325,52 @@ export function TaxTab() {
             </Card>
           )}
 
+          {/* --- Pillar 3a ---
+              Leads, because it explains what is *absent* from every section below it.
+              A reader reconciling the Steuerwert against a statement needs that before
+              the numbers, not in a footnote after them — the same rule that moved the
+              look-through coverage notice outside its collapsible. */}
+          {data.pillar3a && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Pillar 3a</CardTitle>
+                <CardDescription>
+                  Excluded from every section below. 3a capital is not part of the
+                  Steuerwert and its income is not taxable — both are taxed on
+                  withdrawal, at a separate reduced rate.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <div className="text-2xl font-semibold tabular-nums">
+                      {money(data.pillar3a.contributions)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Contributions in {data.year} —{' '}
+                      <span className="font-medium">deductible from taxable income</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold tabular-nums text-muted-foreground">
+                      {money(data.pillar3a.holdings_value)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Assets held — <span className="font-medium">not</span> part of the
+                      Steuerwert
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Check this year&rsquo;s federal cap: it differs depending on whether you
+                  are affiliated to a pension fund. Transfers of vested benefits are
+                  excluded from the figure above — that capital was deducted in the year
+                  it was originally paid in.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* --- Dividend income + withholding (DA-1) --- */}
           <Card>
             <CardHeader>

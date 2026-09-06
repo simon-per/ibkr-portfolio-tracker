@@ -40,10 +40,21 @@ class CashBalanceRepository:
             )
         )
 
-    async def get_all(self) -> List[CashBalance]:
-        """Every measured balance, oldest first."""
+    async def get_all(self, account: Optional[str] = None) -> List[CashBalance]:
+        """
+        Every measured balance, oldest first; optionally for one account.
+
+        `CashService` must pass an account. A measured row is a *level*, and
+        `_apply_measured` turns it into ``level - derived_running`` — so a level
+        reported by one account, differenced against a running total that carries
+        another account's money, emits a correction that silently subtracts the
+        second account's whole balance on every measured day.
+        """
+        query = select(CashBalance)
+        if account is not None:
+            query = query.where(CashBalance.account == account)
         result = await self.session.execute(
-            select(CashBalance).order_by(CashBalance.report_date.asc())
+            query.order_by(CashBalance.report_date.asc())
         )
         return list(result.scalars().all())
 

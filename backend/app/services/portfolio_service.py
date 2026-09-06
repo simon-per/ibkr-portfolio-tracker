@@ -1189,6 +1189,7 @@ class PortfolioService:
                     "isin": security.isin,
                     "currency": security.currency,
                     "exchange": security.exchange,
+                    "account": security.account,
                     "quantity": Decimal("0.0"),
                     "cost_basis_eur": Decimal("0.0"),
                     "taxlots": []

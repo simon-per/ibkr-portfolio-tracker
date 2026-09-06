@@ -49,6 +49,11 @@ class PositionResponse(BaseModel):
     gain_loss_percent: float
     taxlots: List[TaxLotInfo]
     analyst_rating: Optional[AnalystRatingInfo] = None
+    #: Which account holds it. Declared on the model deliberately: a
+    #: `response_model` is a *filter*, so a key the service supplies and this does
+    #: not is dropped from the wire silently. Defaults to 'ibkr' so a client reading
+    #: an older backend sees the same thing it always did.
+    account: str = "ibkr"
 
     class Config:
         from_attributes = True
