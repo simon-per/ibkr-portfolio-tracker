@@ -20,9 +20,11 @@ from typing import Dict, List, Optional
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.accounts import tax_exempt_accounts
 from app.models.security import Security
 from app.models.trade import Trade
 from app.models.dividend_payment import DividendPayment
+from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
 from app.services.portfolio_service import PortfolioService
@@ -67,6 +69,12 @@ class TaxService:
         start = date(year, 1, 1)
         end = date(year, 12, 31)
 
+        # Resolved once and applied at three call sites -- the dividend/DA-1 select,
+        # the realized-gains select and the Steuerwert snapshot. A second copy of
+        # this predicate is this codebase's opening warning, and here the two copies
+        # would disagree on a tax return rather than on a dashboard.
+        exempt_accounts = await tax_exempt_accounts(self.db)
+
         portfolio = PortfolioService(self.db)
         base_fx = await portfolio._load_base_fx()
 
@@ -79,10 +87,22 @@ class TaxService:
         # ex-date/pay-date double-count in later years (yfinance stores a dividend
         # under its ex-date, IBKR under its pay date, weeks apart). The two sources
         # are still never summed for the same period.
+        # A tax-exempt account is excluded here, and this guard can never fire
+        # today: the finpension importer books 3a distributions to `cash_flows`
+        # rather than `dividend_payments`, so there is no row to exclude. That is
+        # exactly why it is written -- a guard that cannot fire is the one you want
+        # on a DA-1 bucket keyed on `isin[:2]`, because both Swisscanto ISINs begin
+        # `CH` and would land in the one bucket that is definitionally not a
+        # foreign-withholding reclaim. It also gates `dividend_income` in the same
+        # clause, so the two cannot come apart.
         stmt = (
             select(DividendPayment, Security)
             .join(Security, DividendPayment.security_id == Security.id)
-            .where(DividendPayment.gross_amount_eur.isnot(None))
+            .where(
+                DividendPayment.gross_amount_eur.isnot(None),
+                *([Security.account.notin_(exempt_accounts)]
+                  if exempt_accounts else []),
+            )
         )
         all_rows = (await self.db.execute(stmt)).all()
         kept, ibkr_from = DividendService._splice_by_era([dp for dp, _ in all_rows])
@@ -158,10 +178,19 @@ class TaxService:
         )
 
         # --- Realized capital gains (per SELL trade) ---
+        # Filtered on `Trade.account`, NOT on the joined security. The join is an
+        # OUTER one because `Trade.security_id` is nullable by design (a fully-sold
+        # security is absent from OpenPositions), so a Security-side clause would
+        # silently drop every unlinked IBKR trade along with the 3a ones.
         trade_rows = (await self.db.execute(
             select(Trade, Security)
             .join(Security, Trade.security_id == Security.id, isouter=True)
-            .where(and_(Trade.trade_date >= start, Trade.trade_date <= end))
+            .where(and_(
+                Trade.trade_date >= start,
+                Trade.trade_date <= end,
+                *([Trade.account.notin_(exempt_accounts)]
+                  if exempt_accounts else []),
+            ))
             .order_by(Trade.trade_date.asc())
         )).all()
 
@@ -205,7 +234,9 @@ class TaxService:
             # portfolio view uses, so the two never disagree; flagged so the UI can
             # label it an estimate (mirrors dividend_source).
             realized_source = "closed_lot_estimate"
-            for row in await portfolio.realized_rows_from_closed_lots(base_fx, start, end):
+            for row in await portfolio.realized_rows_from_closed_lots(
+                base_fx, start, end, exclude_accounts=exempt_accounts
+            ):
                 proceeds, cost = row["proceeds"], row["cost_basis"]
                 gain = proceeds - cost
                 r_proceeds += proceeds
@@ -249,7 +280,14 @@ class TaxService:
         holdings_total = Decimal("0")
         holdings_failed = False
         try:
-            for row in await portfolio.holdings_snapshot_as_of(base_fx, as_of):
+            # `exclude_accounts` deliberately breaks this helper's documented
+            # promise that it uses the same window as `_calculate_daily_value`, so
+            # the wealth-tax base and the portfolio timeline no longer agree. That
+            # is the point: 3a capital is outside the Steuerwert entirely, taxed
+            # instead on withdrawal at a separate reduced rate.
+            for row in await portfolio.holdings_snapshot_as_of(
+                base_fx, as_of, exclude_accounts=exempt_accounts
+            ):
                 mv = row["market_value"]
                 holdings_total += mv
                 holdings.append({
@@ -291,6 +329,45 @@ class TaxService:
                     f"by their value. Fix the ticker mapping or import prices for that "
                     f"date, then re-run."
                 )
+
+        # --- Pillar 3a: excluded above, and reported here instead -----------------
+        # Its capital is outside the wealth-tax base and its income is not taxable,
+        # so none of the three sections above may contain it. What *is* a real tax
+        # figure is the year's contributions: they are deductible from taxable
+        # income, up to a federal cap that depends on whether you have a pension
+        # fund. Deposits only -- a `TRANSFER_IN` is capital already deducted in an
+        # earlier year, and counting it would overstate the deduction, which is the
+        # error direction that costs money at an audit.
+        exempt_contributions = Decimal("0")
+        exempt_holdings_total = Decimal("0")
+        has_exempt = False
+        if exempt_accounts:
+            rows = (await self.db.execute(
+                select(CashFlow).where(and_(
+                    CashFlow.account.in_(exempt_accounts),
+                    CashFlow.flow_type == DEPOSIT_WITHDRAW,
+                    CashFlow.flow_date >= start,
+                    CashFlow.flow_date <= end,
+                ))
+            )).scalars().all()
+            has_exempt = True
+            for flow in rows:
+                converted = base_fx.convert(flow.amount_eur, flow.flow_date)
+                if converted is not None:
+                    exempt_contributions += converted
+            # Stated so the reader can see the assets exist and are deliberately
+            # absent from the Steuerwert, rather than wondering where they went.
+            for row in await portfolio.holdings_snapshot_as_of(
+                base_fx, as_of, only_accounts=exempt_accounts
+            ):
+                exempt_holdings_total += row["market_value"]
+            warnings.append(
+                "Pillar 3a is excluded from the wealth-tax base, the DA-1 reclaim "
+                "and realized gains above, because 3a capital is not taxed as "
+                "wealth and its income is not taxable income — it is taxed on "
+                "withdrawal, at a separate reduced rate. Its contributions are "
+                "reported separately below, being deductible."
+            )
 
         # The label reflects what actually contributed inside the year window:
         # "mixed" is the boundary year, where estimates cover the weeks before the
@@ -339,6 +416,20 @@ class TaxService:
                 + ("." if as_of == end else " (current year — 31 December has not occurred yet).")
                 + " Positions whose price could not be resolved near that date are omitted."
             ),
+            "pillar3a": {
+                "tracked": has_exempt,
+                "accounts": exempt_accounts if has_exempt else [],
+                "contributions": round(float(exempt_contributions), 2),
+                "holdings_value": round(float(exempt_holdings_total), 2),
+                "note": (
+                    "Pillar 3a contributions are deductible from taxable income. "
+                    "The assets themselves are excluded from every section above: "
+                    "3a capital is not part of the Steuerwert and its income is not "
+                    "taxable, being taxed on withdrawal at a separate reduced rate. "
+                    "Check the year's federal cap — it differs depending on whether "
+                    "you are affiliated to a pension fund."
+                ),
+            } if has_exempt else None,
             "warnings": warnings,
         }
 
@@ -356,6 +447,19 @@ class TaxService:
             w.writerow(["WARNINGS"])
             for warning in report["warnings"]:
                 w.writerow([warning])
+            w.writerow([])
+
+        # Pillar 3a leads, because it explains what is *absent* from every section
+        # below it. A reader reconciling the Steuerwert against a bank statement
+        # needs that before the numbers, not in a footnote after them.
+        p3a = report.get("pillar3a")
+        if p3a:
+            w.writerow(["Pillar 3a (excluded from every section below)"])
+            w.writerow(["Contributions this year (deductible from taxable income)",
+                        p3a["contributions"]])
+            w.writerow(["Assets held (NOT part of the Steuerwert)",
+                        p3a["holdings_value"]])
+            w.writerow([p3a["note"]])
             w.writerow([])
 
         w.writerow([f"Dividend income (source: {report['dividend_source']})"])

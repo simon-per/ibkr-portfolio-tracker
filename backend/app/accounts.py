@@ -39,3 +39,29 @@ TAX_EXEMPT_ACCOUNT_PREFIX = "pillar3a"
 def is_tax_exempt(account: str | None) -> bool:
     """True for an account whose holdings and income are outside the Swiss tax base."""
     return bool(account) and account.startswith(TAX_EXEMPT_ACCOUNT_PREFIX)
+
+
+async def tax_exempt_accounts(db) -> list[str]:
+    """
+    Every account label in the database whose assets are outside the Swiss tax base.
+
+    Resolved from the data rather than from a constant, so a second 3a portfolio
+    ingested under its own label (`--account pillar3a-2`) inherits the treatment
+    without anyone editing this file, and an IBKR-only database gets an empty list
+    rather than a filter over a name nothing uses.
+
+    Every caller guards on truthiness before building a ``NOT IN``, because an
+    empty one is a clause with nothing to say and the failure direction here is a
+    wrong tax return.
+    """
+    from sqlalchemy import select
+
+    from app.models.security import Security
+    from app.models.trade import Trade
+
+    labels = set()
+    for column in (Security.account, Trade.account):
+        rows = await db.execute(select(column).distinct())
+        labels.update(a for a in rows.scalars().all() if is_tax_exempt(a))
+
+    return sorted(labels)

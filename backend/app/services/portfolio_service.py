@@ -5,7 +5,7 @@ Calculates cost basis and market value for the portfolio over time.
 import bisect
 import calendar
 from collections import defaultdict
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Sequence, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy import select, and_, or_, func
@@ -930,7 +930,13 @@ class PortfolioService:
             "num_closed_positions": len({row["security_id"] for row in rows}),
         }
 
-    async def holdings_snapshot_as_of(self, base_fx: BaseFx, on_date: date) -> List[Dict]:
+    async def holdings_snapshot_as_of(
+        self,
+        base_fx: BaseFx,
+        on_date: date,
+        exclude_accounts: Optional[Sequence[str]] = None,
+        only_accounts: Optional[Sequence[str]] = None,
+    ) -> List[Dict]:
         """
         Per-security holdings as they stood on ``on_date``, valued at that date's prices.
 
@@ -941,7 +947,30 @@ class PortfolioService:
 
         Securities whose price can't be resolved near ``on_date`` are skipped rather than
         counted at zero — a thin price history degrades the total instead of lying.
+
+        ``exclude_accounts`` **deliberately breaks the agreement promised above**, and
+        only the tax report passes it. Pillar 3a capital is outside the Steuerwert
+        entirely — it is taxed on withdrawal at a separate reduced rate, not as
+        wealth — so a wealth-tax base that included it would be wrong on a tax
+        return. Everything else must keep the default and blend, which is why this
+        is an argument rather than a filter baked into the query.
+
+        An excluded security is **not** recorded in ``last_snapshot_skipped``: that
+        latch means "could not be valued", and the report turns it into a warning
+        that the base is partial. A deliberate exclusion reported as a hole would
+        make the one figure that goes on a tax return look broken.
+
+        ``only_accounts`` is its mirror, so the tax report can *state* the 3a
+        holdings it just excluded rather than leaving the reader to wonder where
+        they went. Passing both is a contradiction and is refused.
         """
+        exclude_accounts = tuple(exclude_accounts or ())
+        only_accounts = tuple(only_accounts or ())
+        if exclude_accounts and only_accounts:
+            raise ValueError(
+                "holdings_snapshot_as_of takes exclude_accounts or only_accounts, "
+                "not both - they answer contradictory questions."
+            )
         result = await self.db.execute(
             select(TaxLot, Security)
             .join(Security, TaxLot.security_id == Security.id)
@@ -952,6 +981,10 @@ class PortfolioService:
                     # position sold on 31 Dec is not held at year-end — it belongs
                     # to that year's realized gains, not its Steuerwert.
                     or_(TaxLot.close_date.is_(None), TaxLot.close_date > on_date),
+                    *([Security.account.notin_(exclude_accounts)]
+                      if exclude_accounts else []),
+                    *([Security.account.in_(only_accounts)]
+                      if only_accounts else []),
                 )
             )
             .order_by(Security.symbol.asc())
@@ -1033,6 +1066,7 @@ class PortfolioService:
         base_fx: BaseFx,
         start: Optional[date] = None,
         end: Optional[date] = None,
+        exclude_accounts: Optional[Sequence[str]] = None,
     ) -> List[Dict]:
         """
         Per-closed-lot realized figures using the market-price approximation
@@ -1042,8 +1076,17 @@ class PortfolioService:
         Shared by the portfolio realized totals and the tax report's fallback so
         the two views can never disagree about the same closed lots. Lots that
         can't be priced (or converted) are skipped, exactly as before.
+
+        ``exclude_accounts`` is passed only by the tax report, and it must be
+        passed there: the fallback and the authoritative trade path answer the
+        *same* question, so excluding a tax-exempt account from one and not the
+        other would make `realized_source` change what the figure covers as well as
+        where it came from. The portfolio's own realized totals blend, as they
+        should — that is a return figure, not a tax one.
         """
         conditions = [TaxLot.is_open == False, TaxLot.close_date.isnot(None)]
+        if exclude_accounts:
+            conditions.append(Security.account.notin_(tuple(exclude_accounts)))
         if start is not None:
             conditions.append(TaxLot.close_date >= start)
         if end is not None:
