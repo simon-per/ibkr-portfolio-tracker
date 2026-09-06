@@ -582,8 +582,7 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Shipped 2026-09-06 (late) — money in per month, which the chart had never drawn
 
-**Not yet deployed at the time of writing** — check `/health`'s commit before reading a
-symptom as unfixed.
+Four commits, `35230b0..2a4817b`. Deployed **18:53 UTC**, health 200.
 
 `monthly[]` on `/api/portfolio/contributions` carried `deployed_eur` and `net_eur` and no
 money in at all, so `MonthlyDeploymentCard` could only draw the gross series. That series
@@ -623,9 +622,22 @@ which is what confirms the snapshot was current.
 suffix still shows it. Nothing was netted, renormalised or redefined — the owner was asked
 and chose to keep it, because the gap *is* the measurement.
 
-1413 backend + 524 frontend tests. `e2e/mobile.mjs` was **not** run (it needs a local stack);
-the change is two bars instead of two plus one wrapping paragraph, so overflow risk is low
-but unverified.
+1413 backend + 524 frontend tests, and **the deployed page was screenshotted at 1280 and
+390** — which is what found the one defect the suites structurally could not. The legend
+listed the two series in the *opposite* order to the bars: declared money-in-first, Recharts
+derived "Deployed, Money in" from the children while the leftmost bar of each pair was money
+in, so the legend put the secondary series first. It is rendered explicitly now
+(`Legend content=`, since `payload` is not in this version's props). **Recharts does not
+render inside jsdom's zero-size container**, so every chart-internal property — series order,
+legend, axis, tile fit — is invisible to the component tests by construction; the only way to
+see one is a browser against a built page.
+
+The check itself is worth reusing and is not `e2e/mobile.mjs` (which needs a local stack): a
+throwaway Playwright script against the **live URL**, importing `playwright` by absolute path
+out of `e2e/node_modules` so nothing lands in the repo, with `page.route(...).abort()` on
+`/api/dividends/summary` and `/api/portfolio/benchmark` — the two GETs that can reach Yahoo
+on a cache miss, and neither of which feeds this card. Zero horizontal overflow at both
+widths.
 
 ## Shipped 2026-09-06 — a second account, deployed and verified
 
