@@ -1,10 +1,11 @@
 # Working state
 
-**Last updated: 2026-09-06.** Latest: **the portfolio holds a second account.** A Swiss
-Pillar 3a with finpension is ingested from a transaction CSV and folded into the same
-tables — same charts, totals, allocation, look-through, contributions and returns, no
-second tab. Built in six commits on `feat/pillar-3a-account`; **not yet pushed or
-deployed**, and the first production import is a human step (see *Needs a human*).
+**Last updated: 2026-09-06.** Latest: **the portfolio holds a second account, live on
+production.** A Swiss Pillar 3a with finpension is ingested from a transaction CSV and
+folded into the same tables — same charts, totals, allocation, look-through, contributions
+and returns, no second tab. Deployed 17:00 UTC, imported 17:05, verified end to end.
+Money in went **53,829.74 → 55,587.74 CHF** (+1,758.00, exactly the deposits) and the book
+**70,853 → 72,613 CHF**.
 
 Three things about it are worth knowing before reading further.
 
@@ -167,29 +168,20 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
 ## Needs a human
 
-- **Import the finpension CSV on production, then pin the World ex CH mapping.** The
-  branch is `feat/pillar-3a-account`, unpushed. Once deployed:
+- **Re-upload the finpension export periodically — roughly monthly.** Only
+  `CH1529078078` depends on it now; `CH0117044948` prices from Yahoo. A market-data sync
+  warns once the newest *published* NAV is 40 days old ("upload a newer statement export"),
+  which is deliberately before the carried price runs out on day 59 and the holding drops
+  out of the total. The run is three commands:
 
   ```bash
-  docker cp transaction_report_YYYYMMDD.csv backend-portfolio-backend-1:/tmp/p3a.csv
-  docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv --dry-run
-  docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv
-  docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings       set CH0117044948 FUND 0P0000S0OD.SW       --notes "Morningstar fund quote; verified against finpension statement NAVs"
+  scp transaction_report_YYYYMMDD.csv root@portfolio.srv1211053.hstgr.cloud:/root/p3a.csv
+  ssh … 'docker cp /root/p3a.csv backend-portfolio-backend-1:/tmp/p3a.csv'
+  ssh … 'docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv --dry-run'
   ```
 
-  The dry run should report **1758.000000 CHF** of deposits and a closing balance of
-  **20.023586**. The mapping command makes one Yahoo request, prints the worst gap against
-  the published NAVs, and flips `price_source` to `yahoo` only if it agrees. **Do not pin
-  anything for `CH1529078078`** — its NAVs are the only price it has, and the plausible
-  candidate is the wrong share class at +49%.
-
-  Then re-run the check that matters: an IBKR sync **after** the import, confirming the 3a
-  lots survive. That is failure #1 and the reason the scoping shipped first.
-
-- **The 3a export needs re-uploading periodically, and nothing reminds you.** Prices carry
-  forward for a bounded window past the last statement NAV and then go unpriced *loudly*,
-  which is the intended end state rather than valuing the fund at a months-old NAV. Once the
-  World ex CH tranche is on Yahoo only the EM one depends on this.
+  Then drop `--dry-run`. It replaces the account wholesale and refuses a file shorter than
+  what is stored, so a truncated download cannot quietly delete history.
 
 - **Enable the Cash Report section in the Flex Query, and the cash balance stops being ours.**
   On query `App_OpenLots` (1389408), add the **Cash Report** section and tick **Base Currency
@@ -579,37 +571,51 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
-## Shipped 2026-09-06 — a second account, on branch, NOT deployed
+## Shipped 2026-09-06 — a second account, deployed and verified
 
-Six commits on `feat/pillar-3a-account`, off `main` at `a8b70fa`. **Nothing is pushed and
-nothing is on production.** 1401 backend + 517 frontend tests pass.
+Eight commits, `a8b70fa..a6fa53a`. Deployed **17:00 UTC**, imported **17:05**. 1405 backend
++ 517 frontend tests.
 
-What to check after the first deploy, in this order:
+**Verified on production, in this order** — the order is the point, because step 2 is the
+one that would have caught a wrong migration before any data moved:
 
-1. **`/health` reports the new commit**, and `alembic upgrade head` ran clean. The migration
-   (`t3c0e7f4a8b9`) rebuilds `securities` and `cash_balances` through `batch_alter_table`;
-   auto-deploy backs the DB up first. It is a **no-op on data** — every column defaults to
-   `ibkr` / `yahoo`, which is what every existing row already is.
-2. **Nothing changed.** Before importing anything, the totals, charts, tax report and
-   allocation should be byte-identical to before. If they are not, the scoping is wrong in a
-   direction the tests did not cover.
-3. **Then import**, per *Needs a human*.
-4. **Then run an IBKR sync and confirm the 3a lots survive.** This is failure #1: before the
-   scoping, `reconcile_taxlots` would delete them and book a fictitious disposal. Pinned by
-   `test_account_isolation.py` and verified by mutation, but it is the one worth seeing on
-   real data.
+1. `/health` reports `a6fa53a`, `scheduler_jobstore_persistent: true`, `write_auth_enabled: true`.
+2. **Nothing changed.** Before importing, every figure was byte-identical to the pre-deploy
+   snapshot: cost basis, market value, cash, `cash_source`, positions, money in, deployed,
+   Steuerwert, dividend gross, realized gain. The migration is a proven no-op on data.
+3. Import: 5 rows, 2 securities, 3 deposits, 2 lots, 68 price rows, `rows_restated 0`.
+4. Mapping: `CH0117044948 → 0P0000S0OD.SW`, verified at **0.05%** against the published NAV
+   and flipped to `price_source=yahoo`.
+5. **An IBKR statement cannot reach a 3a lot** — 750 open lots partition exactly into 748
+   IBKR + 2 pillar 3a, and the set `reconcile_taxlots` deletes from contains none of the
+   3a ones. Checked read-only inside the container rather than by running a sync, which
+   would have spent a Flex generation to learn nothing the partition does not already say.
 
-Two things are **latent** and will not show until something else changes:
+**The numbers, for reconciliation later:** money in 53,829.74 → **55,587.74 CHF** (+1,758.00,
+exactly the deposits); market value 70,828.48 → 72,568.47; cash 24.47 → 44.49 (+20.02, the
+closing balance to the cent); `cash_source` `ibkr` → **`mixed`**; positions 32 → 34;
+`unpriced_holdings` 0. Tax 2026 unchanged in all three sections — Steuerwert still 70,828.48
+over 32 rows, no Swisscanto row, no `CH` bucket in DA-1 — with a new Pillar 3a block
+reporting **1,758.00 deductible**. Look-through partition closes to the cent at 72,568.47,
+coverage 97.13%, `CH1529078078` decomposing through EMIM.
 
-- **The cash partition** does nothing until the Cash Report section is enabled in the Flex
-  portal (the other *Needs a human* item), because `cash_balances` is empty. When it is
-  enabled, watch that the cash line does not sawtooth — that was the defect.
-- **`cash_source: "mixed"`** appears only in that same state. Until then it stays `derived`.
+**Two things found during the deploy that were not in the plan:**
 
-Measured on the real file, worth keeping because they are the reconciliation points:
-deposits **1758.000000 CHF**, invested **1737.976414**, closing balance **20.023586** — and
-the derived balance reproduces that last figure to the cent, which is the Balance oracle
-holding end to end rather than a coincidence.
+- **The cash partition was live, not latent.** STATUS said `cash_balances` was empty; it is
+  not — `cash_source` read `ibkr` before the import. So `_apply_measured` would have started
+  subtracting the 3a balance on the first measured day rather than at some future date. The
+  partition shipped in the same batch, so it never bit.
+- **A carried NAV hid the staleness it bridges** (`a6fa53a`). The importer carries the last
+  NAV forward 45 days, which puts `max(market_prices.date)` in the *future*, so
+  `find_stale_priced_securities` could never have asked for a newer export. Fixed to read the
+  newest *observed* row, at a 40-day threshold chosen to speak before the holding drops out
+  on day 59.
+
+**Still worth watching:** the first market-data sync after this (the 20:00 Berlin slot) is
+the first to run with `price_source` gating in place — it should skip `CH1529078078` and
+fetch `CH0117044948`. And the next IBKR sync (18:00 Berlin tomorrow, or 00:00 tonight if
+today's failed) is the first real one to run beside 3a lots; step 5 above says it is safe,
+but `/api/sync/status` open-lot count should stay 750.
 
 ---
 
