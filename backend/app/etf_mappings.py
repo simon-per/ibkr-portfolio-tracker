@@ -408,6 +408,74 @@ ETF_ALLOCATIONS = {
             "Healthcare": 1.38,
         },
     },
+
+    # --- Swiss pillar 3a (finpension), Swisscanto institutional tranches -------------
+    # Keyed by ISIN like everything else here; the "symbol" is the ISIN because
+    # finpension publishes no ticker and `ticker_mappings` keys on (symbol, exchange),
+    # so the symbol must never change.
+
+    # Pinned **identical to EMIM above**, for the reason VOO / SXR8 / DBPG are pinned to
+    # each other: both track MSCI Emerging Markets (this one the standard index, EMIM
+    # the IMI variant), and a different split here would make the Allocation tab show
+    # the same index differently depending on which wrapper was held.
+    "CH1529078078": {
+        "isins": ["CH1529078078"],
+        "asset_type": "ETF",
+        "geographic": {
+            "China": 30.0,
+            "India": 20.0,
+            "Taiwan": 17.0,
+            "Brazil": 7.0,
+            "Saudi Arabia": 5.0,
+            "South Africa": 4.0,
+            "Other Emerging Markets": 17.0,
+        },
+        "sector": {
+            "Technology": 22.0,
+            "Financial Services": 21.0,
+            "Consumer Cyclical": 14.0,
+            "Communication Services": 10.0,
+            "Energy": 8.0,
+            "Basic Materials": 8.0,
+            "Industrials": 6.0,
+            "Healthcare": 5.0,
+            "Consumer Defensive": 4.0,
+            "Utilities": 2.0,
+        },
+    },
+
+    # MSCI World **ex Switzerland**, so this is IWDA's split with Switzerland taken out
+    # and renormalised, rather than pinned to it. Switzerland is ~2.5% of MSCI World and
+    # sits entirely inside the Europe bucket, so Europe drops from 15 to 13 and the
+    # other three take the difference. Small, and deliberate: pinning to IWDA would put
+    # Swiss weight into a fund whose entire distinguishing feature is not holding any.
+    #
+    # The sector split IS pinned to IWDA's — removing one 2.5% country moves it by less
+    # than this table's precision, and inventing decimals to express that would be
+    # false precision rather than accuracy.
+    "CH0117044948": {
+        "isins": ["CH0117044948"],
+        "asset_type": "ETF",
+        "geographic": {
+            "North America": 74.0,
+            "Europe": 13.0,
+            "Asia Pacific": 10.0,
+            "Emerging Markets": 3.0,
+        },
+        "sector": {
+            "Technology": 23.0,
+            "Financial Services": 14.0,
+            "Healthcare": 12.0,
+            "Consumer Cyclical": 11.0,
+            "Industrials": 10.0,
+            "Communication Services": 8.0,
+            "Consumer Defensive": 7.0,
+            "Energy": 5.0,
+            "Real Estate": 3.0,
+            "Utilities": 3.0,
+            "Basic Materials": 4.0,
+        },
+    },
 }
 
 
