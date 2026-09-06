@@ -28,10 +28,13 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import timedelta
+from decimal import Decimal
 from app.clock import utcnow
 from types import SimpleNamespace
 from typing import Optional, Tuple
 
+import yfinance as yf
 from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal
@@ -43,7 +46,10 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
+from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_YAHOO
+from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
 from app.services.market_data_service import MarketDataService
+from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -164,9 +170,116 @@ async def cmd_list(db) -> int:
     return 0
 
 
+#: How far a candidate ticker's close may sit from a NAV the provider itself published
+#: on the same day and still be believed to be the same instrument.
+#:
+#: Two percent, and both bounds are measured rather than picked. **Above**: a fund NAV
+#: is struck and published on a different clock from a Morningstar quote, so the two
+#: disagree by a few tenths on any given day — `0P0000S0OD.SW` against the finpension
+#: statement for 2026-09-01 read 446.87 / 448.32 / 448.75 across the surrounding days
+#: against a stated 448.5281, a spread of 0.6%. **Below**: the failure this exists to
+#: catch is a *different share class of the same fund*, and the one that was actually
+#: proposed sat +49% away (`0P0000S0OE.SW`, the EM fund's older NT tranche against this
+#: account's NMT one). Nothing lands between the two, which is what makes the threshold
+#: a real separation rather than a guess.
+NAV_TOLERANCE_PCT = Decimal("2.0")
+
+#: How many published NAVs to check against. More is not better: they come
+#: from transaction dates, so a handful spans months and a wrong share class
+#: fails on the first one.
+NAV_SAMPLE = 8
+
+
+async def _verify_against_published_navs(
+    db, service, security, yahoo_ticker: str,
+) -> Optional[str]:
+    """
+    Compare a candidate ticker's closes against NAVs the provider published itself.
+
+    Returns a refusal message, or None when there is nothing to check or the candidate
+    agrees. Only runs for a security that carries `finpension_statement` price rows —
+    a statement NAV is an *observation by the party that sold you the shares*, which is
+    a stronger oracle than anything else in this codebase and the reason a mapping here
+    can be verified at all rather than merely eyeballed.
+
+    This is a Yahoo call, and it is allowed under rule 1 for the same reason the rest of
+    this CLI is: a human typed the command. It costs one request.
+    """
+    rows = (await db.execute(
+        select(MarketPrice)
+        .where(
+            MarketPrice.security_id == security.id,
+            MarketPrice.source == PRICE_SOURCE_STATEMENT,
+        )
+        .order_by(MarketPrice.date.desc())
+        .limit(NAV_SAMPLE)
+    )).scalars().all()
+    if not rows:
+        return None
+
+    start = min(r.date for r in rows) - timedelta(days=5)
+    end = max(r.date for r in rows) + timedelta(days=5)
+    try:
+        history = await asyncio.to_thread(
+            lambda: yf.Ticker(yahoo_ticker).history(
+                start=start.isoformat(), end=end.isoformat(), auto_adjust=False
+            )
+        )
+    except Exception as e:
+        return (
+            f"Could not fetch {yahoo_ticker} to verify it against the "
+            f"{len(rows)} published NAV(s) on record ({type(e).__name__}: {e}). "
+            f"Refusing rather than saving an unverified mapping onto a security whose "
+            f"real prices are already known — that is the one case where guessing has "
+            f"no upside."
+        )
+    if history.empty:
+        return (
+            f"{yahoo_ticker} returned no prices at all, so it cannot be the instrument "
+            f"whose NAVs this security already carries."
+        )
+
+    closes = {d.date(): Decimal(str(round(float(row["Close"]), 6)))
+              for d, row in history.iterrows()}
+    worst = None
+    for row in rows:
+        # Nearest trading day within a couple of days: the two sources strike on
+        # different clocks, and demanding the exact date would refuse a correct ticker
+        # over a Swiss holiday.
+        nearby = [closes[d] for d in closes if abs((d - row.date).days) <= 2]
+        if not nearby:
+            continue
+        gap = min(abs(c - row.close_price) / row.close_price * 100 for c in nearby)
+        if worst is None or gap > worst[0]:
+            worst = (gap, row.date, row.close_price, min(
+                nearby, key=lambda c: abs(c - row.close_price)))
+
+    if worst is None:
+        return (
+            f"{yahoo_ticker} has no prices near any of the {len(rows)} published NAV(s) "
+            f"on record, so there is nothing to verify it against."
+        )
+    gap, when, nav, close = worst
+    if gap > NAV_TOLERANCE_PCT:
+        return (
+            f"{yahoo_ticker} disagrees with the provider's own NAV by {gap:.1f}% "
+            f"(on {when}: statement {nav}, Yahoo {close}) — refusing. "
+            f"A gap this size is a **different share class of the same fund**, not a "
+            f"pricing difference. That is the SBI failure: the prices arrive, they are "
+            f"just the wrong instrument's, and nothing downstream can see it. Measured "
+            f"example: the EM fund's NT tranche quotes ~49% above this account's NMT "
+            f"one under a name that matches perfectly."
+        )
+    print(
+        f"Verified against {len(rows)} published NAV(s): worst gap {gap:.2f}% on "
+        f"{when} (statement {nav}, Yahoo {close}), within {NAV_TOLERANCE_PCT}%."
+    )
+    return None
+
+
 async def cmd_set(
     db, symbol: str, exchange: str, yahoo_ticker: str,
-    notes: Optional[str], dry_run: bool,
+    notes: Optional[str], dry_run: bool, skip_nav_check: bool = False,
 ) -> Tuple[int, dict]:
     service = MarketDataService(db)
     security = await _find_security(db, symbol, exchange)
@@ -197,6 +310,19 @@ async def cmd_set(
             f"A bare ticker is how SBI@TSE ended up priced off a US fund — double-check "
             f"this is really the same instrument."
         )
+
+    # A security priced from provider statements carries an oracle nothing else in
+    # this app has: NAVs published by the party that sold the shares. Check the
+    # candidate against them before believing it, because the failure mode here is
+    # a different *share class* — a perfect name match at a completely wrong level.
+    verified = False
+    if security and not skip_nav_check:
+        refusal = await _verify_against_published_navs(
+            db, service, security, yahoo_ticker
+        )
+        if refusal:
+            raise MappingError(refusal)
+        verified = getattr(security, "price_source", None) == PRICE_SOURCE_MANUAL
 
     existing = await service.ticker_mapping_repo.get_mapping(symbol, exchange)
     before = existing.yahoo_ticker if existing else None
@@ -230,6 +356,16 @@ async def cmd_set(
         ibkr_symbol=symbol, ibkr_exchange=exchange, yahoo_ticker=yahoo_ticker,
         source="manual", notes=notes,
     )
+    # Only a *verified* mapping hands the security to the price loop. Saving the row
+    # without this leaves it inert -- `sync_securities` skips a manual security -- so
+    # the flip is the second half of the same action, and it deliberately happens
+    # nowhere else: a mapping typed without the NAV check does not earn it.
+    if verified:
+        security.price_source = PRICE_SOURCE_YAHOO
+        print(
+            f"{symbol}@{exchange} now prices from Yahoo (was manual). Its statement "
+            f"NAVs stay on record and a Yahoo close supersedes them per date."
+        )
     await db.commit()
     print(
         f"{'Updated' if existing else 'Created'} {symbol}@{exchange} -> {yahoo_ticker}"
@@ -238,6 +374,7 @@ async def cmd_set(
     return 0, {
         "action": "set", "symbol": symbol, "exchange": exchange,
         "yahoo_ticker": yahoo_ticker, "previous": before,
+        "price_source_flipped_to_yahoo": verified,
     }
 
 
@@ -315,7 +452,7 @@ async def run(args) -> int:
             if args.command == "set":
                 code, details = await cmd_set(
                     db, args.symbol, args.exchange, args.yahoo_ticker,
-                    args.notes, args.dry_run,
+                    args.notes, args.dry_run, args.skip_nav_check,
                 )
             else:
                 code, details = await cmd_disable(
@@ -361,6 +498,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_set.add_argument("yahoo_ticker", help="Yahoo ticker, e.g. 2330.TW")
     p_set.add_argument("--notes", default=None, help="Why this mapping exists")
     p_set.add_argument("--dry-run", action="store_true")
+    p_set.add_argument(
+        "--skip-nav-check", action="store_true",
+        help="Do not verify the ticker against NAVs the provider published. Only "
+             "for a security with no such NAVs on record, where the check is a "
+             "no-op anyway - it exists so a Yahoo outage cannot block an unrelated "
+             "mapping, not so a disagreement can be waved through.",
+    )
 
     p_del = sub.add_parser("disable", help="Stop using a mapping (keeps the row)")
     p_del.add_argument("symbol")

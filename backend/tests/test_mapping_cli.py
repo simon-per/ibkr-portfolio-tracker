@@ -17,6 +17,7 @@ import json
 from datetime import date
 from decimal import Decimal
 
+from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -419,3 +420,150 @@ async def test_list_flags_dividends_that_predate_their_mapping(db, capsys):
     out = capsys.readouterr().out
     assert "DIVIDENDS PREDATE MAPPING" in out
     assert "purge_dividend_estimates SBI TSE" in out
+
+
+# ── Verifying a mapping against NAVs the provider published ─────────────────
+
+class _FakeHistory:
+    """Minimal stand-in for a yfinance history frame: `.empty` and `.iterrows()`."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    @property
+    def empty(self):
+        return not self._rows
+
+    def iterrows(self):
+        for when, close in self._rows:
+            yield SimpleNamespace(date=lambda w=when: w), {"Close": close}
+
+
+def _stub_yahoo(monkeypatch, rows):
+    """No network. `rows` is [(date, close)] — what the candidate ticker would return."""
+    class _Ticker:
+        def __init__(self, _t):
+            pass
+
+        def history(self, **_kw):
+            return _FakeHistory(rows)
+
+    monkeypatch.setattr(cli.yf, "Ticker", _Ticker)
+
+
+async def _fund(session, *, navs):
+    """A statement-priced fund, the shape the finpension importer creates."""
+    session.add(Security(
+        id=9, isin="CH1529078078", symbol="CH1529078078", description="Swisscanto EM",
+        currency="CHF", conid=None, asset_category="STK", exchange="FUND",
+        account="pillar3a", price_source="manual",
+    ))
+    for when, price in navs:
+        session.add(MarketPrice(
+            security_id=9, date=when, close_price=Decimal(str(price)),
+            currency="CHF", source="finpension_statement",
+        ))
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_different_share_class_is_refused_however_well_the_name_matches(
+    db, monkeypatch
+):
+    """
+    The measured case. `0P0000S0OE.SW` is "Swisscanto (CH) Index Equity Fund Emerging
+    Markets" — a perfect name match for this holding, and the fund's *NT* tranche rather
+    than the *NMT* one it actually holds. It quotes ~49% higher. Adopting it would carry
+    the position half again too high and nothing downstream could see it: the SBI
+    failure, at the same order of magnitude.
+
+    A provider statement is the only oracle strong enough to catch this, which is the
+    whole reason the check exists here and not for an ordinary listing.
+    """
+    await _fund(db, navs=[(date(2026, 9, 1), "121.201101")])
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 180.83)])
+
+    with pytest.raises(cli.MappingError) as exc:
+        await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OE.SW",
+                          notes=None, dry_run=False)
+    message = str(exc.value)
+    assert "different share class" in message
+    assert "49" in message or "%" in message
+
+    security = await db.get(Security, 9)
+    assert security.price_source == "manual"   # unchanged
+    assert await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND") is None
+
+
+@pytest.mark.asyncio
+async def test_a_verified_ticker_is_saved_and_flips_the_security_onto_yahoo(
+    db, monkeypatch
+):
+    """
+    Saving the row is only half the action: `sync_securities` skips a manual security,
+    so a mapping alone would be inert. The flip happens here and deliberately nowhere
+    else — a ticker typed without the NAV check does not earn it.
+    """
+    await _fund(db, navs=[(date(2026, 9, 1), "448.528100")])
+    # The real measured shape: Yahoo strikes on a different clock, so the surrounding
+    # days straddle the statement figure by a few tenths.
+    _stub_yahoo(monkeypatch, [
+        (date(2026, 8, 31), 447.699188),
+        (date(2026, 9, 1), 446.870392),
+        (date(2026, 9, 2), 448.321594),
+    ])
+
+    code, details = await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OD.SW",
+                                      notes=None, dry_run=False)
+    assert code == 0
+    assert details["price_source_flipped_to_yahoo"] is True
+
+    security = await db.get(Security, 9)
+    assert security.price_source == "yahoo"
+    mapping = await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND")
+    assert mapping.yahoo_ticker == "0P0000S0OD.SW"
+
+
+@pytest.mark.asyncio
+async def test_a_ticker_with_no_prices_at_all_is_refused(db, monkeypatch):
+    await _fund(db, navs=[(date(2026, 9, 1), "121.201101")])
+    _stub_yahoo(monkeypatch, [])
+
+    with pytest.raises(cli.MappingError) as exc:
+        await cli.cmd_set(db, "CH1529078078", "FUND", "NOTATICKER",
+                          notes=None, dry_run=False)
+    assert "no prices at all" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_a_security_with_no_published_navs_is_unaffected(db, monkeypatch):
+    """
+    The check is a no-op for an ordinary listing, which is every security but these.
+    It must not become a Yahoo call on every `set`, nor block one.
+    """
+    called = []
+    monkeypatch.setattr(cli.yf, "Ticker",
+                        lambda t: called.append(t) or SimpleNamespace())
+
+    code, _ = await cli.cmd_set(db, "AMZN", "NASDAQ", "AMZN",
+                                notes=None, dry_run=False)
+    assert code == 0
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_a_dry_run_verifies_but_writes_nothing(db, monkeypatch):
+    """
+    The verification is the useful half of a dry run here — it is how you find out
+    whether a candidate is the right instrument before committing to it.
+    """
+    await _fund(db, navs=[(date(2026, 9, 1), "448.528100")])
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 448.32)])
+
+    code, details = await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OD.SW",
+                                      notes=None, dry_run=True)
+    assert code == 0
+    assert details == {}
+    security = await db.get(Security, 9)
+    assert security.price_source == "manual"
+    assert await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND") is None
