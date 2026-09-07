@@ -4,6 +4,7 @@ Simulates "what if I bought S&P 500 / NASDAQ instead?" using actual tax lot date
 """
 import asyncio
 import random
+from dataclasses import dataclass
 import logging
 import time
 from typing import List, Dict, Optional, Set, Tuple
@@ -127,6 +128,26 @@ BENCHMARKS = {
     "cac40": {"ticker": "^FCHI", "currency": "EUR", "name": "CAC 40"},
 }
 
+# Where the hypothetical starts. See `calculate_benchmark_value_over_time` for what each
+# means; the router refuses anything else with a 400 rather than defaulting silently.
+ANCHOR_MODES = ("inception", "window")
+
+
+@dataclass(frozen=True)
+class WindowAnchor:
+    """
+    Where a window-anchored series was seeded from — see `BenchmarkService.last_anchor`.
+
+    `value_eur` is the portfolio's Total Value (holdings + cash) on `on_date`, in the
+    **base** currency (the `_eur` suffix is this codebase's convention for base-currency
+    figures), and is the series' first point by construction. `unpriced_holdings` above 0
+    means that value could not price every holding, so the seed — and every point after
+    it — is understated; the chart renders that into its incomplete-valuation notice.
+    """
+    on_date: date
+    value_eur: float
+    unpriced_holdings: int
+
 
 class BenchmarkService:
     # Latched the first time Yahoo answers with a rate limit, mirroring
@@ -134,9 +155,15 @@ class BenchmarkService:
     # service built through `__new__` in a test can still read it.
     rate_limited = False
 
+    # Set by a window-anchored run, None after an inception one. A latch rather than a
+    # second return value for the reason the others are: the scheduler and the tests
+    # unpack a plain list, and the router is the only reader that wants the provenance.
+    last_anchor: Optional[WindowAnchor] = None
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.rate_limited = False
+        self.last_anchor = None
 
     # ── Price fetching / caching ───────────────────────────────────────
 
@@ -403,15 +430,22 @@ class BenchmarkService:
         await self.db.flush()
         return result.rowcount
 
-    async def _apply_base_currency(self, points: List[Dict]) -> List[Dict]:
+    async def _apply_base_currency(
+        self, points: List[Dict], base_fx=None
+    ) -> List[Dict]:
         """
         Project EUR-denominated benchmark points into the configured base currency
         at each point's date. The timeline cache stays EUR; this is a display-only
         projection so switching base currency never invalidates the cache.
+
+        `base_fx` lets the window-anchored path hand in the instance it already used to
+        derive its seed, so the seed's inverse conversion and this forward one read the
+        same rates. Loaded here when absent.
         """
         from app.services.portfolio_service import PortfolioService
 
-        base_fx = await PortfolioService(self.db)._load_base_fx()
+        if base_fx is None:
+            base_fx = await PortfolioService(self.db)._load_base_fx()
         if base_fx.base_currency == "EUR":
             return points
         for p in points:
@@ -423,6 +457,10 @@ class BenchmarkService:
             p["cost_basis_eur"] = float(round(cb, 2))
             p["gain_loss_eur"] = float(round(gl, 2))
             p["gain_loss_percent"] = float(round((gl / cb * 100) if cb > 0 else 0, 2))
+            # Only window-mode points carry a flow; an absent key stays absent.
+            flow = p.get("external_flow_eur")
+            if flow is not None:
+                p["external_flow_eur"] = float(round(base_fx.convert(Decimal(str(flow)), d), 2))
         return points
 
     # ── Core benchmark calculation ─────────────────────────────────────
@@ -512,28 +550,65 @@ class BenchmarkService:
         start_date: date,
         end_date: date,
         benchmark_key: str = "sp500",
+        anchor: str = "inception",
     ) -> List[Dict]:
         """
         Simulate contributing the same money to the benchmark index instead.
 
-        Uses a persistent cache: historical values never change, so we compute
-        once and only recompute missing/recent days. **A change to what this
-        function computes therefore requires clearing that cache** — see
-        `clear_cache`, and the note in Step 5 about why the basis changed.
+        Two anchors, two meanings — chosen with ``anchor``:
 
-        For each contribution (the era-spliced `money_in` legs — lot cost basis
-        before `coverage_from`, real deposits after):
+        - ``"inception"`` (default; the cached absolute series): *what if I had put the
+          same money into the index since the account began*. Every `money_in` leg from
+          the first contribution buys hypothetical shares, so on a 3M chart the first
+          point already carries two years of relative performance and the two lines
+          start at different heights.
+        - ``"window"``: *what if, on the first day of this window, I had moved everything
+          into the index and then made the same contributions since*. The hypothetical
+          is seeded with the portfolio's **Total Value** (holdings + cash) on the anchor
+          day — the figure the chart's own first point shows, read through the same
+          pipeline — and only legs strictly **after** the anchor buy or sell shares. The
+          anchor day's own purchases are inside the seed, because the portfolio's point
+          on that day already contains them (`events <= d`); hence `(anchor, end]`, the
+          window `calculate_xirr` and `/attribution` use.
+
+        Window mode is a **seeded walk, never a scale or a shift** of the absolute
+        series: scaling would scale the in-window deposits too, and the portfolio would
+        then appear to outperform by exactly what was paid in. It **bypasses the cache**
+        — `benchmark_timeline_cache` is keyed on (benchmark, date) and holds the absolute
+        series, so a per-window series written there would poison every other range.
+        Both modes drive one walk (`_walk`) over one set of share events
+        (`_share_events_for_legs`), so they cannot drift.
+
+        The seed's provenance rides on `self.last_anchor` (a latch, like `rate_limited`):
+        the day used, the portfolio value seeded from, and how many holdings that value
+        could not price — an understated seed understates the whole line, and the chart
+        has to say so rather than serve it as a figure.
+
+        Inception mode uses a persistent cache: historical values never change, so we
+        compute once and only recompute missing/recent days. **A change to what this
+        function computes therefore requires clearing that cache** — see `clear_cache`,
+        and the note in `_share_events_for_legs` about why the basis changed.
+
+        For each contribution (the era-spliced `money_in` legs — lot cost basis before
+        `coverage_from`, real deposits after):
           1. Convert the EUR amount → benchmark currency on the leg's own date
           2. Divide by index price on that date → hypothetical_shares
         Then for each business day:
           benchmark_value_eur = sum(shares_i * index_price) * fx_to_eur_rate
 
-        `cost_basis_eur` on each point is the running contribution total, so it is
-        the same series the portfolio chart draws as `money_in_eur`.
+        `cost_basis_eur` on each point is the running contribution total in inception
+        mode — the same series the portfolio chart draws as `money_in_eur` — and, in
+        window mode, the seed plus the contributions since: what the window started
+        with plus what was added, so `gain_loss_eur` is the index's gain on that capital.
         """
+        self.last_anchor = None
         bench = BENCHMARKS.get(benchmark_key)
         if not bench:
             return []
+        if anchor not in ANCHOR_MODES:
+            raise ValueError(f"anchor must be one of {ANCHOR_MODES}, got {anchor!r}")
+        if anchor == "window":
+            return await self._window_anchored_series(start_date, end_date, bench)
 
         ticker = bench["ticker"]
         currency = bench["currency"]
@@ -614,28 +689,186 @@ class BenchmarkService:
             fx_rates = await self._preload_fx_rates(currency, price_start, end_date)
 
         # ── Step 5: Turn every contribution into hypothetical index shares ─────
-        #
-        # **Contributions, not tax lots**, and that distinction is the whole point of
-        # this block. Driving it off lots made the benchmark sell whenever the portfolio
-        # sold — `-shares` on a lot's close date — which discards the *gain* those shares
-        # had accumulated, permanently. Measured on the 2026-08-21 rotation: the
-        # benchmark went 61,654 -> 38,766 -> 51,680 and never recovered, losing 4,193 CHF
-        # of gain to a day on which no money left the account. It also cliffed on a chart
-        # whose portfolio line no longer does, so the comparison read as a huge
-        # outperformance that was pure artefact.
-        #
-        # A contribution-driven hypothetical answers the question people actually ask —
-        # *what if I had put the same money into the index instead* — and it is
-        # rotation-neutral by construction, because selling one holding to buy another is
-        # not a contribution. That makes it the honest partner for the `Money In` line it
-        # is drawn beside: both move only when money genuinely enters or leaves.
-        #
-        # A **negative** leg (a withdrawal) sells shares at that day's price, which is
-        # right: the money left, and the hypothetical has to fund it from the index too.
+        share_events, cost_events = self._share_events_for_legs(
+            money_in_legs, bench_prices, fx_rates, is_eur_benchmark
+        )
+        if not share_events:
+            return []
+
+        # ── Step 6: Walk only MISSING business days ──────────────────
+        # Cumulative state needs the whole history, so the walk starts at start_date
+        # and folds every earlier leg into its opening state; only the missing dates
+        # are recorded. Flows are deliberately not reported in this mode: the cached
+        # rows carry no such column, and a series that reported them on its freshly
+        # computed points only would disagree with itself.
+        new_points = self._walk(
+            start_date, end_date, share_events, cost_events,
+            bench_prices, fx_rates, is_eur_benchmark, emit_dates=missing_dates,
+        )
+
+        # ── Step 7: Store new points in cache ────────────────────────
+        if new_points:
+            try:
+                await self._write_cache(benchmark_key, new_points)
+                logger.info(f"Cached {len(new_points)} new benchmark timeline points for {benchmark_key}")
+            except Exception as e:
+                logger.warning(f"Failed to write benchmark cache: {e}")
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
+        # ── Step 8: Merge cached + new and return ────────────────────
+        # Add new points to cached_data dict
+        for point in new_points:
+            cached_data[date.fromisoformat(point["date"])] = point
+
+        return await self._apply_base_currency(sorted(cached_data.values(), key=lambda x: x["date"]))
+
+    async def _window_anchored_series(
+        self, start_date: date, end_date: date, bench: Dict
+    ) -> List[Dict]:
+        """
+        The window-anchored hypothetical — see `calculate_benchmark_value_over_time`.
+
+        Two orderings carry the correctness. Prices and FX are ensured over the window
+        only: pre-window legs are never walked, so reaching back to the first
+        contribution would fetch history nothing here reads. And the portfolio's anchor
+        value is read through `get_portfolio_value_over_time(anchor, anchor)` — the very
+        pipeline that draws the chart's first point — so the two lines start at one
+        figure by construction rather than by a second valuation that could drift.
+
+        The seed is turned back into EUR through the anchor-day base rate, so that
+        `_apply_base_currency`, re-multiplying at the same date, lands on the portfolio's
+        own base-currency figure. Seeding from the EUR components would miss by the FX
+        projection on the cash portion: the timeline projects each cash event at its
+        *own* date, so 1,000 CHF deposited when EURCHF stood at 0.90 is not 1,000 EUR at
+        the anchor day's rate. The test that pins it measures the miss at 75 on a 2,490
+        seed.
+        """
+        from app.services.portfolio_service import BaseFx, PortfolioService
+
+        ticker = bench["ticker"]
+        currency = bench["currency"]
+        is_eur_benchmark = currency == "EUR"
+        portfolio = PortfolioService(self.db)
+
+        # The same splice the chart's Money In line and the inception series read.
+        contributions = await portfolio._contribution_inputs(BaseFx("EUR", {}))
+        money_in_legs = contributions["money_in_legs"]
+
+        try:
+            await self._ensure_prices_available(ticker, start_date, end_date, currency=currency)
+        except Exception as e:
+            logger.warning(f"Could not fetch new benchmark prices for {ticker}, using cached: {e}")
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+        if not is_eur_benchmark:
+            await self._ensure_fx_rates_available(currency, start_date, end_date)
+
+        bench_prices = await self._preload_benchmark_prices(ticker, start_date, end_date)
+        fx_rates: Dict[date, Decimal] = {}
+        if not is_eur_benchmark:
+            fx_rates = await self._preload_fx_rates(currency, start_date, end_date)
+
+        anchor = self._find_anchor(start_date, end_date, bench_prices, fx_rates, is_eur_benchmark)
+        if anchor is None:
+            logger.warning(
+                f"Benchmark {ticker}: no priced weekday in [{start_date}, {end_date}] to anchor on"
+            )
+            return []
+
+        # The chart's own first point, through the chart's own pipeline. Empty only when
+        # there are no tax lots at all, which is also where the inception series is empty.
+        anchor_points = await portfolio.get_portfolio_value_over_time(anchor, anchor)
+        if not anchor_points:
+            return []
+        anchor_point = anchor_points[0]
+
+        base_fx = await portfolio._load_base_fx()
+        value_base = Decimal(str(anchor_point["total_value_eur"]))
+        eur_to_base = base_fx.convert(Decimal("1"), anchor)
+        seed_eur = value_base / eur_to_base if eur_to_base else value_base
+
+        index_price = self._get_with_fallback(bench_prices, anchor)
+        if is_eur_benchmark:
+            seed_shares = seed_eur / index_price
+        else:
+            seed_shares = (seed_eur / self._get_with_fallback(fx_rates, anchor)) / index_price
+
+        self.last_anchor = WindowAnchor(
+            on_date=anchor,
+            value_eur=float(anchor_point["total_value_eur"]),
+            unpriced_holdings=int(anchor_point.get("unpriced_holdings") or 0),
+        )
+
+        # (anchor, end]: the anchor day's own contributions are inside the seed.
+        share_events, cost_events = self._share_events_for_legs(
+            [(d, a) for d, a in money_in_legs if anchor < d <= end_date],
+            bench_prices, fx_rates, is_eur_benchmark,
+        )
+        points = self._walk(
+            anchor, end_date, share_events, cost_events, bench_prices, fx_rates,
+            is_eur_benchmark, seed_shares=seed_shares, seed_cost=seed_eur, report_flows=True,
+        )
+        return await self._apply_base_currency(points, base_fx=base_fx)
+
+    def _find_anchor(
+        self, start_date: date, end_date: date,
+        bench_prices: Dict[date, Decimal], fx_rates: Dict[date, Decimal],
+        is_eur_benchmark: bool,
+    ) -> Optional[date]:
+        """
+        The first weekday in [start, end] the index can be priced on (with the usual
+        14-day fallback) and, for a non-EUR index, converted on. The portfolio emits a
+        point on every weekday, so this is normally `start_date` itself, or the Monday
+        after a weekend start.
+        """
+        d = start_date
+        while d <= end_date:
+            if (
+                d.weekday() < 5
+                and self._get_with_fallback(bench_prices, d)
+                and (is_eur_benchmark or self._get_with_fallback(fx_rates, d))
+            ):
+                return d
+            d += timedelta(days=1)
+        return None
+
+    def _share_events_for_legs(
+        self,
+        legs: List[Tuple[date, Decimal]],
+        bench_prices: Dict[date, Decimal],
+        fx_rates: Dict[date, Decimal],
+        is_eur_benchmark: bool,
+    ) -> Tuple[List[Tuple[date, Decimal]], List[Tuple[date, Decimal]]]:
+        """
+        Turn contribution legs into sorted `(date, shares)` and `(date, EUR amount)` events.
+
+        **Contributions, not tax lots**, and that distinction is the whole point of this
+        helper. Driving it off lots made the benchmark sell whenever the portfolio sold —
+        `-shares` on a lot's close date — which discards the *gain* those shares had
+        accumulated, permanently. Measured on the 2026-08-21 rotation: the benchmark
+        went 61,654 -> 38,766 -> 51,680 and never recovered, losing 4,193 CHF of gain to
+        a day on which no money left the account. It also cliffed on a chart whose
+        portfolio line no longer does, so the comparison read as a huge outperformance
+        that was pure artefact.
+
+        A contribution-driven hypothetical answers the question people actually ask —
+        *what if I had put the same money into the index instead* — and it is
+        rotation-neutral by construction, because selling one holding to buy another is
+        not a contribution. That makes it the honest partner for the `Money In` line it
+        is drawn beside: both move only when money genuinely enters or leaves.
+
+        A **negative** leg (a withdrawal) sells shares at that day's price, which is
+        right: the money left, and the hypothetical has to fund it from the index too.
+        """
         share_events: List[Tuple[date, Decimal]] = []
         cost_events: List[Tuple[date, Decimal]] = []
 
-        for leg_date, amount_eur in money_in_legs:
+        for leg_date, amount_eur in legs:
             if not amount_eur:
                 continue
             index_price = self._get_with_fallback(bench_prices, leg_date)
@@ -658,31 +891,58 @@ class BenchmarkService:
             share_events.append((leg_date, shares))
             cost_events.append((leg_date, amount_eur))
 
-        if not share_events:
-            return []
-
-        # Sort events by date
         share_events.sort(key=lambda x: x[0])
         cost_events.sort(key=lambda x: x[0])
+        return share_events, cost_events
 
-        # ── Step 6: Walk only MISSING business days ──────────────────
-        # We need cumulative state, so walk ALL days from start_date but
-        # only record points for missing dates.
-        new_points: List[Dict] = []
-        current_date = start_date
-        running_cost_basis = Decimal("0.0")
+    def _walk(
+        self,
+        start_date: date,
+        end_date: date,
+        share_events: List[Tuple[date, Decimal]],
+        cost_events: List[Tuple[date, Decimal]],
+        bench_prices: Dict[date, Decimal],
+        fx_rates: Dict[date, Decimal],
+        is_eur_benchmark: bool,
+        *,
+        emit_dates: Optional[Set[date]] = None,
+        seed_shares: Decimal = Decimal("0"),
+        seed_cost: Decimal = Decimal("0"),
+        report_flows: bool = False,
+    ) -> List[Dict]:
+        """
+        Value the hypothetical on each business day in [start, end].
+
+        One walk for both anchors. Inception mode starts from nothing and lets every leg
+        on or before a day fold in — `emit_dates` restricts which days are *recorded*,
+        so a cache miss recomputes only its holes while the running state still covers
+        the whole history. Window mode starts from `seed_shares` / `seed_cost` (the
+        portfolio's value on the anchor day, bought into the index) and is handed only
+        the legs after it.
+
+        `report_flows` adds `external_flow_eur`: the contributions applied on that day,
+        which is what lets the client's beta regression skip a deposit day the way it
+        already skips the portfolio's own trade days. A deposit buys index shares here
+        while the portfolio's holdings line does not step, so left in it reads as a
+        benchmark return of deposit ÷ value against a portfolio that did not move.
+        """
+        points: List[Dict] = []
+        running_cost_basis = seed_cost
+        running_shares = seed_shares
         cost_event_idx = 0
         share_event_idx = 0
-        running_shares = Decimal("0.0")
+        current_date = start_date
 
         while current_date <= end_date:
             if current_date.weekday() >= 5:
                 current_date += timedelta(days=1)
                 continue
 
+            day_flow = Decimal("0")
             # Accumulate cost basis events on or before this date
             while cost_event_idx < len(cost_events) and cost_events[cost_event_idx][0] <= current_date:
                 running_cost_basis += cost_events[cost_event_idx][1]
+                day_flow += cost_events[cost_event_idx][1]
                 cost_event_idx += 1
 
             # Accumulate share events on or before this date
@@ -690,69 +950,61 @@ class BenchmarkService:
                 running_shares += share_events[share_event_idx][1]
                 share_event_idx += 1
 
-            # Only compute for missing dates
-            if current_date in missing_dates:
-                if running_shares > 0:
-                    index_price = self._get_with_fallback(bench_prices, current_date)
-
-                    if is_eur_benchmark:
-                        if index_price:
-                            bench_value_eur = running_shares * index_price
-                            gain_loss = bench_value_eur - running_cost_basis
-
-                            new_points.append({
-                                "date": current_date.isoformat(),
-                                "benchmark_value_eur": float(round(bench_value_eur, 2)),
-                                "cost_basis_eur": float(round(running_cost_basis, 2)),
-                                "gain_loss_eur": float(round(gain_loss, 2)),
-                                "gain_loss_percent": float(
-                                    round((gain_loss / running_cost_basis * 100), 2)
-                                    if running_cost_basis > 0 else 0
-                                ),
-                            })
-                    else:
-                        fx_rate = self._get_with_fallback(fx_rates, current_date)
-                        if index_price and fx_rate:
-                            bench_value_foreign = running_shares * index_price
-                            bench_value_eur = bench_value_foreign * fx_rate
-                            gain_loss = bench_value_eur - running_cost_basis
-
-                            new_points.append({
-                                "date": current_date.isoformat(),
-                                "benchmark_value_eur": float(round(bench_value_eur, 2)),
-                                "cost_basis_eur": float(round(running_cost_basis, 2)),
-                                "gain_loss_eur": float(round(gain_loss, 2)),
-                                "gain_loss_percent": float(
-                                    round((gain_loss / running_cost_basis * 100), 2)
-                                    if running_cost_basis > 0 else 0
-                                ),
-                            })
-                else:
-                    new_points.append({
-                        "date": current_date.isoformat(),
-                        "benchmark_value_eur": 0.0,
-                        "cost_basis_eur": float(round(running_cost_basis, 2)),
-                        "gain_loss_eur": 0.0,
-                        "gain_loss_percent": 0.0,
-                    })
+            if emit_dates is None or current_date in emit_dates:
+                point = self._value_point(
+                    current_date, running_shares, running_cost_basis,
+                    bench_prices, fx_rates, is_eur_benchmark,
+                )
+                if point is not None:
+                    if report_flows:
+                        point["external_flow_eur"] = float(round(day_flow, 2))
+                    points.append(point)
 
             current_date += timedelta(days=1)
 
-        # ── Step 7: Store new points in cache ────────────────────────
-        if new_points:
-            try:
-                await self._write_cache(benchmark_key, new_points)
-                logger.info(f"Cached {len(new_points)} new benchmark timeline points for {benchmark_key}")
-            except Exception as e:
-                logger.warning(f"Failed to write benchmark cache: {e}")
-                try:
-                    await self.db.rollback()
-                except Exception:
-                    pass
+        return points
 
-        # ── Step 8: Merge cached + new and return ────────────────────
-        # Add new points to cached_data dict
-        for point in new_points:
-            cached_data[date.fromisoformat(point["date"])] = point
-
-        return await self._apply_base_currency(sorted(cached_data.values(), key=lambda x: x["date"]))
+    def _value_point(
+        self,
+        on_date: date,
+        running_shares: Decimal,
+        running_cost_basis: Decimal,
+        bench_prices: Dict[date, Decimal],
+        fx_rates: Dict[date, Decimal],
+        is_eur_benchmark: bool,
+    ) -> Optional[Dict]:
+        """
+        One point, or None when the index cannot be priced (or converted) that day — the
+        day is then skipped, as it always was. No shares emits a zero-valued point
+        against the running cost, also as before.
+        """
+        if running_shares > 0:
+            index_price = self._get_with_fallback(bench_prices, on_date)
+            if not index_price:
+                return None
+            if is_eur_benchmark:
+                bench_value_eur = running_shares * index_price
+            else:
+                fx_rate = self._get_with_fallback(fx_rates, on_date)
+                if not fx_rate:
+                    return None
+                bench_value_foreign = running_shares * index_price
+                bench_value_eur = bench_value_foreign * fx_rate
+            gain_loss = bench_value_eur - running_cost_basis
+            return {
+                "date": on_date.isoformat(),
+                "benchmark_value_eur": float(round(bench_value_eur, 2)),
+                "cost_basis_eur": float(round(running_cost_basis, 2)),
+                "gain_loss_eur": float(round(gain_loss, 2)),
+                "gain_loss_percent": float(
+                    round((gain_loss / running_cost_basis * 100), 2)
+                    if running_cost_basis > 0 else 0
+                ),
+            }
+        return {
+            "date": on_date.isoformat(),
+            "benchmark_value_eur": 0.0,
+            "cost_basis_eur": float(round(running_cost_basis, 2)),
+            "gain_loss_eur": 0.0,
+            "gain_loss_percent": 0.0,
+        }

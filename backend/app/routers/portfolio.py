@@ -17,7 +17,7 @@ from app.services.activity_service import (
     MAX_LIMIT,
 )
 from app.services.portfolio_service import PortfolioService
-from app.services.benchmark_service import BenchmarkService, BENCHMARKS
+from app.services.benchmark_service import ANCHOR_MODES, BenchmarkService, BENCHMARKS
 from app.services.lookthrough_service import COMPANY_LIMIT_MAX, LookthroughService
 from app.schemas.lookthrough import LookthroughResponse
 from app.schemas.portfolio import (
@@ -296,18 +296,36 @@ async def get_benchmark_comparison(
     start_date: date = Query(default=None, description="Start date (defaults to 1 year ago)"),
     end_date: date = Query(default=None, description="End date (defaults to today)"),
     benchmark: str = Query(default="sp500", description="Benchmark: sp500 or nasdaq"),
+    anchor: str = Query(
+        default="inception",
+        description=(
+            "Where the hypothetical starts. 'inception' invests every contribution since "
+            "the account began (the cached absolute series). 'window' seeds it with the "
+            "portfolio's own Total Value on the first priced day of the range and applies "
+            "only the contributions after it, so the two lines start at one point and the "
+            "gap between them is what happened inside the window."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Compare portfolio against a benchmark index.
+    Compare the portfolio against a benchmark index.
 
-    Simulates investing every tax lot into S&P 500 or NASDAQ instead,
-    using the same dates and EUR amounts.
+    The hypothetical invests the same **contributions** (the era-spliced money-in legs)
+    into the index — not the tax lots, which made it sell on every rotation. `anchor`
+    picks between the since-inception series and one seeded from the portfolio's own
+    value at the window start; see `BenchmarkService.calculate_benchmark_value_over_time`
+    for what each means and why window mode bypasses the cache.
     """
     if benchmark not in BENCHMARKS:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown benchmark '{benchmark}'. Choose from: {', '.join(BENCHMARKS.keys())}",
+        )
+    if anchor not in ANCHOR_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown anchor '{anchor}'. Choose from: {', '.join(ANCHOR_MODES)}",
         )
 
     if not end_date:
@@ -324,12 +342,19 @@ async def get_benchmark_comparison(
 
     bench_info = BENCHMARKS[benchmark]
     service = BenchmarkService(db)
-    data = await service.calculate_benchmark_value_over_time(start_date, end_date, benchmark)
+    data = await service.calculate_benchmark_value_over_time(
+        start_date, end_date, benchmark, anchor=anchor
+    )
+    seeded = service.last_anchor
 
     return BenchmarkResponse(
         benchmark_name=bench_info["name"],
         benchmark_ticker=bench_info["ticker"],
         data=data,
+        anchor=anchor,
+        anchor_date=seeded.on_date.isoformat() if seeded else None,
+        anchor_value_eur=seeded.value_eur if seeded else None,
+        anchor_unpriced_holdings=seeded.unpriced_holdings if seeded else 0,
     )
 
 

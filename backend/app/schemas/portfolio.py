@@ -153,19 +153,71 @@ class AnnualizedReturnResponse(BaseModel):
 
 
 class BenchmarkValuePoint(BaseModel):
-    """Single data point for benchmark comparison"""
+    """Single data point for benchmark comparison. `*_eur` fields are in base_currency."""
     date: str
     benchmark_value_eur: float
     cost_basis_eur: float
     gain_loss_eur: float
     gain_loss_percent: float
+    external_flow_eur: Optional[float] = Field(
+        None,
+        description=(
+            "Contributions the hypothetical invested on this date (a withdrawal is "
+            "negative), in base_currency. Reported in window mode only; None means *not "
+            "reported*, never zero. The client's beta regression skips a day carrying "
+            "one, exactly as it skips a day the portfolio itself bought or sold on: a "
+            "deposit buys index shares here while the portfolio's holdings line does not "
+            "step, so left in it reads as a benchmark return of deposit ÷ value against "
+            "a portfolio that did not move."
+        ),
+    )
 
 
 class BenchmarkResponse(BaseModel):
-    """Response for benchmark comparison endpoint"""
+    """
+    Response for benchmark comparison endpoint.
+
+    A `response_model` is a filter: a key the service emits but this model does not
+    declare is dropped silently. The anchor fields below exist because the chart has to
+    say what its benchmark line *means*, and a line that starts at the portfolio's value
+    without saying so would be read as the since-inception comparison it replaced.
+    """
     benchmark_name: str
     benchmark_ticker: str
     data: List[BenchmarkValuePoint]
+    anchor: Literal["inception", "window"] = Field(
+        "inception",
+        description=(
+            "'inception': every contribution since the account began is invested, so the "
+            "line answers *what if I had put the same money into the index all along*. "
+            "'window': seeded with the portfolio's own Total Value on anchor_date and fed "
+            "only the contributions after it — *what if I had moved everything into the "
+            "index that day and kept contributing the same way*."
+        ),
+    )
+    anchor_date: Optional[str] = Field(
+        None,
+        description=(
+            "Window mode: the day the hypothetical was seeded on — the first weekday of the "
+            "range the index could be priced on, normally the range start or the Monday "
+            "after a weekend start."
+        ),
+    )
+    anchor_value_eur: Optional[float] = Field(
+        None,
+        description=(
+            "Window mode: the portfolio's Total Value (holdings + cash) on anchor_date, in "
+            "base_currency. The series' first point equals it by construction."
+        ),
+    )
+    anchor_unpriced_holdings: int = Field(
+        0,
+        description=(
+            "Window mode: holdings the anchor value could not price. Above 0 the seed is "
+            "understated and so is every point after it — the chart folds this into its "
+            "incomplete-valuation notice rather than serving the line as a measurement."
+        ),
+    )
 
 
 class BenchmarkInfo(BaseModel):
