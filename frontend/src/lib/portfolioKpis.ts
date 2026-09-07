@@ -369,19 +369,21 @@ export function herfindahlConcentration(positions: { market_value_eur: number }[
 /**
  * Reshape a benchmark point into the common series shape.
  *
- * The benchmark is a flow-matched hypothetical — the same lot cost basis
- * deployed into the index — so it shares the portfolio's cost-basis line and
- * its flows land on the same days. It carries no `external_flow_eur` of its
- * own, and its cost-basis line must **not** be used to infer one: the two
- * lines are projected into the base currency by different rules, so under a
- * non-EUR base the benchmark's moves with the exchange rate. See
- * `betaAndCorrelation`.
+ * The benchmark is a flow-matched hypothetical — the same contributions (the
+ * era-spliced money-in legs) invested in the index — so its deposits land on
+ * the same days as the portfolio's. It carries an `external_flow_eur` of its
+ * own only when the backend served the window-anchored series (2026-09-07 on),
+ * and that field is copied through because `betaAndCorrelation` reads it. Its
+ * cost-basis line must **not** be used to infer a flow: the two lines are
+ * projected into the base currency by different rules, so under a non-EUR
+ * base the benchmark's moves with the exchange rate. See `betaAndCorrelation`.
  */
 export function benchmarkAsValueSeries(points: BenchmarkValuePoint[]): ValueSeriesPoint[] {
   return points.map((p) => ({
     date: p.date,
     market_value_eur: p.benchmark_value_eur,
     cost_basis_eur: p.cost_basis_eur,
+    ...(typeof p.external_flow_eur === 'number' ? { external_flow_eur: p.external_flow_eur } : {}),
   }))
 }
 
@@ -410,6 +412,16 @@ export function benchmarkAsValueSeries(points: BenchmarkValuePoint[]): ValueSeri
  * refused. The test is therefore the portfolio's `external_flow_eur`, plus its
  * own cost-basis step for the one flow that field cannot see: a disposal whose
  * proceeds netted to zero.
+ *
+ * **The benchmark names its own contribution days too**, through an explicit
+ * `external_flow_eur` (window-anchored series, 2026-09-07 on). A deposit into
+ * cash is not a flow to the *holdings*, so the portfolio's field reads 0 and
+ * the day used to survive — while the hypothetical bought index shares with it
+ * and its ratio jumped by deposit ÷ value. Three such days sat in one 3M window
+ * on production, one of them a +1.7% "benchmark return" against a portfolio
+ * that did not move. Only the explicit field is consulted; absent (an older
+ * backend, or the inception series) excludes nothing, because the fallback
+ * would be the cost-line inference above.
  *
  * `sampleDays` is always returned, including when the estimate is refused, so a
  * thin window can say so instead of showing a confident-looking slope drawn
@@ -440,6 +452,13 @@ export function betaAndCorrelation(
     // the exchange rate under a non-EUR base. See the note above.
     if (Math.abs(externalFlow(prev, curr)) > FLOW_EPSILON) continue
     if (Math.abs(curr.cost_basis_eur - prev.cost_basis_eur) > FLOW_EPSILON) continue
+    // The benchmark's own contribution day, from its EXPLICIT field only — never
+    // `externalFlow(benchPrev, benchCurr)`, whose cost-line fallback is the FX
+    // inference the note above forbids.
+    if (
+      typeof benchCurr.external_flow_eur === 'number' &&
+      Math.abs(benchCurr.external_flow_eur) > FLOW_EPSILON
+    ) continue
 
     if (prev.market_value_eur <= 0 || benchPrev.market_value_eur <= 0) continue
     portReturns.push(curr.market_value_eur / prev.market_value_eur - 1)

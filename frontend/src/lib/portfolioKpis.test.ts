@@ -342,6 +342,17 @@ describe('benchmarkAsValueSeries', () => {
       { date: day(0), market_value_eur: 1234, cost_basis_eur: 1000 },
     ])
   })
+
+  it('copies an explicit flow through and invents none', () => {
+    const base = {
+      date: day(0), benchmark_value_eur: 1234, cost_basis_eur: 1000,
+      gain_loss_eur: 234, gain_loss_percent: 23.4,
+    }
+    expect(benchmarkAsValueSeries([{ ...base, external_flow_eur: 500 }])[0].external_flow_eur).toBe(500)
+    // The inception series reports `null` — not reported, never zero — and that must not
+    // become a flow the beta guard reads.
+    expect('external_flow_eur' in benchmarkAsValueSeries([{ ...base, external_flow_eur: null }])[0]).toBe(false)
+  })
 })
 
 describe('betaAndCorrelation', () => {
@@ -415,6 +426,21 @@ describe('betaAndCorrelation', () => {
       cost_basis_eur: p.cost_basis_eur * (1 + 0.003 * i),
     }))
     expect(betaAndCorrelation(port, reprojected).sampleDays).toBe(28)
+  })
+
+  it('drops a day the benchmark reports a contribution on', () => {
+    // A deposit into cash is not a flow to the holdings, so the portfolio's field reads 0
+    // and the day used to survive — while the hypothetical bought index shares with it and
+    // its ratio carried deposit ÷ value as a "return". The explicit field is the fix.
+    const { port, bench } = twiceTheBenchmark(28)
+    const contributed = bench.map((p, i) => (i === 14 ? { ...p, external_flow_eur: 500 } : p))
+    expect(betaAndCorrelation(port, contributed).sampleDays).toBe(27)
+  })
+
+  it('does not read an explicit benchmark flow of zero as a contribution', () => {
+    const { port, bench } = twiceTheBenchmark(28)
+    const flagged = bench.map((p) => ({ ...p, external_flow_eur: 0 }))
+    expect(betaAndCorrelation(port, flagged).sampleDays).toBe(28)
   })
 
   it('ignores dates the benchmark has no point for', () => {
