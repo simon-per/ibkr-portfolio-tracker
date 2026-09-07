@@ -1,15 +1,20 @@
 # Working state
 
-**Last updated: 2026-09-06 (late).** Latest: **the Money In per Month chart shows money
-in.** It did not: `monthly[]` carried only gross deployment, which counts a rotation twice
-by design — so the Ireland→US ETF switch drew **30,617 CHF "deployed" in August against
-7,211 actually paid in**, and September read **3,639 against zero**. Both figures were
-correct and neither answered the question the card asks. Money in is now the primary bar
-and the headline, deployed stays beside it as the churn signal, and the largest rotation
-month is named in prose under the chart. A second bug fell out: the series was keyed on
-months with *tax-lot* activity, so a month with a deposit and no purchase had **no row at
-all** — live since the 3a deposits landed a week before their purchases. Details in
-*Shipped 2026-09-06 (late)*.
+**Last updated: 2026-09-07.** Latest: **the contribution surfaces publish one figure —
+money in — and nothing else.** The chart shows money in; it did not until 09-06, because
+`monthly[]` carried only gross deployment, which counts a rotation twice by design — so
+the Ireland→US ETF switch drew **30,617 CHF "deployed" in August against 7,211 actually
+paid in**, and September read **3,639 against zero**. Both were correct and neither
+answered the question the card asks. Deployed then shipped as a *second bar*, plus the
+strip's `/suffix`, and came out again on 09-07 at the owner's request: they read these two
+surfaces for their contribution rate, and the second figure was answering a question they
+were not asking. The data agreed — the two series are the **identical number in 20 of 29
+months**, and differ trivially in five more. Deployed, released and net are all still in
+the tooltip, which matters: money in comes from the deposit ledger and deployed from tax
+lots, so deployed is the only independent check on a transfer misbooked as a deposit.
+A second bug fell out of the 09-06 work: the series was keyed on months with *tax-lot*
+activity, so a month with a deposit and no purchase had **no row at all** — live since the
+3a deposits landed a week before their purchases. Details in *Shipped 2026-09-06 (late)*.
 
 Before that, the same day: **the portfolio holds a second account, live on
 production.** A Swiss Pillar 3a with finpension is ingested from a transaction CSV and
@@ -599,12 +604,18 @@ Measured on a production snapshot, in CHF:
 
 **What changed.** `money_in_eur` per month, summed from the same `money_in_legs` the strip's
 windows and the value chart's daily line already use — the third reader of one splice, never
-a second implementation of it. The card leads with it, keeps deployed as the second bar,
-drops the `net_eur` bar to the tooltip, and names the largest rotation month in prose under
-the chart ("Aug 26 is the largest: CHF 23,405 of the CHF 30,617 deployed was capital already
-invested, not new money"). The deployed bar is suppressed entirely where there is no deposit
-ledger, on the same condition that suppresses the strip's `/deployed` suffix. Card title is
-now **Money In per Month**, which two e2e scripts match on by name.
+a second implementation of it. The card leads with it, drops `deployed_eur` and `net_eur` to
+the tooltip, and names the largest rotation month in prose under the chart. Card title is now
+**Money In per Month**, which two e2e scripts match on by name.
+
+**Amended 2026-09-07**, so read the above as of its own date: deployed shipped here as a
+*second bar* and as the strip's `/suffix`, and came out a day later at the owner's request —
+it is the identical number in 20 of 29 months, and they read both surfaces for a contribution
+rate. It survives in both tooltips and the strip's hover `title` as the one independent check
+on money in. The note was reworded to stand without a bar beside it ("These bars count new
+money only. Aug 26 is where that matters most: CHF 30,617 went into new positions that month
+but only CHF 7,211 of it was new money…"). `showDeployed` is now the legacy-backend fallback
+alone.
 
 **The second bug, found while building the first.** The series was keyed on months with
 tax-lot activity, so a month carrying a deposit and no purchase had **no row** — the
@@ -2771,6 +2782,21 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-07** — "what is the difference between money in, net, deployed, released by sales",
+  then "most relevant is money in... maybe we should only care about that?" A question about
+  definitions turned into a design decision, and the honest answer to the second was **yes, and
+  the data says so louder than taste does**: the two series are the *identical* number in 20 of
+  this account's 29 months, because before `coverage_from` money in IS lot cost basis. So the
+  deployed bar and the strip's `/suffix` — both shipped the day before, both argued for in
+  writing — came straight back out. Two lessons. **A correct design argument can still be
+  answering a question the reader is not asking**: "the gap is capital churn, so make it readable
+  without hovering" was sound and irrelevant to someone reading the card for a contribution rate.
+  And **demote rather than delete when the second figure is a cross-check**: money in comes from
+  the deposit ledger and deployed from tax lots, so deployed is the only thing on any screen that
+  can disagree with a transfer misbooked as a deposit — which is this feature's worst failure.
+  It lives in the tooltip now. Also worth saying plainly: none of this is a *savings* rate, since
+  the app has no income data.
+
 - **2026-09-06 (late)** — "there are also issues with the monthly deployment logic, since sold
   and redeployed is double counted", with two screenshots. The report named a bug that did not
   exist and pointed at a real one: `deployed_eur` counts a rotation twice **on purpose**, and
@@ -2810,12 +2836,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   contradicted it in the component directly below**, which is what the `unpriced_holdings` family
   looks like once every *aggregate* has been guarded and only the itemised screen is left.
 
-- **2026-08-24** — "get the newest data onto the server, and check why the errors happened." The data
-  half was a no-op: the server already held everything through 08-21, which is all IBKR has. The
-  errors were two ordinary Flex failures — but the *warning about them* was miscalibrated, because
-  the alarm's threshold was derived from a query period the portal had not been running for weeks.
-  The lesson is narrow and reusable: **a constant that mirrors a setting in someone else's system is
-  wrong from the moment they change it, so derive it from what that system actually sent.** The span
-  was already recorded on every run; nothing new had to be stored. A second finding came free from
-  the user simply saying what they had bought — two funds from the 08-21 rotation were undeclared,
-  and an undeclared fund fails *quietly*, as a plausible-looking company row.

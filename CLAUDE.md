@@ -1467,11 +1467,30 @@ So the series carries `money_in_eur` first, summed from the same `money_in_legs`
 is that rule's **third** reader after the strip's windows and the chart's daily line, and
 `Σ monthly[].money_in_eur == windows['all'].money_in_eur` is the identity that keeps them honest
 (`test_api_smoke.py`, and all three pinned together in `test_cash_balance.py`). `MonthlyDeploymentCard`
-draws money in as the primary bar, keeps deployed beside it, drops the `net_eur` bar to the tooltip where
-its own docstring already said it belonged, and names the largest rotation month in prose under the chart
-— the **largest** rather than the latest, so the note cannot vanish while the spike it explains is still
-the tallest bar. The deployed bar is suppressed entirely under the `deployed` method, on the same
-condition that suppresses the strip's `/deployed` suffix: with no ledger the two series are one number.
+draws money in as its bar, drops `deployed_eur` and `net_eur` to the tooltip where the latter's own
+docstring already said it belonged, and names the largest rotation month in prose under the chart — the
+**largest** rather than the latest, so the note cannot vanish while the spike it explains is still on
+screen.
+
+**"Secondary" became "off the surface" on 2026-09-07, one day later, and the reasoning is worth keeping
+because it is not the reasoning above.** Deployed shipped as a *second bar* beside money in, and as the
+strip's muted `/suffix`, on the argument that the gap is capital churn and should be readable without
+hovering. The account owner asked for both out: they read these two surfaces for one thing — how much
+goes in per month — and a second figure sharing the slash with it, one a rotation can quadruple, made the
+one they wanted harder to read. It was also mostly redundant ink, which the data settles rather than
+taste: **the two series are the identical number in 20 of this account's 29 months** — every month before
+`coverage_from`, where money in *is* lot cost basis — and differ by a few hundred francs of dividend
+reinvestment in five more. It earned its ink in two months out of 29, and those two are exactly what the
+prose note carries.
+
+**Do not read that as licence to delete `deployed_eur`.** It stays on the wire, in both tooltips, and in
+the strip's hover `title`, because it is the only *independent* check on the highest-risk failure in this
+feature: money in comes from the deposit ledger and deployed from tax lots, so a broker transfer booked as
+an ordinary deposit inflates money in with nothing else on screen able to disagree. Off the surface is not
+gone. (This is also why the ~12% agreement between the two derivations recorded under *Current state* is
+evidence rather than trivia.) `showDeployed` is now the legacy-backend fallback alone — an older backend
+publishing no `money_in_eur` still gets the old deployment-only chart, because absent means "older
+backend", never "nothing was paid in".
 
 **The months are the union of both key sets, and that was a second bug in the same place.** The series was
 keyed on months with *lot* activity, so **a month carrying a deposit and no purchase had no row** — the
@@ -3426,7 +3445,7 @@ Tests: `tests/test_currency_fallback.py`.
 | The chart steps at a split date | Cached pre-split closes. A *new* split purges them automatically; for an older one delete that security's `market_prices` and let 08:00 refill |
 | A new currency appears | Nothing to do if it's in `WARM_CURRENCIES` or the ECB set. Otherwise add it there — one edit, no extra request |
 | "Money added" spikes in one month | A transfer booked as a deposit. `manage_cash_flows list`, then `reclassify <ib_key> --as TRANSFER_IN`. **Never** trust an Added figure without eyeballing that list first |
-| The Money In per Month chart shows a huge **Deployed** bar in a month I did not fund | Working as intended, and the note under the chart names it. Deployed is the cost basis of everything *bought*, so selling one holding to buy another counts the same money twice — August 2026 read 30,617 CHF deployed against 7,211 paid in, and September 3,639 against **zero**. The **Money in** bar beside it is the rotation-proof figure and is what the collapsed summary reports. The gap is capital churn; do not net it away, and do not read the deployed average in the strip's `/suffix` as a savings rate |
+| A month I know I invested in reads low on the Money In per Month chart | Working as intended: the bar is money *in*, so capital rotated between holdings is not in it. Selling one holding to buy another puts the same money to work twice, and only the second trip looks like activity — August 2026 put 30,617 CHF into new positions against 7,211 actually paid in, and September 3,639 against **zero**. Hover the bar for the deployed, released and net figures, or read the note under the chart, which names the largest such month in prose. Do not net the gap away and do not promote deployed back to a bar |
 | "Money added" is blank or `—` | Expected before `deposits_from`: no IBKR deposit ledger exists for the pre-transfer years. Not a bug — Deployed covers that era |
 | Realized gains look low + a `warnings[]` entry names a currency | No FX rate for that trade date, so the sale was **omitted** rather than mis-scaled. Check `WARM_CURRENCIES` covers it |
 | Steuerwert reads `—` instead of a number | `holdings_snapshot_error`: the snapshot raised. Check the logs — this is deliberately *not* 0.00 |
