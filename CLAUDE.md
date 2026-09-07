@@ -1347,6 +1347,70 @@ double-converted series and reported the gap as 3,000 CHF rather than 250 — ro
 EUR/CHF factor, which is exactly what a plausible wrong number looks like. Do not
 re-project the return value; it is already in the base currency.
 
+### The benchmark is anchored to the window, and its seed is the chart's own first point
+
+`GET /api/portfolio/benchmark?anchor=window` (2026-09-07) is what the chart asks for on every
+range. The since-inception series stays behind `anchor=inception` — the default, so an unknown
+caller sees no change — and is now the only thing `benchmark_timeline_cache` serves.
+
+Both lines used to be absolute: the portfolio's first point was its own value that day while
+the benchmark's carried every contribution since 2024-05-28, so on 3M the starting gap was two
+years of relative performance on a chart that drew none of it. Window mode answers a different
+question — *what if, on the first day of this range, I had moved everything into the index and
+then made the same contributions since* — and four rules carry it, each a wrong number the
+other way:
+
+- **The seed is Total Value (holdings + cash) on the anchor day, read through
+  `get_portfolio_value_over_time(anchor, anchor)`** — the pipeline that draws the chart's first
+  point, so the two lines start at one figure by construction rather than by a second
+  valuation. Cash is in because the benchmark is drawn beside Total Value and invests the same
+  Money In legs: the hypothetical is swapping the *whole account* into the index, so idle cash
+  shows as underperformance against it, which is the honest reading. When cash is not tracked
+  the balance is 0 and Total Value equals Market Value, so one rule covers both modes.
+- **Legs strictly after the anchor buy or sell shares; a leg on the anchor day is inside the
+  seed.** The portfolio's anchor point already contains that day's purchases (`events <= d`),
+  so the window is `(anchor, end]`, the one `calculate_xirr` and `/attribution` use.
+- **It is a seeded walk, never a scale or a shift.** Scaling the absolute series so its first
+  point matched would scale the in-window deposits too, and the portfolio would then appear to
+  outperform by exactly what was paid in. `_share_events_for_legs` and `_walk` are one
+  implementation for both anchors; window mode passes a seed and the legs after it.
+- **The seed is converted back to EUR through the anchor-day base rate**, because
+  `_apply_base_currency` re-multiplies at that date. Seeding from the EUR components misses by
+  the FX projection on cash — the timeline projects each cash event at its *own* date — by 75
+  on a 2,490 seed in the test that pins it.
+
+**It bypasses the cache on purpose.** `benchmark_timeline_cache` is keyed on (benchmark, date)
+and holds the absolute series; a per-window series written there would poison every other
+range. Window mode reads and writes nothing there, which is also why this change needed no
+production cache clear. The walk over one window is cheap; the expensive steps were always
+the provider fetches, which run exactly as before, over the window only.
+
+**ALL is a near no-op, measured.** The seed on the inception day is the first lot at that
+day's close against a first leg at its cost, a fraction of a percent apart; two years later
+the two series differ by 0.0011%. Do not special-case ALL back to the inception series — one
+meaning on screen is the point, and the prose under the toggles names the anchor day.
+
+**Beta is unchanged on flow-free days, exactly**: between contributions the share count is
+constant under either anchor, so the day-over-day ratio is the index's own return. What *did*
+move was a pre-existing contamination. A deposit into cash is not a flow to the holdings, so
+the portfolio's `external_flow_eur` read 0 and `betaAndCorrelation` kept the day — while the
+hypothetical bought index shares with it and its ratio jumped by deposit ÷ value (+1,002 CHF
+on 2026-08-26, a +1.7% "benchmark return" against a portfolio that did not move; three such
+days in one 3M window). Window-mode points now carry `external_flow_eur` — the contributions
+applied that day — and beta skips a day whose benchmark point carries a non-zero **explicit**
+flow. Explicit only: the cost-line inference `externalFlow()` falls back to is what measured
+the exchange rate and left 9 usable days out of 147 in August. Inception-mode points report
+`None`, never 0, because the cached rows carry no flow and a series reporting it on its fresh
+points only would disagree with itself.
+
+**An anchor the portfolio could not fully price is served and declared**, not refused —
+refusing would silently flip the line's meaning back to inception. `anchor_unpriced_holdings`
+rides on the response and the chart folds it into its incomplete-valuation notice: the seed is
+understated, so every point after it is. The rebased `cost_basis_eur` (seed plus contributions
+since) inherits the FX wobble recorded under *Worth doing next* in STATUS.md; it is not drawn.
+Tests: `tests/test_benchmark_window_anchor.py`, the anchor cases in
+`PortfolioValueChart.test.tsx`, the contribution-day cases in `portfolioKpis.test.ts`.
+
 ### Where cash reaches, and where it deliberately does not
 
 - **The value chart and the summary hero card.** The card names the split in its footnote
@@ -3284,7 +3348,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1413 backend + 524 frontend as of 2026-09-06, all offline — no IBKR, Yahoo or FX-provider
+Tests (1427 backend + 532 frontend as of 2026-09-07, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -3424,6 +3488,7 @@ Tests: `tests/test_currency_fallback.py`.
 | I bought something today and it is not in the app | Expected on any day, and not a settlement delay — the rolling window ends at the last completed *trading* day, so today is structurally never in today's statement. A Monday purchase is first reachable Tuesday; a Friday one on Saturday. Nothing to force. Verify with `toDate` in the statement header rather than the generation time |
 | The value chart dips hard after a big sale, or Market Value looks far too low | Fixed 2026-08-26 by tracking cash — check `/health`'s commit predates it before looking further. Selling moves value from holdings into a cash balance nothing used to record, so a rotation drew a cliff and the headline card understated the account by the idle balance. The chart now pairs **Total Value** (holdings + cash) with **Money In**, and neither steps on a trade. The risk metrics were always right about this: they net the flow out |
 | The cash figure disagrees with IBKR's by a small amount | Expected while `cash_source` is `derived`: it is computed from the trade, deposit and dividend ledgers, so it cannot see broker interest, account fees or FX conversion spread. On this account that ran to about −250 CHF over eight months, 0.36%. Enable the **Cash Report** section (option: Base Currency Summary) or **Equity Summary in Base** in the Flex portal and IBKR's own figure takes over — expect one visible step on the first measured day, which is the accumulated difference becoming visible |
+| The benchmark line starts exactly where the portfolio line does, and the gap is smaller than it used to be | Intended since 2026-09-07. The chart asks for `anchor=window`, so the hypothetical is seeded with the portfolio's own Total Value on the first day of the range and the gap is what happened *inside* it — the old starting gap was two years of history the range did not draw. The prose under the toggles names the anchor day. ALL is where the since-inception meaning lives, and there the two anchors agree to 0.001%; `anchor=inception` on the API still serves the old series |
 | The chart still says Cost Basis / Market Value | `cash_source` is `unknown`, meaning no trade or cash-flow row exists to derive a balance from — a fresh install, or a Flex query with none of the cash-bearing sections enabled. Deliberately not relabelled: a holdings-only line called "Total Value" over a 0.00 cash figure asserts a completeness nothing established |
 | A Cash slice appears in the sector and geography charts | Intended. Cash has no sector and no country, but putting it only in the asset-type chart would give that endpoint two denominators and leave the other two summing to under 100 while every slice says "% of portfolio". Named `Cash` rather than folded into `Unknown`, which means something else there: a holding whose sector nobody has fetched yet |
 | A negative cash balance, and a notice above the allocation charts | A margin debit. It cannot be drawn as a slice, so those charts leave it out of both the slice and the denominator rather than renormalising around it, and say so. The value chart still plots it — the cash line simply goes below zero |

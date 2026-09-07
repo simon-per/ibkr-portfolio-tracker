@@ -1,6 +1,19 @@
 # Working state
 
-**Last updated: 2026-09-07.** Latest: **the contribution surfaces publish one figure —
+**Last updated: 2026-09-07 (evening).** Latest: **the benchmark line starts where the
+portfolio line does, on every range.** Both were absolute and inception-based, so on 3M the
+benchmark's first point carried two years of relative performance while the portfolio's was its
+own value that day, and most of the visible gap was history the chart did not draw. The chart
+now asks for `anchor=window`: the hypothetical is seeded with the portfolio's Total Value on the
+first day of the range and fed only the contributions after it — a seeded walk, not a scale or a
+shift, so a deposit inside the window still buys index shares. Verified in a browser against a
+snapshot at 1440 and 390: the two lines start at the same pixel on 3M, 1Y and ALL, the API first
+points agree to a fraction of a cent, and on ALL the window series ends within 0.0011% of the
+inception one. Beta is unchanged on flow-free days by construction; the same change fixed a
+pre-existing contamination where deposit-only days counted as benchmark returns (three in the
+current 3M window, one a +1.7% jump). Details in *Shipped 2026-09-07*.
+
+Before that, the same day: **the contribution surfaces publish one figure —
 money in — and nothing else.** The chart shows money in; it did not until 09-06, because
 `monthly[]` carried only gross deployment, which counts a rotation twice by design — so
 the Ireland→US ETF switch drew **30,617 CHF "deployed" in August against 7,211 actually
@@ -584,6 +597,48 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-09-07 — the benchmark is anchored to the selected range
+
+Asked for as "make the benchmark line start at the same point as my portfolio line whenever I
+change the time range". The request came with the difficulty already named — a naive rebase
+(shift or scale the line) is wrong the moment a deposit lands inside the window — and that is
+exactly the shape shipped against: a **seeded walk** through the same `_walk` the absolute
+series uses, seeded with the portfolio's Total Value on the anchor day and fed only the
+contributions after it. CLAUDE.md, *The benchmark is anchored to the window*, has the rules.
+
+**What changed on the wire.** `GET /api/portfolio/benchmark` takes `anchor=inception|window`
+(default `inception`, unchanged behaviour for any caller not passing it). The response carries
+`anchor`, `anchor_date`, `anchor_value_eur`, `anchor_unpriced_holdings`, and window-mode
+points carry `external_flow_eur` (the contributions applied that day; `null` in inception
+mode, meaning *not reported*). The chart always asks for `window`, renders a sentence under
+the toggles naming the anchor day and what the line means, and folds an unpriced anchor into
+its existing notice.
+
+**Beta.** Unchanged on flow-free days — pinned by
+`test_flow_free_daily_ratios_are_identical_to_the_absolute_series`. It also stops counting
+deposit-only days as benchmark returns: `betaAndCorrelation` skips a day whose benchmark point
+carries a non-zero *explicit* flow, and only the explicit field, never the cost-line inference
+that measured the exchange rate in August.
+
+**Verified locally on a fresh production snapshot**, not only in jsdom: Playwright at 1440 and
+390 read the first point of the Total Value path and the S&P 500 path straight off the SVG on
+3M, 1Y and ALL — `dy = 0.00px` all six times — and the API cross-check put the two first
+values within 0.005 of each other on every range. ALL ends 0.0011% from the inception series
+(the seed is the first lot at its first-day close, the old first leg was its cost). The check
+cost **one Yahoo request** (`^GSPC`, the provisional refresh of today's bar), inside the two
+granted for it. The suite went 1413 → 1427 backend and 524 → 532 frontend.
+
+**What to check on prod after the deploy.** Open the chart on 3M with a benchmark selected:
+the two lines must start at one point and the sentence *Benchmarks start at your portfolio's
+value on …* must be there. Switch to ALL — it should look as it did before. No cache clear is
+needed: window mode never touches `benchmark_timeline_cache`, and the inception arithmetic did
+not move.
+
+**Not done, on purpose.** `benchmark_timeline_cache` now serves only `anchor=inception`, which
+the UI no longer requests; removing it (and the scheduler's daily `clear_cache_recent_days`) is
+a separate cleanup. The benchmark baseline's FX wobble (*Worth doing next*, item 6) is
+inherited by the rebased `cost_basis_eur` and still not drawn.
 
 ## Shipped 2026-09-06 (late) — money in per month, which the chart had never drawn
 
@@ -2702,12 +2757,29 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    it), and a per-lot conversion cannot be derived from the cached aggregate — the cost *events* have
    to be re-projected at read time. Do not "fix" it by making the portfolio convert per-date instead:
    that direction breaks the contributions identity, which depends on each leg converting at its own
-   date.
+   date. The window-anchored series (2026-09-07) inherits it — its `cost_basis_eur` is the seed
+   plus the contributions since, converted at each point's date — and still does not draw it.
+
+7. **Retire `benchmark_timeline_cache`, or decide to keep it.** Since 2026-09-07 the chart asks
+   for `anchor=window`, which never reads or writes the cache, so the table now serves only
+   `anchor=inception` callers — of which the repo has none. What still touches it: the scheduler's
+   daily `clear_cache_recent_days(7)`, `sync_helper`'s `clear_cache()` after every ingest, and
+   `import_finpension_csv`'s. Removing all of it is a migration plus four call sites; keeping it
+   costs a table nobody reads. Either is fine; leaving it half-alive is the one wrong answer,
+   because a cache that is never read is a cache whose staleness nobody will notice.
 
 ## Local development traps
 
 Each of these cost real time at least once.
 
+- **A service-level benchmark test can reach Yahoo.** `calculate_benchmark_value_over_time`
+  calls `_ensure_prices_available` itself, which fetches whenever the fixture leaves a gap it
+  considers missing — a leading gap at the range start, or a trailing day inside
+  `PROVISIONAL_PRICE_DAYS` of today — and its `except Exception` swallows a raiser, so the smoke
+  test's `yf.Ticker` stub alone is *silent* here. This cost exactly one real `^GDAXI` request on
+  2026-09-07 from a fixture whose index started three days after the window. Stub both fetch
+  steps for the module and assert the raiser was never reached on teardown; the `_offline`
+  fixture in `test_benchmark_window_anchor.py` is the pattern.
 - **`SCHEDULER_ENABLED=false` in `backend/.env` for any local run.** Otherwise starting uvicorn arms
   the nine daily Europe/Berlin jobs against the live Flex token and Yahoo. Defaults to `True` so
   production is unaffected.
@@ -2789,6 +2861,18 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-07 (evening)** — "make the benchmark line start at the same point as my portfolio
+  line whenever I change the time range", with the trap already named in the request: a shift or
+  a scale looks right and is wrong the moment a deposit lands inside the window. Two lessons.
+  **The seed has to come from the pipeline that draws the other line** — reading the anchor value
+  through `get_portfolio_value_over_time(anchor, anchor)` made "the lines start at one point" a
+  property rather than a hope, and the CHF test found the seed had to be divided back through
+  the anchor-day rate because cash is projected per event. And **"does this move beta" had a
+  two-part answer**: not on flow-free days, by arithmetic — but the question surfaced a
+  pre-existing defect where deposit-only days counted as benchmark returns, fixed in the same
+  change. Also: a fixture with a leading price gap made a real Yahoo request from a unit test,
+  which is now a local-dev trap above.
+
 - **2026-09-07** — "what is the difference between money in, net, deployed, released by sales",
   then "most relevant is money in... maybe we should only care about that?" A question about
   definitions turned into a design decision, and the honest answer to the second was **yes, and
@@ -2835,11 +2919,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   timeline's own `external_flow_eur` agreed to a tenth of a percent, which is what made a derived
   balance shippable today instead of waiting on a portal edit. The third thing: running an e2e
   script that had never been executed found an assertion that could not pass.
-
-- **2026-08-24 (late)** — "test everything, then commit." The testing was the deliverable and it
-  found nothing, which is itself the finding: the uncommitted work was sound and the full stack —
-  1272 backend, 505 frontend, 144 browser checks — went green first time. The reusable part is the
-  bug that was already fixed in that WIP: **the app named a condition in one component and
-  contradicted it in the component directly below**, which is what the `unpriced_holdings` family
-  looks like once every *aggregate* has been guarded and only the itemised screen is left.
-
