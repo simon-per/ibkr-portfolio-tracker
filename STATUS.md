@@ -617,6 +617,13 @@ money only. Aug 26 is where that matters most: CHF 30,617 went into new position
 but only CHF 7,211 of it was new money…"). `showDeployed` is now the legacy-backend fallback
 alone.
 
+Live on `12fd7ad`, 18:21 UTC, and **verified in a browser rather than only by the suite** — the
+tell that the second series is gone is the Y axis topping at **8.0k instead of ~32k**, which no
+jsdom test can see because Recharts renders nothing inside a zero-size `ResponsiveContainer`.
+Zero horizontal overflow at 1280 and 390. The strip reads `All time CHF 2,034 · 12M 2,769 ·
+6M 2,716 · 3M 4,382` with no suffix, and the 3M window is now legible as what it is: +115%
+against the all-time average.
+
 **The second bug, found while building the first.** The series was keyed on months with
 tax-lot activity, so a month carrying a deposit and no purchase had **no row** — the
 contribution absent from a chart of contributions, and `Σ monthly != windows['all']` with
