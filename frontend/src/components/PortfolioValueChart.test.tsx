@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { PortfolioValueChart } from './PortfolioValueChart'
+import type { BenchmarkDataset } from './PortfolioValueChart'
 import type { PortfolioValuePoint } from '@/lib/api'
 
 /**
@@ -46,6 +47,20 @@ const HEALTHY = [
   point('2026-03-04', 1020),
 ]
 
+function benchmark(anchorDate: string | null, anchorUnpriced = 0, name = 'S&P 500'): BenchmarkDataset {
+  return {
+    key: name.toLowerCase().replace(/\W+/g, ''),
+    name,
+    color: '#3b82f6',
+    data: HEALTHY.map((p) => ({
+      date: p.date, benchmark_value_eur: p.market_value_eur, cost_basis_eur: 1000,
+      gain_loss_eur: 0, gain_loss_percent: 0,
+    })),
+    anchorDate,
+    anchorUnpriced,
+  }
+}
+
 describe('the incomplete-valuation notice', () => {
   it('stays hidden when every day was fully priced', () => {
     render(<PortfolioValueChart data={HEALTHY} />)
@@ -84,5 +99,58 @@ describe('the incomplete-valuation notice', () => {
     const text = screen.getByRole('alert').textContent ?? ''
     expect(text).toMatch(/1 day in this range/)
     expect(text).toMatch(/up to 1 holding\b/)
+  })
+})
+
+/**
+ * A benchmark line that starts at the portfolio's own value reads as the since-inception
+ * comparison it replaced unless the chart says what it is. The sentence is prose rather
+ * than a tooltip because a tooltip does not exist on a phone.
+ */
+describe('the benchmark anchor note', () => {
+  it('says where the benchmark line starts, and what it means', async () => {
+    render(<PortfolioValueChart data={HEALTHY} benchmarks={[benchmark('2026-03-02')]} />)
+    const note = await screen.findByText(/start at your portfolio's value on Mar 2, 2026/)
+    expect(note.textContent).toMatch(/moved everything into that index that day/)
+    expect(note.textContent).toMatch(/same contributions since/)
+  })
+
+  it('is absent when no benchmark is drawn', () => {
+    render(<PortfolioValueChart data={HEALTHY} />)
+    expect(screen.queryByText(/start at your portfolio's value/)).toBeNull()
+  })
+
+  it('is absent for a backend that sends no anchor, rather than rendered wrong', async () => {
+    // Older than 2026-09-07 the series is since-inception, and describing it as seeded
+    // from the portfolio's value would be the exact misreading the sentence exists to stop.
+    render(<PortfolioValueChart data={HEALTHY} benchmarks={[benchmark(null)]} />)
+    await screen.findByRole('button', { name: /S&P 500/ })
+    expect(screen.queryByText(/start at your portfolio's value/)).toBeNull()
+  })
+
+  it('names each benchmark when they anchor on different days', async () => {
+    render(
+      <PortfolioValueChart
+        data={HEALTHY}
+        benchmarks={[benchmark('2026-03-02'), benchmark('2026-03-03', 0, 'DAX')]}
+      />,
+    )
+    const note = await screen.findByText(/S&P 500 from Mar 2, 2026, DAX from Mar 3, 2026/)
+    expect(note.textContent).toMatch(/first day each index could be priced/)
+  })
+
+  it('says the line is understated when the anchor day could not be fully valued', async () => {
+    render(
+      <PortfolioValueChart
+        data={[point('2026-03-02', 600, 2), ...HEALTHY.slice(1)]}
+        benchmarks={[benchmark('2026-03-02', 2)]}
+      />,
+    )
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/1 day in this range could not be fully valued/)
+    expect(alert.textContent).toMatch(
+      /The S&P 500 benchmark line starts from a day the portfolio could not be fully valued/,
+    )
+    expect(alert.textContent).toMatch(/understated for the whole range/)
   })
 })

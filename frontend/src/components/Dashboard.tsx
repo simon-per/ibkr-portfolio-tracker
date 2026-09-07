@@ -159,7 +159,7 @@ export function Dashboard() {
 
   const benchmarkDatasets: BenchmarkDataset[] = useMemo(() => {
     return selectedBenchmarks
-      .map((key, i) => {
+      .map((key, i): BenchmarkDataset | null => {
         const query = benchmarkQueries[i]
         if (!query?.data) return null
         return {
@@ -167,6 +167,10 @@ export function Dashboard() {
           name: query.data.benchmark_name,
           color: BENCHMARK_COLORS[i % BENCHMARK_COLORS.length],
           data: query.data.data,
+          // Window-anchored since 2026-09-07. Both null/0 from an older backend, and the
+          // chart then draws the line without the prose that would misdescribe it.
+          anchorDate: query.data.anchor_date ?? null,
+          anchorUnpriced: query.data.anchor_unpriced_holdings ?? 0,
         }
       })
       .filter((d): d is BenchmarkDataset => d !== null)

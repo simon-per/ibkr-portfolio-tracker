@@ -262,16 +262,42 @@ export interface BenchmarkInfo {
 
 export interface BenchmarkValuePoint {
   date: string;
+  // NOTE: *_eur fields carry values in the selected base_currency.
   benchmark_value_eur: number;
   cost_basis_eur: number;
   gain_loss_eur: number;
   gain_loss_percent: number;
+  /**
+   * Contributions the hypothetical invested that day (a withdrawal is negative). Reported
+   * in window mode only: `null`/absent means *not reported*, never zero. `betaAndCorrelation`
+   * skips a day carrying one, exactly as it skips a day the portfolio bought or sold on — a
+   * deposit buys index shares here while the holdings line does not step, so left in it
+   * reads as a benchmark return of deposit ÷ value against a portfolio that did not move.
+   */
+  external_flow_eur?: number | null;
 }
+
+/**
+ * Where the benchmark hypothetical starts. `inception` invests every contribution since the
+ * account began (the cached absolute series). `window` seeds it with the portfolio's own
+ * Total Value on the first priced day of the range and applies only the contributions after
+ * it, so the two lines start at one point and the gap is what happened inside the window.
+ * The chart always asks for `window`; `PortfolioValueChart` carries the prose that says so.
+ */
+export type BenchmarkAnchor = 'inception' | 'window';
 
 export interface BenchmarkResponse {
   benchmark_name: string;
   benchmark_ticker: string;
   data: BenchmarkValuePoint[];
+  /** Optional because a backend older than 2026-09-07 does not send it; absent reads as `inception`. */
+  anchor?: BenchmarkAnchor;
+  /** Window mode: the day the series was seeded on — the first weekday of the range the index could be priced on. */
+  anchor_date?: string | null;
+  /** Window mode: the portfolio's Total Value on `anchor_date`, in base_currency — the first point by construction. */
+  anchor_value_eur?: number | null;
+  /** Window mode: holdings the anchor value could not price. Above 0 the whole line is understated. */
+  anchor_unpriced_holdings?: number;
 }
 
 export interface SecurityAttribution {
@@ -1072,11 +1098,15 @@ class ApiClient {
     return this.request<BenchmarkInfo[]>('/api/portfolio/benchmarks');
   }
 
+  // `anchor=window` by default: the chart compares over the selected range, so the
+  // hypothetical is seeded with the portfolio's own value at the range start. The
+  // since-inception series stays reachable for anything that wants the old meaning.
   async getBenchmarkComparison(
-    startDate: string, endDate: string, benchmark: string = 'sp500'
+    startDate: string, endDate: string, benchmark: string = 'sp500',
+    anchor: BenchmarkAnchor = 'window',
   ): Promise<BenchmarkResponse> {
     return this.request<BenchmarkResponse>(
-      `/api/portfolio/benchmark?start_date=${startDate}&end_date=${endDate}&benchmark=${benchmark}`
+      `/api/portfolio/benchmark?start_date=${startDate}&end_date=${endDate}&benchmark=${benchmark}&anchor=${anchor}`
     );
   }
 

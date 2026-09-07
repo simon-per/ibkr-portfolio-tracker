@@ -42,6 +42,14 @@ export interface BenchmarkDataset {
   name: string
   color: string
   key: string
+  /**
+   * The day the hypothetical was seeded from the portfolio's own value — `null` when the
+   * backend served the since-inception series (older than 2026-09-07, or asked for it),
+   * in which case the anchor prose is not rendered rather than rendered wrong.
+   */
+  anchorDate?: string | null
+  /** Holdings the anchor value could not price. Above 0 the whole benchmark line is understated. */
+  anchorUnpriced?: number
 }
 
 interface PortfolioValueChartProps {
@@ -182,6 +190,42 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
   const availableBenchmarks = benchmarks.filter(b => b.data.length > 0)
 
   /**
+   * What the benchmark lines MEAN, said in prose. Each is seeded with the portfolio's own
+   * Total Value on the first priced day of the range and fed only the contributions after
+   * it — so the two lines start at one point and the gap is what happened in the window,
+   * not two years of history the range does not draw. Without this sentence a line that
+   * starts at the portfolio's value reads as the since-inception comparison it replaced.
+   *
+   * One sentence when every drawn benchmark shares an anchor (the normal case: the anchor
+   * is the range start), one clause per benchmark when an index had no price on that day
+   * and anchored later. Prose rather than a tooltip, because a tooltip does not exist on a
+   * phone — the rule that put the dividend basis in a footnote.
+   */
+  const drawnBenchmarks = availableBenchmarks.filter(b => visibleBenchmarks.has(b.key))
+  const anchored = drawnBenchmarks.filter(b => b.anchorDate)
+  const anchorDates = Array.from(new Set(anchored.map(b => b.anchorDate as string)))
+  // Reduced to a STRING and a NUMBER here, ahead of the axis memo below, so the JSX touches
+  // nothing derived from `availableBenchmarks`: the React Compiler treats a method call on an
+  // array aliased from that memo's dependency — even `.join()` on a mapped copy — as a
+  // possible later mutation, and refuses to preserve the memo
+  // (`react-hooks/preserve-manual-memoization`). Bisected, not guessed.
+  const anchorPhrase =
+    anchorDates.length === 0
+      ? null
+      : anchorDates.length === 1
+        ? formatDate(anchorDates[0])
+        : `the first day each index could be priced (${anchored
+            .map(b => `${b.name} from ${formatDate(b.anchorDate as string)}`)
+            .join(', ')})`
+  // A seed the backend could not fully price understates every point after it. Folded into
+  // the incomplete-valuation notice rather than left to the line's shape.
+  const understatedNames = drawnBenchmarks
+    .filter(b => (b.anchorUnpriced ?? 0) > 0)
+    .map(b => b.name)
+  const understatedCount = understatedNames.length
+  const understatedText = understatedNames.join(' and ')
+
+  /**
    * X tick labels.
    *
    * This used to return a label only on the 1st of a month and `''` otherwise. That
@@ -312,19 +356,35 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
 
   return (
     <div className="space-y-4">
-      {incomplete.days > 0 && (
+      {(incomplete.days > 0 || understatedCount > 0) && (
         <div
           role="alert"
           className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
         >
-          <span className="font-medium">
-            {incomplete.days} {incomplete.days === 1 ? 'day' : 'days'} in this range could not
-            be fully valued
-          </span>{' '}
-          — up to {incomplete.worst} {incomplete.worst === 1 ? 'holding' : 'holdings'} had no
-          usable price{incomplete.from ? `, from ${incomplete.from}` : ''}. Market value and
-          profit are understated on those days by the whole value of the missing holdings, so
-          the dip is a gap in the price data rather than a loss. Risk metrics skip them.
+          {incomplete.days > 0 && (
+            <>
+              <span className="font-medium">
+                {incomplete.days} {incomplete.days === 1 ? 'day' : 'days'} in this range could not
+                be fully valued
+              </span>{' '}
+              — up to {incomplete.worst} {incomplete.worst === 1 ? 'holding' : 'holdings'} had no
+              usable price{incomplete.from ? `, from ${incomplete.from}` : ''}. Market value and
+              profit are understated on those days by the whole value of the missing holdings, so
+              the dip is a gap in the price data rather than a loss. Risk metrics skip them.
+            </>
+          )}
+          {understatedCount > 0 && (
+            <>
+              {incomplete.days > 0 ? ' ' : ''}
+              <span className="font-medium">
+                The {understatedText} benchmark{' '}
+                {understatedCount === 1 ? 'line starts' : 'lines start'} from a day the
+                portfolio could not be fully valued
+              </span>
+              , so {understatedCount === 1 ? 'it is' : 'they are'} understated for the whole
+              range, not only that day.
+            </>
+          )}
         </div>
       )}
 
@@ -334,6 +394,14 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
           uninvested cash, and <span className="font-medium text-foreground">Money In</span> is
           what you contributed — so a sale moves value between the lines instead of off the
           chart, and the gap between them is total profit. Cash is {caveat}.
+        </p>
+      )}
+
+      {anchorPhrase && (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Benchmarks</span> start at your
+          portfolio's value on {anchorPhrase} — what you would have if you had moved everything
+          into that index that day and made the same contributions since.
         </p>
       )}
 
