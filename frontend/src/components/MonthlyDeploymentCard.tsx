@@ -6,7 +6,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
@@ -45,21 +44,32 @@ function whole(value: number): string {
 }
 
 /**
- * Money in per month, with capital deployed beside it.
+ * Money in per month — one series, answering one question: how much new money went in.
  *
- * **Money in leads and deployed is the context** — it did not until 2026-09-06, and a
- * rotation is what made that matter. Selling the Ireland-domiciled sleeve to buy US
- * ETFs deployed ~31k CHF in one month against a few hundred francs of new money, and
- * the only series on the chart was the gross one: a bar four times the height of any
- * contribution this account has ever made, in a month nothing was paid in. Deployed was
- * not wrong — it is defined to count a rotation twice, because the gap between the two
- * IS the churn measurement — it was simply alone.
+ * **The chart drew gross deployment alone until 2026-09-06**, and a rotation is what
+ * made that matter. Selling the Ireland-domiciled sleeve to buy US ETFs deployed ~31k
+ * CHF in one month against a few hundred francs of new money, so the chart carried a bar
+ * four times the height of any contribution this account has ever made, in a month
+ * nothing was paid in. Deployed was not wrong — it is defined to count a rotation twice,
+ * because the gap between the two IS the churn measurement — it was simply alone.
  *
- * So `money_in_eur` is the primary bar, on the same era splice the strip's headline and
- * the value chart's Money In line use (`_contribution_inputs`: one event list, three
- * readers, pinned equal in `test_cash_balance.py`). Deployed stays as a second bar so
- * the gap is readable without hovering, and `net_eur` moved to the tooltip, which is
- * where its own server-side docstring already said it belonged.
+ * So the bar is `money_in_eur`, on the same era splice the strip's headline and the value
+ * chart's Money In line use (`_contribution_inputs`: one event list, three readers, pinned
+ * equal in `test_cash_balance.py`).
+ *
+ * **Deployed was a second bar beside it for one day**, and came out on 2026-09-07 at the
+ * account owner's request: they read this card for their contribution rate and the second
+ * series was answering a question they were not asking. It was also mostly redundant —
+ * the two are the *identical* number in every month before `coverage_from`, where money in
+ * IS lot cost basis, which is 20 of this account's 29 months, plus five more where they
+ * differ by a few hundred francs of dividend reinvestment. It earned its ink in two months
+ * out of 29, and those two are exactly what the prose note under the chart now names.
+ *
+ * `deployed_eur`, `net_eur` and the released figure all survive in the **tooltip**, and
+ * that is not sentimentality: money in is derived from the deposit ledger and deployed
+ * from tax lots, so deployed is the only independent check on the highest-risk failure
+ * in this feature — a broker transfer booked as an ordinary deposit, which inflates money
+ * in with nothing else on the screen able to disagree.
  */
 export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeploymentCardProps) {
   const curSym = useCurrencySymbol()
@@ -75,16 +85,21 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // deployment-only chart is honest; drawing a row of zeros would not be.
   const hasMoneyIn = monthly.length > 0 && monthly.every(m => typeof m.money_in_eur === 'number')
 
-  // Under the 'deployed' method there is no deposit ledger, so money in IS deployment
-  // and a second identical bar would be pure noise. Same condition, for the same reason,
-  // that suppresses the strip's `/deployed` suffix.
+  // Whether a deposit ledger exists at all. Under the 'deployed' method money in IS
+  // deployment, so there is no gap to explain and the note below would describe nothing.
   const hasLedger = data?.windows.some(w => w.money_in_method !== 'deployed') ?? false
-  const showDeployed = !hasMoneyIn || hasLedger
 
-  const legendItems = [
-    ...(hasMoneyIn ? [{ label: 'Money in', color: MONEY_IN_COLOR }] : []),
-    ...(showDeployed ? [{ label: 'Deployed', color: DEPLOYED_COLOR }] : []),
-  ]
+  // Deployed is drawn ONLY as the legacy fallback, when the backend publishes no money
+  // in. It was a second bar beside money in until 2026-09-07, and the account owner
+  // asked for it out: the two series are the *identical* number in 20 of this account's
+  // 29 months (every month before `coverage_from`, where money in IS lot cost basis) and
+  // differ trivially in five more, so it was redundant ink in 25 of 29 — earning its
+  // place only in the two rotation months, which the note below now carries in prose.
+  // It survives in the tooltip, which is the point: money in comes from the deposit
+  // ledger and deployed from tax lots, so deployed is the one independent check on the
+  // failure this feature fears most — a transfer booked as a deposit, which inflates
+  // money in with nothing beside it to disagree.
+  const showDeployed = !hasMoneyIn
 
   // The largest month where deployment exceeded money in, named below the chart. The
   // largest rather than the latest, so the note cannot vanish while the spike it
@@ -186,14 +201,12 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                       }}
                     />
                     <Tooltip content={<DeploymentTooltip hasMoneyIn={hasMoneyIn} />} />
-                    {/* Rendered rather than left to Recharts, which derives its own order
-                        from the children in a way that does not match the order the bars
-                        are DRAWN in: declared money-in-first, the legend still came out
-                        "Deployed, Money in" while the leftmost bar of each pair was money
-                        in. Two orders for one pair of series, and the wrong one puts the
-                        secondary first. (`payload` is not in this version's Legend props,
-                        so `content` is the typed way to say it.) */}
-                    <Legend content={<SeriesLegend items={legendItems} />} />
+                    {/* No legend: exactly one series is ever drawn, and a one-item legend
+                        is a label for a chart that already has a title. (It carried two
+                        items until 2026-09-07 — and note it had to be hand-rendered even
+                        then, because Recharts derived its own order from the children and
+                        came out "Deployed, Money in" while the leftmost bar of each pair
+                        was money in.) */}
                     {/* Money in goes negative in a withdrawal month, so the zero line stays. */}
                     <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeWidth={1} />
                     {hasMoneyIn && (
@@ -212,11 +225,12 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                   so it belongs beside it. */}
               {rotation && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Deployed exceeds money in wherever capital was rotated between holdings —
-                  selling one holding to buy another puts the same money to work twice.{' '}
-                  {rotation.row.label} is the largest: {curSym}{whole(rotation.gap)} of the{' '}
-                  {curSym}{whole(rotation.row.deployed_eur)} deployed was capital already
-                  invested, not new money.
+                  These bars count new money only. {rotation.row.label} is where that
+                  matters most: {curSym}{whole(rotation.row.deployed_eur)} went into new
+                  positions that month but only {curSym}
+                  {whole(rotation.row.money_in_eur ?? 0)} of it was new money — the other{' '}
+                  {curSym}{whole(rotation.gap)} was capital rotated between holdings,
+                  which puts the same money to work twice.
                 </p>
               )}
             </>
@@ -224,24 +238,6 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
         </CardContent>
       )}
     </Card>
-  )
-}
-
-/** Legend in declaration order, so it reads left-to-right like the bars do. */
-function SeriesLegend({ items }: { items: Array<{ label: string; color: string }> }) {
-  return (
-    <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs">
-      {items.map(i => (
-        <li key={i.label} className="flex items-center gap-1.5">
-          <span
-            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: i.color }}
-            aria-hidden="true"
-          />
-          <span>{i.label}</span>
-        </li>
-      ))}
-    </ul>
   )
 }
 

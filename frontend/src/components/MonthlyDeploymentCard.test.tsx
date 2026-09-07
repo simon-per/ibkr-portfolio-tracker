@@ -14,15 +14,19 @@ import type { ContributionsResponse, ContributionWindow, ContributionMonthlyItem
  * the last twelve *rows* (which can span more than twelve months) and divides by that
  * row count rather than by the months covered. Both errors push the average up.
  *
- * **Money in leads, deployed is the context.** Until 2026-09-06 the card drew only the
- * gross deployment, which counts a rotation twice by design — so the August 2026
+ * **The card publishes money in, and only money in.** Until 2026-09-06 it drew the gross
+ * deployment alone, which counts a rotation twice by design — so the August 2026
  * Ireland→US ETF switch drew a ~31k bar in a month with a few hundred francs of new
- * money, with nothing beside it to read it against.
+ * money, with nothing beside it to read it against. Deployed was then a second bar for a
+ * day and came out on 09-07: it is the *identical* number in 20 of this account's 29
+ * months, and the two where it is not are what the rotation note names in prose.
  *
  * The bars themselves are not asserted here: Recharts renders inside a
- * `ResponsiveContainer`, which has no dimensions in jsdom. What *is* assertable is the
- * collapsed summary and the rotation note, which are plain DOM either side of it — and
- * the note is gated on the same `hasLedger` condition the second bar is.
+ * `ResponsiveContainer`, which has no dimensions in jsdom — which is exactly how a legend
+ * listing two series in the opposite order to the bars shipped through a green suite. What
+ * *is* assertable is the collapsed summary and the rotation note, plain DOM either side of
+ * it, and the note is still gated on `hasLedger`: with no deposit ledger money in IS
+ * deployment, so there is no gap for it to describe.
  */
 
 afterEach(cleanup)
@@ -154,10 +158,13 @@ describe('a rotation is named rather than left to be inferred', () => {
       />,
     )
     expand()
-    const note = screen.getByText(/capital already/)
+    // The note carries the whole rotation now that no deployed bar is drawn beside it:
+    // what went into positions, how much of that was new, and the difference.
+    const note = screen.getByText(/rotated between holdings/)
     expect(note.textContent).toMatch(/Aug 26/)
+    expect(note.textContent).toMatch(/31,400/)   // deployed
+    expect(note.textContent).toMatch(/1,240/)    // of which new money
     expect(note.textContent).toMatch(/30,160/)   // 31,400 - 1,240
-    expect(note.textContent).toMatch(/31,400/)
   })
 
   it('names the largest month even when a later one is quiet', () => {
@@ -170,7 +177,7 @@ describe('a rotation is named rather than left to be inferred', () => {
       />,
     )
     expand()
-    expect(screen.getByText(/capital already/).textContent).toMatch(/Aug 26/)
+    expect(screen.getByText(/rotated between holdings/).textContent).toMatch(/Aug 26/)
   })
 
   it('says nothing when every month deployed only what came in', () => {
@@ -181,7 +188,7 @@ describe('a rotation is named rather than left to be inferred', () => {
       />,
     )
     expand()
-    expect(screen.queryByText(/capital already/)).toBeNull()
+    expect(screen.queryByText(/rotated between holdings/)).toBeNull()
   })
 
   it('says nothing when there is no deposit ledger, where money in IS deployment', () => {
@@ -197,6 +204,6 @@ describe('a rotation is named rather than left to be inferred', () => {
       />,
     )
     expand()
-    expect(screen.queryByText(/capital already/)).toBeNull()
+    expect(screen.queryByText(/rotated between holdings/)).toBeNull()
   })
 })

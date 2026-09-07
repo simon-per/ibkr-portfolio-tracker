@@ -52,20 +52,26 @@ describe('ContributionsStrip', () => {
     expect(screen.getByText('Avg Monthly in')).toBeTruthy()
   })
 
-  it('explains the money-in / deployed pair without needing a pointer', () => {
+  it('publishes one figure, so the strip reads as a contribution rate', () => {
+    // Until 2026-09-07 this rendered `2,026/2,023` with an `· in / deployed` legend to
+    // make the pair readable. Both went: the strip is read for how much goes in per
+    // month, and a second figure behind a slash — one a rotation can quadruple — is not
+    // that. The deployed average must be nowhere on the surface.
     render(<ContributionsStrip data={data([win()])} />)
-    // Both figures are on screen as `2,026` and a `/2,023` suffix; the legend is what makes
-    // that readable as two numbers rather than one broken one.
-    expect(screen.getByText(/in \/ deployed/)).toBeTruthy()
-    expect(screen.getByText(/2,023/)).toBeTruthy()
+    expect(screen.getByText(/2,026/)).toBeTruthy()
+    expect(screen.queryByText(/2,023/)).toBeNull()
+    expect(screen.queryByText(/in \/ deployed/)).toBeNull()
   })
 
-  it('omits the legend when no suffix is rendered', () => {
-    // Under the 'deployed' method money in IS deployment, so the suffix is suppressed and a
-    // legend would describe something that is not on screen.
-    render(<ContributionsStrip data={data([win({ money_in_method: 'deployed' })])} />)
-    expect(screen.getByText('Avg Monthly in')).toBeTruthy()
-    expect(screen.queryByText(/in \/ deployed/)).toBeNull()
+  it('keeps deployed in the hover title, where the cross-check belongs', () => {
+    // Money in comes from the deposit ledger and deployed from tax lots, so deployed is
+    // the one independent check on this feature's worst failure — a broker transfer
+    // booked as a deposit, which inflates money in with nothing to disagree. Off the
+    // surface is not the same as gone.
+    const { container } = render(<ContributionsStrip data={data([win()])} />)
+    const titles = Array.from(container.querySelectorAll('[title]'))
+      .map(el => el.getAttribute('title') ?? '')
+    expect(titles.some(t => /deployed into positions/.test(t))).toBe(true)
   })
 
   it('still says unavailable rather than vanishing on a failed fetch', () => {

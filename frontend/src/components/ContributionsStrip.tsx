@@ -25,12 +25,12 @@ function round(value: number): string {
  * Money in per month, over all time / 12M / 6M / 3M, each trailing window shown as
  * a delta against the all-time average.
  *
- * It is labelled **"Avg Monthly in"** rather than "Avg Monthly" because
- * `MonthlyDeploymentCard`, on the same tab, renders `12M avg: …/mo` of capital
- * *deployed*. Neither number was wrong and they agree wherever they measure the same
- * thing — the strip's own `/deployed` suffix is byte-identical to the card's figure —
- * but "an average per month" named two quantities over two windows, and the only thing
- * distinguishing them lived in a `title` attribute.
+ * It is labelled **"Avg Monthly in"** rather than "Avg Monthly" because this app once had
+ * two figures called an average per month over two windows on one tab — this one, and
+ * `MonthlyDeploymentCard`'s `12M avg: …/mo` of capital *deployed*. Neither was wrong and
+ * the only thing distinguishing them lived in a `title` attribute. Both surfaces publish
+ * money in now, so the word is no longer load-bearing against that specific collision; it
+ * stays because it is what the number is, and because `deployed_eur` has not gone away.
  *
  * Rendered inline inside the Portfolio Value Over Time card header, beside the period
  * metrics — two lines, no card of its own.
@@ -41,9 +41,12 @@ function round(value: number): string {
  * because lot cost basis cannot survive a rotation — selling one ETF to buy another
  * counts the same money twice.
  *
- * Deployed rides along as a muted suffix: once rotation starts it exceeds money in,
- * and that gap is capital churn rather than saving, so it has to be visible without
- * hovering.
+ * **Deployed rode along as a muted `/suffix` until 2026-09-07** and is now in the `title`
+ * only. The argument for surfacing it was that the gap is capital churn rather than
+ * saving, so it should be readable without hovering — but that reasoning assumed the
+ * reader wanted to know about churn, and the account owner reads this strip for one thing:
+ * how much is going in per month. A second figure behind a slash, which a rotation can
+ * quadruple, made the one they wanted harder to read.
  */
 export function ContributionsStrip({ data, isLoading, isError }: ContributionsStripProps) {
   const curSym = useCurrencySymbol()
@@ -97,14 +100,10 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
             both were called an average per month, so the only thing separating them was a
             tooltip. */}
         <span className="font-medium">Avg Monthly in</span>
-        {/* The legend for the `/` suffix, rendered rather than left in `title`: a caveat
-            reachable only by hovering does not exist on a phone, and `CHF2026/2023` reads
-            like one broken number until you know it is two. Conditional on a suffix
-            actually being rendered below — under the 'deployed' method money in IS
-            deployment and no suffix is drawn, so a legend would describe nothing. */}
-        {data.windows.some(w => w.money_in_method !== 'deployed') && (
-          <span className="text-[10px] font-normal opacity-70">· in / deployed</span>
-        )}
+        {/* No `· in / deployed` legend any more, because there is no longer a suffix for
+            it to explain. It existed for a real reason while there was one — `CHF2026/2023`
+            reads as a single broken number until you know it is two, and a caveat living
+            only in `title` does not exist on a phone. Both went together on 2026-09-07. */}
       </div>
 
       {data.windows.map(w => {
@@ -156,13 +155,10 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
             <div className="text-sm font-semibold leading-tight tabular-nums">
               {curSym}{round(w.avg_money_in_per_month_eur)}
               {w.partial && <span className="text-muted-foreground">*</span>}
-              {/* Omitted under the 'deployed' method, where money in IS deployment and
-                  the suffix would just repeat the number beside it. */}
-              {w.money_in_method !== 'deployed' && (
-                <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">
-                  /{round(w.avg_deployed_per_month_eur)}
-                </span>
-              )}
+              {/* The `/deployed` suffix that used to sit here came out on 2026-09-07: this
+                  strip is read as a contribution rate, and a second figure sharing the
+                  slash with it — one that a rotation can quadruple — is not one. It is
+                  still in the `title` above, which is where the cross-check belongs. */}
             </div>
           </div>
         )
