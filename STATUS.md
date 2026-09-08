@@ -10,6 +10,14 @@ Total Value where cash is tracked; and a baseline that fails to load is refused 
 drawn as zero. The tab had no tests and has 22. Details in *Shipped 2026-09-08*. **Not yet seen
 in a browser** — Recharts draws nothing in jsdom, so the legend and bands want one look on prod.
 
+Same evening: **the Look-through tab's warning block is collapsed and last on the page.** Ten
+near-identical "basket is N days old" sentences sat in an amber block directly under the KPI
+cards and took half the screen above the company table. At the owner's request the itemised
+notes now live inside the *Fund coverage* card at the bottom, collapsed by default with a
+one-line count in its header; the Coverage KPI keeps the qualifier and names every condition
+present rather than only the most severe. The module docstring records why this does not
+break the "caveat outside every collapsible" rule.
+
 Before that (2026-09-07, evening): **the benchmark line starts where the portfolio line does,
 on every range.** Both were absolute and inception-based, so on 3M the
 benchmark's first point carried two years of relative performance while the portfolio's was its
@@ -640,6 +648,21 @@ under *Shipped 2026-09-06 (late)*) is the check, at 1280 and 390.
 No `unpriced_holdings` notice on the seed — the Performance tab's cards already carry one. The
 inline Y-axis tick code was not swapped for `lib/niceTicks.ts`, whose header already says it was
 extracted from this tab; that is a one-file follow-up.
+
+**Also shipped the same evening — the Look-through notes are collapsed and last.** Asked as
+"I do not want the error/warning to take up half of the page, bring the irrelevant things down
+to a simple dropdown". Live, the block held ten sentences, seven of them the same staleness
+line for different funds. The `role="alert"` block under the KPI row is gone; the notes render
+inside the *Fund coverage* card, which is now collapsed by default via `CollapsibleCardHeader`
+(the same control Monthly Returns and Performance Attribution use) with a header line that
+counts what is inside ("9 funds held — 7 decomposed, 1 via another fund's basket, 1 with no
+basket — 10 notes on this view"). The Coverage KPI's footnote lists every condition present
+(`no basket · borrowed basket · ageing`) instead of only the most severe, so the qualifier above
+the fold is complete. Tests updated: the alert assertion became "qualifier on the card, notes
+reachable from the collapsed header", plus a document-order check that the fund card is last.
+**Check on prod:** the Look-through tab opens straight into the KPI row, the composition bar and
+the company table; the last card reads *Fund coverage* with the count line and a chevron, and
+opening it shows the notes then the fund table.
 
 ## Shipped 2026-09-07 — the benchmark is anchored to the selected range
 
@@ -2913,7 +2936,12 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   `lib/forecast.ts` is that function, and the family test is the table row equalling the series
   point. And **the seed had to include cash for the arithmetic, not for taste**: money in counts a
   deposit the moment it lands, so measuring it against holdings alone understates today's gain by
-  the idle balance — which settled a question that looked like a preference.
+  the idle balance — which settled a question that looked like a preference. Same evening: "I do
+  not want the Look-through warning to take up half the page" — ten near-identical staleness
+  lines above the content. The rule that a caveat must sit outside every collapsible was
+  written for a *qualifier*; a ten-line itemised list is the always-present-banner failure it
+  was never meant to protect, so the qualifier stayed on the KPI card and the list went into the
+  collapsed card at the bottom with its count in the header.
 - **2026-09-07 (evening)** — "make the benchmark line start at the same point as my portfolio
   line whenever I change the time range", with the trap already named in the request: a shift or
   a scale looks right and is wrong the moment a deposit lands inside the window. Two lessons.

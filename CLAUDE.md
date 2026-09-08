@@ -2551,8 +2551,13 @@ base-currency projection is inherited and the total **cannot disagree with
 - **Nothing is renormalised onto covered value.** Every percentage is a share of the *whole*
   portfolio, so while some funds have no basket every row is an understatement — and rescaling
   would convert a stated gap into a confident lie. Same refusal `rebalance.ts` makes about
-  targets. `coverage_pct` leads the panel as a `role="alert"` **outside any collapsible**, the
-  `MonthlyReturnsHeatmap` lesson.
+  targets. `coverage_pct` leads the panel on the KPI row, **outside any collapsible**, the
+  `MonthlyReturnsHeatmap` lesson — and since 2026-09-08 the itemised `warnings[]` sit *inside*
+  the collapsed *Fund coverage* card at the bottom, at the owner's request: ten near-identical
+  staleness sentences directly under the KPI row pushed the company table below the fold, which
+  is the always-present-banner pathology from the other direction. The Coverage footnote names
+  every condition present rather than only the most severe, and the collapsed header counts the
+  notes, so what is hidden is their text and never their existence.
 - **Equity asset classes are a whitelist**, never a blacklist — the reasoning behind
   `get_deposits()` selecting `DEPOSITWITHDRAW` by name. A blacklist admits the next label an
   issuer invents (`Rights`, `Warrant`, `Preferred`) as a company.
@@ -3381,7 +3386,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1427 backend as of 2026-09-07 + 554 frontend as of 2026-09-08, all offline — no IBKR, Yahoo or FX-provider
+Tests (1427 backend as of 2026-09-07 + 555 frontend as of 2026-09-08, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -3574,8 +3579,8 @@ Tests: `tests/test_currency_fallback.py`.
 | Currency exposure looks wrong for an ETF | It is quote currency, not economic exposure, and deliberately not re-attributed — a EUR-listed S&P tracker is EUR-quoted with USD risk. The fund share is named on screen |
 | A recently bought holding sits in an *Unknown* sector or region | Expected, and correct rather than missing. `sync_helper` never writes `sector`/`country`, so an IBKR-ingested security has both NULL while `asset_type` has a `"Stock"` column default. Only `POST /api/allocation/sync` fills them and **nothing schedules it** (it needs Yahoo), so run it by hand. Before 2026-08-05 the holding was silently dropped from those two charts instead, which made them sum to under 100% under a "% of portfolio" label. A **mapped ETF** is the exception and needs no sync at all — `app/etf_mappings.py` supplies its sector, region *and* asset type live at read time |
 | A fund's Equity weight reads ~92% and its Value looks fully invested | Rounding, not cash, and the cell says which: the muted `N rows at 0%` beneath it. Vanguard publishes weights to 2dp and VT has 10,032 holdings, so its 8,007 smallest are printed at 0.00% and its file sums to 91.86%. Nothing is missing and nothing is misparsed — check `stored_rows == source_rows` on the sync run if you want to confirm. Deliberately not renormalised |
-| A fund's status badge reads *Via VT* rather than *Decomposed* | It publishes no basket of its own and is decomposed using another fund's — see *A borrowed basket*. Its companies are approximate and err **low**; the reason is spelled out in the yellow notice above. The Coverage card stays amber while any fund is in this state, and clears the moment a real basket is imported for it |
-| Look-through coverage is below 100% | Expected, and it cannot reach 100%: no basket attributes 100% of its own fund, so each decomposed fund's residual is a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is the yellow notice above the table, not a bug |
+| A fund's status badge reads *Via VT* rather than *Decomposed* | It publishes no basket of its own and is decomposed using another fund's — see *A borrowed basket*. Its companies are approximate and err **low**; the reason is spelled out in the notes inside the *Fund coverage* card at the bottom (collapsed — click its header). The Coverage card stays amber while any fund is in this state, and clears the moment a real basket is imported for it |
+| Look-through coverage is below 100% | Expected, and it cannot reach 100%: no basket attributes 100% of its own fund, so each decomposed fund's residual is a permanent floor under the gap; the rest is each decomposed fund's own residual. Read the `funds` table: every fund is named with the reason its constituents are unknown. **Every company row is an understatement by whatever those funds hold**, and nothing is rescaled to hide it — that is what the Coverage footnote says and what the notes inside the collapsed *Fund coverage* card spell out, not a bug |
 | The Coverage card is amber at a high percentage | It tones on whether any fund is *unresolved*, not on a threshold — green means every held fund is either decomposed or deliberately excluded. That is deliberate: a percentage threshold could not be green even with every obtainable basket loaded, so it would have been a warning that never clears. Amber names the count of funds still missing a basket |
 | A basket is badged `†` stale but its issuer publishes slowly | `ADAPTER_STALE_DAYS` is per-source, so `†` means *the issuer has newer holdings we failed to fetch* rather than *this feed is slow*: 7 days for the six that republish daily (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck), 75 for Vanguard US (month-end, ~6-week lag by design), 45 for a hand import. A quarterly source needs its own entry — do not raise the global default to silence it |
 | A company appears twice in the look-through table | The two rows share no identifier, and there are three causes in order of likelihood. (1) `key_type: ISIN` — no LEI and no shareClassFIGI on record, so run `python -m app.cli.resolve_identities`. (2) The row came out of **GRID or QTUM**, whose issuers publish a CINS or a SEDOL and no ISIN, so it has no identity at all until `resolve_identities --constituents` runs — and note a **basket re-import deliberately clears that resolution**, so it is the second half of every import for those two funds. Set `OPENFIGI_API_KEY` first. (3) Both rows are already resolved, which is a genuine gap no identifier closes — an ADR against its ordinary, or a dual-listed company with two legitimate LEIs — and needs an `ISSUER_OVERRIDES` entry with its evidence |
