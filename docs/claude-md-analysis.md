@@ -2,6 +2,11 @@
 
 Measurement only. Target: `CLAUDE.md` at commit `69c8eb8`, 2026-08-26.
 
+> **Acted on 2026-09-08.** Every non-EVERY section moved verbatim into `docs/<topic>.md`, the
+> STATUS.md *Shipped* sections into `docs/shipped-log.md`, and CLAUDE.md became a ~270-line index
+> plus the two rules and the cross-cutting conventions (~7k tokens by this file's calibration).
+> Line numbers below refer to the 2026-08-26 file and are kept as the record of the measurement.
+
 ## Method
 
 | quantity | how obtained |
