@@ -677,6 +677,12 @@ def _ishares_as_of(points) -> date:
     text = _clean(raw)
     if not text:
         raise BasketParseError("ishares: the response carries no asOfDate")
+    # BlackRock abbreviates September to the British `Sept` — `07/Sept/2026` on EMIM's live
+    # file, 2026-09-08 — while every other month is three letters, and `%b` accepts only
+    # `Sep`. So the parser first failed on the first September after it shipped, refusing a
+    # perfectly good basket and leaving the fund on its August one. The only English month
+    # abbreviation that is not three letters, hence a single substitution rather than a table.
+    text = re.sub(r"(?i)\bsept\b", "Sep", text)
     for pattern in ("%d/%b/%Y", "%Y-%m-%d", "%d-%b-%Y", "%b %d, %Y"):
         try:
             return datetime.strptime(text, pattern).date()

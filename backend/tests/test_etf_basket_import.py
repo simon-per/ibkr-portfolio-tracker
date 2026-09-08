@@ -591,3 +591,17 @@ def test_dws_cash_and_futures_rows_are_read_off_the_issuers_own_identifiers():
     # Only the negatives are derived — a real holding is left unclassified rather than asserted
     # to be equity, which would be an inference about instruments nobody looked at.
     assert basket.rows[0].asset_class is None
+
+
+def test_ishares_reads_blackrocks_four_letter_september():
+    """
+    Measured 2026-09-08: EMIM's live file said `07/Sept/2026`. Every other month is three
+    letters and `%b` accepts only `Sep`, so the parser refused a good basket on the first
+    September after it shipped and the scheduled refresh kept the fund on its August one.
+    """
+    basket = parse_ishares(ishares_json([
+        ("US67066G1040", "NVIDIA CORP", "8.12", "Equity"),
+        ("US0378331005", "APPLE INC", "6.50", "Equity"),
+    ], as_of="07/Sept/2026"), SXR8)
+    assert basket.as_of_date == date(2026, 9, 7)
+    assert basket.as_of_is_issuer_stated
