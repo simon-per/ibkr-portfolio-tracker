@@ -87,6 +87,8 @@ def spy(monkeypatch):
                         s.make('dividends', {"status": "success"}))
     monkeypatch.setattr(svc, 'sync_benchmark_prices',
                         s.make('benchmarks', {"status": "success"}))
+    monkeypatch.setattr(svc, 'refresh_lookthrough_data',
+                        s.make('lookthrough', {"status": "success"}))
     return svc, s
 
 
@@ -950,3 +952,67 @@ async def test_a_yahoo_security_is_unaffected_by_the_manual_threshold(price_db):
     warnings = await SchedulerService().find_stale_priced_securities(price_db)
     assert len(warnings) == 1
     assert "price feed looks broken" in warnings[0]
+
+
+# --- the look-through keeps itself current from the 18:00 job, and only from there -------
+#
+# Issuer sites plus OpenFIGI/GLEIF: no Yahoo, no IBKR. The step exists because stale
+# baskets warned on every market-data run for two weeks in 2026-08/09 with nobody running
+# the CLI; it runs once a day because the issuers publish once a day, and seven third-party
+# sites are not a thing to poll at every slot.
+
+
+@pytest.mark.asyncio
+async def test_full_sync_refreshes_the_lookthrough_last(spy, monkeypatch):
+    """After market data and dividends, so an issuer hanging on its timeout delays nothing
+    the portfolio's own figures depend on."""
+    svc, s = spy
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.full_sync_job()
+
+    assert 'lookthrough' in s.called
+    assert s.called.index('lookthrough') > s.called.index('market_data')
+    assert s.called.index('lookthrough') > s.called.index('dividends')
+    assert svc.last_sync_result["lookthrough_result"] == {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_lookthrough_upkeep_runs_when_ibkr_refused(spy, monkeypatch):
+    """Same reasoning as the market-data half: a refused Flex statement says nothing about
+    an issuer's website."""
+    svc, s = spy
+    monkeypatch.setattr(svc, 'sync_ibkr_data',
+                        s.make('ibkr', {"status": "error", "message": "Code=1001"}))
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.full_sync_job()
+
+    assert 'lookthrough' in s.called
+    assert svc.last_sync_result["status"] == "error", "the IBKR verdict is still the status"
+
+
+@pytest.mark.asyncio
+async def test_lookthrough_warnings_reach_the_top_of_the_result(spy, monkeypatch):
+    """A basket that failed to refresh is exactly the kind of thing `warnings[]` exists
+    for — and a step's warnings buried in `details` are never rendered."""
+    svc, s = spy
+    monkeypatch.setattr(svc, 'refresh_lookthrough_data', s.make('lookthrough', {
+        "status": "success", "warnings": ["XAIX: basket refresh failed (ConnectError)"],
+    }))
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.full_sync_job()
+
+    assert svc.last_sync_result["warnings"] == ["XAIX: basket refresh failed (ConnectError)"]
+
+
+@pytest.mark.asyncio
+async def test_the_lighter_jobs_leave_the_issuer_sites_alone(spy, monkeypatch):
+    svc, s = spy
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.ibkr_only_sync_job()
+    await svc.market_data_only_sync_job()
+
+    assert 'lookthrough' not in s.called

@@ -250,7 +250,8 @@ class SchedulerService:
 
     Runs 8 times daily (Europe/Berlin):
     - 08:00, 11:00, 13:00, 15:00, 20:00, 22:00: Market data only (7 days)
-    - 18:00: Full sync (IBKR + 730 days market data) — fills historical gaps gradually
+    - 18:00: Full sync (IBKR + 730 days market data + look-through upkeep) — fills
+      historical gaps gradually and refreshes any stale issuer basket
     - 00:00: IBKR + FX only — no Yahoo
 
     **Only one of the two IBKR slots can ever succeed in a day.** IBKR generates this
@@ -834,117 +835,85 @@ class SchedulerService:
 
         Every other decaying dataset here has a detector — prices, IBKR freshness, the
         Flex generation gap, dividend provenance — and the look-through's baskets had
-        none. They are populated by a deliberate CLI run and then decay in place while
-        the numbers stay confidently on screen: nine of the ten feeds republish daily, so
-        a week after a fetch the whole tab describes an older index. The tab's own `†`
-        badge was the only signal, and it requires someone to look.
+        none. Runs from the **market-data** job, like its siblings and for the same
+        reason: those slots succeed while Flex is refusing.
 
-        Runs from the **market-data** job, like its siblings and for the same reason:
-        those slots succeed while Flex is refusing.
+        **The verdict comes from `etf_basket_refresh.stale_basket_verdicts`, the same
+        list the 18:00 refresh fetches from.** This method only formats it. Two
+        definitions of "stale" — one that warns and one that acts — would be this
+        codebase's dominant failure mode, and the version that lived here had already
+        been wrong once about which basket a proxied fund reads. The four rules (held
+        funds only, the proxy source's file and cadence, the per-adapter threshold,
+        nothing unclearable) are documented on the predicate.
 
-        Four rules, each of which would be wrong the other way:
-
-        - **Held funds only.** Mirrors `find_stale_priced_securities` restricting itself
-          to open lots — a basket for a fund nobody holds moves no figure.
-        - **The basket a fund actually reads comes from
-          `LookthroughService._alias_proxied_baskets`, never from a second copy of the
-          proxy rule.** Two implementations of "which basket does this fund use" is this
-          codebase's dominant failure mode; the age reported here has to be the age of
-          the file the numbers came from, which for a proxied fund is the *source's*.
-        - **The threshold is `lookthrough_service.stale_after_days`**, the existing
-          per-adapter table. A single global constant meant two different things once and
-          badged Vanguard permanently for publishing month-end as documented.
-        - **Nothing unclearable warns.** A fund excluded from look-through by design, and
-          one whose only route is a hand-downloaded file, can never be fixed by running
-          anything — and a warning that can never clear is the always-present-Flex-banner
-          pathology, which teaches the reader to skip the banner that also carries a
-          skipped tax lot. A held fund with no basket that *does* have a route warns,
-          because that is what a newly bought fund looks like and one CLI run clears it.
-          **"Has a route" follows the proxy**: VWCE's own adapter is `manual`, but it
-          reads VT's basket and VT is fetchable, so a missing VT is actionable and must
-          not be silently skipped just because the *held* fund has no route of its own.
+        Since the refresh exists, a warning here means one of three things and says
+        which: the basket went stale today and this evening's run will refresh it; the
+        refresh ran and failed, in which case the 18:00 run's own warning names the
+        error; or the fund has no automated route and needs a hand download.
         """
-        from app.cli.fetch_etf_baskets import AUTOMATED_ADAPTERS
-        from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
-        from app.etf_sources import basket_proxy_for, source_for_fund_isin
-        from app.repositories.etf_basket_repository import EtfBasketRepository
-        from app.services.lookthrough_service import (
-            LookthroughService,
-            stale_after_days,
-        )
-
-        as_of = as_of or date.today()
-
-        held = await db.execute(
-            select(distinct(Security.isin))
-            .join(TaxLot, TaxLot.security_id == Security.id)
-            .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
-        )
-        fund_isins = sorted({
-            isin.strip().upper() for (isin,) in held.all()
-            if isin and is_known_etf_isin(isin)
-        })
-        if not fund_isins:
-            return []
-
-        # Load each held fund's own basket plus any it borrows, then let the read path's
-        # own resolver decide which one each fund actually uses.
-        proxy_sources = sorted({
-            src for i in fund_isins if (src := basket_proxy_for(i)) and src != i
-        })
-        repo = EtfBasketRepository(db)
-        baskets = await repo.get_baskets(fund_isins + proxy_sources)
-        LookthroughService._alias_proxied_baskets(fund_isins, baskets, {})
+        from app.services.etf_basket_refresh import stale_basket_verdicts
 
         warnings = []
-        for isin in fund_isins:
-            source = source_for_fund_isin(isin)
-            if source is not None and not source.look_through_eligible:
-                continue  # excluded by design: no run of anything would clear it
-            name = symbol_for_fund_isin(isin) or isin
-            basket = baskets.get(isin)
-
-            if basket is None:
-                # `AUTOMATED_ADAPTERS` is imported from the fetcher CLI rather than
-                # re-listed here, and that direction is deliberate: the set has to name
-                # the fetchers that actually exist, which is a property of that module —
-                # its own comment says so, and a copy here would go stale the first time
-                # an adapter is added. Follow the proxy, so a fund whose basket is
-                # borrowed is judged by whether the *source* can be fetched.
-                route = source.adapter if source else None
-                if route not in AUTOMATED_ADAPTERS:
-                    proxy = basket_proxy_for(isin)
-                    proxy_source = source_for_fund_isin(proxy) if proxy else None
-                    route = proxy_source.adapter if proxy_source else None
-                if route not in AUTOMATED_ADAPTERS:
-                    # Nothing the reader could run fixes this — a hand download, or no
-                    # published file at all. The look-through tab names it in the fund
-                    # table, where it does not train anyone to ignore a banner.
-                    continue
+        for v in await stale_basket_verdicts(db, as_of):
+            if v.missing:
                 warnings.append(
-                    f"{name}: no constituent basket has ever been fetched, so its whole "
-                    f"value is missing from the look-through's company rows. Run "
+                    f"{v.name}: no constituent basket has ever been fetched, so its whole "
+                    f"value is missing from the look-through's company rows. The 18:00 "
+                    f"full sync fetches it automatically; if this persists past a day, run "
                     f"`python -m app.cli.fetch_etf_baskets --all` and the import line it "
                     f"prints, then `python -m app.cli.resolve_identities --constituents`"
                 )
-                continue
-
-            limit = stale_after_days(basket.adapter)
-            age = (as_of - basket.as_of_date).days
-            if age <= limit:
-                continue
-            warnings.append(
-                f"{name}: its basket is dated {basket.as_of_date:%Y-%m-%d} ({age} days "
-                f"old against a {limit}-day expectation for {basket.adapter}), so every "
-                f"company figure it contributes describes an older index. Re-run "
-                f"`python -m app.cli.fetch_etf_baskets --all` plus the import lines, "
-                f"then `python -m app.cli.resolve_identities --constituents` — a "
-                f"re-import clears the CINS/SEDOL resolutions on purpose"
-            )
+            elif v.fetchable:
+                warnings.append(
+                    f"{v.name}: its basket is dated {v.as_of_date:%Y-%m-%d} ({v.age_days} "
+                    f"days old against a {v.limit_days}-day expectation for "
+                    f"{v.basket_adapter}), so every company figure it contributes describes "
+                    f"an older index. The 18:00 full sync refreshes it automatically; if "
+                    f"this persists past a day, re-run "
+                    f"`python -m app.cli.fetch_etf_baskets --all` plus the import lines, "
+                    f"then `python -m app.cli.resolve_identities --constituents` — a "
+                    f"re-import clears the CINS/SEDOL resolutions on purpose"
+                )
+            else:
+                warnings.append(
+                    f"{v.name}: its basket is dated {v.as_of_date:%Y-%m-%d} ({v.age_days} "
+                    f"days old against a {v.limit_days}-day expectation for "
+                    f"{v.basket_adapter}), so every company figure it contributes describes "
+                    f"an older index. It has no automated route, so download a newer file "
+                    f"by hand and import it with `python -m app.cli.import_etf_basket`"
+                )
 
         if warnings:
             logger.warning(f"{len(warnings)} held fund(s) with a missing or stale basket")
         return warnings
+
+    async def refresh_lookthrough_data(self) -> dict:
+        """
+        Step 5 of the 18:00 full sync: keep the look-through's baskets and identities current.
+
+        Issuer sites, OpenFIGI and GLEIF only — no Yahoo, no IBKR — so neither rule at
+        the top of CLAUDE.md applies, and it runs whether or not the Flex half succeeded,
+        for the same reason the market-data half does. Once a day rather than at every
+        market-data slot: the issuers publish once a day, and seven of them is not a
+        thing to poll. The service refuses everything the CLIs refuse and keeps the
+        previous basket on any failure; its failures are this step's warnings, never the
+        job's status. See `app/services/etf_basket_refresh.py`.
+        """
+        from app.services.etf_basket_refresh import refresh_lookthrough_data
+
+        try:
+            async with AsyncSessionLocal() as db:
+                return await refresh_lookthrough_data(db)
+        except Exception as e:
+            logger.error(f"Look-through upkeep failed: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "warnings": [
+                    f"Look-through upkeep failed ({type(e).__name__}: {e}); baskets and "
+                    f"identities are as they were"
+                ],
+            }
 
     async def sync_exchange_rates(self, days_back: int = 30) -> dict:
         """
@@ -1224,6 +1193,16 @@ class SchedulerService:
         div_result = await self.sync_dividends()
         logger.info(f"Dividend Sync Result: {div_result}")
 
+        # Step 5: Look-through upkeep — stale issuer baskets, then pending identities.
+        # Issuer sites and OpenFIGI/GLEIF only, no Yahoo and no IBKR, and not gated on
+        # either. Last, so an issuer hanging on its 60 s timeout delays nothing the
+        # portfolio's own figures depend on. Once a day, here, because the issuers
+        # publish once a day and seven third-party sites are not a thing to poll at
+        # every market-data slot.
+        logger.info("Refreshing look-through baskets and identities...")
+        lookthrough_result = await self.refresh_lookthrough_data()
+        logger.info(f"Look-through Upkeep Result: {lookthrough_result}")
+
         # Track result
         self.last_sync_result = {
             "type": "full_sync",
@@ -1232,13 +1211,16 @@ class SchedulerService:
             "fx_result": fx_result,
             "market_result": market_result,
             "dividend_result": div_result,
+            "lookthrough_result": lookthrough_result,
             "status": ibkr_result.get("status", "error"),
         }
         # A skip is only useful in the history if it says which kind it was; `status`
         # alone reads the same as a pipeline collision.
         if ibkr_result.get("reason"):
             self.last_sync_result["reason"] = ibkr_result["reason"]
-        _collect_warnings(self.last_sync_result, ibkr_result, market_result)
+        _collect_warnings(
+            self.last_sync_result, ibkr_result, market_result, lookthrough_result
+        )
         await self._record_run(self.last_sync_result, started_at)
 
         logger.info("=" * 80)

@@ -11,6 +11,10 @@ VWCE currently borrows VT's basket (`FundSource.basket_proxy_isin`). Importing a
 it here needs nothing un-declared first: the proxy is consulted only when the fund has no
 basket of its own, so a stored basket takes over the moment this writes one.
 
+Since 2026-09-08 the 18:00 `full_sync` job fetches and imports stale baskets on its own, so
+this is the by-hand route: a file an issuer only publishes by email, a first import ahead of
+the evening, or a fund whose scheduled refresh keeps failing.
+
 Touches **no** network at all, so neither rule at the top of CLAUDE.md applies. Re-running is
 safe and idempotent: a basket is replaced wholesale, and an incoming file with the same as-of
 date simply rewrites the same rows.
@@ -49,17 +53,8 @@ from app.repositories.etf_basket_repository import (
     EtfBasketRepository,
 )
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.etf_basket_parsers import (
-    PARSERS,
-    BasketParseError,
-    parse_defiance,
-    parse_dws,
-    parse_first_trust,
-    parse_invesco,
-    parse_ishares,
-    parse_vaneck,
-    parse_vanguard_us,
-)
+from app.services.etf_basket_fetch import parse_bodies
+from app.services.etf_basket_parsers import BasketParseError
 
 logger = logging.getLogger(__name__)
 
@@ -79,37 +74,14 @@ def _fetched_on(paths: List[Path]) -> date:
 
 def parse_file(fund_isin: str, paths: List[Path], adapter: str, symbol: str):
     """
-    Dispatch to the adapter's parser. Pure apart from reading the files.
+    Read the files and hand them to the shared dispatch.
 
-    `symbol` reaches the two HTML adapters because their routes are keyed by ticker in a query
-    string or a path segment, so a redirect can serve another fund's holdings under a 200 —
-    they check it against the page's `<title>`, which is their equivalent of the
-    `ShareClass ISIN` echo `parse_dws` checks on every row.
+    `etf_basket_fetch.parse_bodies` is the same function the 18:00 refresh parses with, so a
+    by-hand import and the scheduled one cannot read one file two ways. The as-of handed to
+    it is the file's own mtime (`_fetched_on`), not today — see that helper.
     """
-    bodies = [p.read_bytes() for p in paths]
-    single = len(bodies) == 1
-
-    if adapter == "vanguard_us":
-        return parse_vanguard_us(bodies, fund_isin)
-    if not single:
-        raise BasketParseError(
-            f"{adapter} responses are a single file; {len(bodies)} were given"
-        )
-    if adapter == "dws":
-        return parse_dws(bodies[0], fund_isin, _fetched_on(paths))
-    if adapter == "blackrock":
-        return parse_ishares(bodies[0], fund_isin)
-    if adapter == "invesco":
-        return parse_invesco(bodies[0], fund_isin)
-    if adapter == "first_trust":
-        return parse_first_trust(bodies[0], fund_isin, symbol)
-    if adapter == "defiance":
-        return parse_defiance(bodies[0], fund_isin, symbol, _fetched_on(paths))
-    if adapter == "vaneck":
-        return parse_vaneck(bodies[0], fund_isin)
-    raise BasketParseError(
-        f"no parser for adapter {adapter!r}. Known: {', '.join(sorted(PARSERS))} — pass "
-        f"--adapter to override what app/etf_sources.py declares"
+    return parse_bodies(
+        fund_isin, [p.read_bytes() for p in paths], adapter, symbol, _fetched_on(paths)
     )
 
 

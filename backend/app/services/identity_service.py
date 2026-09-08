@@ -35,6 +35,7 @@ import logging
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -381,3 +382,33 @@ class IdentityService:
         except (KeyError, TypeError):
             pass
         return (lei or None), (name or None), False
+
+
+async def held_isins(db: AsyncSession, include_funds: bool = False) -> List[str]:
+    """
+    Distinct ISINs of securities with at least one open tax lot.
+
+    Funds are excluded by default: GLEIF returns no record for a fund ISIN (measured on
+    IE00B4L5Y983), a fund is never a row in the company table, and the requests buy
+    nothing. `include_funds` exists because a fund missing from `ETF_ALLOCATIONS` is treated
+    as an ordinary holding, and resolving it then gives it a proper name.
+
+    Shared by `app/cli/resolve_identities.py` and the scheduled pass in
+    `etf_basket_refresh`, so the two cannot disagree about what "held" means.
+    """
+    from app.etf_mappings import is_known_etf_isin
+    from app.models.security import Security
+    from app.models.taxlot import TaxLot
+
+    rows = (
+        await db.execute(
+            select(Security.isin)
+            .join(TaxLot, TaxLot.security_id == Security.id)
+            .where(TaxLot.is_open == True)  # noqa: E712 - SQLAlchemy needs the comparison
+            .distinct()
+        )
+    ).scalars().all()
+    isins = sorted({r.strip().upper() for r in rows if r and r.strip()})
+    if include_funds:
+        return isins
+    return [i for i in isins if not is_known_etf_isin(i)]

@@ -8,6 +8,11 @@ Portal. It is also the only way to test the trap this feature is most exposed to
 iShares holdings URL answers **HTTP 200 with `Content-Type: text/csv` and an HTML body**, so a
 fetcher that parsed inline would have nothing to hand a test.
 
+Since 2026-09-08 the 18:00 `full_sync` job refreshes stale baskets on its own through the same
+fetchers (`app/services/etf_basket_fetch.py` — one implementation, two callers), so this is
+the by-hand route: for a fund whose refresh keeps failing, where the saved body is what makes
+the failure debuggable, and for a first import of a newly declared fund before the evening.
+
 Touches **no** Yahoo and **no** IBKR, so neither rule at the top of CLAUDE.md applies. It does
 reach seven issuer sites, as a guest rather than a customer: a descriptive User-Agent carrying
 `LOOKTHROUGH_CONTACT_EMAIL` when set, one request at a time, a pause between them, and no
@@ -34,69 +39,23 @@ from typing import Dict, List, Tuple
 
 import httpx
 
-from app.etf_sources import FUND_SOURCES, FundSource, user_agent
-from app.services.security_identifiers import cusip_from_isin
+from app.etf_sources import FUND_SOURCES, FundSource
+from app.services.etf_basket_fetch import (  # noqa: F401 — re-exported for callers and tests
+    AUTOMATED_ADAPTERS,
+    BETWEEN_REQUESTS_S,
+    FetchError,
+    fetch_blackrock,
+    fetch_bodies,
+    new_client,
+)
 
 logger = logging.getLogger(__name__)
 
-# One at a time, with a pause. Nothing here is rate-limited in any documented way; this is
-# simply not being a nuisance to somebody else's web server.
-BETWEEN_REQUESTS_S = 2.0
-REQUEST_TIMEOUT_S = 60.0
-
-DWS_URL = "https://etf.dws.com/etfdata/export/GBR/ENG/csv/product/constituent/{isin}/"
-
-BLACKROCK_URL = (
-    "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/"
-    "get-product-data"
-)
-BLACKROCK_PARAMS = {
-    "appType": "PRODUCT_PAGE",
-    "appSubType": "ISHARES",
-    "targetSite": "ishares-uk",
-    "locale": "en_GB",
-    "userType": "individual",
-    "component": "holdings",
+# File suffix per adapter, so the import command can be read off the file name.
+_EXTENSIONS = {
+    "dws": "csv", "blackrock": "json", "vanguard_us": "json", "invesco": "json",
+    "first_trust": "html", "defiance": "html", "vaneck": "xlsx",
 }
-
-VANGUARD_URL = (
-    "https://investor.vanguard.com/investment-products/etfs/profile/api/{ticker}/"
-    "portfolio-holding/stock"
-)
-# The API caps a page at 500 however large a `count` is asked for, so VT's ~10,000 holdings
-# take ~21 requests. The ceiling below is a runaway guard, not a limit on any real fund.
-VANGUARD_PAGE = 500
-VANGUARD_MAX_PAGES = 60
-
-# Keyed by the fund's own CUSIP, which is the ISIN with its country prefix and check digit
-# removed — so nothing has to be discovered or kept in step, unlike BlackRock's portfolio id.
-INVESCO_URL = (
-    "https://dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund"
-)
-INVESCO_PARAMS = {"idType": "cusip", "productType": "ETF"}
-
-FIRST_TRUST_URL = "https://www.ftportfolios.com/retail/etf/etfholdings.aspx"
-
-# `-full-holdings`, NOT the plain product page: that one renders its table client-side, so a
-# fetch of it returns a document with no holdings in it at all and the parser rightly refuses.
-DEFIANCE_URL = "https://www.defianceetfs.com/{slug}-full-holdings/"
-
-# The locale is pinned rather than left to geo-resolution, so the same file comes back from
-# any machine. Two GETs, not one: the first is only there to be handed the consent cookies
-# that the second needs, without which this URL loops its redirects indefinitely.
-VANECK_URL = "https://www.vaneck.com/nl/en/investments/{slug}/downloads/holdings/"
-VANECK_CONSENT_URL = "https://www.vaneck.com/nl/en/investments/{slug}/"
-
-
-# Every adapter `--all` will attempt. Derived from the fetchers below rather than from
-# `etf_sources.ADAPTERS`, which also names `manual` — a real answer, not a route.
-AUTOMATED_ADAPTERS = frozenset({
-    "dws", "blackrock", "vanguard_us", "invesco", "first_trust", "defiance", "vaneck",
-})
-
-
-class FetchError(Exception):
-    """The download failed — reported, and no file written for that fund."""
 
 
 def _resolve_targets(names: List[str], fetch_all: bool) -> List[Tuple[str, FundSource]]:
@@ -128,152 +87,33 @@ def _resolve_targets(names: List[str], fetch_all: bool) -> List[Tuple[str, FundS
     return out
 
 
-async def _fetch_dws(client: httpx.AsyncClient, isin: str, out_dir: Path) -> List[Path]:
-    response = await client.get(DWS_URL.format(isin=isin))
-    response.raise_for_status()
-    path = out_dir / f"{isin}.dws.csv"
-    path.write_bytes(response.content)
-    return [path]
+def _write_bodies(isin: str, adapter: str, bodies: List[bytes], out_dir: Path) -> List[Path]:
+    """
+    One file per body, numbered when there is more than one.
+
+    Paginated pages are zero-padded so `import_etf_basket` can be handed them in order by a
+    shell glob; the parser checks the assembled row count against the `size` the API declares,
+    because a missing page is exactly the shape that makes a fund look like it holds only its
+    largest names while the weights still sum plausibly.
+    """
+    ext = _EXTENSIONS.get(adapter, "bin")
+    paths: List[Path] = []
+    if len(bodies) == 1:
+        path = out_dir / f"{isin}.{adapter}.{ext}"
+        path.write_bytes(bodies[0])
+        return [path]
+    for page, body in enumerate(bodies, start=1):
+        path = out_dir / f"{isin}.{adapter}.{page:02d}.{ext}"
+        path.write_bytes(body)
+        paths.append(path)
+    return paths
 
 
 async def _fetch_blackrock(
     client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
 ) -> List[Path]:
-    portfolio_id = source.params.get("portfolio_id")
-    if not portfolio_id:
-        raise FetchError(f"{source.symbol}: no portfolio_id declared in app/etf_sources.py")
-    # One host serves every iShares domicile, but the **locale** selects which catalogue it
-    # looks the portfolio up in, and a fund absent from that catalogue is a flat
-    # `400 BAD_REQUEST_INVALID_PARAM_VALUES` rather than an empty basket. Measured against
-    # IQQ (a US-listed fund) on 2026-08-24: `en_GB` 400s, `en_US` returns all 106 rows from
-    # the same URL. So the default stays `en_GB` for the UCITS lines and a fund overrides it
-    # rather than this gaining a second endpoint — the payload shape is identical, which is
-    # why `parse_ishares` needs no branch.
-    params = {**BLACKROCK_PARAMS, "portfolioId": portfolio_id}
-    locale = source.params.get("locale")
-    if locale:
-        params["locale"] = locale
-    response = await client.get(BLACKROCK_URL, params=params)
-    response.raise_for_status()
-    path = out_dir / f"{isin}.blackrock.json"
-    path.write_bytes(response.content)
-    return [path]
-
-
-async def _fetch_vanguard(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    """
-    Page until the API stops offering a `next`, writing one file per page.
-
-    The page files are numbered so `import_etf_basket` can be handed them in order: the parser
-    checks the assembled row count against the `size` the API declares, because a missing page
-    is exactly the shape that makes a fund look like it holds only its largest names while the
-    weights still sum plausibly.
-    """
-    ticker = source.params.get("ticker")
-    if not ticker:
-        raise FetchError(f"{source.symbol}: no ticker declared in app/etf_sources.py")
-
-    paths: List[Path] = []
-    start = 1
-    for page in range(1, VANGUARD_MAX_PAGES + 1):
-        if page > 1:
-            await asyncio.sleep(BETWEEN_REQUESTS_S)
-        response = await client.get(
-            VANGUARD_URL.format(ticker=ticker),
-            params={"start": start, "count": VANGUARD_PAGE},
-        )
-        response.raise_for_status()
-        path = out_dir / f"{isin}.vanguard_us.{page:02d}.json"
-        path.write_bytes(response.content)
-        paths.append(path)
-
-        try:
-            payload = response.json()
-        except ValueError:
-            # Not JSON: let the parser refuse it with its own message rather than guessing
-            # here. The bytes are on disk, which is the point of this command.
-            break
-        if not (payload.get("next") or {}).get("href"):
-            break
-        start += VANGUARD_PAGE
-    else:
-        raise FetchError(
-            f"{source.symbol}: still paginating after {VANGUARD_MAX_PAGES} pages — refusing "
-            f"to keep going"
-        )
-    return paths
-
-
-async def _fetch_invesco(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    cusip = cusip_from_isin(isin)
-    if not cusip:
-        raise FetchError(
-            f"{source.symbol}: {isin} is not a US ISIN, so no CUSIP can be taken from it — "
-            f"this endpoint has no other key"
-        )
-    response = await client.get(
-        INVESCO_URL.format(cusip=cusip), params=INVESCO_PARAMS,
-        headers={"Accept": "application/json"},
-    )
-    response.raise_for_status()
-    path = out_dir / f"{isin}.invesco.json"
-    path.write_bytes(response.content)
-    return [path]
-
-
-async def _fetch_first_trust(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    response = await client.get(FIRST_TRUST_URL, params={"Ticker": source.symbol})
-    response.raise_for_status()
-    path = out_dir / f"{isin}.first_trust.html"
-    path.write_bytes(response.content)
-    return [path]
-
-
-async def _fetch_defiance(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    slug = source.params.get("slug") or source.symbol.lower()
-    response = await client.get(DEFIANCE_URL.format(slug=slug))
-    response.raise_for_status()
-    path = out_dir / f"{isin}.defiance.html"
-    path.write_bytes(response.content)
-    return [path]
-
-
-async def _fetch_vaneck(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    """
-    Two GETs: the product page to be given the geo/consent cookies, then the download.
-
-    Without the first, the download URL bounces between locale and consent redirects until
-    `follow_redirects` gives up — the failure looks like a network fault rather than a missing
-    cookie, which is why it is worth a comment. `httpx.AsyncClient` keeps the jar itself.
-    """
-    slug = source.params.get("slug")
-    if not slug:
-        raise FetchError(f"{source.symbol}: no slug declared in app/etf_sources.py")
-
-    await client.get(VANECK_CONSENT_URL.format(slug=slug))
-    await asyncio.sleep(BETWEEN_REQUESTS_S)
-    response = await client.get(VANECK_URL.format(slug=slug))
-    response.raise_for_status()
-    # Checked here as well as in the parser, so a consent page is named at the point it
-    # arrived rather than as an obscure zip error two commands later.
-    if not response.content.startswith(b"PK\x03\x04"):
-        raise FetchError(
-            f"{source.symbol}: the download is not an XLSX (it starts "
-            f"{response.content[:16]!r}) — the consent cookies were probably not accepted"
-        )
-    path = out_dir / f"{isin}.vaneck.xlsx"
-    path.write_bytes(response.content)
-    return [path]
+    """File-writing wrapper around the shared fetcher, kept for the registry test's probe."""
+    return _write_bodies(isin, "blackrock", [await fetch_blackrock(client, isin, source)], out_dir)
 
 
 async def fetch_baskets(
@@ -289,37 +129,22 @@ async def fetch_baskets(
         return 0
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    headers = {"User-Agent": user_agent(), "Accept": "*/*"}
     written: Dict[str, List[Path]] = {}
     failures: Dict[str, str] = {}
 
-    async with httpx.AsyncClient(
-        headers=headers, timeout=REQUEST_TIMEOUT_S, follow_redirects=True
-    ) as client:
+    async with new_client() as client:
         for index, (isin, source) in enumerate(targets):
             if index:
                 await asyncio.sleep(BETWEEN_REQUESTS_S)
+            if source.adapter not in AUTOMATED_ADAPTERS:
+                print(
+                    f"{source.symbol}: adapter {source.adapter!r} has no fetcher — "
+                    f"download it by hand and use import_etf_basket"
+                )
+                continue
             try:
-                if source.adapter == "dws":
-                    paths = await _fetch_dws(client, isin, out_dir)
-                elif source.adapter == "blackrock":
-                    paths = await _fetch_blackrock(client, isin, source, out_dir)
-                elif source.adapter == "vanguard_us":
-                    paths = await _fetch_vanguard(client, isin, source, out_dir)
-                elif source.adapter == "invesco":
-                    paths = await _fetch_invesco(client, isin, source, out_dir)
-                elif source.adapter == "first_trust":
-                    paths = await _fetch_first_trust(client, isin, source, out_dir)
-                elif source.adapter == "defiance":
-                    paths = await _fetch_defiance(client, isin, source, out_dir)
-                elif source.adapter == "vaneck":
-                    paths = await _fetch_vaneck(client, isin, source, out_dir)
-                else:
-                    print(
-                        f"{source.symbol}: adapter {source.adapter!r} has no fetcher — "
-                        f"download it by hand and use import_etf_basket"
-                    )
-                    continue
+                bodies = await fetch_bodies(client, isin, source)
+                paths = _write_bodies(isin, source.adapter, list(bodies), out_dir)
             except Exception as e:
                 failures[source.symbol] = str(e)
                 print(f"{source.symbol}: FAILED - {e}", file=sys.stderr)

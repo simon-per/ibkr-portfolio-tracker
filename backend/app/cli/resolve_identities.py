@@ -46,47 +46,19 @@ import argparse
 import asyncio
 import logging
 import sys
-from typing import List, Optional
-
-from sqlalchemy import select
+from typing import Optional
 
 from app.clock import utcnow
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.etf_mappings import is_known_etf_isin
-from app.models.security import Security
-from app.models.taxlot import TaxLot
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.identity_service import GLEIF_MIN_INTERVAL_S, IdentityService
+from app.services.identity_service import GLEIF_MIN_INTERVAL_S, IdentityService, held_isins
 from app.services.lookthrough_service import LookthroughService
 
 logger = logging.getLogger(__name__)
 
 SYNC_TYPE = "manual_identity_resolve"
-
-
-async def _held_isins(db, include_funds: bool) -> List[str]:
-    """
-    Distinct ISINs of securities with at least one open tax lot.
-
-    Funds are excluded by default: GLEIF returns no record for a fund ISIN (measured on
-    IE00B4L5Y983), a fund is never a row in the company table, and the twelve requests buy
-    nothing. `--include-funds` exists because a fund missing from `ETF_ALLOCATIONS` is
-    treated as an ordinary holding, and resolving it then gives it a proper name.
-    """
-    rows = (
-        await db.execute(
-            select(Security.isin)
-            .join(TaxLot, TaxLot.security_id == Security.id)
-            .where(TaxLot.is_open == True)  # noqa: E712 - SQLAlchemy needs the comparison
-            .distinct()
-        )
-    ).scalars().all()
-    isins = sorted({r.strip().upper() for r in rows if r and r.strip()})
-    if include_funds:
-        return isins
-    return [i for i in isins if not is_known_etf_isin(i)]
 
 
 async def resolve_identities(
@@ -100,7 +72,7 @@ async def resolve_identities(
     async with AsyncSessionLocal() as db:
         try:
             service = IdentityService(db)
-            targets = await _held_isins(db, include_funds)
+            targets = await held_isins(db, include_funds)
             direct_count = len(targets)
             constituent_count = 0
             if constituents:
