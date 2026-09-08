@@ -7,8 +7,9 @@ of the same name carried no seed at all, so one name meant two numbers on one ta
 columns did not sum. Both are **Money In** now, read from the contributions endpoint's all-time
 figure; `Portfolio Value = Money In + Investment Gains` on every row and point; the seed is
 Total Value where cash is tracked; and a baseline that fails to load is refused rather than
-drawn as zero. The tab had no tests and has 22. Details in *Shipped 2026-09-08*. **Not yet seen
-in a browser** — Recharts draws nothing in jsdom, so the legend and bands want one look on prod.
+drawn as zero. The tab had no tests and has 22. Details in *Shipped 2026-09-08*. **Verified live
+on `1cc84b5`** at 1280 and 390: the year-0 tooltip reads the money-in and Total Value figures the
+API serves, the table rows sum, and the bands run the full horizon once the draw animation settles.
 
 Same evening: **the Look-through tab's warning block is collapsed and last on the page.** Ten
 near-identical "basket is N days old" sentences sat in an amber block directly under the KPI
@@ -640,9 +641,14 @@ value whichever start is selected; it used to read "Current (CHF 0)" with 0 sele
 **What to check on prod after the deploy.** Open the Forecast tab: the legend reads *Money In* /
 *Portfolio Value*; the grey band's first point equals the ContributionsStrip's all-time money-in
 figure on the Performance tab; the Current button equals the hero card's Total Value; each table
-row sums. Recharts renders nothing in jsdom, so the legend and the bands were **not seen in a
-browser before the deploy** — a throwaway Playwright run against the live URL (the 09-06 recipe
-under *Shipped 2026-09-06 (late)*) is the check, at 1280 and 390.
+row sums. **DONE on `1cc84b5`, 2026-09-08 19:03 Berlin**, by a throwaway Playwright run against
+the live URL (the 09-06 recipe under *Shipped 2026-09-06 (late)*) at 1280 and 390: legend *Money
+In* / *Portfolio Value*, the year-0 tooltip reading CHF 55,588 against CHF 73,305 — the API's
+all-time money in and Total Value to the franc — the 1 Year row summing (91,839 = 24,251 +
+67,588), Current button equal to the hero card, zero horizontal overflow. One trap for the next
+such check: a screenshot taken straight after load catches the Recharts draw animation halfway,
+and the bands appear to stop at year 5 of 10. Wait ~3 s before judging their extent, and hover
+`.recharts-wrapper` rather than `.recharts-surface`, which also matches the legend's icon SVGs.
 
 **Not done, on purpose.** The nominal/12 monthly rate and end-of-period annuity are unchanged.
 No `unpriced_holdings` notice on the seed — the Performance tab's cards already carry one. The
