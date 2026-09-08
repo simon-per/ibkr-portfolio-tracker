@@ -17,9 +17,8 @@ What the tests below pin, and why each would be a wrong number the other way:
 - Flow-free daily ratios are identical to the absolute series (beta is unchanged by the
   anchor), and a contribution day is *named* so beta can skip it.
 - Over the whole history the two anchors agree to the cent.
-- Window mode never touches `benchmark_timeline_cache`, which is keyed on (benchmark, date)
-  and holds the absolute series — a per-window series written there would poison every
-  other range.
+- Neither anchor is cached since 2026-09-08: `benchmark_timeline_cache` held the absolute
+  series, nothing read it once the chart moved to window mode, and it was retired.
 """
 import asyncio
 from datetime import date
@@ -28,14 +27,12 @@ from typing import Dict, Optional
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 import app.models  # noqa: F401
 from app.models.benchmark_price import BenchmarkPrice
-from app.models.benchmark_timeline_cache import BenchmarkTimelineCache
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.exchange_rate import ExchangeRate
 from app.models.market_price import MarketPrice
@@ -175,12 +172,6 @@ async def _series(session, start, end, anchor) -> Dict[str, Dict]:
 async def _chart(session, start, end) -> Dict[str, Dict]:
     pts = await PortfolioService(session).get_portfolio_value_over_time(start, end)
     return {p["date"]: p for p in pts}
-
-
-async def _cache_rows(session) -> int:
-    return (await session.execute(
-        select(func.count()).select_from(BenchmarkTimelineCache)
-    )).scalar()
 
 
 # ── The seed is the chart's own first point ─────────────────────────────────────────
@@ -366,27 +357,6 @@ async def test_over_the_whole_history_the_two_anchors_agree_to_the_cent():
             assert window[d]["cost_basis_eur"] == pytest.approx(
                 inception[d]["cost_basis_eur"], abs=0.01), d
         assert window["2026-03-20"]["benchmark_value_eur"] == pytest.approx(3000)
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_window_mode_never_touches_the_timeline_cache():
-    engine, session = await _session()
-    try:
-        await _standard_book(session)
-        assert await _cache_rows(session) == 0
-
-        await _series(session, *WINDOW, anchor="window")
-        assert await _cache_rows(session) == 0
-
-        # The absolute series still caches, exactly as before.
-        await _series(session, *WINDOW, anchor="inception")
-        assert await _cache_rows(session) > 0
-
-        # ...and a cached absolute series does not leak into a window request.
-        window = await _series(session, *WINDOW, anchor="window")
-        assert window["2026-03-05"]["benchmark_value_eur"] == pytest.approx(2700)
     finally:
         await engine.dispose()
 

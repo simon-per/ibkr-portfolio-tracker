@@ -85,13 +85,6 @@ async def ingest(path: Path, account: str, dry_run: bool, force: bool) -> int:
             result = await ingest_finpension_report(
                 db, report, CurrencyService(db), account=account, force=force
             )
-            # The money-in basis moved, and `benchmark_timeline_cache` is only sound
-            # given a fixed basis: the comparison line buys the *same* contribution
-            # legs the chart draws, so a cached point computed before this account
-            # existed is now measuring a different portfolio. `ingest_flex_statement`
-            # clears it on every Flex sync for exactly this reason.
-            from app.services.benchmark_service import BenchmarkService
-            await BenchmarkService(db).clear_cache()
             await db.commit()
         except Exception as e:
             await db.rollback()

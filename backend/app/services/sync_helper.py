@@ -160,10 +160,6 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     if flex_data.get('to_date'):
         await app_settings.set_last_sync_to_date(flex_data['to_date'])
 
-    # Tax lots moved, so any cached benchmark timeline is stale.
-    cleared = await BenchmarkService(db).clear_cache()
-    logger.info(f"Cleared {cleared} benchmark timeline cache entries (tax lots changed)")
-
     warnings: List[str] = []
     if recon["skipped_currencies"]:
         warnings.append(

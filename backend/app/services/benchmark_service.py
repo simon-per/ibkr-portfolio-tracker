@@ -10,7 +10,7 @@ import time
 from typing import List, Dict, Optional, Set, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy import select, and_, delete
+from sqlalchemy import select, and_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,6 @@ from app.models.taxlot import TaxLot
 from app.models.security import Security
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
-from app.models.benchmark_timeline_cache import BenchmarkTimelineCache
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 
@@ -363,73 +362,6 @@ class BenchmarkService:
                 return val
         return None
 
-    # ── Cache management ───────────────────────────────────────────────
-
-    async def _read_cache(
-        self, benchmark_key: str, start_date: date, end_date: date
-    ) -> Dict[date, Dict]:
-        """Read cached benchmark timeline data for the given range."""
-        result = await self.db.execute(
-            select(BenchmarkTimelineCache)
-            .where(
-                and_(
-                    BenchmarkTimelineCache.benchmark_key == benchmark_key,
-                    BenchmarkTimelineCache.date >= start_date,
-                    BenchmarkTimelineCache.date <= end_date,
-                )
-            )
-        )
-        cached = {}
-        for row in result.scalars().all():
-            cached[row.date] = {
-                "date": row.date.isoformat(),
-                "benchmark_value_eur": float(row.benchmark_value_eur),
-                "cost_basis_eur": float(row.cost_basis_eur),
-                "gain_loss_eur": float(row.gain_loss_eur),
-                "gain_loss_percent": float(row.gain_loss_percent),
-            }
-        return cached
-
-    async def _write_cache(
-        self, benchmark_key: str, points: List[Dict]
-    ) -> None:
-        """Write computed benchmark timeline points to cache."""
-        for point in points:
-            point_date = date.fromisoformat(point["date"])
-            self.db.add(BenchmarkTimelineCache(
-                benchmark_key=benchmark_key,
-                date=point_date,
-                benchmark_value_eur=Decimal(str(point["benchmark_value_eur"])),
-                cost_basis_eur=Decimal(str(point["cost_basis_eur"])),
-                gain_loss_eur=Decimal(str(point["gain_loss_eur"])),
-                gain_loss_percent=Decimal(str(point["gain_loss_percent"])),
-            ))
-        await self.db.flush()
-
-    async def clear_cache(self, benchmark_key: Optional[str] = None) -> int:
-        """Clear cached benchmark timeline data. If benchmark_key is None, clear all."""
-        if benchmark_key:
-            result = await self.db.execute(
-                delete(BenchmarkTimelineCache)
-                .where(BenchmarkTimelineCache.benchmark_key == benchmark_key)
-            )
-        else:
-            result = await self.db.execute(
-                delete(BenchmarkTimelineCache)
-            )
-        await self.db.flush()
-        return result.rowcount
-
-    async def clear_cache_recent_days(self, days: int = 7) -> int:
-        """Clear cache entries for the last N days (prices may have been updated)."""
-        cutoff = date.today() - timedelta(days=days)
-        result = await self.db.execute(
-            delete(BenchmarkTimelineCache)
-            .where(BenchmarkTimelineCache.date >= cutoff)
-        )
-        await self.db.flush()
-        return result.rowcount
-
     async def _apply_base_currency(
         self, points: List[Dict], base_fx=None
     ) -> List[Dict]:
@@ -557,7 +489,7 @@ class BenchmarkService:
 
         Two anchors, two meanings — chosen with ``anchor``:
 
-        - ``"inception"`` (default; the cached absolute series): *what if I had put the
+        - ``"inception"`` (default; the absolute series): *what if I had put the
           same money into the index since the account began*. Every `money_in` leg from
           the first contribution buys hypothetical shares, so on a 3M chart the first
           point already carries two years of relative performance and the two lines
@@ -573,21 +505,21 @@ class BenchmarkService:
 
         Window mode is a **seeded walk, never a scale or a shift** of the absolute
         series: scaling would scale the in-window deposits too, and the portfolio would
-        then appear to outperform by exactly what was paid in. It **bypasses the cache**
-        — `benchmark_timeline_cache` is keyed on (benchmark, date) and holds the absolute
-        series, so a per-window series written there would poison every other range.
-        Both modes drive one walk (`_walk`) over one set of share events
-        (`_share_events_for_legs`), so they cannot drift.
+        then appear to outperform by exactly what was paid in. Both modes drive one walk
+        (`_walk`) over one set of share events (`_share_events_for_legs`), so they
+        cannot drift.
 
         The seed's provenance rides on `self.last_anchor` (a latch, like `rate_limited`):
         the day used, the portfolio value seeded from, and how many holdings that value
         could not price — an understated seed understates the whole line, and the chart
         has to say so rather than serve it as a figure.
 
-        Inception mode uses a persistent cache: historical values never change, so we
-        compute once and only recompute missing/recent days. **A change to what this
-        function computes therefore requires clearing that cache** — see `clear_cache`,
-        and the note in `_share_events_for_legs` about why the basis changed.
+        Neither mode is cached. `benchmark_timeline_cache` held the inception series
+        until 2026-09-08 and was sound only given a fixed contribution basis, so three
+        call sites cleared it — and once the chart moved to `anchor=window` nothing read
+        it at all. A cache nobody reads is a cache whose staleness nobody notices; the
+        walk it saved is O(days) over preloaded prices, and the provider fetches, which
+        were always the expensive part, never went through it.
 
         For each contribution (the era-spliced `money_in` legs — lot cost basis before
         `coverage_from`, real deposits after):
@@ -613,29 +545,6 @@ class BenchmarkService:
         ticker = bench["ticker"]
         currency = bench["currency"]
         is_eur_benchmark = currency == "EUR"
-
-        # ── Step 0: Check cache ──────────────────────────────────────
-        cached_data = await self._read_cache(benchmark_key, start_date, end_date)
-
-        # Build the set of expected business days in [start_date, end_date]
-        expected_dates = set()
-        d = start_date
-        while d <= end_date:
-            if d.weekday() < 5:
-                expected_dates.add(d)
-            d += timedelta(days=1)
-
-        missing_dates = expected_dates - set(cached_data.keys())
-
-        if not missing_dates:
-            # Full cache hit — return cached data sorted by date
-            logger.info(f"Benchmark {benchmark_key}: full cache hit ({len(cached_data)} points)")
-            return await self._apply_base_currency(sorted(cached_data.values(), key=lambda x: x["date"]))
-
-        logger.info(
-            f"Benchmark {benchmark_key}: {len(cached_data)} cached, "
-            f"{len(missing_dates)} to compute"
-        )
 
         # ── Step 1: Load ALL tax lots (open + closed) for historical accuracy
         result = await self.db.execute(
@@ -695,35 +604,17 @@ class BenchmarkService:
         if not share_events:
             return []
 
-        # ── Step 6: Walk only MISSING business days ──────────────────
-        # Cumulative state needs the whole history, so the walk starts at start_date
-        # and folds every earlier leg into its opening state; only the missing dates
-        # are recorded. Flows are deliberately not reported in this mode: the cached
-        # rows carry no such column, and a series that reported them on its freshly
-        # computed points only would disagree with itself.
-        new_points = self._walk(
+        # ── Step 6: Walk every business day in the range ─────────────
+        # Cumulative state needs the whole history, so the walk starts at start_date and
+        # folds every earlier leg into its opening state. Flows are deliberately not
+        # reported in this mode: window mode names contribution days so beta can skip
+        # them, and this series never carried the column, so a reader keying on its
+        # presence can still tell the two apart.
+        points = self._walk(
             start_date, end_date, share_events, cost_events,
-            bench_prices, fx_rates, is_eur_benchmark, emit_dates=missing_dates,
+            bench_prices, fx_rates, is_eur_benchmark,
         )
-
-        # ── Step 7: Store new points in cache ────────────────────────
-        if new_points:
-            try:
-                await self._write_cache(benchmark_key, new_points)
-                logger.info(f"Cached {len(new_points)} new benchmark timeline points for {benchmark_key}")
-            except Exception as e:
-                logger.warning(f"Failed to write benchmark cache: {e}")
-                try:
-                    await self.db.rollback()
-                except Exception:
-                    pass
-
-        # ── Step 8: Merge cached + new and return ────────────────────
-        # Add new points to cached_data dict
-        for point in new_points:
-            cached_data[date.fromisoformat(point["date"])] = point
-
-        return await self._apply_base_currency(sorted(cached_data.values(), key=lambda x: x["date"]))
+        return await self._apply_base_currency(points)
 
     async def _window_anchored_series(
         self, start_date: date, end_date: date, bench: Dict
@@ -914,9 +805,9 @@ class BenchmarkService:
         Value the hypothetical on each business day in [start, end].
 
         One walk for both anchors. Inception mode starts from nothing and lets every leg
-        on or before a day fold in — `emit_dates` restricts which days are *recorded*,
-        so a cache miss recomputes only its holes while the running state still covers
-        the whole history. Window mode starts from `seed_shares` / `seed_cost` (the
+        on or before a day fold in — `emit_dates` restricts which days are *recorded*
+        while the running state still covers the whole history. Window mode starts from
+        `seed_shares` / `seed_cost` (the
         portfolio's value on the anchor day, bought into the index) and is handed only
         the legs after it.
 

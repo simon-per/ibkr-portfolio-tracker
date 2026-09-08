@@ -1275,16 +1275,6 @@ class SchedulerService:
         bench_result = await self.sync_benchmark_prices()
         logger.info(f"Benchmark Price Sync Result: {bench_result}")
 
-        # Invalidate recent benchmark timeline cache (prices updated for last 7 days)
-        async with AsyncSessionLocal() as db:
-            try:
-                bench_service = BenchmarkService(db)
-                cleared = await bench_service.clear_cache_recent_days(days=7)
-                await db.commit()
-                logger.info(f"Cleared {cleared} recent benchmark timeline cache entries")
-            except Exception as e:
-                logger.error(f"Failed to clear benchmark timeline cache: {e}")
-
         # Track result
         self.last_sync_result = {
             "type": "market_data_only",

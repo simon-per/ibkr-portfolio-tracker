@@ -32,7 +32,6 @@ from app.database import Base
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
 from app.models.benchmark_price import BenchmarkPrice
-from app.models.benchmark_timeline_cache import BenchmarkTimelineCache
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.exchange_rate import ExchangeRate
 from app.models.security import Security
@@ -53,8 +52,7 @@ async def _session():
         connect_args={"check_same_thread": False},
     )
     tables = [BenchmarkPrice.__table__, ExchangeRate.__table__, TaxLot.__table__,
-              Security.__table__, AppSetting.__table__, CashFlow.__table__,
-              BenchmarkTimelineCache.__table__]
+              Security.__table__, AppSetting.__table__, CashFlow.__table__]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     session = AsyncSession(engine, expire_on_commit=False)

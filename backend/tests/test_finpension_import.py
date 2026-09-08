@@ -449,10 +449,6 @@ async def test_a_dry_run_writes_nothing_and_records_no_sync_run(db, tmp_path):
 
 @pytest.mark.asyncio
 async def test_the_cli_records_a_sync_run_on_success(db, tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "app.services.benchmark_service.BenchmarkService.clear_cache",
-        lambda self: _noop(),
-    )
     path = tmp_path / "report.csv"
     path.write_text(REAL_SHAPE, encoding="utf-8")
 
