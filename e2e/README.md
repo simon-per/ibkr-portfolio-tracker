@@ -26,8 +26,8 @@ occupied it silently moves to 5174, and `frontend/.env` points `VITE_API_URL` at
 so only origins listed in `CORS_ORIGINS` work — any other port fails every request with a CORS error
 that looks exactly like a backend outage.
 
-Set `SCHEDULER_ENABLED=false` in `backend/.env` for any local run, or starting uvicorn arms the five
-daily jobs against the live Flex token and Yahoo.
+Set `SCHEDULER_ENABLED=false` in `backend/.env` for any local run, or starting uvicorn arms the eight
+daily jobs against the live Flex token, Yahoo and the issuer sites.
 
 | Script | Needs |
 |---|---|

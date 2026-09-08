@@ -1,6 +1,14 @@
 # Working state
 
-**Last updated: 2026-09-08.** Latest: **the Forecast tab's Money In starts at what was paid
+**Last updated: 2026-09-08 (night).** Latest: **the look-through keeps itself current, the
+benchmark cache is gone, a deploy no longer takes the site down for the build, and the
+backend's January-2024 dependency pins are current.** An audit found seven stale-basket
+warnings on every market-data run for two weeks, `starlette 0.35` with 14 advisories behind a
+public `/api/`, `deploy.sh` running `down` before `build --no-cache`, and a
+`benchmark_timeline_cache` nothing read. All four shipped together; details in *Shipped
+2026-09-08 (late)*, and what to watch after the deploy is in *Watch after the next deploy*.
+
+Earlier the same day: **the Forecast tab's Money In starts at what was paid
 in, not at what the book is worth.** The grey "Total Contributions" band was seeded with the
 holdings' market value — every gain ever made, presented as contributed — while the table column
 of the same name carried no seed at all, so one name meant two numbers on one tab and the
@@ -295,14 +303,18 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 
   Whichever is chosen, do not re-introduce a hardcoded threshold: `flex_window_days()` reads it.
 
-- **The Look-through CLI runs are DONE as of 2026-08-17 and will need redoing as baskets age.**
-  Ran on production that evening: 10 baskets fetched (0 failed), 9 imported, identity resolution
-  completed. Coverage 95.16%, `unresolved_value_eur` 516 CHF. Nothing is scheduled, so this is a
-  recurring chore, not a one-off — the six daily feeds badge `†` after 7 days and Vanguard after 75
-  (`ADAPTER_STALE_DAYS`). `find_stale_etf_baskets()` exists as of 2026-08-17 (night) and fired for
-  real on 2026-08-24, naming GRID and SOXQ at 10 days against their 7-day expectation — so the sync
-  warnings are the signal now, not just the badge in the fund table. Both were refreshed that
-  evening. None of it touches Yahoo or IBKR, so it is safe at any hour:
+- **Add the HSTS header on the host nginx.** Found 2026-09-08: production sends CSP, nosniff,
+  X-Frame-Options and Referrer-Policy but no `Strict-Transport-Security`. TLS terminates on the
+  VPS's own nginx (`/etc/nginx/sites-*`), which is not in the repo, so this is one `add_header`
+  line there — start with a short `max-age` and raise it, since the header is sticky in browsers.
+
+- **The look-through's baskets refresh themselves since 2026-09-08, so this stopped being a
+  chore.** The 18:00 `full_sync` fetches any basket older than its issuer's cadence through the
+  same fetchers the CLI uses, keeps the previous one on any failure, and runs the CINS/SEDOL
+  identity pass after a replacement plus a bounded ISIN pass every evening. What a human still
+  does: hand-import a file an issuer only publishes by email (VWCE, if its real basket is ever
+  wanted instead of VT's), and read the 18:00 run's `lookthrough_result` when a stale warning
+  survives past a day. The by-hand commands are unchanged and still safe at any hour:
 
   ```bash
   docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
@@ -617,6 +629,39 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
 
+## Shipped 2026-09-08 (late) — the audit batch: self-refreshing baskets, no benchmark cache, build-before-down, current deps
+
+Asked as "look for issues and let's brainstorm", then "push it then and let's call it a day for
+the benchmark, and for the look-through, can we somehow get the data automatically per API call or
+similar + cache?". Four changes, one push.
+
+- **The look-through refreshes its own baskets** (`app/services/etf_basket_refresh.py`, last
+  step of the 18:00 `full_sync`). The fetchers and the parser dispatch moved out of the two CLIs
+  into `app/services/etf_basket_fetch.py` so the job and the CLIs share one implementation; the
+  detector `find_stale_etf_baskets` now formats `stale_basket_verdicts`, the same list the refresh
+  fetches from; every CLI refusal survives (fetch error, parse failure, row-count collapse,
+  backwards as-of → previous basket kept, one warning per fund, job status untouched); and identity
+  follows in two bounded pieces (CINS/SEDOL after a replacement, 25 ISINs an evening otherwise).
+  Deliberately **not** on the read endpoint: a public GET reaching seven third-party sites is a DoS
+  vector aimed at somebody else, and it would bump the shared cooldown clock. 13 tests in
+  `test_etf_basket_refresh.py`, 4 in `test_scheduler_jobs.py`.
+- **`benchmark_timeline_cache` is retired** — model, four call sites, the inception path's
+  read/write, and migration `u4d1f8a5b9c0` to drop the table. The inception series is walked on
+  request like the window series. The anchor test that asserted "window mode never writes the
+  cache" went with it.
+- **`deploy.sh` builds before it takes anything down.** `npm run build -- --outDir dist.next`,
+  `docker compose build`, then `down`, swap `dist`, `up`, remove `dist.old`. The old order left the
+  site offline for the whole `--no-cache` build on every push. Takes effect from the *next* push,
+  because the deploy that ships a `deploy.sh` change runs the old copy.
+- **Backend pins moved from January 2024 to current**: fastapi 0.141.1 (starlette 1.6.0), uvicorn
+  0.52.4, python-multipart 0.0.32, requests 2.34.2, httpx 0.28.1, pydantic 2.13.5, sqlalchemy
+  2.0.52, alembic 1.19.2, aiosqlite 0.22.1, pytest 9.1.1, pytest-asyncio 1.4.0. OSV had 14
+  advisories on the old starlette alone, including the multipart DoS, on a publicly proxied API.
+  One test needed changing (the route-table walk); everything else passed unchanged.
+
+**What the audit found and did not ship** is recorded under *Worth doing next* items 7–9 and the
+HSTS bullet under *Needs a human*.
+
 ## Shipped 2026-09-08 — the Forecast tab's Money In starts at what was paid in
 
 Asked as "the starting point shows the total portfolio value as the Total Contributions, but
@@ -703,14 +748,11 @@ granted for it. The suite went 1413 → 1427 backend and 524 → 532 frontend.
 
 **What to check on prod after the deploy.** Open the chart on 3M with a benchmark selected:
 the two lines must start at one point and the sentence *Benchmarks start at your portfolio's
-value on …* must be there. Switch to ALL — it should look as it did before. No cache clear is
-needed: window mode never touches `benchmark_timeline_cache`, and the inception arithmetic did
-not move.
+value on …* must be there. Switch to ALL — it should look as it did before.
 
-**Not done, on purpose.** `benchmark_timeline_cache` now serves only `anchor=inception`, which
-the UI no longer requests; removing it (and the scheduler's daily `clear_cache_recent_days`) is
-a separate cleanup. The benchmark baseline's FX wobble (*Worth doing next*, item 6) is
-inherited by the rebased `cost_basis_eur` and still not drawn.
+**Follow-up done 2026-09-08:** `benchmark_timeline_cache` was retired outright (it served only
+`anchor=inception`, which nothing requests). The benchmark baseline's FX wobble (*Worth doing
+next*, item 6) is inherited by the rebased `cost_basis_eur` and still not drawn.
 
 ## Shipped 2026-09-06 (late) — money in per month, which the chart had never drawn
 
@@ -2600,6 +2642,29 @@ not say.
 
 ## Watch after the next deploy
 
+- **The dependency bump (2026-09-08) is a major Starlette jump: 0.35 → 1.6, with FastAPI
+  0.109 → 0.141, pydantic 2.5 → 2.13, httpx 0.26 → 0.28, pytest-asyncio 0.23 → 1.4.** The
+  suite passed 1,443/1,443 on the new stack, and the one thing that broke was test code —
+  FastAPI 0.141 keeps included routers as lazy nodes in `app.routes`, so the auth-coverage
+  walk now uses `fastapi.routing.iter_route_contexts`. Watch `/health` for `write_auth_enabled:
+  true` and one `POST` without a key answering 401 after the deploy; the middleware chain is
+  where a Starlette major would bite first.
+
+- **`deploy.sh` changed, so the deploy that ships it runs the OLD copy once** (CLAUDE.md,
+  *Deployment*): expect the usual full-build outage one more time, and the new build-first
+  order from the next push on. After that push, `ls /root/IBKR_investment_tracker/frontend`
+  should show `dist` and no `dist.next` / `dist.old`.
+
+- **Migration `u4d1f8a5b9c0` drops `benchmark_timeline_cache` on the first start.** Nothing
+  reads it; a benchmark chart on any range should render exactly as before, ALL included.
+
+- **The first 18:00 run after the deploy refreshes seven stale baskets at once** (XAIX, QTUM,
+  SOXQ, QQQM, IQQ, GRID and the 3a EM fund's EMIM source) and runs the identity passes. Read
+  `lookthrough_result` on that run in `/api/scheduler/history`: `refreshed` should list them,
+  `failed`/`refused` should be empty, and the 20:00 market-data run's `warnings[]` should be
+  empty for the first time since late August. A basket in `failed` is that issuer's route
+  breaking, not the job's — the by-hand CLI is the fallback and its saved body is the fixture.
+
 - **`kept, next run:` is finally readable, and it says `kept` for all nine jobs.** This entry asked
   for exactly that line and it could not be checked before 2026-08-04 for a dull reason: it is
   logged at INFO, and `settings.log_level` configured nothing, so it never reached the container log
@@ -2785,15 +2850,12 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    who own shares *of* the ETF, the reverse direction, and it returns plausible-looking garbage that
    passes a smoke test.
 
-4. **Make look-through coverage keep itself current — half done.** `find_stale_etf_baskets()`
-   shipped 2026-08-17 (night), so a stale basket now *warns* instead of only badging the tab. What
-   remains is the automatic half: a staleness-guarded refresh on the existing 18:00 `full_sync`
-   rather than a new slot, because a new hour has to be threaded through `ALL_SYNC_HOURS` and the
-   three deploy-guard copies `test_deploy_guard_hours.py` keeps in step. The read path must stay pure
-   DB either way, and the refresh has to reuse the detector's verdict rather than re-deriving
-   "which basket is stale" — that predicate now exists in exactly one place and should stay there.
-   Identities are still hand-run and have no detector at all; `unresolved_value_eur` is the figure
-   that shows them drifting.
+4. **Look-through coverage keeps itself current since 2026-09-08 — what remains is the measured
+   sector/geography project.** The detector shipped 2026-08-17; the refresh shipped 2026-09-08 as
+   the last step of the 18:00 `full_sync`, built on the detector's own verdict
+   (`etf_basket_refresh.stale_basket_verdicts`), with the CLIs' refusals intact and a bounded
+   identity pass behind it. Identities still have no detector of their own; `unresolved_value_eur`
+   is the figure that shows what the evening pass has not yet reached.
 
    Then, once every held fund has a basket: `etf_holdings.sector` and `.country` are the raw material
    for replacing `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones.
@@ -2832,13 +2894,34 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
    date. The window-anchored series (2026-09-07) inherits it — its `cost_basis_eur` is the seed
    plus the contributions since, converted at each point's date — and still does not draw it.
 
-7. **Retire `benchmark_timeline_cache`, or decide to keep it.** Since 2026-09-07 the chart asks
-   for `anchor=window`, which never reads or writes the cache, so the table now serves only
-   `anchor=inception` callers — of which the repo has none. What still touches it: the scheduler's
-   daily `clear_cache_recent_days(7)`, `sync_helper`'s `clear_cache()` after every ingest, and
-   `import_finpension_csv`'s. Removing all of it is a migration plus four call sites; keeping it
-   costs a table nobody reads. Either is fine; leaving it half-alive is the one wrong answer,
-   because a cache that is never read is a cache whose staleness nobody will notice.
+7. **Prune STATUS.md and restructure CLAUDE.md.** Found by the 2026-09-08 audit: STATUS.md is
+   ~3,000 lines with thirty *Shipped* sections back to July, most long verified, against its own
+   rule that a shipped section goes once nothing in it is outstanding; CLAUDE.md is ~3,700 lines
+   and measured ~92k tokens when it was 3,064. Every session starts with well over 150k tokens of
+   documentation. The measurement for the restructure is in the untracked
+   `docs/claude-md-analysis.md` (2026-08-26, still uncommitted — commit it or drop it).
+
+8. **Doc and hygiene drift the audit turned up, none of it shipped yet.** `README.md` is the
+   public front page and still says "all values normalized to EUR", lists five tabs of nine and
+   none of Tax, Dividends, Activity, Look-through, cash, Pillar 3a or write auth. `.env.example`
+   lacks `LOG_LEVEL`, `LOOKTHROUGH_CONTACT_EMAIL` and `SCHEDULER_JOBSTORE_URL`. The `ResizeObserver`
+   stub is copied into seven test files and belongs in a vitest `setupFiles`. ESLint is red (17,
+   seven of them the react-refresh export rule) and neither it nor ruff runs in CI; ruff flags one
+   bare `except` in `currency_service` and two dead assignments (`gross` in `activity_service`,
+   `price_repo` in `routers/market_data.py`). `alembic check` fails on naming drift only — the
+   `ticker_mappings` unique constraint exists unnamed, `corporate_actions` indexes are named
+   `ix_corp_actions_*`, and `index=True` sits on primary keys — so it cannot guard the next
+   forgotten migration until one reconciliation pass makes it green.
+
+9. **Three duplicate helpers the AST lens found, each a copy that still agrees.** `_to_eur` in
+   the dividend and tax services (identical four-line bodies, each docstring citing the other;
+   CLAUDE.md records syncing them twice — extract to `CurrencyService`). Three CLI copies of
+   "resolve a security by symbol and exchange, refuse ambiguity" in `import_prices`,
+   `purge_dividend_estimates` and `manage_mappings`. The inner `_fetch` closures in the fundamentals
+   and watchlist services, which pull the same yfinance sub-endpoints and differ only in that one
+   logs each failure and the other swallows it. Also `BaseFx.convert` returns the EUR amount when no
+   EUR→base rate exists at all (reachable only on a fresh database when Frankfurter also fails), a
+   stand-in that claims a value.
 
 ## Local development traps
 
@@ -2853,7 +2936,8 @@ Each of these cost real time at least once.
   steps for the module and assert the raiser was never reached on teardown; the `_offline`
   fixture in `test_benchmark_window_anchor.py` is the pattern.
 - **`SCHEDULER_ENABLED=false` in `backend/.env` for any local run.** Otherwise starting uvicorn arms
-  the nine daily Europe/Berlin jobs against the live Flex token and Yahoo. Defaults to `True` so
+  the eight daily Europe/Berlin jobs against the live Flex token, Yahoo and, at 18:00, the
+  issuer sites. Defaults to `True` so
   production is unaffected.
 - **Check which port Vite actually took.** If 5173 is occupied it moves to 5174 and says so once. A
   stray dev server on 5173 configured against production means you are reading prod data and issuing
@@ -2864,11 +2948,11 @@ Each of these cost real time at least once.
   is real account data; `*.db` is gitignored but it should not linger).
 - **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD). Every money
   figure moves with it, so never compare a number across sessions without checking it.
-- **Don't push within ~10 minutes of a Berlin sync slot** — now nine of them, on the hour at
-  00/06/08/11/13/15/18/20/22. Auto-deploy rebuilds in ~90 s, so an overlapping deploy used to lose
-  that sync outright. The persistent job store recovers it if the gap is under 30 minutes, but a slow
-  `--no-cache` rebuild can exceed that. `ops/finish-deploy.*` checks this for you and is now correct
-  — both twins had been warning about the retired 13:00/20:00 and missing the live 00:00/06:00.
+- **Don't push within ~10 minutes of a Berlin sync slot** — eight of them, on the hour at
+  00/08/11/13/15/18/20/22 (06:00 retired 2026-08-08). An overlapping deploy used to lose that sync
+  outright; since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the
+  seconds of `down`/`up` rather than the whole build, and the persistent job store recovers a slot
+  missed by under 30 minutes. `ops/finish-deploy.*` checks the window for you.
 - **`curl 127.0.0.1:<vite port>` fails while the browser works.** Vite binds `localhost`, which
   resolves to `::1` first on this machine, so the IPv4 literal gets connection-refused and looks like
   a dead dev server. Use `http://localhost:<port>`.
@@ -2887,7 +2971,7 @@ Each of these cost real time at least once.
   0.00.** So the currency-exposure card reports *no priced positions* and the rebalance panel shows 29
   unpriced rows — both correct, and both easy to mistake for a broken feature. Anything that depends on
   a valued portfolio can only be browser-verified against a production snapshot.
-- **`ResizeObserver` is stubbed inline in three test files now.** Consolidating it is a real
+- **`ResizeObserver` is stubbed inline in seven test files now.** Consolidating it is a real
   follow-up; until then copy the block from `RebalanceCard.test.tsx`, and remember a jsdom test that
   renders anything through `DataTable` needs it because `ScrollableTable` measures overflow.
 - **uvicorn can die mid-Playwright-run with `OSError: [WinError 64] The specified network name is no
@@ -2933,6 +3017,18 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-08 (night)** — "please look for issues and let's brainstorm", then "push it then".
+  A read-only audit with the codebase's own lenses (duplicate-name AST walk, stand-in values,
+  production reads, dependency advisories) found more in the operational layer than in the
+  arithmetic: seven identical stale-basket warnings on every run for two weeks, a public API on a
+  January-2024 Starlette with 14 advisories, a deploy script that took the site down for the
+  build, and a cache nothing read. Three lessons. **A warning that has been present for two
+  weeks is a feature request**, not an alert — the fix was the missing trigger, and the data had
+  been one HTTP call away all along. **A dependency pin is a decision that ages silently**; nothing
+  in the repo ever asked OSV, and the suite that made the bump safe (1,443 green, one test-code
+  fix) had been there for months. And **"push it" after a ranked list means the top of the
+  list**, so the four cheapest-per-risk items shipped and the rest went into *Worth doing next*
+  as items rather than as work.
 - **2026-09-08** — "the Forecast tab shows the total portfolio value as Total Contributions, but
   gains are already baked in". The owner had it right, and reading the one component found three
   more in the same place: the table column of the same name was a *different* number with no seed
@@ -2988,12 +3084,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   is why one shipped with it. And **the production snapshot is what made it real**: September
   read 3,639 deployed against 0.00 in, a headline for a month nothing was paid into, and no
   fixture would have produced that shape.
-
-- **2026-09-06** — "integrate my pillar 3a the same way as my normal portfolio; I do not
-  think we need a separate tab". Agreeing with the user was right and was the easy half; the
-  work was the five places where merging naively is *wrong* rather than untidy, and four of
-  them were invisible from the request. Two lessons. **Measure the input before designing
-  against it**: the CSV's running `Balance` turned "trust the parser" into a structural
-  guarantee, and its NAVs turned "pick a Yahoo ticker" into a check that refused a +49%
-  wrong share class. And **an end-to-end run earns its cost even on green tests** — 1,367
-  passing tests said nothing about a contributions window anchored on the wrong event.

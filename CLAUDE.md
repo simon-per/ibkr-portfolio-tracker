@@ -1326,10 +1326,12 @@ Two consequences worth knowing:
   cannot survive a rotation — the same limitation `get_contributions` reports as
   `money_in_method: "deployed"`. The benchmark inherits it instead of inventing a better
   answer. Pinned from both sides in `tests/test_benchmark_basis.py`.
-- **`benchmark_timeline_cache` must be cleared when this arithmetic changes.** Historical
-  points never change *given a fixed basis*, which is what makes the cache sound and also
-  what makes it wrong the moment the basis moves. `clear_cache()` exists for this; it was
-  run on production when this shipped.
+- **There is no cached benchmark series any more.** `benchmark_timeline_cache` held the
+  inception series and was sound only *given a fixed basis*, so three call sites cleared it
+  (every Flex ingest, every finpension import, daily for the trailing week); once the chart
+  moved to `anchor=window` on 2026-09-07 nothing read it at all, and it was retired on
+  2026-09-08 (migration `u4d1f8a5b9c0`). Both anchors are computed on request — the walk is
+  O(days) over preloaded prices and the provider fetches never went through the cache.
 
 A gap remains, and it is CLAUDE.md's *dominant failure mode* in its mildest form:
 `_apply_base_currency` converts the benchmark's running baseline at **each point's
@@ -1352,7 +1354,7 @@ re-project the return value; it is already in the base currency.
 
 `GET /api/portfolio/benchmark?anchor=window` (2026-09-07) is what the chart asks for on every
 range. The since-inception series stays behind `anchor=inception` — the default, so an unknown
-caller sees no change — and is now the only thing `benchmark_timeline_cache` serves.
+caller sees no change — and is computed on request like the window series.
 
 Both lines used to be absolute: the portfolio's first point was its own value that day while
 the benchmark's carried every contribution since 2024-05-28, so on 3M the starting gap was two
@@ -1380,11 +1382,11 @@ other way:
   the FX projection on cash — the timeline projects each cash event at its *own* date — by 75
   on a 2,490 seed in the test that pins it.
 
-**It bypasses the cache on purpose.** `benchmark_timeline_cache` is keyed on (benchmark, date)
-and holds the absolute series; a per-window series written there would poison every other
-range. Window mode reads and writes nothing there, which is also why this change needed no
-production cache clear. The walk over one window is cheap; the expensive steps were always
-the provider fetches, which run exactly as before, over the window only.
+**Neither anchor is cached.** Window mode never was — a per-window series in a table keyed on
+(benchmark, date) would have poisoned every other range — and the inception cache it bypassed
+was retired the day after it shipped, since nothing read it any more. The walk over one window
+is cheap; the expensive steps were always the provider fetches, which run exactly as before,
+over the window only.
 
 **ALL is a near no-op, measured.** The seed on the inception day is the first lot at that
 day's close against a first leg at its cost, a fraction of a percent apart; two years later
@@ -1840,7 +1842,7 @@ Tests: `tests/test_account_isolation.py`, `tests/test_finpension_parse.py`,
 | Time | ET | Job | Touches Yahoo? |
 |---|---|---|---|
 | 08:00, 11:00, 13:00, 15:00, 20:00, 22:00 | | `market_data_only_sync_job` (7d) | yes |
-| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends | **yes** |
+| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 
 **Yahoo is repriced at seven hours — 8, 11, 13, 15, 18, 20, 22 — and that set has not
@@ -2739,17 +2741,39 @@ raised default. Staleness deliberately **does not reduce `coverage_pct`** — th
 "how much is attributed", not "how current is it" — which is exactly why the age has to be surfaced
 on the card rather than only in the fund table.
 
-**Nothing schedules any of this, and that is the feature's weakest property.** Baskets and
-identities are populated by a deliberate CLI run and then decay in place: `fetch_etf_baskets --all`
-plus the import lines it prints, and `resolve_identities --constituents`. The read path is pure DB,
-so a basket nobody re-downloads keeps contributing its full share of `coverage_pct` while describing
-an older index — which is exactly why staleness is surfaced on the card and not only in the fund
-table. Two clocks matter: the six daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance,
-VanEck) badge `†` within a week, Vanguard US publishes **month-end with a ~6-week lag** (75 days).
-Identities never expire but are also never *extended* — a fund rebalance brings in constituent ISINs
-nobody has asked about, and a newly bought security's ISIN is unresolved until the CLI is re-run, so
-it will not fold with an existing holding of the same company. `unresolved_value_eur` is the figure
-that shows this drifting.
+**The 18:00 `full_sync` keeps baskets and identities current (2026-09-08); until then nothing
+did, and that was the feature's weakest property.** Baskets were populated by a deliberate CLI run
+and then decayed in place, and on production the stale-basket warning sat on every market-data run
+for two weeks — seven funds, one line each — which is the always-present-banner pathology this file
+keeps rediscovering. The data was always one keyless HTTP call away and `etf_baskets` was always the
+cache; what was missing was the trigger. `app/services/etf_basket_refresh.py` is that trigger, hung
+off the 18:00 job as its last step, and four things about it are load-bearing:
+
+- **It fetches from the detector's verdict.** `stale_basket_verdicts` is the one predicate;
+  `find_stale_etf_baskets` formats it into `warnings[]` and the refresh fetches from it. The
+  detector's message now says the evening run will fix it and names the CLI only as the fallback.
+- **It refuses everything the CLI refuses**, through the same functions: the fetchers and the parser
+  dispatch moved to `app/services/etf_basket_fetch.py` and both the CLIs and the job call them. A
+  fetch error, a parse failure, a row-count collapse or a backwards as-of each leave the previous
+  basket in use and become that fund's warning — never the job's status, and never a half-applied
+  basket.
+- **It is not on the read path.** `/api/portfolio/lookthrough` stays pure DB: a public GET that
+  reached seven third-party sites on a cache miss would be a denial-of-service vector aimed at
+  somebody else's servers, and entering `SYNC_PIPELINE` from a read would bump the clock every
+  other route's cooldown reads. Once a day, from the job that already holds the gate, matches
+  issuers that publish once a day.
+- **Identity follows the baskets, bounded.** A re-import clears the CINS/SEDOL resolutions on
+  purpose, so the OpenFIGI pass that restores them runs whenever a basket was replaced; and a
+  bounded ISIN pass (`SCHEDULED_IDENTITY_LIMIT`, 25 per evening — GLEIF has no batch form) walks the
+  held securities and material constituents never asked about, so a newly bought security folds with
+  its fund exposure within a day and a rebalance converges over a few. `unresolved_value_eur` still
+  shows what is left.
+
+Two clocks matter: the six daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck)
+go stale within a week and Vanguard US publishes **month-end with a ~6-week lag** (75 days), so a
+normal evening refreshes nothing and a busy one refreshes the six. The CLIs remain the by-hand route
+— a file an issuer only publishes by email (VWCE), a first import ahead of the evening, or a fund
+whose refresh keeps failing, where the saved body is what makes the failure debuggable.
 
 **A stale basket does warn now** (`SchedulerService.find_stale_etf_baskets`, 2026-08-17), hung off
 the market-data job beside its four siblings for the documented reason: those slots succeed while
@@ -2769,8 +2793,8 @@ Flex is refusing. Four rules carry it, and each is wrong the other way round:
   missing VT is actionable and must not be skipped just because the held fund has no route of its
   own. That was the first draft's bug, and the test is what found it.
 
-Identities still have no detector, and the automatic refresh is still unbuilt — `unresolved_value_eur`
-is the only signal for the first, and someone has to run the CLI for the second.
+Identities still have no detector of their own; the bounded evening pass converges them and
+`unresolved_value_eur` shows what is left.
 
 **`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not** —
 and one issuer publishes a date that is *worse* than none. Xtrackers publishes nothing at all: not
@@ -3308,9 +3332,14 @@ crontab, `*/10 * * * *`) does: `flock` → `git fetch` → deploy **only if stri
 `deploy.sh` → health check → **roll back to the previous commit if health fails**. Log:
 `/root/auto-deploy.log`.
 
-`deploy.sh` is expensive (`docker compose down`, `build --no-cache`, `npm ci`), which is why the cron
-guards on an actual change. Its own health check fires a few seconds after start and often reports
-FAILED spuriously — check `/health` again after ~15s before believing it.
+`deploy.sh` is expensive (`npm ci`, `build --no-cache`), which is why the cron guards on an actual
+change. **Since 2026-09-08 it builds before it stops anything**: the frontend goes to `dist.next`
+and the image is built while the old containers keep serving, then `down`, swap `dist`, `up`. Before
+that `down` came first and the site was offline for the whole build — minutes per push, and the
+window that loses a scheduled sync. (A bind mount follows the directory inode, so the swap has to
+sit between `down` and `up`, and `dist.old` is removed only after `up`.) Its own health check fires a
+few seconds after start and often reports FAILED spuriously — check `/health` again after ~15s
+before believing it.
 
 - SSH: `ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud`
 - Secrets live only in `/root/IBKR_investment_tracker/backend/.env` (`IBKR_TOKEN`, `IBKR_QUERY_ID`)
@@ -3603,7 +3632,7 @@ Tests: `tests/test_currency_fallback.py`.
 | A pillar 3a fund reads as unpriced | Its NAVs come from your uploads, carried forward for a bounded window. Past that it goes unpriced **loudly**, which is the intended end state rather than valuing it at a months-old NAV for ever. Upload a newer export. The World ex CH tranche should instead be priced from Yahoo — check its `price_source` is `yahoo` and its mapping is pinned |
 | Pillar 3a is missing from the Steuerwert | Correct, and the report says so. 3a capital is not taxed as wealth and its income is not taxable — both are taxed on withdrawal at a separate reduced rate. The Tax tab leads with a Pillar 3a card carrying the year's contributions, which *are* deductible from taxable income |
 | A 3a fund shows as `uncovered_fund` in Look-through | The World ex CH tranche, deliberately. Borrowing IWDA's basket would put Nestlé, Roche and Novartis into the table at ~2.5% of the position — companies the fund exists specifically not to hold. Every other proxy here errs low and says so; a fabricated holding is a different kind of wrong. The exact-index donor is `CH0244028970` and is recorded in `etf_sources.py` |
-| A market-data sync warns that a fund's basket is stale | `find_stale_etf_baskets`. Nothing refreshes baskets automatically, so this is a real chore rather than noise: run `fetch_etf_baskets --all`, the import lines it prints, then `resolve_identities --constituents` — in that order, because a re-import clears the CINS/SEDOL resolutions on purpose. The threshold is the issuer's own cadence, so a Vanguard basket is not stale at 30 days and an iShares one is |
+| A market-data sync warns that a fund's basket is stale | `find_stale_etf_baskets`. Since 2026-09-08 the 18:00 full sync refreshes it, so a warning at 11:00 clears by 20:00 on its own. One that **persists past a day** means the evening refresh failed — read the 18:00 run's `lookthrough_result` for the error — or the fund has no automated route (the message says which). The by-hand route is unchanged: `fetch_etf_baskets`, the import line it prints, then `resolve_identities --constituents`, in that order because a re-import clears the CINS/SEDOL resolutions on purpose. The threshold is the issuer's own cadence, so a Vanguard basket is not stale at 30 days and an iShares one is |
 
 ---
 
