@@ -2658,12 +2658,15 @@ not say.
 - **Migration `u4d1f8a5b9c0` drops `benchmark_timeline_cache` on the first start.** Nothing
   reads it; a benchmark chart on any range should render exactly as before, ALL included.
 
-- **The first 18:00 run after the deploy refreshes seven stale baskets at once** (XAIX, QTUM,
-  SOXQ, QQQM, IQQ, GRID and the 3a EM fund's EMIM source) and runs the identity passes. Read
-  `lookthrough_result` on that run in `/api/scheduler/history`: `refreshed` should list them,
-  `failed`/`refused` should be empty, and the 20:00 market-data run's `warnings[]` should be
-  empty for the first time since late August. A basket in `failed` is that issuer's route
-  breaking, not the job's — the by-hand CLI is the fallback and its saved body is the fixture.
+- **The first scheduled-path refresh ran by hand on production right after `75ccc3a` landed**
+  (recorded as a `manual_etf_basket` run): six baskets refreshed — GRID, QQQM, IQQ, QTUM, SOXQ,
+  XAIX — 109 CINS/SEDOL identifiers and 25 ISINs resolved, and **one failure that was a real
+  parser bug**: BlackRock dates EMIM's file `07/Sept/2026`, a four-letter month `%b` does not
+  accept, so `parse_ishares` refused a good basket and the 3a EM fund stayed on the August one
+  — exactly the isolation the design promised (previous basket kept, one warning, job status
+  untouched). Fixed in the follow-up commit; the next 18:00 run, or a by-hand re-run, should
+  refresh EMIM and leave the market-data `warnings[]` empty for the first time since late
+  August. Read `lookthrough_result` on the 18:00 run in `/api/scheduler/history` to confirm.
 
 - **`kept, next run:` is finally readable, and it says `kept` for all nine jobs.** This entry asked
   for exactly that line and it could not be checked before 2026-08-04 for a dull reason: it is
