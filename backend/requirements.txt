@@ -1,24 +1,24 @@
 # FastAPI and server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
 
 # Database
-sqlalchemy==2.0.25
-aiosqlite==0.19.0
-alembic==1.13.1
+sqlalchemy==2.0.52
+aiosqlite==0.22.1
+alembic==1.19.2
 
 # Validation and configuration
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
 
 # IBKR Integration
 ibflex==0.15
 
 # HTTP Client
-httpx==0.26.0
-requests==2.31.0
+httpx==0.28.1
+requests==2.34.2
 
 # Market Data
 yfinance>=1.1.0
@@ -29,9 +29,9 @@ lxml>=5.0.0
 pyxirr>=0.10.0
 
 # Scheduling
-APScheduler==3.11.2
+APScheduler==3.11.3
 
 # Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-pytest-cov==4.1.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0

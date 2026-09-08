@@ -12,6 +12,7 @@ runs, or on /health, which has no dependencies.
 import pytest
 import asyncio
 
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -191,12 +192,16 @@ def test_every_mutating_route_is_covered_without_being_annotated(client, monkeyp
     """
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
 
+    # `iter_route_contexts` rather than `app.routes`: since FastAPI 0.141 an included
+    # router sits in `app.routes` as one lazy node with no path of its own, so the flat
+    # walk saw nothing under /api/ and this test passed its `checked` floor only because
+    # the floor existed. The iterator yields every leaf with its prefix applied.
     checked = 0
-    for route in app.routes:
-        path = getattr(route, "path", "")
+    for ctx in iter_route_contexts(app.routes):
+        path = ctx.path  # the prefix applied; `ctx.route.path` is the bare "/ibkr"
         if not path.startswith("/api/") or "{" in path:
             continue
-        for method in sorted(set(getattr(route, "methods", set())) & MUTATING_METHODS):
+        for method in sorted(set(ctx.methods or ()) & MUTATING_METHODS):
             # No key: must be refused before the handler can do anything.
             assert client.request(method, path).status_code == 401, f"{method} {path}"
             checked += 1
