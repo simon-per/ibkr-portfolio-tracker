@@ -7,6 +7,11 @@ warnings on every market-data run for two weeks, `starlette 0.35` with 14 adviso
 public `/api/`, `deploy.sh` running `down` before `build --no-cache`, and a
 `benchmark_timeline_cache` nothing read. All four shipped together; details in *Shipped
 2026-09-08 (late)*, and what to watch after the deploy is in *Watch after the next deploy*.
+**Verifying them then found a fifth, older problem: every deploy had been discarding the
+un-checkpointed tail of the database** — `portfolio.db` is a file bind mount, so SQLite's WAL
+lives in the container layer and dies with `docker compose down`. Mitigated the same night
+with checkpoints on shutdown, before `down`, and before backups; the durable fix (mount the
+directory) is *Worth doing next* item 0 and needs the owner present.
 
 Earlier the same day: **the Forecast tab's Money In starts at what was paid
 in, not at what the book is worth.** The grey "Total Contributions" band was seeded with the
@@ -2642,6 +2647,14 @@ not say.
 
 ## Watch after the next deploy
 
+- **The deploy that ships the WAL fix still runs the OLD `deploy.sh`, so it cannot
+  checkpoint before its own `down`.** The WAL was checkpointed by hand right before the push
+  and no sync slot falls in the deploy window, so nothing should be lost; from the deploy
+  after that, `/root/auto-deploy.log` should show a `WAL checkpoint (busy, frames, done):`
+  line between the image build and `Stopping`. Also copy the repo's `ops/backup-db.sh` over
+  `/root/backup-db.sh` — auto-deploy and the daily cron prefer that copy, which predates
+  the checkpoint step.
+
 - **The dependency bump (2026-09-08) is a major Starlette jump: 0.35 → 1.6, with FastAPI
   0.109 → 0.141, pydantic 2.5 → 2.13, httpx 0.26 → 0.28, pytest-asyncio 0.23 → 1.4.** The
   suite passed 1,443/1,443 on the new stack, and the one thing that broke was test code —
@@ -2751,6 +2764,23 @@ were deliberately **not** called — both can reach Yahoo on a cache miss.
 
 
 ## Worth doing next
+
+0. **Mount the database's directory, not the file — the WAL-on-deploy data loss is
+   mitigated, not fixed.** Found 2026-09-08 while verifying the basket refresh: a run's
+   commits vanished in the next deploy. `./portfolio.db:/app/portfolio.db` bind-mounts a
+   FILE, so SQLite's `-wal`/`-shm` sidecars live in the container layer and go with
+   `docker compose down`; every deploy discarded the commits since the last auto-checkpoint
+   (~4 MB), and every host-side backup lacked the same tail. Three checkpoints now cover
+   the deploy path (app shutdown, `deploy.sh` before `down`, `backup-db.sh` before the
+   copy), but a killed container never reaches its shutdown hook and the deploy that
+   ships a `deploy.sh` change runs the old copy — so the sidecars have to land on the host.
+   The job store already does this (`scheduler-data/`). Plan, in one deploy with the
+   container down: `mkdir backend/data && mv backend/portfolio.db backend/data/`, compose
+   `- ./data:/app/data`, `DATABASE_URL=sqlite+aiosqlite:///./data/portfolio.db` in the host
+   `.env` (`up -d`, never `restart`), `deploy.sh`'s `touch portfolio.db` guard, `backup-db.sh`'s
+   `DB` default, the `sqlite3.connect` snippets in CLAUDE.md, and `/root/backup-db.sh` on the
+   VPS, which is a *copy* of the repo script and does not update itself (auto-deploy prefers
+   it when present). Checkpoint by hand before the `mv`. Do it with the owner present.
 
 0. **A security quoted in the base currency is valued ~0.12% high — found 2026-09-06,
    pre-existing, and previously unreachable.** `get_positions_breakdown` and the
@@ -3031,7 +3061,12 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   in the repo ever asked OSV, and the suite that made the bump safe (1,443 green, one test-code
   fix) had been there for months. And **"push it" after a ranked list means the top of the
   list**, so the four cheapest-per-risk items shipped and the rest went into *Worth doing next*
-  as items rather than as work.
+  as items rather than as work. Then the verification found the biggest bug of the night by
+  accident: running the new basket refresh twice around a deploy showed the first run's
+  commits gone — `portfolio.db` is a file bind mount, so the WAL dies with the container,
+  and every deploy since the beginning had been discarding the tail of the database.
+  **Verify by re-reading, not by re-running**: the second run only revealed it because its
+  `previous_as_of` disagreed with the first run's output.
 - **2026-09-08** — "the Forecast tab shows the total portfolio value as Total Contributions, but
   gains are already baked in". The owner had it right, and reading the one component found three
   more in the same place: the table column of the same name was a *different* number with no seed

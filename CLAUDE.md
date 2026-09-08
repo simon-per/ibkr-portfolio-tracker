@@ -3347,6 +3347,27 @@ before believing it.
   record exists)
 - Backups: `/root/ibkr-backups/<date>/`
 
+**`portfolio.db` is a FILE bind mount, and until 2026-09-08 every deploy silently discarded
+the tail of the database.** SQLite in WAL mode writes its `-wal` and `-shm` sidecars *beside*
+the database path — inside the container, that is `/app/portfolio.db-wal`, which is in the
+container's writable layer, not on the host. `docker compose down` removes the container and
+the sidecars with it, so every commit since the last auto-checkpoint (`wal_autocheckpoint`,
+1000 pages, ~4 MB) was lost on every deploy, and every host-side backup was missing the same
+tail. Measured: a `sync_runs` row written at 18:23 UTC was gone after the 18:30 deploy while
+one from 18:07 survived (a market-data pass had crossed the auto-checkpoint threshold between
+them), and the container held a 2.7 MB WAL against a 0-byte one on the host. Small writes were
+the exposure — a settings change, a mapping edit, a basket import, the last `sync_runs` row —
+because a big sync checkpoints itself. The scheduler's job store had this exact bug fixed on
+2026-08-01 ("mount the parent directory, never the `.db` file"); the main database did not.
+
+Three places now checkpoint, each covering a case the others cannot, and
+`tests/test_wal_checkpoint_on_shutdown.py` pins all three: the app on a clean shutdown
+(`checkpoint_and_dispose_engine` in `main.py`), `deploy.sh` from outside the container between
+`build` and `down`, and `ops/backup-db.sh` before the host-side copy. **The durable fix is
+still to mount the directory** so the sidecars land on the host — STATUS.md, *Worth doing
+next*, item 0 — because a killed container never runs its shutdown and a deploy script that
+changes runs its old copy once.
+
 **Changing `backend/.env` needs `docker compose up -d`, never `restart`.** Compose reads `env_file`
 when it *creates* a container; `restart` reuses the existing one with its original environment, so a
 new value is accepted, written, and silently ignored. `up -d` sees the changed config and recreates.
