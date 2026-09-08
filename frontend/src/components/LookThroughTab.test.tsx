@@ -10,9 +10,11 @@ import type { LookthroughResponse } from '@/lib/api'
 /**
  * The arithmetic is pinned server-side in `tests/test_lookthrough_partition.py`. These cover
  * what only the component can get wrong, and the first is the one that matters: the coverage
- * caveat has to be *rendered*, outside any collapsible. It rides on a successful response, so
- * nothing else would ever reveal its absence — and a company table that silently omits a
- * fifth of the book is the exact failure this feature was built to avoid creating.
+ * *qualifier* has to be rendered outside any collapsible — on the Coverage KPI card — while
+ * the itemised notes live inside the collapsed Fund coverage card at the bottom and must be
+ * reachable from it. The qualifier rides on a successful response, so nothing else would ever
+ * reveal its absence — and a company table that silently omits a fifth of the book is the
+ * exact failure this feature was built to avoid creating.
  */
 
 afterEach(() => {
@@ -128,16 +130,42 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
   }
 }
 
+/** The collapsed Fund coverage card, opened. Its header is a real button, so a click reaches it. */
+async function openFundCoverage() {
+  fireEvent.click(await screen.findByRole('button', { name: /Fund coverage/ }))
+}
+
 describe('LookThroughTab', () => {
-  it('renders the coverage caveat as an alert, not buried in a collapsible', async () => {
+  it('keeps the qualifier on the Coverage card and the itemised notes in the collapsed card', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    const alert = await screen.findByRole('alert')
-    expect(alert).toBeTruthy()
-    expect(alert.textContent).toContain('partial view')
-    expect(alert.textContent).toContain('VWCE')
-    expect(alert.textContent).toContain('28.8%')
+    // Above the fold: the KPI footnote says a fund has no basket, without the ten-line list.
+    await screen.findByText('Coverage')
+    expect(screen.getByText(/1 fund\(s\) have no basket/)).toBeTruthy()
+    expect(screen.queryByText(/28\.8%/)).toBeNull()
+
+    // The collapsed header counts the notes, so their existence is visible before their text.
+    const header = screen.getByRole('button', { name: /Fund coverage/ })
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(header.textContent).toMatch(/1 note on this view/)
+
+    await openFundCoverage()
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+    const notes = screen.getByText('Notes on this view').parentElement!
+    expect(notes.textContent).toContain('VWCE')
+    expect(notes.textContent).toContain('28.8%')
+  })
+
+  it('keeps the fund table below the company table, last on the page', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('ALPHABET INC.')
+    const companies = screen.getByText('Company exposure')
+    const coverage = screen.getByRole('button', { name: /Fund coverage/ })
+    // DOCUMENT_POSITION_FOLLOWING: the coverage header comes after the company card's title.
+    expect(companies.compareDocumentPosition(coverage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('folds a company across its listings and shows the direct/via-fund split', async () => {
@@ -236,7 +264,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Fund coverage')
+    await openFundCoverage()
     expect(screen.getByText(/Not attributed to any company/)).toBeTruthy()
     // The fund with no basket is named with its reason rather than omitted.
     expect(screen.getByText('No basket')).toBeTruthy()
@@ -412,6 +440,7 @@ describe('LookThroughTab coverage tone', () => {
     expect(coverageCard().querySelector('.text-green-600')).toBeNull()
     expect(screen.getByText(/1 fund\(s\) use another fund's basket/)).toBeTruthy()
     // And the fund's own row must say which, rather than a green "Decomposed".
+    await openFundCoverage()
     expect(screen.getByText('Via VT')).toBeTruthy()
   })
 
@@ -432,6 +461,7 @@ describe('LookThroughTab coverage tone', () => {
     withProviders(<LookThroughTab />)
 
     await screen.findByText('Coverage')
+    await openFundCoverage()
     expect(screen.getByText('91.86%')).toBeTruthy()
     expect(screen.getByText('8,007 rows at 0%')).toBeTruthy()
   })

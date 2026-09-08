@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
+import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
@@ -14,12 +15,24 @@ import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
  * True company-level exposure: direct holdings plus every held fund decomposed into the
  * companies inside it, folded across listings and share classes.
  *
- * **The coverage notice sits outside every collapsible, deliberately.** With some funds
- * publishing no machine-readable basket, each company figure is an understatement by
- * whatever those funds hold — and nothing is renormalised to hide that. A caveat reachable
- * only by expanding a card is absent from the surface people actually read, which is the
- * lesson `MonthlyReturnsHeatmap` learned when its `†` and its footnote both lived inside a
- * collapsed body while the summary carried the figure with no marker at all.
+ * **The coverage qualifier sits on the KPI row, outside every collapsible; the itemised
+ * notes sit inside the collapsed Fund coverage card at the bottom.** Both halves are
+ * deliberate. With some funds publishing no machine-readable basket, each company figure is
+ * an understatement by whatever those funds hold — nothing is renormalised to hide that — so
+ * the Coverage card's tone and footnote have to say so where people actually read, which is
+ * the lesson `MonthlyReturnsHeatmap` learned when its `†` and its footnote both lived inside
+ * a collapsed body while the summary carried the figure with no marker at all.
+ *
+ * The itemised `warnings[]` used to be a `role="alert"` block directly under that row, and by
+ * 2026-09-08 it carried ten sentences — seven of them the same "basket is N days old" for
+ * different funds — and pushed the company table, the thing the tab exists for, below the
+ * fold. A banner that is always present and always long is the always-present-Flex-banner
+ * pathology from the other direction: it teaches the reader to scroll past the surface that
+ * also carries the one line that matters. The owner asked for it collapsed and moved down.
+ * What has to stay unmissable is the qualifier, and the Coverage footnote now names every
+ * condition present (no basket, borrowed basket, ageing) rather than only the most severe;
+ * the collapsed card's own summary line counts the notes so their existence is never hidden,
+ * only their text.
  */
 
 const LIMITS = [25, 50, 100] as const
@@ -341,6 +354,8 @@ function CompanyBreakdown({
 export function LookThroughTab() {
   const [limit, setLimit] = useState<LimitOption>(50)
   const [selected, setSelected] = useState<string | null>(null)
+  // Collapsed by default — see the module docstring for why the notes live in here.
+  const [coverageOpen, setCoverageOpen] = useState(false)
   const formatCurrency = useFormatCurrency()
 
   const { data, isLoading, isError } = useQuery({
@@ -388,6 +403,42 @@ export function LookThroughTab() {
   // Ageing baskets are the other way coverage lies: the percentage does not move, but the
   // holdings behind it describe an older index. Surfaced on the card, not only in the table.
   const staleFunds = (data?.funds ?? []).filter((f) => f.stale)
+
+  // The Coverage footnote is now the ONLY qualifier above the fold, so it names every
+  // condition present rather than the most severe one — the itemised list that used to sit
+  // under it is inside the collapsed card at the bottom.
+  const coverageConditions = [
+    unresolvedFunds.length > 0 ? `${unresolvedFunds.length} fund(s) have no basket` : null,
+    proxiedFunds.length > 0 ? `${proxiedFunds.length} fund(s) use another fund's basket` : null,
+    staleFunds.length > 0 ? `${staleFunds.length} basket(s) ageing` : null,
+  ].filter((s): s is string => s !== null)
+  const coverageSub =
+    unresolvedFunds.length === 0 && proxiedFunds.length === 0
+      ? staleFunds.length > 0
+        ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
+        : 'every fund decomposed or deliberately excluded'
+      : coverageConditions.join(' · ')
+
+  // The collapsed card's one line: what is inside, counted, so a reader who never opens it
+  // still knows the notes exist. Only the non-zero states are named.
+  const funds = data?.funds ?? []
+  const fundSummary = [
+    `${funds.length} fund${funds.length === 1 ? '' : 's'} held`,
+    [
+      [funds.filter((f) => f.status === 'looked_through' && !f.proxy_for_symbol).length, 'decomposed'],
+      [proxiedFunds.length, "via another fund's basket"],
+      [unresolvedFunds.length, 'with no basket'],
+      [funds.filter((f) => f.status === 'excluded').length, 'excluded by design'],
+    ]
+      .filter(([n]) => (n as number) > 0)
+      .map(([n, what]) => `${n} ${what}`)
+      .join(', '),
+    data && data.warnings.length > 0
+      ? `${data.warnings.length} note${data.warnings.length === 1 ? '' : 's'} on this view`
+      : null,
+  ]
+    .filter((s) => s)
+    .join(' — ')
 
   // A fetch failure must not impersonate an empty portfolio — the table below would render
   // nothing and read as "you own no companies", which is the worst possible misreading of a
@@ -441,15 +492,7 @@ export function LookThroughTab() {
                   ? 'positive'
                   : 'warning'
               }
-              sub={
-                unresolvedFunds.length > 0
-                  ? `${unresolvedFunds.length} fund(s) have no basket`
-                  : proxiedFunds.length > 0
-                    ? `${proxiedFunds.length} fund(s) use another fund's basket`
-                    : staleFunds.length > 0
-                      ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
-                      : 'every fund decomposed or deliberately excluded'
-              }
+              sub={coverageSub}
             />
             <KpiCard
               label="In funds"
@@ -477,20 +520,11 @@ export function LookThroughTab() {
             />
           </div>
 
-          {/* Outside every collapsible, on purpose — see the module docstring. */}
-          {data.warnings.length > 0 && (
-            <div
-              role="alert"
-              className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-            >
-              <p className="font-medium">This is a partial view</p>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                {data.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {/*
+            The itemised `warnings[]` used to render here as a `role="alert"` block. They are
+            inside the collapsed Fund coverage card at the bottom now — see the module
+            docstring. The Coverage card above carries the qualifier.
+          */}
 
           {/*
             Its own card rather than a strip inside the one below, because the Top 25/50/100
@@ -600,47 +634,72 @@ export function LookThroughTab() {
             </CardContent>
           </Card>
 
-          {data.funds.length > 0 && (
+          {/*
+            Last on the page and collapsed by default, at the owner's request: the fund table,
+            each fund's reason, and the itemised notes are reference material for the Coverage
+            card above, not the content. The header's one line counts what is inside.
+          */}
+          {(data.funds.length > 0 || data.warnings.length > 0) && (
             <Card>
-              <CardHeader>
-                <CardTitle>Fund coverage</CardTitle>
-                <CardDescription>
-                  Which held funds could be decomposed, and why the others could not. A fund
-                  with no basket contributes nothing to the table above — its value is
-                  counted in the portfolio but attributed to no company.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <DataTable
-                  rows={data.funds}
-                  columns={coverageColumns}
-                  getRowKey={(row) => row.fund_isin}
-                  label="Fund coverage"
-                  detailLimit={4}
-                />
-                <FundReasons funds={data.funds} />
-                <p className="text-xs text-muted-foreground">
-                  Not attributed to any company:{' '}
-                  {formatCurrency(
-                    data.uncovered_fund_eur +
-                      data.fund_residual_eur +
-                      data.nested_fund_eur,
-                  )}{' '}
-                  — {formatCurrency(data.uncovered_fund_eur)} in funds with no usable
-                  basket, and {formatCurrency(data.fund_residual_eur)} left over inside the
-                  funds that were decomposed: cash, derivatives, and weight lost to rounding
-                  in the issuer's own file
-                  {data.nested_fund_eur > 0
-                    ? `, plus ${formatCurrency(data.nested_fund_eur)} in funds held inside those funds`
-                    : ''}
-                  .
-                </p>
-                {data.oldest_basket_as_of && (
-                  <p className="text-xs text-muted-foreground">
-                    Oldest basket on record: {data.oldest_basket_as_of}.
-                  </p>
-                )}
-              </CardContent>
+              <CollapsibleCardHeader
+                open={coverageOpen}
+                onToggle={() => setCoverageOpen((o) => !o)}
+                title="Fund coverage"
+                description={fundSummary}
+                contentId="lookthrough-fund-coverage"
+              />
+              {coverageOpen && (
+                <CardContent id="lookthrough-fund-coverage" className="space-y-3">
+                  {data.warnings.length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                      <p className="font-medium">Notes on this view</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {data.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {data.funds.length > 0 && (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Which held funds could be decomposed, and why the others could not. A
+                        fund with no basket contributes nothing to the company table — its
+                        value is counted in the portfolio but attributed to no company.
+                      </p>
+                      <DataTable
+                        rows={data.funds}
+                        columns={coverageColumns}
+                        getRowKey={(row) => row.fund_isin}
+                        label="Fund coverage"
+                        detailLimit={4}
+                      />
+                      <FundReasons funds={data.funds} />
+                      <p className="text-xs text-muted-foreground">
+                        Not attributed to any company:{' '}
+                        {formatCurrency(
+                          data.uncovered_fund_eur +
+                            data.fund_residual_eur +
+                            data.nested_fund_eur,
+                        )}{' '}
+                        — {formatCurrency(data.uncovered_fund_eur)} in funds with no usable
+                        basket, and {formatCurrency(data.fund_residual_eur)} left over inside
+                        the funds that were decomposed: cash, derivatives, and weight lost to
+                        rounding in the issuer's own file
+                        {data.nested_fund_eur > 0
+                          ? `, plus ${formatCurrency(data.nested_fund_eur)} in funds held inside those funds`
+                          : ''}
+                        .
+                      </p>
+                      {data.oldest_basket_as_of && (
+                        <p className="text-xs text-muted-foreground">
+                          Oldest basket on record: {data.oldest_basket_as_of}.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              )}
             </Card>
           )}
         </>
