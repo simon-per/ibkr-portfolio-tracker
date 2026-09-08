@@ -52,7 +52,14 @@ if ! command -v node &> /dev/null; then
 fi
 
 npm ci
-npm run build
+# Built beside `dist/`, not into it. The nginx container bind-mounts `dist/`, and
+# `vite build` empties its output directory first — so building in place served 404s for
+# every asset while the build ran, and then the backend image build below kept the site
+# down for minutes more. The swap happens between `down` and `up` (a bind mount follows the
+# directory inode, so a rename under a running container changes nothing it sees), and the
+# old tree is removed only after `up`, for the same reason.
+rm -rf dist.next
+npm run build -- --outDir dist.next
 
 # 4. Rebuild and restart Docker containers (backend + frontend nginx)
 echo ""
@@ -74,9 +81,18 @@ GIT_COMMIT="$(cd "$REPO_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
 export GIT_COMMIT
 echo "Deploying commit: $GIT_COMMIT"
 
-docker compose down
+# Build first, while the old containers keep serving. `down` used to come first, which
+# took the site offline for the whole `--no-cache` image build — minutes per push, and
+# the window that loses a scheduled sync — when the swap itself takes seconds.
 docker compose build --no-cache
+docker compose down
+cd "$REPO_DIR/frontend"
+rm -rf dist.old
+[ -d dist ] && mv dist dist.old
+mv dist.next dist
+cd "$REPO_DIR/backend"
 docker compose up -d
+rm -rf "$REPO_DIR/frontend/dist.old"
 
 # 5. Status check
 echo ""
