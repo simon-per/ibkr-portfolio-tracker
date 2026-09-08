@@ -5,8 +5,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
+
 from app.auth import log_write_auth_state, write_auth_enabled, write_auth_middleware
 from app.config import settings
+from app.database import engine
 from app.observability import request_id_middleware, unhandled_exception_handler
 from app.rate_limit import rate_limit_middleware
 
@@ -135,6 +138,36 @@ async def lifespan(app: FastAPI):
     # Safe when the scheduler was never started — shutdown() no-ops on a None
     # scheduler, which is exactly the disabled case.
     scheduler.shutdown()
+    await checkpoint_and_dispose_engine()
+
+
+async def checkpoint_and_dispose_engine() -> None:
+    """
+    Fold SQLite's write-ahead log into portfolio.db and close every pooled connection.
+
+    `docker-compose.yml` bind-mounts `./portfolio.db` as a FILE, so the `-wal` and `-shm`
+    sidecars SQLite writes beside it live in the container's writable layer and are
+    destroyed with the container. Every commit since the last auto-checkpoint — up to
+    `wal_autocheckpoint` pages, ~4 MB — went with them on every `docker compose down`,
+    which is every deploy. Measured 2026-09-08: a `sync_runs` row written at 18:23 UTC was
+    gone after the 18:30 deploy while one from 18:07 survived, and the container held a
+    2.7 MB WAL against a 0-byte one on the host. A process that is killed rather than
+    stopped never gets here, so `deploy.sh` also checkpoints from outside before `down`;
+    this is the half that covers a plain `docker stop`. The durable fix is to mount the
+    directory rather than the file, as the scheduler's job store already does — see
+    STATUS.md, *Worth doing next*.
+
+    Best effort on the checkpoint: another connection holding a read transaction makes
+    TRUNCATE partial rather than failing, and `dispose()` then closes the last connection,
+    which is where SQLite performs its own final checkpoint anyway.
+    """
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            logger.info(f"WAL checkpoint on shutdown (busy, frames, done): {result.fetchone()}")
+    except Exception as e:
+        logger.warning(f"WAL checkpoint on shutdown failed: {e}")
+    await engine.dispose()
 
 
 # Create FastAPI application

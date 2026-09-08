@@ -85,6 +85,17 @@ echo "Deploying commit: $GIT_COMMIT"
 # took the site offline for the whole `--no-cache` image build — minutes per push, and
 # the window that loses a scheduled sync — when the swap itself takes seconds.
 docker compose build --no-cache
+
+# Fold SQLite's write-ahead log into portfolio.db BEFORE the container goes. `./portfolio.db`
+# is a FILE bind mount, so the -wal/-shm sidecars SQLite writes beside it live in the
+# container's writable layer and vanish with `down` — taking every commit since the last
+# auto-checkpoint (up to ~4 MB) with them. Measured 2026-09-08: a sync_runs row written at
+# 18:23 UTC was gone after the 18:30 deploy while one from 18:07 survived, and the container
+# held a 2.7 MB WAL against a 0-byte one on the host. The app also checkpoints on a clean
+# shutdown; this covers a stop that is not clean. A container that is not running has
+# nothing to lose, hence the fallback message rather than a failure.
+docker compose exec -T portfolio-backend python -c "import sqlite3; c = sqlite3.connect('/app/portfolio.db'); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint (busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" \
+    || echo "WAL checkpoint skipped (backend container not running)"
 docker compose down
 cd "$REPO_DIR/frontend"
 rm -rf dist.old

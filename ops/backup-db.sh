@@ -73,6 +73,15 @@ DEST="$DEST_DIR/portfolio.db.$TAG-$(date -u +%H%M%S)"
 # `docker compose down`. sqlite's backup API takes only a read lock either way, and
 # `timeout=30` matches the app's own busy_timeout so a checkpoint in flight is waited
 # out rather than raising.
+# The host can see portfolio.db but NOT its write-ahead log: the container bind-mounts the
+# FILE, so the -wal sidecar lives in the container's writable layer. A host-side backup
+# therefore misses every commit since the last checkpoint unless the running container
+# folds them in first. Best effort — a stopped container has an empty WAL by definition.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'backend-portfolio-backend-1'; then
+    docker exec backend-portfolio-backend-1 python -c "import sqlite3; c = sqlite3.connect('/app/portfolio.db'); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint (busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" >>"$LOG" 2>&1 \
+        || log "WARN: WAL checkpoint in the container failed; this backup may lack the newest commits"
+fi
+
 "$PYTHON" - "$DB" "$DEST" <<'PY' >>"$LOG" 2>&1
 import sqlite3
 import sys
