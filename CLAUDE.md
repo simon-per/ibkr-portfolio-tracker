@@ -186,6 +186,7 @@ recomputes by hand is the one that is wrong. The known instances:
 | `isUnpriced` | "can the backend value this position?" was inline in `rebalance.ts` and `currencyExposure.ts` — identical, correct, each carrying its own copy of the reasoning — and `winRate` was about to make it three. Caught **while writing the third copy**, which is the only cheap moment to catch one. Note what makes it more than tidiness: the two existing copies had already needed correcting *together* on 2026-08-05, when the one-clause `market_price === null` form turned out to miss the FX case — so the drift had already happened once, in lockstep, by luck. Extracted to `positionValuation.ts`, with a family test that strips comments (the rule is *documented* in `api.ts`, deliberately) and fails naming any `lib/` module that tests the columns itself |
 | `formatMarketCap` | the same T/B/M formatter existed **byte-identically** in `FundamentalsTab.tsx` and `watchlistColumns.tsx` — so one defect had to be fixed twice, and its sub-million branch carried the worst instance of the locale bug in the app: a bare `toLocaleString()` renders a market cap of 850,000 as **"850.000"** under a German runtime, reading as eight hundred fifty *thousandths*. Extracted to `lib/utils.ts` beside `formatCount`, both pinned to `en-US` like every other formatter in that file. The call sites that had grown their own formatting inline were exactly the ones that were not pinned |
 | the native→base two-step | `trades` and `corporate_actions` store money in the trade's own currency with no `_eur` column, so they need native→EUR at the row's date *and then* EUR→base — and a single `BaseFx.convert()` is wrong twice over. Three copies: `ActivityService._to_base`, `PortfolioService._realized_from_trades`, and the cash balance was about to be the fourth. Two had already diverged in a way that mattered — the activity one memoized the rate, the realized one issued a query per call. Extracted to `native_amounts.NativeToBase`. Caught **while writing the fourth copy**, which is the only cheap moment |
+| the forecast formula | `ForecastTab.tsx` wrote the same `PV(1+r)^t + PMT·((1+r)^t−1)/r` out **four times** — the horizon table, the scenario cards, the sampled chart series and that series' hand-copied final point — each with its own NaN guard, and two of the four had already diverged: the table's "Total Contributions" was `PMT × months` while the chart band of the **same name** was `market value + PMT × months`. Neither was money in, and the chart's included every gain the book had ever made — which is what the owner noticed. Extracted to `lib/forecast.ts` on 2026-09-08; the family test is that a table horizon equals the series point at the same month |
 
 **The lens that finds them**, and which found the last four: walk the AST for function names defined in
 more than one module, ignore trivial bodies, and read each cluster. Router-to-service pairs and
@@ -3019,10 +3020,11 @@ case in `test_api_smoke.py` and `LookThroughTab.test.tsx`.
 
 ## Client-side analytics — risk, targets, currency
 
-Three pure `frontend/src/lib/` modules with no endpoint of their own: they compute from series and
+Four pure `frontend/src/lib/` modules with no endpoint of their own: they compute from series and
 positions the page has already fetched, which is why they add **no request and cannot reach Yahoo**.
 `portfolioKpis.ts` feeds the Performance tab's two card rows; `rebalance.ts` and
-`currencyExposure.ts` feed two panels on the Allocation tab.
+`currencyExposure.ts` feed two panels on the Allocation tab; `forecast.ts` is the Forecast tab's
+projection and the baseline it starts from.
 
 **One rule spans all three, and it was a real bug before it was a rule.** `undefined` data means
 *not loaded*; an empty array means *nothing held*. Collapsing them lets a panel build a confident
@@ -3182,9 +3184,40 @@ because the flag is a caveat rather than a figure.
 Unpriced positions are excluded and counted, as above, and `foreignQuotedPct` returns `null` rather
 than `0` when nothing is priced: no positions is an unknown exposure, not an unhedged-free one.
 
+### The forecast (`forecast.ts`)
+
+The Forecast tab's compound-growth projection, and the baseline it starts from. It was inline in
+`ForecastTab.tsx` until 2026-09-08, written out **four times** — the horizon table, the scenario
+cards, the sampled chart series and that series' hand-copied final point — and the tab had no tests
+at all. Two rules, each a wrong number on screen first:
+
+- **Money In starts at what was paid in, never at what the book is worth.** The chart's grey band
+  was seeded with `total_market_value_eur` and then grew by the monthly contribution, so it asserted
+  that every gain the portfolio had ever made was contributed and the gap to the green band showed
+  only *future* gains. The baseline is `windows['all'].money_in_eur` from
+  `/api/portfolio/contributions` — the app's one answer to "how much have I paid in", the figure the
+  ContributionsStrip and the value chart's Money In line both publish, already in Dashboard's query
+  cache so it costs no request. Never `total_cost_basis_eur`, which is *deployed* and counts a
+  rotation twice.
+- **`Portfolio Value = Money In + Investment Gains`**, on every row and every point, on the rounded
+  figures (`gains` is the rounded remainder — the `fund_residual_eur` rule). So "Investment Gains" is
+  every gain including those already made, and the year-0 gap between the bands is today's unrealised
+  profit. Before, the *table's* column of the same name was a different quantity from the chart
+  band's — `monthlyContribution × months` with no seed at all — and the three columns did not sum.
+
+Three consequences. **The seed is Total Value** (holdings + cash) whenever `cashIsTracked`, because
+money in counts a deposit the moment it lands whether or not it is invested yet, so measuring it
+against holdings alone understates today's gain by exactly the idle balance — and it makes the
+Current button agree with the hero card. **"Start from 0" zeroes both sides**: it is the from-scratch
+scenario, and carrying today's money in would report a negative gain of that size. **A baseline that
+could not be loaded is `null`, never 0**: the grey band is omitted, Money In and Gains read `—`, and a
+notice under the chart says so, while Portfolio Value — which never needed the baseline — is
+unaffected. Falling back to 0 or to the start value would redraw the very lie the module removes.
+The nominal/12 monthly rate and end-of-period annuity are unchanged and conventional.
+
 Tests: `src/lib/portfolioKpis.test.ts`, `src/lib/rebalance.test.ts`,
-`src/lib/currencyExposure.test.ts`, plus jsdom tests beside each component and three checks in
-`e2e/errors.mjs`.
+`src/lib/currencyExposure.test.ts`, `src/lib/forecast.test.ts`, plus jsdom tests beside each
+component and three checks in `e2e/errors.mjs`.
 
 ---
 
@@ -3348,7 +3381,7 @@ raiser for that whole module, so an accidental network reach fails loudly; `/api
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
 start real syncs. **Add a case here when an endpoint's response shape changes.**
 
-Tests (1427 backend + 532 frontend as of 2026-09-07, all offline — no IBKR, Yahoo or FX-provider
+Tests (1427 backend as of 2026-09-07 + 554 frontend as of 2026-09-08, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
@@ -3535,6 +3568,7 @@ Tests: `tests/test_currency_fallback.py`.
 | A log timestamp disagrees with a Berlin slot by 2h | Expected: `%(asctime)s` is the container's local time and the image sets no `TZ`, so logs are UTC while the schedule is Europe/Berlin |
 | A missed sync ran late after a restart | Expected: the persistent job store honours a misfire for 30 min. Older than that is dropped, and the next slot recovers |
 | A drift row reads `—` instead of advice | No target (unmanaged — blank is not 0%), or the position has no cached price so it has no weight to compare. Both deliberate; see *Client-side analytics* |
+| The Forecast tab's grey **Money In** band starts well below Portfolio Value at year 0 | Intended since 2026-09-08. It starts at what has been paid in — the ContributionsStrip's all-time figure — and the gap is the gain already made. It used to start at the market value, which claimed every gain was contributed. `—` in the table's Money In and Gains columns means the contributions endpoint failed; Portfolio Value is unaffected |
 | Drift says "no target could be compared" | Nothing had both a target and a weight. **Not** an all-clear — that wording exists because "0 outside the band" was one |
 | A drift or currency panel says it couldn't load positions | The positions query failed. The panel refuses to build a plan from absent data rather than reporting a portfolio of unheld rows |
 | Currency exposure looks wrong for an ETF | It is quote currency, not economic exposure, and deliberately not re-attributed — a EUR-listed S&P tracker is EUR-quoted with USD risk. The fund share is named on screen |

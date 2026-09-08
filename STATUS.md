@@ -1,7 +1,17 @@
 # Working state
 
-**Last updated: 2026-09-07 (evening).** Latest: **the benchmark line starts where the
-portfolio line does, on every range.** Both were absolute and inception-based, so on 3M the
+**Last updated: 2026-09-08.** Latest: **the Forecast tab's Money In starts at what was paid
+in, not at what the book is worth.** The grey "Total Contributions" band was seeded with the
+holdings' market value — every gain ever made, presented as contributed — while the table column
+of the same name carried no seed at all, so one name meant two numbers on one tab and the
+columns did not sum. Both are **Money In** now, read from the contributions endpoint's all-time
+figure; `Portfolio Value = Money In + Investment Gains` on every row and point; the seed is
+Total Value where cash is tracked; and a baseline that fails to load is refused rather than
+drawn as zero. The tab had no tests and has 22. Details in *Shipped 2026-09-08*. **Not yet seen
+in a browser** — Recharts draws nothing in jsdom, so the legend and bands want one look on prod.
+
+Before that (2026-09-07, evening): **the benchmark line starts where the portfolio line does,
+on every range.** Both were absolute and inception-based, so on 3M the
 benchmark's first point carried two years of relative performance while the portfolio's was its
 own value that day, and most of the visible gap was history the chart did not draw. The chart
 now asks for `anchor=window`: the hypothetical is seeded with the portfolio's Total Value on the
@@ -597,6 +607,39 @@ under *Sync schedule* / *The Flex Query*. This file carries only what is perisha
 - **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
   purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
   actually runs daily. See the section below for why it had not.
+
+## Shipped 2026-09-08 — the Forecast tab's Money In starts at what was paid in
+
+Asked as "the starting point shows the total portfolio value as the Total Contributions, but
+gains are already baked in — should it be revised?". Yes, and three more defects sat beside it in
+`ForecastTab.tsx`: the *table's* "Total Contributions" was a different quantity from the chart
+band's (monthly contribution × months, no seed at all), the three table columns did not partition,
+and the seed was `total_market_value_eur` — holdings only — so the Current button disagreed with
+the hero card's Total Value whenever cash was held. The formula was also written out four times.
+
+**What changed.** `lib/forecast.ts` is the one copy: `projectForecast`, `forecastSeries`,
+`forecastBaseline`. The baseline is `windows['all'].money_in_eur` from
+`/api/portfolio/contributions` — the query Dashboard already holds, so no new request — the seed
+is Total Value where cash is tracked, and `Portfolio Value = Money In + Investment Gains` holds
+on every row and point on the rounded figures. The grey band and the table column are both
+**Money In**; the year-0 gap is the gain already made, and a sentence under the chart says so. A
+baseline that failed to load is refused — no grey band, `—` in both columns, a notice — rather
+than drawn as zero. "Start from 0" zeroes both sides. The Current button now reports today's
+value whichever start is selected; it used to read "Current (CHF 0)" with 0 selected. The tab had
+**no tests**; it has 22 (`lib/forecast.test.ts`, `ForecastTab.test.tsx`). Frontend suite
+532 → 554; backend untouched and not re-run.
+
+**What to check on prod after the deploy.** Open the Forecast tab: the legend reads *Money In* /
+*Portfolio Value*; the grey band's first point equals the ContributionsStrip's all-time money-in
+figure on the Performance tab; the Current button equals the hero card's Total Value; each table
+row sums. Recharts renders nothing in jsdom, so the legend and the bands were **not seen in a
+browser before the deploy** — a throwaway Playwright run against the live URL (the 09-06 recipe
+under *Shipped 2026-09-06 (late)*) is the check, at 1280 and 390.
+
+**Not done, on purpose.** The nominal/12 monthly rate and end-of-period annuity are unchanged.
+No `unpriced_holdings` notice on the seed — the Performance tab's cards already carry one. The
+inline Y-axis tick code was not swapped for `lib/niceTicks.ts`, whose header already says it was
+extracted from this tab; that is a one-file follow-up.
 
 ## Shipped 2026-09-07 — the benchmark is anchored to the selected range
 
@@ -2861,6 +2904,16 @@ detail; this exists so the next session knows what just moved without reading it
 confirmed) and gets deleted once nothing in it is outstanding: these lines are permanent, so don't
 "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-08** — "the Forecast tab shows the total portfolio value as Total Contributions, but
+  gains are already baked in". The owner had it right, and reading the one component found three
+  more in the same place: the table column of the same name was a *different* number with no seed
+  at all, the seed was holdings-only so the Current button disagreed with the hero card, and the
+  formula was written out four times. Two lessons. **A legend entry is a claim about a quantity**,
+  and when a table column and a chart band share a name they have to share a function —
+  `lib/forecast.ts` is that function, and the family test is the table row equalling the series
+  point. And **the seed had to include cash for the arithmetic, not for taste**: money in counts a
+  deposit the moment it lands, so measuring it against holdings alone understates today's gain by
+  the idle balance — which settled a question that looked like a preference.
 - **2026-09-07 (evening)** — "make the benchmark line start at the same point as my portfolio
   line whenever I change the time range", with the trap already named in the request: a shift or
   a scale looks right and is wrong the moment a deposit lands inside the window. Two lessons.
@@ -2910,12 +2963,3 @@ confirmed) and gets deleted once nothing in it is outstanding: these lines are p
   guarantee, and its NAVs turned "pick a Yahoo ticker" into a check that refused a +49%
   wrong share class. And **an end-to-end run earns its cost even on green tests** — 1,367
   passing tests said nothing about a contributions window anchored on the wrong event.
-- **2026-08-26** — "I sold a lot of my portfolio for a restructuring and it shows a large dip —
-  include cash everywhere". Two lessons, both about measuring before building. **The complaint named
-  a symptom that was half false**: the chart's cliff was real and the "huge drawdown" was not — the
-  risk metrics already net the flow out and read +0.76% on the sale day — so checking the metric
-  before believing the word cut the scope roughly in half and kept XIRR and friends out of it. And
-  **the missing number was already derivable twice over**: the trade/deposit/dividend ledger and the
-  timeline's own `external_flow_eur` agreed to a tenth of a percent, which is what made a derived
-  balance shippable today instead of waiting on a portal edit. The third thing: running an e2e
-  script that had never been executed found an assertion that could not pass.
