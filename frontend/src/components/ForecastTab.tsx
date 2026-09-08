@@ -4,6 +4,7 @@ import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatCount } from '@/lib/utils'
+import { forecastBaseline, forecastSeries, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -23,10 +24,33 @@ function readNumber(key: string, fallback: number, min: number, max: number): nu
   return val
 }
 
-/** The projection table's four columns, described once for both renderings. */
-const projectionColumns = (
-  curSym: string
-): Column<{ year: number; futureValue: number; totalContributions: number; investmentGains: number }>[] => [
+interface ProjectionRow {
+  year: number
+  value: number
+  moneyIn: number | null
+  gains: number | null
+}
+
+/** The horizons the table reports — fixed, independent of the chart's slider. */
+const HORIZON_YEARS = [1, 5, 10, 15, 20]
+
+const SCENARIOS = [
+  { name: 'Conservative', rate: 5 },
+  { name: 'Moderate', rate: 8 },
+  { name: 'Aggressive', rate: 12 },
+]
+
+/**
+ * The projection table's four columns, described once for both renderings.
+ *
+ * "Money In" and "Investment Gains" partition "Portfolio Value" on every row — the
+ * baseline is what was paid in, not the market value, and `lib/forecast.ts` says why. The
+ * column used to be called "Total Contributions" and meant a *different* quantity from
+ * the chart band of the same name: neither included what had already been paid in, and
+ * the chart's included every gain ever made. Both render a dash rather than a figure when
+ * the baseline could not be loaded, because a 0 would claim nothing was ever paid in.
+ */
+const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
   {
     key: 'horizon',
     header: 'Time Horizon',
@@ -43,7 +67,7 @@ const projectionColumns = (
     mobile: 'value',
     tone: () => 'text-green-600 dark:text-green-400',
     cellClassName: 'font-semibold',
-    cell: (p) => `${curSym}${formatCount(p.futureValue)}`,
+    cell: (p) => `${curSym}${formatCount(p.value)}`,
   },
   {
     key: 'gains',
@@ -51,15 +75,25 @@ const projectionColumns = (
     shortHeader: 'Investment gains',
     align: 'right',
     mobile: 'delta',
-    tone: () => 'text-blue-600 dark:text-blue-400',
-    cell: (p) => `${curSym}${formatCount(p.investmentGains)}`,
+    // A book worth less than was paid in is a loss today, and a loss in blue reads as a gain.
+    tone: (p) =>
+      p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400',
+    hint: {
+      description:
+        'Portfolio Value minus Money In: the gain or loss already made today, plus what the projection adds.',
+    },
+    cell: (p) => (p.gains === null ? '—' : `${curSym}${formatCount(p.gains)}`),
   },
   {
-    key: 'contributions',
-    header: 'Total Contributions',
-    shortHeader: 'Total contributions',
+    key: 'moneyIn',
+    header: 'Money In',
+    shortHeader: 'Money in',
     align: 'right',
-    cell: (p) => `${curSym}${formatCount(p.totalContributions)}`,
+    hint: {
+      description:
+        'What you have paid in so far plus the monthly contributions projected to this horizon. Money moved between holdings does not count.',
+    },
+    cell: (p) => (p.moneyIn === null ? '—' : `${curSym}${formatCount(p.moneyIn)}`),
   },
 ]
 
@@ -92,10 +126,18 @@ export function ForecastTab() {
     localStorage.setItem(STORAGE_KEYS.forecastYears, forecastYears.toString())
   }, [forecastYears])
 
-  // Fetch current portfolio value
+  // Two reads, both under the keys Dashboard already fetches with, so neither costs a
+  // request once the Performance tab has loaded. The summary query used to carry no
+  // `staleTime` and refetched on every visit to this tab.
   const { data: summary, isError: summaryError } = useQuery({
     queryKey: ['portfolio', 'summary'],
     queryFn: () => api.getPortfolioSummary(),
+    staleTime: 30 * 60 * 1000,
+  })
+  const { data: contributions, isPending: contributionsPending } = useQuery({
+    queryKey: ['portfolio', 'contributions'],
+    queryFn: () => api.getContributions(),
+    staleTime: 30 * 60 * 1000,
   })
 
   // `summary?.total_market_value_eur || 0` on its own made a failed request
@@ -107,133 +149,42 @@ export function ForecastTab() {
   // The figure still falls back to 0 (there is nothing else to project from), but the
   // failure is now stated, and the Current button says so rather than advertising a
   // portfolio value of zero.
-  const currentValue = startFromZero ? 0 : (summary?.total_market_value_eur ?? 0)
+  //
+  // `current` is what the account is worth today whichever starting point is selected.
+  // The button used to print the *selected* seed, so choosing "0" relabelled it
+  // "Current (CHF 0)". The projection itself runs from `startValue` / `moneyInToDate`,
+  // which `forecastBaseline` resolves — Total Value where cash is tracked, and money in
+  // to date from the contributions endpoint, or `null` when that could not be loaded.
+  const current = forecastBaseline(summary, contributions, false)
+  const { startValue, moneyInToDate } = forecastBaseline(summary, contributions, startFromZero)
 
-  // Calculate projections
-  const projections = useMemo(() => {
-    const years = [1, 5, 10, 15, 20]
-    const monthlyRate = expectedReturn / 100 / 12
+  const inputs = useMemo(
+    () => ({ startValue, moneyInToDate, monthlyContribution, annualReturnPct: expectedReturn }),
+    [startValue, moneyInToDate, monthlyContribution, expectedReturn],
+  )
 
-    return years.map(year => {
-      const months = year * 12
+  // One formula for the three surfaces. It was written out four times in this file — the
+  // table, the scenarios, the sampled chart series and that series' hand-copied final
+  // point — so moving the baseline off market value would have been four edits, and the
+  // table and the chart had already drifted into publishing two different quantities
+  // under one name. `lib/forecast.ts` is the single copy.
+  const projections = useMemo(
+    () => HORIZON_YEARS.map((year) => ({ year, ...projectForecast(inputs, year * 12) })),
+    [inputs],
+  )
 
-      // Future Value = PV(1+r)^t + PMT × [(1+r)^t - 1] / r
-      const portfolioGrowth = currentValue * Math.pow(1 + monthlyRate, months)
-
-      // Handle division by zero when monthlyRate is 0
-      let contributionsGrowth = 0
-      if (monthlyRate === 0) {
-        contributionsGrowth = monthlyContribution * months
-      } else {
-        contributionsGrowth = monthlyContribution *
-          ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate)
-      }
-
-      const futureValue = portfolioGrowth + contributionsGrowth
-      const totalContributions = monthlyContribution * months
-      const investmentGains = futureValue - currentValue - totalContributions
-
-      // Guard against invalid numbers
-      const safeValue = (val: number) => (!isFinite(val) || isNaN(val)) ? 0 : val
-
-      return {
-        year,
-        futureValue: Math.round(safeValue(futureValue)),
-        totalContributions: Math.round(safeValue(totalContributions)),
-        investmentGains: Math.round(safeValue(investmentGains)),
-        portfolioGrowth: Math.round(safeValue(portfolioGrowth)),
-      }
-    })
-  }, [currentValue, monthlyContribution, expectedReturn])
-
-  // Scenario comparison
-  const scenarios = useMemo(() => {
-    const months = forecastYears * 12
-    const rates = [
-      { name: 'Conservative', rate: 5 },
-      { name: 'Moderate', rate: 8 },
-      { name: 'Aggressive', rate: 12 },
-    ]
-
-    return rates.map(({ name, rate }) => {
-      const monthlyRate = rate / 100 / 12
-      const portfolioGrowth = currentValue * Math.pow(1 + monthlyRate, months)
-
-      // Handle division by zero when monthlyRate is 0
-      let contributionsGrowth = 0
-      if (monthlyRate === 0) {
-        contributionsGrowth = monthlyContribution * months
-      } else {
-        contributionsGrowth = monthlyContribution *
-          ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate)
-      }
-
-      const futureValue = portfolioGrowth + contributionsGrowth
-      const safeValue = !isFinite(futureValue) || isNaN(futureValue) ? 0 : futureValue
-
-      return {
+  const scenarios = useMemo(
+    () =>
+      SCENARIOS.map(({ name, rate }) => ({
         name,
         rate,
-        value: Math.round(safeValue),
-      }
-    })
-  }, [currentValue, monthlyContribution, forecastYears])
+        value: projectForecast({ ...inputs, annualReturnPct: rate }, forecastYears * 12).value,
+      })),
+    [inputs, forecastYears],
+  )
 
-  // Monthly progression data for chart
-  const monthlyData = useMemo(() => {
-    const months = forecastYears * 12
-    const monthlyRate = expectedReturn / 100 / 12
-    const data = []
-
-    for (let month = 0; month <= months; month += 6) { // Every 6 months for cleaner chart
-      const portfolioGrowth = currentValue * Math.pow(1 + monthlyRate, month)
-
-      // Handle division by zero when monthlyRate is 0
-      let contributionsGrowth = 0
-      if (month > 0) {
-        if (monthlyRate === 0) {
-          contributionsGrowth = monthlyContribution * month
-        } else {
-          contributionsGrowth = monthlyContribution * ((Math.pow(1 + monthlyRate, month) - 1) / monthlyRate)
-        }
-      }
-
-      const futureValue = portfolioGrowth + contributionsGrowth
-      const totalContributions = currentValue + (monthlyContribution * month)
-
-      // Guard against invalid numbers
-      const safeValue = (val: number) => (!isFinite(val) || isNaN(val)) ? 0 : val
-
-      data.push({
-        month,
-        year: (month / 12).toFixed(1),
-        value: Math.round(safeValue(futureValue)),
-        contributions: Math.round(safeValue(totalContributions)),
-      })
-    }
-
-    // Ensure the final data point reaches the exact endpoint
-    if (data.length > 0 && data[data.length - 1].month !== months) {
-      const portfolioGrowth = currentValue * Math.pow(1 + monthlyRate, months)
-      let contributionsGrowth = 0
-      if (monthlyRate === 0) {
-        contributionsGrowth = monthlyContribution * months
-      } else {
-        contributionsGrowth = monthlyContribution * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate)
-      }
-      const futureValue = portfolioGrowth + contributionsGrowth
-      const totalContributions = currentValue + (monthlyContribution * months)
-      const safeValue = (val: number) => (!isFinite(val) || isNaN(val)) ? 0 : val
-      data.push({
-        month: months,
-        year: (months / 12).toFixed(1),
-        value: Math.round(safeValue(futureValue)),
-        contributions: Math.round(safeValue(totalContributions)),
-      })
-    }
-
-    return data
-  }, [currentValue, monthlyContribution, expectedReturn, forecastYears])
+  // Every 6 months for a cleaner chart; the exact horizon is always the last point.
+  const monthlyData = useMemo(() => forecastSeries(inputs, forecastYears * 12), [inputs, forecastYears])
 
   // Calculate dynamic Y-axis configuration — always produces ≤ 10 ticks
   const yAxisConfig = useMemo(() => {
@@ -357,7 +308,7 @@ export function ForecastTab() {
                       : 'bg-background hover:bg-accent hover:text-accent-foreground'
                   }`}
                 >
-                  Current ({summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(currentValue))}`})
+                  Current ({summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(current.startValue))}`})
                 </button>
                 <button
                   onClick={() => setStartFromZero(true)}
@@ -405,22 +356,30 @@ export function ForecastTab() {
                 formatter={(value: number | undefined) => value != null ? `${curSym}${formatCount(value)}` : '—'}
                 labelFormatter={(label) => `Year ${label}`}
               />
-              {/* This two-series stacked area had no legend at all, at any width — the
-                  grey band and the green band were unlabelled. Unreadable is not a
-                  mobile problem, but it is a problem. */}
+              {/* This two-series area had no legend at all, at any width — the grey band
+                  and the green band were unlabelled. Unreadable is not a mobile problem,
+                  but it is a problem. */}
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Area
-                type="monotone"
-                dataKey="contributions"
-                stackId="1"
-                stroke="#94a3b8"
-                fill="#94a3b8"
-                name="Total Contributions"
-              />
+              {/* Two independent bands, deliberately NOT stacked: green is the projected
+                  value and grey is the money paid in to reach it, so the gap between them
+                  is the gain. Stacking would draw value + money in. The two `stackId`s
+                  this used to carry were distinct, so nothing ever stacked — the rendering
+                  was right and the comment calling it "stacked" was wrong.
+
+                  The grey band is omitted, not drawn at zero, when the baseline could not
+                  be loaded; the sentence under the chart says so. */}
+              {moneyInToDate !== null && (
+                <Area
+                  type="monotone"
+                  dataKey="moneyIn"
+                  stroke="#94a3b8"
+                  fill="#94a3b8"
+                  name="Money In"
+                />
+              )}
               <Area
                 type="monotone"
                 dataKey="value"
-                stackId="2"
                 stroke="#22c55e"
                 fill="#22c55e"
                 name="Portfolio Value"
@@ -428,6 +387,31 @@ export function ForecastTab() {
             </AreaChart>
           </ResponsiveContainer>
           </div>
+          {/* Prose, not a tooltip: a caveat reachable only by hovering does not exist on a
+              phone. Which sentence depends on what the grey band is built from. Nothing is
+              said while the baseline is still loading — the refusal is for a load that
+              failed, and flashing it on every visit would teach the reader to skip it. */}
+          {startFromZero ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Starting from zero: <span className="font-medium text-foreground">Money In</span> is your
+              monthly contributions alone, so Investment Gains is only what the projection adds.
+            </p>
+          ) : moneyInToDate !== null ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Money In</span> starts at what you have paid
+              in so far ({curSym}{formatCount(Math.round(moneyInToDate))}) and grows by your monthly
+              contribution. The gap to <span className="font-medium text-foreground">Portfolio Value</span>{' '}
+              at year 0 is the gain or loss already made.
+            </p>
+          ) : contributionsPending ? null : (
+            <p
+              role="alert"
+              className="mt-3 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+            >
+              Money in to date isn't available, so Money In and Investment Gains aren't shown.
+              Portfolio Value is unaffected.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -435,7 +419,9 @@ export function ForecastTab() {
       <Card>
         <CardHeader>
           <CardTitle>Future Value Projections</CardTitle>
-          <CardDescription>Portfolio growth milestones</CardDescription>
+          <CardDescription>
+            Portfolio growth milestones. At every horizon, Portfolio Value is Money In plus Investment Gains.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <DataTable
