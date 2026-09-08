@@ -2647,13 +2647,13 @@ not say.
 
 ## Watch after the next deploy
 
-- **The deploy that ships the WAL fix still runs the OLD `deploy.sh`, so it cannot
-  checkpoint before its own `down`.** The WAL was checkpointed by hand right before the push
-  and no sync slot falls in the deploy window, so nothing should be lost; from the deploy
-  after that, `/root/auto-deploy.log` should show a `WAL checkpoint (busy, frames, done):`
-  line between the image build and `Stopping`. Also copy the repo's `ops/backup-db.sh` over
-  `/root/backup-db.sh` — auto-deploy and the daily cron prefer that copy, which predates
-  the checkpoint step.
+- **The WAL fix is live (`b6bbe6f`, 18:50 UTC) and its own deploy lost nothing** — the WAL
+  was checkpointed by hand right before the push and the newest `sync_runs` id was 378 on
+  both sides of the deploy. `/root/backup-db.sh` was refreshed from the repo at 18:52 UTC
+  (auto-deploy and the daily cron prefer that copy) and a manual backup logged
+  `WAL checkpoint (busy, frames, done): (0, 0, 0)` before its snapshot. Still to observe
+  once: the *next* deploy's `/root/auto-deploy.log` should carry the same line between the
+  image build and `Stopping` — the first deploy to run the new `deploy.sh` end to end.
 
 - **The dependency bump (2026-09-08) is a major Starlette jump: 0.35 → 1.6, with FastAPI
   0.109 → 0.141, pydantic 2.5 → 2.13, httpx 0.26 → 0.28, pytest-asyncio 0.23 → 1.4.** The
