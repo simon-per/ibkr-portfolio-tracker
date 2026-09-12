@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { getRatingScore } from '@/lib/analystRating'
 import { DataTable } from '@/components/ui/DataTable'
 import { watchlistColumns, type WatchlistSortColumn } from './watchlistColumns'
 import type { WatchlistItem } from '@/lib/api'
@@ -97,6 +98,14 @@ export function WatchlistTab() {
       if (aVal === null && bVal === null) return 0
       if (aVal === null) return 1
       if (bVal === null) return -1
+      // A rating is an enum, not a word: `localeCompare` ranked `strong_sell` above
+      // `strong_buy` because "se" sorts after "bu", so descending led with the worst.
+      // Scored on the shared conviction scale instead, so descending means strongest
+      // first — the order the positions table gives the same ratings.
+      if (sortColumn === 'analyst_rating') {
+        const diff = getRatingScore(aVal as string) - getRatingScore(bVal as string)
+        return sortDirection === 'asc' ? diff : -diff
+      }
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortDirection === 'asc'
           ? aVal.localeCompare(bVal)

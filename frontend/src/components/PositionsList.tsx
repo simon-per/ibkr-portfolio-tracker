@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
 import { formatPercent } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
+import { getRatingScore } from '@/lib/analystRating'
 import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
 import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -53,24 +54,8 @@ const getRatingBadgeColor = (consensus: string): string => {
   }
 }
 
-// Convert rating consensus to numeric score for sorting (lower is better)
-const getRatingScore = (consensus: string | undefined): number => {
-  if (!consensus) return 999 // No rating goes to the bottom
-  switch (consensus.toLowerCase()) {
-    case 'strong buy':
-      return 1
-    case 'buy':
-      return 2
-    case 'hold':
-      return 3
-    case 'sell':
-      return 4
-    case 'strong sell':
-      return 5
-    default:
-      return 999
-  }
-}
+// The rating sort score lives in `lib/analystRating.ts`, shared with the watchlist — the
+// two tables ranked the same ratings by different rules until 2026-09-12.
 
 const exchangeOf = (p: Position) => p.exchange || 'N/A'
 
@@ -417,8 +402,8 @@ export function PositionsList({
           // A sentinel below every real yield, so descending — the default, and the
           // direction someone clicking this column wants — puts the 17 rows with no rate
           // beneath the 19 that have one. Ascending puts them first, which is the same
-          // trade-off the `rating` column makes with its 999 and is honest enough here:
-          // a holding that distributes nothing really is at the bottom of this ranking.
+          // trade-off `getRatingScore` makes for the `rating` column and is honest enough
+          // here: a holding that distributes nothing really is at the bottom of this ranking.
           aValue = yieldOnCost.get(a.security_id) ?? -1
           bValue = yieldOnCost.get(b.security_id) ?? -1
           break
