@@ -725,15 +725,13 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
     or `BadResponseError`, compare the request against `ibflex.client.submit_request`'s
     (`params={"v": "3", "t", "q"}`, `user-agent: Java`) — the GET is meant to be identical —
     and do **not** retry by hand; the 00:00 slot is the recovery.
-  - `POST /api/dividends/sync` twice inside five minutes: the second answers 429 with
-    `Retry-After`. **Needs the admin key**, so only the owner can run it.
   - The 13:00 Berlin `market_data_only` run's `details.benchmark_result` carries
     `benchmarks_total` and `rate_limited: false`; the 18:00 `full_sync`'s `lookthrough_result`
     shows the CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
-  - **The finpension upsert is verified by test only.** The live check is the next monthly
-    `import_finpension_csv` run: it must succeed even if `CH0117044948`'s NAV date now carries a
-    `yahoo_finance` row, and the shrink guard's message now says "the previous import … had N"
-    rather than quoting the stored count.
+  - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) and
+    the finpension price upsert are **closed by the owner on 2026-09-12**: dividends update as
+    expected, and the upsert is covered by test and will simply be exercised by the next routine
+    monthly upload. Nothing to check.
   - Frontend, in a browser: on a range starting before inception (none of the buttons reach it
     on this account today — the general case is younger accounts and backfills), Max/Current
     Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the value chart shows
