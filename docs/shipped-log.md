@@ -162,9 +162,14 @@ drew their per-share history from yfinance — MRVL and MU included, whose IBKR 
 `gross_estimate_eur` equals the total; a `DELETE` with a non-ASCII `X-API-Key` answers 401; the
 current-year tax report answers 200. The forward-yield figure moved 322.80 → 320.92 EUR across the
 deploy, −0.6% — pre-ownership estimate rows now enter the size median for securities that used to
-prefer `net`, plus the FX refresh between reads; recorded in `docs/dividends.md`. Still unverified:
-the dividends cooldown's 429 (needs the admin key), `benchmarks_total` on the next
-`market_data_only` run (13:00 Berlin), and the finpension upsert on the next monthly upload.
+prefer `net`, plus the FX refresh between reads; recorded in `docs/dividends.md`. The dividends
+cooldown was closed by the owner (dividends update as expected). **The finpension importer was
+rehearsed against a copy of production the same day**: the 09:40 UTC auto-deploy snapshot plus
+the real 09-06 export — dry run, a real re-import with the guard baseline read from production's
+own `sync_runs` row, the forced Yahoo-bar collision on the World fund's NAV date (re-import
+succeeds, the Yahoo row survives), and the guard's refusal when the previous run is made to claim
+6 rows. Ledger counts identical before and after; snapshot deleted. Still unverified:
+`benchmarks_total` on the next `market_data_only` run (13:00 Berlin).
 
 ## Shipped 2026-09-08 (late) — the audit batch: self-refreshing baskets, no benchmark cache, build-before-down, current deps
 

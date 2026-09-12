@@ -728,10 +728,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   - The 13:00 Berlin `market_data_only` run's `details.benchmark_result` carries
     `benchmarks_total` and `rate_limited: false`; the 18:00 `full_sync`'s `lookthrough_result`
     shows the CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
-  - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) and
-    the finpension price upsert are **closed by the owner on 2026-09-12**: dividends update as
-    expected, and the upsert is covered by test and will simply be exercised by the next routine
-    monthly upload. Nothing to check.
+  - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) is
+    **closed by the owner on 2026-09-12**: dividends update as expected.
+  - **The finpension importer is rehearsed on a copy of production, 2026-09-12 12:00 Berlin.**
+    Against the 09:40 UTC auto-deploy snapshot and the real 09-06 export: dry run parses 5 rows;
+    a real re-import succeeds with the guard's baseline read from production's own `sync_runs`
+    row (`rows: 5`), 2 trades / 3 deposits / 2 lots / 35 price rows (the World fund is
+    Yahoo-priced, so only the EM fund is carried); with the World fund's 09-01 row forced to a
+    `yahoo_finance` bar the re-import still succeeds and the Yahoo row survives untouched — the
+    exact IntegrityError shape, gone; a `sync_runs` row pretending the previous import parsed 6
+    rows makes the 5-row file refuse with "had 6", and `--force` still applies. Snapshot deleted
+    afterwards. The next routine monthly upload needs nothing special; do it before the carried
+    NAV runs out (last NAV 2026-09-01, the day-40 warning fires ~10-11).
   - Frontend, in a browser: on a range starting before inception (none of the buttons reach it
     on this account today — the general case is younger accounts and backfills), Max/Current
     Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the value chart shows
