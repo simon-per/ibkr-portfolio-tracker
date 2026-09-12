@@ -5,7 +5,29 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-08 (night).** Latest: **the look-through keeps itself current, the
+**Last updated: 2026-09-12.** Latest: **a bug sweep with three parallel read-only hunts
+(backend valuation, frontend, sync/ops) found 31 verified defects; 24 shipped, the rest are
+recorded below rather than fixed.** Production was healthy throughout and every sum identity
+the public API exposes held — the defects were in the paths today's data does not exercise
+and in the codebase's own conventions. The ones that were live: the timeline stamped
+`cash_source: ibkr` on its tail while the summary said `mixed`, so the chart dropped its caveat
+(fixed: the label is the service's verdict); the dividend forecast labelled yfinance gross
+estimates `net` (fixed: `net` only from IBKR rows — expect `forward_yield.basis` to move
+toward `gross_estimate`); the dividend fetch and the benchmark warm-up recorded a Yahoo 429
+as `status: success` with no warning and were never passed to `_collect_warnings`; the
+scheduled CINS/SEDOL identity pass ran unbounded against its own docstring; `POST
+/api/dividends/sync` had no cooldown; the Alpha Vantage fallback fired on a rate limit; a
+non-ASCII `X-API-Key` was a 500; the tax router froze its year ceiling at process start; and
+the finpension re-import would have crashed on a Yahoo bar within about two uploads. Frontend:
+drawdowns and the Dashboard's period percentages read `0` on a pre-inception range, the chart
+tooltip printed `0.00` for a missing benchmark point, the look-through never rendered
+`unvaluable_positions`, and eight smaller ones. Details in *Shipped 2026-09-12* in
+`docs/shipped-log.md`; what to watch is in *Watch after the next deploy*. **Two owner decisions
+from the session are now rules**: FX drifts under 0.3% are accepted, not bugs (closes the old
+*Worth doing next* item 0 — see *Known rough edges*); and the auto-deploy rollback's inability
+to undo a migration-bearing deploy is deferred to *Needs a human*.
+
+Before that (2026-09-08, night): **the look-through keeps itself current, the
 benchmark cache is gone, a deploy no longer takes the site down for the build, and the
 backend's January-2024 dependency pins are current.** An audit found seven stale-basket
 warnings on every market-data run for two weeks, `starlette 0.35` with 14 advisories behind a
@@ -207,6 +229,20 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 ---
 
 ## Needs a human
+
+- **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
+  owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
+  "$LOCAL"` and re-runs `deploy.sh`; it never restores the snapshot `backup-db.sh` just took
+  (its path only goes to the log). A failed deploy that had already run `alembic upgrade head`
+  leaves `alembic_version` at a revision the reverted tree no longer has, the container's
+  `alembic upgrade head && uvicorn` short-circuits, `restart: unless-stopped` crash-loops, and
+  the script logs `CRITICAL: rollback also failed` — on exactly the class of deploy the rollback
+  exists for. The fix: `backup-db.sh` prints `$DEST` on stdout, auto-deploy captures it, and the
+  rollback branch restores it over `backend/portfolio.db` after `reset --hard` and before
+  `deploy.sh`; rehearse in `tests/test_deploy_rollback.py`; then refresh `/root/backup-db.sh`
+  and `/root/auto-deploy.sh` on the VPS by **atomic rename** (see the deploy-guard entry under
+  *Watching* for why not `install`). Until then, treat any `CRITICAL: rollback also failed` as
+  "restore the newest `/root/ibkr-backups/<date>/` snapshot by hand, then redeploy".
 
 - **Re-upload the finpension export periodically — roughly monthly.** Only
   `CH1529078078` depends on it now; `CH0117044948` prices from Yahoo. A market-data sync
@@ -617,6 +653,28 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
+- **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** This closes what used to
+  be *Worth doing next* item 0: a security quoted in the base currency is valued through
+  native→EUR→base with two independently rounded ECB quotes, ~0.12% high (`3.615 × 121.201101`
+  served as 438.65 against 438.14), at the five valuation sites the timeline-equivalence test
+  pins. The same round trip sits in the tax report's SELL-trade conversion (`tax_service`
+  `_to_eur` + `base_fx.convert` where the summary uses `NativeToBase`), and `BaseFx`'s rate
+  cache starts at the first tax lot rather than the first cash event (a pre-lot deposit uses a
+  rate up to a week off). **None of the three is a task**; do not re-open them for anything
+  under that threshold. If a figure ever drifts *past* 0.3%, the fix is the `NativeToBase`
+  short-circuit applied at the valuation sites, and `test_timeline_equivalence.py` is the net.
+- **The realized-P&L headline switches source all-or-nothing, unscoped by account** — found
+  2026-09-12, dormant. `_realized_from_trades` uses `trades` for the whole book the moment
+  *any* SELL exists there (the 3a importer writes them too), so closed lots of an account
+  without `<Trades>` coverage would drop out. Today every IBKR sale is in `trades` (the
+  holdings arrived in kind and were sold at IBKR), so nothing is wrong; `tax_service` already
+  picks per account and per year, and the fix is to do the same here — a modelling change,
+  not a one-liner.
+- **A pillar-3a `LIQUIDATION` closes lots but books no realized P&L and no trade** — found
+  2026-09-12, dormant (both 3a funds are accumulating). `finpension_ingest` computes the
+  realized figure and discards it, writing an `INCOME` cash flow. Not fixed because adding a
+  SELL trade beside the flow would double the Balance-oracle replay; the right shape needs a
+  decision about how a liquidation moves cash. It becomes real on the first fund switch.
 - **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
   far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
   shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
@@ -649,6 +707,31 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
 ## Watch after the next deploy
+
+- **The 2026-09-12 bug sweep, on production.** Cheap checks, all against the public API:
+  - `GET /api/portfolio/value-over-time` tail points read `cash_source: "mixed"`, the same
+    word `/api/portfolio/summary` uses — and the value chart shows the "partly IBKR's own
+    figure" caveat it was dropping.
+  - `GET /api/dividends/breakdown`: SK Hynix (`000660.KS`) reads `forecast_basis:
+    gross_estimate`, and `forward_yield.basis` has moved from `mixed` toward `gross_estimate`
+    (most payers' per-share history is yfinance's; only MRVL/MU-shaped rows stay `net`). The
+    forward yield *figure* does not change — only its label was wrong.
+  - `POST /api/dividends/sync` twice inside five minutes: the second answers 429 with
+    `Retry-After`.
+  - A mutating request with a non-ASCII `X-API-Key` answers 401, not 500, and the container
+    log shows no traceback for it.
+  - The next `market_data_only` run's `details.benchmark_result` carries `benchmarks_total`
+    and `rate_limited: false`; the next 18:00 `full_sync`'s `lookthrough_result` shows the
+    CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
+  - **The finpension upsert is verified by test only.** The live check is the next monthly
+    `import_finpension_csv` run: it must succeed even if `CH0117044948`'s NAV date now carries a
+    `yahoo_finance` row, and the shrink guard's message now says "the previous import … had N"
+    rather than quoting the stored count.
+  - Frontend: on a range starting before inception (none of the buttons reach it on this
+    account today — the general case is younger accounts and backfills), Max/Current Drawdown
+    and the hero `DeltaChip` show *unmeasurable* rather than `0`; the Look-through tab shows an
+    alert naming any unvaluable position above its KPIs; the watchlist's Analyst sort puts
+    `strong_buy` first descending; EPS figures carry no `$`.
 
 - **The WAL fix is live (`b6bbe6f`, 18:50 UTC) and its own deploy lost nothing** — the WAL
   was checkpointed by hand right before the push and the newest `sync_runs` id was 378 on
@@ -726,35 +809,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
    VPS, which is a *copy* of the repo script and does not update itself (auto-deploy prefers
    it when present). Checkpoint by hand before the `mv`. Do it with the owner present.
 
-0. **A security quoted in the base currency is valued ~0.12% high — found 2026-09-06,
-   pre-existing, and previously unreachable.** `get_positions_breakdown` and the
-   valuation walk convert a price **native → EUR → base**, and the two stored rates are
-   not inverses: they are independently rounded ECB quotes, often from different dates.
-   Measured live: `CHF→EUR 1.06450` (2026-09-01) × `EUR→CHF 0.94050` (2026-09-04) =
-   **1.0011622**, so `3.615 × 121.201101 = 438.14198` was served as **438.65**.
-
-   **This is exactly the defect `NativeToBase.convert` already short-circuits for** —
-   "12,501.58 CHF came back as 12,502.03" is the same arithmetic — but the *price* path
-   has no such clause, so the rule exists in the codebase and is not applied here.
-
-   It surfaced only now because until today **no held security was quoted in the base
-   currency**: the book is 26 USD, 2 EUR, 2 KRW, 1 CAD, 1 TWD under a CHF base. The two
-   Swisscanto funds are the first CHF ones.
-
-   **Do not read it as a 2 CHF problem.** `base_currency` is user-switchable from the
-   UI, and switching it to USD makes all 26 USD holdings hit the same round trip — 0.12%
-   of nearly the whole portfolio rather than of 2.4% of it. The visible symptom today is
-   a fund bought five days ago at its only recorded NAV reporting **+0.12%** unrealized
-   gain, which is the plausible-wrong-number shape rather than an obvious one.
-
-   The fix is the short-circuit `NativeToBase` already has — when the price currency
-   equals the base, skip EUR entirely — applied at the five valuation sites
-   (`_calculate_daily_value`, `_calculate_timeline_swept`, `get_positions_breakdown`,
-   `holdings_snapshot_as_of`, `get_performance_attribution`). The first two are pinned
-   byte-for-byte by `test_timeline_equivalence.py`, which is a safety net here rather
-   than an obstacle. Deliberately **not** done in the session that found it: it changes
-   the core valuation arithmetic for every holding, and bolting that onto the end of a
-   deploy is how a plausible wrong number gets introduced rather than removed.
+0. **Stamp the attempt when Yahoo has no analyst rating or no fundamentals for a security**
+   — found 2026-09-12, medium-low. `AnalystRatingService.sync_stale_ratings` and the
+   fundamentals sibling write nothing when Yahoo answers "no data", so every ETF in the book
+   is "missing a rating" forever and re-queued on every `sync-stale` pass: a real Yahoo
+   request plus the 2–4 s pacing each, for an answer already known. Only the explicit routes
+   reach it (no scheduled caller, no frontend auto-trigger), so it costs budget only when
+   someone clicks — which is why it was left out of the sweep's fix list. The pattern is
+   `AllocationService`'s `allocation_last_updated` stamp on the *attempt*
+   (`allocation_service.py`, "leaving it null on failure meant a security Yahoo has no
+   `.info` for was re-fetched on every sync forever"): write a row with zero counts and
+   `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
 
 0. **Decompose the World ex CH tranche from the fund that tracks its actual index.** It is
    ~1.9% of the book sitting in `uncovered_fund`, and the donor exists: **iShares World ex
@@ -995,6 +1060,22 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-12** — "let's look for bugs or things that look wrong or not work properly and
+  try to fix it." Three read-only hunts in parallel (backend valuation, frontend, sync/ops),
+  each finding verified by reading the code and, where the public API allowed, against
+  production, before it went into the plan: 31 defects, 24 shipped in small commits with a
+  test each, seven recorded here instead or dropped. Three lessons. **Production being healthy proves
+  only that today's data is kind**: every sum identity held and every warning was legitimate,
+  and the bugs were all in the paths the data did not exercise — a range before inception,
+  a second account older than the Flex claim, a Yahoo bar landing on a NAV date, a 429 in the
+  one loop that reported nothing. **The silent shape is the default one**: a dict without a
+  `warnings` key looks finished, so the rule became "a step that can stop early says so on
+  its own result, and a job passes *every* step result to `_collect_warnings`". And **a
+  fix that contradicts a rule the codebase already pinned is not a fix** — recording a
+  sync run for an unparseable Flex file would have reversed the finpension CLI's own test
+  ("a file we never read is not a database event"), so it was dropped. Also: two files
+  carried two concerns each, and staging them in two steps kept every intermediate commit
+  self-consistent, which is what makes a small commit revertable.
 - **2026-09-08 (night)** — "please look for issues and let's brainstorm", then "push it then".
   A read-only audit with the codebase's own lenses (duplicate-name AST walk, stand-in values,
   production reads, dependency advisories) found more in the operational layer than in the
@@ -1053,17 +1134,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   can disagree with a transfer misbooked as a deposit — which is this feature's worst failure.
   It lives in the tooltip now. Also worth saying plainly: none of this is a *savings* rate, since
   the app has no income data.
-
-- **2026-09-06 (late)** — "there are also issues with the monthly deployment logic, since sold
-  and redeployed is double counted", with two screenshots. The report named a bug that did not
-  exist and pointed at a real one: `deployed_eur` counts a rotation twice **on purpose**, and
-  CLAUDE.md forbids netting it — but the chart drew that series **alone**, so the only number on
-  a card about contributions was one nobody should read as a contribution. Saying so in one
-  sentence and then asking what the bars should be was worth more than either agreeing or
-  arguing. Three lessons. **The fix for a misleading figure is often a missing one**, not a
-  changed one: `money_in_legs` already existed and two other surfaces already drew it. **An
-  omission is invisible to every assertion over values** — the second bug, months keyed on lot
-  activity so a deposit-only month had no row, could only be caught by a *sum* identity, which
-  is why one shipped with it. And **the production snapshot is what made it real**: September
-  read 3,639 deployed against 0.00 in, a headline for a month nothing was paid into, and no
-  fixture would have produced that shape.

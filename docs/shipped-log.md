@@ -31,6 +31,104 @@ The durable half of these findings is in **CLAUDE.md**, not here: the once-per-d
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
+## Shipped 2026-09-12 — the bug sweep: 24 defects from three parallel hunts
+
+Asked as "let's look for bugs or things that look wrong or not work properly and try to fix
+it." Baselines first (backend 1448/1448, frontend 555/555, tsc clean, production healthy on
+`a3cdee2`, every sum identity the public API exposes holding), then three read-only Explore
+hunts in parallel — backend valuation, frontend, sync/scheduler/ops — with every finding
+verified by reading the code and, where the API allowed, against production before it entered
+the plan. 31 verified; 24 shipped in small commits with a test each; the other seven are in
+STATUS.md (*Needs a human*: the rollback; *Known rough edges*: the accepted FX drifts, the
+realized-P&L source switch, the 3a liquidation; *Worth doing next*: stamping a "no rating"
+attempt) or dropped (recording a sync run for an unparseable Flex XML, which would have
+contradicted the finpension CLI's own pinned rule that a file never read is not a database
+event). Owner decisions taken in the session: fix everything in the six groups; **FX drifts
+under 0.3% are accepted**; the rollback fix waits for a session with the owner present.
+
+**Backend, in commit order.**
+
+- **Every Yahoo step reports an abandoned pass** (`5513f05`). `sync_dividend_data` and
+  `sync_benchmark_prices` both latched a 429 and broke correctly, then returned dicts with no
+  `rate_limited` and no `warnings`, and neither `div_result` nor `bench_result` was passed to
+  `_collect_warnings` — a pass Yahoo killed at 5 of 40 was `status: success`, indistinguishable
+  from a complete one, and `securities_processed` counted everything not skipped. Both carry
+  the flag and the standard warning now; the warm-up reports `benchmarks_total`;
+  `sync_dividends()` hoists its two children's warnings, which is also how
+  `compute_dividend_income`'s FX-skipped line first reached a reader.
+- **`POST /api/dividends/sync` has the 300 s cooldown** every other bulk Yahoo route got in
+  July (`a482b87`): the module flag fenced only overlapping runs, so a poller ran full passes
+  back to back.
+- **No Alpha Vantage fallback when Yahoo rate-limited us** (`a667bb0`): a 429 came back as the
+  same empty list as an unknown ticker, spending a free-tier call and rewriting `source`.
+- **The scheduled CINS/SEDOL identity pass is bounded** (`91f5b0a`): it does not cache a miss,
+  which its docstring accepted "only as a manual CLI step"; the evening refresh had called it
+  unbounded since 2026-09-08.
+- **The finpension importer** (`6d9d2f5`): price rows insert with `ON CONFLICT DO NOTHING` —
+  the Yahoo-pinned fund's provisional re-fetch rewrites a statement row's `source`, and the next
+  upload's bare `db.add` on that date was an `IntegrityError` about two uploads away; and the
+  shrink guard compares the file's row count with what the previous run **parsed** (read back
+  from its `sync_runs` row), not with what it stored, since an FX-skipped row is parsed and never
+  stored. `SYNC_TYPE` moved into the service.
+- **The tax router's year ceiling is resolved per request** (`9415da1`): it was
+  `date.today().year` at import, so 1 January answered 422 for the new year until a restart.
+- **Credentials compare as bytes** (`0b6dd14`): Starlette decodes headers latin-1, and
+  `compare_digest` raises on a non-ASCII `str`, so a malformed `X-API-Key` was a 500.
+- **A forecast basis is `net` only from IBKR rows** (`3376533`, follow-up `a85aee5`): a
+  yfinance estimate with shares held has `net == gross`, so its per-share figure is gross, and
+  it was stamped `net`. Verified live before the fix: SK Hynix `forecast_basis: net` with zero
+  IBKR payouts. The first cut dropped the estimate's EUR-derived per-share figure altogether,
+  which the full suite caught (`test_dividend_estimate_purge`: a CAD payer with no rate in the
+  FX dict sized nothing); the follow-up keeps the figure and moves only the label.
+- **The timeline's measured-era `cash_source` is `CashService.cash_source()`'s verdict**
+  (`6a8df32`): a literal `ibkr` sat on 14 tail points while the summary said `mixed`, and the
+  chart — which reads the last point — dropped its caveat.
+- **The contributions clamp reads the IBKR ledger only** (`ef9cbe6`): `coverage_from` is a Flex
+  claim, and comparing it with any account's earliest row let a 3a row older than the claim
+  disable the clamp silently. An AST test pins the `account=IBKR` keyword.
+
+**Frontend** (one general-purpose agent on the twelve items, its diff reviewed and one defect
+fixed before committing; the gates: tsc clean, 46 files / 607 tests from 555, ESLint one error
+*fewer*, build fine).
+
+- **Drawdowns and the header's period change refuse a zero-valued start.** The backend emits a
+  point for every weekday in the window, including the days before the first lot, and those are
+  *measurable* zeros — so `maxDrawdownPct`/`drawdownDetail` seeded from `series[0]` stayed at
+  zero and printed "Never below its opening value" over a real fall (the second route to the
+  08-17 bug), while Dashboard's memo published `(+0.00%)` for two undefined percentages.
+  `firstValuedPoint` seeds the walk; `periodChange` is the memo extracted into `portfolioKpis.ts`
+  with both percentages `number | null`. The review found the agent's version applied the
+  inception pair's own return to a seed that already contained it (a −2% phantom opening dip for
+  a lot bought at 100 that closed at 99, invisible to its fixture where the first close equalled
+  cost); `returnsAfter` drops returns dated at or before the seed. Verified live before the fix:
+  105 zero-value measurable points before 2024-05-28.
+- **The value chart's tooltip drops a missing benchmark point** instead of formatting `null` as
+  `0.00` (`tooltipValue`); sync timestamps go through `formatShortDateTime` (`en-US`), the last
+  three unpinned locale calls.
+- **The Look-through tab renders `unvaluable_positions`** as an always-visible alert above its
+  KPIs, naming the symbols; it was rendered nowhere while the backend schema docstring said it
+  was. The itemised staleness notes stay in the collapsed card (owner decision, 09-08).
+- **The monthly-returns heatmap badges a range-truncated period.** On 1Y, last year's "YTD" was
+  Sep 12–Dec 31 with no dagger: `partial` came only from the unpriced-day trim.
+  `computeModifiedDietzReturn` takes `PeriodBounds` and reports `shortenedBy {unpriced, range}`
+  so the footnote can name the cause; compared on the *range's* start rather than the window's
+  first point, or every YTD whose 1 January fell on a weekend would badge January.
+- **One rating scale for both tables** (`lib/analystRating.ts`): the watchlist `localeCompare`d
+  `strong_sell` above `strong_buy`, and PositionsList scored the display spelling in a switch of
+  its own. A family test sorts one fixture through both real tables. Behaviour change to know
+  about: PositionsList's descending Analyst sort now leads with Strong Buy and puts unrated last
+  (it led with unrated and Strong Sell).
+- **EPS figures lose their hardcoded `$`**; activity rows without an `ib_key` key on
+  kind-date-symbol-index rather than colliding; the allocation drill-down no longer closes itself
+  on Dashboard's 60-second re-render (`mergeAllocation` memoised); `localStorage` sits behind one
+  guarded `readStored`/`writeStored` at eight sites (a source scan pins it); benchmark colours
+  are assigned by the benchmark's position in the full `/benchmarks` list rather than in the
+  selection, so deselecting one no longer recolours the rest.
+
+Verified offline: the full backend suite green at the new count (1467 from 1448) and the
+frontend gates above, each fix with a failing-first test. What to look at on production is in
+STATUS.md's *Watch after the next deploy*.
+
 ## Shipped 2026-09-08 (late) — the audit batch: self-refreshing baskets, no benchmark cache, build-before-down, current deps
 
 Asked as "look for issues and let's brainstorm", then "push it then and let's call it a day for
