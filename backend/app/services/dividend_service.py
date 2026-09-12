@@ -147,6 +147,10 @@ class DividendService:
         errors = 0
         skipped = 0
         pre_ownership_skipped = 0
+        # Securities this pass actually asked Yahoo about. `len(securities) - skipped`
+        # was reported instead, which on a pass abandoned at 5 of 40 claimed 40 — a
+        # partial import indistinguishable from a complete one.
+        processed = 0
 
         pending_ids = [s.id for s in securities]
 
@@ -168,6 +172,7 @@ class DividendService:
                     continue
 
                 yahoo_ticker = await self._get_yahoo_ticker(security)
+                processed += 1
                 logger.info(f"[{i}/{len(pending_ids)}] Fetching dividends for {security.symbol} ({yahoo_ticker})")
 
                 # Rate limit before API call
@@ -225,16 +230,28 @@ class DividendService:
 
         logger.info(
             f"Dividend sync complete: added={dividends_added}, skipped={skipped}, "
-            f"pre_ownership_skipped={pre_ownership_skipped}, errors={errors}"
+            f"pre_ownership_skipped={pre_ownership_skipped}, errors={errors}, "
+            f"rate_limited={self.rate_limited}"
         )
-        return {
-            'securities_processed': len(securities) - skipped,
+        result = {
+            'securities_processed': processed,
             'dividends_added': dividends_added,
             'skipped': skipped,
             'pre_ownership_skipped': pre_ownership_skipped,
             'errors': errors,
-            'message': f'Synced dividends: {dividends_added} records from {len(securities) - skipped} securities',
+            'rate_limited': self.rate_limited,
+            'message': f'Synced dividends: {dividends_added} records from {processed} securities',
         }
+        if self.rate_limited:
+            # The same sentence the fundamentals, ratings and watchlist passes emit, so
+            # the scheduler's `warnings[]` says why the run stopped early instead of the
+            # run merely looking complete — this was the one Yahoo loop that latched
+            # the flag and then reported nothing.
+            result['warnings'] = [
+                'Yahoo Finance rate limit reached; the rest of this pass was abandoned. '
+                'Do not retry manually — the next scheduled run resumes where it stopped.'
+            ]
+        return result
 
     async def compute_dividend_income(self) -> Dict:
         """Compute shares held and EUR amounts for all uncomputed dividend payments."""

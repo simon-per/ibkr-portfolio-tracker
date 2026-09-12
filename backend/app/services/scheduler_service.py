@@ -1009,7 +1009,10 @@ class SchedulerService:
 
                 if not existing_tickers:
                     logger.info("No benchmarks in DB to refresh")
-                    return {"status": "success", "benchmarks_synced": 0}
+                    return {
+                        "status": "success", "benchmarks_synced": 0,
+                        "benchmarks_total": 0, "rate_limited": False,
+                    }
 
                 # Map tickers back to benchmark info for currency
                 ticker_to_benchmark = {
@@ -1020,6 +1023,7 @@ class SchedulerService:
                 today = date.today()
                 start = today - timedelta(days=7)
                 synced = 0
+                rate_limited = False
 
                 for ticker in existing_tickers:
                     bench_info = ticker_to_benchmark.get(ticker)
@@ -1045,6 +1049,7 @@ class SchedulerService:
                         # limit. A benchmark this pass skipped keeps its cached prices
                         # and the next slot refreshes it.
                         if is_rate_limit(e):
+                            rate_limited = True
                             logger.warning(
                                 f"Yahoo rate limit on benchmark {ticker}; "
                                 f"abandoning the rest of the warm-up"
@@ -1054,7 +1059,24 @@ class SchedulerService:
 
                 await db.commit()
                 logger.info(f"Benchmark price sync completed: {synced} benchmarks refreshed")
-                return {"status": "success", "benchmarks_synced": synced}
+                result = {
+                    "status": "success",
+                    "benchmarks_synced": synced,
+                    "benchmarks_total": len(existing_tickers),
+                    "rate_limited": rate_limited,
+                }
+                if rate_limited:
+                    # Without this a warm-up that stopped at 2 of 8 was byte-identical
+                    # in the API to one that finished — and this loop is the fastest of
+                    # the Yahoo loops at burning a limit, so it is the leading indicator
+                    # for the market-data half that runs beside it.
+                    result["warnings"] = [
+                        f"Yahoo Finance rate limit reached during the benchmark warm-up; "
+                        f"{synced} of {len(existing_tickers)} benchmarks refreshed, the rest "
+                        f"keep their cached prices. Do not retry manually — the next "
+                        f"scheduled run resumes where it stopped."
+                    ]
+                return result
 
             except Exception as e:
                 await db.rollback()
@@ -1084,12 +1106,23 @@ class SchedulerService:
                 compute_res = await service.compute_dividend_income()
 
                 logger.info(f"Dividend sync completed: {sync_res}; compute: {compute_res}")
-                return {
+                result = {
                     "status": "success",
                     "sync": sync_res,
                     "compute": compute_res,
+                    "rate_limited": bool(sync_res.get("rate_limited")),
                     "timestamp": utc_iso(utcnow())
                 }
+                # Hoisted so `_collect_warnings` can see them: a rate limit that
+                # abandoned the fetch, and `compute_dividend_income`'s FX-skipped
+                # rows, both sat two levels down in `details` where nothing read them.
+                warnings = (
+                    list(sync_res.get("warnings") or [])
+                    + list(compute_res.get("warnings") or [])
+                )
+                if warnings:
+                    result["warnings"] = warnings
+                return result
 
             except Exception as e:
                 logger.error(f"Failed to sync dividends: {str(e)}", exc_info=True)
@@ -1219,7 +1252,8 @@ class SchedulerService:
         if ibkr_result.get("reason"):
             self.last_sync_result["reason"] = ibkr_result["reason"]
         _collect_warnings(
-            self.last_sync_result, ibkr_result, market_result, lookthrough_result
+            self.last_sync_result, ibkr_result, market_result, div_result,
+            lookthrough_result,
         )
         await self._record_run(self.last_sync_result, started_at)
 
@@ -1266,7 +1300,7 @@ class SchedulerService:
             "benchmark_result": bench_result,
             "status": market_result.get("status", "error"),
         }
-        _collect_warnings(self.last_sync_result, market_result)
+        _collect_warnings(self.last_sync_result, market_result, bench_result)
         await self._record_run(self.last_sync_result, started_at)
 
         logger.info("=" * 80)

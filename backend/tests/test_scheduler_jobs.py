@@ -1016,3 +1016,178 @@ async def test_the_lighter_jobs_leave_the_issuer_sites_alone(spy, monkeypatch):
     await svc.market_data_only_sync_job()
 
     assert 'lookthrough' not in s.called
+
+
+# --- every Yahoo step reports what it did not finish --------------------------------
+#
+# The dividend and benchmark steps both latched a rate limit correctly and then
+# reported nothing: no `rate_limited`, no `warnings`, and neither result was handed to
+# `_collect_warnings`. A pass Yahoo killed at 5 of 40 was recorded as `success` and
+# looked exactly like a complete one.
+
+
+class _FakeSession:
+    """Just enough of an AsyncSession for the two scheduler steps below."""
+
+    def __init__(self, rows=()):
+        self._rows = list(rows)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_a):
+        return False
+
+    async def execute(self, *_a, **_k):
+        rows = self._rows
+
+        class _Result:
+            def all(self_inner):
+                return list(rows)
+
+        return _Result()
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_dividend_warnings_reach_the_top_of_the_result(spy, monkeypatch):
+    """`div_result` was the one step result the full sync never passed to
+    `_collect_warnings`, so its warnings were buried in `details` for every run."""
+    svc, s = spy
+    monkeypatch.setattr(svc, 'sync_dividends', s.make('dividends', {
+        "status": "success",
+        "warnings": ["Yahoo Finance rate limit reached; the rest of this pass was abandoned."],
+    }))
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.full_sync_job()
+
+    assert svc.last_sync_result["warnings"] == [
+        "Yahoo Finance rate limit reached; the rest of this pass was abandoned."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_benchmark_warnings_reach_the_top_of_the_result(spy, monkeypatch):
+    """The market-data-only job collected only `market_result`; the benchmark warm-up
+    beside it is the fastest Yahoo loop at burning a limit and was silent."""
+    svc, s = spy
+    monkeypatch.setattr(svc, 'sync_benchmark_prices', s.make('benchmarks', {
+        "status": "success", "benchmarks_synced": 2, "benchmarks_total": 8,
+        "rate_limited": True,
+        "warnings": ["Yahoo Finance rate limit reached during the benchmark warm-up"],
+    }))
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.market_data_only_sync_job()
+
+    assert svc.last_sync_result["warnings"] == [
+        "Yahoo Finance rate limit reached during the benchmark warm-up"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sync_dividends_hoists_its_childrens_warnings_and_the_rate_limit(monkeypatch):
+    """Two children, two places a warning could hide: the fetch's abandoned pass and the
+    compute step's FX-skipped rows. Both must surface on the step result itself."""
+    import app.services.scheduler_service as sched_mod
+    from app.services.dividend_service import DividendService
+
+    monkeypatch.setattr(sched_mod, "AsyncSessionLocal", lambda: _FakeSession())
+
+    async def _sync(self):
+        return {"securities_processed": 5, "rate_limited": True,
+                "warnings": ["Yahoo Finance rate limit reached"]}
+
+    async def _compute(self):
+        return {"computed": 3, "fx_skipped": 1,
+                "warnings": ["1 dividend(s) left uncomputed: no exchange rate"]}
+
+    monkeypatch.setattr(DividendService, "sync_dividend_data", _sync)
+    monkeypatch.setattr(DividendService, "compute_dividend_income", _compute)
+
+    result = await SchedulerService().sync_dividends()
+
+    assert result["status"] == "success"
+    assert result["rate_limited"] is True
+    assert result["warnings"] == [
+        "Yahoo Finance rate limit reached",
+        "1 dividend(s) left uncomputed: no exchange rate",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_dividend_step_grows_no_warnings_key(monkeypatch):
+    import app.services.scheduler_service as sched_mod
+    from app.services.dividend_service import DividendService
+
+    monkeypatch.setattr(sched_mod, "AsyncSessionLocal", lambda: _FakeSession())
+
+    async def _sync(self):
+        return {"securities_processed": 5, "rate_limited": False}
+
+    async def _compute(self):
+        return {"computed": 3, "fx_skipped": 0}
+
+    monkeypatch.setattr(DividendService, "sync_dividend_data", _sync)
+    monkeypatch.setattr(DividendService, "compute_dividend_income", _compute)
+
+    result = await SchedulerService().sync_dividends()
+
+    assert result["rate_limited"] is False
+    assert "warnings" not in result   # a clean run must not grow an empty list
+
+
+@pytest.mark.asyncio
+async def test_the_benchmark_warmup_reports_how_far_it_got_when_yahoo_refused(monkeypatch):
+    """A warm-up that stopped at the first of two benchmarks used to return the same
+    `{"status": "success"}` as one that finished."""
+    import app.services.scheduler_service as sched_mod
+    from app.services.benchmark_service import BenchmarkService
+
+    monkeypatch.setattr(
+        sched_mod, "AsyncSessionLocal",
+        lambda: _FakeSession(rows=[("^GSPC",), ("^IXIC",)]),
+    )
+
+    async def _refuse(self, *_a, **_k):
+        raise Exception("HTTP Error 429: Too Many Requests")
+
+    monkeypatch.setattr(BenchmarkService, "_ensure_prices_available", _refuse)
+
+    result = await SchedulerService().sync_benchmark_prices()
+
+    assert result["status"] == "success"          # the step ran; the job is not a failure
+    assert result["rate_limited"] is True
+    assert result["benchmarks_synced"] == 0
+    assert result["benchmarks_total"] == 2
+    assert len(result["warnings"]) == 1
+    assert "0 of 2" in result["warnings"][0]
+    assert "Do not retry manually" in result["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_a_complete_benchmark_warmup_is_not_flagged(monkeypatch):
+    import app.services.scheduler_service as sched_mod
+    from app.services.benchmark_service import BenchmarkService
+
+    monkeypatch.setattr(
+        sched_mod, "AsyncSessionLocal",
+        lambda: _FakeSession(rows=[("^GSPC",), ("^IXIC",)]),
+    )
+
+    async def _fine(self, *_a, **_k):
+        return 3
+
+    monkeypatch.setattr(BenchmarkService, "_ensure_prices_available", _fine)
+
+    result = await SchedulerService().sync_benchmark_prices()
+
+    assert result["rate_limited"] is False
+    assert result["benchmarks_synced"] == result["benchmarks_total"] == 2
+    assert "warnings" not in result
