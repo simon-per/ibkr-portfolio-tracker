@@ -178,6 +178,15 @@ describe('days the backend could not fully value', () => {
     expect(r?.partial).toBeUndefined()
   })
 
+  it('names the unpriced trim as the cause, so the reader looks at the sync and not the range', () => {
+    const r = computeModifiedDietzReturn([
+      point('2026-03-01', 1000, 900, 0),
+      point('2026-03-30', 1000, 900, 0),
+      partialPoint('2026-03-31', 500, 900, 3),
+    ])
+    expect(r?.shortenedBy).toEqual({ unpriced: true, range: false })
+  })
+
   it('refuses when there is nothing to divide by, rather than printing a flat month', () => {
     // Modified Dietz's denominator is `startMV + weightedFlow`, so an early outflow
     // larger than the opening value drives it to zero or below and the return is
@@ -192,5 +201,78 @@ describe('days the backend could not fully value', () => {
       point('2026-03-22', 0, 0, 0),
       point('2026-03-31', 0, 0, 0),
     ])).toBeNull()
+  })
+})
+
+/**
+ * The other way a period gets shorter than its label. The heatmap groups whatever points
+ * the selected range contains, so on 1Y last year's "YTD" is measured from today's date
+ * to 31 December and its first month from mid-month — every point complete, so the trim
+ * above sees nothing, while the label still names the whole period. Unbadged until
+ * 2026-09-12.
+ */
+describe('a period the chart range began inside', () => {
+  const septemberFromThe12th = [
+    point('2025-09-12', 1000, 900, 0),
+    point('2025-09-30', 1030, 900, 0),
+  ]
+
+  it('is partial, naming the days it covers and the range as the cause', () => {
+    const r = computeModifiedDietzReturn(septemberFromThe12th, {
+      periodStart: '2025-09-01',
+      rangeStart: '2025-09-12',
+    })
+    expect(r?.returnPercent).toBeCloseTo(3, 6)
+    expect(r?.partial).toBe(true)
+    expect(r?.measured).toEqual({ from: '2025-09-12', to: '2025-09-30' })
+    expect(r?.shortenedBy).toEqual({ unpriced: false, range: true })
+  })
+
+  it('flags the year the same way as the month', () => {
+    const r = computeModifiedDietzReturn(septemberFromThe12th, {
+      periodStart: '2025-01-01',
+      rangeStart: '2025-09-12',
+    })
+    expect(r?.shortenedBy).toEqual({ unpriced: false, range: true })
+  })
+
+  it('does not flag a period the range covers from its first calendar day, whenever trading resumed', () => {
+    // 1 January is a holiday, so the first point is the 2nd. Compared on the RANGE start,
+    // not the window's first point — otherwise every YTD would read as a truncated January.
+    const r = computeModifiedDietzReturn(
+      [point('2026-01-02', 1000, 900, 0), point('2026-01-30', 1010, 900, 0)],
+      { periodStart: '2026-01-01', rangeStart: '2026-01-01' },
+    )
+    expect(r?.partial).toBeUndefined()
+    expect(r?.shortenedBy).toBeUndefined()
+  })
+
+  it('does not flag a later period the range fully contains', () => {
+    const r = computeModifiedDietzReturn(
+      [point('2026-01-02', 1000, 900, 0), point('2026-01-30', 1010, 900, 0)],
+      { periodStart: '2026-01-01', rangeStart: '2025-09-12' },
+    )
+    expect(r?.partial).toBeUndefined()
+  })
+
+  it('names both causes when a truncating range and a trimmed edge coincide', () => {
+    const r = computeModifiedDietzReturn(
+      [
+        point('2025-09-12', 1000, 900, 0),
+        point('2025-09-29', 1030, 900, 0),
+        { ...point('2025-09-30', 400, 900, 0), unpriced_holdings: 3 },
+      ],
+      { periodStart: '2025-09-01', rangeStart: '2025-09-12' },
+    )
+    expect(r?.returnPercent).toBeCloseTo(3, 6)
+    expect(r?.measured).toEqual({ from: '2025-09-12', to: '2025-09-29' })
+    expect(r?.shortenedBy).toEqual({ unpriced: true, range: true })
+  })
+
+  it("flags nothing on the range's account when no range start is known", () => {
+    expect(
+      computeModifiedDietzReturn(septemberFromThe12th, { periodStart: '2025-09-01' })?.partial,
+    ).toBeUndefined()
+    expect(computeModifiedDietzReturn(septemberFromThe12th)?.partial).toBeUndefined()
   })
 })

@@ -9,6 +9,12 @@ import { ScrollableTable } from '@/components/ui/ScrollableTable'
 
 interface MonthlyReturnsHeatmapProps {
   data: PortfolioValuePoint[] | undefined
+  /**
+   * The first day the chart's range asked for (`dateRange.start`). What lets a year or
+   * month the range only partly covers carry the dagger — see `computeModifiedDietzReturn`.
+   * Optional: without it no period is flagged on the range's account.
+   */
+  rangeStart?: string
   isLoading: boolean
   isError?: boolean
 }
@@ -34,11 +40,20 @@ function cellTitle(label: string, m: MonthReturn, curSym: string): string {
     ...(m.newInvestment > 0 ? [`+${money(m.newInvestment)} invested`] : []),
     // Names the days it actually covers, not just that some were dropped: the label is
     // the thing that is wrong on a trimmed figure, so "part of the period" alone leaves
-    // the reader no way to tell a lost day from a lost half-year.
+    // the reader no way to tell a lost day from a lost half-year. And names the cause,
+    // because a stalled sync and the 1Y button produce the same dagger.
     ...(m.measured
-      ? [`† measured ${m.measured.from} → ${m.measured.to}; the edge days could not be fully valued`]
+      ? [`† measured ${m.measured.from} → ${m.measured.to}; ${shortenedReason(m)}`]
       : []),
   ].join(' · ')
+}
+
+/** Why a cell's window is shorter than its label, in the words the footnote uses. */
+function shortenedReason(m: MonthReturn): string {
+  const causes: string[] = []
+  if (m.shortenedBy?.range) causes.push('the selected range starts inside this period')
+  if (m.shortenedBy?.unpriced) causes.push('the edge days could not be fully valued')
+  return causes.length ? causes.join(' and ') : 'part of the period only'
 }
 
 function getReturnColor(pct: number): string {
@@ -63,7 +78,7 @@ function getReturnColor(pct: number): string {
   }
 }
 
-export function MonthlyReturnsHeatmap({ data, isLoading, isError }: MonthlyReturnsHeatmapProps) {
+export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: MonthlyReturnsHeatmapProps) {
   const curSym = useCurrencySymbol()
   const [open, setOpen] = useState(false)
 
@@ -82,10 +97,11 @@ export function MonthlyReturnsHeatmap({ data, isLoading, isError }: MonthlyRetur
       }
     }
 
-    // Compute Modified Dietz return per month
+    // Compute Modified Dietz return per month. `periodStart` is the month's first
+    // calendar day, so a month the range began inside carries the dagger.
     const monthReturns = new Map<string, MonthReturn>()
     for (const [key, points] of monthGroups) {
-      const result = computeModifiedDietzReturn(points)
+      const result = computeModifiedDietzReturn(points, { periodStart: `${key}-01`, rangeStart })
       if (result) monthReturns.set(key, result)
     }
 
@@ -100,23 +116,36 @@ export function MonthlyReturnsHeatmap({ data, isLoading, isError }: MonthlyRetur
       yearMap.get(year)![monthIndex] = monthReturns.get(key)!
     }
 
-    // Compute YTD for each year using Modified Dietz
+    // Compute YTD for each year using Modified Dietz. `yearPoints` is whatever the
+    // selected RANGE holds for that year, so on 1Y last year's "YTD" runs from today's
+    // date to 31 December — `periodStart` is what gets that badged.
     const rows: YearRow[] = []
     for (const [year, months] of yearMap) {
       const yearPrefix = String(year)
       const yearPoints = data.filter(p => p.date.startsWith(yearPrefix))
-      const ytd = computeModifiedDietzReturn(yearPoints)
+      const ytd = computeModifiedDietzReturn(yearPoints, { periodStart: `${yearPrefix}-01-01`, rangeStart })
       rows.push({ year, months, ytd })
     }
 
     // Sort descending (most recent on top)
     rows.sort((a, b) => b.year - a.year)
     return rows
-  }, [data])
+  }, [data, rangeStart])
 
-  const hasPartial = yearRows.some(
-    row => row.ytd?.partial || row.months.some(m => m?.partial)
-  )
+  const cells = yearRows.flatMap(row => [row.ytd, ...row.months])
+  const hasPartial = cells.some(m => m?.partial)
+  // Which causes the footnote has to explain — only the ones on the page, so a reader
+  // is not sent looking for a stalled sync when the 1Y button is the whole story.
+  const shortenedByRange = cells.some(m => m?.shortenedBy?.range)
+  const shortenedByUnpriced = cells.some(m => m?.shortenedBy?.unpriced)
+  const footnoteCauses = [
+    shortenedByRange ? 'the selected range starts inside it' : null,
+    shortenedByUnpriced
+      ? 'some days could not be fully valued, so they are excluded rather than counted at zero (a stalled market-data sync is the usual cause)'
+      : null,
+  ]
+    .filter((s): s is string => s !== null)
+    .join(', or ')
 
   // Summary text for collapsed state
   let summaryText: React.ReactNode = 'Monthly return percentages by year'
@@ -262,10 +291,8 @@ export function MonthlyReturnsHeatmap({ data, isLoading, isError }: MonthlyRetur
               phone, which this codebase has already learned once. */}
           {hasPartial && (
             <p className="mt-2 text-xs text-muted-foreground">
-              † Measured over part of the period: some days could not be fully valued, so they
-              are excluded rather than counted at zero — hover a cell for the days it does
-              cover, which can be much shorter than the column it sits in. A stalled
-              market-data sync is the usual cause.
+              † Measured over part of the period: {footnoteCauses}. Hover a cell for the days
+              it does cover, which can be much shorter than the column it sits in.
             </p>
           )}
         </CardContent>

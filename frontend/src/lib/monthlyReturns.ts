@@ -19,6 +19,25 @@ export interface MonthReturn {
    * of a year, badged with a dagger that said "part of the period" and not which part.
    */
   measured?: { from: string; to: string }
+  /**
+   * What shortened the window, written in the same spread as `partial` and `measured`:
+   * edge days the backend could not fully value were trimmed off (`unpriced`), the
+   * chart's range began after the period did (`range`), or both. Named because the two
+   * call for different repairs — a stalled sync and the 1Y button look identical from
+   * the cell — and "part of the period" alone sent the reader to the wrong one.
+   */
+  shortenedBy?: { unpriced: boolean; range: boolean }
+}
+
+/** The calendar period a return is labelled with, and the range it was cut from. */
+export interface PeriodBounds {
+  /** The labelled period's first calendar day, `YYYY-MM-DD`: `2025-09-01`, `2025-01-01`. */
+  periodStart: string
+  /**
+   * The first day the chart's range asked for. Absent means unknown, and nothing is
+   * flagged on its account — an older caller keeps the behaviour it had.
+   */
+  rangeStart?: string
 }
 
 /**
@@ -46,15 +65,30 @@ export interface MonthReturn {
  * would lose far more than it protects. `partial` reports that the window was
  * shortened. Interior gaps need no handling — nothing reads an interior market
  * value.
+ *
+ * **The chart's range is the other thing that shortens a period**, and it shortened
+ * them unbadged until 2026-09-12. The heatmap groups whatever points the selected
+ * range contains, so on 1Y last year's "YTD" is measured from today's date to
+ * 31 December and its first month from mid-month — every point in the window complete,
+ * so the trim above sees nothing, while the label still names the whole period. With
+ * `bounds` the period is marked partial when the range began after the period's first
+ * calendar day. Compared on the *range's* start rather than the window's first point,
+ * because the first trading day of a year is 2 or 3 January and must not read as a
+ * truncated January.
  */
-export function computeModifiedDietzReturn(points: PortfolioValuePoint[]): MonthReturn | null {
+export function computeModifiedDietzReturn(
+  points: PortfolioValuePoint[],
+  bounds?: PeriodBounds,
+): MonthReturn | null {
   let lo = 0
   let hi = points.length - 1
   while (lo <= hi && !isMeasurable(points[lo])) lo++
   while (hi > lo && !isMeasurable(points[hi])) hi--
 
-  const partial = lo !== 0 || hi !== points.length - 1
-  const window = partial ? points.slice(lo, hi + 1) : points
+  const trimmed = lo !== 0 || hi !== points.length - 1
+  const truncated = bounds?.rangeStart !== undefined && bounds.rangeStart > bounds.periodStart
+  const partial = trimmed || truncated
+  const window = trimmed ? points.slice(lo, hi + 1) : points
 
   if (window.length < 2) return null
   const startMV = window[0].market_value_eur
@@ -89,7 +123,11 @@ export function computeModifiedDietzReturn(points: PortfolioValuePoint[]): Month
     endValue: endMV,
     newInvestment: netCashFlow,
     ...(partial
-      ? { partial: true, measured: { from: window[0].date, to: window[window.length - 1].date } }
+      ? {
+          partial: true,
+          measured: { from: window[0].date, to: window[window.length - 1].date },
+          shortenedBy: { unpriced: trimmed, range: truncated },
+        }
       : {}),
   }
 }
