@@ -954,3 +954,44 @@ async def test_a_pillar3a_only_balance_is_derived_not_measured():
         assert await CashService(session).cash_source() == DERIVED
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_measured_era_reads_mixed_when_a_second_account_is_only_derived():
+    """
+    The timeline stamped a literal `ibkr` on every point after the first measured
+    balance, while `CashService.cash_source()` — read by the summary card and the
+    allocation tab — says `mixed` once a second account holds cash IBKR cannot see.
+    Live on production: 14 tail points `ibkr`, the card `mixed`, and the chart's
+    caveat gone because it reads the last point. One balance, two provenance claims.
+    """
+    from app.accounts import PILLAR3A
+
+    engine, session = await _make_session()
+    try:
+        session.add(_flow(date(2026, 1, 9), "1000", "D1"))
+        other = _flow(date(2026, 1, 10), "100", "P1")
+        other.account = PILLAR3A                     # derived-only, IBKR never sees it
+        session.add(other)
+        session.add(MarketPrice(
+            security_id=1, date=date(2026, 1, 12), close_price=Decimal("10"),
+            currency="EUR", source="test",
+        ))
+        session.add(_lot(date(2026, 1, 9), "500"))
+        session.add(CashBalance(
+            report_date=date(2026, 1, 13), currency="EUR", cash=Decimal("500"),
+        ))
+        await session.flush()
+
+        verdict = await CashService(session).cash_source()
+        assert verdict == MIXED
+
+        timeline = await PortfolioService(session).get_portfolio_value_over_time(
+            date(2026, 1, 12), date(2026, 1, 14)
+        )
+        by_date = {r["date"]: r for r in timeline}
+        assert by_date["2026-01-12"]["cash_source"] == DERIVED
+        assert by_date["2026-01-13"]["cash_source"] == verdict
+        assert by_date["2026-01-14"]["cash_source"] == verdict
+    finally:
+        await engine.dispose()

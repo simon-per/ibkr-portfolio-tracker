@@ -17,7 +17,7 @@ from app.models.security import Security
 from app.models.trade import Trade
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
-from app.services.cash_service import CashService
+from app.services.cash_service import CashService, MEASURED
 from app.services.native_amounts import NativeToBase
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
@@ -306,6 +306,11 @@ class PortfolioService:
             money_in_legs=contributions["money_in_legs"],
             cash_source=cash_source,
             cash_measured_from=await cash_service.measured_from(),
+            # The service's own verdict for the measured era — MEASURED, or MIXED once
+            # a second account has cash IBKR cannot see. A literal "ibkr" here stamped
+            # the tail of the chart `ibkr` while the summary card said `mixed` for the
+            # same balance on the same day, and the chart dropped its caveat.
+            cash_measured_source=await cash_service.cash_source(),
         )
         for row in portfolio_timeline:
             row["base_currency"] = base_fx.base_currency
@@ -326,6 +331,7 @@ class PortfolioService:
         money_in_legs: Optional[List[Tuple[date, Decimal]]] = None,
         cash_source: str = "unknown",
         cash_measured_from: Optional[date] = None,
+        cash_measured_source: str = MEASURED,
     ) -> List[Dict]:
         """
         The full timeline in one sweep — numerically identical to calling
@@ -481,9 +487,12 @@ class PortfolioService:
                     "money_in_eur": float(money_in_running),
                     # Per point, not per response: measured history begins whenever the
                     # Flex section was enabled, so calling the whole series measured
-                    # because its tail is would overclaim the years before it.
+                    # because its tail is would overclaim the years before it. And the
+                    # measured era's label is CashService's verdict, not a literal — it
+                    # is `mixed` while a second account's cash is only derived, which is
+                    # what the summary card says for the same day.
                     "cash_source": (
-                        "ibkr"
+                        cash_measured_source
                         if cash_measured_from is not None and d >= cash_measured_from
                         else cash_source
                     ),

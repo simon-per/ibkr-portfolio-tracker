@@ -161,7 +161,13 @@ history starts whenever the section was enabled and can never reach the account'
 stamping `ibkr` on the years before it because the tail is measured is the same overclaim
 as a badge that cannot clear. Hence `derived_source()` alongside `cash_source()` — the
 first is the fallback for pre-measurement days, and using the second there was a real bug
-caught before it shipped.
+caught before it shipped. **The measured era's label is `cash_source()`'s verdict too, never
+a literal.** Until 2026-09-12 the timeline stamped `"ibkr"` on every point after the first
+measured balance while `cash_source()` — read by the summary card and the allocation tab — said
+`mixed`, because the pillar-3a account's cash is derived and IBKR never saw it. Live: 14 tail
+points `ibkr`, the card `mixed`, and the chart's caveat gone, since it reads the last point.
+`_calculate_timeline_swept` takes the label as `cash_measured_source`; pinned in
+`tests/test_cash_balance.py`.
 
 ### Total Value vs Money In — the only pairing a rotation cannot step
 
