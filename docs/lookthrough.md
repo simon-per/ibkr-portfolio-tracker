@@ -305,8 +305,12 @@ off the 18:00 job as its last step, and four things about it are load-bearing:
   somebody else's servers, and entering `SYNC_PIPELINE` from a read would bump the clock every
   other route's cooldown reads. Once a day, from the job that already holds the gate, matches
   issuers that publish once a day.
-- **Identity follows the baskets, bounded.** A re-import clears the CINS/SEDOL resolutions on
-  purpose, so the OpenFIGI pass that restores them runs whenever a basket was replaced; and a
+- **Identity follows the baskets, bounded — both passes.** A re-import clears the CINS/SEDOL
+  resolutions on purpose, so the OpenFIGI pass that restores them runs whenever a basket was replaced,
+  **with the same `SCHEDULED_IDENTITY_LIMIT`** (since 2026-09-12: it ran unbounded for four days,
+  and `resolve_constituent_identifiers` does not cache a miss, so every permanently unresolvable
+  identifier was re-asked of OpenFIGI on every evening a basket changed — the docstring's "acceptable
+  only as a manual CLI step" precondition had quietly stopped holding); and a
   bounded ISIN pass (`SCHEDULED_IDENTITY_LIMIT`, 25 per evening — GLEIF has no batch form) walks the
   held securities and material constituents never asked about, so a newly bought security folds with
   its fund exposure within a day and a rebalance converges over a few. `unresolved_value_eur` still

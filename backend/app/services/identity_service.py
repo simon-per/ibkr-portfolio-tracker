@@ -216,9 +216,12 @@ class IdentityService:
 
         A row that resolves to nothing is re-asked on the next run rather than remembered, which
         the codebase normally refuses (`isin_identities`' `*_checked_at` split exists to stop
-        exactly that loop). It is right here only because the pending set is a hundred or so
-        identifiers across three funds — two requests with a key — and this is a manual CLI step,
-        not a scheduled one. If that set ever grows past a few hundred, cache the misses.
+        exactly that loop). It was acceptable while this was a manual CLI step over a hundred
+        or so identifiers. Since 2026-09-08 the evening basket refresh also calls it, so every
+        scheduled caller **must pass `limit`** (`etf_basket_refresh` passes
+        `SCHEDULED_IDENTITY_LIMIT`) — that bounds the re-ask the way the ISIN pass is bounded.
+        Caching the misses is the durable fix and needs a column; do it if the pending set
+        grows past a few hundred.
         """
         repo = EtfBasketRepository(self.db)
         pending = await repo.unresolved_identifiers()

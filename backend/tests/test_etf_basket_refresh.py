@@ -365,14 +365,17 @@ async def test_verdicts_follow_the_proxy_for_a_missing_source(db):
 
 @pytest.mark.asyncio
 async def test_identities_are_resolved_after_a_refresh_and_bounded(db, monkeypatch):
-    calls = {"resolve": [], "constituents": 0}
+    calls = {"resolve": [], "constituents": []}
 
     async def _resolve(self, isins, limit=None):
         calls["resolve"].append(limit)
         return {"rows_written": 0}
 
     async def _constituents(self, limit=None):
-        calls["constituents"] += 1
+        # Recorded, because this pass does not cache a miss: unbounded, the
+        # permanently unresolvable identifiers were re-asked of OpenFIGI every
+        # evening a basket was replaced.
+        calls["constituents"].append(limit)
         return {"holdings_updated": 0}
 
     monkeypatch.setattr(IdentityService, "resolve", _resolve)
@@ -386,16 +389,17 @@ async def test_identities_are_resolved_after_a_refresh_and_bounded(db, monkeypat
     await _basket(db, IWDA, "blackrock", age_days=1)
     await refresh_lookthrough_data(db, TODAY)
     assert calls["resolve"] == [SCHEDULED_IDENTITY_LIMIT]
-    assert calls["constituents"] == 0
+    assert calls["constituents"] == []
 
-    # A basket was replaced: the CINS/SEDOL pass runs, because a re-import clears them.
+    # A basket was replaced: the CINS/SEDOL pass runs, because a re-import clears them —
+    # and it runs *bounded*, with the same limit as the ISIN pass.
     await db.execute(
         EtfBasket.__table__.update().values(as_of_date=TODAY - timedelta(days=40))
     )
     await db.commit()
     result = await refresh_lookthrough_data(db, TODAY)
     assert [r["symbol"] for r in result["baskets"]["refreshed"]] == ["IWDA"]
-    assert calls["constituents"] == 1
+    assert calls["constituents"] == [SCHEDULED_IDENTITY_LIMIT]
     assert calls["resolve"] == [SCHEDULED_IDENTITY_LIMIT, SCHEDULED_IDENTITY_LIMIT]
 
 

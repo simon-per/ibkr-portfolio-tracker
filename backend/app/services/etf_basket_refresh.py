@@ -329,7 +329,11 @@ async def resolve_pending_identities(
 
     summary = await service.resolve(targets, limit=limit)
     if after_refresh:
-        summary.update(await service.resolve_constituent_identifiers())
+        # Bounded like the ISIN pass. This method does not cache a miss, which its
+        # docstring accepts only for a hand-run CLI — scheduled and unbounded, the
+        # permanently unresolvable identifiers were re-asked of OpenFIGI every evening
+        # a basket was replaced, growing with each new fund.
+        summary.update(await service.resolve_constituent_identifiers(limit=limit))
     await db.commit()
     return summary
 

@@ -419,6 +419,25 @@ and `sync_market_data` breaks, reporting `rate_limited: true` plus a `warnings[]
 already written stays written and the next slot resumes, since the dates it never reached are simply
 still missing. That mattered little at three passes a day.
 
+**Every scheduled Yahoo step reports the abandonment, and every step result reaches
+`_collect_warnings`.** Found 2026-09-12: the dividend fetch and the benchmark warm-up both latched
+the flag and broke correctly, then returned dicts with no `rate_limited` and no `warnings` — and
+neither `div_result` nor `bench_result` was passed to `_collect_warnings`, so a pass Yahoo killed at
+5 of 40 was recorded as `status: success` and was byte-identical in the API to a complete one. The
+dividend step also reported `securities_processed` as "everything not skipped" rather than what it
+asked about. Both now carry `rate_limited`, the standard "do not retry manually" warning, and (for
+the warm-up) `benchmarks_total` beside `benchmarks_synced`; `sync_dividends()` hoists its two
+children's warnings, which is also how `compute_dividend_income`'s FX-skipped line first became
+visible. Rule: a step that can stop early says so on its own result, and a job passes *every* step
+result to `_collect_warnings` — the silent shape is the default one, since a dict without the key
+looks finished. Tests: `tests/test_dividend_sync_rate_limit.py`, the "every Yahoo step reports" block
+in `tests/test_scheduler_jobs.py`.
+
+Related, same day: the Alpha Vantage fallback in `fetch_and_cache_prices` fired on `not prices_data`,
+and a 429 comes back from the Yahoo fetcher as the same empty list as "Yahoo has never heard of this
+ticker" — so a rate limit spent one of the free tier's few daily calls and rewrote that security's
+`source` column. It now also requires `not self.rate_limited`.
+
 **Every IBKR attempt must sit outside US market hours, and this is measured rather than assumed.**
 IBKR builds a Year-to-Date statement from *finalised* daily data, so `SendRequest` succeeds overnight
 and fails mid-session — the failure surfaces as `Code=1001` **at the request step**, which is the
@@ -627,7 +646,7 @@ lockout. Everything that can reach IBKR or Yahoo shares the `sync-pipeline` gate
 is the failure mode regardless of which endpoint started them. Scheduled jobs enter with **no cooldown**
 and, on collision, record a `status="skipped"` run rather than running concurrently (the next slot
 recovers freshness). The public routes add cooldowns (ibkr 120s; market-data / trigger / fundamentals /
-ratings / allocation / watchlist 300s) and answer **429 with `Retry-After`**. In-process by design —
+ratings / allocation / watchlist / dividends 300s) and answer **429 with `Retry-After`**. In-process by design —
 single uvicorn worker, and the check-and-set has no `await` between test and set. A backgrounded route
 (fundamentals `/sync`) checks `is_running()` in the handler and holds the lock inside the task, so the
 gate spans the actual work rather than the enqueue. **`POST /api/watchlist` (add) is gated too** (60s
@@ -664,6 +683,10 @@ missing-days rule as the price path, extracted to `_missing_business_days()` so 
 fences only *overlapping* runs, so a poller that waited for each pass to end ran them back to back
 indefinitely at ~5 Yahoo calls per security per pass. `cooldown_remaining()` lets a BackgroundTasks
 handler answer 429 honestly instead of replying `"started"` to a run the background half then drops.
+`POST /api/dividends/sync` had exactly the same shape — a module flag that fences only overlapping
+runs, a gate entered with no cooldown — and was the one bulk Yahoo route the 2026-07 rollout left
+out; it mirrors the fundamentals route since 2026-09-12 (`SYNC_COOLDOWN_SECONDS = 300`). The
+`GET /summary` auto-trigger was already throttled (6h); the unthrottled path was the explicit one.
 
 **Errors are redacted before they are stored or served (`app/redact.py`).** Flex sends the token as a
 `t=` URL parameter and `requests` transport errors stringify with the full URL, so a plain `str(e)` from
