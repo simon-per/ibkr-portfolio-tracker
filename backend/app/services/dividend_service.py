@@ -762,8 +762,15 @@ class DividendService:
             # actually landed; fall back to the gross per-share yfinance
             # publishes. Never mix the two inside one security — that would
             # average a gross figure against a net one.
+            #
+            # Only an IBKR row is "what actually landed". A yfinance_estimate row
+            # with shares held also has gross > 0, but compute_dividend_income writes
+            # its net as gross with zero withholding — so dividing *that* by the
+            # shares gives the gross per-share figure back, and stamping it "net"
+            # labelled a projection that deducts no withholding as one that did.
+            # SK Hynix read `net` with no IBKR payout on record.
             net_ps = None
-            if self._is_income(p):
+            if self._is_income(p) and p.source == "ibkr":
                 # IBKR rows store a 0 sentinel in shares_held, so fall back to
                 # the holding the tax lots show for that date.
                 shares = (p.shares_held if (p.shares_held and p.shares_held > 0)

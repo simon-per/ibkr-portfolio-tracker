@@ -966,3 +966,45 @@ async def test_a_continuously_held_position_still_reports_full_coverage():
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_estimate_that_landed_while_shares_were_held_is_still_gross():
+    """
+    `compute_dividend_income` writes a yfinance_estimate row's net as its gross with
+    zero withholding. Dividing that by the shares gives the gross per-share figure
+    straight back — and the forecast stamped it `net`, labelling a projection that
+    deducts no withholding as one that did. SK Hynix read `net` on production with
+    zero IBKR payouts on record. Only an IBKR row is money that actually landed.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))   # AAA: estimates only
+        session.add(_lot(2, date(2025, 1, 2), "10"))   # BBB: the broker's own rows
+        session.add(_price(1, "20"))                    # priced, so a yield exists
+        session.add(_price(2, "20"))
+        await session.flush()
+        for d in (date(2025, 7, 15), date(2025, 10, 15),
+                  date(2026, 1, 15), date(2026, 4, 15)):
+            # Held on every ex-date, so the estimate carries a real gross figure...
+            await DividendRepository(session).upsert_payment({
+                "security_id": 1, "ex_date": d, "pay_date": d, "currency": "EUR",
+                "amount_per_share": Decimal("0.50"), "shares_held": Decimal("10"),
+                "gross_amount_eur": Decimal("5"), "withholding_tax_eur": Decimal("0"),
+                "net_amount_eur": Decimal("5"), "source": "yfinance_estimate",
+            })
+            # ...while BBB's history is what IBKR paid, net of 15% withholding.
+            await _seed_payment(session, 2, d, net="4.25", source="ibkr",
+                                gross="5.00", wht="0.75")
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        rows = {r["symbol"]: r for r in out["securities"]}
+        assert rows["AAA"]["forecast_basis"] == "gross_estimate"
+        assert rows["BBB"]["forecast_basis"] == "net"
+        # And the total's three-way flag sees the gross half rather than a flat "net".
+        assert out["forward_yield"]["basis"] == "mixed"
+    finally:
+        await session.close()
+        await engine.dispose()

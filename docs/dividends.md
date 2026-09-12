@@ -161,7 +161,13 @@ every payer look stopped and returned an empty year.
 
 `forecast_basis` reports which amount was used: `net` when a dividend has actually been received (net of
 withholding), `gross_estimate` when only yfinance's gross per-share exists — the latter runs a little
-high and the UI badges it. Future years are selectable (`years` offers `as_of.year + 1`) and a future
+high and the UI badges it. **"Actually received" means an IBKR row.** A `yfinance_estimate` row with
+shares held also carries `gross > 0`, but `compute_dividend_income` writes its net as gross with zero
+withholding, so dividing that by the shares gives the gross per-share figure straight back — and until
+2026-09-12 `_forecast_inputs` stamped it `net` (SK Hynix read `net` on production with no IBKR payout
+on record; most payers took this path, since the IBKR duplicate of a yfinance per-share row is
+dropped). The `net_ps` branch now requires `p.source == "ibkr"`; an estimate row keeps counting toward
+the cadence with no per-share figure, which the projector already handles. Future years are selectable (`years` offers `as_of.year + 1`) and a future
 year is forecast in full rather than from today.
 
 **Accumulating ETFs correctly show nothing** — DBPG, EMIM, IWDA, SXR8, VWCE, XAIX, XNAS (the `1C`/`ACC`
