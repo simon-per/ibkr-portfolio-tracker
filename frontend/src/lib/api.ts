@@ -2,6 +2,8 @@
  * API Client for IBKR Portfolio Analyzer Backend
  */
 
+import { readStored, writeStored } from './storage';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export interface AppSettings {
@@ -936,22 +938,14 @@ export interface HealthResponse {
  */
 export const API_KEY_STORAGE_KEY = 'ibkr-api-key';
 
+/** The stored key, or `''` — including when storage itself is unavailable. */
 export function getApiKey(): string {
-  try {
-    return localStorage.getItem(API_KEY_STORAGE_KEY) ?? '';
-  } catch {
-    // Private-mode Safari and some embedded webviews throw on access.
-    return '';
-  }
+  return readStored(API_KEY_STORAGE_KEY) ?? '';
 }
 
+/** An empty key removes the entry rather than storing `''`; a refused write is simply a refused request later. */
 export function setApiKey(key: string): void {
-  try {
-    if (key) localStorage.setItem(API_KEY_STORAGE_KEY, key);
-    else localStorage.removeItem(API_KEY_STORAGE_KEY);
-  } catch {
-    /* nothing we can do; the request will simply be refused */
-  }
+  writeStored(API_KEY_STORAGE_KEY, key || null);
 }
 
 /** Thrown for a 401 so callers can tell "not allowed" from "went wrong". */

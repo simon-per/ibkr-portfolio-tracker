@@ -3,19 +3,9 @@ import { api } from '@/lib/api'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { benchmarkColor } from '@/lib/benchmarkColors'
 
 const MAX_BENCHMARKS = 3
-
-export const BENCHMARK_COLORS = [
-  '#3b82f6', // blue
-  '#ec4899', // pink
-  '#f97316', // orange
-  '#06b6d4', // cyan
-  '#a855f7', // purple
-  '#14b8a6', // teal
-  '#ef4444', // red
-  '#84cc16', // lime
-]
 
 interface BenchmarkPickerProps {
   selected: string[]
@@ -51,7 +41,9 @@ export function BenchmarkPicker({ selected, onChange }: BenchmarkPickerProps) {
         </div>
         {benchmarks?.map((b) => {
           const isSelected = selected.includes(b.key)
-          const colorIndex = isSelected ? selected.indexOf(b.key) : 0
+          // By the benchmark's place in the full list, not in the selection — the same
+          // colour the chart draws it in, and one that survives deselecting a neighbour.
+          const color = benchmarkColor(b.key, benchmarks)
           const disabled = !isSelected && selected.length >= MAX_BENCHMARKS
 
           return (
@@ -68,8 +60,8 @@ export function BenchmarkPicker({ selected, onChange }: BenchmarkPickerProps) {
               <div
                 className="w-3 h-3 rounded-sm border flex-shrink-0"
                 style={{
-                  backgroundColor: isSelected ? BENCHMARK_COLORS[colorIndex] : 'transparent',
-                  borderColor: isSelected ? BENCHMARK_COLORS[colorIndex] : 'hsl(var(--border))',
+                  backgroundColor: isSelected ? color : 'transparent',
+                  borderColor: isSelected ? color : 'hsl(var(--border))',
                 }}
               />
               <span className="flex-1">{b.name}</span>

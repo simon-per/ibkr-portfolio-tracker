@@ -7,6 +7,7 @@ import { formatCount } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
+import { readStored, writeStored } from '@/lib/storage'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 
 const STORAGE_KEYS = {
@@ -17,7 +18,7 @@ const STORAGE_KEYS = {
 }
 
 function readNumber(key: string, fallback: number, min: number, max: number): number {
-  const saved = localStorage.getItem(key)
+  const saved = readStored(key)
   if (!saved) return fallback
   const val = Number(saved)
   if (!isFinite(val) || isNaN(val) || val < min || val > max) return fallback
@@ -104,26 +105,26 @@ export function ForecastTab() {
   const [monthlyContribution, setMonthlyContribution] = useState(() => readNumber(STORAGE_KEYS.monthlyContribution, 1000, 0, 1000000))
   const [expectedReturn, setExpectedReturn] = useState(() => readNumber(STORAGE_KEYS.expectedReturn, 8, 0, 30))
   const [startFromZero, setStartFromZero] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.startFromZero)
+    const saved = readStored(STORAGE_KEYS.startFromZero)
     return saved === 'true'
   })
   const [forecastYears, setForecastYears] = useState(() => readNumber(STORAGE_KEYS.forecastYears, 10, 1, 30))
 
-  // Save to localStorage whenever values change
+  // Persist whenever values change, through the one guarded store (`lib/storage.ts`).
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.monthlyContribution, monthlyContribution.toString())
+    writeStored(STORAGE_KEYS.monthlyContribution, monthlyContribution.toString())
   }, [monthlyContribution])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.expectedReturn, expectedReturn.toString())
+    writeStored(STORAGE_KEYS.expectedReturn, expectedReturn.toString())
   }, [expectedReturn])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.startFromZero, startFromZero.toString())
+    writeStored(STORAGE_KEYS.startFromZero, startFromZero.toString())
   }, [startFromZero])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.forecastYears, forecastYears.toString())
+    writeStored(STORAGE_KEYS.forecastYears, forecastYears.toString())
   }, [forecastYears])
 
   // Two reads, both under the keys Dashboard already fetches with, so neither costs a

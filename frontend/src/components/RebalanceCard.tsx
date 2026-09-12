@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { readStored, writeStored } from '@/lib/storage'
 import {
   DEFAULT_BAND_PP,
   computeRebalancePlan,
@@ -24,7 +25,7 @@ const BAND_KEY = 'allocationBandPp'
  */
 export function readTargets(): TargetMap {
   try {
-    const raw = localStorage.getItem(TARGETS_KEY)
+    const raw = readStored(TARGETS_KEY)
     if (!raw) return {}
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return {}
@@ -71,7 +72,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
   const curSym = useCurrencySymbol()
   const [targets, setTargets] = useState<TargetMap>(() => readTargets())
   const [bandPp, setBandPp] = useState(() => {
-    const saved = Number(localStorage.getItem(BAND_KEY))
+    const saved = Number(readStored(BAND_KEY))
     return Number.isFinite(saved) && saved > 0 && saved <= 50 ? saved : DEFAULT_BAND_PP
   })
   // Open for someone who has already set targets, collapsed for someone who
@@ -79,10 +80,10 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
   const [open, setOpen] = useState(() => Object.keys(readTargets()).length > 0)
 
   useEffect(() => {
-    localStorage.setItem(TARGETS_KEY, JSON.stringify(targets))
+    writeStored(TARGETS_KEY, JSON.stringify(targets))
   }, [targets])
   useEffect(() => {
-    localStorage.setItem(BAND_KEY, String(bandPp))
+    writeStored(BAND_KEY, String(bandPp))
   }, [bandPp])
 
   const plan = useMemo(

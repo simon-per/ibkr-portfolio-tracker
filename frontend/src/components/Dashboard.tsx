@@ -41,7 +41,8 @@ import { cashIsTracked } from '@/lib/portfolioCash'
 import { ThemeToggle } from './ThemeToggle'
 import { AdminKeyButton } from './AdminKeyButton'
 import { SyncStatusMessage } from './SyncStatusMessage'
-import { BenchmarkPicker, BENCHMARK_COLORS } from './BenchmarkPicker'
+import { BenchmarkPicker } from './BenchmarkPicker'
+import { benchmarkColor } from '@/lib/benchmarkColors'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import {
   MIN_PAIRED_RETURNS,
@@ -52,11 +53,14 @@ import {
   drawdownDetail,
   herfindahlConcentration,
   maxDrawdownPct,
+  periodChange,
   sharpeRatio,
   sortinoRatio,
   winRate,
 } from '@/lib/portfolioKpis'
 import { rangeFor, TIME_RANGES, type TimeRange } from '@/lib/dateRanges'
+import { readStored, writeStored } from '@/lib/storage'
+import { formatShortDateTime } from '@/lib/utils'
 import { RefreshCw, Download, Clock } from 'lucide-react'
 
 const BENCHMARKS_KEY = 'selectedBenchmarks'
@@ -77,7 +81,7 @@ const BENCHMARKS_KEY = 'selectedBenchmarks'
  */
 export function readSelectedBenchmarks(): string[] {
   try {
-    const raw = localStorage.getItem(BENCHMARKS_KEY)
+    const raw = readStored(BENCHMARKS_KEY)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -99,7 +103,7 @@ export function Dashboard() {
 
   const handleBenchmarkChange = (keys: string[]) => {
     setSelectedBenchmarks(keys)
-    localStorage.setItem(BENCHMARKS_KEY, JSON.stringify(keys))
+    writeStored(BENCHMARKS_KEY, JSON.stringify(keys))
   }
 
   // Fetch average monthly contributions. Declared before `dateRange` because ALL
@@ -157,6 +161,15 @@ export function Dashboard() {
     })),
   })
 
+  // The full `/benchmarks` list, for colouring by identity rather than by position in
+  // the selection. Same key and `staleTime` as `BenchmarkPicker`'s query, so it is one
+  // request shared through the cache.
+  const { data: availableBenchmarks } = useQuery({
+    queryKey: ['portfolio', 'benchmarks'],
+    queryFn: () => api.getAvailableBenchmarks(),
+    staleTime: Infinity,
+  })
+
   const benchmarkDatasets: BenchmarkDataset[] = useMemo(() => {
     return selectedBenchmarks
       .map((key, i): BenchmarkDataset | null => {
@@ -165,7 +178,7 @@ export function Dashboard() {
         return {
           key,
           name: query.data.benchmark_name,
-          color: BENCHMARK_COLORS[i % BENCHMARK_COLORS.length],
+          color: benchmarkColor(key, availableBenchmarks),
           data: query.data.data,
           // Window-anchored since 2026-09-07. Both null/0 from an older backend, and the
           // chart then draws the line without the prose that would misdescribe it.
@@ -174,7 +187,7 @@ export function Dashboard() {
         }
       })
       .filter((d): d is BenchmarkDataset => d !== null)
-  }, [selectedBenchmarks, benchmarkQueries])
+  }, [selectedBenchmarks, benchmarkQueries, availableBenchmarks])
 
   // Fetch XIRR annualized return for selected time range
   const { data: annualizedReturn, isLoading: xirrLoading } = useQuery({
@@ -238,43 +251,15 @@ export function Dashboard() {
     staleTime: Infinity,
   })
 
-  // Calculate performance metrics for selected timeframe
-  const performanceMetrics = useMemo(() => {
-    if (!valueOverTime || valueOverTime.length === 0) {
-      return null
-    }
-
-    const firstPoint = valueOverTime[0]
-    const lastPoint = valueOverTime[valueOverTime.length - 1]
-
-    const startValue = firstPoint.market_value_eur
-    const currentValue = lastPoint.market_value_eur
-    const absoluteChange = currentValue - startValue
-    const percentageChange = startValue > 0 ? (absoluteChange / startValue) * 100 : 0
-
-    // Period gain. The attribution endpoint already computes the period's
-    // economic P&L over the same range — value change plus disposal proceeds
-    // minus new investment — so it counts a realized gain. The local fallback
-    // is the change in UNREALIZED profit, which drops when a winner is sold:
-    // the gain leaves the unrealized pool and shows up nowhere.
-    const startProfit = firstPoint.market_value_eur - firstPoint.cost_basis_eur
-    const currentProfit = lastPoint.market_value_eur - lastPoint.cost_basis_eur
-    const periodGain = attribution?.total_pnl_eur ?? (currentProfit - startProfit)
-    // Use cost basis as denominator for gain % (more meaningful than profit-on-profit)
-    const startCostBasis = firstPoint.cost_basis_eur
-    const periodGainPercent = startCostBasis > 0 ? (periodGain / startCostBasis) * 100 : 0
-
-    return {
-      startValue,
-      currentValue,
-      absoluteChange,
-      percentageChange,
-      startDate: firstPoint.date,
-      endDate: lastPoint.date,
-      periodGain,
-      periodGainPercent,
-    }
-  }, [valueOverTime, attribution])
+  // The header line's value change and period gain over the selected range. Extracted
+  // to `periodChange` and unit-tested: inline it read the raw endpoints of a series every
+  // other consumer trims, and published `0%` for two percentages that were undefined —
+  // see its docstring. Both percentages are `number | null` now and the two spans below
+  // render nothing for null.
+  const performanceMetrics = useMemo(
+    () => (valueOverTime ? periodChange(valueOverTime, attribution?.total_pnl_eur) : null),
+    [valueOverTime, attribution],
+  )
 
   // Calculate KPIs
   const kpiMetrics = useMemo(() => {
@@ -406,14 +391,14 @@ export function Dashboard() {
                   <Clock className="h-3 w-3 shrink-0" />
                   {schedulerStatus.last_sync ? (
                     <span>
-                      Last sync: {new Date(schedulerStatus.last_sync.timestamp).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })} ({schedulerStatus.last_sync.status})
+                      Last sync: {formatShortDateTime(schedulerStatus.last_sync.timestamp)} ({schedulerStatus.last_sync.status})
                     </span>
                   ) : (
                     <span>No sync has run yet</span>
                   )}
                   {schedulerStatus.jobs.length > 0 && schedulerStatus.jobs[0].next_run_time && (
                     <span>
-                      · Next: {new Date(schedulerStatus.jobs[0].next_run_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                      · Next: {formatShortDateTime(schedulerStatus.jobs[0].next_run_time)}
                     </span>
                   )}
                 </div>
@@ -638,9 +623,14 @@ export function Dashboard() {
                         <span className={`font-semibold ${performanceMetrics.absoluteChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                           {performanceMetrics.absoluteChange >= 0 ? '+' : ''}{curSym}{performanceMetrics.absoluteChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
-                        <span className={`font-semibold ${performanceMetrics.percentageChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          ({performanceMetrics.percentageChange >= 0 ? '+' : ''}{performanceMetrics.percentageChange.toFixed(2)}%)
-                        </span>
+                        {/* Absent, not `(+0.00%)`, when nothing was held at the range start:
+                            a percentage of zero is undefined, and the figure beside it
+                            already says what changed. */}
+                        {performanceMetrics.percentageChange !== null && (
+                          <span className={`font-semibold ${performanceMetrics.percentageChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            ({performanceMetrics.percentageChange >= 0 ? '+' : ''}{performanceMetrics.percentageChange.toFixed(2)}%)
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-6 text-sm">
@@ -656,9 +646,11 @@ export function Dashboard() {
                         <span className={`font-semibold ${performanceMetrics.periodGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                           {performanceMetrics.periodGain >= 0 ? '+' : ''}{curSym}{performanceMetrics.periodGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
-                        <span className={`font-semibold ${performanceMetrics.periodGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          ({performanceMetrics.periodGainPercent >= 0 ? '+' : ''}{performanceMetrics.periodGainPercent.toFixed(2)}%)
-                        </span>
+                        {performanceMetrics.periodGainPercent !== null && (
+                          <span className={`font-semibold ${performanceMetrics.periodGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            ({performanceMetrics.periodGainPercent >= 0 ? '+' : ''}{performanceMetrics.periodGainPercent.toFixed(2)}%)
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -676,8 +668,15 @@ export function Dashboard() {
               </CardContent>
             </Card>
 
-            {/* Monthly Returns Heatmap */}
-            <MonthlyReturnsHeatmap data={valueOverTime} isLoading={chartLoading} isError={chartError} />
+            {/* Monthly Returns Heatmap. `rangeStart` is what lets it badge a year or month
+                the selected range only partly covers — on 1Y, last year's "YTD" is
+                measured from today's date, not from January. */}
+            <MonthlyReturnsHeatmap
+              data={valueOverTime}
+              rangeStart={dateRange.start}
+              isLoading={chartLoading}
+              isError={chartError}
+            />
 
             {/* Money in per month, with capital deployed beside it */}
             <MonthlyDeploymentCard data={contributions} isLoading={contributionsLoading} isError={contributionsError} />
