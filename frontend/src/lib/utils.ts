@@ -76,6 +76,38 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
+ * A timestamp as a short local date and time — "8/9/26, 6:00 AM" — pinned to `en-US`
+ * like every other formatter here.
+ *
+ * Three sites (the sync header's last/next run, and `SyncStatusMessage`'s skip notice)
+ * called `toLocaleString(undefined, …)` inline, which follows the viewer's runtime
+ * locale; one formatter so the pin cannot be dropped at one of them. A full timestamp
+ * names a real instant, so `new Date(iso)` is the right parse — `parseLocalDate` is for
+ * the API's date-only strings.
+ */
+export function formatShortDateTime(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso
+  return d.toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
+}
+
+/**
+ * A Recharts tooltip formatter's answer for one series value.
+ *
+ * `null` — not `''`, and never a formatted zero — when the point carries no value,
+ * because Recharts drops the tooltip row only when the formatter returns `null`. The
+ * value chart writes `null` into `chartData` for a benchmark with no bar on that date
+ * (and for cash fields an older backend does not send); its formatter guarded
+ * `!== undefined`, so `null` reached `formatCurrency`, was coerced to `0`, and a line
+ * that was not drawn read "€0.00" in the tooltip.
+ */
+export function tooltipValue<T>(
+  value: T | null | undefined,
+  format: (value: T) => string,
+): string | null {
+  return value == null ? null : format(value)
+}
+
+/**
  * A plain integer with thousands separators, pinned to `en-US`.
  *
  * The pin is the whole point, and `LookThroughTab` writes down why: a bare

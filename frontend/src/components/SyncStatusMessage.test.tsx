@@ -81,6 +81,16 @@ describe('SyncStatusMessage', () => {
     expect(screen.getByText(/editing the Flex Query in the IBKR portal/)).toBeTruthy()
   })
 
+  it('renders the statement times in the en-US short form, whatever the host locale', () => {
+    // `toLocaleString(undefined, …)` followed the viewer's runtime, so the same skip read
+    // "09.08.26, 06:00" on a German machine. `lib/utils.ts` pins every other formatter to
+    // en-US; the times here go through `formatShortDateTime` now.
+    render(<SyncStatusMessage data={SKIPPED} error={null} isPending={false} onForce={() => {}} />)
+    const line = screen.getByText(/Next statement available/).textContent ?? ''
+    expect(line).toMatch(/available \d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)/)
+    expect(line).toMatch(/last synced \d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)/)
+  })
+
   it('does not offer a force override while a sync is already running', () => {
     render(<SyncStatusMessage data={SKIPPED} error={null} isPending onForce={() => {}} />)
     expect(screen.getByRole('button', { name: /Sync anyway/ }).hasAttribute('disabled')).toBe(true)

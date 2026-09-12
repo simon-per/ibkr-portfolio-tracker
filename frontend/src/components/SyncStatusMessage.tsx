@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import type { SyncResponse } from '@/lib/api'
+import { formatShortDateTime } from '@/lib/utils'
 
 /**
  * What the header says after you press Sync.
@@ -26,10 +27,6 @@ export interface SyncStatusMessageProps {
   onForce: () => void
 }
 
-function shortTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
-}
-
 export function SyncStatusMessage({ data, error, isPending, onForce }: SyncStatusMessageProps) {
   if (error) {
     return (
@@ -47,8 +44,8 @@ export function SyncStatusMessage({ data, error, isPending, onForce }: SyncStatu
         <p className="text-sm text-muted-foreground">⏸ Already up to date. {data.message}</p>
         {data.next_attempt_after && (
           <p className="mt-1 text-sm text-muted-foreground">
-            Next statement available {shortTime(data.next_attempt_after)}
-            {data.last_success_at && <> · last synced {shortTime(data.last_success_at)}</>}.
+            Next statement available {formatShortDateTime(data.next_attempt_after)}
+            {data.last_success_at && <> · last synced {formatShortDateTime(data.last_success_at)}</>}.
           </p>
         )}
         {/* The only path to a second generation in one day: the IBKR portal resets it

@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { PortfolioValuePoint, BenchmarkValuePoint } from '@/lib/api'
-import { formatDate, parseLocalDate } from '@/lib/utils'
+import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
@@ -477,7 +477,10 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
               // but unbounded it fills the whole plot area at 390px.
               maxWidth: '70vw',
             }}
-            formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''}
+            // `chartData` writes `null` for a benchmark with no bar on a date; a `null`
+            // return is what makes Recharts drop that row instead of printing "€0.00"
+            // for a line that was not drawn. See `tooltipValue`.
+            formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
           />
           {series.map(s =>
             s.show ? (

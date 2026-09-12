@@ -5,7 +5,9 @@ import {
   formatCurrency,
   formatDate,
   formatPercent,
+  formatShortDateTime,
   parseLocalDate,
+  tooltipValue,
 } from './utils'
 
 /**
@@ -136,6 +138,41 @@ describe('formatPercent', () => {
 
   it('shows a small non-zero value rather than rounding it away entirely', () => {
     expect(formatPercent(0.01)).toBe('0.01%')
+  })
+})
+
+describe('formatShortDateTime', () => {
+  it('renders the en-US short form whatever the host locale', () => {
+    // Local time, so the digits depend on the host zone; the SHAPE does not. The three
+    // sites this replaces passed `undefined` as the locale and followed the runtime —
+    // "09.08.26, 06:00" on a German machine for the same instant.
+    expect(formatShortDateTime('2026-08-09T04:00:00+00:00')).toMatch(
+      /^\d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)$/,
+    )
+  })
+
+  it('accepts a Date as given', () => {
+    // `\s` rather than a literal space: recent ICU separates the meridiem with U+202F.
+    expect(formatShortDateTime(new Date(2026, 7, 9, 6, 0))).toMatch(/^8\/9\/26, 6:00\sAM$/)
+  })
+})
+
+describe('tooltipValue', () => {
+  const money = (v: number) => `€${v.toFixed(2)}`
+
+  it('formats a present value', () => {
+    expect(tooltipValue(1234.5, money)).toBe('€1234.50')
+  })
+
+  it('returns null — the value Recharts drops a row for — when the point has none', () => {
+    // Not '' and not a formatted zero: `formatCurrency(null)` coerced to 0 and printed
+    // "€0.00" for a benchmark line that was not drawn on that date.
+    expect(tooltipValue(null, money)).toBeNull()
+    expect(tooltipValue(undefined, money)).toBeNull()
+  })
+
+  it('does not read a real zero as absent', () => {
+    expect(tooltipValue(0, money)).toBe('€0.00')
   })
 })
 
