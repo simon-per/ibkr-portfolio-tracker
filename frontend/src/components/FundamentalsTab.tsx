@@ -340,9 +340,11 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
                   className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm"
                 >
                   <span className="font-medium">{item.symbol}</span>
+                  {/* No currency symbol: EPS is in the issuer's reporting currency, which
+                      this row does not carry, and a `$` on a Nestlé figure is a claim. */}
                   {item.eps_estimate !== null && (
                     <span className="text-muted-foreground">
-                      Est: ${item.eps_estimate.toFixed(2)}
+                      Est: {item.eps_estimate.toFixed(2)}
                     </span>
                   )}
                 </div>
@@ -413,19 +415,21 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
         </span>
       ) : null,
   },
+  // Bare figures, no `$`: EPS is reported in the issuer's own currency, which this row
+  // does not carry, and the header already says EPS. Same rule as the calendar above.
   {
     key: 'eps_estimate',
     header: 'EPS Est.',
     shortHeader: 'EPS Est.',
     align: 'right',
-    cell: (row) => (row.eps_estimate !== null ? `$${row.eps_estimate.toFixed(2)}` : '-'),
+    cell: (row) => (row.eps_estimate !== null ? row.eps_estimate.toFixed(2) : '-'),
   },
   {
     key: 'reported_eps',
     header: 'Reported',
     shortHeader: 'Reported',
     align: 'right',
-    cell: (row) => (row.reported_eps !== null ? `$${row.reported_eps.toFixed(2)}` : '-'),
+    cell: (row) => (row.reported_eps !== null ? row.reported_eps.toFixed(2) : '-'),
   },
 ]
 
