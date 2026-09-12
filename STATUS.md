@@ -723,17 +723,19 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **Sibling-class pricing for the 3a EM fund — activated by hand after the deploy.** The
-  code ships `price_source = sibling`; the switch is one command in the container:
-  `manage_mappings set CH1529078078 FUND 0P0000S0OE.SW --sibling`. It sets the source, purges
-  the 33 carried rows (they would shadow the derived ones) and keeps the 2026-09-01 statement
-  NAV as the anchor. Then the **next market-data slot** writes `sibling_scaled` rows from
-  09-02 to today; check `/api/portfolio/positions` for `CH1529078078`: `price_source:
-  "sibling"` and a `market_price` near `121.20 × (sibling today ÷ sibling on 09-01)` — with the
-  sibling at ~182.6 against ~180 on the anchor day that is ~122.9, not 121.20 (the carried
-  value) and not ~180 (the wrong-class value). The run's `market_result.errors` must be empty;
-  a refusal names itself there. In the browser the position carries a "sibling NAV" badge.
-  If the sibling ever stops quoting, the 7-day "price feed looks broken" warning covers it.
+- **Sibling-class pricing for the 3a EM fund is live and verified (2026-09-12, 15:08
+  Berlin).** Deployed `ce0035a` at 13:22, activated with `manage_mappings set CH1529078078
+  FUND 0P0000S0OE.SW --sibling` (33 carried rows dropped, the 09-01 NAV kept as anchor), and
+  the 15:00 market-data slot wrote the first `sibling_scaled` rows: 09-07, 09-09, 09-10 —
+  the 7-day window's weekdays for which the sibling has a close (no 09-08 bar on Yahoo, 09-11
+  not yet published; mutual-fund NAVs lag a day). The position reads `price_source: sibling`,
+  `market_price 122.358` = 121.201 × (182.56 ÷ 180.83), +0.95% since the anchor — not the
+  carried 121.20, not the wrong-class ~182. Run status `success`, no refusal. **One thing left
+  to see once**: the 18:00 `full_sync`'s 730-day pass backfills 09-02 … 09-04 (the intraday
+  slots only look 7 days back). In the browser the row carries a "sibling NAV" badge. If the
+  sibling ever stops quoting, the 7-day "price feed looks broken" warning covers it. The same
+  run also verified this morning's benchmark fix: `benchmark_result.benchmarks_total: 8`,
+  `rate_limited: false`.
 
 - **The 2026-09-12 bug sweep is live on `e6e7698` (11:22 Berlin) and the API checks passed**
   — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
@@ -745,9 +747,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
     or `BadResponseError`, compare the request against `ibflex.client.submit_request`'s
     (`params={"v": "3", "t", "q"}`, `user-agent: Java`) — the GET is meant to be identical —
     and do **not** retry by hand; the 00:00 slot is the recovery.
-  - The 13:00 Berlin `market_data_only` run's `details.benchmark_result` carries
-    `benchmarks_total` and `rate_limited: false`; the 18:00 `full_sync`'s `lookthrough_result`
-    shows the CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
+  - `benchmarks_total: 8` and `rate_limited: false` **seen on the 15:00 run** (the 13:00 run
+    predated the deploy). Still to see: the 18:00 `full_sync`'s `lookthrough_result` shows the
+    CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
   - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) is
     **closed by the owner on 2026-09-12**: dividends update as expected.
   - **The finpension importer is rehearsed on a copy of production, 2026-09-12 12:00 Berlin.**

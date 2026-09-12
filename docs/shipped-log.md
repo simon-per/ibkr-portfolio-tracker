@@ -56,8 +56,18 @@ the provider's NAV ratios when two or more NAVs exist; `price_source` on the pos
 and a "sibling NAV" / "statement NAV" badge in the table; `NAV_TOLERANCE_PCT` moved into
 `finpension_ingest` so the CLI and the importer share one bound. Verified offline (the full
 suites); one Yahoo lookup made with the owner's go-ahead to confirm the sibling's currency
-and cadence. Activation is a by-hand command on production — STATUS.md *Watch after the next
-deploy* says what the first derived prices should read.
+and cadence.
+
+**Verified on production, 15:08 Berlin.** Deployed `ce0035a` at 13:22; activated by hand
+(dry run, then real: one NAV on record, 33 carried rows dropped, mapping created,
+`price_source: sibling`). The 15:00 market-data slot wrote three `sibling_scaled` rows
+(09-07, 09-09, 09-10 — the 7-day window's weekdays the sibling has a close for; no 09-08
+bar, 09-11 not yet published) and the position reads `market_price 122.358` = 121.201 ×
+182.56 ÷ 180.83, +0.95% since the anchor. Run `success`, no refusal in the errors; the same
+run showed `benchmark_result.benchmarks_total: 8`, closing this morning's warm-up item. The
+18:00 730-day pass backfills 09-02 … 09-04. The owner's note on the direction of the
+remaining error is worth keeping: the two classes differ only by fee drag, and the fund's
+withholding runs a little lower, so what is left is small and partly offsetting.
 
 ## Shipped 2026-09-12 (late) — SendRequest is one HTTP request, whatever ibflex would do
 
