@@ -86,7 +86,12 @@ self-inflicted. **When locked: do nothing; the schedule recovers it. Retrying ca
   (`requests.RequestException`) never reached IBKR and are retried.
 - `IBKRService._download_statement()` drives the two-step protocol itself: SendRequest **once**,
   then poll GetStatement on the same reference until a deadline. Never `ibflex.client.download()`
-  — it raises on `1001`, so any outer retry starts a brand-new generation.
+  — it raises on `1001`, so any outer retry starts a brand-new generation. **And never
+  `client.request_statement()` for the SendRequest step** (found 2026-09-12): its
+  `submit_request` re-sends the same GET up to three times on a 5 s timeout, each a new
+  generation. `send_flex_request` issues one GET with a (connect, read) timeout pair, and a
+  `ReadTimeout` there fails fast like a `1001` — the request may have been accepted.
+  `tests/test_flex_retry_policy.py` pins that the name is never called.
 - IBKR generates about **one statement per ET calendar day**; `flex_generation` makes the second
   daily slot skip once one succeeded. Adding IBKR slots adds failed generations, not freshness.
 - The Flex Query period is a portal setting. **Measure it** (`flex_window_days()` reads

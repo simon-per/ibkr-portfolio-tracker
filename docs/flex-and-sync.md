@@ -101,11 +101,30 @@ which we never saw). The first two lockouts came from this; the third came from 
 the same mistake one layer up.
 
 So `IBKRService._download_statement()` drives the two steps itself using ibflex's public pieces
-(`request_statement`, `submit_request`, `check_statement_response`, `STMT_URL`): **SendRequest once**,
-then poll the *same* `ReferenceCode` for every `_RETRIEVE_PENDING_CODES` hit, bounded by a deadline
-(120s interactive / 900s scheduled) rather than an attempt count. The outer loop only ever re-issues
-SendRequest, and only for failures raised *before* a reference code exists — the one case where
-re-initiating is unavoidable.
+(`submit_request`, `check_statement_response`, `parse_stmt_response`, `STMT_URL`): **SendRequest
+once**, then poll the *same* `ReferenceCode` for every `_RETRIEVE_PENDING_CODES` hit, bounded by a
+deadline (120s interactive / 900s scheduled) rather than an attempt count. The outer loop only ever
+re-issues SendRequest, and only for failures raised *before* a reference code exists — the one case
+where re-initiating is unavoidable.
+
+**"Once" also has to hold *below* the application, and until 2026-09-12 it did not.** The
+SendRequest step went through `client.request_statement`, which delegates to
+`client.submit_request` — and that function catches `requests.exceptions.Timeout` and **re-sends
+the same GET up to three times** with 5 s, 10 s and 15 s ceilings (a scalar `timeout=` covers connect
+*and* read, so a slow answer looks like an unreachable host). A read timeout on SendRequest is not
+"never reached IBKR": it is IBKR taking longer than five seconds to answer a request it has already
+accepted, and each re-send starts another generation — what `1025` counts. The outer handler then
+retried `RequestException` (`Timeout` is one) on the assumption its comment stated, so one scheduled
+slot could issue **up to twelve SendRequests in ~19 minutes**. The line-62 comment had even named
+the inner 3-try loop, as a reason to keep the *outer* retries sparse, without drawing the conclusion
+for the request step. The re-send announces itself with a bare `print()`, so it never appeared under
+any logger. Now `send_flex_request` issues **one GET** with `_SEND_REQUEST_TIMEOUT = (10, 60)` and
+parses the reply with ibflex's own parser (same exception types), and `fetch_flex_data` fails fast
+on a `ReadTimeout` the way it does on a `1001`, while a `ConnectionError`/`ConnectTimeout` keeps
+the retry it always had. The poll step still uses `client.submit_request`: a repeated GetStatement
+retrieves the same reference, which is what IBKR asks for. Pinned by the "SendRequest is one HTTP
+request" block in `tests/test_flex_retry_policy.py`, including a source guard that the name
+`client.request_statement(` is never called.
 
 **Flex error codes:** `1001` statement not ready (transient, expected — poll, don't re-request),
 `1003` not available (terminal), `1018` rate limit (1/sec, 10/min per token), `1019`/`1021` transient,

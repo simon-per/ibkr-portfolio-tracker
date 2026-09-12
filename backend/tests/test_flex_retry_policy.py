@@ -48,7 +48,9 @@ def _always_raise(monkeypatch, exc):
         calls['n'] += 1
         raise exc
 
-    monkeypatch.setattr(ibkr_module.client, 'request_statement', boom)
+    # The seam is our own single-GET SendRequest, not `client.request_statement`, which
+    # re-sends on a timeout and is deliberately no longer called (see the guard test).
+    monkeypatch.setattr(ibkr_module, 'send_flex_request', boom)
     return calls
 
 
@@ -197,7 +199,7 @@ class _FakeFlexServer:
                 raise outcome
             return SimpleNamespace(content=outcome)
 
-        monkeypatch.setattr(ibkr_module.client, 'request_statement', request_statement)
+        monkeypatch.setattr(ibkr_module, 'send_flex_request', request_statement)
         monkeypatch.setattr(ibkr_module.client, 'submit_request', submit_request)
         # check_statement_response only sees successful payloads here; pending states are
         # delivered as ResponseCodeError from submit_request, matching ibflex's behaviour.
@@ -311,3 +313,121 @@ async def test_custom_retry_delays_control_attempt_count(monkeypatch, no_sleep):
 
     assert calls['n'] == 4
     assert no_sleep == [1, 2, 3]
+
+
+# --- SendRequest is one HTTP request, whatever ibflex would do -------------------------
+#
+# `client.request_statement` delegates to `client.submit_request`, which re-sends the same
+# GET up to three times on `requests.exceptions.Timeout` with 5/10/15 s ceilings. On the
+# request step a re-send is a new statement generation — what 1025 counts — so with the
+# outer budget on top one scheduled slot could issue twelve SendRequests. Found 2026-09-12
+# by reading the installed library; every test above pinned only the application's own loop.
+
+
+def test_send_request_is_a_single_get_even_when_it_times_out(monkeypatch):
+    import requests
+
+    calls = []
+
+    def slow_get(url, **kwargs):
+        calls.append(kwargs)
+        raise requests.exceptions.ReadTimeout("IBKR took longer than the read ceiling")
+
+    monkeypatch.setattr(ibkr_module.requests, 'get', slow_get)
+
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        ibkr_module.send_flex_request('t', 'q')
+
+    assert len(calls) == 1, "SendRequest was re-sent — ibflex's submit_request behaviour"
+    # A (connect, read) pair, so a slow answer is not read as an unreachable host.
+    connect, read = calls[0]['timeout']
+    assert read >= 30
+    assert calls[0]['params'] == {"v": "3", "t": "t", "q": "q"}
+
+
+def test_send_request_parses_a_refusal_into_the_same_exception_type(monkeypatch):
+    body = (
+        b'<FlexStatementResponse timestamp="12 September, 2026 05:00 AM EDT">'
+        b'<Status>Fail</Status><ErrorCode>1001</ErrorCode>'
+        b'<ErrorMessage>Statement could not be generated at this time.</ErrorMessage>'
+        b'</FlexStatementResponse>'
+    )
+    monkeypatch.setattr(
+        ibkr_module.requests, 'get', lambda url, **kw: SimpleNamespace(content=body)
+    )
+
+    with pytest.raises(ResponseCodeError) as exc:
+        ibkr_module.send_flex_request('t', 'q')
+    assert exc.value.code == "1001"
+
+
+def test_send_request_returns_the_reference_code(monkeypatch):
+    body = (
+        b'<FlexStatementResponse timestamp="12 September, 2026 05:00 AM EDT">'
+        b'<Status>Success</Status><ReferenceCode>REF123</ReferenceCode>'
+        b'<Url>https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement</Url>'
+        b'</FlexStatementResponse>'
+    )
+    monkeypatch.setattr(
+        ibkr_module.requests, 'get', lambda url, **kw: SimpleNamespace(content=body)
+    )
+
+    assert ibkr_module.send_flex_request('t', 'q').ReferenceCode == "REF123"
+
+
+@pytest.mark.asyncio
+async def test_read_timeout_at_the_request_step_is_never_re_requested(monkeypatch, no_sleep):
+    """
+    A read timeout means IBKR accepted the request and did not answer in time — a
+    generation may be running, so re-issuing SendRequest is the 1025 mistake. Same
+    treatment as a 1001, on the patient budget too.
+    """
+    import requests
+
+    calls = _always_raise(monkeypatch, requests.exceptions.ReadTimeout("slow answer"))
+
+    with pytest.raises(RuntimeError, match="1025"):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(
+            retry_delays=FLEX_RETRY_DELAYS_PATIENT
+        )
+
+    assert calls['n'] == 1
+    assert no_sleep == []
+
+
+@pytest.mark.asyncio
+async def test_connect_timeout_before_a_reference_exists_is_still_retried(monkeypatch, no_sleep):
+    """A connect timeout never reached IBKR; it keeps the DNS-blip treatment."""
+    import requests
+
+    calls = _always_raise(monkeypatch, requests.exceptions.ConnectTimeout("no route"))
+
+    with pytest.raises(requests.exceptions.ConnectTimeout):
+        await IBKRService(token='t', query_id='q').fetch_flex_data()
+
+    assert calls['n'] == len(_FLEX_RETRY_DELAYS) + 1
+    assert no_sleep == _FLEX_RETRY_DELAYS
+
+
+def test_the_request_step_never_goes_through_ibflex_request_statement():
+    """
+    The guard for the whole section: `client.request_statement` re-sends on a timeout,
+    so the application must not call it. `client.submit_request` stays legitimate for
+    the *poll* step, where a repeat retrieves the same reference.
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(ibkr_module.__file__).read_text(encoding="utf-8"))
+    # Call sites only — the name is allowed in prose, where the docstrings explain why.
+    offenders = [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "request_statement"
+    ]
+    assert offenders == [], (
+        f"ibkr_service.py:{offenders} calls request_statement — SendRequest must be issued "
+        "by send_flex_request, one GET; client.request_statement re-sends on a timeout"
+    )
+    assert callable(getattr(ibkr_module, "send_flex_request", None))

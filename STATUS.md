@@ -6,10 +6,17 @@
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
 **Last updated: 2026-09-12.** Latest: **a bug sweep with three parallel read-only hunts
-(backend valuation, frontend, sync/ops) found 31 verified defects; 24 shipped, the rest are
+(backend valuation, frontend, sync/ops) found 32 verified defects; 25 shipped, the rest are
 recorded below rather than fixed.** Production was healthy throughout and every sum identity
 the public API exposes held — the defects were in the paths today's data does not exercise
-and in the codebase's own conventions. The ones that were live: the timeline stamped
+and in the codebase's own conventions. **The most serious arrived last, as a retraction**:
+the sync/ops hunt had listed "no path can issue two SendRequests for one slot" as verified,
+then read the installed `ibflex` source and withdrew it — `client.request_statement` re-sends
+the same GET up to three times on a 5 s timeout, each a new statement generation, so with the
+outer retry budget one scheduled slot could issue twelve. `send_flex_request` now issues one
+GET with a (connect, read) timeout pair and a read timeout fails fast like a `1001` (rule 2 in
+CLAUDE.md carries it). **The 18:00 run today is the first live SendRequest through it.** The
+ones that were live: the timeline stamped
 `cash_source: ibkr` on its tail while the summary said `mixed`, so the chart dropped its caveat
 (fixed: the label is the service's verdict); the dividend forecast labelled yfinance gross
 estimates `net` (fixed: `net` only from IBKR rows — expect `forward_yield.basis` to move
@@ -712,6 +719,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
   row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
   2026-09-12*). Still to observe:
+  - **The 18:00 Berlin `full_sync` is the first live SendRequest through `send_flex_request`**
+    (one GET, `(10, 60)` timeouts, ibflex's parser). Expect `ibkr_result.status: success` with
+    a reference code logged as before. If it reads `error` with a message naming `SendRequest`
+    or `BadResponseError`, compare the request against `ibflex.client.submit_request`'s
+    (`params={"v": "3", "t", "q"}`, `user-agent: Java`) — the GET is meant to be identical —
+    and do **not** retry by hand; the 00:00 slot is the recovery.
   - `POST /api/dividends/sync` twice inside five minutes: the second answers 429 with
     `Retry-After`. **Needs the admin key**, so only the owner can run it.
   - The 13:00 Berlin `market_data_only` run's `details.benchmark_result` carries
@@ -1058,8 +1071,12 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 - **2026-09-12** — "let's look for bugs or things that look wrong or not work properly and
   try to fix it." Three read-only hunts in parallel (backend valuation, frontend, sync/ops),
   each finding verified by reading the code and, where the public API allowed, against
-  production, before it went into the plan: 31 defects, 24 shipped in small commits with a
-  test each, seven recorded here instead or dropped. Three lessons. **Production being healthy proves
+  production, before it went into the plan: 32 defects, 25 shipped in small commits with a
+  test each, seven recorded here instead or dropped. Three lessons, and a fourth from the
+  item that arrived last: **"checked and correct" is only as deep as the layer that was read**
+  — the sync/ops hunt cleared the Flex retry policy against the application's code, then read
+  the installed library and retracted it, and that retraction was the highest-severity finding
+  of the day. Three lessons. **Production being healthy proves
   only that today's data is kind**: every sum identity held and every warning was legitimate,
   and the bugs were all in the paths the data did not exercise — a range before inception,
   a second account older than the Flex claim, a Yahoo bar landing on a NAV date, a 429 in the

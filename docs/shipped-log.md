@@ -31,6 +31,31 @@ The durable half of these findings is in **CLAUDE.md**, not here: the once-per-d
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
+## Shipped 2026-09-12 (late) — SendRequest is one HTTP request, whatever ibflex would do
+
+The sync/ops hunt's late correction, and the most serious finding of the day. It had listed
+"no path can issue two SendRequests for one slot" as verified against the application's code,
+then read the installed `ibflex 0.15` source and retracted it: `client.request_statement`
+delegates to `client.submit_request`, which catches `requests.exceptions.Timeout` and **re-sends
+the same GET up to three times** with 5 s, 10 s and 15 s ceilings. On the request step a re-send
+is a new statement generation — what `Code=1025` counts — and a *read* timeout is not "never
+reached IBKR" but IBKR taking more than five seconds to answer a request it already accepted.
+Our outer handler then retried `RequestException` (`Timeout` is one) on exactly the opposite
+assumption, so one scheduled slot could issue up to twelve SendRequests in ~19 minutes while
+`_download_statement`'s docstring said "once" and `test_flex_retry_policy.py` pinned only our own
+loop. The line-62 comment had even named the inner 3-try loop. The re-send is a bare `print()`,
+invisible under any logger.
+
+Shipped: `send_flex_request` issues **one GET** (`_SEND_REQUEST_TIMEOUT = (10, 60)`, the same
+params and `user-agent: Java` as ibflex, ibflex's own `parse_stmt_response`, so callers see the
+same exception types); `fetch_flex_data` fails fast on a `ReadTimeout` with the `1001` reasoning
+while `ConnectionError`/`ConnectTimeout` keep their retry; the poll step still uses
+`client.submit_request`, where a repeat retrieves the same reference. Tests: the "SendRequest is
+one HTTP request" block in `test_flex_retry_policy.py`, including an AST guard that nothing in
+`ibkr_service.py` calls `request_statement`. Rule 2 in CLAUDE.md and `docs/flex-and-sync.md`
+carry it. **Verified offline only**; the 18:00 Berlin `full_sync` is the first live SendRequest
+through the new path — STATUS.md *Watch after the next deploy* says what to look for.
+
 ## Shipped 2026-09-12 — the bug sweep: 24 defects from three parallel hunts
 
 Asked as "let's look for bugs or things that look wrong or not work properly and try to fix
