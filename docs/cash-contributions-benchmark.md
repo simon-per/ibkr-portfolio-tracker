@@ -384,7 +384,10 @@ still covered, and using the first row would hand that week's purchases to the l
 deposits.
 
 **But the period start is a claim, not evidence, and `get_contributions()` clamps it forward to
-`CashFlowRepository.earliest_flow_date()`** — the first row the ledger holds, of *any* type. **The account
+`CashFlowRepository.earliest_flow_date(account=IBKR)`** — the first row the IBKR ledger holds, of
+*any* type (scoped since 2026-09-12: `coverage_from` is an IBKR Flex claim, and an unscoped query
+let one pillar-3a row older than the claim make the `>` test false and silently disable the
+clamp — `tests/test_account_isolation.py` now walks the AST for the keyword). **The account
 is younger than the statement that reports it**: a YTD query in the first year begins on 1 January while
 the account was funded weeks later, and in that gap the deposits table is empty because the money was
 still going to the previous broker. Believing the claim drops those purchases from **both** sides — past

@@ -995,3 +995,30 @@ async def test_the_measured_era_reads_mixed_when_a_second_account_is_only_derive
         assert by_date["2026-01-14"]["cash_source"] == verdict
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_coverage_clamp_asks_only_the_ibkr_ledger():
+    """
+    `coverage_from` is an IBKR Flex claim, and the clamp that hands an unevidenced gap
+    back to lot cost basis compared it with the earliest row of ANY account. One
+    pillar-3a export starting before the claim made the `>` test false and the clamp
+    silently disappeared — IBKR purchases in the gap vanished from Money In.
+    """
+    from app.accounts import IBKR, PILLAR3A
+    from app.repositories.cash_flow_repository import CashFlowRepository
+
+    engine, session = await _make_session()
+    try:
+        session.add(_flow(date(2026, 1, 9), "1000", "D1"))        # IBKR's first row
+        older = _flow(date(2025, 6, 1), "100", "P1")
+        older.account = PILLAR3A                                  # a 3a row before it
+        session.add(older)
+        await session.flush()
+
+        repo = CashFlowRepository(session)
+        assert await repo.earliest_flow_date() == date(2025, 6, 1)
+        assert await repo.earliest_flow_date(account=IBKR) == date(2026, 1, 9)
+        assert await repo.earliest_flow_date(account="nobody") is None
+    finally:
+        await engine.dispose()

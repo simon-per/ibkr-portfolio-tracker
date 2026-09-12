@@ -275,3 +275,27 @@ def test_every_destructive_taxlot_read_in_sync_helper_is_account_scoped():
         "read deletes the open lots of every account this statement does not mention "
         "— which is every other account, always."
     )
+
+
+def test_the_contributions_clamp_reads_the_ledger_per_account():
+    """
+    Same lens as the sync_helper rule above, pointed at the one per-IBKR fact the
+    portfolio service computes: `coverage_from` is written only by the Flex sync, so
+    the ledger date it is clamped to must be IBKR's. An unscoped
+    `earliest_flow_date()` there is how a 3a row silently disabled the clamp.
+    """
+    path = pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / "portfolio_service.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "earliest_flow_date"
+    ]
+    assert calls, "the clamp is gone — re-read docs/cash-contributions-benchmark.md before deleting it"
+    for call in calls:
+        keywords = {kw.arg: kw.value for kw in call.keywords}
+        assert "account" in keywords, (
+            f"portfolio_service.py:{call.lineno} calls earliest_flow_date() unscoped"
+        )
+        assert isinstance(keywords["account"], ast.Name) and keywords["account"].id == "IBKR"

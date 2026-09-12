@@ -17,6 +17,7 @@ from app.models.security import Security
 from app.models.trade import Trade
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
+from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED
 from app.services.native_amounts import NativeToBase
 from app.repositories.app_settings_repository import AppSettingsRepository
@@ -656,7 +657,12 @@ class PortfolioService:
         # those purchases from both sides: past the lot cutoff, with no deposit to
         # replace them. Clamping forward hands the gap back to lot cost basis, which is
         # the correct source for any era the ledger does not reach.
-        ledger_starts_at = await flow_repo.earliest_flow_date()
+        #
+        # Scoped to IBKR because `coverage_from` is an IBKR Flex claim (sync_helper is
+        # its only writer). Unscoped, one pillar-3a export starting before that date
+        # made the `>` test false and the clamp silently disappeared — the 3a blends
+        # everywhere *except* where a per-IBKR fact is being computed.
+        ledger_starts_at = await flow_repo.earliest_flow_date(account=IBKR)
         if coverage_from and ledger_starts_at and ledger_starts_at > coverage_from:
             coverage_from = ledger_starts_at
 

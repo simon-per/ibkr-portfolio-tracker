@@ -83,7 +83,7 @@ class CashFlowRepository:
         )
         return result.scalar()
 
-    async def earliest_flow_date(self) -> Optional[date]:
+    async def earliest_flow_date(self, account: Optional[str] = None) -> Optional[date]:
         """
         Date of the oldest row of ANY type — when the ledger first had anything to say.
 
@@ -94,8 +94,16 @@ class CashFlowRepository:
         the account did (a Year-to-Date query in the account's first year), and in that
         slice an empty deposit list means the money went to another broker, not that no
         money was added — so the contributions splice clamps to this date.
+
+        `account` scopes the question to one ledger. The clamp's caller asks about the
+        IBKR statement's claim, and a pillar-3a row older than that claim would make the
+        `>` test false and silently disable the clamp — the IBKR purchases in the
+        unevidenced gap would then vanish from Money In with nothing reporting it.
         """
-        result = await self.session.execute(select(func.min(CashFlow.flow_date)))
+        query = select(func.min(CashFlow.flow_date))
+        if account is not None:
+            query = query.where(CashFlow.account == account)
+        result = await self.session.execute(query)
         return result.scalar()
 
     async def count(self) -> int:
