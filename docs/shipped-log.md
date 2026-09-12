@@ -126,8 +126,20 @@ fixed before committing; the gates: tsc clean, 46 files / 607 tests from 555, ES
   selection, so deselecting one no longer recolours the rest.
 
 Verified offline: the full backend suite green at the new count (1467 from 1448) and the
-frontend gates above, each fix with a failing-first test. What to look at on production is in
-STATUS.md's *Watch after the next deploy*.
+frontend gates above, each fix with a failing-first test.
+
+**Verified on production, 11:22 Berlin, commit `e6e7698`** (pushed 11:11, deployed by the 11:20
+cron): `/health` healthy with write auth and the persistent job store; the timeline's tail points
+read `cash_source: mixed`, the same word as the summary; SK Hynix `forecast_basis: gross_estimate`
+and every forecast row with a basis reads `gross_estimate` (the 21 rows that had read `net` all
+drew their per-share history from yfinance — MRVL and MU included, whose IBKR rows the
+"second record" rule drops), so `forward_yield.basis` is `gross_estimate` and its
+`gross_estimate_eur` equals the total; a `DELETE` with a non-ASCII `X-API-Key` answers 401; the
+current-year tax report answers 200. The forward-yield figure moved 322.80 → 320.92 EUR across the
+deploy, −0.6% — pre-ownership estimate rows now enter the size median for securities that used to
+prefer `net`, plus the FX refresh between reads; recorded in `docs/dividends.md`. Still unverified:
+the dividends cooldown's 429 (needs the admin key), `benchmarks_total` on the next
+`market_data_only` run (13:00 Berlin), and the finpension upsert on the next monthly upload.
 
 ## Shipped 2026-09-08 (late) — the audit batch: self-refreshing baskets, no benchmark cache, build-before-down, current deps
 

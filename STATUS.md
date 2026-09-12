@@ -708,28 +708,23 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The 2026-09-12 bug sweep, on production.** Cheap checks, all against the public API:
-  - `GET /api/portfolio/value-over-time` tail points read `cash_source: "mixed"`, the same
-    word `/api/portfolio/summary` uses — and the value chart shows the "partly IBKR's own
-    figure" caveat it was dropping.
-  - `GET /api/dividends/breakdown`: SK Hynix (`000660.KS`) reads `forecast_basis:
-    gross_estimate`, and `forward_yield.basis` has moved from `mixed` toward `gross_estimate`
-    (most payers' per-share history is yfinance's; only MRVL/MU-shaped rows stay `net`). The
-    forward yield *figure* does not change — only its label was wrong.
+- **The 2026-09-12 bug sweep is live on `e6e7698` (11:22 Berlin) and the API checks passed**
+  — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
+  row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
+  2026-09-12*). Still to observe:
   - `POST /api/dividends/sync` twice inside five minutes: the second answers 429 with
-    `Retry-After`.
-  - A mutating request with a non-ASCII `X-API-Key` answers 401, not 500, and the container
-    log shows no traceback for it.
-  - The next `market_data_only` run's `details.benchmark_result` carries `benchmarks_total`
-    and `rate_limited: false`; the next 18:00 `full_sync`'s `lookthrough_result` shows the
-    CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
+    `Retry-After`. **Needs the admin key**, so only the owner can run it.
+  - The 13:00 Berlin `market_data_only` run's `details.benchmark_result` carries
+    `benchmarks_total` and `rate_limited: false`; the 18:00 `full_sync`'s `lookthrough_result`
+    shows the CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
   - **The finpension upsert is verified by test only.** The live check is the next monthly
     `import_finpension_csv` run: it must succeed even if `CH0117044948`'s NAV date now carries a
     `yahoo_finance` row, and the shrink guard's message now says "the previous import … had N"
     rather than quoting the stored count.
-  - Frontend: on a range starting before inception (none of the buttons reach it on this
-    account today — the general case is younger accounts and backfills), Max/Current Drawdown
-    and the hero `DeltaChip` show *unmeasurable* rather than `0`; the Look-through tab shows an
+  - Frontend, in a browser: on a range starting before inception (none of the buttons reach it
+    on this account today — the general case is younger accounts and backfills), Max/Current
+    Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the value chart shows
+    the "partly IBKR's own figure" cash caveat it was dropping; the Look-through tab shows an
     alert naming any unvaluable position above its KPIs; the watchlist's Analyst sort puts
     `strong_buy` first descending; EPS figures carry no `$`.
 

@@ -169,7 +169,11 @@ on record; most payers took this path, since the IBKR duplicate of a yfinance pe
 dropped). The `net` branch now requires `p.source == "ibkr"`; an estimate row that landed keeps
 contributing exactly the per-share figure it always did (its ex-date-converted EUR amount over the
 shares — a better gross than `amount_per_share × one recent rate`, and the only figure when the FX
-dict lacks the currency), just under the `gross_estimate` label. The label moved; no forecast size did. Future years are selectable (`years` offers `as_of.year + 1`) and a future
+dict lacks the currency), just under the `gross_estimate` label. The label moved; a size can move a
+little for a security that used to prefer `net`: its pre-ownership estimate rows contributed no size
+under that preference (their `net_ps` was `None`) and now enter the median at
+`amount_per_share × rate`. Measured on production across the deploy: forward yield 322.80 → 320.92
+(−0.6%), with the daily FX refresh between the two reads as the other contributor. Future years are selectable (`years` offers `as_of.year + 1`) and a future
 year is forecast in full rather than from today.
 
 **Accumulating ETFs correctly show nothing** — DBPG, EMIM, IWDA, SXR8, VWCE, XAIX, XNAS (the `1C`/`ACC`
