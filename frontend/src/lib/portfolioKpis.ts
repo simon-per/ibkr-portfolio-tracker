@@ -54,6 +54,42 @@ export function isMeasurable(point: ValueSeriesPoint): boolean {
 }
 
 /**
+ * The first point that held anything, to seed a compounding walk from.
+ *
+ * **A pre-inception day is measurable and zero.** The backend emits a point for every
+ * weekday in the requested window, including the days before the first lot —
+ * `market_value_eur: 0, cost_basis_eur: 0, unpriced_holdings: 0` — so `isMeasurable` is
+ * true of it and nothing above filters it out. Seeding the drawdown walk from
+ * `series[0]` therefore seeded it from `0`, and `0 * (1 + r)` is `0` for every return
+ * after it: the peak never rose above zero, no drawdown was ever recorded, and the card
+ * printed "Never below its opening value" for any range starting before inception.
+ * Latent on this account since 2Y crossed inception; live on any younger one.
+ *
+ * `null` when nothing was ever held, so callers can refuse rather than walk from zero.
+ */
+export function firstValuedPoint(series: ValueSeriesPoint[]): ValueSeriesPoint | null {
+  return series.find((p) => p.market_value_eur > 0) ?? null
+}
+
+/**
+ * The returns a walk seeded from `seed` may apply: those dated *after* it.
+ *
+ * `dailyReturnSeries` dates each return on the later point of its pair, so the return
+ * dated `seed.date` is the move from the day before — from nothing held to the seed —
+ * and the seed's value already contains it. Applying it again to that value fabricated an
+ * opening drawdown: a lot bought at 100 that closed at 99 has a Modified-Dietz inception
+ * return of (99 − 0 − 100) / (0 + 50) = −2%, so a book that never fell afterwards read
+ * −2% until it rose 2% above its first close. For a series that starts at inception the
+ * seed is `series[0]` and nothing is dropped.
+ */
+function returnsAfter(
+  seed: ValueSeriesPoint,
+  returns: { date: string; ret: number }[],
+): { date: string; ret: number }[] {
+  return returns.filter((r) => r.date > seed.date)
+}
+
+/**
  * The day's external flow: money entering (+) or leaving (−) the holdings.
  *
  * Prefers the backend's `external_flow_eur`, which values a purchase at cost and
@@ -119,13 +155,19 @@ function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
  * Reachable exactly when a stalled price feed covers the whole selected range — every
  * point unmeasurable, so `dailyReturns` drops every pair — which is the one situation
  * where "it never fell" is the last thing anyone should be told.
+ *
+ * The walk is seeded from the first point that held anything, never from `series[0]`:
+ * a range that starts before inception opens on measurable zeros, and a zero seed
+ * stays zero through every return. See {@link firstValuedPoint}.
  */
 export function maxDrawdownPct(series: ValueSeriesPoint[]): number | null {
-  const returns = dailyReturns(series)
+  const seed = firstValuedPoint(series)
+  if (seed === null) return null
+  const returns = returnsAfter(seed, dailyReturnSeries(series)).map((r) => r.ret)
   if (returns.length === 0) return null
 
   let worst = 0
-  let value = series.length ? series[0].market_value_eur : 0
+  let value = seed.market_value_eur
   let peak = value
   for (const r of returns) {
     value *= 1 + r
@@ -161,21 +203,26 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
   currentDrawdownPct: number | null
   sampleDays: number
 } {
-  const measurable = dailyReturnSeries(series)
-  if (measurable.length === 0) {
+  // Same seed rule as `maxDrawdownPct`: the first point that held anything, or nothing
+  // to walk. A pre-inception zero seeded this walk too, and it does not merely miss the
+  // fall — `currentDrawdownPct` stays 0 as well, so the card's green prose was doubly
+  // wrong. And only the returns after the seed are walked — see `returnsAfter`.
+  const seed = firstValuedPoint(series)
+  const measurable = seed === null ? [] : returnsAfter(seed, dailyReturnSeries(series))
+  if (measurable.length === 0 || seed === null) {
     return {
       maxDrawdownPct: null,
       peakDate: null,
       troughDate: null,
       recoveredDate: null,
       currentDrawdownPct: null,
-      sampleDays: 0,
+      sampleDays: measurable.length,
     }
   }
 
-  let value = series.length ? series[0].market_value_eur : 0
+  let value = seed.market_value_eur
   let peak = value
-  let peakDate = series.length ? series[0].date : null
+  let peakDate: string | null = seed.date
 
   let worst = 0
   let worstPeakDate: string | null = null
@@ -212,6 +259,73 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
     recoveredDate,
     currentDrawdownPct: current,
     sampleDays: measurable.length,
+  }
+}
+
+/** What the Performance tab's header line says changed over the selected range. */
+export interface PeriodChange {
+  startValue: number
+  currentValue: number
+  absoluteChange: number
+  /** `absoluteChange` over `startValue`; `null` when nothing was held at the start. */
+  percentageChange: number | null
+  startDate: string
+  endDate: string
+  periodGain: number
+  /** `periodGain` over the opening cost basis; `null` when nothing had been invested. */
+  periodGainPercent: number | null
+}
+
+/**
+ * Value change and period gain between the first and last **measurable** points.
+ *
+ * This lived in `Dashboard`'s memo, reading `series[0]` and `series[at(-1)]` raw while
+ * every other consumer of the same series trims unmeasurable days — so a stalled feed
+ * on the last day printed a fabricated loss here alone. And both percentages fell back
+ * to `0` when their denominator was not positive: a range starting before inception
+ * opens on a measurable zero (see {@link firstValuedPoint}), so the header read
+ * `(+0.00%)` beside a value change of the whole book. `?? null` downstream cannot
+ * recover a `0` once it is published, which is why the refusal has to happen here.
+ *
+ * `periodGain` prefers the attribution endpoint's `total_pnl_eur` when the caller has
+ * it: that figure counts a realized gain, while the local fallback — the change in
+ * *unrealized* profit — drops when a winner is sold, because the gain leaves the
+ * unrealized pool and shows up nowhere.
+ *
+ * `null` for the whole thing when no point in the range is measurable, because a line
+ * built from unpriced days is the fabricated-loss shape this exists to remove.
+ */
+export function periodChange(
+  series: ValueSeriesPoint[],
+  attributionPnl?: number | null,
+): PeriodChange | null {
+  const measurable = series.filter(isMeasurable)
+  if (measurable.length === 0) return null
+
+  const first = measurable[0]
+  const last = measurable[measurable.length - 1]
+
+  const startValue = first.market_value_eur
+  const currentValue = last.market_value_eur
+  const absoluteChange = currentValue - startValue
+  const percentageChange = startValue > 0 ? (absoluteChange / startValue) * 100 : null
+
+  const startProfit = first.market_value_eur - first.cost_basis_eur
+  const currentProfit = last.market_value_eur - last.cost_basis_eur
+  const periodGain = attributionPnl ?? currentProfit - startProfit
+  // Cost basis as the denominator: a return on what was invested, not profit-on-profit.
+  const startCostBasis = first.cost_basis_eur
+  const periodGainPercent = startCostBasis > 0 ? (periodGain / startCostBasis) * 100 : null
+
+  return {
+    startValue,
+    currentValue,
+    absoluteChange,
+    percentageChange,
+    startDate: first.date,
+    endDate: last.date,
+    periodGain,
+    periodGainPercent,
   }
 }
 

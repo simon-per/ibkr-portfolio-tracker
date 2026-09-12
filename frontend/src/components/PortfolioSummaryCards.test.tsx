@@ -66,3 +66,18 @@ describe('the incomplete-total notice', () => {
     expect(screen.getByRole('alert')).toBeTruthy()
   })
 })
+
+describe('the period-change chip', () => {
+  it('shows the change and its range when one is known', () => {
+    render(<PortfolioSummaryCards summary={base} periodChangePct={4.2} periodLabel="1Y" />)
+    expect(screen.getByText(/over 1Y/)).toBeTruthy()
+  })
+
+  it('renders no chip at all for an unknown change, rather than a 0% one', () => {
+    // `periodChange` publishes null when nothing was held at the range start — a range
+    // that begins before inception — and the card must not turn that back into a figure.
+    render(<PortfolioSummaryCards summary={base} periodChangePct={null} periodLabel="2Y" />)
+    expect(screen.queryByText(/over 2Y/)).toBeNull()
+    expect(screen.queryByText(/\+0\.0+%/)).toBeNull()
+  })
+})

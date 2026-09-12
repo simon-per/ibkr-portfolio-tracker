@@ -8,9 +8,11 @@ import {
   dailyReturns,
   drawdownDetail,
   externalFlow,
+  firstValuedPoint,
   herfindahlConcentration,
   isMeasurable,
   maxDrawdownPct,
+  periodChange,
   sharpeRatio,
   sortinoRatio,
   winRate,
@@ -573,6 +575,140 @@ describe('incomplete valuations are not measured', () => {
     expect(maxDrawdownPct(rising)).toBe(0)
     expect(drawdownDetail(rising).maxDrawdownPct).toBe(0)
     expect(drawdownDetail(rising).sampleDays).toBe(3)
+  })
+})
+
+describe('a range that starts before inception', () => {
+  /**
+   * The backend emits a point for every weekday in the requested window, including the
+   * days before the first lot: `market_value_eur: 0, cost_basis_eur: 0,
+   * unpriced_holdings: 0`. Nothing there is unpriced, so `isMeasurable` is true of them
+   * and every guard above keeps them — and a drawdown walk seeded from `series[0]` was
+   * seeded from zero, stayed zero through every return, and reported a *measured* `0`:
+   * "Never below its opening value", in green, over a real fall. Verified live:
+   * `value-over-time` from 2024-01-02 returns 105 such points before this account's
+   * first lot. Latent here since 2Y crossed inception; live on any younger account.
+   */
+  const preInception = (i: number): PortfolioValuePoint => ({
+    ...point(day(i), 0, 0, 0),
+    unpriced_holdings: 0,
+  })
+  const series: PortfolioValuePoint[] = [
+    preInception(0),
+    preInception(1),
+    point(day(2), 1000, 1000, 1000), // the first lot
+    point(day(3), 1100, 1000, 0),    // the peak
+    point(day(4), 990, 1000, 0),     // −10% from it
+  ]
+
+  it('seeds the walk from the first point that held anything', () => {
+    expect(firstValuedPoint(series)?.date).toBe(day(2))
+    expect(firstValuedPoint([preInception(0), preInception(1)])).toBeNull()
+  })
+
+  it('reports the real fall, not a measured zero', () => {
+    expect(maxDrawdownPct(series)).toBeCloseTo(-10, 6)
+  })
+
+  it('names the peak and trough of that fall in the detail', () => {
+    const detail = drawdownDetail(series)
+    expect(detail.maxDrawdownPct).toBeCloseTo(-10, 6)
+    expect(detail.currentDrawdownPct).toBeCloseTo(-10, 6)
+    expect(detail.peakDate).toBe(day(3))
+    expect(detail.troughDate).toBe(day(4))
+    // Only the two real moves are walked: the zero-to-zero pair has nothing to divide
+    // by, and the inception pair describes the move *to* the seed, which the seed's
+    // value already contains.
+    expect(detail.sampleDays).toBe(2)
+  })
+
+  it('does not apply the inception day’s own return to a seed that already contains it', () => {
+    // Bought at 100 on day 2, closed at 99: the inception pair's Modified-Dietz return is
+    // (99 − 0 − 100) / (0 + 50) = −2%. The seed IS day 2's close, so walking that return
+    // onto it fabricated a 2% opening drawdown on a book that never fell afterwards.
+    const flat: PortfolioValuePoint[] = [
+      preInception(0),
+      preInception(1),
+      point(day(2), 99, 100, 100),
+      point(day(3), 99, 100, 0),
+      point(day(4), 99, 100, 0),
+    ]
+    expect(maxDrawdownPct(flat)).toBe(0)
+    const detail = drawdownDetail(flat)
+    expect(detail.maxDrawdownPct).toBe(0)
+    expect(detail.currentDrawdownPct).toBe(0)
+    expect(detail.sampleDays).toBe(2)
+  })
+
+  it('has nothing to walk when the range holds only the inception day', () => {
+    expect(maxDrawdownPct([preInception(0), point(day(1), 99, 100, 100)])).toBeNull()
+  })
+
+  it('refuses rather than walking from zero when nothing was ever valued', () => {
+    // Money went in and nothing was ever priced, with no unpriced count to say so: a
+    // return exists (−200% on the inception pair) but there is no point to seed from.
+    const blind: PortfolioValuePoint[] = [
+      preInception(0),
+      { ...point(day(1), 0, 100, 100), unpriced_holdings: 0 },
+    ]
+    expect(dailyReturns(blind)).toHaveLength(1)
+    expect(maxDrawdownPct(blind)).toBeNull()
+    expect(drawdownDetail(blind).maxDrawdownPct).toBeNull()
+  })
+})
+
+describe('periodChange', () => {
+  it('measures value change and period gain between the range endpoints', () => {
+    const series = [point(day(0), 1000, 900, 0), point(day(1), 1100, 900, 0)]
+    const r = periodChange(series)!
+    expect(r.absoluteChange).toBe(100)
+    expect(r.percentageChange).toBeCloseTo(10, 6)
+    // Unrealised profit went 100 → 200 with no attribution figure to prefer.
+    expect(r.periodGain).toBe(100)
+    expect(r.periodGainPercent).toBeCloseTo((100 / 900) * 100, 6)
+    expect([r.startDate, r.endDate]).toEqual([day(0), day(1)])
+  })
+
+  it('prefers the attribution P&L, which counts a realized gain', () => {
+    const series = [point(day(0), 1000, 900, 0), point(day(1), 1100, 900, 0)]
+    expect(periodChange(series, 250)!.periodGain).toBe(250)
+    // An explicit null from the endpoint falls back exactly as an absent one does.
+    expect(periodChange(series, null)!.periodGain).toBe(100)
+  })
+
+  it('reads the first and last MEASURABLE points, like every other consumer of the series', () => {
+    const series: PortfolioValuePoint[] = [
+      { ...point(day(0), 400, 900, 0), unpriced_holdings: 2 },
+      point(day(1), 1000, 900, 0),
+      point(day(2), 1100, 900, 0),
+      // The feed stalled today: the raw endpoints would print a 100 loss.
+      { ...point(day(3), 300, 900, 0), unpriced_holdings: 3 },
+    ]
+    const r = periodChange(series)!
+    expect([r.startValue, r.currentValue]).toEqual([1000, 1100])
+    expect([r.startDate, r.endDate]).toEqual([day(1), day(2)])
+    expect(r.absoluteChange).toBe(100)
+  })
+
+  it('publishes null, never 0%, when the range opens on a pre-inception zero', () => {
+    // The Dashboard's memo wrote `startValue > 0 ? … : 0` here, and `?? null` downstream
+    // cannot tell a published 0 from a measured one — so the header read `(+0.00%)`
+    // beside a value change of the whole book.
+    const series: PortfolioValuePoint[] = [
+      { ...point(day(0), 0, 0, 0), unpriced_holdings: 0 },
+      point(day(1), 1000, 1000, 1000),
+      point(day(2), 1100, 1000, 0),
+    ]
+    const r = periodChange(series)!
+    expect(r.absoluteChange).toBe(1100) // the whole book — true, and worth stating
+    expect(r.percentageChange).toBeNull() // a percentage of nothing is undefined
+    expect(r.periodGainPercent).toBeNull()
+    expect(r.periodGain).toBe(100)
+  })
+
+  it('is null when no point in the range is measurable', () => {
+    expect(periodChange([])).toBeNull()
+    expect(periodChange([{ ...point(day(0), 400, 900, 0), unpriced_holdings: 2 }])).toBeNull()
   })
 })
 

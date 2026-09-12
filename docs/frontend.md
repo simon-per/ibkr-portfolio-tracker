@@ -98,6 +98,22 @@ from one dominant one.
   `−cost`) and is now `null` with the excluded count named. Note where the zeros in this family come
   from — `0` for unknown, `100` for `_compute_rsi`, and now a *sentence* — so the question is what
   the stand-in asserts, never what value it happens to be.
+
+  **A pre-inception day is measurable and zero, and every compounding walk seeds from the first
+  valued point** (`firstValuedPoint`, 2026-09-12). The backend emits `market_value_eur: 0,
+  cost_basis_eur: 0, unpriced_holdings: 0` for each weekday before the first lot — verified live,
+  105 such points before this account's first purchase — so `isMeasurable` keeps them, and a walk
+  seeded from `series[0]` stayed at zero through every return: `maxDrawdownPct` printed the same
+  green "Never below its opening value" over a real fall by a second route the 08-17 fix did not
+  cover, and Dashboard's header published `(+0.00%)` for two percentages whose denominator was that
+  zero. `periodChange` (extracted from the Dashboard memo, so it could be tested) returns `null` for
+  both, and reads the first and last *measurable* points like every other consumer of the series.
+  Two details the fix needed: the seed is the first point with `market_value_eur > 0`, never
+  `series[0]`; and **only the returns dated after the seed are walked** (`returnsAfter`) — the
+  inception pair's Modified-Dietz return is the move from nothing held *to* the seed, which the
+  seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
+  bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
+  so it is latent here and live on any younger account or after a backfill.
 - **`dailyReturnSeries` exists because `dailyReturns` drops days with nothing to divide by**, so the
   nth return is not the nth calendar point. Indexing the input by return position to name a
   drawdown's peak picks the wrong day.
