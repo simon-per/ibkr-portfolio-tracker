@@ -89,6 +89,13 @@ function normalize(name: string, mapping: Record<string, string>): string {
 }
 
 /**
+ * The "nothing loaded" allocation, as one module-level object rather than a fresh `{}` per
+ * render. `AllocationTreemap` resets its drill-down whenever its `allocation` prop changes
+ * identity, so a literal here would close the panel on every parent re-render.
+ */
+const NO_ALLOCATION: Record<string, AllocationCategory> = {}
+
+/**
  * Colour by identity, never by row position.
  *
  * This used to fall back to `FALLBACK_COLORS[index % 15]`, so any category the map did not
@@ -484,16 +491,28 @@ export function AllocationTab() {
     [allocation],
   )
 
-  // Merge and normalize allocation data
-  const sectorAllocation = allocation?.sector_allocation
-    ? mergeAllocation(allocation.sector_allocation, SECTOR_MAPPING)
-    : {}
+  // Merge and normalize allocation data. Memoised on `allocation`, because
+  // `AllocationTreemap` resets its drill-down whenever its `allocation` prop changes
+  // identity — and `mergeAllocation` in the render body handed it a fresh object on every
+  // render, so the Dashboard's 60-second `scheduler/status` refetch, which re-renders
+  // everything under it, closed the open panel once a minute.
+  const sectorAllocation = useMemo(
+    () =>
+      allocation?.sector_allocation
+        ? mergeAllocation(allocation.sector_allocation, SECTOR_MAPPING)
+        : NO_ALLOCATION,
+    [allocation],
+  )
 
-  const geoAllocation = allocation?.geographic_allocation
-    ? mergeAllocation(allocation.geographic_allocation, GEOGRAPHIC_MAPPING)
-    : {}
+  const geoAllocation = useMemo(
+    () =>
+      allocation?.geographic_allocation
+        ? mergeAllocation(allocation.geographic_allocation, GEOGRAPHIC_MAPPING)
+        : NO_ALLOCATION,
+    [allocation],
+  )
 
-  const assetAllocation = allocation?.asset_type_allocation || {}
+  const assetAllocation = allocation?.asset_type_allocation ?? NO_ALLOCATION
 
   return (
     <div className="space-y-6">

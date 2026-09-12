@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AllocationTab } from './AllocationTab'
 import { CurrencyProvider } from '@/lib/CurrencyContext'
@@ -152,5 +152,36 @@ describe('AllocationTab completeness', () => {
 
     const alert = await waitFor(() => screen.getByRole('alert'))
     expect(alert.textContent).toMatch(/1 holding with no usable price/)
+  })
+})
+
+describe('AllocationTab drill-down', () => {
+  it('survives a parent re-render that changes nothing', async () => {
+    /**
+     * `AllocationTreemap` resets its selection whenever its `allocation` prop changes
+     * identity. The merged allocations were built in the render body, so every re-render
+     * of this tab — and the Dashboard's 60-second `scheduler/status` poll re-renders
+     * everything beneath it — handed the treemap a fresh object and closed the open panel
+     * once a minute. A `rerender` with the same client and the same props is that poll,
+     * seen from here: the query data keeps its identity, so only the tab's own derivation
+     * can break the memo.
+     */
+    mockApi()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = () => (
+      <QueryClientProvider client={client}>
+        <CurrencyProvider>
+          <AllocationTab />
+        </CurrencyProvider>
+      </QueryClientProvider>
+    )
+    const view = render(tree())
+
+    // The legend entry is a real button; the treemap itself is an SVG jsdom cannot size.
+    fireEvent.click(await screen.findByRole('button', { name: /Technology/ }))
+    expect(screen.getByText('Apple Inc')).toBeTruthy()
+
+    view.rerender(tree())
+    expect(screen.getByText('Apple Inc')).toBeTruthy()
   })
 })
