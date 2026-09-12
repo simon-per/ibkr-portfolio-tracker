@@ -7,7 +7,7 @@ database, and FX is a stub — the copy-at-each-date rule is exercised in
 
 Every fixture is synthetic. The real export is account data and gitignored.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -33,6 +33,7 @@ from app.services.finpension_ingest import (
     CARRY_HORIZON_DAYS,
     PRICE_SOURCE_CARRY,
     PRICE_SOURCE_STATEMENT,
+    SYNC_TYPE,
     FinpensionIngestError,
     ingest_finpension_report,
 )
@@ -511,3 +512,79 @@ async def test_a_reimport_does_not_unpin_a_verified_yahoo_mapping(db):
     assert em.price_source == PRICE_SOURCE_MANUAL
     assert [p for p in await _rows(db, MarketPrice, security_id=em.id)
             if p.source == PRICE_SOURCE_CARRY]
+
+
+@pytest.mark.asyncio
+async def test_a_reimport_survives_a_yahoo_bar_on_a_nav_date(db):
+    """
+    The wholesale replace deletes only *our* price rows, and the market-data sync
+    re-fetches the trailing three days even when cached — its ON CONFLICT DO UPDATE
+    rewrites a statement row's `source` to `yahoo_finance`. The next upload then
+    re-added that date with a bare `db.add` and hit the (security_id, date) unique
+    constraint: IntegrityError on flush, in place of a refusal with a reason. Two
+    monthly uploads away for the Yahoo-pinned fund.
+    """
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+    em = (await _rows(db, Security, isin=EM))[0]
+
+    # What bulk_create's upsert does to the 2026-09-01 statement row.
+    row = (await _rows(db, MarketPrice, security_id=em.id, date=date(2026, 9, 1)))[0]
+    row.source = "yahoo_finance"
+    row.close_price = Decimal("121.500000")
+    await db.commit()
+
+    result = await _apply(db, REAL_SHAPE)   # used to raise IntegrityError here
+    await db.commit()
+
+    kept = (await _rows(db, MarketPrice, security_id=em.id, date=date(2026, 9, 1)))
+    assert len(kept) == 1
+    assert (kept[0].source, kept[0].close_price) == ("yahoo_finance", Decimal("121.500000"))
+    # The other fund's NAV on the same date is still ours, and the carry was rewritten.
+    world = (await _rows(db, Security, isin=WORLD))[0]
+    assert (await _rows(db, MarketPrice, security_id=world.id, date=date(2026, 9, 1)))[0].source \
+        == PRICE_SOURCE_STATEMENT
+    assert any(p.source == PRICE_SOURCE_CARRY for p in await _rows(db, MarketPrice))
+    # Rows *submitted*, the same contract as bulk_create — SQLite's rowcount cannot
+    # tell a DO NOTHING row from an inserted one, so the count is not "inserted".
+    clean = await _apply(db, REAL_SHAPE, force=True)
+    assert result["prices_written"] == clean["prices_written"]
+
+
+@pytest.mark.asyncio
+async def test_the_shrink_guard_compares_parsed_rows_with_parsed_rows(db):
+    """
+    It compared the file's row count with the number of rows *stored*, and those
+    differ: a row skipped for a missing FX rate is parsed, warned about and never
+    stored. After k skips a re-export missing up to k rows passed the guard and the
+    wholesale replace deleted the difference — and the skip's own warning says to
+    re-import. The baseline is what the previous run parsed, read from its sync run.
+    """
+    await _apply(db, REAL_SHAPE)          # 5 rows parsed and stored
+    await db.commit()
+
+    # The previous import, as the CLI records it, parsed six rows (one was skipped).
+    db.add(SyncRun(
+        sync_type=SYNC_TYPE, status="success", message="Ingested",
+        details={"account": PILLAR3A, "rows": 6}, started_at=datetime(2026, 9, 6),
+    ))
+    await db.commit()
+
+    # Five rows against five stored passes the old guard; against six parsed it is a
+    # truncation.
+    with pytest.raises(FinpensionIngestError, match="had 6"):
+        await _apply(db, REAL_SHAPE)
+    assert len(await _rows(db, Trade, account=PILLAR3A)) == 2   # nothing was written
+
+    # Another account's run is not this account's baseline.
+    db.add(SyncRun(
+        sync_type=SYNC_TYPE, status="success", message="Ingested",
+        details={"account": "pillar3a-2", "rows": 99}, started_at=datetime(2026, 9, 7),
+    ))
+    await db.commit()
+    with pytest.raises(FinpensionIngestError, match="had 6"):
+        await _apply(db, REAL_SHAPE)
+
+    # --force still means what it says.
+    result = await _apply(db, REAL_SHAPE, force=True)
+    assert result["rows"] == 5

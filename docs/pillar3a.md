@@ -90,7 +90,20 @@ Two measured details that look like nits:
 - **A partial export refuses**, because the replay starts from zero and a 3a account does
   too. That matters because ingest **replaces wholesale** — sound only while the file is
   full history, and necessary because a content hash alone orphans a restated row's
-  predecessor. A shrink guard mirrors the empty-statement one.
+  predecessor. A shrink guard mirrors the empty-statement one — and since 2026-09-12 it
+  compares the file's row count with what the **previous run parsed** (read back from its
+  `sync_runs` row, `details.rows`), not with what is stored: a row skipped for a missing FX
+  rate is parsed and never stored, so after k skips a re-export missing up to k rows passed
+  the old guard and the wholesale replace deleted the difference. With no run on record it
+  falls back to the stored count.
+- **Price rows are inserted with ON CONFLICT DO NOTHING, never a bare add.** The replace
+  deletes only our own `finpension_*` rows, and for a fund pinned to Yahoo the market-data
+  sync re-fetches the trailing `PROVISIONAL_PRICE_DAYS` even when cached — its upsert
+  rewrites a statement row's `source` to `yahoo_finance`. Until 2026-09-12 the next upload
+  re-added that date and hit the `(security_id, date)` unique constraint: an IntegrityError
+  on flush in place of a refusal with a reason, two monthly uploads away for `CH0117044948`.
+  An existing Yahoo bar wins; `prices_written` counts rows *submitted*, the same contract as
+  `MarketPriceRepository.bulk_create`.
 
 The full vocabulary is `Buy`, `Sell`, `Portfolio Transaction`, `Liquidation distribution`,
 `Deposit`, `Transfer vested benefits`, `Flat-rate administrative fee`, `Flat-rate

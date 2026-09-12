@@ -37,7 +37,7 @@ from app.clock import utcnow
 from app.database import AsyncSessionLocal
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.currency_service import CurrencyService
-from app.services.finpension_ingest import ingest_finpension_report
+from app.services.finpension_ingest import SYNC_TYPE, ingest_finpension_report
 from app.services.finpension_report import (
     DEPOSIT,
     FinpensionParseError,
@@ -45,8 +45,6 @@ from app.services.finpension_report import (
 )
 
 logger = logging.getLogger(__name__)
-
-SYNC_TYPE = "pillar3a_csv"
 
 
 def _print_warnings(warnings) -> None:

@@ -39,6 +39,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.models.cash_flow import DEPOSIT_WITHDRAW, FEE as FLOW_FEE, INCOME as FLOW_INCOME, TRANSFER_IN as FLOW_TRANSFER_IN
 from app.models.market_price import MarketPrice
@@ -155,6 +156,40 @@ def _business_days(start: date, end: date):
         day += timedelta(days=1)
 
 
+#: The `sync_runs.sync_type` the CLI records under. Defined here rather than in the
+#: CLI because the shrink guard reads the previous run back.
+SYNC_TYPE = "pillar3a_csv"
+
+
+async def _last_parsed_row_count(db, account: str) -> Optional[int]:
+    """
+    How many rows the previous successful import of this account *parsed*.
+
+    The shrink guard used to compare the incoming file's row count with the number of
+    rows *stored* — and those are different quantities: a row whose CHF→EUR rate was
+    missing is parsed, warned about and skipped, so after k such skips a re-export
+    missing up to k rows passed the guard and the wholesale replace deleted the
+    difference. The skip's own warning ("re-import once the rate is available") is the
+    workflow that walked into that hole. `sync_runs.details.rows` holds the parsed
+    count of every successful run, so compare parsed with parsed. `None` when no run
+    is on record (the first import, or a database that predates the CLI recording
+    one), and the caller falls back to the stored count.
+    """
+    from app.models.sync_run import SyncRun
+
+    rows = (await db.execute(
+        select(SyncRun.details)
+        .where(SyncRun.sync_type == SYNC_TYPE, SyncRun.status == "success")
+        .order_by(SyncRun.finished_at.desc(), SyncRun.id.desc())
+    )).scalars().all()
+    for details in rows:
+        if not isinstance(details, dict) or details.get("account") != account:
+            continue
+        parsed = details.get("rows")
+        return parsed if isinstance(parsed, int) else None
+    return None
+
+
 async def _existing_state(db, account: str) -> Tuple[int, Optional[date], set]:
     """Row count, last trade/flow date, and the ib_keys currently stored."""
     trade_keys = set((await db.execute(
@@ -198,15 +233,18 @@ async def ingest_finpension_report(
     # Same shape as the empty-statement wipe guard and `replace_basket`'s row-collapse
     # refusal: a wholesale replace is only safe while the incoming file is at least as
     # complete as what it replaces. Checked up front so a refusal leaves the ledger
-    # untouched rather than half-rebuilt.
+    # untouched rather than half-rebuilt. The row baseline is what the previous run
+    # *parsed*, not what it stored — see _last_parsed_row_count for why they differ.
     if stored_count and not force:
-        if len(report.rows) < stored_count:
+        previous_rows = await _last_parsed_row_count(db, account)
+        baseline = previous_rows if previous_rows is not None else stored_count
+        if len(report.rows) < baseline:
             raise FinpensionIngestError(
-                f"The file holds {len(report.rows)} rows but {stored_count} are stored "
-                f"for account {account!r}. A finpension export is full history, so a "
-                f"shorter one is a truncated download rather than a correction, and "
-                f"applying it would delete the difference. Re-export, or pass --force "
-                f"if you really mean to replace the ledger with this."
+                f"The file holds {len(report.rows)} rows but the previous import of "
+                f"account {account!r} had {baseline}. A finpension export is full "
+                f"history, so a shorter one is a truncated download rather than a "
+                f"correction, and applying it would delete the difference. Re-export, "
+                f"or pass --force if you really mean to replace the ledger with this."
             )
         if stored_last and report.last_date < stored_last:
             raise FinpensionIngestError(
@@ -480,20 +518,30 @@ async def _write_prices(
     Materialising it is more honest than the alternative, not less: the read path
     already carries a price forward silently, and giving the carried rows their own
     `source` is what lets the staleness detector ask for the newest *observed* NAV.
+
+    Inserted with ON CONFLICT DO NOTHING on `(security_id, date)`, never a bare add.
+    The wholesale replace above deletes only *our* rows, and for a fund pinned to
+    Yahoo the market-data sync re-fetches the trailing `PROVISIONAL_PRICE_DAYS` even
+    when cached and its ON CONFLICT DO UPDATE rewrites the row's `source` — so a NAV
+    struck within three days of an upload was a Yahoo bar by the next upload, and
+    re-adding that date raised IntegrityError on flush: an opaque failure in place of
+    this module's "refuse whole with a reason". An existing bar wins, which is what the
+    comment on the delete already said it wanted. Returns the rows *submitted*, the
+    same contract as `MarketPriceRepository.bulk_create` — SQLite's rowcount does not
+    tell a DO NOTHING row from an inserted one.
     """
-    written = 0
     horizon = last_date + timedelta(days=CARRY_HORIZON_DAYS)
+    rows: List[dict] = []
 
     for isin, by_date in observed.items():
         security_id = security_ids[isin]
         dates = sorted(by_date)
         for i, nav_date in enumerate(dates):
             price = by_date[nav_date]
-            db.add(MarketPrice(
+            rows.append(dict(
                 security_id=security_id, date=nav_date, close_price=price,
                 currency=ACCOUNT_CURRENCY, source=PRICE_SOURCE_STATEMENT,
             ))
-            written += 1
 
             if security_id not in carry_for:
                 continue
@@ -501,11 +549,20 @@ async def _write_prices(
             for day in _business_days(nav_date, stop):
                 if day in by_date:
                     break
-                db.add(MarketPrice(
+                rows.append(dict(
                     security_id=security_id, date=day, close_price=price,
                     currency=ACCOUNT_CURRENCY, source=PRICE_SOURCE_CARRY,
                 ))
-                written += 1
+
+    written = 0
+    # Chunked for SQLite's variable limit, the same 100 `MarketPriceRepository.bulk_create` uses.
+    for start in range(0, len(rows), 100):
+        chunk = rows[start:start + 100]
+        await db.execute(
+            sqlite_insert(MarketPrice).values(chunk)
+            .on_conflict_do_nothing(index_elements=["security_id", "date"])
+        )
+        written += len(chunk)
 
     await db.flush()
     return written
