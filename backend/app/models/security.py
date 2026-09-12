@@ -15,6 +15,12 @@ from app.database import Base
 # shape. `MANUAL` is that opt-out: prices arrive from a statement import instead.
 PRICE_SOURCE_YAHOO = "yahoo"
 PRICE_SOURCE_MANUAL = "manual"
+#: Priced from a *sibling share class* Yahoo does quote: the newest statement NAV
+#: anchors the level, the sibling's closes supply every day's move after it. For a
+#: pension-only tranche that has no public quote of its own and whose provider prints
+#: a NAV only on transaction rows. Not `yahoo` — the sibling's dividends, fundamentals
+#: and ratings are not this security's — and not `manual`, which is carried and bounded.
+PRICE_SOURCE_SIBLING = "sibling"
 
 
 class Security(Base):

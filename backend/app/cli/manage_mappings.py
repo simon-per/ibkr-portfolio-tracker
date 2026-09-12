@@ -46,8 +46,9 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
-from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_YAHOO
+from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_SIBLING, PRICE_SOURCE_YAHOO
 from app.services.finpension_ingest import (
+    NAV_TOLERANCE_PCT,
     PRICE_SOURCE_STATEMENT,
     purge_carried_prices,
 )
@@ -185,7 +186,8 @@ async def cmd_list(db) -> int:
 #: proposed sat +49% away (`0P0000S0OE.SW`, the EM fund's older NT tranche against this
 #: account's NMT one). Nothing lands between the two, which is what makes the threshold
 #: a real separation rather than a guess.
-NAV_TOLERANCE_PCT = Decimal("2.0")
+# NAV_TOLERANCE_PCT lives in finpension_ingest since 2026-09-12: the importer's sibling
+# tracking check applies the same bound, and two copies of one tolerance is how they drift.
 
 #: How many published NAVs to check against. More is not better: they come
 #: from transaction dates, so a handful spans months and a wrong share class
@@ -280,9 +282,96 @@ async def _verify_against_published_navs(
     return None
 
 
+async def _verify_sibling_returns(
+    db, security, yahoo_ticker: str,
+) -> Optional[str]:
+    """
+    For `--sibling`: the candidate's *level* is expected to differ (it is another share
+    class), so the level check above is the wrong oracle. What must agree is the *move*:
+    between two NAVs the provider published, the sibling's closes must have changed by
+    the same ratio, within `NAV_TOLERANCE_PCT`. With a single NAV on record there is
+    nothing to compare yet — the level is anchored to it, and the importer's tracking
+    check applies this same bound to every later NAV an upload brings.
+
+    One Yahoo request, allowed under rule 1 because a human typed the command.
+    """
+    rows = (await db.execute(
+        select(MarketPrice)
+        .where(
+            MarketPrice.security_id == security.id,
+            MarketPrice.source == PRICE_SOURCE_STATEMENT,
+        )
+        .order_by(MarketPrice.date.asc())
+        .limit(NAV_SAMPLE)
+    )).scalars().all()
+    if not rows:
+        return (
+            f"{security.symbol}@{security.exchange} has no statement NAV on record to "
+            f"anchor a sibling class to. Import the provider's export first."
+        )
+    if len(rows) < 2:
+        print(
+            f"One published NAV on record ({rows[0].date}: {rows[0].close_price}); the "
+            f"level is anchored to it. Tracking is checked against every later NAV an "
+            f"upload brings, at the same {NAV_TOLERANCE_PCT}% bound."
+        )
+        return None
+
+    start = rows[0].date - timedelta(days=5)
+    end = rows[-1].date + timedelta(days=5)
+    try:
+        history = await asyncio.to_thread(
+            lambda: yf.Ticker(yahoo_ticker).history(
+                start=start.isoformat(), end=end.isoformat(), auto_adjust=False
+            )
+        )
+    except Exception as e:
+        return (
+            f"Could not fetch {yahoo_ticker} to check its moves against the "
+            f"{len(rows)} published NAVs ({type(e).__name__}: {e}); refusing."
+        )
+    if history.empty:
+        return f"{yahoo_ticker} returned no prices at all; it cannot stand in for anything."
+    closes = {d.date(): Decimal(str(round(float(row["Close"]), 6)))
+              for d, row in history.iterrows()}
+
+    def nearest(when):
+        candidates = [d for d in closes if abs((d - when).days) <= 2]
+        return closes[min(candidates, key=lambda d: abs((d - when).days))] if candidates else None
+
+    worst = None
+    for older, newer in zip(rows, rows[1:]):
+        c_old, c_new = nearest(older.date), nearest(newer.date)
+        if c_old is None or c_new is None:
+            continue
+        nav_ratio = newer.close_price / older.close_price
+        close_ratio = c_new / c_old
+        gap = abs(close_ratio / nav_ratio - 1) * 100
+        if worst is None or gap > worst[0]:
+            worst = (gap, older.date, newer.date)
+    if worst is None:
+        return (
+            f"{yahoo_ticker} has no closes near the published NAV dates, so its moves "
+            f"cannot be compared with the fund's."
+        )
+    gap, d0, d1 = worst
+    if gap > NAV_TOLERANCE_PCT:
+        return (
+            f"{yahoo_ticker} moved {gap:.1f}% differently from the fund between {d0} and "
+            f"{d1} (provider NAVs against its closes) — refusing. A sibling class must "
+            f"track the fund it stands in for to within {NAV_TOLERANCE_PCT}%."
+        )
+    print(
+        f"Sibling moves verified against {len(rows)} published NAVs: worst tracking gap "
+        f"{gap:.2f}% ({d0} → {d1}), within {NAV_TOLERANCE_PCT}%."
+    )
+    return None
+
+
 async def cmd_set(
     db, symbol: str, exchange: str, yahoo_ticker: str,
     notes: Optional[str], dry_run: bool, skip_nav_check: bool = False,
+    sibling: bool = False,
 ) -> Tuple[int, dict]:
     service = MarketDataService(db)
     security = await _find_security(db, symbol, exchange)
@@ -319,7 +408,28 @@ async def cmd_set(
     # candidate against them before believing it, because the failure mode here is
     # a different *share class* — a perfect name match at a completely wrong level.
     verified = False
-    if security and not skip_nav_check:
+    sibling_ok = False
+    if sibling:
+        # Another share class of the same fund: its level is *expected* to disagree
+        # with the published NAVs (the EM fund's NT tranche sits 49% above the NMT one
+        # held), so the level check would refuse the very thing being declared. What
+        # has to agree is the move — see _verify_sibling_returns.
+        if not security:
+            raise MappingError(
+                f"--sibling needs {symbol}@{exchange} to exist with statement NAVs on "
+                f"record; import the provider's export first."
+            )
+        if getattr(security, "price_source", None) == PRICE_SOURCE_YAHOO:
+            raise MappingError(
+                f"{symbol}@{exchange} already prices from Yahoo directly. A sibling class "
+                f"is for a tranche Yahoo does not quote; disable that mapping first if you "
+                f"really mean to replace a direct quote with a derived one."
+            )
+        refusal = await _verify_sibling_returns(db, security, yahoo_ticker)
+        if refusal:
+            raise MappingError(refusal)
+        sibling_ok = True
+    elif security and not skip_nav_check:
         refusal = await _verify_against_published_navs(
             db, service, security, yahoo_ticker
         )
@@ -375,6 +485,18 @@ async def cmd_set(
             f"carried row(s); its published NAVs stay on record and a Yahoo close "
             f"supersedes them per date."
         )
+    elif sibling_ok:
+        security.price_source = PRICE_SOURCE_SIBLING
+        # Same reason as above: a carry written forward past today would shadow the
+        # derived rows the next sync writes.
+        purged = await purge_carried_prices(db, security.id)
+        print(
+            f"{symbol}@{exchange} now prices from sibling class {yahoo_ticker} (was "
+            f"{getattr(security, 'price_source', None) and 'manual'}): the newest "
+            f"statement NAV anchors the level and the sibling's closes supply each day's "
+            f"move. Dropped {purged} carried row(s); the next market-data sync derives the "
+            f"prices, and every upload re-anchors them and checks the tracking."
+        )
     await db.commit()
     print(
         f"{'Updated' if existing else 'Created'} {symbol}@{exchange} -> {yahoo_ticker}"
@@ -384,6 +506,7 @@ async def cmd_set(
         "action": "set", "symbol": symbol, "exchange": exchange,
         "yahoo_ticker": yahoo_ticker, "previous": before,
         "price_source_flipped_to_yahoo": verified,
+        "price_source_set_to_sibling": sibling_ok,
         "carried_rows_purged": purged,
     }
 
@@ -462,7 +585,7 @@ async def run(args) -> int:
             if args.command == "set":
                 code, details = await cmd_set(
                     db, args.symbol, args.exchange, args.yahoo_ticker,
-                    args.notes, args.dry_run, args.skip_nav_check,
+                    args.notes, args.dry_run, args.skip_nav_check, args.sibling,
                 )
             else:
                 code, details = await cmd_disable(
@@ -514,6 +637,14 @@ def build_parser() -> argparse.ArgumentParser:
              "for a security with no such NAVs on record, where the check is a "
              "no-op anyway - it exists so a Yahoo outage cannot block an unrelated "
              "mapping, not so a disagreement can be waved through.",
+    )
+    p_set.add_argument(
+        "--sibling", action="store_true",
+        help="The ticker is another share class of the same fund, quoted where this "
+             "one is not. Its level is expected to differ; its moves must track the "
+             "provider's NAVs. Sets price_source=sibling: the newest statement NAV "
+             "anchors the level, the sibling's closes supply each day's move, and "
+             "every upload re-anchors and checks the tracking.",
     )
 
     p_del = sub.add_parser("disable", help="Stop using a mapping (keeps the row)")

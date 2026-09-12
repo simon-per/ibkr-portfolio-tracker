@@ -28,7 +28,7 @@ is caught by construction rather than by somebody noticing.
 """
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models.security import PRICE_SOURCE_YAHOO, Security
+from app.models.security import PRICE_SOURCE_SIBLING, PRICE_SOURCE_YAHOO, Security
 
 
 def yahoo_eligible() -> ColumnElement[bool]:
@@ -52,3 +52,17 @@ def is_yahoo_eligible(security: Security) -> bool:
     query is a rule that leaks the first time somebody calls the inner function.
     """
     return getattr(security, "price_source", PRICE_SOURCE_YAHOO) == PRICE_SOURCE_YAHOO
+
+
+def is_sibling_priced(security: Security) -> bool:
+    """
+    Priced from a sibling share class — see `MarketDataService.sync_sibling_prices`.
+
+    Deliberately **not** folded into `yahoo_eligible()`. The market-data path does ask
+    Yahoo for such a security, but for the *sibling's* bars, which it then scales to
+    the statement NAV; every other Yahoo consumer — dividends, fundamentals, ratings,
+    the allocation sync — must still leave it alone, because the sibling's dividend
+    history and `.info` are not this security's. So the family predicate keeps saying
+    "no" and the price loop alone consults this one.
+    """
+    return getattr(security, "price_source", PRICE_SOURCE_YAHOO) == PRICE_SOURCE_SIBLING

@@ -71,6 +71,31 @@ const accountBadge = (p: Position): string | null =>
   p.account && p.account.startsWith('pillar3a') ? '3a' : null
 
 /**
+ * How a derived or carried price is qualified, or null for an ordinary quote.
+ *
+ * `sibling`: the provider's statement NAV scaled by a sibling share class's daily moves,
+ * because Yahoo does not quote this tranche at all. `manual`: the statement NAV carried
+ * between uploads. Both are the honest value of the position and both are not a quote
+ * of *this* instrument, so the figure carries the word — next to it, not behind a hover.
+ */
+const priceSourceBadge = (p: Position): { label: string; title: string } | null => {
+  if (p.price_source === 'sibling') {
+    return {
+      label: 'sibling NAV',
+      title:
+        'Priced from a sibling share class of the same fund: the last statement NAV sets the level, the sibling’s daily moves carry it forward. Re-anchored on every finpension upload.',
+    }
+  }
+  if (p.price_source === 'manual') {
+    return {
+      label: 'statement NAV',
+      title: 'Priced from the provider’s last statement NAV, carried forward until the next upload.',
+    }
+  }
+  return null
+}
+
+/**
  * A holding the backend could not value, on the shared two-clause predicate.
  *
  * The table used to render these as an ordinary, very bad position. `market_value_eur`
@@ -143,14 +168,27 @@ export function positionColumns(deps: {
         const badge = accountBadge(p)
         // One Column[] renders both the table and the phone card list, so the badge
         // reaches mobile without a second edit — the whole reason DataTable exists.
-        const tag = badge ? (
-          <span
-            className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
-            title="Held in your pillar 3a account. Excluded from the tax report's wealth and income sections."
-          >
-            {badge}
-          </span>
-        ) : null
+        const priced = priceSourceBadge(p)
+        const tag = (
+          <>
+            {badge ? (
+              <span
+                className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
+                title="Held in your pillar 3a account. Excluded from the tax report's wealth and income sections."
+              >
+                {badge}
+              </span>
+            ) : null}
+            {priced ? (
+              <span
+                className="ml-1.5 rounded border border-amber-300/60 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 align-middle dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                title={priced.title}
+              >
+                {priced.label}
+              </span>
+            ) : null}
+          </>
+        )
         return view === 'table' ? (
           <>
             <div className="font-medium">

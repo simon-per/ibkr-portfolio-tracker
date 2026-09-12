@@ -187,6 +187,14 @@ export interface Position {
    * fields, so an older backend keeps rendering exactly as it did.
    */
   account?: string;
+  /**
+   * Where `market_price` comes from. `'yahoo'` is a quote for this instrument;
+   * `'manual'` is the provider's statement NAV carried between uploads; `'sibling'` is
+   * that NAV scaled by a sibling share class's daily moves — a derived figure, badged
+   * in the positions table because a caveat behind a hover does not exist. Absent
+   * means `'yahoo'`, from a backend older than 2026-09-12.
+   */
+  price_source?: string;
   isin: string;
   currency: string;
   exchange: string | null;

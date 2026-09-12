@@ -7,6 +7,13 @@ from decimal import Decimal
 from app.database import Base
 
 
+#: `source` tag for a row derived from a sibling share class: the sibling's close on that
+#: date scaled by (statement NAV ÷ sibling close) at the newest statement date. Tagged
+#: apart from `yahoo_finance` because it is a *derived* figure, and from the finpension
+#: tags because the importer deletes and re-derives these on every upload.
+PRICE_ROW_SOURCE_SIBLING_SCALED = "sibling_scaled"
+
+
 class MarketPrice(Base):
     """
     Stores historical daily closing prices for securities.

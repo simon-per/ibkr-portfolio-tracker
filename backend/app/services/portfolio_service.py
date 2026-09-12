@@ -1240,6 +1240,7 @@ class PortfolioService:
                     "currency": security.currency,
                     "exchange": security.exchange,
                     "account": security.account,
+                    "price_source": security.price_source,
                     "quantity": Decimal("0.0"),
                     "cost_basis_eur": Decimal("0.0"),
                     "taxlots": []

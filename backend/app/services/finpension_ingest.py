@@ -42,8 +42,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.models.cash_flow import DEPOSIT_WITHDRAW, FEE as FLOW_FEE, INCOME as FLOW_INCOME, TRANSFER_IN as FLOW_TRANSFER_IN
-from app.models.market_price import MarketPrice
-from app.models.security import PRICE_SOURCE_MANUAL, Security
+from app.models.market_price import MarketPrice, PRICE_ROW_SOURCE_SIBLING_SCALED
+from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_SIBLING, Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.models.cash_flow import CashFlow
@@ -159,6 +159,59 @@ def _business_days(start: date, end: date):
 #: The `sync_runs.sync_type` the CLI records under. Defined here rather than in the
 #: CLI because the shrink guard reads the previous run back.
 SYNC_TYPE = "pillar3a_csv"
+
+#: How far a candidate price may sit from a NAV the provider itself published before
+#: it is refused as a *different share class*. Both bounds are measured: the correct
+#: World ex CH ticker sat 0.6% off at worst, the wrong EM class 49%. Nothing lands
+#: between. Shared by `manage_mappings` (verifying a mapping) and the tracking check
+#: below (a sibling class drifting away from the fund it stands in for).
+NAV_TOLERANCE_PCT = Decimal("2.0")
+
+
+async def _sibling_tracking_warnings(db, report, security_ids: Dict[str, int]) -> List[str]:
+    """
+    Does the sibling class still track the fund? Asked on every upload, before the
+    replace deletes the evidence.
+
+    A sibling-priced security (`PRICE_SOURCE_SIBLING`) carries rows derived from another
+    share class scaled to the *previous* NAV. A new transaction row in this file brings
+    a fresh NAV from the provider — the strongest oracle here — and the derived row for
+    that day should agree with it to within fee drift. A gap past `NAV_TOLERANCE_PCT`
+    means the sibling is not moving like the fund any more (a class was merged,
+    re-based, or the mapping points at the wrong one), and the position has been
+    mis-valued since the last upload. Reported as a warning, never a refusal: the
+    import itself is right, and re-anchoring to the new NAV is exactly the repair.
+    """
+    warnings: List[str] = []
+    for isin, security_id in security_ids.items():
+        security = await db.get(Security, security_id)
+        if security is None or security.price_source != PRICE_SOURCE_SIBLING:
+            continue
+        navs = {row.row_date: row.price_chf for row in report.rows
+                if row.kind == TRADE and row.isin == isin}
+        if not navs:
+            continue
+        derived = {row.date: row.close_price for row in (await db.execute(
+            select(MarketPrice).where(
+                MarketPrice.security_id == security_id,
+                MarketPrice.source == PRICE_ROW_SOURCE_SIBLING_SCALED,
+                MarketPrice.date.in_(list(navs)),
+            )
+        )).scalars().all()}
+        for when, nav in sorted(navs.items()):
+            price = derived.get(when)
+            if price is None or not nav:
+                continue
+            gap = abs(price - nav) / nav * 100
+            if gap > NAV_TOLERANCE_PCT:
+                warnings.append(
+                    f"{isin}: the sibling-class price derived for {when} ({price}) is "
+                    f"{gap:.1f}% off the NAV the provider published ({nav}). The sibling "
+                    f"no longer tracks this fund — check its mapping. Re-anchored to the "
+                    f"new NAV now; values between the previous upload and today were off "
+                    f"by up to that much."
+                )
+    return warnings
 
 
 async def _last_parsed_row_count(db, account: str) -> Optional[int]:
@@ -284,15 +337,22 @@ async def ingest_finpension_report(
         security = await security_repo.upsert_by_isin_exchange(fields)
         security_ids[isin] = security.id
 
+    # --- Sibling tracking check, before the replace removes the evidence ------------
+    warnings.extend(await _sibling_tracking_warnings(db, report, security_ids))
+
     # --- Wholesale replace -------------------------------------------------------
     ids = list(security_ids.values())
     if ids:
         await db.execute(delete(TaxLot).where(TaxLot.security_id.in_(ids)))
         # Only our own price rows. A fund later validated onto Yahoo keeps its Yahoo
-        # bars, which are better than anything this file can supply.
+        # bars, which are better than anything this file can supply. Sibling-derived
+        # rows are ours too: they were scaled to the *previous* newest NAV, and the next
+        # market-data sync re-derives them from whatever this file makes the newest.
         await db.execute(delete(MarketPrice).where(
             MarketPrice.security_id.in_(ids),
-            MarketPrice.source.in_([PRICE_SOURCE_STATEMENT, PRICE_SOURCE_CARRY]),
+            MarketPrice.source.in_([
+                PRICE_SOURCE_STATEMENT, PRICE_SOURCE_CARRY, PRICE_ROW_SOURCE_SIBLING_SCALED,
+            ]),
         ))
     await db.execute(delete(Trade).where(Trade.account == account))
     await db.execute(delete(CashFlow).where(CashFlow.account == account))

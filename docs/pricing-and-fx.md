@@ -50,6 +50,8 @@ over ssh, where a typo mis-prices a position and looks like a real price. Use th
 docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings list
 docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set 2330 TWSE 2330.TW
 docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings disable SBI TSE --purge-prices
+# Another share class of the same fund, for a tranche Yahoo does not quote (docs/pillar3a.md, Prices):
+docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set CH1529078078 FUND 0P0000S0OE.SW --sibling --notes "NT class of the same fund; NMT tranche held is not quoted"
 ```
 
 - **`list`** prints the security's currency beside the one its Yahoo ticker implies. A disagreement

@@ -151,6 +151,23 @@ def test_the_criterion_and_the_row_test_agree():
         assert is_yahoo_eligible(Security(price_source=source)) is expected
 
 
+def test_a_sibling_priced_security_is_not_a_yahoo_instrument_to_the_family():
+    """
+    The market-data loop asks Yahoo for the *sibling's* bars and scales them; every
+    other consumer — dividends, fundamentals, ratings, allocation — must leave the
+    security alone, because the sibling's dividend history and `.info` are not its.
+    So the family predicate says no, and only `is_sibling_priced` says yes.
+    """
+    from app.models.security import PRICE_SOURCE_SIBLING
+    from app.services.yahoo_eligibility import is_sibling_priced
+
+    sibling = Security(price_source=PRICE_SOURCE_SIBLING)
+    assert is_yahoo_eligible(sibling) is False
+    assert is_sibling_priced(sibling) is True
+    assert is_sibling_priced(Security(price_source=PRICE_SOURCE_YAHOO)) is False
+    assert is_sibling_priced(Security(price_source=PRICE_SOURCE_MANUAL)) is False
+
+
 def test_a_security_from_before_the_column_existed_is_eligible():
     """
     The row form defaults to eligible when the attribute is absent.

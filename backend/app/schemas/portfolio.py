@@ -54,6 +54,11 @@ class PositionResponse(BaseModel):
     #: not is dropped from the wire silently. Defaults to 'ibkr' so a client reading
     #: an older backend sees the same thing it always did.
     account: str = "ibkr"
+    #: Where `market_price` comes from: 'yahoo' (a quote for this instrument),
+    #: 'manual' (the provider's statement NAV, carried between uploads) or 'sibling'
+    #: (statement NAV scaled by a sibling share class's moves — a derived figure). The
+    #: positions table badges the last two, since a caveat behind a hover does not exist.
+    price_source: str = "yahoo"
 
     class Config:
         from_attributes = True

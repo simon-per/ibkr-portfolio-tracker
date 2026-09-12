@@ -17,7 +17,10 @@ from app.config import settings
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.models.security import Security
 from app.services.yahoo_rate_limit import is_rate_limit
-from app.services.yahoo_eligibility import is_yahoo_eligible
+from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
+from sqlalchemy import select
+from app.models.market_price import MarketPrice, PRICE_ROW_SOURCE_SIBLING_SCALED
+from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
 
 logger = logging.getLogger(__name__)
 
@@ -681,6 +684,145 @@ class MarketDataService:
 
         return 0
 
+    # How far before the anchor date to look for the sibling's close when the anchor
+    # day itself has none — a NAV struck on a Swiss holiday, or the two strike on
+    # different clocks. Nearest *prior* close only: a later one would import a move the
+    # NAV had not yet seen.
+    SIBLING_ANCHOR_LOOKBACK_DAYS = 7
+
+    async def sync_sibling_prices(self, security: Security, days_back: int = 730) -> int:
+        """
+        Price a security from a sibling share class: statement NAV × sibling return.
+
+        For a pension-only fund tranche Yahoo does not quote (`PRICE_SOURCE_SIBLING`).
+        Its provider prints a NAV only on transaction rows, so the previous design
+        carried the last NAV forward 45 business days and let the position go unpriced
+        after that — dropping ~0.6% of the book out of the total to avoid a stale price
+        error of a fraction of that. The owner's call on 2026-09-12: the share count
+        never changes between uploads, and another share class of the *same fund* is
+        quoted daily, so use its moves.
+
+            price(t) = NAV(anchor) × close_sibling(t) / close_sibling(anchor)
+
+        where the anchor is the newest `finpension_statement` row. The level comes
+        from the provider, every daily move from the sibling; the two classes differ
+        only by fee, ~0.1%/yr. The importer deletes the derived rows on every upload so
+        they re-anchor to the newest NAV, and warns when a new NAV disagrees with the
+        row derived for that day — the tracking check, since a 49% level gap between
+        classes is exactly what this must never mistake for a price.
+
+        Refuses whole rather than guessing: no active mapping (a sibling must be
+        declared by hand — `manage_mappings set … --sibling` — never inferred from a
+        suffix), no statement NAV to anchor to, a sibling quoted in another currency
+        (FX would ride into the ratio), or no sibling close near the anchor date. A
+        refusal is raised so the loop's `errors` names it; the 7-day staleness alarm is
+        the durable one. Never writes over a statement row: those are the anchors.
+        Honours the rate-limit latch like every other Yahoo caller here.
+        """
+        if self.rate_limited:
+            logger.warning(f"Skipping {security.symbol}: Yahoo rate-limited this run")
+            return 0
+
+        mapping = await self.ticker_mapping_repo.get_mapping(security.symbol, security.exchange)
+        if not mapping:
+            raise ValueError(
+                f"{security.symbol}@{security.exchange} is priced from a sibling share "
+                f"class but has no active ticker mapping naming it. Declare one with "
+                f"`manage_mappings set … --sibling`; a sibling is never inferred."
+            )
+        ticker = mapping.yahoo_ticker
+
+        statement_rows = list((await self.db.execute(
+            select(MarketPrice)
+            .where(
+                MarketPrice.security_id == security.id,
+                MarketPrice.source == PRICE_SOURCE_STATEMENT,
+            )
+            .order_by(MarketPrice.date.asc())
+        )).scalars().all())
+        end_date = date.today()
+        anchors = [r for r in statement_rows if r.date <= end_date]
+        if not anchors:
+            raise ValueError(
+                f"{security.symbol}@{security.exchange} has no statement NAV on record to "
+                f"anchor its sibling-class prices to. Import the provider's transaction "
+                f"export first."
+            )
+        anchor = anchors[-1]
+        statement_dates = {r.date for r in statement_rows}
+
+        # Never derive before the first observed NAV: nothing was held, and a price
+        # there would be an extrapolation the read path never needs.
+        start_date = max(statement_rows[0].date, end_date - timedelta(days=days_back))
+        missing = [
+            d for d in await self.market_price_repo.get_missing_dates(
+                security.id, start_date, end_date
+            )
+            if d not in statement_dates
+        ]
+        if not missing:
+            logger.debug(f"All sibling-derived prices cached for {security.symbol}")
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+            return 0
+
+        fetch_start = min(min(missing), anchor.date) - timedelta(
+            days=self.SIBLING_ANCHOR_LOOKBACK_DAYS
+        )
+        prices, rate_limited = await self._try_fetch_yahoo(
+            ticker, security, fetch_start, end_date
+        )
+        if rate_limited:
+            logger.warning(f"Rate limit hit on sibling {ticker}; abandoning the pass")
+            self.rate_limited = True
+            return 0
+        if not prices:
+            raise ValueError(
+                f"Sibling {ticker} returned no prices for {security.symbol}@"
+                f"{security.exchange} between {fetch_start} and {end_date}."
+            )
+        fetched_currency = prices[0]["currency"]
+        if security.currency and fetched_currency != security.currency:
+            raise ValueError(
+                f"Sibling {ticker} is quoted in {fetched_currency} but {security.symbol} is "
+                f"{security.currency}; an FX move would ride into the ratio, so refusing."
+            )
+
+        closes: Dict[date, Decimal] = {p["date"]: p["close_price"] for p in prices}
+        anchor_close = closes.get(anchor.date)
+        if anchor_close is None:
+            prior = [d for d in closes if anchor.date - timedelta(
+                days=self.SIBLING_ANCHOR_LOOKBACK_DAYS) <= d < anchor.date]
+            anchor_close = closes[max(prior)] if prior else None
+        if not anchor_close:
+            raise ValueError(
+                f"Sibling {ticker} has no close on or within "
+                f"{self.SIBLING_ANCHOR_LOOKBACK_DAYS} days before the anchor NAV date "
+                f"{anchor.date} for {security.symbol}; cannot scale."
+            )
+        factor = anchor.close_price / anchor_close
+        logger.info(
+            f"{security.symbol}: sibling {ticker} anchored on {anchor.date} "
+            f"(NAV {anchor.close_price} / close {anchor_close} = ×{factor:.6f})"
+        )
+
+        rows = [
+            {
+                "security_id": security.id,
+                "date": d,
+                "close_price": (closes[d] * factor).quantize(Decimal("0.000001")),
+                "currency": security.currency,
+                "source": PRICE_ROW_SOURCE_SIBLING_SCALED,
+            }
+            for d in missing if d in closes
+        ]
+        if not rows:
+            return 0
+        count = await self.market_price_repo.bulk_create(rows)
+        await self.db.commit()
+        logger.info(f"Cached {count} sibling-derived prices for {security.symbol}")
+        await asyncio.sleep(random.uniform(3.0, 6.0))
+        return count
+
     async def sync_securities(
         self,
         securities: List[Security],
@@ -713,7 +855,8 @@ class MarketDataService:
         logger.info(f"Syncing market data for {len(securities)} securities...")
 
         for security in securities:
-            if not is_yahoo_eligible(security):
+            sibling = is_sibling_priced(security)
+            if not sibling and not is_yahoo_eligible(security):
                 skipped_not_yahoo += 1
                 logger.debug(
                     f"Skipping {security.symbol}@{security.exchange}: "
@@ -724,7 +867,10 @@ class MarketDataService:
                 logger.info(
                     f"Fetching prices for {security.symbol} ({security.exchange})..."
                 )
-                count = await self.sync_security_prices(security, days_back=days_back)
+                if sibling:
+                    count = await self.sync_sibling_prices(security, days_back=days_back)
+                else:
+                    count = await self.sync_security_prices(security, days_back=days_back)
                 total_prices += count
                 processed += 1
                 logger.info(f"Wrote {count} price rows for {security.symbol}")

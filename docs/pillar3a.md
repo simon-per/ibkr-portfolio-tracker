@@ -153,7 +153,7 @@ database rather than a zeroed block, which would assert a 3a account holding not
 
 ### Prices — `price_source`, and the oracle that validates a mapping
 
-`securities.price_source` ∈ `yahoo` | `manual` is the Yahoo opt-out, **orthogonal to
+`securities.price_source` ∈ `yahoo` | `manual` | `sibling` is the Yahoo opt-out, **orthogonal to
 `account`**: of the two funds here, one is reachable on Yahoo and one is not, in the same
 account. It exists because there was previously **no way to leave a security alone** — the
 loops select `Security` unfiltered, `ticker_mappings.is_active=False` does not stop a fetch,
@@ -167,6 +167,41 @@ A manual fund is priced from the statement NAVs, plus a **bounded business-day c
 so a staleness detector can ask for the newest *observed* one. Bounded to
 `CARRY_HORIZON_DAYS` rather than run to today, or a six-month-stale upload would value the
 fund at a six-month-old NAV for ever with nothing saying so.
+
+**A `sibling` fund is priced from another share class of the same fund** (since 2026-09-12,
+the owner's call). The bounded carry traded the wrong things for the EM tranche: its share
+count never changes between uploads, an EM index drifts a few percent a month, and the
+position is ~0.6% of the book — so going *unpriced* after 45 business days removed 464 EUR
+from the total to avoid a stale-price error of perhaps 15. Yahoo does not quote the tranche
+held (`CH1529078078`, the NMT class), but it quotes the same fund's NT class
+(`0P0000S0OE.SW`, CHF, daily) at a level ~49% higher — the very thing the NAV check refuses
+as a *direct* price, and exactly what a returns anchor wants:
+
+    price(t) = NAV(anchor) × close_sibling(t) / close_sibling(anchor)
+
+with the anchor the newest `finpension_statement` row. `MarketDataService.sync_sibling_prices`
+does it inside the ordinary market-data pass (so it honours the rate-limit latch and the
+provisional re-fetch): explicit mapping only, never a suffix guess; refuses whole on a
+sibling in another currency (FX would ride into the ratio), on no NAV to anchor to, or on no
+sibling close within `SIBLING_ANCHOR_LOOKBACK_DAYS` before the anchor date; never derives
+before the first NAV; never writes over a statement row. Rows are tagged
+`sibling_scaled`. **No carry** for such a fund — the sibling supplies every day — and no
+horizon, so an upload is needed only for the *transactions* it brings.
+
+Two guards keep it honest. The importer **deletes the derived rows on every upload** (they
+were scaled to the previous newest NAV; the next sync re-derives from the new one) and
+**checks the tracking first**: for each new transaction NAV that has a derived row on the
+same day, a gap past `NAV_TOLERANCE_PCT` is a warning naming the size — the sibling stopped
+moving like the fund, or the mapping points at the wrong class — while the import still
+lands, because re-anchoring is the repair. And `manage_mappings set … --sibling` is the only
+way in: with one NAV on record it anchors the level; with two or more it verifies the
+sibling's *moves* against the provider's NAV ratios at the same bound before saving, and
+refuses a security Yahoo already quotes directly. `yahoo_eligible()` still says **no** for a
+sibling-priced security — the sibling's dividend history and `.info` are not this fund's, so
+only the price loop consults `is_sibling_priced`. The positions table badges the row
+"sibling NAV" (and a manual one "statement NAV"), since a derived figure carries its word
+next to it. Tests: `tests/test_sibling_pricing.py`, the sibling blocks in
+`test_finpension_import.py` and `test_mapping_cli.py`.
 
 **`manage_mappings set` verifies a candidate against those published NAVs and refuses on a
 disagreement**, which is the strongest oracle in this codebase: a NAV observed by the party

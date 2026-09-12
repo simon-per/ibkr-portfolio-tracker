@@ -588,3 +588,106 @@ async def test_the_shrink_guard_compares_parsed_rows_with_parsed_rows(db):
     # --force still means what it says.
     result = await _apply(db, REAL_SHAPE, force=True)
     assert result["rows"] == 5
+
+
+# ── A sibling-priced fund: no carry, re-anchored on upload, tracking checked ─────────
+
+from app.models.market_price import PRICE_ROW_SOURCE_SIBLING_SCALED
+from app.models.security import PRICE_SOURCE_SIBLING
+from app.services.finpension_ingest import purge_carried_prices
+
+
+@pytest.mark.asyncio
+async def test_a_sibling_priced_fund_gets_no_carry_and_its_derived_rows_are_reanchored(db):
+    """
+    The derived rows were scaled to the *previous* newest NAV. An upload that brings a
+    newer one makes them stale by construction, so the replace drops them and the next
+    market-data sync re-derives from the new anchor; the statement rows it keeps are
+    those anchors. And no carry: the sibling supplies every day, bounded by nothing.
+    """
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+    em = (await _rows(db, Security, isin=EM))[0]
+    em.price_source = PRICE_SOURCE_SIBLING
+    await purge_carried_prices(db, em.id)      # what `manage_mappings set --sibling` does
+    db.add(MarketPrice(security_id=em.id, date=date(2026, 9, 3), close_price=Decimal("122.10"),
+                       currency="CHF", source=PRICE_ROW_SOURCE_SIBLING_SCALED))
+    await db.commit()
+
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+
+    prices = await _rows(db, MarketPrice, security_id=em.id)
+    sources = {p.source for p in prices}
+    assert PRICE_SOURCE_STATEMENT in sources
+    assert PRICE_ROW_SOURCE_SIBLING_SCALED not in sources, "stale derived rows must go"
+    assert PRICE_SOURCE_CARRY not in sources, "a sibling-priced fund is never carried"
+    assert (await db.get(Security, em.id)).price_source == PRICE_SOURCE_SIBLING  # never unpinned
+
+
+@pytest.mark.asyncio
+async def test_a_new_nav_that_the_sibling_missed_is_a_warning_not_a_refusal(db):
+    """
+    The provider's NAV on a transaction day is the oracle; the derived row for that day
+    is the claim. More than NAV_TOLERANCE_PCT apart means the sibling stopped tracking
+    the fund — reported, and the import still lands, because re-anchoring is the repair.
+    """
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+    em = (await _rows(db, Security, isin=EM))[0]
+    em.price_source = PRICE_SOURCE_SIBLING
+    # A second buy on 09-05 at NAV 125; the sibling-derived row for that day says 118.
+    db.add(MarketPrice(security_id=em.id, date=date(2026, 9, 5), close_price=Decimal("118.000000"),
+                       currency="CHF", source=PRICE_ROW_SOURCE_SIBLING_SCALED))
+    await db.commit()
+
+    result = await _apply(db, _file(
+        _row("2026-08-25", "Deposit", "256.000000", "256.000000"),
+        _row("2026-08-26", "Deposit", "1002.000000", "1258.000000"),
+        _row("2026-08-28", "Deposit", "500.000000", "1758.000000"),
+        _row("2026-09-01", "Buy", "-438.141980", "1319.858020",
+             name="Swisscanto EM", isin=EM, shares="3.615000", price="121.201101"),
+        _row("2026-09-01", "Buy", "-1299.834434", "20.023586",
+             name="Swisscanto World ex CH", isin=WORLD, shares="2.898000", price="448.528100"),
+        _row("2026-09-04", "Deposit", "500.000000", "520.023586"),
+        _row("2026-09-05", "Buy", "-500.000000", "20.023586",
+             name="Swisscanto EM", isin=EM, shares="4.000000", price="125.000000"),
+    ))
+    await db.commit()
+
+    tracking = [w for w in result["warnings"] if "no longer tracks" in w]
+    assert len(tracking) == 1
+    assert "5.6%" in tracking[0] and "2026-09-05" in tracking[0]
+    assert result["trades"] == 3                       # the import landed
+    # Both NAVs are on record as anchors; the stale derived row is gone.
+    em_prices = await _rows(db, MarketPrice, security_id=em.id)
+    assert {(p.date, p.source) for p in em_prices} >= {
+        (date(2026, 9, 1), PRICE_SOURCE_STATEMENT), (date(2026, 9, 5), PRICE_SOURCE_STATEMENT),
+    }
+    assert all(p.source != PRICE_ROW_SOURCE_SIBLING_SCALED for p in em_prices)
+
+
+@pytest.mark.asyncio
+async def test_a_sibling_that_tracks_within_tolerance_raises_no_warning(db):
+    await _apply(db, REAL_SHAPE)
+    await db.commit()
+    em = (await _rows(db, Security, isin=EM))[0]
+    em.price_source = PRICE_SOURCE_SIBLING
+    await purge_carried_prices(db, em.id)      # what `manage_mappings set --sibling` does
+    db.add(MarketPrice(security_id=em.id, date=date(2026, 9, 5), close_price=Decimal("124.400000"),
+                       currency="CHF", source=PRICE_ROW_SOURCE_SIBLING_SCALED))   # 0.48% off
+    await db.commit()
+
+    result = await _apply(db, _file(
+        _row("2026-08-25", "Deposit", "256.000000", "256.000000"),
+        _row("2026-08-26", "Deposit", "1002.000000", "1258.000000"),
+        _row("2026-08-28", "Deposit", "500.000000", "1758.000000"),
+        _row("2026-09-01", "Buy", "-438.141980", "1319.858020",
+             name="Swisscanto EM", isin=EM, shares="3.615000", price="121.201101"),
+        _row("2026-09-01", "Buy", "-1299.834434", "20.023586",
+             name="Swisscanto World ex CH", isin=WORLD, shares="2.898000", price="448.528100"),
+        _row("2026-09-04", "Deposit", "500.000000", "520.023586"),
+        _row("2026-09-05", "Buy", "-500.000000", "20.023586",
+             name="Swisscanto EM", isin=EM, shares="4.000000", price="125.000000"),
+    ))
+    assert not [w for w in result["warnings"] if "no longer tracks" in w]

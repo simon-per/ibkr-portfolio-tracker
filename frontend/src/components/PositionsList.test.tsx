@@ -245,3 +245,30 @@ describe('the account badge', () => {
     expect(screen.getByText('3a')).toBeTruthy()
   })
 })
+
+
+describe('the price-source badge', () => {
+  const symbolCell = (p: Position, view: 'table' | 'cards' = 'table') =>
+    render(<>{cols().find((c) => c.key === 'symbol')!.cell(p, view)}</>)
+
+  it('says when a price is derived from a sibling share class', () => {
+    // The 3a EM tranche: Yahoo has no quote for it, so the statement NAV is scaled by a
+    // sibling class's moves. A derived figure carries the word next to it, not behind a
+    // hover — the qualifier rule.
+    symbolCell(position({ security_id: 9, symbol: 'CH1529078078', account: 'pillar3a', price_source: 'sibling' }))
+    expect(screen.getByText('sibling NAV')).toBeTruthy()
+    expect(screen.getByText('3a')).toBeTruthy()
+  })
+
+  it('says when a price is a carried statement NAV', () => {
+    symbolCell(position({ security_id: 9, symbol: 'CH0117044948', price_source: 'manual' }))
+    expect(screen.getByText('statement NAV')).toBeTruthy()
+  })
+
+  it('badges nothing for an ordinary quote, or for an older backend that sends no source', () => {
+    symbolCell(position({ security_id: 1, symbol: 'AVGO', price_source: 'yahoo' }))
+    symbolCell(position({ security_id: 2, symbol: 'AMZN' }), 'cards')
+    expect(screen.queryByText('sibling NAV')).toBeNull()
+    expect(screen.queryByText('statement NAV')).toBeNull()
+  })
+})

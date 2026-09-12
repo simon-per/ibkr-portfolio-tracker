@@ -647,3 +647,77 @@ async def test_a_yahoo_priced_fund_is_not_given_a_carry_on_reimport(db, monkeypa
     assert [r for r in rows if r.source == PRICE_SOURCE_CARRY] == []
     # The observed NAV is still written — that is an observation regardless of feed.
     assert any(r.source == PRICE_SOURCE_STATEMENT for r in rows)
+
+
+# ── `set --sibling`: another share class, declared as the price source ──────────────
+
+
+@pytest.mark.asyncio
+async def test_sibling_flag_accepts_the_class_the_level_check_refuses(db, monkeypatch):
+    """
+    The measured case again, read the other way: `0P0000S0OE.SW` is the EM fund's NT
+    tranche, 49% above the NMT one held. As a *direct* price that is the SBI failure;
+    as a *sibling* it is exactly what is wanted — the level is expected to differ, the
+    moves are what must agree. One NAV on record means nothing to compare yet, so the
+    level is anchored and tracking is left to the importer's check.
+    """
+    await _fund(db, navs=[(date(2026, 9, 1), "121.201101")])
+    # The carry the old design wrote must go: it would shadow the derived rows.
+    db.add(MarketPrice(security_id=9, date=date(2026, 9, 2), close_price=Decimal("121.201101"),
+                       currency="CHF", source="finpension_carry"))
+    await db.commit()
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 180.83)])
+
+    code, details = await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OE.SW",
+                                      notes="sibling class", dry_run=False, sibling=True)
+    assert code == 0
+    assert details["price_source_set_to_sibling"] is True
+    assert details["price_source_flipped_to_yahoo"] is False
+    assert details["carried_rows_purged"] == 1
+
+    security = await db.get(Security, 9)
+    assert security.price_source == "sibling"
+    mapping = await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND")
+    assert mapping.yahoo_ticker == "0P0000S0OE.SW"
+    assert {p.source for p in await _prices(db, 9)} == {"finpension_statement"}
+
+
+@pytest.mark.asyncio
+async def test_sibling_flag_refuses_a_class_whose_moves_do_not_track(db, monkeypatch):
+    """Two NAVs on record: the fund rose 3.1%, the candidate fell 2% — not a sibling."""
+    await _fund(db, navs=[(date(2026, 9, 1), "121.201101"), (date(2026, 9, 5), "125.000000")])
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 180.83), (date(2026, 9, 5), 177.21)])
+
+    with pytest.raises(cli.MappingError, match="differently from the fund"):
+        await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OE.SW",
+                          notes=None, dry_run=False, sibling=True)
+    assert (await db.get(Security, 9)).price_source == "manual"
+    assert await TickerMappingRepository(db).get_mapping("CH1529078078", "FUND") is None
+
+
+@pytest.mark.asyncio
+async def test_sibling_flag_accepts_a_class_whose_moves_track(db, monkeypatch):
+    await _fund(db, navs=[(date(2026, 9, 1), "121.201101"), (date(2026, 9, 5), "125.000000")])
+    # +3.13% on the fund; +3.0% on the candidate, at a level 49% higher.
+    _stub_yahoo(monkeypatch, [(date(2026, 9, 1), 180.83), (date(2026, 9, 5), 186.25)])
+
+    code, details = await cli.cmd_set(db, "CH1529078078", "FUND", "0P0000S0OE.SW",
+                                      notes=None, dry_run=False, sibling=True)
+    assert code == 0 and details["price_source_set_to_sibling"] is True
+
+
+@pytest.mark.asyncio
+async def test_sibling_flag_needs_a_security_with_navs_and_refuses_a_direct_quote(db, monkeypatch):
+    with pytest.raises(cli.MappingError, match="needs"):
+        await cli.cmd_set(db, "NOPE", "FUND", "0P0000S0OE.SW", notes=None, dry_run=False,
+                          sibling=True)
+    # A security Yahoo already quotes directly is not a candidate for a derived price.
+    _stub_yahoo(monkeypatch, [(date(2026, 7, 24), 7.70)])
+    with pytest.raises(cli.MappingError, match="already prices from Yahoo"):
+        await cli.cmd_set(db, "SBI", "TSE", "SBI.TO", notes=None, dry_run=False, sibling=True)
+
+
+def test_the_sibling_flag_is_wired_through_the_parser():
+    parsed = args("set", "CH1529078078", "FUND", "0P0000S0OE.SW", "--sibling")
+    assert parsed.sibling is True
+    assert args("set", "A", "B", "C").sibling is False

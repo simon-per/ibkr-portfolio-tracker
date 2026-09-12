@@ -31,6 +31,34 @@ The durable half of these findings is in **CLAUDE.md**, not here: the once-per-d
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
+## Shipped 2026-09-12 (afternoon) — the 3a EM fund prices from its sibling share class
+
+Asked as "why does the carried price end? … the amount stays the same and we get the prices
+from somewhere or not?", then "the sibling share class makes the most sense … I will not do
+an upload every few days." The owner was right about the trade: the bounded carry dropped a
+464 EUR position out of the total after 45 business days to avoid a stale-price error of a
+fraction of that, and made a monthly upload a pricing deadline. Yahoo does not quote the NMT
+tranche held, but it quotes the same fund's NT class (`0P0000S0OE.SW`, CHF, daily) at a level
+~49% higher — the class the NAV check rightly refuses as a *direct* price, and exactly what a
+returns anchor wants.
+
+Shipped: `price_source = sibling` (a third value; `yahoo_eligible()` still says no, so
+dividends/fundamentals/ratings leave the fund alone and only the price loop consults
+`is_sibling_priced`); `MarketDataService.sync_sibling_prices` — statement NAV × sibling
+return, anchored on the newest `finpension_statement` row, explicit mapping only, refuses
+whole on another currency / no anchor / no close near the anchor, never derives before the
+first NAV, never overwrites a statement row, honours the rate-limit latch, rows tagged
+`sibling_scaled`; the importer deletes derived rows on every upload (re-anchor) and warns
+when a new transaction NAV is more than `NAV_TOLERANCE_PCT` off the row derived for that day
+(the tracking check — the import still lands, re-anchoring is the repair);
+`manage_mappings set … --sibling` as the only way in, verifying the sibling's *moves* against
+the provider's NAV ratios when two or more NAVs exist; `price_source` on the positions API
+and a "sibling NAV" / "statement NAV" badge in the table; `NAV_TOLERANCE_PCT` moved into
+`finpension_ingest` so the CLI and the importer share one bound. Verified offline (the full
+suites); one Yahoo lookup made with the owner's go-ahead to confirm the sibling's currency
+and cadence. Activation is a by-hand command on production — STATUS.md *Watch after the next
+deploy* says what the first derived prices should read.
+
 ## Shipped 2026-09-12 (late) — SendRequest is one HTTP request, whatever ibflex would do
 
 The sync/ops hunt's late correction, and the most serious finding of the day. It had listed

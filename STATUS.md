@@ -15,7 +15,11 @@ then read the installed `ibflex` source and withdrew it — `client.request_stat
 the same GET up to three times on a 5 s timeout, each a new statement generation, so with the
 outer retry budget one scheduled slot could issue twelve. `send_flex_request` now issues one
 GET with a (connect, read) timeout pair and a read timeout fails fast like a `1001` (rule 2 in
-CLAUDE.md carries it). **The 18:00 run today is the first live SendRequest through it.** The
+CLAUDE.md carries it). **The 18:00 run today is the first live SendRequest through it.**
+Afternoon, a design change at the owner's request: **the 3a Emerging Markets fund prices from
+its sibling share class** (`price_source = sibling`: statement NAV × the NT class's daily
+moves), so the monthly upload stopped being a pricing deadline — see *Needs a human* and the
+activation step under *Watch after the next deploy*. The
 ones that were live: the timeline stamped
 `cash_source: ibkr` on its tail while the summary said `mixed`, so the chart dropped its caveat
 (fixed: the label is the service's verdict); the dividend forecast labelled yfinance gross
@@ -251,11 +255,15 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   *Watching* for why not `install`). Until then, treat any `CRITICAL: rollback also failed` as
   "restore the newest `/root/ibkr-backups/<date>/` snapshot by hand, then redeploy".
 
-- **Re-upload the finpension export periodically — roughly monthly.** Only
-  `CH1529078078` depends on it now; `CH0117044948` prices from Yahoo. A market-data sync
-  warns once the newest *published* NAV is 40 days old ("upload a newer statement export"),
-  which is deliberately before the carried price runs out on day 59 and the holding drops
-  out of the total. The run is three commands:
+- **Upload the finpension export when it has new transactions in it — no pricing deadline
+  any more.** Since 2026-09-12 neither 3a fund depends on the upload for its price:
+  `CH0117044948` prices from Yahoo directly and `CH1529078078` from its sibling share class
+  (`0P0000S0OE.SW`, statement NAV × the sibling's moves — `docs/pillar3a.md`, *Prices*). The
+  40-day "upload a newer statement" warning and the day-59 drop-out applied to a `manual`
+  fund, and there is none left once the sibling mapping is set on production (see *Watch
+  after the next deploy*). What an upload still brings is the *transactions*: each buy is a
+  new NAV that re-anchors the derived prices and checks the sibling still tracks (a warning
+  names the gap if not). The run is three commands:
 
   ```bash
   scp transaction_report_YYYYMMDD.csv root@portfolio.srv1211053.hstgr.cloud:/root/p3a.csv
@@ -715,6 +723,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **Sibling-class pricing for the 3a EM fund — activated by hand after the deploy.** The
+  code ships `price_source = sibling`; the switch is one command in the container:
+  `manage_mappings set CH1529078078 FUND 0P0000S0OE.SW --sibling`. It sets the source, purges
+  the 33 carried rows (they would shadow the derived ones) and keeps the 2026-09-01 statement
+  NAV as the anchor. Then the **next market-data slot** writes `sibling_scaled` rows from
+  09-02 to today; check `/api/portfolio/positions` for `CH1529078078`: `price_source:
+  "sibling"` and a `market_price` near `121.20 × (sibling today ÷ sibling on 09-01)` — with the
+  sibling at ~182.6 against ~180 on the anchor day that is ~122.9, not 121.20 (the carried
+  value) and not ~180 (the wrong-class value). The run's `market_result.errors` must be empty;
+  a refusal names itself there. In the browser the position carries a "sibling NAV" badge.
+  If the sibling ever stops quoting, the 7-day "price feed looks broken" warning covers it.
+
 - **The 2026-09-12 bug sweep is live on `e6e7698` (11:22 Berlin) and the API checks passed**
   — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
   row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
@@ -1093,7 +1113,14 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   sync run for an unparseable Flex file would have reversed the finpension CLI's own test
   ("a file we never read is not a database event"), so it was dropped. Also: two files
   carried two concerns each, and staging them in two steps kept every intermediate commit
-  self-consistent, which is what makes a small commit revertable.
+  self-consistent, which is what makes a small commit revertable. Afternoon: "why does the
+  carried price end? … we get the prices from somewhere or not?" — the owner was right that
+  dropping a 0.6% position out of the total to avoid a stale-price error of a fraction of
+  that was the wrong trade, and the same fund's other share class is quoted daily. Lesson:
+  **a level the NAV oracle refuses can still be a perfect source of returns** — the 49% gap
+  that made `0P0000S0OE.SW` the wrong *price* is irrelevant to it as an *anchor*, and the
+  oracle's job moved from "is the level right" to "do the moves track", checked on every
+  upload.
 - **2026-09-08 (night)** — "please look for issues and let's brainstorm", then "push it then".
   A read-only audit with the codebase's own lenses (duplicate-name AST walk, stand-in values,
   production reads, dependency advisories) found more in the operational layer than in the
