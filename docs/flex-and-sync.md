@@ -910,7 +910,10 @@ Berlin slot still loses that sync, whatever `/api/scheduler/status` says.
 last, so a rejection from any of them still carries a correlation id:
 
 - **`app/auth.py`** gates every `POST/PUT/PATCH/DELETE` under `/api/` on `settings.api_admin_token`
-  (`X-API-Key`, or `Authorization: Bearer`, compared with `secrets.compare_digest`). It is
+  (`X-API-Key`, or `Authorization: Bearer`, compared with `secrets.compare_digest` **on bytes** —
+  Starlette decodes headers as latin-1, so a byte ≥ 0x80 arrives as a non-ASCII `str`, and
+  `compare_digest` raises `TypeError` on those; until 2026-09-12 a malformed credential was a 500
+  with a traceback per attempt rather than a 401). It is
   **middleware, not a per-route dependency**, deliberately: every router takes only `Depends(get_db)`,
   so a dependency would have to be added to ~14 routes and remembered on every route added later —
   keying on the HTTP method means a new `POST` is covered the moment it exists, and

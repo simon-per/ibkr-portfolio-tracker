@@ -360,3 +360,18 @@ def test_a_rejected_request_is_still_correlatable(client, monkeypatch):
     refused = client.get("/api/portfolio/benchmarks", headers=headers)
     assert refused.status_code == 429
     assert refused.headers[REQUEST_ID_HEADER]
+
+
+def test_a_non_ascii_key_is_refused_not_a_server_error(client, monkeypatch):
+    """
+    Starlette decodes header bytes as latin-1, so any byte >= 0x80 reaches the
+    middleware as a non-ASCII str — and `secrets.compare_digest` raises TypeError on
+    those, which the error handler answered as a 500 with a traceback per attempt.
+    Still rejected either way; the point is that it is a 401 and not a server fault.
+    """
+    monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
+    r = client.delete(
+        "/api/watchlist/1",
+        headers={API_KEY_HEADER.encode("ascii"): "sécret".encode("latin-1")},
+    )
+    assert r.status_code == 401

@@ -82,8 +82,13 @@ async def write_auth_middleware(request: Request, call_next):
     expected = (settings.api_admin_token or "").strip()
 
     # compare_digest, not ==: a plain comparison short-circuits on the first differing
-    # byte and leaks the shared prefix through response timing.
-    if not presented or not secrets.compare_digest(presented, expected):
+    # byte and leaks the shared prefix through response timing. Compared as bytes:
+    # Starlette decodes headers as latin-1, so any byte >= 0x80 in the header arrives
+    # as a non-ASCII str, and compare_digest raises TypeError on those — which turned a
+    # malformed credential into a 500 with a traceback per attempt instead of a 401.
+    if not presented or not secrets.compare_digest(
+        presented.encode("utf-8"), expected.encode("utf-8")
+    ):
         # The path, never the key or any part of it. Logging a near-miss would put
         # guessed keys in a file that outlives the guess.
         logger.warning(
