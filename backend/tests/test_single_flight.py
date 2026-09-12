@@ -250,3 +250,57 @@ async def test_rapid_fire_fundamentals_syncs_get_one_pass_not_n(monkeypatch):
     # what actually enforces it.
     await fnd._run_sync_background(True)
     assert passes == [True], "a second pass ran inside the cooldown"
+
+
+# ── POST /api/dividends/sync ───────────────────────────────────────────────
+#
+# The one bulk Yahoo route with no cooldown: `_sync_in_progress` fences only
+# *overlapping* runs, so a poller that waited for each pass to end and POSTed
+# again ran full yfinance passes back to back indefinitely.
+
+
+@pytest.mark.asyncio
+async def test_rapid_fire_dividend_syncs_get_one_pass_not_n(monkeypatch):
+    from fastapi import BackgroundTasks, HTTPException
+    from app.routers import dividends as div
+
+    _reset_gate(monkeypatch)
+    monkeypatch.setattr(div, "_sync_in_progress", False)
+
+    first = await div.sync_dividends(BackgroundTasks())
+    assert first["status"] == "started"
+
+    # Entering the gate is what stamps the cooldown clock, so run the queued work.
+    passes = []
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _sync(self):
+        passes.append("sync")
+        return {}
+
+    async def _compute(self):
+        passes.append("compute")
+        return {}
+
+    monkeypatch.setattr(div, "AsyncSessionLocal", lambda: _Session())
+    monkeypatch.setattr(div.DividendService, "sync_dividend_data", _sync)
+    monkeypatch.setattr(div.DividendService, "compute_dividend_income", _compute)
+    await div._run_dividend_sync_background()
+    assert passes == ["sync", "compute"]
+
+    with pytest.raises(HTTPException) as exc:
+        await div.sync_dividends(BackgroundTasks())
+    assert exc.value.status_code == 429
+    assert int(exc.value.headers["Retry-After"]) > 0
+
+    # And the background half refuses too, so the gate — not the handler — is
+    # what actually enforces it.
+    await div._run_dividend_sync_background()
+    assert passes == ["sync", "compute"], "a second pass ran inside the cooldown"
+    assert div._sync_in_progress is False

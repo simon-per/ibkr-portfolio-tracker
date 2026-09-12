@@ -3,19 +3,26 @@ from datetime import datetime, timedelta, timezone
 from app.clock import utcnow
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
 from app.schemas.portfolio import DividendBreakdownResponse, DividendSummaryResponse
 from app.services.dividend_service import DividendService
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import SYNC_PIPELINE, SyncBusy, cooldown_remaining, single_flight
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _sync_in_progress = False
+
+# A full pass is one Yahoo call per non-fresh security across the whole portfolio, so
+# a poller that waits for `_sync_in_progress` to clear and POSTs again runs passes
+# back to back indefinitely against an IP-based limit — the flag fences only
+# *overlapping* runs. Same 300s as the fundamentals, ratings and watchlist routes;
+# this was the one bulk Yahoo route without it.
+SYNC_COOLDOWN_SECONDS = 300
 
 # Auto-refresh tuning for the dividend summary endpoint.
 # Data is considered stale if the newest computed payment is older than this.
@@ -36,7 +43,7 @@ async def _run_dividend_sync_background() -> None:
     """
     global _sync_in_progress
     try:
-        with single_flight(SYNC_PIPELINE):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=SYNC_COOLDOWN_SECONDS):
             _sync_in_progress = True
             try:
                 async with AsyncSessionLocal() as db:
@@ -114,5 +121,14 @@ async def sync_dividends(background_tasks: BackgroundTasks):
     """Manual trigger for dividend sync."""
     if _sync_in_progress:
         return {"status": "already_running", "message": "Dividend sync is already in progress"}
+    # The gate in the background task is what enforces this; checking here too is so
+    # the answer is honest rather than "started" for a run the gate then drops.
+    retry_after = cooldown_remaining(SYNC_PIPELINE, SYNC_COOLDOWN_SECONDS)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail=f"A sync started moments ago; retry in ~{retry_after}s",
+            headers={"Retry-After": str(retry_after)},
+        )
     background_tasks.add_task(_run_dividend_sync_background)
     return {"status": "started", "message": "Dividend sync started in background"}
