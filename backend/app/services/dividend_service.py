@@ -770,15 +770,23 @@ class DividendService:
             # labelled a projection that deducts no withholding as one that did.
             # SK Hynix read `net` with no IBKR payout on record.
             net_ps = None
-            if self._is_income(p) and p.source == "ibkr":
+            gross_ps = None
+            if self._is_income(p):
                 # IBKR rows store a 0 sentinel in shares_held, so fall back to
                 # the holding the tax lots show for that date.
                 shares = (p.shares_held if (p.shares_held and p.shares_held > 0)
                           else shares_at(p.security_id, on_date))
                 if shares > 0:
-                    net_ps = self._net_eur(p) / shares
-            gross_ps = None
-            if p.amount_per_share and p.amount_per_share > 0:
+                    per_share = self._net_eur(p) / shares
+                    if p.source == "ibkr":
+                        net_ps = per_share
+                    else:
+                        # The same figure the row always contributed — the EUR
+                        # amount converted at its ex-date is a better gross per
+                        # share than amount_per_share × one recent rate — under
+                        # the label it deserves.
+                        gross_ps = per_share
+            if gross_ps is None and p.amount_per_share and p.amount_per_share > 0:
                 rate = fx_to_eur.get(sec.currency or "EUR")
                 if rate is not None:
                     gross_ps = p.amount_per_share * rate

@@ -166,8 +166,10 @@ shares held also carries `gross > 0`, but `compute_dividend_income` writes its n
 withholding, so dividing that by the shares gives the gross per-share figure straight back — and until
 2026-09-12 `_forecast_inputs` stamped it `net` (SK Hynix read `net` on production with no IBKR payout
 on record; most payers took this path, since the IBKR duplicate of a yfinance per-share row is
-dropped). The `net_ps` branch now requires `p.source == "ibkr"`; an estimate row keeps counting toward
-the cadence with no per-share figure, which the projector already handles. Future years are selectable (`years` offers `as_of.year + 1`) and a future
+dropped). The `net` branch now requires `p.source == "ibkr"`; an estimate row that landed keeps
+contributing exactly the per-share figure it always did (its ex-date-converted EUR amount over the
+shares — a better gross than `amount_per_share × one recent rate`, and the only figure when the FX
+dict lacks the currency), just under the `gross_estimate` label. The label moved; no forecast size did. Future years are selectable (`years` offers `as_of.year + 1`) and a future
 year is forecast in full rather than from today.
 
 **Accumulating ETFs correctly show nothing** — DBPG, EMIM, IWDA, SXR8, VWCE, XAIX, XNAS (the `1C`/`ACC`
