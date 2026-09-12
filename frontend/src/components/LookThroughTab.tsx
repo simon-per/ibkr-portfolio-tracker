@@ -33,6 +33,14 @@ import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
  * condition present (no basket, borrowed basket, ageing) rather than only the most severe;
  * the collapsed card's own summary line counts the notes so their existence is never hidden,
  * only their text.
+ *
+ * **One thing is not a note and does not go in the collapsed card**: a holding the backend
+ * could not value at all (`unvaluable_positions`). Its value is in neither the company
+ * table nor the coverage denominator, so every percentage on the page is a share of a
+ * smaller book than the one held — the same absence `AllocationTab` and the summary cards
+ * state as a `role="alert"` above their figures. It rides the KPI row as one, naming the
+ * symbols, because it was rendered nowhere until 2026-09-12 while the backend's schema
+ * docstring asserted the frontend showed it.
  */
 
 const LIMITS = [25, 50, 100] as const
@@ -465,6 +473,28 @@ export function LookThroughTab() {
         <KpiCardSkeleton count={4} />
       ) : (
         <>
+          {/* Above the KPI row and outside every collapsible — see the module docstring.
+              Same shape and wording as AllocationTab's, since it is the same absence seen
+              from the other tab. */}
+          {data.unvaluable_positions > 0 && (
+            <div
+              role="alert"
+              className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+            >
+              <span className="font-medium">
+                This view excludes {data.unvaluable_positions}{' '}
+                {data.unvaluable_positions === 1 ? 'holding' : 'holdings'} with no usable
+                price
+                {data.unvaluable_symbols?.length
+                  ? ` (${data.unvaluable_symbols.join(', ')})`
+                  : ''}
+              </span>
+              {' '}— every exposure and percentage below is a share of what could be valued,
+              not of the whole portfolio. Check the market-data sync's warnings and the
+              position's ticker mapping.
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <KpiCard
               label="Companies"

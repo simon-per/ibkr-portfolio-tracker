@@ -280,7 +280,12 @@ class LookthroughResponse(BaseModel):
         default_factory=list,
         description=(
             "Rides on a SUCCESSFUL response, so it is structurally invisible unless "
-            "rendered — the frontend shows it above the table, outside any collapsible."
+            "rendered. Since 2026-09-08 the frontend lists these inside the collapsed "
+            "Fund coverage card (owner decision: ten near-identical staleness lines were "
+            "the always-present banner); the qualifier stays on the Coverage KPI, and "
+            "`unvaluable_positions` is rendered as its own always-visible alert above "
+            "the KPI row — it was rendered nowhere until 2026-09-12 while this "
+            "docstring said otherwise."
         ),
     )
 

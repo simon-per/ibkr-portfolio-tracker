@@ -324,6 +324,48 @@ describe('LookThroughTab', () => {
   })
 })
 
+describe('LookThroughTab unvaluable holdings', () => {
+  /**
+   * `unvaluable_positions` and `unvaluable_symbols` rode on every response and were read
+   * nowhere: a holding with no usable price is in neither the company table nor the
+   * coverage denominator, so every percentage on the page was a share of a smaller book
+   * than the one held, with nothing on the surface saying so — while the backend's own
+   * schema docstring asserted the frontend showed it. Same alert `AllocationTab` renders
+   * for the same absence.
+   */
+  it('states, above the KPI row and outside the collapsed card, which holdings it excludes', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({ unvaluable_positions: 2, unvaluable_symbols: ['SBI', 'TWSE'] }),
+    )
+    withProviders(<LookThroughTab />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/excludes 2 holdings with no usable price/)
+    expect(alert.textContent).toMatch(/SBI, TWSE/)
+    expect(alert.textContent).toMatch(/share of what could be valued/)
+    // On the surface: the Fund coverage card is still collapsed, and the alert precedes
+    // the Coverage KPI it qualifies.
+    expect(screen.getByRole('button', { name: /Fund coverage/ }).getAttribute('aria-expanded')).toBe('false')
+    const coverage = screen.getByText('Coverage')
+    expect(alert.compareDocumentPosition(coverage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('uses the singular for one holding', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({ unvaluable_positions: 1, unvaluable_symbols: ['SBI'] }),
+    )
+    withProviders(<LookThroughTab />)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/1 holding with no usable price \(SBI\)/)
+  })
+
+  it('renders no alert when every holding could be valued', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+    await screen.findByText('Coverage')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
 describe('LookThroughTab coverage tone', () => {
   /**
    * The threshold this replaces was `coverage_pct >= 95`, which was unreachable: DBPG is ~3.8% of
