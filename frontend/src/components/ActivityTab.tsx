@@ -394,7 +394,13 @@ export function ActivityTab() {
               <DataTable
                 rows={data.items}
                 columns={columns}
-                getRowKey={(row) => row.ib_key ?? `${row.kind}-${row.date}`}
+                // Rows without an `ib_key` — every estimated dividend — cluster on
+                // dates, and `kind-date` alone collided on them (two estimates paid the
+                // same day were one React key). The symbol and the position in the page
+                // make the fallback unique within a render.
+                getRowKey={(row, index) =>
+                  row.ib_key ?? `${row.kind}-${row.date}-${row.symbol ?? ''}-${index}`
+                }
                 label="Activity table"
                 density="normal"
                 caption={`Account activity from ${data.start_date} to ${data.end_date}, newest first`}
