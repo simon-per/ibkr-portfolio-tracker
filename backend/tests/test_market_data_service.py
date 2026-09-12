@@ -408,3 +408,47 @@ async def test_a_hand_checked_override_is_not_scaled(monkeypatch):
 
     assert prices[0]["currency"] == "USD"
     assert prices[0]["close_price"] == Decimal("126.12")
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_yahoo_does_not_fall_through_to_alpha_vantage(monkeypatch):
+    """
+    A 429 comes back from the Yahoo fetcher as the same empty list as "Yahoo has never
+    heard of this ticker", so the fallback fired on a refusal: it spent one of the free
+    tier's few daily calls and rewrote this security's `source` for a failure that had
+    nothing to do with the security.
+    """
+    monkeypatch.setattr(mds.random, "uniform", lambda *_: 0)
+    monkeypatch.setattr(mds.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(mds.settings, "alpha_vantage_api_key", "test-key")
+
+    class RefusingTicker:
+        def __init__(self, ticker):
+            self._price_history = SimpleNamespace(_history_metadata=None)
+
+        def history(self, **kwargs):
+            raise Exception("HTTP Error 429: Too Many Requests")
+
+    monkeypatch.setattr(mds.yf, "Ticker", RefusingTicker)
+
+    fallback_calls = []
+
+    async def _fake_alpha_vantage(_self, sec, outputsize="compact"):
+        fallback_calls.append(sec.symbol)
+        return []
+
+    monkeypatch.setattr(
+        mds.MarketDataService, "fetch_prices_from_alpha_vantage", _fake_alpha_vantage
+    )
+
+    day = date(2026, 7, 24)
+    security = SimpleNamespace(id=1, symbol="AMZN", exchange="NASDAQ", currency="USD")
+    service = make_service()
+    service.db = _FakeDb()
+    service.market_price_repo = _FakePriceRepo([day])
+
+    cached = await service.fetch_and_cache_prices(security, day, day)
+
+    assert cached == 0
+    assert service.rate_limited is True
+    assert fallback_calls == [], "Alpha Vantage was asked after Yahoo refused us"

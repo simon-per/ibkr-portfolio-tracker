@@ -627,8 +627,16 @@ class MarketDataService:
             security, fetch_start, end_date
         )
 
-        # If Yahoo Finance fails or returns nothing, try Alpha Vantage (US stocks only)
-        if not prices_data and security.exchange in ['NASDAQ', 'NYSE', 'ARCA', 'AMEX']:
+        # If Yahoo Finance returns nothing, try Alpha Vantage (US stocks only). Not when
+        # Yahoo *refused* us: a 429 also comes back as an empty list, and falling through
+        # spent one of the free tier's few daily calls and switched this security's
+        # `source` column — the one every pricing diagnosis reads first — for a failure
+        # that had nothing to do with the security.
+        if (
+            not prices_data
+            and not self.rate_limited
+            and security.exchange in ['NASDAQ', 'NYSE', 'ARCA', 'AMEX']
+        ):
             logger.info(f"Yahoo Finance failed for {security.symbol}, trying Alpha Vantage...")
             prices_data = await self.fetch_prices_from_alpha_vantage(security)
 
