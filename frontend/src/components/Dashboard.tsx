@@ -521,16 +521,18 @@ export function Dashboard() {
               // put "Performance" ~150px off the left edge, permanently untappable.
               className="flex w-full justify-start gap-1 overflow-x-auto rounded-none p-0 px-4 py-2 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:max-w-4xl sm:auto-cols-fr sm:grid-flow-col sm:gap-0 sm:rounded-md sm:p-1"
             >
+              {/* Most-used first, left to right — the owner's order (2026-09-13). The phone
+                  strip scrolls, so what sits leftmost is what is reachable without a swipe. */}
               <TabsTrigger value="performance">Performance</TabsTrigger>
               <TabsTrigger value="analytics">Analytics</TabsTrigger>
-              <TabsTrigger value="activity">Activity</TabsTrigger>
-              <TabsTrigger value="allocation">Allocation</TabsTrigger>
-              <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
               <TabsTrigger value="dividends">Dividends</TabsTrigger>
+              <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
+              <TabsTrigger value="allocation">Allocation</TabsTrigger>
+              <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="fundamentals">Fundamentals</TabsTrigger>
               <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
-              <TabsTrigger value="forecast">Forecast</TabsTrigger>
               <TabsTrigger value="tax">Tax</TabsTrigger>
+              <TabsTrigger value="forecast">Forecast</TabsTrigger>
             </TabsList>
           </div>
 
