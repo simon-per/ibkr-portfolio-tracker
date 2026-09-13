@@ -247,6 +247,14 @@ class SecurityAttribution(BaseModel):
     pnl_contribution_eur: float
     contribution_percent: float
     weight_percent: float
+    # The currency the security's prices are quoted in, and the split of
+    # pnl_contribution_eur into what the holding earned in that currency (converted at
+    # the window-end rate) and what the base currency's move against it added. Both
+    # None — never 0 — when the local-currency leg could not be built; see
+    # PortfolioService.attribution_rows.
+    price_currency: Optional[str] = None
+    price_effect_eur: Optional[float] = None
+    fx_effect_eur: Optional[float] = None
 
     class Config:
         from_attributes = True

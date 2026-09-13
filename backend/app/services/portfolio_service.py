@@ -1188,14 +1188,19 @@ class PortfolioService:
                     )
                     continue
 
-            proceeds_eur = lot.quantity * price * fx_rate
+            proceeds_local = lot.quantity * price
+            proceeds_eur = proceeds_local * fx_rate
             rows.append({
                 "security_id": security.id,
                 "symbol": security.symbol,
                 "close_date": lot.close_date,
+                "open_date": lot.open_date,
                 "quantity": lot.quantity,
                 "proceeds": base_fx.convert(proceeds_eur, lot.close_date),
                 "cost_basis": base_fx.convert(lot.cost_basis_eur, lot.open_date),
+                # In the price currency, for the price/FX split in `attribution_rows`.
+                "proceeds_local": proceeds_local,
+                "price_currency": price_currency,
             })
         return rows
 
@@ -1514,6 +1519,258 @@ class PortfolioService:
             logger.warning(f"XIRR calculation failed: {e}")
             return None, num_cash_flows, effective_start_date, effective_end_date, "xirr"
 
+    async def attribution_rows(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> Dict:
+        """
+        The per-security window arithmetic behind `/api/portfolio/attribution`, kept as
+        Decimals and in BOTH the base currency and each security's own price currency.
+
+        `get_performance_attribution` presents it; `PerformanceAnalyticsService` splits
+        it into price and FX effects and folds it through the look-through. One
+        implementation on purpose — the return decomposition and the per-security chart
+        must agree about every security's gain to the cent, and two loops over the same
+        lots is how such figures stop agreeing (CLAUDE.md, *two implementations*).
+
+        Returns::
+
+            {
+              "empty": bool,                    # nothing to attribute (no lots, or no prices)
+              "effective_start": date, "effective_end": date,
+              "base_fx": BaseFx,
+              "securities": {sid: Security},
+              "unpriced": set(sid),             # held at an endpoint but unvaluable there
+              "rows": {sid: {
+                  "price_currency": str,
+                  "start_mv_base", "end_mv_base",           # Decimal, base currency
+                  "new_investment_base", "disposals_base",
+                  "pnl_base",                               # end − start + disposals − new
+                  "pnl_local",                              # same, in price currency, or None
+                  "fx_end_to_base",                         # price ccy → base at effective_end, or None
+                  "price_effect_base", "fx_effect_base",    # Decimal or None (see below)
+              }},
+            }
+
+        The local-currency leg is None — never 0 — when any of its inputs is missing:
+        a lot booked in a currency other than the price currency with no FX rate on
+        its open date, a closed lot whose price history is in a different currency,
+        or no rate for the price currency at the window end. A zero there would claim
+        the whole gain was FX.
+
+        **Price effect is the local-currency gain converted at the window-END rate;
+        the FX effect is the remainder.** So "price" answers "what did the holdings
+        earn in their own currency, worth today", and "FX" is what the base currency's
+        move against them added or took away. Both are conventions; this one makes a
+        security that did not move in its own currency contribute a price effect of
+        exactly zero, which is the reading a chart viewer expects.
+        """
+        empty = {
+            "empty": True,
+            "effective_start": start_date,
+            "effective_end": end_date,
+            "base_fx": None,
+            "securities": {},
+            "unpriced": set(),
+            "rows": {},
+        }
+        # Get ALL taxlots (open + closed) for correct historical attribution
+        result = await self.db.execute(
+            select(TaxLot, Security)
+            .join(Security, TaxLot.security_id == Security.id)
+            .order_by(TaxLot.open_date.asc())
+        )
+        taxlots_with_securities = result.all()
+        if not taxlots_with_securities:
+            return empty
+
+        # Pre-load caches
+        unique_securities = {security for _, security in taxlots_with_securities}
+        price_cache, price_currency_cache = await self._preload_market_prices(unique_securities, start_date, end_date)
+        exchange_rate_cache = await self._preload_exchange_rates(unique_securities, start_date, end_date, price_currency_cache=price_currency_cache)
+        base_fx = await self._load_base_fx()
+        empty["base_fx"] = base_fx
+
+        # Find effective dates with actual price data
+        effective_end = self._find_latest_price_date(end_date, price_cache)
+        if effective_end is None or effective_end <= start_date:
+            return empty
+
+        effective_start = self._find_latest_price_date(start_date, price_cache)
+        if effective_start is None:
+            effective_start = start_date
+
+        ONE = Decimal("1")
+
+        def eur_rate(currency: str, on_date: date) -> Optional[Decimal]:
+            """`currency` → EUR on `on_date`, 1 for EUR itself, None when unavailable."""
+            if currency == "EUR":
+                return ONE
+            return self._get_exchange_rate_with_fallback(currency, on_date, exchange_rate_cache)
+
+        # Group tax lots by security
+        security_map: Dict[int, Dict] = {}
+        securities_by_id: Dict[int, Security] = {}
+
+        # Securities held at an endpoint that could not be valued there. A SET of ids
+        # rather than a counter, for the same reason `_calculate_daily_value` uses one:
+        # this walks tax LOTS, so incrementing would report 110 for a holding split
+        # across 110 lots.
+        unpriced_securities: set = set()
+
+        for taxlot, security in taxlots_with_securities:
+            sid = security.id
+            if sid not in security_map:
+                security_map[sid] = {
+                    "price_currency": price_currency_cache.get(sid, security.currency),
+                    "start_market_value": Decimal("0.0"),   # EUR
+                    "end_market_value": Decimal("0.0"),     # EUR
+                    "start_mv_local": Decimal("0.0"),
+                    "end_mv_local": Decimal("0.0"),
+                    "new_investment": Decimal("0.0"),       # base
+                    "new_investment_local": Decimal("0.0"),
+                    "local_complete": True,
+                }
+                securities_by_id[sid] = security
+            entry = security_map[sid]
+            ccy = entry["price_currency"]
+
+            # Returns None, never 0.0, when the holding cannot be valued. A zero is not
+            # a small error on this endpoint: `value_change = end_mv - start_mv`, so an
+            # unvaluable END makes a still-held position read as `-start_value` — the
+            # exact shape the disposal term was added to fix for sales, arriving by the
+            # other route and never covered. An unvaluable START is the mirror image and
+            # fabricates a gain. Either then renders as the largest bar on a
+            # per-security chart, which is the most legible place in the app to publish
+            # a wrong number.
+            #
+            # Two distinct causes, which is why `price is None` alone is not the test:
+            # no cached price, or a price whose currency has no FX rate. `rebalance.ts`
+            # learned the same asymmetry the same way.
+            def valued(qty, price, target_date) -> Optional[Tuple[Decimal, Decimal]]:
+                """(EUR value, local value) or None."""
+                if price is None:
+                    return None
+                local = qty * price
+                rate = eur_rate(ccy, target_date)
+                if rate is None:
+                    return None
+                return local * rate, local
+
+            # Tax lot contributes to start value if opened on or before effective_start
+            # AND still held at effective_start (exclude-on-close)
+            if taxlot.open_date <= effective_start:
+                if not (taxlot.close_date and taxlot.close_date <= effective_start):
+                    price = self._get_market_price_with_fallback(sid, effective_start, price_cache)
+                    pair = valued(taxlot.quantity, price, effective_start)
+                    if pair is None:
+                        unpriced_securities.add(sid)
+                    else:
+                        entry["start_market_value"] += pair[0]
+                        entry["start_mv_local"] += pair[1]
+
+            # Tax lot contributes to end value if opened on or before effective_end
+            # AND still held at effective_end (exclude-on-close)
+            #
+            # A lot held at NEITHER date never reaches `valued`, so a fully-sold
+            # position keeps its legitimate zero end value and is never confused with
+            # one that simply could not be priced.
+            if taxlot.open_date <= effective_end:
+                if not (taxlot.close_date and taxlot.close_date <= effective_end):
+                    price = self._get_market_price_with_fallback(sid, effective_end, price_cache)
+                    pair = valued(taxlot.quantity, price, effective_end)
+                    if pair is None:
+                        unpriced_securities.add(sid)
+                    else:
+                        entry["end_market_value"] += pair[0]
+                        entry["end_mv_local"] += pair[1]
+
+            # New investment: opened during (effective_start, effective_end] (base, at open_date)
+            if effective_start < taxlot.open_date <= effective_end:
+                entry["new_investment"] += base_fx.convert(taxlot.cost_basis_eur, taxlot.open_date)
+                # The lot's own cost is exact when it was booked in the price currency
+                # (the normal case); otherwise it is re-expressed through EUR at the
+                # open date, and a missing rate leaves the local leg unknown.
+                if taxlot.currency == ccy and taxlot.cost_basis is not None:
+                    entry["new_investment_local"] += taxlot.cost_basis
+                else:
+                    rate = eur_rate(ccy, taxlot.open_date)
+                    if rate is None or rate == 0:
+                        entry["local_complete"] = False
+                    else:
+                        entry["new_investment_local"] += taxlot.cost_basis_eur / rate
+
+        # Capital returned by sales inside the window, priced like the valuations.
+        # Window is (start, end] under exclude-on-close — mirrors calculate_xirr;
+        # change both together if the close-date convention ever moves again.
+        disposals_by_sec: Dict[int, Decimal] = {}
+        disposals_local_by_sec: Dict[int, Decimal] = {}
+        for r in await self.realized_rows_from_closed_lots(
+            base_fx, start=effective_start + timedelta(days=1), end=effective_end,
+        ):
+            sid = r["security_id"]
+            disposals_by_sec[sid] = disposals_by_sec.get(sid, Decimal("0")) + r["proceeds"]
+            entry = security_map.get(sid)
+            if entry is None:
+                continue
+            if r["price_currency"] == entry["price_currency"]:
+                disposals_local_by_sec[sid] = (
+                    disposals_local_by_sec.get(sid, Decimal("0")) + r["proceeds_local"]
+                )
+            else:
+                # A mixed-currency price history (a repair state) — the base figure is
+                # still right, the local split is not knowable.
+                entry["local_complete"] = False
+
+        rows: Dict[int, Dict] = {}
+        for sid, entry in security_map.items():
+            start_b = base_fx.convert(entry["start_market_value"], effective_start)
+            end_b = base_fx.convert(entry["end_market_value"], effective_end)
+            new_b = entry["new_investment"]
+            disp_b = disposals_by_sec.get(sid, Decimal("0"))
+            pnl_b = end_b - start_b + disp_b - new_b
+
+            ccy = entry["price_currency"]
+            end_rate = eur_rate(ccy, effective_end)
+            fx_end_to_base = (
+                base_fx.convert(end_rate, effective_end) if end_rate is not None else None
+            )
+            pnl_local: Optional[Decimal] = None
+            price_effect: Optional[Decimal] = None
+            fx_effect: Optional[Decimal] = None
+            if entry["local_complete"] and fx_end_to_base is not None:
+                pnl_local = (
+                    entry["end_mv_local"] - entry["start_mv_local"]
+                    + disposals_local_by_sec.get(sid, Decimal("0"))
+                    - entry["new_investment_local"]
+                )
+                price_effect = pnl_local * fx_end_to_base
+                fx_effect = pnl_b - price_effect
+
+            rows[sid] = {
+                "price_currency": ccy,
+                "start_mv_base": start_b,
+                "end_mv_base": end_b,
+                "new_investment_base": new_b,
+                "disposals_base": disp_b,
+                "pnl_base": pnl_b,
+                "pnl_local": pnl_local,
+                "fx_end_to_base": fx_end_to_base,
+                "price_effect_base": price_effect,
+                "fx_effect_base": fx_effect,
+            }
+
+        return {
+            "empty": False,
+            "effective_start": effective_start,
+            "effective_end": effective_end,
+            "base_fx": base_fx,
+            "securities": securities_by_id,
+            "unpriced": unpriced_securities,
+            "rows": rows,
+        }
+
     async def get_performance_attribution(
         self,
         start_date: date,
@@ -1528,21 +1785,15 @@ class PortfolioService:
         - Disposal proceeds during the period (tax lots closed, priced at close date)
         - Pure P&L contribution = value_change + disposals - new_investment
         - Contribution % of total portfolio P&L
+        - The price / FX split of that contribution (see `attribution_rows`)
 
         Without the disposal term a position sold mid-period contributed 0 to the
         end value while its full start value stayed on the books, so it read as
         pnl = -start_value — a CHF 40k position sold at a profit showed as a
         CHF -40k contributor and corrupted every contribution_percent.
         """
-        # Get ALL taxlots (open + closed) for correct historical attribution
-        result = await self.db.execute(
-            select(TaxLot, Security)
-            .join(Security, TaxLot.security_id == Security.id)
-            .order_by(TaxLot.open_date.asc())
-        )
-        taxlots_with_securities = result.all()
-
-        if not taxlots_with_securities:
+        computed = await self.attribution_rows(start_date, end_date)
+        if computed["empty"]:
             return {
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
@@ -1550,136 +1801,26 @@ class PortfolioService:
                 "unpriced_holdings": 0,
                 "attributions": []
             }
-
-        # Pre-load caches
-        unique_securities = {security for _, security in taxlots_with_securities}
-        price_cache, price_currency_cache = await self._preload_market_prices(unique_securities, start_date, end_date)
-        exchange_rate_cache = await self._preload_exchange_rates(unique_securities, start_date, end_date, price_currency_cache=price_currency_cache)
-        base_fx = await self._load_base_fx()
-
-        # Find effective dates with actual price data
-        effective_end = self._find_latest_price_date(end_date, price_cache)
-        if effective_end is None or effective_end <= start_date:
-            return {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "total_pnl_eur": 0.0,
-                "unpriced_holdings": 0,
-                "attributions": []
-            }
-
-        effective_start = self._find_latest_price_date(start_date, price_cache)
-        if effective_start is None:
-            effective_start = start_date
-
-        # Group tax lots by security
-        security_map: Dict[int, Dict] = {}
-        securities_by_id: Dict[int, Security] = {}
-
-        # Securities held at an endpoint that could not be valued there. A SET of ids
-        # rather than a counter, for the same reason `_calculate_daily_value` uses one:
-        # this walks tax LOTS, so incrementing would report 110 for a holding split
-        # across 110 lots.
-        unpriced_securities: set = set()
-
-        for taxlot, security in taxlots_with_securities:
-            if security.id not in security_map:
-                security_map[security.id] = {
-                    "start_market_value": Decimal("0.0"),
-                    "end_market_value": Decimal("0.0"),
-                    "new_investment": Decimal("0.0"),
-                }
-                securities_by_id[security.id] = security
-
-            sid = security.id
-            entry = security_map[sid]
-
-            # Get FX rate helper — uses actual price currency, not security currency.
-            #
-            # Returns None, never 0.0, when the holding cannot be valued. A zero is not
-            # a small error on this endpoint: `value_change = end_mv - start_mv`, so an
-            # unvaluable END makes a still-held position read as `-start_value` — the
-            # exact shape the disposal term was added to fix for sales, arriving by the
-            # other route and never covered. An unvaluable START is the mirror image and
-            # fabricates a gain. Either then renders as the largest bar on a
-            # per-security chart, which is the most legible place in the app to publish
-            # a wrong number.
-            #
-            # Two distinct causes, which is why `price is None` alone is not the test:
-            # no cached price, or a price whose currency has no FX rate. `rebalance.ts`
-            # learned the same asymmetry the same way.
-            def get_eur_value(qty, price, sec, target_date) -> Optional[Decimal]:
-                if price is None:
-                    return None
-                val = qty * price
-                price_currency = price_currency_cache.get(sec.id, sec.currency)
-                if price_currency != "EUR":
-                    rate = self._get_exchange_rate_with_fallback(
-                        price_currency, target_date, exchange_rate_cache
-                    )
-                    return val * rate if rate else None
-                return val
-
-            # Tax lot contributes to start value if opened on or before effective_start
-            # AND still held at effective_start (exclude-on-close)
-            if taxlot.open_date <= effective_start:
-                if not (taxlot.close_date and taxlot.close_date <= effective_start):
-                    price = self._get_market_price_with_fallback(sid, effective_start, price_cache)
-                    value = get_eur_value(taxlot.quantity, price, security, effective_start)
-                    if value is None:
-                        unpriced_securities.add(sid)
-                    else:
-                        entry["start_market_value"] += value
-
-            # Tax lot contributes to end value if opened on or before effective_end
-            # AND still held at effective_end (exclude-on-close)
-            #
-            # A lot held at NEITHER date never reaches `get_eur_value`, so a fully-sold
-            # position keeps its legitimate zero end value and is never confused with
-            # one that simply could not be priced.
-            if taxlot.open_date <= effective_end:
-                if not (taxlot.close_date and taxlot.close_date <= effective_end):
-                    price = self._get_market_price_with_fallback(sid, effective_end, price_cache)
-                    value = get_eur_value(taxlot.quantity, price, security, effective_end)
-                    if value is None:
-                        unpriced_securities.add(sid)
-                    else:
-                        entry["end_market_value"] += value
-
-            # New investment: opened during (effective_start, effective_end] (base, at open_date)
-            if effective_start < taxlot.open_date <= effective_end:
-                entry["new_investment"] += base_fx.convert(taxlot.cost_basis_eur, taxlot.open_date)
-
-        # Capital returned by sales inside the window, priced like the valuations.
-        # Window is (start, end] under exclude-on-close — mirrors calculate_xirr;
-        # change both together if the close-date convention ever moves again.
-        disposals_by_sec: Dict[int, Decimal] = {}
-        for r in await self.realized_rows_from_closed_lots(
-            base_fx, start=effective_start + timedelta(days=1), end=effective_end,
-        ):
-            disposals_by_sec[r["security_id"]] = (
-                disposals_by_sec.get(r["security_id"], Decimal("0")) + r["proceeds"]
-            )
+        effective_start = computed["effective_start"]
+        effective_end = computed["effective_end"]
 
         # Excluded from BOTH sides, exactly as the forward yield excludes an unpriced
         # holding: leaving one in contributes a fabricated `-start_value` to total P&L
         # and takes a 0% weight, which also inflates every other security's weight
         # against a denominator its own value is missing from.
-        priced = {sid: e for sid, e in security_map.items() if sid not in unpriced_securities}
+        priced = {
+            sid: r for sid, r in computed["rows"].items() if sid not in computed["unpriced"]
+        }
 
-        # Calculate totals — market values converted to base at their effective date
-        total_end_mv = sum(
-            float(base_fx.convert(v["end_market_value"], effective_end))
-            for v in priced.values()
-        )
+        total_end_mv = sum(float(r["end_mv_base"]) for r in priced.values())
         attributions = []
 
-        for sid, entry in priced.items():
-            sec = securities_by_id[sid]
-            start_mv = float(base_fx.convert(entry["start_market_value"], effective_start))
-            end_mv = float(base_fx.convert(entry["end_market_value"], effective_end))
-            new_inv = float(entry["new_investment"])
-            disposal = float(disposals_by_sec.get(sid, Decimal("0")))
+        for sid, r in priced.items():
+            sec = computed["securities"][sid]
+            start_mv = float(r["start_mv_base"])
+            end_mv = float(r["end_mv_base"])
+            new_inv = float(r["new_investment_base"])
+            disposal = float(r["disposals_base"])
             value_change = end_mv - start_mv
             pnl = value_change + disposal - new_inv
             weight = (end_mv / total_end_mv * 100) if total_end_mv > 0 else 0.0
@@ -1696,6 +1837,16 @@ class PortfolioService:
                 "pnl_contribution_eur": round(pnl, 2),
                 "contribution_percent": 0.0,  # set below
                 "weight_percent": round(weight, 2),
+                "price_currency": r["price_currency"],
+                # None when the local-currency leg could not be built — absent, not 0.
+                "price_effect_eur": (
+                    round(float(r["price_effect_base"]), 2)
+                    if r["price_effect_base"] is not None else None
+                ),
+                "fx_effect_eur": (
+                    round(float(r["fx_effect_base"]), 2)
+                    if r["fx_effect_base"] is not None else None
+                ),
             })
 
         total_pnl = sum(a["pnl_contribution_eur"] for a in attributions)
@@ -1716,7 +1867,7 @@ class PortfolioService:
             # > 0 means securities were left out because they could not be valued at an
             # endpoint, so total_pnl_eur covers less than the whole book. Same signal
             # and same name as the timeline's and the summary's.
-            "unpriced_holdings": len(unpriced_securities),
+            "unpriced_holdings": len(computed["unpriced"]),
             "attributions": attributions
         }
 

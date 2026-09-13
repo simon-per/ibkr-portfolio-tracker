@@ -74,6 +74,9 @@ READ_ENDPOINTS = [
     f"/api/tax/report.csv?year={TODAY.year}",
     "/api/portfolio/lookthrough",
     "/api/portfolio/lookthrough?limit=5",
+    f"/api/performance/decomposition?start_date={START}&end_date={TODAY}",
+    f"/api/performance/segments?start_date={START}&end_date={TODAY}",
+    "/api/performance/closed-positions",
 ]
 
 

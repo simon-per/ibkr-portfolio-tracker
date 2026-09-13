@@ -108,6 +108,28 @@ class CashService:
         and puts it back on every day between. The line would sawtooth and each
         individual point would look plausible.
         """
+        by_account, to_base = await self._derived_events(base_fx)
+        # The union of accounts with derived events and accounts with measured
+        # levels, not just the former: a Flex query can carry the Cash Report
+        # section while <Trades> and <CashTransactions> are still off, and an
+        # account whose only evidence is IBKR's own figure must still get it.
+        accounted = set(by_account) | {
+            row.account
+            for row in await CashBalanceRepository(self.db).get_all()
+        }
+        merged: List[Tuple[date, Decimal]] = []
+        for account in sorted(accounted):
+            events = sorted(by_account.get(account, []), key=lambda e: e[0])
+            merged += await self._apply_measured(events, to_base, account)
+        merged.sort(key=lambda e: e[0])
+        return merged
+
+    async def _derived_events(self, base_fx):
+        """
+        The three ledgers as per-account ``(date, amount in base)`` events, unspliced,
+        plus the converter that projected them. Shared by `balance_events` and
+        `measured_corrections` so both read one set of derived events.
+        """
         by_account: Dict[str, List[Tuple[date, Decimal]]] = defaultdict(list)
         to_base = NativeToBase(self.currency_service, base_fx)
 
@@ -146,20 +168,32 @@ class CashService:
         for when, net_eur in await DividendService(self.db).ibkr_cash_receipts():
             by_account[IBKR].append((when, base_fx.convert(net_eur, when)))
 
-        # The union of accounts with derived events and accounts with measured
-        # levels, not just the former: a Flex query can carry the Cash Report
-        # section while <Trades> and <CashTransactions> are still off, and an
-        # account whose only evidence is IBKR's own figure must still get it.
-        accounted = set(by_account) | {
-            row.account
-            for row in await CashBalanceRepository(self.db).get_all()
-        }
-        merged: List[Tuple[date, Decimal]] = []
-        for account in sorted(accounted):
+        return by_account, to_base
+
+    async def measured_corrections(self, base_fx) -> List[Tuple[date, Decimal, str]]:
+        """
+        Only the corrections `_apply_measured` interleaves: ``(date, amount, account)``.
+
+        Each one is the gap between IBKR's own end-of-day balance and what the three
+        ledgers add up to by then — which is, by construction, the broker interest,
+        account fees and FX conversion spread none of the ledgers record. Summed over a
+        window that is the "fees and interest" leg of the return decomposition; kept
+        separate here so that surface reads the same corrections the cash line snaps
+        to rather than re-deriving them. Empty when no measured row exists.
+        """
+        # Re-gathers the derived events rather than caching them from `balance_events`:
+        # the two are called from different requests, and a stale cache would let the
+        # corrections drift from the balance they explain.
+        by_account, to_base = await self._derived_events(base_fx)
+        out: List[Tuple[date, Decimal, str]] = []
+        for account in sorted(
+            set(by_account) | {r.account for r in await CashBalanceRepository(self.db).get_all()}
+        ):
             events = sorted(by_account.get(account, []), key=lambda e: e[0])
-            merged += await self._apply_measured(events, to_base, account)
-        merged.sort(key=lambda e: e[0])
-        return merged
+            for when, amount in await self._corrections_for(events, to_base, account):
+                out.append((when, amount, account))
+        out.sort(key=lambda e: e[0])
+        return out
 
     async def _apply_measured(self, events, to_base, account):
         """
@@ -182,9 +216,18 @@ class CashService:
         the accumulated broker interest, fees and FX spread this service cannot see — it
         is the correction being visible, not a fault.
         """
+        corrections = await self._corrections_for(events, to_base, account)
+        if not corrections:
+            return events
+        return sorted(events + corrections, key=lambda e: e[0])
+
+    async def _corrections_for(
+        self, events, to_base, account
+    ) -> List[Tuple[date, Decimal]]:
+        """The correction events for one account — see `_apply_measured`."""
         measured = await CashBalanceRepository(self.db).get_all(account=account)
         if not measured:
-            return events
+            return []
 
         corrections: List[Tuple[date, Decimal]] = []
         derived_running = Decimal("0")
@@ -219,7 +262,7 @@ class CashService:
             applied += correction
             corrections.append((row.report_date, correction))
 
-        return sorted(events + corrections, key=lambda e: e[0])
+        return corrections
 
     async def cash_source(self) -> str:
         """
