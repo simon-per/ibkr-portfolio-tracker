@@ -224,6 +224,19 @@ component and three checks in `e2e/errors.mjs`.
 
 ---
 
+### Rolling risk and the drawdown ledger (`rollingRisk.ts`), the waterfall (`returnDecomposition.ts`)
+
+Added 2026-09-13 for the Analytics tab; the rules are in
+[performance-analytics.md](performance-analytics.md). The two things that belong here:
+they reuse `portfolioKpis.ts`' primitives rather than re-deriving a return (`TRADING_DAYS`,
+`RISK_FREE_RATE`, `FLOW_EPSILON`, `meanAndStdDev` and `returnsAfter` were exported for
+exactly that), so the last rolling point equals the risk cards over the same window; and
+every metric is `null` below its sample floor, never `0`. The Analytics tab never asks the
+benchmark endpoint unless the Performance tab has a benchmark selected — a cache miss there
+is a Yahoo request, and it is handed the selection as a prop rather than re-reading storage.
+
+---
+
 ## The mobile layout — one description, two renderings
 
 The app is built to work at **390x844**, and the rule that keeps it that way is that a table and its

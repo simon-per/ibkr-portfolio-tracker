@@ -5,7 +5,18 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-13.** Health check on 09-13 (see *Recent sessions*): nothing unpushed, both suites green, production on the latest commit. Previous latest: **a bug sweep with three parallel read-only hunts
+**Last updated: 2026-09-13.** Latest: **an Analytics tab — where the return came from.** The
+change in Total Value split into money paid in, price, FX, dividends, fees/interest and a named
+remainder (waterfall for the range, stacked bars per year, legs summing exactly to end − start);
+the same gains folded onto sectors and countries through the look-through; 12-month rolling
+Sharpe/volatility/beta and a drawdown ledger; closed positions with IBKR's realized figure and the
+quote's move since the sale. Three pure-database routes under `/api/performance`, no new upstream
+call. `PortfolioService.attribution_rows` is now the single per-security window loop the
+Performance tab's attribution chart and this tab both read. Rules in
+`docs/performance-analytics.md`; what to check live is in *Watch after the next deploy*.
+Brinson allocation/selection is deliberately not built — it needs per-sector benchmark data the
+database does not hold (*Worth doing next*). Morning health check: nothing unpushed, both suites
+green, production on the latest commit. Previous latest: **a bug sweep with three parallel read-only hunts
 (backend valuation, frontend, sync/ops) found 32 verified defects; 25 shipped, the rest are
 recorded below rather than fixed.** Production was healthy throughout and every sum identity
 the public API exposes held — the defects were in the paths today's data does not exercise
@@ -723,6 +734,21 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The Analytics tab and `/api/performance/*` ship with the 2026-09-13 push.** To verify on
+  production, read-only: `GET /api/performance/decomposition?start_date=<1y ago>&end_date=<today>`
+  answers 200 and `window.end_total_value_eur − window.start_total_value_eur` equals the sum of
+  `net_flows_eur, price_effect_eur, fx_effect_eur, unsplit_eur, dividends_eur, fees_interest_eur,
+  unexplained_eur` to the cent; `fees_interest_eur` is non-null (a measured IBKR balance exists
+  since 08-25) and `unexplained_eur` is small — on this account expect it to carry the in-kind
+  transfers in early windows and commissions elsewhere; a large negative there with
+  `cash_source: unknown` would be the untracked-cash case, which does not apply here.
+  `/segments` on the same window: `sum(by_sector[].pnl_eur) == total_pnl_eur`, a *Fund residual*
+  row present, and the "current basket" caveat in `warnings[]`. `/closed-positions`: the 08-21
+  rotation's sold funds with `realized_source: trade`; `post_sale_pct` null for fully sold
+  securities is expected (nothing prices them). In the browser: the tab renders at 390 px, the
+  rolling-risk card asks for 2Y/ALL on 1Y if the range holds fewer than 252 returns, and beta
+  appears only with a benchmark selected on the Performance tab.
+
 - **Sibling-class pricing for the 3a EM fund is live and verified (2026-09-12, 15:08
   Berlin).** Deployed `ce0035a` at 13:22, activated with `manage_mappings set CH1529078078
   FUND 0P0000S0OE.SW --sibling` (33 carried rows dropped, the 09-01 NAV kept as anchor), and
@@ -830,6 +856,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   on-time sync look early.
 
 ## Worth doing next
+
+0. **Brinson allocation / selection attribution against the benchmark — needs data first.**
+   The Analytics tab (2026-09-13) shows each sector's *weight at start* beside its *share of
+   gain*, which is the portfolio-only half of the question. The other half — "did I beat the
+   index by being overweight the right sectors or by picking the right names inside them" —
+   needs the benchmark's per-sector weights and per-sector returns over the window. The
+   benchmarks are indices with one price series each and no basket, so both are new upstream
+   data: either an index ETF basket (e.g. SPY/URTH from an issuer file, which the basket
+   fetchers already know how to store) plus one price series per sector ETF, or a factor
+   provider. Budget it against rule 1 before building. Design is in
+   `docs/performance-analytics.md`, *What is deliberately not here*.
 
 0. **Mount the database's directory, not the file — the WAL-on-deploy data loss is
    mitigated, not fixed.** Found 2026-09-08 while verifying the basket refresh: a run's
@@ -1099,10 +1136,13 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
-- **2026-09-13** — "have we committed everything, made sure it works, what are open bugs?" Read-only
-  health check: working tree clean and pushed, `/health` on `bcff1e1`, backend 1,490 and frontend
-  612 tests green. Found the 09-12 18:00 slot had *skipped*, so `send_flex_request` is still
-  unexercised live; verified the look-through refresh and the 25-identifier bound instead.
+- **2026-09-13** — a health check ("have we committed everything… what are open bugs?": clean,
+  green, on the latest commit; found the 09-12 18:00 slot had *skipped*, so `send_flex_request`
+  is still unexercised live), then a brainstorm the owner narrowed to "it is ALL ABOUT
+  ANALYTICS… I like charts", then the build: the Analytics tab and `/api/performance/*` (return
+  decomposition, segments, rolling risk, drawdowns, closed positions), 6 backend and 14 frontend
+  tests, one extracted loop (`attribution_rows`) instead of a second copy. Brinson deferred for
+  want of benchmark sector data rather than approximated.
 
 - **2026-09-12** — "let's look for bugs or things that look wrong or not work properly and
   try to fix it." Three read-only hunts in parallel (backend valuation, frontend, sync/ops),

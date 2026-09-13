@@ -31,6 +31,36 @@ The durable half of these findings is in **CLAUDE.md**, not here: the once-per-d
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
+## Shipped 2026-09-13 — the Analytics tab: where the return came from
+
+Goal set by the owner: analytics only, charts first. Four surfaces on a new lazy tab, three
+pure-database routes under `/api/performance`, zero new Yahoo or IBKR calls.
+
+- **Return decomposition** — the change in Total Value split into money paid in, price (each
+  holding's gain in its own currency at the window-end rate), FX, dividends received,
+  fees/interest (IBKR's measured cash corrections) and a named remainder, for the range and per
+  calendar year. The legs sum exactly to end − start on the rounded figures; the identity is
+  pinned on an EUR and a CHF base.
+- **Segments** — the same gains folded onto sectors and countries through the look-through's
+  own predicates and proxy aliasing; a fund's cash row stays visible as *Fund residual*,
+  unclassified holdings as *Unknown*. Badged as spread by the fund's current basket.
+- **Risk over time** — 12-month rolling Sharpe, volatility and beta, plus a drawdown ledger,
+  computed client-side from the value series; the last rolling point equals the risk cards
+  over the same window by construction.
+- **Closed positions** — IBKR's own realized figure where a SELL trade exists, cost-weighted
+  holding days, and the quote's move since the sale where a later price exists.
+
+The structural change underneath: `PortfolioService.attribution_rows` is the one per-security
+window loop, and `get_performance_attribution` became its presenter (gaining `price_currency`,
+`price_effect_eur`, `fx_effect_eur`). `CashService` exposes `measured_corrections`.
+**Deliberately not built**: Brinson allocation/selection, which needs per-sector benchmark
+weights and returns the database does not hold (STATUS.md, *Worth doing next*). Rules in
+[performance-analytics.md](performance-analytics.md).
+
+Verified: backend 1,505 tests and frontend 626 green; the three routes serve the smoke fixture
+through the real HTTP stack; the bundle gains one 24 kB lazy chunk. Production verification of
+the identity on the public API is recorded in STATUS.md, *Watch after the next deploy*.
+
 ## Shipped 2026-09-12 (afternoon) — the 3a EM fund prices from its sibling share class
 
 Asked as "why does the carried price end? … the amount stays the same and we get the prices

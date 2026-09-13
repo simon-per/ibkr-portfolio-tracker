@@ -156,6 +156,14 @@ weekend or a failed-sync stretch would freeze the balance through real trades. E
 small one-off step on the first measured day: that is the accumulated interest and fees
 becoming visible, not a fault.
 
+Those corrections are also **the fees-and-interest leg of the return decomposition**
+([performance-analytics.md](performance-analytics.md)), read through
+`CashService.measured_corrections(base_fx)` — the same `_corrections_for` walk the balance
+splices, so the leg and the step in the cash line are one set of numbers. `balance_events`
+and `measured_corrections` share `_derived_events`; neither caches the other's result,
+because they are called from different requests and a stale cache would let the corrections
+drift from the balance they explain.
+
 **`cash_source` is per point, not per response.** The Flex window is bounded, so measured
 history starts whenever the section was enabled and can never reach the account's start;
 stamping `ibkr` on the years before it because the tail is measured is the same overclaim

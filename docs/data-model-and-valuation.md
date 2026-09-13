@@ -190,6 +190,15 @@ annualizing a few days of noise. Attribution takes the same disposal term
 (`pnl = value_change + disposals − new_investment`), without which a position sold at a profit read as
 `−start_value`. Tests: `tests/test_xirr.py`, `tests/test_attribution.py`.
 
+**The attribution's per-security loop is `attribution_rows()` and there is one of it** (since
+2026-09-13). `get_performance_attribution` presents it; `PerformanceAnalyticsService` splits it
+into price and FX and folds it onto sectors. It keeps both base-currency and price-currency
+Decimals so the split can be made downstream, and `realized_rows_from_closed_lots` carries
+`proceeds_local` and `price_currency` for the same reason. The convention for the split, and
+why the local leg is `None` rather than 0 when an input is missing, are in
+[performance-analytics.md](performance-analytics.md). Change the disposal window or the
+close-date rule here and every consumer moves with it.
+
 **The timeline is swept once, not rebuilt per day.** `_calculate_timeline_swept()` folds each lot's
 date-independent parts (base-converted cost at `open_date`, quantity) into running sums via open/close
 events, so a day prices each *security* once instead of once per lot — O(days × securities) rather than

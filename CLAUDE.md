@@ -34,6 +34,7 @@ holds it — the index below maps them.
 | [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh |
 | [docs/pricing-and-fx.md](docs/pricing-and-fx.md) | ticker mapping, `manage_mappings`, minor-unit quotes, `currency_service`, Frankfurter and the fallback |
 | [docs/frontend.md](docs/frontend.md) | `frontend/src/lib/` analytics (risk, rebalance, currency exposure, forecast), `DataTable`, the mobile layout |
+| [docs/performance-analytics.md](docs/performance-analytics.md) | `performance_analytics_service`, `/api/performance/*`, `attribution_rows`, the price/FX split, the Analytics tab, `rollingRisk.ts` |
 | [docs/tech-stack.md](docs/tech-stack.md) | versions, the bundle boundaries, `e2e/` |
 | [docs/deployment.md](docs/deployment.md) | `deploy.sh`, auto-deploy, the VPS, `.env`, `/health` |
 | [docs/local-development.md](docs/local-development.md) | running it locally, the smoke test, snapshots, test commands |
