@@ -734,20 +734,19 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The Analytics tab and `/api/performance/*` ship with the 2026-09-13 push.** To verify on
-  production, read-only: `GET /api/performance/decomposition?start_date=<1y ago>&end_date=<today>`
-  answers 200 and `window.end_total_value_eur − window.start_total_value_eur` equals the sum of
-  `net_flows_eur, price_effect_eur, fx_effect_eur, unsplit_eur, dividends_eur, fees_interest_eur,
-  unexplained_eur` to the cent; `fees_interest_eur` is non-null (a measured IBKR balance exists
-  since 08-25) and `unexplained_eur` is small — on this account expect it to carry the in-kind
-  transfers in early windows and commissions elsewhere; a large negative there with
-  `cash_source: unknown` would be the untracked-cash case, which does not apply here.
-  `/segments` on the same window: `sum(by_sector[].pnl_eur) == total_pnl_eur`, a *Fund residual*
-  row present, and the "current basket" caveat in `warnings[]`. `/closed-positions`: the 08-21
-  rotation's sold funds with `realized_source: trade`; `post_sale_pct` null for fully sold
-  securities is expected (nothing prices them). In the browser: the tab renders at 390 px, the
-  rolling-risk card asks for 2Y/ALL on 1Y if the range holds fewer than 252 returns, and beta
-  appears only with a benchmark selected on the Performance tab.
+- **`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
+  Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
+  sum to `end − start` to the cent; `sum(by_sector)` and `sum(by_country)` equal `total_pnl_eur`
+  (14 and 53 rows); the per-security attribution total equals the segments total, so the two
+  surfaces agree. `fees_interest_eur` is non-null on 2026 windows and 0 for 2025 (measurement
+  began 08-25). Three things seen that are correct and worth knowing: **2025 carries 7 unsplit
+  holdings** (in-kind-transferred lots whose open dates predate the cached FX history, so their
+  gain is carried whole, not guessed); **Unknown is the second-largest sector and country**
+  because the allocation sync has classified only part of the direct book — run
+  `POST /api/allocation/sync` to shrink it; and **every one of the 16 sold securities has a
+  post-sale price** (the market-data pass still prices them), so *Rose after sale* reads 12 of 16.
+  **Still to see in a browser**: the tab at 390 px, the rolling-risk card asking for 2Y/ALL on
+  a 1Y range, beta only with a benchmark selected, and the reordered tab strip (`4eb3d3b`).
 
 - **Sibling-class pricing for the 3a EM fund is live and verified (2026-09-12, 15:08
   Berlin).** Deployed `ce0035a` at 13:22, activated with `manage_mappings set CH1529078078
