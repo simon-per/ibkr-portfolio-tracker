@@ -321,6 +321,15 @@ export interface SecurityAttribution {
   pnl_contribution_eur: number;
   contribution_percent: number;
   weight_percent: number;
+  /** The currency the security's prices are quoted in. Optional: sent since 2026-09-13. */
+  price_currency?: string | null;
+  /**
+   * `pnl_contribution_eur` split into what the holding earned in its own currency
+   * (converted at the window-end rate) and what the base currency's move added. Both
+   * `null` when the split could not be built — absent, never 0.
+   */
+  price_effect_eur?: number | null;
+  fx_effect_eur?: number | null;
 }
 
 export interface PerformanceAttributionResponse {
@@ -347,6 +356,124 @@ export interface AllocationPosition {
   weight: number;
   market_value_eur: number;
   is_etf_contribution: boolean;
+}
+
+// ---- /api/performance — where the return came from -------------------------------
+//
+// Every `number | null` below is an unknown that stays absent: `null` means "could not
+// be measured", never a stand-in for 0. The Analytics tab renders `—` for it.
+
+/** One window of the return decomposition. The legs sum EXACTLY to end − start. */
+export interface DecompositionWindow {
+  start_date: string;
+  end_date: string;
+  start_total_value_eur: number | null;
+  end_total_value_eur: number | null;
+  /** Money paid in (+) or taken out (−) inside the window. */
+  net_flows_eur: number | null;
+  /** end − start − net_flows: everything the account earned. */
+  gain_eur: number | null;
+  /** Modified-Dietz percentage of the gain; null without a base to measure against. */
+  gain_pct: number | null;
+  /** What the holdings earned in their own currencies, at the window-end rate. */
+  price_effect_eur: number | null;
+  /** What the base currency's moves against the holdings' currencies added or took. */
+  fx_effect_eur: number | null;
+  /** Gain of holdings whose price/FX split could not be built, carried whole. */
+  unsplit_eur: number | null;
+  unsplit_securities: number;
+  /** Net dividend cash that landed (IBKR ledger). */
+  dividends_eur: number | null;
+  /** Broker interest, fees and FX spread — IBKR's measured balance against the derived one. */
+  fees_interest_eur: number | null;
+  /** The remainder that makes the legs sum. Named, never folded into another leg. */
+  unexplained_eur: number | null;
+  unpriced_holdings: number;
+  warnings: string[];
+}
+
+export interface DecompositionYear extends DecompositionWindow {
+  year: number;
+  /** Not a full year: the current one, or the account began inside it. */
+  partial: boolean;
+}
+
+export interface ReturnDecompositionResponse {
+  base_currency: string;
+  cash_source: string;
+  window: DecompositionWindow;
+  years: DecompositionYear[];
+}
+
+export interface SegmentRow {
+  name: string;
+  pnl_eur: number | null;
+  price_effect_eur: number | null;
+  fx_effect_eur: number | null;
+  share_of_gain_pct: number | null;
+  start_value_eur: number | null;
+  end_value_eur: number | null;
+  start_weight_pct: number | null;
+  end_weight_pct: number | null;
+  /** How much of the segment's end value came through fund baskets. */
+  via_funds_pct: number | null;
+}
+
+export interface SegmentAttributionResponse {
+  start_date: string;
+  end_date: string;
+  total_pnl_eur: number | null;
+  start_total_value_eur: number | null;
+  end_total_value_eur: number | null;
+  unpriced_holdings: number;
+  basket_as_of_oldest: string | null;
+  proxied_funds: string[];
+  by_sector: SegmentRow[];
+  by_country: SegmentRow[];
+  warnings: string[];
+}
+
+export interface ClosedPosition {
+  security_id: number;
+  symbol: string;
+  description: string;
+  account: string;
+  still_held: boolean;
+  lots_closed: number;
+  first_open_date: string;
+  last_close_date: string;
+  holding_days: number | null;
+  cost_basis_eur: number | null;
+  proceeds_eur: number | null;
+  realized_pnl_eur: number | null;
+  /** 'trade' (IBKR's own FIFO figure) or 'closed_lots' (market-price approximation). */
+  realized_source: string;
+  return_pct: number | null;
+  /** Quote-currency move from the last close before the sale to the newest close after it. */
+  post_sale_pct: number | null;
+  post_sale_days: number | null;
+}
+
+export interface ClosedPositionsSummary {
+  closed_securities: number;
+  winners: number;
+  losers: number;
+  hit_rate_pct: number | null;
+  total_realized_eur: number | null;
+  total_cost_eur: number | null;
+  avg_holding_days: number | null;
+  best: string | null;
+  worst: string | null;
+  post_sale_judged: number;
+  sold_then_rose: number;
+  sold_then_fell: number;
+}
+
+export interface ClosedPositionsResponse {
+  base_currency: string;
+  positions: ClosedPosition[];
+  summary: ClosedPositionsSummary;
+  warnings: string[];
 }
 
 export interface AllocationCategory {
@@ -1138,6 +1265,23 @@ class ApiClient {
   // Look-through endpoints
   async getLookthrough(limit = 50): Promise<LookthroughResponse> {
     return this.request<LookthroughResponse>(`/api/portfolio/lookthrough?limit=${limit}`);
+  }
+
+  // Performance analytics endpoints — pure database reads, nothing here can reach Yahoo.
+  async getReturnDecomposition(startDate: string, endDate: string): Promise<ReturnDecompositionResponse> {
+    return this.request<ReturnDecompositionResponse>(
+      `/api/performance/decomposition?start_date=${startDate}&end_date=${endDate}`
+    );
+  }
+
+  async getSegmentAttribution(startDate: string, endDate: string): Promise<SegmentAttributionResponse> {
+    return this.request<SegmentAttributionResponse>(
+      `/api/performance/segments?start_date=${startDate}&end_date=${endDate}`
+    );
+  }
+
+  async getClosedPositions(): Promise<ClosedPositionsResponse> {
+    return this.request<ClosedPositionsResponse>('/api/performance/closed-positions');
   }
 
   // Allocation endpoints

@@ -1,10 +1,10 @@
 import type { BenchmarkValuePoint } from './api'
 import { isValuable, type ValuablePosition } from './positionValuation'
 
-/** Trading days per year, for annualising a daily return series. */
-const TRADING_DAYS = 252
-/** EUR risk-free assumption for the Sharpe numerator. */
-const RISK_FREE_RATE = 0.03
+/** Trading days per year, for annualising a daily return series. Shared with `rollingRisk.ts`. */
+export const TRADING_DAYS = 252
+/** EUR risk-free assumption for the Sharpe numerator. Shared with `rollingRisk.ts`. */
+export const RISK_FREE_RATE = 0.03
 /** Below this many daily returns the statistics are noise, not signal. */
 const MIN_RETURNS = 5
 /**
@@ -17,7 +17,7 @@ export const MIN_PAIRED_RETURNS = 20
  * A cost-basis line unchanged from one day to the next subtracts to exactly
  * zero, so this only has to absorb the cent rounding the API applies.
  */
-const FLOW_EPSILON = 0.01
+export const FLOW_EPSILON = 0.01
 
 /**
  * The minimum either series needs: a date, a value, and the cost-basis line the
@@ -82,7 +82,7 @@ export function firstValuedPoint(series: ValueSeriesPoint[]): ValueSeriesPoint |
  * −2% until it rose 2% above its first close. For a series that starts at inception the
  * seed is `series[0]` and nothing is dropped.
  */
-function returnsAfter(
+export function returnsAfter(
   seed: ValueSeriesPoint,
   returns: { date: string; ret: number }[],
 ): { date: string; ret: number }[] {
@@ -137,7 +137,7 @@ export function dailyReturns(series: ValueSeriesPoint[]): number[] {
 }
 
 /** Mean and (population) standard deviation of a sample. */
-function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
+export function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
   const mean = values.reduce((s, v) => s + v, 0) / values.length
   const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length
   return { mean, stdDev: Math.sqrt(variance) }
