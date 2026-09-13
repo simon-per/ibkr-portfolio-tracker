@@ -95,7 +95,7 @@ class PerformanceAnalyticsService:
         Identity, on the *rounded* figures the response carries::
 
             end_total_value − start_total_value
-              = net_flows + price + fx + unsplit + dividends + fees_interest + unexplained
+              = net_flows + price + fx + unsplit + dividends + cash_adjustment + unexplained
 
         `unexplained_eur` is what the ledgers cannot account for: in-kind transfers
         (a lot arrives with a cost and no cash left), the gap between a sale's real
@@ -185,7 +185,7 @@ class PerformanceAnalyticsService:
             "unsplit_eur": None,
             "unsplit_securities": 0,
             "dividends_eur": None,
-            "fees_interest_eur": None,
+            "cash_adjustment_eur": None,
             "unexplained_eur": None,
             "unpriced_holdings": 0,
             "warnings": warnings,
@@ -232,7 +232,7 @@ class PerformanceAnalyticsService:
             "fx_effect_eur": _f(fx_effect),
             "unsplit_eur": _f(unsplit),
             "dividends_eur": _f(dividends_eur),
-            "fees_interest_eur": _f(fees_eur),
+            "cash_adjustment_eur": _f(fees_eur),
         }
         start_f = _f(start_tv)
         end_f = _f(end_tv)

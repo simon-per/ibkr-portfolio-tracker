@@ -62,7 +62,7 @@ Per window, on the **rounded** figures the response carries:
 
 ```
 end_total_value − start_total_value
-  = net_flows + price + fx + unsplit + dividends + fees_interest + unexplained
+  = net_flows + price + fx + unsplit + dividends + cash_adjustment + unexplained
 ```
 
 `unexplained_eur` is computed last as the remainder, so the identity holds by construction
@@ -82,10 +82,14 @@ The other legs:
   A flow, not a return; the waterfall draws it grey.
 - **`dividends_eur`** — `DividendService.ibkr_cash_receipts()` in the window, converted at
   the pay date. IBKR rows only: an estimate is a guess about cash another broker received.
-- **`fees_interest_eur`** — `CashService.measured_corrections()` in the window. Each
-  correction is `measured − derived-so-far`, which is by construction the broker interest,
-  account fees and FX spread none of the three ledgers record. `None` when no measured row
-  exists; the card's footnote says a measured cash balance is needed.
+- **`cash_adjustment_eur`** — `CashService.measured_corrections()` in the window. Each
+  correction is `measured − derived-so-far`: whatever IBKR's own balance says that the three
+  ledgers do not record — broker interest, account fees, FX on idle cash, **and any gap in the
+  ledgers themselves**. It was first shipped as "Fees & interest" and renamed the same day,
+  because on this account it read **+349 CHF** for the year: IBKR holds *more* than the
+  ledgers explain (the +289 step of 2026-08-25 is most of it), so the label claimed a fee bill
+  that did not exist. The card says *positive = more cash than the ledgers explain*. `None`
+  when no measured row exists.
 - **`gain_pct`** — Modified Dietz, `gain / (start + flows/2)`, `None` when the denominator is
   not positive (a window that starts from nothing has no base).
 

@@ -159,7 +159,7 @@ async def _session(base_currency: str, eur_chf_end: str = "0.94"):
 
 def _legs(w):
     return [w[k] for k in ("net_flows_eur", "price_effect_eur", "fx_effect_eur",
-                           "unsplit_eur", "dividends_eur", "fees_interest_eur",
+                           "unsplit_eur", "dividends_eur", "cash_adjustment_eur",
                            "unexplained_eur")]
 
 
@@ -183,7 +183,7 @@ async def test_the_legs_sum_to_the_change_in_total_value_and_each_reads_right():
         assert w["fx_effect_eur"] == pytest.approx(-100.0)
         assert w["unsplit_eur"] == 0.0 and w["unsplit_securities"] == 0
         assert w["dividends_eur"] == pytest.approx(10.0)
-        assert w["fees_interest_eur"] == pytest.approx(-3.0)
+        assert w["cash_adjustment_eur"] == pytest.approx(-3.0)
         # The sale's 1.00 commission: the lot carries proceeds at market (110) while the
         # cash received 109. Reported, not folded into a leg.
         assert w["unexplained_eur"] == pytest.approx(-1.0)

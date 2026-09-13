@@ -11,7 +11,7 @@ export type LegKey =
   | 'price_effect_eur'
   | 'fx_effect_eur'
   | 'dividends_eur'
-  | 'fees_interest_eur'
+  | 'cash_adjustment_eur'
   | 'unsplit_eur'
   | 'unexplained_eur'
 
@@ -20,7 +20,7 @@ export const LEGS: { key: LegKey; label: string }[] = [
   { key: 'price_effect_eur', label: 'Price' },
   { key: 'fx_effect_eur', label: 'FX' },
   { key: 'dividends_eur', label: 'Dividends' },
-  { key: 'fees_interest_eur', label: 'Fees & interest' },
+  { key: 'cash_adjustment_eur', label: 'Cash adjustment' },
   { key: 'unsplit_eur', label: 'Unsplit' },
   { key: 'unexplained_eur', label: 'Unexplained' },
 ]

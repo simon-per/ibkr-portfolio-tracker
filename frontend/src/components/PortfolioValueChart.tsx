@@ -14,6 +14,7 @@ import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 
 /**
  * One height for the chart and its three placeholder states, so a range switch or a
@@ -469,14 +470,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             width={isCompact ? 44 : 60}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: 'hsl(var(--card))',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              // Recharts clamps a tooltip to the viewBox, so it never causes overflow —
-              // but unbounded it fills the whole plot area at 390px.
-              maxWidth: '70vw',
-            }}
+            contentStyle={CHART_TOOLTIP_STYLE}
             // `chartData` writes `null` for a benchmark with no bar on a date; a `null`
             // return is what makes Recharts drop that row instead of printing "€0.00"
             // for a line that was not drawn. See `tooltipValue`.

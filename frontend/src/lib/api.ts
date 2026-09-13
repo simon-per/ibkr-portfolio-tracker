@@ -385,7 +385,7 @@ export interface DecompositionWindow {
   /** Net dividend cash that landed (IBKR ledger). */
   dividends_eur: number | null;
   /** Broker interest, fees and FX spread — IBKR's measured balance against the derived one. */
-  fees_interest_eur: number | null;
+  cash_adjustment_eur: number | null;
   /** The remainder that makes the legs sum. Named, never folded into another leg. */
   unexplained_eur: number | null;
   unpriced_holdings: number;

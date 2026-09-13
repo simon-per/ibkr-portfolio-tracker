@@ -45,7 +45,7 @@ const window: DecompositionWindow = {
   unsplit_eur: 0,
   unsplit_securities: 0,
   dividends_eur: 300,
-  fees_interest_eur: null,          // no measured cash balance: absent, not 0
+  cash_adjustment_eur: null,          // no measured cash balance: absent, not 0
   unexplained_eur: -100,
   unpriced_holdings: 1,
   warnings: ['1 holding could not be priced at an endpoint and is left out of every leg.'],
@@ -123,14 +123,15 @@ describe('AnalyticsTab', () => {
     renderTab()
     const gain = await screen.findByText('Gain', { selector: 'p, span, div, h3, dt' })
     expect(gain).toBeTruthy()
-    // Fees & interest is null: a dash, never CHF 0.00.
-    const fees = await screen.findByText('Fees & interest', { selector: 'p, span, div, h3, dt' })
+    // The cash adjustment is null: a dash, never CHF 0.00.
+    const fees = await screen.findByText('Cash adjustment', { selector: 'p, span, div, h3, dt' })
     const feesCard = fees.closest('[class*="rounded"]') ?? fees.parentElement!
     expect(within(feesCard as HTMLElement).getByText('—')).toBeTruthy()
     expect(within(feesCard as HTMLElement).queryByText(/0\.00/)).toBeNull()
-    // The warning rides above the cards.
-    const alerts = await screen.findAllByRole('alert')
-    expect(alerts.some((a) => a.textContent?.includes('could not be priced'))).toBe(true)
+    // Caveats collapse to one line, but the material qualifier stays on that line.
+    const summary = await screen.findByText(/1 note · 1 unpriced holding left out/)
+    expect(summary.closest('details')).toBeTruthy()
+    expect(screen.getByText(/could not be priced at an endpoint/)).toBeTruthy()
     // The year table carries both years, marked partial.
     expect(await screen.findByText('2025 (partial)')).toBeTruthy()
     expect(screen.getByText('2026 (partial)')).toBeTruthy()

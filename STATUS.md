@@ -738,7 +738,7 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
   sum to `end − start` to the cent; `sum(by_sector)` and `sum(by_country)` equal `total_pnl_eur`
   (14 and 53 rows); the per-security attribution total equals the segments total, so the two
-  surfaces agree. `fees_interest_eur` is non-null on 2026 windows and 0 for 2025 (measurement
+  surfaces agree. `cash_adjustment_eur` is non-null on 2026 windows and 0 for 2025 (measurement
   began 08-25). Three things seen that are correct and worth knowing: **2025 carries 7 unsplit
   holdings** (in-kind-transferred lots whose open dates predate the cached FX history, so their
   gain is carried whole, not guessed); **Unknown is the second-largest sector and country**

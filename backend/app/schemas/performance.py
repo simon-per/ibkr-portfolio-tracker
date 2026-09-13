@@ -38,8 +38,14 @@ class DecompositionWindow(BaseModel):
     )
     unsplit_securities: int = 0
     dividends_eur: Optional[float] = Field(None, description="Net dividend cash that landed in the account (IBKR ledger).")
-    fees_interest_eur: Optional[float] = Field(
-        None, description="Broker interest, fees and FX spread: the corrections IBKR's measured cash balance applies to the derived one."
+    cash_adjustment_eur: Optional[float] = Field(
+        None,
+        description=(
+            "What IBKR's measured cash balance says that the trade/deposit/dividend ledgers "
+            "do not record: broker interest, account fees, FX on idle cash, and any gap in the "
+            "ledgers themselves. The sum of the corrections the cash line snaps to. Positive "
+            "means the account holds MORE than the ledgers explain; it is not a fee total."
+        ),
     )
     unexplained_eur: Optional[float] = Field(
         None, description="The remainder that makes the legs sum exactly to the change in total value. Named, never folded in."
