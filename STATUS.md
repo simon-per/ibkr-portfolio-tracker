@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-12.** Latest: **a bug sweep with three parallel read-only hunts
+**Last updated: 2026-09-13.** Health check on 09-13 (see *Recent sessions*): nothing unpushed, both suites green, production on the latest commit. Previous latest: **a bug sweep with three parallel read-only hunts
 (backend valuation, frontend, sync/ops) found 32 verified defects; 25 shipped, the rest are
 recorded below rather than fixed.** Production was healthy throughout and every sum identity
 the public API exposes held — the defects were in the paths today's data does not exercise
@@ -15,7 +15,7 @@ then read the installed `ibflex` source and withdrew it — `client.request_stat
 the same GET up to three times on a 5 s timeout, each a new statement generation, so with the
 outer retry budget one scheduled slot could issue twelve. `send_flex_request` now issues one
 GET with a (connect, read) timeout pair and a read timeout fails fast like a `1001` (rule 2 in
-CLAUDE.md carries it). **The 18:00 run today is the first live SendRequest through it.**
+CLAUDE.md carries it). **Its first live SendRequest is still to come: the 09-12 18:00 slot was `skipped` because an earlier sync that morning had already spent the day's generation, so the 2026-09-13 18:00 Berlin `full_sync` is the first real test.**
 Afternoon, a design change at the owner's request: **the 3a Emerging Markets fund prices from
 its sibling share class** (`price_source = sibling`: statement NAV × the NT class's daily
 moves), so the monthly upload stopped being a pricing deadline — see *Needs a human* and the
@@ -732,7 +732,8 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   `market_price 122.358` = 121.201 × (182.56 ÷ 180.83), +0.95% since the anchor — not the
   carried 121.20, not the wrong-class ~182. Run status `success`, no refusal. **One thing left
   to see once**: the 18:00 `full_sync`'s 730-day pass backfills 09-02 … 09-04 (the intraday
-  slots only look 7 days back). In the browser the row carries a "sibling NAV" badge. If the
+  slots only look 7 days back) — not checked on 09-13; the price rows are only readable over ssh,
+  and this session had no production-read permission. In the browser the row carries a "sibling NAV" badge. If the
   sibling ever stops quoting, the 7-day "price feed looks broken" warning covers it. The same
   run also verified this morning's benchmark fix: `benchmark_result.benchmarks_total: 8`,
   `rate_limited: false`.
@@ -741,15 +742,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
   row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
   2026-09-12*). Still to observe:
-  - **The 18:00 Berlin `full_sync` is the first live SendRequest through `send_flex_request`**
+  - **The 18:00 Berlin `full_sync` is the first live SendRequest through `send_flex_request` —
+    not yet exercised: the 09-12 slot skipped (`already_generated_today`), so watch 2026-09-13**
     (one GET, `(10, 60)` timeouts, ibflex's parser). Expect `ibkr_result.status: success` with
     a reference code logged as before. If it reads `error` with a message naming `SendRequest`
     or `BadResponseError`, compare the request against `ibflex.client.submit_request`'s
     (`params={"v": "3", "t", "q"}`, `user-agent: Java`) — the GET is meant to be identical —
     and do **not** retry by hand; the 00:00 slot is the recovery.
   - `benchmarks_total: 8` and `rate_limited: false` **seen on the 15:00 run** (the 13:00 run
-    predated the deploy). Still to see: the 18:00 `full_sync`'s `lookthrough_result` shows the
-    CINS/SEDOL pass bounded (`identifiers_pending` ≤ 25) when a basket was replaced.
+    predated the deploy). **Seen on the 09-12 18:00 `full_sync`**: four stale baskets (GRID,
+    IQQ, QQQM, SOXQ) refreshed to 09-10, `identifiers_pending: 25` — the bound held — and the
+    following runs carry an empty `warnings[]`.
   - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) is
     **closed by the owner on 2026-09-12**: dividends update as expected.
   - **The finpension importer is rehearsed on a copy of production, 2026-09-12 12:00 Berlin.**
@@ -1096,6 +1099,11 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-13** — "have we committed everything, made sure it works, what are open bugs?" Read-only
+  health check: working tree clean and pushed, `/health` on `bcff1e1`, backend 1,490 and frontend
+  612 tests green. Found the 09-12 18:00 slot had *skipped*, so `send_flex_request` is still
+  unexercised live; verified the look-through refresh and the 25-identifier bound instead.
+
 - **2026-09-12** — "let's look for bugs or things that look wrong or not work properly and
   try to fix it." Three read-only hunts in parallel (backend valuation, frontend, sync/ops),
   each finding verified by reading the code and, where the public API allowed, against
@@ -1166,18 +1174,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   pre-existing defect where deposit-only days counted as benchmark returns, fixed in the same
   change. Also: a fixture with a leading price gap made a real Yahoo request from a unit test,
   which is now a local-dev trap above.
-
-- **2026-09-07** — "what is the difference between money in, net, deployed, released by sales",
-  then "most relevant is money in... maybe we should only care about that?" A question about
-  definitions turned into a design decision, and the honest answer to the second was **yes, and
-  the data says so louder than taste does**: the two series are the *identical* number in 20 of
-  this account's 29 months, because before `coverage_from` money in IS lot cost basis. So the
-  deployed bar and the strip's `/suffix` — both shipped the day before, both argued for in
-  writing — came straight back out. Two lessons. **A correct design argument can still be
-  answering a question the reader is not asking**: "the gap is capital churn, so make it readable
-  without hovering" was sound and irrelevant to someone reading the card for a contribution rate.
-  And **demote rather than delete when the second figure is a cross-check**: money in comes from
-  the deposit ledger and deployed from tax lots, so deployed is the only thing on any screen that
-  can disagree with a transfer misbooked as a deposit — which is this feature's worst failure.
-  It lives in the tooltip now. Also worth saying plainly: none of this is a *savings* rate, since
-  the app has no income data.
