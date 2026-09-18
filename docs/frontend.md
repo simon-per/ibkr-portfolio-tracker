@@ -304,9 +304,27 @@ property of the assembled page at a real width, and jsdom loads no CSS. Read its
 "fixing" an overflow: `body { overflow-x: hidden }` clips rather than fixes, kills `position: sticky`,
 and makes the check pass vacuously. Two assertions are paired specifically to catch that.
 
-Chart heights are CSS on a wrapper plus `height="100%"`, hoisted to a module constant per file so the
-chart and its loading/error/empty states cannot drift. `PerformanceAttribution` is the exception and
-keeps a numeric height: its height is *data*-driven, one row per security, so a CSS height would
-squash thirty bars into 240px.
+Chart heights are CSS on a wrapper plus `height="100%"`, hoisted to a module constant per file — or
+to the shared chart component when two files draw the same chart — so the chart and its
+loading/error/empty states cannot drift. `DIVIDEND_CHART_BOX` is the second kind: the literal was
+written out **four** times across `DividendsTab` and `DividendTtmChart` before they were given one
+owner. `PerformanceAttribution` is the exception and keeps a numeric height: its height is
+*data*-driven, one row per security, so a CSS height would squash thirty bars into 240px.
+
+**The Dividends tab's two views come out of one `DividendStackChart`**, for the same reason a table
+and its card list come from one `Column[]`. The monthly bars and the rolling twelve-month bars are
+the same picture over different buckets — same symbols, same colours, same solid/dashed split — and
+drawn twice they would have been two fifty-line recharts trees plus two copies of the tooltip's
+payload plumbing, which is two places a series can be added to one and not the other. The axis
+formatter and the tick-density expressions live there too, so the two views cannot drift on those
+either; the axis formatter was already duplicated verbatim between the two files.
+
+**Nothing in the component suite can see any of it.** `DividendsTab.test.tsx` mocks recharts'
+`ResponsiveContainer` to an empty div, so no `<Bar>`, `<Line>` or `<Tooltip>` ever mounts — the
+stacked rebuild is invisible there, and was to the chart it replaced. Coverage of the transform
+belongs in `src/lib/dividendChart.test.ts` (pure node, no jsdom); the component file covers
+controls, captions, the legend and the empty/error states, which do render. Do not "fix" the mock:
+making it render children needs a fixed-size `<BarChart width height>` and buys flaky zero-width
+charts.
 
 ---

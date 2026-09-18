@@ -747,11 +747,6 @@ export interface DividendSummaryResponse {
 
 export interface DividendMonthBar {
   month: string;                    // "YYYY-MM"
-  /** Twelve completed calendar months; unavailable before sufficient history. */
-  ttm_net_eur?: number | null;
-  ttm_mom_pct?: number | null;
-  ttm_source?: 'ibkr' | 'mixed' | 'yfinance_estimate' | null;
-  ttm_mom_crosses_era?: boolean;
   /**
    * Growth of the REALIZED figure only, vs the previous month and the same month
    * a year earlier. null when the base is zero (constant for a quarterly payer)
@@ -909,11 +904,45 @@ export interface DividendForwardYield {
   basis: 'net' | 'mixed' | 'gross_estimate';
 }
 
+/**
+ * One rolling twelve-month total, stacked by symbol.
+ *
+ * A sibling of DividendMonthBar, not fields on it: on the all-time view this
+ * series runs to the end of the projection horizon while `months` deliberately
+ * stops at 31 December, so the two cover different spans and cannot share an
+ * array. Also distinct from `growth.ttm`, which is 365 days through today —
+ * these are whole calendar months.
+ *
+ * The server emits a point only where twelve months of history back it, so there
+ * is nothing to trim client-side.
+ */
+export interface DividendTtmPoint {
+  month: string;                    // "YYYY-MM" — the month the window ENDS in
+  // symbol -> amount inside the window. Same key space as DividendMonthBar's
+  // maps, so one palette and one <Bar> map serve both charts.
+  actual: Record<string, number>;
+  forecast: Record<string, number>;
+  net_eur: number;
+  forecast_net_eur: number;
+  total_eur: number;                // net + forecast — the bar's full height
+  /** vs the previous window's total. null when that window was zero. */
+  mom_pct: number | null;
+  /** This window or its comparable carries projection — mark the chip est. */
+  mom_includes_forecast: boolean;
+  /** Provenance of money RECEIVED; null when the window is all projection. */
+  source: 'ibkr' | 'mixed' | 'yfinance_estimate' | null;
+  mom_crosses_era: boolean;
+  /** The window reaches the current month or beyond, so it is not fully elapsed.
+   *  What the Forecast toggle filters on. */
+  partial: boolean;
+}
+
 export interface DividendBreakdownResponse {
   years: number[];
   year: number | null;              // null = all time, unless period is set
   period?: '24m' | null;
   months: DividendMonthBar[];
+  ttm_series: DividendTtmPoint[];
   securities: DividendSecurityRow[];
   total_net_eur: number;
   total_forecast_net_eur: number;

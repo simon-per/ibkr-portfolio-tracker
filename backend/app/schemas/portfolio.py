@@ -476,12 +476,6 @@ class DividendSummaryResponse(BaseModel):
 class DividendMonthBar(BaseModel):
     """One month of the dividends chart: net amounts per symbol, actual vs forecast."""
     month: str                      # "YYYY-MM"
-    # Calendar-month TTM, distinct from growth.ttm's 365 days through today.
-    # Null until 12 history months exist and for current/future months.
-    ttm_net_eur: Optional[float] = None
-    ttm_mom_pct: Optional[float] = None
-    ttm_source: Optional[Literal["ibkr", "mixed", "yfinance_estimate"]] = None
-    ttm_mom_crosses_era: bool = False
     actual: Dict[str, float]        # symbol -> net received (base currency)
     forecast: Dict[str, float]      # symbol -> projected net (cadence-based)
     actual_total_eur: float
@@ -494,6 +488,52 @@ class DividendMonthBar(BaseModel):
     # correct when the response is windowed to one year.
     mom_pct: Optional[float] = None
     yoy_pct: Optional[float] = None
+
+
+class DividendTtmPoint(BaseModel):
+    """
+    One rolling twelve-month total, stacked by symbol.
+
+    A sibling of DividendMonthBar rather than fields on it, because the two series
+    deliberately cover different spans: on the all-time view this one runs to the
+    end of the projection horizon while `months` stops at 31 December, a cap that
+    exists because coupling the chart to the wider horizon once tripled its
+    forecast total. One array cannot hold both reaches.
+
+    Also distinct from `growth.ttm`, which is the last 365 days through today. This
+    is whole calendar months, one point per month, ending at `month`.
+    """
+    month: str                      # "YYYY-MM" — the month the window ENDS in
+    # symbol -> amount inside the twelve months ending at `month`. Same key space
+    # as DividendMonthBar.actual/forecast, so one palette serves both charts.
+    actual: Dict[str, float]
+    forecast: Dict[str, float]
+    # What those two maps sum to. Emitted rather than left to the client: the split
+    # is per symbol but the figure a reader quotes is the total, and deriving it in
+    # two places is how the two stop agreeing.
+    net_eur: float
+    forecast_net_eur: float
+    total_eur: float                # net + forecast — the bar's full height
+    # Against the previous month's window, on total_eur: one rule for every point,
+    # degrading to plain measured-vs-measured once both windows have elapsed.
+    # Computed from the UNWINDOWED series, so a point's figure does not change with
+    # the selected range. None when the previous window was zero — undefined, not
+    # large, exactly as everywhere else here.
+    mom_pct: Optional[float] = None
+    # This window or the one it is compared against contains projection, so the
+    # chip must read as forward-looking rather than measured.
+    mom_includes_forecast: bool = False
+    # Provenance of the money actually RECEIVED in the window. None when the window
+    # is entirely projection — absent rather than a reassuring "ibkr".
+    source: Optional[Literal["ibkr", "mixed", "yfinance_estimate"]] = None
+    # The two windows jointly straddle the estimate -> IBKR boundary, so part of
+    # the change is a change of source rather than of income.
+    mom_crosses_era: bool = False
+    # The window is not fully elapsed: it reaches the current month or beyond, so
+    # its received figure covers only part of it. What the Forecast toggle filters
+    # on — with projections hidden, a partial window would understate by however
+    # much of it has not happened yet.
+    partial: bool = False
 
 
 class DividendSecurityRow(BaseModel):
@@ -660,6 +700,10 @@ class DividendBreakdownResponse(BaseModel):
     year: Optional[int] = None      # None = all time, unless period is set
     period: Optional[Literal["24m"]] = None
     months: List[DividendMonthBar]
+    # Rolling twelve-month totals, one point per month, stacked by the same symbols
+    # as `months`. Reaches further than `months` on the all-time view by design —
+    # see DividendTtmPoint. Empty until twelve months of history exist.
+    ttm_series: List[DividendTtmPoint] = []
     securities: List[DividendSecurityRow]
     total_net_eur: float
     total_forecast_net_eur: float

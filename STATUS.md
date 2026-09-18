@@ -5,15 +5,31 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-18.** Latest local work: **Dividends Monthly / TTM and Last 24 months**
-are implemented and verified; production deployment verification is pending. Calendar TTM uses twelve completed
-months of cached, era-spliced history, with coverage and source caveats; the 24-month range
-also filters the table and received/projected totals. `AGENTS.md` is an exact copy of the root
-`CLAUDE.md`. Verification: 1,512 backend tests and 634 frontend tests pass; TypeScript/build
-and lint on touched frontend files pass. Synthetic-data browser checks passed at 1440px and
-390px, including controls, tooltips, dark mode and overflow. The suite exposed a weekday-dependent
-sibling-pricing test assertion; it now checks the inclusive provisional window's actual count.
-Unrelated UI changes already in the working tree were preserved.
+**Last updated: 2026-09-18.** Latest local work, not yet deployed: **the Dividends TTM view is a
+stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
+rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
+it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
+The rolling series moved off `months[]` onto its own `ttm_series`, because on All time it runs to
+the projection horizon while `months[]` must keep its narrower cap — the one that exists because
+coupling them once tripled the all-time forecast total. Both charts now come out of one
+`DividendStackChart` and one ranking, so a symbol cannot change colour between views. Rules in
+`docs/dividends.md`; what to check live is in *Watch after the next deploy*.
+
+Three things the work turned up that are worth knowing. **Ranking over summed rolling windows would
+have ordered symbols by *when* they paid, not how much** — a January payment falls in twelve windows
+and a December one in one, a 12× swing that would have quietly reordered the existing monthly chart;
+the fix is to score a symbol by its widest single window. **Extending the series on the forecast
+*flag* rather than on a projection existing** would have drawn a decline to zero that never happened,
+the same shape this service once served as `next_12m_vs_ttm_pct: -100.0`. And **ending the series at
+the last projected payment** put All time in October while `year=` for the same year ran to December;
+it ends at the horizon now, so every range builds one identical series and only the slice differs.
+
+Verification: 1,520 backend and 648 frontend tests pass, plus TypeScript, build and lint on the
+touched files. Browser checks at 1440px and 390px against synthetic fixtures — stacked segments
+drawn, trimming, future year, toggle, dark theme, no overflow, no console errors and no network.
+Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
+`AGENTS.md` is an exact copy of the root `CLAUDE.md`. Unrelated UI restyle changes already in the
+working tree were preserved and remain uncommitted.
 
 Previously shipped: **an Analytics tab — where the return came from.** The
 change in Total Value split into money paid in, price, FX, dividends, fees/interest and a named
@@ -744,9 +760,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **Dividends TTM / Last 24 months awaits production verification (2026-09-18).** Verify the
-  completed-month TTM line, the 24-month table/totals, and source caveats against cached live
-  data. Local verification used synthetic data and made no Yahoo/Flex requests.
+- **The stacked, forecast-aware Dividends TTM awaits production verification (2026-09-18).**
+  `c0ba465` (the Monthly/TTM toggle and the 24-month range) is live and verified; the rebuild on
+  top of it is not deployed yet. Against cached live data, check: the December window equals
+  `growth.annual[<year>].total_eur` to the cent, and each point's per-symbol maps sum to its own
+  scalars — those two are the identities the new series is held to. Then in a browser: All time's
+  TTM axis reaching a year past the monthly chart's, the solid/dashed split, the legend rendering
+  in TTM mode, and the toggle dropping the open windows. Local verification used synthetic data
+  and made no Yahoo or Flex requests.
 
 - **`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
   Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
@@ -1149,7 +1170,16 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
-- **2026-09-18** — copied CLAUDE.md to AGENTS.md; added dividend calendar TTM and Last 24 months; full suites/build and fixture browser checks passed; corrected the sibling provisional-window test; local only.
+- **2026-09-18** — copied CLAUDE.md to AGENTS.md; shipped dividend Monthly/TTM and Last 24 months
+  (`c0ba465`, live); then rebuilt TTM at the owner's request as a forecast-aware stacked column
+  chart on its own `ttm_series`, trimmed of uncoverable months and working on a future year.
+  Lessons, each a wrong number avoided: **a rolling window is already a total, so ranking by the
+  sum of windows ranks by payment timing** (January lands in twelve windows, December in one);
+  **gate an extension on the projection existing, not on the flag asking for one**, or the flag
+  manufactures a decline — the `next_12m_vs_ttm_pct: -100.0` shape again; and **end a series at
+  the horizon, not at the last data point in it**, or two ranges disagree about which months
+  exist. Simulating the change against production first produced the two identities it is now
+  tested on. Local only, not deployed.
 
 - **2026-09-13** — a health check ("have we committed everything… what are open bugs?": clean,
   green, on the latest commit; found the 09-12 18:00 slot had *skipped*, so `send_flex_request`

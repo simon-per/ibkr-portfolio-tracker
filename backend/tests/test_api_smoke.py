@@ -264,10 +264,16 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert rolling["period"] == "24m"
     assert len(rolling["months"]) == 24
     assert rolling["months"][-1]["month"] == TODAY.strftime("%Y-%m")
-    assert rolling["months"][-1]["ttm_net_eur"] is None
-    assert all("ttm_mom_pct" in m and "ttm_source" in m for m in rolling["months"])
     assert client.get("/api/dividends/breakdown?year=2026&period=24m").status_code == 422
     assert client.get("/api/dividends/breakdown?period=12m").status_code == 422
+
+    # This fixture's income starts ~150 days ago, so no twelve-month window is
+    # covered yet and the rolling series is EMPTY rather than a row of nulls or a
+    # short sum wearing a year's label. That is the interesting assertion here.
+    assert rolling["ttm_series"] == []
+    assert client.get(
+        "/api/dividends/breakdown?forecast=false"
+    ).json()["ttm_series"] == []
 
     summary = client.get("/api/dividends/summary").json()
     assert all(abs(m["amount_eur"]) > 0 for m in summary["monthly"])
@@ -311,6 +317,33 @@ def test_the_shapes_that_broke_production_serialize(client):
     # the only reason a year-filtered response can show year-over-year at all.
     unwindowed = client.get("/api/dividends/breakdown").json()
     assert unwindowed["growth"] == growth
+
+    # The rolling series deliberately out-reaches the monthly chart: it runs to the
+    # projection horizon while `months` stops inside this year, which is the whole
+    # reason it is a separate list rather than four more fields on a month bar.
+    # On this fixture every covered window is still ahead of us, so they are all
+    # projection — and each one says so rather than reporting a received figure it
+    # has no basis for.
+    assert unwindowed["ttm_series"]
+    assert unwindowed["ttm_series"][-1]["month"] > unwindowed["months"][-1]["month"]
+    for point in unwindowed["ttm_series"]:
+        assert point["partial"] is True
+        assert point["net_eur"] + point["forecast_net_eur"] == pytest.approx(
+            point["total_eur"], abs=0.01
+        )
+        # The split a stacked bar is drawn from must add up to the figure quoted
+        # beside it, or the segments and the total are two computations.
+        assert sum(point["actual"].values()) == pytest.approx(point["net_eur"], abs=0.01)
+        assert sum(point["forecast"].values()) == pytest.approx(
+            point["forecast_net_eur"], abs=0.01
+        )
+    # The earliest covered windows straddle today — real receipts behind, projection
+    # ahead. The last one is wholly in the future, so it has received nothing and
+    # must not claim a provenance for money that never arrived.
+    furthest = unwindowed["ttm_series"][-1]
+    assert furthest["net_eur"] == 0 and furthest["actual"] == {}
+    assert furthest["source"] is None
+    assert furthest["forecast_net_eur"] == furthest["total_eur"] > 0
 
     # Completeness travels with the headline. `total_market_value_eur` is a sum over the
     # holdings the backend could price, so a partial one has to declare itself — the SBI

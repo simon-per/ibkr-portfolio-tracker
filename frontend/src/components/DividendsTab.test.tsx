@@ -31,10 +31,19 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
     years: [2025, 2026, 2027], year: year ?? null, period: period ?? null,
     months: [
       { month: '2026-01', actual: { AAA: 30 }, forecast: {}, actual_total_eur: 30,
-        forecast_total_eur: 0, ttm_net_eur: 120, ttm_mom_pct: 10, ttm_source: 'mixed',
-        ttm_mom_crosses_era: true },
+        forecast_total_eur: 0 },
       { month: '2026-02', actual: {}, forecast: { AAA: 50 }, actual_total_eur: 0,
-        forecast_total_eur: 50, ttm_net_eur: null, ttm_mom_pct: null },
+        forecast_total_eur: 50 },
+    ],
+    // One closed window and one open, projected one — the two states the Forecast
+    // toggle has to tell apart.
+    ttm_series: [
+      { month: '2026-01', actual: { AAA: 120 }, forecast: {}, net_eur: 120,
+        forecast_net_eur: 0, total_eur: 120, mom_pct: 10, mom_includes_forecast: false,
+        source: 'mixed', mom_crosses_era: true, partial: false },
+      { month: '2026-02', actual: { AAA: 100 }, forecast: { AAA: 50 }, net_eur: 100,
+        forecast_net_eur: 50, total_eur: 150, mom_pct: 25, mom_includes_forecast: true,
+        source: 'mixed', mom_crosses_era: false, partial: true },
     ],
     total_net_eur: period === '24m' ? 200 : 30, total_forecast_net_eur: 50,
     securities: [], ibkr_from: '2025-06-01', base_currency: 'EUR',
@@ -56,23 +65,56 @@ function mount() {
 }
 
 describe('Dividend chart controls', () => {
-  it('switches chart modes and forecasts without refetching or changing historical TTM', async () => {
+  it('switches chart modes and forecasts without refetching or moving a closed window', async () => {
     const request = vi.spyOn(api, 'getDividendBreakdown').mockImplementation(async (year, period) => response(year, period))
     const user = userEvent.setup()
     mount()
     await screen.findByText(/Received/)
     expect(screen.getByRole('button', { name: 'Monthly' }).getAttribute('aria-pressed')).toBe('true')
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    const latest = screen.getByLabelText('Latest completed TTM')
-    expect(latest.textContent).toContain('120.00')
-    expect(latest.textContent).toContain('Feb 25 – Jan 26')
-    expect(latest.textContent).toContain('+10%')
+    // Forecast on: the newest window is the open one, quoted as its full total and
+    // saying so — the amount carries its own marker, not just the delta chip.
+    const open = screen.getByLabelText('Latest rolling 12 months')
+    expect(open.textContent).toContain('150.00')
+    expect(open.textContent).toContain('Mar 25 – Feb 26')
+    expect(open.textContent).toContain('incl. €50.00 projected')
+    expect(open.textContent).toContain('est.')
     expect(screen.getByText(/Earlier history includes estimated gross/)).toBeTruthy()
-    expect(screen.getByText(/Some TTM comparisons span the switch/)).toBeTruthy()
+    expect(screen.getByText(/Some comparisons span the switch/)).toBeTruthy()
+
     await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
+    // Forecast off: the open window goes, leaving the last fully elapsed one —
+    // which is exactly what this chart drew before projections were folded in.
+    const closed = screen.getByLabelText('Latest rolling 12 months')
+    expect(closed.textContent).toContain('120.00')
+    expect(closed.textContent).toContain('Feb 25 – Jan 26')
+    expect(closed.textContent).toContain('+10%')
+    expect(closed.textContent).not.toContain('projected')
     expect(screen.queryByText(/projected \+/)).toBeNull()
-    expect(latest.textContent).toContain('120.00')
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the per-symbol key and the forecast key in TTM mode, not only monthly', async () => {
+    // Both views are the same stack in the same colours, so a legend that appears
+    // for one and not the other leaves segments on screen with nothing naming them.
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    await user.click(screen.getByRole('button', { name: 'TTM' }))
+    expect(screen.getByText('AAA')).toBeTruthy()
+    expect(screen.getByText('translucent = forecast')).toBeTruthy()
+  })
+
+  it('tells the reader which windows it is showing, and changes that with the toggle', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    await user.click(screen.getByRole('button', { name: 'TTM' }))
+    expect(screen.getByText(/include projected payments/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
+    expect(screen.getByText(/Only fully elapsed windows are shown/)).toBeTruthy()
   })
 
   it('requests 24 months and allows an annual row to restore a calendar year without changing mode', async () => {
@@ -94,7 +136,7 @@ describe('Dividend chart controls', () => {
 
   it('shows unavailable TTM rather than zero for short or future history', async () => {
     const data = response(2027)
-    data.months = data.months.map(m => ({ ...m, ttm_net_eur: null }))
+    data.ttm_series = []
     data.total_net_eur = 0
     data.total_forecast_net_eur = 0
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
@@ -102,8 +144,8 @@ describe('Dividend chart controls', () => {
     mount()
     await screen.findByText(/No dividends recorded/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByText(/No completed 12-month window/)).toBeTruthy()
-    expect(screen.queryByLabelText('Latest completed TTM')).toBeNull()
+    expect(screen.getByText(/No twelve-month window is covered/)).toBeTruthy()
+    expect(screen.queryByLabelText('Latest rolling 12 months')).toBeNull()
   })
 
   it('still displays trailing income when the selected range received no payments', async () => {
@@ -115,7 +157,9 @@ describe('Dividend chart controls', () => {
     mount()
     await screen.findByText(/No dividends recorded/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByLabelText('Latest completed TTM').textContent).toContain('120.00')
+    // The rolling total is unwindowed, so it still has a figure when the selected
+    // range itself received nothing — which is when the trend is most worth seeing.
+    expect(screen.getByLabelText('Latest rolling 12 months').textContent).toContain('150.00')
   })
 
   it('keeps an API failure distinct from an empty history', async () => {
@@ -133,17 +177,16 @@ describe('Dividend chart controls', () => {
     mount()
     await screen.findByText(/Received/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByLabelText('Latest completed TTM')).toBeTruthy()
+    expect(screen.getByLabelText('Latest rolling 12 months')).toBeTruthy()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Dividend period' }), '24m')
-    expect(screen.queryByLabelText('Latest completed TTM')).toBeNull()
-    expect(screen.queryByText(/No completed 12-month window/)).toBeNull()
+    expect(screen.queryByLabelText('Latest rolling 12 months')).toBeNull()
+    expect(screen.queryByText(/No twelve-month window is covered/)).toBeNull()
   })
 
   it('shows a measured zero TTM and its decline instead of hiding the point', async () => {
     const data = response(2026)
-    data.months[0].ttm_net_eur = 0
-    data.months[0].ttm_mom_pct = -100
-    data.months[0].ttm_source = null
+    data.ttm_series = [{ ...data.ttm_series[0], actual: {}, net_eur: 0, total_eur: 0,
+      mom_pct: -100, source: null, mom_crosses_era: false }]
     data.total_net_eur = 0
     data.total_forecast_net_eur = 0
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
@@ -151,9 +194,9 @@ describe('Dividend chart controls', () => {
     mount()
     await screen.findByText(/No dividends recorded/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    const latest = screen.getByLabelText('Latest completed TTM')
+    const latest = screen.getByLabelText('Latest rolling 12 months')
     expect(latest.textContent).toContain('€0.00')
     expect(latest.textContent).toContain('100%')
-    expect(screen.queryByText(/No completed 12-month window/)).toBeNull()
+    expect(screen.queryByText(/No twelve-month window is covered/)).toBeNull()
   })
 })

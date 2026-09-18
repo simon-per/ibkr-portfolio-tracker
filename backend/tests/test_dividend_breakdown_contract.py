@@ -42,6 +42,7 @@ from app.schemas.portfolio import (
     DividendLatestMonth,
     DividendMonthBar,
     DividendSecurityRow,
+    DividendTtmPoint,
     DividendUpcomingPayment,
 )
 from app.services.dividend_service import DividendService
@@ -133,8 +134,12 @@ def _pairs(payload):
     ]
     for key in ("ttm", "ytd", "avg_month"):
         out.append((f"DividendDelta ({key})", growth[key], DividendDelta))
+    # Only the ROWS of an already-listed key are enumerated — the key-to-model
+    # pairing itself is hand-written, so a new top-level list has to be added here
+    # or it is silently never compared against anything.
     for label, rows, model in (
         ("DividendMonthBar", payload["months"], DividendMonthBar),
+        ("DividendTtmPoint", payload["ttm_series"], DividendTtmPoint),
         ("DividendSecurityRow", payload["securities"], DividendSecurityRow),
         ("DividendUpcomingPayment", payload["upcoming"], DividendUpcomingPayment),
         ("DividendAnnualRow", growth["annual"], DividendAnnualRow),
@@ -157,7 +162,7 @@ async def test_the_fixture_populates_every_nested_model():
         assert payload["growth"]["latest_month"] is not None
         assert payload["growth"]["annual"], "no annual rows"
         assert payload["months"], "no month bars"
-        assert any(m["ttm_net_eur"] is not None for m in payload["months"]), "no completed TTM window"
+        assert payload["ttm_series"], "no covered rolling window"
         assert payload["securities"], "no security rows"
         assert payload["upcoming"], "no projected payments"
         # One of each provenance, or the splice is not being exercised.
@@ -230,6 +235,10 @@ async def test_the_whole_payload_validates_and_survives_serialization():
         assert model.securities[0].forward_yield_pct is not None
         assert model.growth.ttm.net_eur == payload["growth"]["ttm"]["net_eur"]
         assert [m.model_dump() for m in model.months] == payload["months"]
+        # Whole-list round trip: a field whose schema default differs from what the
+        # service supplies passes both key-set checks and still changes the figure
+        # on the wire.
+        assert [p.model_dump() for p in model.ttm_series] == payload["ttm_series"]
     finally:
         await session.close()
         await engine.dispose()

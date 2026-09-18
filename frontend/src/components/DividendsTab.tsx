@@ -1,39 +1,20 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { api } from '@/lib/api'
 import type { DividendSecurityRow } from '@/lib/api'
-import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
-import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, OTHER } from '@/lib/dividendChart'
+import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC } from '@/lib/dividendChart'
+import { dividendColor, dividendPalette } from '@/lib/dividendColors'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
 import { DividendKpiCards } from './DividendKpiCards'
 import { DividendYearComparison } from './DividendYearComparison'
+import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { useTheme } from './ThemeProvider'
 import { cn } from '@/lib/utils'
-import { useIsCompact } from '@/lib/useMediaQuery'
 import { DataTable, type Column } from '@/components/ui/DataTable'
-
-/**
- * Categorical palette from the validated reference set, stepped per theme and
- * checked against this app's actual card surfaces (#ffffff / #020817): adjacent
- * pairs pass CVD dE >= 8.4 and normal-vision dE >= 19.3; all dark steps >= 3:1.
- * The ORDER is the colorblind-safety mechanism — stack order must follow it.
- * Symbols beyond the 8 slots fold into a muted "Other", never a ninth hue.
- */
-const SERIES_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
-const SERIES_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767']
-const OTHER_COLOR = '#898781'
 
 function SourceBadge({ row }: { row: DividendSecurityRow }) {
   if (row.payouts === 0 && row.forecast_payouts > 0) {
@@ -261,9 +242,7 @@ export function DividendsTab() {
   const [chartMode, setChartMode] = useState<'monthly' | 'ttm'>('monthly')
   const [showForecast, setShowForecast] = useState(true)
   const { theme } = useTheme()
-  const curSym = useCurrencySymbol()
   const formatCurrency = useFormatCurrency()
-  const isCompact = useIsCompact()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['dividends', 'breakdown', year],
@@ -275,19 +254,19 @@ export function DividendsTab() {
     staleTime: 30 * 60 * 1000,
   })
 
-  const palette = theme === 'dark' ? SERIES_DARK : SERIES_LIGHT
-
+  const palette = dividendPalette(theme)
 
   // Extracted so it can be unit-tested: this transformation already carried one
   // silent bug (ranking by a key space the data didn't use), and with no browser
-  // in the loop a test is the only way to catch the next one.
-  const { chartData, stackSymbols } = useMemo(() => buildChartSeries(data), [data])
+  // in the loop a test is the only way to catch the next one — the chart itself
+  // is invisible to the component suite, which mocks recharts' container away.
+  // Both views come out of one call so they cannot rank symbols differently.
+  const { chartData, ttmData, ttmPoints, stackSymbols } = useMemo(
+    () => buildChartSeries(data, { showForecast }),
+    [data, showForecast],
+  )
 
-  const colorOf = (sym: string) =>
-    sym === OTHER ? OTHER_COLOR : palette[stackSymbols.indexOf(sym)] ?? OTHER_COLOR
-
-  const formatAxisTick = (v: number) =>
-    Math.abs(v) >= 1000 ? `${curSym}${(v / 1000).toFixed(1)}k` : `${curSym}${v}`
+  const colorOf = (sym: string) => dividendColor(sym, stackSymbols, palette)
 
   // Growth per month rides on the response rather than being derived here: it is
   // measured over the whole history, which a year-filtered payload doesn't carry.
@@ -299,63 +278,16 @@ export function DividendsTab() {
     return m
   }, [data])
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload?.length) return null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows = payload.filter((p: any) => typeof p.value === 'number' && p.value > 0)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const actual = rows.filter((p: any) => !String(p.dataKey).startsWith(FC))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const forecast = rows.filter((p: any) => String(p.dataKey).startsWith(FC))
-    if (!actual.length && !forecast.length) return null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const total = rows.reduce((s: number, p: any) => s + p.value, 0)
-    const growth = growthByMonth.get(label)
+  // Only on realized months — a projected month's "change" would be an artifact
+  // of the forecast's own flat median, and the backend sends null.
+  const monthlyTooltipFooter = (month: string) => {
+    const growth = growthByMonth.get(month)
+    if (!growth || (growth.mom == null && growth.yoy == null)) return null
     return (
-      <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-md">
-        <div className="mb-1 font-medium">{monthLabel(label, true)}</div>
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        {actual.map((p: any) => (
-          <div key={p.dataKey} className="flex items-center justify-between gap-6">
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.fill }} />
-              {p.dataKey}
-            </span>
-            <span className="tabular-nums">{formatCurrency(p.value)}</span>
-          </div>
-        ))}
-        {forecast.length > 0 && (
-          <div className="mt-1 border-t border-border/50 pt-1 text-xs text-muted-foreground">
-            Forecast
-          </div>
-        )}
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        {forecast.map((p: any) => (
-          <div key={p.dataKey} className="flex items-center justify-between gap-6">
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <span
-                className="h-2 w-2 rounded-sm border border-dashed"
-                style={{ borderColor: p.stroke, backgroundColor: 'transparent' }}
-              />
-              {String(p.dataKey).slice(FC.length)}
-            </span>
-            <span className="tabular-nums">{formatCurrency(p.value)}</span>
-          </div>
-        ))}
-        <div className="mt-1 flex items-center justify-between gap-6 border-t border-border/50 pt-1 font-medium">
-          <span>Total</span>
-          <span className="tabular-nums">{formatCurrency(total)}</span>
-        </div>
-        {/* Only on realized months — a projected month's "change" would be an
-            artifact of the forecast's own flat median, and the backend sends null. */}
-        {growth && (growth.mom != null || growth.yoy != null) && (
-          <div className="mt-1 flex items-center gap-3 border-t border-border/50 pt-1">
-            <DeltaChip pct={growth.mom} label="MoM" />
-            <DeltaChip pct={growth.yoy} label="YoY" />
-          </div>
-        )}
-      </div>
+      <>
+        <DeltaChip pct={growth.mom} label="MoM" />
+        <DeltaChip pct={growth.yoy} label="YoY" />
+      </>
     )
   }
 
@@ -385,6 +317,18 @@ export function DividendsTab() {
   )
 
   const hasAnything = (data?.total_net_eur ?? 0) > 0 || (showForecast && (data?.total_forecast_net_eur ?? 0) > 0)
+
+  // Per view, not per response. `total_forecast_net_eur` covers the SELECTED
+  // window, while a rolling window reaches twelve months past it — so a year view
+  // can draw dashed segments while that total is 0, leaving hatched bars on screen
+  // with nothing saying what the hatching means.
+  const visibleRows = chartMode === 'ttm' ? ttmData : chartData
+  const chartHasForecast = visibleRows.some((row) =>
+    Object.entries(row).some(([k, v]) => k.startsWith(FC) && typeof v === 'number' && v > 0),
+  )
+  const legendSymbols = stackSymbols.filter((s) =>
+    visibleRows.some((row) => typeof row[s] === 'number' || typeof row[FC + s] === 'number'),
+  )
   // The growth block is unwindowed, so it stands even when the selected year is
   // empty — which is exactly when knowing the trend is most useful.
   const hasGrowth = (data?.growth?.annual?.length ?? 0) > 0
@@ -488,7 +432,7 @@ export function DividendsTab() {
             )}
 
             {isLoading ? (
-              <div className="h-[240px] animate-pulse rounded bg-muted sm:h-[320px]" />
+              <div className={cn(DIVIDEND_CHART_BOX, 'animate-pulse rounded bg-muted')} />
             ) : !data || (!hasAnything && chartMode === 'monthly') ? (
               <div className="flex h-32 items-center justify-center text-center text-sm text-muted-foreground">
                 No dividends recorded {year === 'all' ? 'yet' : year === '24m' ? 'in the last 24 months' : `for ${year}`}. They arrive with
@@ -497,62 +441,24 @@ export function DividendsTab() {
             ) : (
               <>
                 {chartMode === 'ttm' ? (
-                  <DividendTtmChart months={data.months} multiYear={typeof year !== 'number'} />
+                  <DividendTtmChart
+                    data={ttmData}
+                    points={ttmPoints}
+                    stackSymbols={stackSymbols}
+                    colorOf={colorOf}
+                    showForecast={showForecast}
+                    multiYear={typeof year !== 'number'}
+                  />
                 ) : (
-                  <div className="h-[240px] w-full sm:h-[320px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-                        <XAxis
-                          dataKey="month"
-                          tickFormatter={(m: string) => monthLabel(m, typeof year !== 'number')}
-                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                          tickLine={false}
-                          axisLine={{ stroke: 'hsl(var(--border))' }}
-                          interval={typeof year !== 'number' ? 'preserveStartEnd' : isCompact ? 1 : 0}
-                          minTickGap={isCompact ? 24 : 16}
-                        />
-                        <YAxis
-                          tickFormatter={formatAxisTick}
-                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                          tickLine={false}
-                          axisLine={false}
-                          width={isCompact ? 40 : 60}
-                        />
-                        <Tooltip content={renderTooltip} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.35 }} />
-                        {stackSymbols.map((s, i) => (
-                          <Bar
-                            key={s}
-                            dataKey={s}
-                            stackId="d"
-                            fill={colorOf(s)}
-                            stroke="hsl(var(--card))"
-                            strokeWidth={1}
-                            isAnimationActive={false}
-                            // Only the topmost series gets the rounded cap, or every
-                            // segment in the stack would look like its own bar.
-                            radius={i === stackSymbols.length - 1 && !showForecast
-                              ? [3, 3, 0, 0] : undefined}
-                          />
-                        ))}
-                        {showForecast &&
-                          stackSymbols.map((s, i) => (
-                            <Bar
-                              key={FC + s}
-                              dataKey={FC + s}
-                              stackId="d"
-                              fill={colorOf(s)}
-                              fillOpacity={0.4}
-                              stroke={colorOf(s)}
-                              strokeDasharray="3 2"
-                              strokeWidth={1}
-                              isAnimationActive={false}
-                              radius={i === stackSymbols.length - 1 ? [3, 3, 0, 0] : undefined}
-                            />
-                          ))}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <DividendStackChart
+                    data={chartData}
+                    stackSymbols={stackSymbols}
+                    colorOf={colorOf}
+                    showForecast={showForecast}
+                    multiYear={typeof year !== 'number'}
+                    tooltipTitle={(m) => monthLabel(m, true)}
+                    tooltipFooter={monthlyTooltipFooter}
+                  />
                 )}
 
                 {/* The three qualifier explanations used to live in `title=`, which no
@@ -561,20 +467,22 @@ export function DividendsTab() {
                     they are simply visible now, matching DividendCalendar and
                     DividendYearComparison, which both spell theirs out. */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                  {chartMode === 'monthly' && stackSymbols.map((s) => (
+                  {/* Both views are stacked by the same symbols in the same
+                      colours, so the key belongs to both. Filtered to what is
+                      actually on screen: a swatch for a bucket with no segment
+                      behind it is a legend entry for nothing. */}
+                  {legendSymbols.map((s) => (
                     <span key={s} className="inline-flex items-center gap-1.5">
                       <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: colorOf(s) }} />
                       {s}
                     </span>
                   ))}
-                  {showForecast && (data.total_forecast_net_eur ?? 0) > 0 && (
+                  {showForecast && chartHasForecast && (
                     <>
-                      {chartMode === 'monthly' && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
-                          translucent = forecast
-                        </span>
-                      )}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
+                        translucent = forecast
+                      </span>
                       {securities.some((r) => r.forecast_basis === 'gross_estimate') && (
                         <span>
                           <span className="text-amber-600 dark:text-amber-500">*</span> projected

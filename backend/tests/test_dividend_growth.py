@@ -402,8 +402,28 @@ async def test_an_empty_history_produces_zeros_and_nulls_rather_than_failing():
         await session.close()
         await engine.dispose()
 
+async def _quarterly_payer(session):
+    """A steady quarterly payer, held, last paying 2026-07 — so it projects."""
+    session.add(_lot(1, date(2024, 1, 1), "100"))
+    await session.flush()
+    for year in (2024, 2025, 2026):
+        for month in (1, 4, 7, 10):
+            if (year, month) <= (2026, 7):
+                await _seed_per_share(session, date(year, month, 15))
+
+
 @pytest.mark.asyncio
-async def test_calendar_ttm_uses_history_outside_each_display_window():
+async def test_ttm_reads_history_outside_the_range_showing_it_and_drops_what_it_cannot_cover():
+    """
+    The rolling series is computed over the whole history and only then sliced, so
+    one month's figures are the same whichever range is displaying it. Slice first
+    and January's change silently becomes "vs nothing" on a year view and a real
+    number on the all-time one.
+
+    It also pins requirement (a): a window without twelve months behind it is
+    ABSENT, not a null the client has to strip and not a short sum presented as a
+    year.
+    """
     engine, session = await _make_session()
     try:
         # Unequal monthly amounts catch shifted boundaries and missing lookback.
@@ -415,94 +435,312 @@ async def test_calendar_ttm_uses_history_outside_each_display_window():
         all_time = await svc.get_dividend_breakdown(**args)
         rolling = await svc.get_dividend_breakdown(period="24m", **args)
         selected = await svc.get_dividend_breakdown(year=2026, **args)
-        by_month = {m["month"]: m for m in all_time["months"]}
+        by_month = {p["month"]: p for p in all_time["ttm_series"]}
 
+        # months[] is untouched by any of this.
         assert rolling["period"] == "24m" and rolling["year"] is None
         assert len(rolling["months"]) == 24
         assert rolling["months"][0]["month"] == "2024-10"
         assert rolling["months"][-1]["month"] == "2026-09"
-        assert rolling["months"][0]["ttm_net_eur"] == 198  # Nov 2023..Oct 2024
-        assert rolling["months"][0]["ttm_mom_pct"] == 6.5
         assert rolling["total_net_eur"] == sum(range(22, 46))
         assert rolling["securities"][0]["net_eur"] == rolling["total_net_eur"]
         assert rolling["growth"] == selected["growth"] == all_time["growth"]
+
+        # Coverage begins in the first income month, so the eleven months before
+        # it produce no point at all rather than a partial sum.
+        assert all_time["ttm_series"][0]["month"] == "2023-12"
+        assert "2023-11" not in by_month
+        assert by_month["2023-12"]["net_eur"] == 78          # amounts 1..12
+        assert by_month["2023-12"]["mom_pct"] is None        # nothing precedes it
+        assert by_month["2024-02"]["net_eur"] == 102         # leap-year February
+        assert by_month["2026-01"]["source"] == "mixed"
+        assert by_month["2026-01"]["mom_crosses_era"] is True
+        assert by_month["2026-08"]["net_eur"] == 462
+        # The open month has no closed window, so it is absent on every range.
+        assert "2026-09" not in by_month
+
+        # Every shared month is byte-identical across the three ranges — the whole
+        # point of building the series before slicing it.
         for response in (rolling, selected):
-            for month in response["months"]:
-                if month["month"] in by_month:
-                    for field in ("ttm_net_eur", "ttm_mom_pct", "ttm_source", "ttm_mom_crosses_era"):
-                        assert month[field] == by_month[month["month"]][field]
-        assert by_month["2023-11"]["ttm_net_eur"] is None
-        assert by_month["2023-12"]["ttm_net_eur"] == 78
-        assert by_month["2023-12"]["ttm_mom_pct"] is None
-        assert by_month["2024-02"]["ttm_net_eur"] == 102  # leap-year February
-        assert by_month["2026-01"]["ttm_source"] == "mixed"
-        assert by_month["2026-01"]["ttm_mom_crosses_era"] is True
-        assert by_month["2026-08"]["ttm_net_eur"] == 462
-        assert by_month["2026-09"]["ttm_net_eur"] is None
-        assert all(m["ttm_net_eur"] is None for m in selected["months"][8:])
+            for point in response["ttm_series"]:
+                assert point == by_month[point["month"]]
+        assert [p["month"] for p in selected["ttm_series"]] == [
+            f"2026-{m:02d}" for m in range(1, 9)
+        ]
+        assert rolling["ttm_series"][0]["month"] == "2024-10"
+        assert rolling["ttm_series"][0]["net_eur"] == 198     # Nov 2023..Oct 2024
+        assert rolling["ttm_series"][0]["mom_pct"] == 6.5
+
+        # The specific wrong number: a year view's first point compares against the
+        # previous December, a window it never displays. A dash here would mean the
+        # base was read off the emitted list instead of the series.
+        assert selected["ttm_series"][0]["mom_pct"] is not None
     finally:
         await session.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_stopped_payer_ttm_reaches_zero_without_truncating_elapsed_months():
+async def test_a_december_window_equals_that_calendar_year_and_so_cannot_drift_from_it():
+    """
+    A window ending in December IS that calendar year, so it must equal the annual
+    row to the cent. The two are accumulated independently — one rolling per month
+    over per-symbol buckets, one straight into `annual_actual` — so this is the
+    cross-check that catches either of them drifting. Measured on production before
+    it was written: both read 147.85 for 2026.
+    """
+    engine, session = await _make_session()
+    try:
+        for i in range(45):
+            await _seed(session, date(2023 + i // 12, i % 12 + 1, 15), str(i + 1))
+        r = await DividendService(session).get_dividend_breakdown(
+            as_of=date(2026, 9, 18), include_forecast=False,
+        )
+        annual = {a["year"]: a for a in r["growth"]["annual"]}
+        decembers = {p["month"][:4]: p for p in r["ttm_series"] if p["month"].endswith("-12")}
+        assert set(decembers) == {"2023", "2024", "2025"}
+        for year, point in decembers.items():
+            assert point["total_eur"] == annual[int(year)]["total_eur"], year
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_payer_falls_to_a_measured_zero_and_the_open_month_is_absent():
+    """
+    A payer that stops really does take its rolling total to zero, and that is the
+    one thing this chart exists to show — so a measured 0.00 is kept while an
+    uncovered month is dropped. The two look alike and mean opposite things.
+    """
     engine, session = await _make_session()
     try:
         await _seed(session, date(2023, 1, 15), "10")
         r = await DividendService(session).get_dividend_breakdown(
             as_of=date(2024, 3, 1), include_forecast=False,
         )
-        months = {m["month"]: m for m in r["months"]}
-        assert r["months"][-1]["month"] == "2024-03"
-        assert months["2023-12"]["ttm_net_eur"] == 10
-        assert months["2024-01"]["ttm_net_eur"] == 0
-        assert months["2024-01"]["ttm_mom_pct"] == -100
-        assert months["2024-02"]["ttm_net_eur"] == 0
-        assert months["2024-02"]["ttm_mom_pct"] is None
-        assert months["2024-03"]["ttm_net_eur"] is None
+        ttm = {p["month"]: p for p in r["ttm_series"]}
+        assert r["months"][-1]["month"] == "2024-03"      # months[] still reaches it
+        assert ttm["2023-12"]["net_eur"] == 10
+        assert ttm["2024-01"]["net_eur"] == 0
+        assert ttm["2024-01"]["mom_pct"] == -100          # a real fall, reported
+        assert ttm["2024-02"]["net_eur"] == 0
+        assert ttm["2024-02"]["mom_pct"] is None          # zero base: undefined
+        assert "2024-03" not in ttm                        # the open month
     finally:
         await session.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_calendar_ttm_forecast_independence_and_quarterly_cadence():
+async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_it():
+    """
+    The toggle never refetches, so the client filters `partial` locally — which is
+    only honest if the closed points are identical either way. They are, and by
+    construction rather than by luck: no projection can be dated on or before
+    today (`horizon_start = as_of + 1`), so a window that has fully elapsed cannot
+    contain one.
+
+    Byte-identical, not "equal on the two fields someone thought to check" — the
+    premise that used to hold for the whole series now holds exactly here.
+    """
     engine, session = await _make_session()
     try:
-        session.add(_lot(1, date(2024, 1, 1), "100"))
-        await session.flush()
-        for year in (2024, 2025, 2026):
-            for month in (1, 4, 7, 10):
-                if (year, month) <= (2026, 7):
-                    await _seed_per_share(session, date(year, month, 15))
+        await _quarterly_payer(session)
         svc = DividendService(session)
         on = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF)
         off = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF, include_forecast=False)
         assert on["total_forecast_net_eur"] > 0
         assert off["total_forecast_net_eur"] == 0
-        for a, b in zip(on["months"], off["months"]):
-            assert a["ttm_net_eur"] == b["ttm_net_eur"]
-            assert a["ttm_mom_pct"] == b["ttm_mom_pct"]
-        assert [m["ttm_net_eur"] for m in on["months"][:6]] == [400] * 6
-        assert [m["ttm_mom_pct"] for m in on["months"][:6]] == [0] * 6
-        assert all(m["ttm_net_eur"] is None for m in on["months"][6:])
-        future = await svc.get_dividend_breakdown(year=2027, as_of=AS_OF)
-        assert all(m["ttm_net_eur"] is None for m in future["months"])
+
+        closed = [p for p in on["ttm_series"] if not p["partial"]]
+        assert off["ttm_series"] == closed
+        assert [p["month"] for p in closed] == [f"2026-{m:02d}" for m in range(1, 7)]
+        assert all(p["total_eur"] == p["net_eur"] == 400 for p in closed)
+        assert all(p["forecast_net_eur"] == 0 for p in closed)
+
+        by_m = {p["month"]: p for p in on["ttm_series"]}
+        # `partial` and "carries projection" are different facts: this window is
+        # open but the next payment falls outside it.
+        assert by_m["2026-07"]["partial"] is True
+        assert by_m["2026-07"]["forecast_net_eur"] == 0
+        assert by_m["2026-07"]["mom_includes_forecast"] is False
+        # ...and this one is open AND projected.
+        assert by_m["2026-10"]["net_eur"] == 300
+        assert by_m["2026-10"]["forecast_net_eur"] == 100
+        assert by_m["2026-10"]["total_eur"] == 400
+        assert by_m["2026-10"]["mom_includes_forecast"] is True
     finally:
         await session.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_24_month_empty_history_is_unknown_and_conflicting_filters_refused():
+async def test_a_future_year_is_fully_projected_and_claims_no_received_income():
+    """
+    Requirement (c). A year entirely ahead of us has a rolling total made of
+    projections, and it must say so: no received income, and no `source`, which is
+    the provenance of money that actually arrived. Stamping the estimate's
+    provenance there would claim income turned up from a guess.
+    """
+    engine, session = await _make_session()
+    try:
+        await _quarterly_payer(session)
+        r = await DividendService(session).get_dividend_breakdown(year=2027, as_of=AS_OF)
+        ttm = r["ttm_series"]
+        assert [p["month"] for p in ttm] == [f"2027-{m:02d}" for m in range(1, 13)]
+        assert all(p["partial"] for p in ttm)
+        last = ttm[-1]
+        assert last["net_eur"] == 0 and last["actual"] == {}
+        assert last["source"] is None
+        assert last["forecast_net_eur"] == last["total_eur"] > 0
+        # Early 2027 still carries real 2026 receipts — the window straddles today.
+        assert ttm[0]["net_eur"] > 0 and ttm[0]["forecast_net_eur"] > 0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_folding_the_forecast_in_moves_neither_the_monthly_chart_nor_its_totals():
+    """
+    The rolling series is a separate list precisely so it can out-reach `months[]`
+    without stretching it. Coupling the two once tripled the all-time chart's
+    forecast total (46 -> 162), and these two sums are the executable form of
+    "the new accumulators cannot perturb the old ones".
+    """
+    engine, session = await _make_session()
+    try:
+        await _quarterly_payer(session)
+        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
+        assert r["total_net_eur"] == sum(m["actual_total_eur"] for m in r["months"])
+        assert r["total_forecast_net_eur"] == sum(
+            m["forecast_total_eur"] for m in r["months"]
+        )
+        # The chart stops inside this year; the rolling series runs past it.
+        assert r["months"][-1]["month"] < f"{AS_OF.year + 1}-01"
+        assert r["ttm_series"][-1]["month"] > r["months"][-1]["month"]
+        assert r["ttm_series"][-1]["month"] > f"{AS_OF.year}-12"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_per_symbol_split_reconciles_to_the_scalar_it_is_drawn_against():
+    """
+    Requirement (d): the bar is stacked from `actual`/`forecast` while the figure
+    quoted beside it is `net_eur`/`total_eur`. A reader adding up the segments must
+    land on the total, so the split and the scalar cannot be two computations.
+
+    Exact equality on a deliberately clean fixture — a tolerance here would hide
+    the bucketing bug this exists to catch.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(Security(id=2, isin="US0000000002", symbol="BBB", description="Beta Corp",
+                             currency="EUR", conid=200, asset_category="STK", exchange="XETRA"))
+        await session.flush()
+        for month in range(1, 13):
+            await _seed(session, date(2025, month, 15), "10")
+            await _seed(session, date(2025, month, 20), "4", security_id=2)
+        r = await DividendService(session).get_dividend_breakdown(
+            as_of=date(2026, 2, 1), include_forecast=False,
+        )
+        assert r["ttm_series"]
+        for p in r["ttm_series"]:
+            assert sum(p["actual"].values()) == p["net_eur"]
+            assert sum(p["forecast"].values()) == p["forecast_net_eur"]
+            assert p["net_eur"] + p["forecast_net_eur"] == p["total_eur"]
+        dec = next(p for p in r["ttm_series"] if p["month"] == "2025-12")
+        assert dec["actual"] == {"AAA": 120.0, "BBB": 48.0}
+        assert dec["net_eur"] == 168.0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_asking_for_a_forecast_that_projects_nothing_does_not_draw_a_decline():
+    """
+    With the flag set and nothing to project — nothing held, too thin a history, a
+    payer past the stopped guard — a window reaching into the future is elapsed
+    months plus empty ones, so the series would decay month by month to 0.00 and
+    draw a collapse that never happened.
+
+    This service already served exactly that shape once, as
+    `next_12m_vs_ttm_pct: -100.0`. The gate is on a projection existing, not on the
+    flag asking for one.
+    """
+    engine, session = await _make_session()
+    try:
+        # History, but no open lot — so project_dividends returns nothing.
+        for month in range(1, 13):
+            await _seed_per_share(session, date(2025, month, 15))
+        r = await DividendService(session).get_dividend_breakdown(
+            as_of=date(2026, 6, 10), include_forecast=True,
+        )
+        assert r["total_forecast_net_eur"] == 0
+        assert r["ttm_series"]
+        assert r["ttm_series"][-1]["month"] == "2026-05"   # the last elapsed month
+        assert not any(p["partial"] for p in r["ttm_series"])
+        assert not any(p["forecast_net_eur"] for p in r["ttm_series"])
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_history_shorter_than_a_year_yields_no_points_rather_than_a_short_sum():
+    """Requirement (a) at its most load-bearing: six months summed and labelled as
+    twelve would read as a collapse against the first real year."""
+    engine, session = await _make_session()
+    try:
+        for month in range(1, 7):
+            await _seed(session, date(2026, month, 15), "10")
+        r = await DividendService(session).get_dividend_breakdown(
+            as_of=date(2026, 7, 1), include_forecast=False,
+        )
+        assert r["months"], "the monthly chart still has something to draw"
+        assert r["ttm_series"] == []
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_three_ranges_agree_on_every_shared_month_with_the_forecast_on():
+    """
+    The projection is window-invariant by construction (`horizon_end` ignores the
+    selected range and `project_dividends` steps deterministically), so folding it
+    in must not make a month's rolling total depend on the range showing it. The
+    existing agreement test runs with the forecast off and could not see this.
+    """
+    engine, session = await _make_session()
+    try:
+        await _quarterly_payer(session)
+        svc = DividendService(session)
+        args = {"as_of": AS_OF}
+        by_month = {p["month"]: p for p in (await svc.get_dividend_breakdown(**args))["ttm_series"]}
+        for kwargs in ({"period": "24m"}, {"year": 2026}, {"year": 2027}):
+            other = await svc.get_dividend_breakdown(**args, **kwargs)
+            assert other["ttm_series"], kwargs
+            for point in other["ttm_series"]:
+                assert point == by_month[point["month"]], (kwargs, point["month"])
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_24_month_empty_history_is_absent_and_conflicting_filters_refused():
     engine, session = await _make_session()
     try:
         svc = DividendService(session)
         r = await svc.get_dividend_breakdown(period="24m", as_of=date(2026, 1, 1))
         assert [r["months"][0]["month"], r["months"][-1]["month"]] == ["2024-02", "2026-01"]
         assert len(r["months"]) == 24
-        assert all(m["ttm_net_eur"] is None and m["ttm_mom_pct"] is None for m in r["months"])
+        assert r["ttm_series"] == []
         with pytest.raises(ValueError):
             await svc.get_dividend_breakdown(year=2026, period="24m")
     finally:
@@ -511,7 +749,7 @@ async def test_24_month_empty_history_is_unknown_and_conflicting_filters_refused
 
 
 @pytest.mark.asyncio
-async def test_calendar_ttm_splices_duplicates_before_applying_payment_date_fx(monkeypatch):
+async def test_ttm_splices_duplicates_before_applying_payment_date_fx(monkeypatch):
     from app.services.portfolio_service import BaseFx, PortfolioService
 
     fx = BaseFx("CHF", {
@@ -535,12 +773,16 @@ async def test_calendar_ttm_splices_duplicates_before_applying_payment_date_fx(m
         result = await DividendService(session).get_dividend_breakdown(
             year=2026, as_of=date(2026, 2, 1), include_forecast=False,
         )
-        jan = result["months"][0]
+        jan = result["ttm_series"][0]
         assert result["base_currency"] == "CHF"
-        assert jan["actual_total_eur"] == 16
-        assert jan["ttm_net_eur"] == 118  # 5*9 + 6*9.5 + 20*0.8
-        assert jan["ttm_source"] == "mixed"
-        assert jan["ttm_mom_pct"] == 6.3  # prior calendar TTM was 111
+        assert result["months"][0]["actual_total_eur"] == 16
+        assert jan["month"] == "2026-01"
+        assert jan["net_eur"] == 118  # 5*9 + 6*9.5 + 20*0.8
+        assert jan["source"] == "mixed"
+        assert jan["mom_pct"] == 6.3  # prior calendar TTM was 111
+        # The per-symbol bucket carries the same per-date conversion, not a
+        # re-conversion of the rounded total.
+        assert jan["actual"] == {"AAA": 118.0}
     finally:
         await session.close()
         await engine.dispose()

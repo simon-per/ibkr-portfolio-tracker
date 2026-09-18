@@ -15,37 +15,104 @@ from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
 
 ### Monthly / TTM and the rolling 24-month range
 
-The chart defaults to **Monthly**, the current calendar year, and Forecast on. **Last 24 months**
+The chart has two views of the same data, **Monthly** (default) and **TTM**, both stacked by symbol
+from one ranking so a series cannot change colour when the view is switched — see *Ranking* below.
+It defaults to the current calendar year with Forecast on. **Last 24 months**
 uses `period=24m`: the first of the month 23 months ago through the end of the current month.
 It filters the monthly bars, received/projected totals and per-security table together. `year` and
 `period` are mutually exclusive (HTTP 422); neither means All time. The response echoes `period`.
 The KPI strip and upcoming calendar remain unwindowed. Selecting an annual row restores that
 calendar year without changing the chart mode.
 
-**TTM is a line of twelve completed calendar months**, not twelve visible bars and not the KPI's
-365 days through today. `ttm_net_eur` and `ttm_mom_pct` on each month are calculated server-side
-from the unwindowed, era-spliced, payment-date-converted history. A point includes its ending month
-and the eleven preceding months; its MoM compares against the preceding month's TTM. Forecasts
-never enter either figure. Switching chart mode or Forecast does not refetch the response.
+**TTM is `ttm_series`, its own top-level array — not fields on `months[]`, and not the KPI strip's
+365 days through today.** One point per calendar month, stacked by symbol exactly like the monthly
+bars, computed server-side from the unwindowed, era-spliced, payment-date-converted history. It is
+a separate array because the two series deliberately cover **different spans**: on All time the
+rolling one runs to the projection horizon (31 December of next year) while `months[]` stops at
+31 December of *this* one. That cap on `months[]` is load-bearing — coupling the chart to the wider
+horizon once tripled its forecast total (46 → 162) — so the reach the rolling series needs could
+only be had by leaving `months[]` alone. `test_folding_the_forecast_in_moves_neither_the_monthly_chart_nor_its_totals`
+pins that, by re-deriving both response totals from the monthly bars.
 
-Coverage starts in the first recorded income month. Until twelve calendar buckets exist, TTM is
-null; current and future months are also null. The 24-month axis includes the current month, but
-its TTM point stays blank (at most 23 completed points). Empty months within recorded history are
-zero, including elapsed months after the last payment: All time extends at least through the
-current month so a stopped payer's rolling total can decline to zero. A zero comparison base gives
-null growth, while a fall from positive income to zero legitimately reports -100%.
+**Forecast is folded in and treated as received.** A window reaching past today is part measured,
+part projected; the bar splits each symbol into a solid segment and a translucent dashed one on the
+same stack, which is the monthly chart's existing vocabulary. `partial` marks such a window, and
+that — not `forecast_net_eur > 0` — is what the Forecast toggle filters on: an open window can
+contain no projection at all when the next payment falls outside it. With the toggle off the client
+drops the partial points, which reproduces the pre-forecast series **exactly**, and it can do that
+without refetching because no projection is ever dated on or before today (`horizon_start = as_of + 1`),
+so a fully elapsed window provably contains none. `test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_it`
+asserts byte equality rather than equality on the two fields someone thought to check.
 
-`ttm_source` uses `ibkr` / `mixed` / `yfinance_estimate`, or null for a window with no payments.
-`ttm_mom_crosses_era` flags comparisons whose two windows jointly contain both sources. Historical
-gross-estimate and source-transition caveats stay visible beside the line, alongside the reminder
-that portfolio income also changes with holdings and FX. The latest visible TTM amount and change
-are shown directly; tooltips repeat the covered dates and comparison. TTM has its own empty state,
-so a range with no new payments can still show trailing income from earlier months.
+**Folding a projection into a rolling total is legitimate where folding it into a single month is
+not** (see *Growth* rule 5 below, which forbids exactly that). A projected month's change is the
+forecast's own flat median showing up as ±90% cadence noise; a twelve-month window moves by at most
+one payment, which is the question the forecast exists to answer. `mom_includes_forecast` still
+marks the comparison `est.` whenever either side carries projection.
 
-Tests: `test_dividend_growth.py` covers calendar boundaries, coverage, stopped/quarterly payers,
-forecast independence, range agreement, era deduplication and payment-date FX;
-`test_dividend_breakdown_contract.py` and `test_api_smoke.py` pin serialization and query validation.
-`DividendsTab.test.tsx` covers range/mode/forecast controls and failure/empty states.
+**A window without twelve months of history behind it does not exist** — absent, never a null the
+client strips and never a short sum wearing a year's label. Coverage begins in the first month that
+carried income, so that requirement is met on the server and the chart simply has no empty leading
+stretch. A **measured** zero is kept: a payer that stops really does take its rolling total to zero,
+which is the one thing this chart exists to show. A zero comparison base gives null growth; a fall
+from positive income to zero reports −100%.
+
+**The series is built whole, then sliced.** A point's `mom_pct` compares against the previous
+month's window even when that point is outside the selected range — a year view's January compares
+against the previous December — so a month's figures are identical whichever range displays it.
+Filtering before comparing would make January's change depend on the range. All three ranges are
+pinned equal on shared months, with the forecast both on and off.
+
+**The reach is the horizon, not the last projected payment.** Ending at the last payment put the
+series wherever one payer's final projection happened to fall, so All time stopped in October while
+`year=` for the same year ran to December — one month computing to one number in one range and not
+existing in the other. And the extension is gated on a projection *existing*, not on the flag asking
+for one: with the flag set and nothing projected, a window reaching forward is elapsed months plus
+empty ones, and the series would decay to 0.00 and draw a collapse that never happened. This service
+served that exact shape once, as `next_12m_vs_ttm_pct: -100.0`.
+
+`source` is the provenance of money **received** (`ibkr` / `mixed` / `yfinance_estimate`), and is
+null for a window that is entirely projection — stamping the estimate's provenance there would claim
+income arrived from a guess. `mom_crosses_era` flags a comparison whose two windows jointly contain
+both sources. The latest point's amount, window and change are shown directly, with `incl. … projected`
+on the amount itself rather than only `est.` on the chip; the caveats sit on the surface beside the
+chart, not in a tooltip.
+
+**One identity ties the new series to the old figures**: a window ending in December *is* that
+calendar year, so it must equal `growth.annual[year].total_eur` to the cent. The two are accumulated
+independently — one rolling per month over per-symbol buckets, one straight into `annual_actual` —
+so pinning them equal catches either drifting. Measured on production before the test was written:
+both read 147.85 for 2026. The per-symbol maps likewise reconcile to the scalars they are drawn
+against, which is what keeps a stacked bar's segments adding up to the figure quoted beside it.
+
+### Ranking — one colour scheme for both views
+
+`buildChartSeries` ranks symbols once and projects both bucket sets through it, because `colorOf` is
+`palette[stackSymbols.indexOf(sym)]`: two rankings would repaint the chart on a view switch, the
+same failure the "toggling cannot repaint series" test exists to prevent.
+
+A symbol scores its total across `months[]` **plus its widest single rolling window** — never the
+sum of those windows. A window is already a twelve-month total, so summing counts a January payment
+once per window it falls in (twelve) and a December one exactly once: that ranks symbols by *when*
+they paid rather than how much, a 12× swing big enough to reorder the monthly stack for a reason no
+reader could infer. The widest window is a year of income counted once, and it degenerates to the
+old months-only ranking when `ttm_series` is empty. The rolling series earns a vote at all because a
+future-year view's `months[]` holds nothing but projection, so ranking on it alone would fold every
+symbol that paid in the preceding year into *Other*.
+
+Ranking reads the **unfiltered** series, before the `partial` filter, or hiding projections would
+move a colour. `MAX_SERIES` and the two palettes now live together in `lib/dividendColors.ts`: they
+were one number stated in two files, and raising the cap alone would have handed the extra symbols
+grey — indistinguishable from the *Other* bucket, with nothing failing.
+
+Tests: `test_dividend_growth.py` covers coverage trimming, stopped/quarterly payers, forecast
+folding, a future year, the per-symbol reconciliation, the no-projection gate, range agreement, era
+deduplication and payment-date FX; `test_dividend_breakdown_contract.py` and `test_api_smoke.py` pin
+serialization and query validation. On the client the transform is covered by
+`src/lib/dividendChart.test.ts` — **not** `DividendsTab.test.tsx`, which mocks recharts'
+`ResponsiveContainer` away so no `<Bar>` ever mounts; that file covers controls, captions and states.
+`dividendColors.test.ts` asks the family question (can every slot be told apart?) rather than the
+instance one (are these two numbers equal?).
 
 **The boundary itself leaked one dividend per security until 2026-08-05, and the reason is the
 splice's own premise.** The rule keeps estimates strictly *before* the first IBKR payment — but the

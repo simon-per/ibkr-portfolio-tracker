@@ -673,6 +673,129 @@ class DividendService:
         total = year * 12 + (month - 1) - months_back
         return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
+    @classmethod
+    def _rolling_twelve_months(
+        cls,
+        *,
+        month_actual_sym_all: Dict[str, Dict[str, Decimal]],
+        month_forecast_sym_all: Dict[str, Dict[str, Decimal]],
+        month_sources_all: Dict[str, set],
+        first_income: Optional[date],
+        current_month: str,
+        horizon_month: str,
+        axis_start: Optional[str],
+        axis_end: Optional[str],
+        windowed: bool,
+        include_forecast: bool,
+    ) -> List[Dict]:
+        """
+        Rolling twelve-month totals, one point per month, stacked by symbol.
+
+        Three rules, each of which would be a wrong number the other way:
+
+        **The whole series is built before any of it is filtered.** A point's
+        month-over-month compares against the previous month's window, which on a
+        year view is the previous December — a point the reader never sees. Slicing
+        first would make January's change depend on the range selected, and the
+        figures for one month must be the same whichever range is showing it.
+
+        **A window needs twelve months of history or it does not exist.** Coverage
+        starts at the first month that carried income; before that the months are
+        unknown, not zero, and a partial sum presented as a year would read as a
+        collapse. Nothing is emitted rather than a null the client has to strip —
+        which is also what leaves the chart with no empty leading stretch.
+
+        **A measured zero is kept.** A payer that stops really does take its
+        rolling total to zero, and that is the one thing this chart exists to show.
+        Only absent coverage is dropped.
+
+        Forecast is folded in as though it had been received, so a window reaching
+        past today is part measured and part projected; `partial` says so, and the
+        client hides those points when the Forecast toggle is off. With
+        ``include_forecast`` false there is no projection to fold, so the series
+        simply stops at the last elapsed month rather than publishing windows that
+        are short by however much of them has not happened yet.
+        """
+        if first_income is None or axis_start is None or axis_end is None:
+            return []
+
+        coverage_start = cls._shift_month(first_income.strftime("%Y-%m"), -11)
+        # Gate on a projection EXISTING, not on the flag asking for one. With the
+        # flag set and nothing projected — nothing held, too thin a history, a
+        # payer past the stopped guard — a window reaching into the future is all
+        # elapsed months and empty ones, so the series would decay month by month
+        # to 0.00 and draw a collapse that never happened. That is the shape this
+        # service already served once as `next_12m_vs_ttm_pct: -100.0`: a figure
+        # manufactured by a flag rather than measured from anything.
+        #
+        # Portfolio-level, deliberately: asking it per window would punch holes in
+        # an annual payer's series, where the window ending in January contains no
+        # projection and the one ending in March does.
+        projecting = include_forecast and bool(month_forecast_sym_all)
+        if projecting:
+            # The HORIZON, not the last projected payment. Ending at the last
+            # payment would put the series' end wherever one payer's final
+            # projection happened to fall, so all-time stopped in October while
+            # `year=` for the same year ran to December — the same month computing
+            # to the same number in one range and not existing in the other.
+            # Ending at the horizon makes every range build one identical series
+            # that only the slice below differs on.
+            #
+            # On the all-time view this reaches a year past `months`, which stops
+            # at 31 December by design. That is the whole reason this is a separate
+            # list: it can have the wider reach without stretching the monthly
+            # chart or its forecast total.
+            last = max(axis_end, horizon_month)
+        else:
+            last = min(axis_end, cls._shift_month(current_month, 1))
+
+        points: List[Dict] = []
+        prev_total: Optional[Decimal] = None
+        prev_forecast: Decimal = Decimal("0")
+        prev_sources: set = set()
+        mk = coverage_start
+        while mk <= last:
+            window = [cls._shift_month(mk, back) for back in range(12)]
+            actual: Dict[str, Decimal] = defaultdict(Decimal)
+            forecast: Dict[str, Decimal] = defaultdict(Decimal)
+            sources: set = set()
+            for key in window:
+                for sym, v in month_actual_sym_all.get(key, {}).items():
+                    actual[sym] += v
+                for sym, v in month_forecast_sym_all.get(key, {}).items():
+                    forecast[sym] += v
+                sources |= month_sources_all.get(key, set())
+
+            net = sum(actual.values(), Decimal("0"))
+            fc = sum(forecast.values(), Decimal("0"))
+            total = net + fc
+            points.append({
+                "month": mk,
+                "actual": {s: round(float(v), 2) for s, v in sorted(actual.items())},
+                "forecast": {s: round(float(v), 2) for s, v in sorted(forecast.items())},
+                "net_eur": round(float(net), 2),
+                "forecast_net_eur": round(float(fc), 2),
+                "total_eur": round(float(total), 2),
+                "mom_pct": cls._pct(total, prev_total),
+                # Either side carrying projection is enough: a measured window
+                # compared against a projected one is still a comparison against a
+                # guess, and the chip must say so rather than look measured.
+                "mom_includes_forecast": fc > 0 or prev_forecast > 0,
+                "source": "mixed" if len(sources) > 1 else next(iter(sources), None),
+                "mom_crosses_era": (
+                    prev_total is not None and len(sources | prev_sources) > 1
+                ),
+                "partial": mk >= current_month,
+            })
+            prev_total, prev_forecast, prev_sources = total, fc, sources
+            mk = cls._shift_month(mk, -1)
+
+        # Only now, with every comparison already made against its true neighbour,
+        # narrow to what the selected range should show.
+        if windowed:
+            points = [p for p in points if axis_start <= p["month"] <= axis_end]
+        return points
+
     @staticmethod
     def _same_day_last_year(d: date) -> date:
         """
@@ -971,18 +1094,43 @@ class DividendService:
         total_net = Decimal("0")
         total_forecast = Decimal("0")
 
+        # The UNWINDOWED halves of the same walk. `growth` is defined as derived
+        # from the whole payment history — with year=2026 selected the response
+        # carries no 2025 months, so no client could derive year-over-year at all —
+        # and the rolling twelve-month series needs the same reach for the same
+        # reason: a window ending in January is eleven-twelfths outside the year
+        # showing it. Keeping the era splice and the per-date FX projection in one
+        # place beats growing a second implementation to drift.
+        annual_actual: Dict[int, Decimal] = defaultdict(Decimal)
+        month_actual_all: Dict[str, Decimal] = defaultdict(Decimal)
+        month_sources_all: Dict[str, set] = defaultdict(set)
+        month_actual_sym_all: Dict[str, Dict[str, Decimal]] = defaultdict(
+            lambda: defaultdict(Decimal)
+        )
+
         for p in all_payments:
             on_date = p.pay_date or p.ex_date
+            mk = on_date.strftime("%Y-%m")
+            net = base_fx.convert(self._net_eur(p), on_date)
+            symbol = _symbol(p.security_id)
+            # These four accumulate BEFORE the window guard, and that order is the
+            # whole point: hoist the `continue` above them and growth quietly
+            # starts agreeing with the selected year instead of the history.
+            # `test_calendar_ttm_uses_history_outside_each_display_window` and
+            # `test_growth_is_identical_whichever_year_is_selected` pin it.
+            annual_actual[on_date.year] += net
+            month_actual_all[mk] += net
+            month_actual_sym_all[mk][symbol] += net
+            month_sources_all[mk].add(p.source)
             if not _in_window(on_date):
                 continue
-            net = base_fx.convert(self._net_eur(p), on_date)
             row = by_sec.setdefault(p.security_id, _new_row())
             row["payouts"] += 1
             row["net"] += net
             row["gross"] += base_fx.convert(p.gross_amount_eur or Decimal("0"), on_date)
             row["wht"] += base_fx.convert(p.withholding_tax_eur or Decimal("0"), on_date)
             row["sources"].add("ibkr" if p.source == "ibkr" else "estimate")
-            monthly_actual[on_date.strftime("%Y-%m")][_symbol(p.security_id)] += net
+            monthly_actual[mk][symbol] += net
             total_net += net
 
         # Projections, in base currency, needed at three different reaches:
@@ -995,6 +1143,15 @@ class DividendService:
         # directly — which is what keeps the chart's numbers unchanged here.
         upcoming: List[Dict] = []
         annual_forecast: Dict[int, Decimal] = defaultdict(Decimal)
+        # Projected income per symbol per month, UNWINDOWED and reaching the full
+        # horizon. The rolling TTM series needs months the chart never draws, the
+        # same way `growth` needs payments the chart never draws. Deliberately NOT
+        # `monthly_forecast`, which is capped twice — to the selected window and to
+        # chart_end — so every twelve-month window straddling either cap would be
+        # silently short.
+        month_forecast_sym_all: Dict[str, Dict[str, Decimal]] = defaultdict(
+            lambda: defaultdict(Decimal)
+        )
         next_12m = Decimal("0")
         # The same 365-day total, split per security, for the forward yields. Kept
         # beside the aggregate rather than derived from the per-security table
@@ -1004,16 +1161,18 @@ class DividendService:
         next_12m_by_sec: Dict[int, Decimal] = defaultdict(Decimal)
         next_pay: Dict[int, date] = {}
         next_12m_end = as_of + timedelta(days=365)
+        # Far enough to complete next calendar year, so the year comparison never
+        # shows a truncated bar; further still if the caller asked for a year
+        # beyond that. Defined out here because the rolling series ends at the
+        # horizon too, and re-deriving a two-line expression is how one reach
+        # quietly becomes two.
+        horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
             hist_by_sec, basis_by_sec, lots_by_sec, shares_at = \
                 await self._forecast_inputs(raw_payments, securities, as_of)
 
-            # Far enough to complete next calendar year, so the year comparison
-            # never shows a truncated bar; further still if the caller asked for
-            # a year beyond that.
             horizon_start = as_of + timedelta(days=1)
-            horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
             # The CHART's reach is unchanged by that widening: without a selected
             # year it still stops at the end of the current year. Projecting
@@ -1038,6 +1197,7 @@ class DividendService:
                 for fp in projected:
                     amt = base_fx.convert(fp.net_eur, fp.on_date)
                     annual_forecast[fp.on_date.year] += amt
+                    month_forecast_sym_all[fp.on_date.strftime("%Y-%m")][symbol] += amt
                     if fp.on_date <= next_12m_end:
                         next_12m += amt
                         next_12m_by_sec[sid] += amt
@@ -1077,20 +1237,10 @@ class DividendService:
         upcoming.sort(key=lambda u: (u["date"], u["symbol"]))
 
         # ---- Growth -------------------------------------------------------------
-        # Deliberately computed from the UNWINDOWED history: with year=2026
-        # selected the response carries no 2025 months, so no client could derive
-        # any of this. Doing it here also keeps the era splice and the per-date FX
-        # projection in one place instead of growing a second implementation.
-        annual_actual: Dict[int, Decimal] = defaultdict(Decimal)
-        month_actual_all: Dict[str, Decimal] = defaultdict(Decimal)
-        month_sources_all: Dict[str, set] = defaultdict(set)
-        for p in all_payments:
-            d = p.pay_date or p.ex_date
-            value = base_fx.convert(self._net_eur(p), d)
-            annual_actual[d.year] += value
-            month_actual_all[d.strftime("%Y-%m")] += value
-            month_sources_all[d.strftime("%Y-%m")].add(p.source)
-
+        # Built on the unwindowed accumulators above, for the reason stated there.
+        # `_net_between` stays a separate walk rather than joining them: it answers
+        # a DAY-granular question (Jan 1 to the same calendar day last year) that
+        # month buckets cannot express.
         def _net_between(after: date, through: date) -> Decimal:
             """Realized net in (after, through], each payment at its own date's rate."""
             total = Decimal("0")
@@ -1375,21 +1525,18 @@ class DividendService:
                     months_axis.append(f"{y:04d}-{m:02d}")
                     y, m = (y, m + 1) if m < 12 else (y + 1, 1)
 
-        def _calendar_ttm(mk: str) -> tuple[Optional[Decimal], set]:
-            """Twelve completed calendar buckets, before slicing the chart window.
-
-            Coverage begins in the first income month, matching the annual view's
-            conservative history boundary. Earlier months are unknown, not zero.
-            This deliberately differs from the headline's trailing 365 days.
-            """
-            start = self._shift_month(mk, 11)
-            if mk >= current_month or first_income is None or start < first_income.strftime("%Y-%m"):
-                return None, set()
-            keys = [self._shift_month(mk, back) for back in range(12)]
-            return (
-                sum((month_actual_all.get(key, Decimal("0")) for key in keys), Decimal("0")),
-                set().union(*(month_sources_all.get(key, set()) for key in keys)),
-            )
+        ttm_series = self._rolling_twelve_months(
+            month_actual_sym_all=month_actual_sym_all,
+            month_forecast_sym_all=month_forecast_sym_all,
+            month_sources_all=month_sources_all,
+            first_income=first_income,
+            current_month=current_month,
+            horizon_month=horizon_end.strftime("%Y-%m"),
+            axis_start=months_axis[0] if months_axis else None,
+            axis_end=months_axis[-1] if months_axis else None,
+            windowed=year is not None or period == "24m",
+            include_forecast=include_forecast,
+        )
 
         months = []
         for mk in months_axis:
@@ -1399,20 +1546,8 @@ class DividendService:
             # "change" would be an artifact of the projection's own flat median —
             # it would read as the payout schedule shifting when nothing has.
             realized = month_actual_all.get(mk, Decimal("0"))
-            ttm_value, ttm_sources = _calendar_ttm(mk)
-            prev_ttm_value, prev_ttm_sources = _calendar_ttm(self._shift_month(mk, 1))
-            comparison_sources = ttm_sources | prev_ttm_sources
             months.append({
                 "month": mk,
-                "ttm_net_eur": round(float(ttm_value), 2) if ttm_value is not None else None,
-                "ttm_mom_pct": self._pct(ttm_value, prev_ttm_value) if ttm_value is not None else None,
-                "ttm_source": (
-                    "mixed" if len(ttm_sources) > 1 else next(iter(ttm_sources), None)
-                ),
-                "ttm_mom_crosses_era": (
-                    ttm_value is not None and prev_ttm_value is not None
-                    and len(comparison_sources) > 1
-                ),
                 "actual": {s: round(float(v), 2) for s, v in sorted(actual.items())},
                 "forecast": {s: round(float(v), 2) for s, v in sorted(forecast.items())},
                 "actual_total_eur": round(float(sum(actual.values(), Decimal("0"))), 2),
@@ -1531,6 +1666,7 @@ class DividendService:
             "year": year,
             "period": period,
             "months": months,
+            "ttm_series": ttm_series,
             "securities": sec_rows,
             "total_net_eur": round(float(total_net), 2),
             "total_forecast_net_eur": round(float(total_forecast), 2),
