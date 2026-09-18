@@ -13,11 +13,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { api } from '@/lib/api'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
-import { buildChartSeries, duplicatedSymbols, FC, OTHER } from '@/lib/dividendChart'
+import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, OTHER } from '@/lib/dividendChart'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
 import { DividendKpiCards } from './DividendKpiCards'
 import { DividendYearComparison } from './DividendYearComparison'
+import { DividendTtmChart } from './DividendTtmChart'
 import { useTheme } from './ThemeProvider'
 import { cn } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -33,14 +34,6 @@ import { DataTable, type Column } from '@/components/ui/DataTable'
 const SERIES_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948']
 const SERIES_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767']
 const OTHER_COLOR = '#898781'
-
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-function monthLabel(month: string, withYear: boolean): string {
-  const [y, m] = month.split('-')
-  const name = MONTH_NAMES[Number(m) - 1] ?? month
-  return withYear ? `${name} ${y.slice(2)}` : name
-}
 
 function SourceBadge({ row }: { row: DividendSecurityRow }) {
   if (row.payouts === 0 && row.forecast_payouts > 0) {
@@ -264,7 +257,8 @@ function dividendColumns(deps: {
 
 export function DividendsTab() {
   const currentYear = new Date().getFullYear()
-  const [year, setYear] = useState<number | 'all'>(currentYear)
+  const [year, setYear] = useState<number | 'all' | '24m'>(currentYear)
+  const [chartMode, setChartMode] = useState<'monthly' | 'ttm'>('monthly')
   const [showForecast, setShowForecast] = useState(true)
   const { theme } = useTheme()
   const curSym = useCurrencySymbol()
@@ -274,7 +268,10 @@ export function DividendsTab() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['dividends', 'breakdown', year],
     // Forecast is always fetched; the toggle only hides it, so flipping is instant.
-    queryFn: () => api.getDividendBreakdown(year === 'all' ? undefined : year),
+    queryFn: () => api.getDividendBreakdown(
+      typeof year === 'number' ? year : undefined,
+      year === '24m' ? '24m' : undefined,
+    ),
     staleTime: 30 * 60 * 1000,
   })
 
@@ -387,7 +384,7 @@ export function DividendsTab() {
     [data, showForecast],
   )
 
-  const hasAnything = (data?.total_net_eur ?? 0) > 0 || (data?.total_forecast_net_eur ?? 0) > 0
+  const hasAnything = (data?.total_net_eur ?? 0) > 0 || (showForecast && (data?.total_forecast_net_eur ?? 0) > 0)
   // The growth block is unwindowed, so it stands even when the selected year is
   // empty — which is exactly when knowing the trend is most useful.
   const hasGrowth = (data?.growth?.annual?.length ?? 0) > 0
@@ -402,6 +399,9 @@ export function DividendsTab() {
               {data && hasAnything ? (
                 <>
                   Received {formatCurrency(data.total_net_eur)} net
+                  {year === '24m' && data.months.length > 0 && (
+                    <> · {monthLabel(data.months[0].month, true)} – {monthLabel(data.months[data.months.length - 1].month, true)}</>
+                  )}
                   {showForecast && data.total_forecast_net_eur > 0 && (
                     <> · projected +{formatCurrency(data.total_forecast_net_eur)}</>
                   )}
@@ -420,16 +420,35 @@ export function DividendsTab() {
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label="Dividend chart view">
+              {(['monthly', 'ttm'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={chartMode === mode}
+                  onClick={() => setChartMode(mode)}
+                  className={cn(
+                    'h-8 rounded px-3 text-sm font-medium transition-colors',
+                    chartMode === mode ? 'bg-primary text-primary-foreground' : 'hover:bg-accent',
+                  )}
+                >
+                  {mode === 'monthly' ? 'Monthly' : 'TTM'}
+                </button>
+              ))}
+            </div>
             <label htmlFor="dividend-year" className="sr-only">
-              Year
+              Dividend period
             </label>
             <select
               id="dividend-year"
               value={year}
-              onChange={(e) => setYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              onChange={(e) => setYear(
+                e.target.value === 'all' || e.target.value === '24m' ? e.target.value : Number(e.target.value),
+              )}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium"
             >
               <option value="all">All time</option>
+              <option value="24m">Last 24 months</option>
               {yearOptions.map((y) => (
                 <option key={y} value={y}>
                   {y}
@@ -470,69 +489,71 @@ export function DividendsTab() {
 
             {isLoading ? (
               <div className="h-[240px] animate-pulse rounded bg-muted sm:h-[320px]" />
-            ) : !data || !hasAnything ? (
+            ) : !data || (!hasAnything && chartMode === 'monthly') ? (
               <div className="flex h-32 items-center justify-center text-center text-sm text-muted-foreground">
-                No dividends recorded {year === 'all' ? 'yet' : `for ${year}`}. They arrive with
+                No dividends recorded {year === 'all' ? 'yet' : year === '24m' ? 'in the last 24 months' : `for ${year}`}. They arrive with
                 the IBKR sync; estimates for earlier years come from the dividend sync.
               </div>
             ) : (
               <>
-                {/* Every other month on a phone (`interval={1}` below): twelve labels
-                    in ~290px of plot area collide. This retires the "tick labels are
-                    cramped at 390px" rough edge STATUS.md used to carry. */}
-                <div className="h-[240px] w-full sm:h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-                    <XAxis
-                      dataKey="month"
-                      tickFormatter={(m: string) => monthLabel(m, year === 'all')}
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      tickLine={false}
-                      axisLine={{ stroke: 'hsl(var(--border))' }}
-                      interval={year === 'all' ? 'preserveStartEnd' : isCompact ? 1 : 0}
-                    />
-                    <YAxis
-                      tickFormatter={formatAxisTick}
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      tickLine={false}
-                      axisLine={false}
-                      width={isCompact ? 40 : 60}
-                    />
-                    <Tooltip content={renderTooltip} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.35 }} />
-                    {stackSymbols.map((s, i) => (
-                      <Bar
-                        key={s}
-                        dataKey={s}
-                        stackId="d"
-                        fill={colorOf(s)}
-                        stroke="hsl(var(--card))"
-                        strokeWidth={1}
-                        isAnimationActive={false}
-                        // Only the topmost series gets the rounded cap, or every
-                        // segment in the stack would look like its own bar.
-                        radius={i === stackSymbols.length - 1 && !showForecast
-                          ? [3, 3, 0, 0] : undefined}
-                      />
-                    ))}
-                    {showForecast &&
-                      stackSymbols.map((s, i) => (
-                        <Bar
-                          key={FC + s}
-                          dataKey={FC + s}
-                          stackId="d"
-                          fill={colorOf(s)}
-                          fillOpacity={0.4}
-                          stroke={colorOf(s)}
-                          strokeDasharray="3 2"
-                          strokeWidth={1}
-                          isAnimationActive={false}
-                          radius={i === stackSymbols.length - 1 ? [3, 3, 0, 0] : undefined}
+                {chartMode === 'ttm' ? (
+                  <DividendTtmChart months={data.months} multiYear={typeof year !== 'number'} />
+                ) : (
+                  <div className="h-[240px] w-full sm:h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                        <XAxis
+                          dataKey="month"
+                          tickFormatter={(m: string) => monthLabel(m, typeof year !== 'number')}
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                          tickLine={false}
+                          axisLine={{ stroke: 'hsl(var(--border))' }}
+                          interval={typeof year !== 'number' ? 'preserveStartEnd' : isCompact ? 1 : 0}
+                          minTickGap={isCompact ? 24 : 16}
                         />
-                      ))}
-                  </BarChart>
-                </ResponsiveContainer>
-                </div>
+                        <YAxis
+                          tickFormatter={formatAxisTick}
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                          tickLine={false}
+                          axisLine={false}
+                          width={isCompact ? 40 : 60}
+                        />
+                        <Tooltip content={renderTooltip} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.35 }} />
+                        {stackSymbols.map((s, i) => (
+                          <Bar
+                            key={s}
+                            dataKey={s}
+                            stackId="d"
+                            fill={colorOf(s)}
+                            stroke="hsl(var(--card))"
+                            strokeWidth={1}
+                            isAnimationActive={false}
+                            // Only the topmost series gets the rounded cap, or every
+                            // segment in the stack would look like its own bar.
+                            radius={i === stackSymbols.length - 1 && !showForecast
+                              ? [3, 3, 0, 0] : undefined}
+                          />
+                        ))}
+                        {showForecast &&
+                          stackSymbols.map((s, i) => (
+                            <Bar
+                              key={FC + s}
+                              dataKey={FC + s}
+                              stackId="d"
+                              fill={colorOf(s)}
+                              fillOpacity={0.4}
+                              stroke={colorOf(s)}
+                              strokeDasharray="3 2"
+                              strokeWidth={1}
+                              isAnimationActive={false}
+                              radius={i === stackSymbols.length - 1 ? [3, 3, 0, 0] : undefined}
+                            />
+                          ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
 
                 {/* The three qualifier explanations used to live in `title=`, which no
                     touch device can reach — and they are the difference between reading
@@ -540,7 +561,7 @@ export function DividendsTab() {
                     they are simply visible now, matching DividendCalendar and
                     DividendYearComparison, which both spell theirs out. */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                  {stackSymbols.map((s) => (
+                  {chartMode === 'monthly' && stackSymbols.map((s) => (
                     <span key={s} className="inline-flex items-center gap-1.5">
                       <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: colorOf(s) }} />
                       {s}
@@ -548,10 +569,12 @@ export function DividendsTab() {
                   ))}
                   {showForecast && (data.total_forecast_net_eur ?? 0) > 0 && (
                     <>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
-                        translucent = forecast
-                      </span>
+                      {chartMode === 'monthly' && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
+                          translucent = forecast
+                        </span>
+                      )}
                       {securities.some((r) => r.forecast_basis === 'gross_estimate') && (
                         <span>
                           <span className="text-amber-600 dark:text-amber-500">*</span> projected
@@ -592,7 +615,7 @@ export function DividendsTab() {
                   {hasGrowth && (
                     <DividendYearComparison
                       annual={data.growth!.annual}
-                      selectedYear={year}
+                      selectedYear={typeof year === 'number' ? year : 'all'}
                       onSelectYear={setYear}
                       showForecast={showForecast}
                     />

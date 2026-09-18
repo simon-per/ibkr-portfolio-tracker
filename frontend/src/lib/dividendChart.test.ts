@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildChartSeries, duplicatedSymbols, FC, OTHER } from './dividendChart'
+import { buildChartSeries, dividendTtmWindowLabel, duplicatedSymbols, FC, OTHER } from './dividendChart'
 import type { DividendBreakdownResponse } from './api'
+
+it('labels calendar TTM windows across year boundaries', () => {
+  expect(dividendTtmWindowLabel('2026-01')).toBe('Feb 25 – Jan 26')
+  expect(dividendTtmWindowLabel('2024-02')).toBe('Mar 23 – Feb 24')
+  expect(dividendTtmWindowLabel('2025-12')).toBe('Jan 25 – Dec 25')
+})
 
 function response(
   months: { month: string; actual?: Record<string, number>; forecast?: Record<string, number> }[],

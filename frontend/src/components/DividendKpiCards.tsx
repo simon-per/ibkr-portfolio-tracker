@@ -107,6 +107,7 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
 
       <Tile
         label="Last 12 months"
+        sub="365 days through today"
         value={`${curSym}${amount(ttm.net_eur)}`}
         title={
           `${formatCurrency(ttm.net_eur)} received over the last 365 days,`

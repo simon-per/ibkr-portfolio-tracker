@@ -476,6 +476,12 @@ class DividendSummaryResponse(BaseModel):
 class DividendMonthBar(BaseModel):
     """One month of the dividends chart: net amounts per symbol, actual vs forecast."""
     month: str                      # "YYYY-MM"
+    # Calendar-month TTM, distinct from growth.ttm's 365 days through today.
+    # Null until 12 history months exist and for current/future months.
+    ttm_net_eur: Optional[float] = None
+    ttm_mom_pct: Optional[float] = None
+    ttm_source: Optional[Literal["ibkr", "mixed", "yfinance_estimate"]] = None
+    ttm_mom_crosses_era: bool = False
     actual: Dict[str, float]        # symbol -> net received (base currency)
     forecast: Dict[str, float]      # symbol -> projected net (cadence-based)
     actual_total_eur: float
@@ -651,7 +657,8 @@ class DividendForwardYield(BaseModel):
 
 class DividendBreakdownResponse(BaseModel):
     years: List[int]
-    year: Optional[int] = None      # None = all time
+    year: Optional[int] = None      # None = all time, unless period is set
+    period: Optional[Literal["24m"]] = None
     months: List[DividendMonthBar]
     securities: List[DividendSecurityRow]
     total_net_eur: float

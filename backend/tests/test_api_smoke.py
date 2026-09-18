@@ -70,6 +70,7 @@ READ_ENDPOINTS = [
     f"/api/dividends/breakdown?year={TODAY.year}",
     f"/api/dividends/breakdown?year={TODAY.year + 1}",   # a future year
     "/api/dividends/breakdown?forecast=false",
+    "/api/dividends/breakdown?period=24m",
     f"/api/tax/report?year={TODAY.year}",
     f"/api/tax/report.csv?year={TODAY.year}",
     "/api/portfolio/lookthrough",
@@ -258,6 +259,15 @@ def test_the_shapes_that_broke_production_serialize(client):
     # The 1999 pre-ownership zero row never surfaces.
     assert all(m["month"] >= "2000-01" for m in bd["months"])
     assert bd["base_currency"] == "CHF"
+
+    rolling = client.get("/api/dividends/breakdown?period=24m").json()
+    assert rolling["period"] == "24m"
+    assert len(rolling["months"]) == 24
+    assert rolling["months"][-1]["month"] == TODAY.strftime("%Y-%m")
+    assert rolling["months"][-1]["ttm_net_eur"] is None
+    assert all("ttm_mom_pct" in m and "ttm_source" in m for m in rolling["months"])
+    assert client.get("/api/dividends/breakdown?year=2026&period=24m").status_code == 422
+    assert client.get("/api/dividends/breakdown?period=12m").status_code == 422
 
     summary = client.get("/api/dividends/summary").json()
     assert all(abs(m["amount_eur"]) > 0 for m in summary["monthly"])

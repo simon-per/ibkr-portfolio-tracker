@@ -157,6 +157,7 @@ async def test_the_fixture_populates_every_nested_model():
         assert payload["growth"]["latest_month"] is not None
         assert payload["growth"]["annual"], "no annual rows"
         assert payload["months"], "no month bars"
+        assert any(m["ttm_net_eur"] is not None for m in payload["months"]), "no completed TTM window"
         assert payload["securities"], "no security rows"
         assert payload["upcoming"], "no projected payments"
         # One of each provenance, or the splice is not being exercised.
@@ -228,6 +229,7 @@ async def test_the_whole_payload_validates_and_survives_serialization():
         assert model.forward_yield.basis in ("net", "mixed", "gross_estimate")
         assert model.securities[0].forward_yield_pct is not None
         assert model.growth.ttm.net_eur == payload["growth"]["ttm"]["net_eur"]
+        assert [m.model_dump() for m in model.months] == payload["months"]
     finally:
         await session.close()
         await engine.dispose()

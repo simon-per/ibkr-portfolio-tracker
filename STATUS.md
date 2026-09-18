@@ -5,7 +5,17 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-13.** Latest: **an Analytics tab — where the return came from.** The
+**Last updated: 2026-09-18.** Latest local work: **Dividends Monthly / TTM and Last 24 months**
+are implemented and verified; production deployment verification is pending. Calendar TTM uses twelve completed
+months of cached, era-spliced history, with coverage and source caveats; the 24-month range
+also filters the table and received/projected totals. `AGENTS.md` is an exact copy of the root
+`CLAUDE.md`. Verification: 1,512 backend tests and 634 frontend tests pass; TypeScript/build
+and lint on touched frontend files pass. Synthetic-data browser checks passed at 1440px and
+390px, including controls, tooltips, dark mode and overflow. The suite exposed a weekday-dependent
+sibling-pricing test assertion; it now checks the inclusive provisional window's actual count.
+Unrelated UI changes already in the working tree were preserved.
+
+Previously shipped: **an Analytics tab — where the return came from.** The
 change in Total Value split into money paid in, price, FX, dividends, fees/interest and a named
 remainder (waterfall for the range, stacked bars per year, legs summing exactly to end − start);
 the same gains folded onto sectors and countries through the look-through; 12-month rolling
@@ -734,6 +744,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **Dividends TTM / Last 24 months awaits production verification (2026-09-18).** Verify the
+  completed-month TTM line, the 24-month table/totals, and source caveats against cached live
+  data. Local verification used synthetic data and made no Yahoo/Flex requests.
+
 - **`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
   Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
   sum to `end − start` to the cent; `sum(by_sector)` and `sum(by_country)` equal `total_pnl_eur`
@@ -1135,6 +1149,8 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-18** — copied CLAUDE.md to AGENTS.md; added dividend calendar TTM and Last 24 months; full suites/build and fixture browser checks passed; corrected the sibling provisional-window test; local only.
+
 - **2026-09-13** — a health check ("have we committed everything… what are open bugs?": clean,
   green, on the latest commit; found the 09-12 18:00 slot had *skipped*, so `send_flex_request`
   is still unexercised live), then a brainstorm the owner narrowed to "it is ALL ABOUT
@@ -1202,14 +1218,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   written for a *qualifier*; a ten-line itemised list is the always-present-banner failure it
   was never meant to protect, so the qualifier stayed on the KPI card and the list went into the
   collapsed card at the bottom with its count in the header.
-- **2026-09-07 (evening)** — "make the benchmark line start at the same point as my portfolio
-  line whenever I change the time range", with the trap already named in the request: a shift or
-  a scale looks right and is wrong the moment a deposit lands inside the window. Two lessons.
-  **The seed has to come from the pipeline that draws the other line** — reading the anchor value
-  through `get_portfolio_value_over_time(anchor, anchor)` made "the lines start at one point" a
-  property rather than a hope, and the CHF test found the seed had to be divided back through
-  the anchor-day rate because cash is projected per event. And **"does this move beta" had a
-  two-part answer**: not on flow-free days, by arithmetic — but the question surfaced a
-  pre-existing defect where deposit-only days counted as benchmark returns, fixed in the same
-  change. Also: a fixture with a leading price gap made a real Yahoo request from a unit test,
-  which is now a local-dev trap above.

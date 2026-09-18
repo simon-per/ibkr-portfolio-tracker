@@ -6,6 +6,22 @@ export const OTHER = 'Other'
 /** dataKey prefix marking a forecast series, so one stack can carry both. */
 export const FC = 'f:'
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+export function dividendMonthLabel(month: string, withYear = false): string {
+  const [y, m] = month.split('-')
+  const name = MONTH_NAMES[Number(m) - 1] ?? month
+  return withYear ? `${name} ${y.slice(2)}` : name
+}
+
+/** The server's calendar TTM includes the ending month and eleven before it. */
+export function dividendTtmWindowLabel(month: string): string {
+  const [year, m] = month.split('-').map(Number)
+  const start = year * 12 + m - 1 - 11
+  const key = `${Math.floor(start / 12)}-${String(start % 12 + 1).padStart(2, '0')}`
+  return `${dividendMonthLabel(key, true)} – ${dividendMonthLabel(month, true)}`
+}
+
 export interface ChartSeries {
   /** One row per month, keyed by series name (and FC-prefixed name for forecast). */
   chartData: Record<string, number | string>[]

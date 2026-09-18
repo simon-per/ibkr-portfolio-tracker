@@ -7,11 +7,45 @@
 
 ## Dividends — history and forecast
 
-`GET /api/dividends/breakdown?year=&forecast=` → `DividendService.get_dividend_breakdown()`, rendered by
+`GET /api/dividends/breakdown?year=&forecast=&period=` → `DividendService.get_dividend_breakdown()`, rendered by
 `DividendsTab.tsx`: net dividends by month **stacked by symbol**, a year filter (All time + the years
 with data), a Forecast toggle, and a per-stock table (payouts, net, projected, trailing-12M yield).
 Unlike `/summary` it **never enqueues a sync**, so it cannot reach Yahoo (rule 1) — everything comes
 from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
+
+### Monthly / TTM and the rolling 24-month range
+
+The chart defaults to **Monthly**, the current calendar year, and Forecast on. **Last 24 months**
+uses `period=24m`: the first of the month 23 months ago through the end of the current month.
+It filters the monthly bars, received/projected totals and per-security table together. `year` and
+`period` are mutually exclusive (HTTP 422); neither means All time. The response echoes `period`.
+The KPI strip and upcoming calendar remain unwindowed. Selecting an annual row restores that
+calendar year without changing the chart mode.
+
+**TTM is a line of twelve completed calendar months**, not twelve visible bars and not the KPI's
+365 days through today. `ttm_net_eur` and `ttm_mom_pct` on each month are calculated server-side
+from the unwindowed, era-spliced, payment-date-converted history. A point includes its ending month
+and the eleven preceding months; its MoM compares against the preceding month's TTM. Forecasts
+never enter either figure. Switching chart mode or Forecast does not refetch the response.
+
+Coverage starts in the first recorded income month. Until twelve calendar buckets exist, TTM is
+null; current and future months are also null. The 24-month axis includes the current month, but
+its TTM point stays blank (at most 23 completed points). Empty months within recorded history are
+zero, including elapsed months after the last payment: All time extends at least through the
+current month so a stopped payer's rolling total can decline to zero. A zero comparison base gives
+null growth, while a fall from positive income to zero legitimately reports -100%.
+
+`ttm_source` uses `ibkr` / `mixed` / `yfinance_estimate`, or null for a window with no payments.
+`ttm_mom_crosses_era` flags comparisons whose two windows jointly contain both sources. Historical
+gross-estimate and source-transition caveats stay visible beside the line, alongside the reminder
+that portfolio income also changes with holdings and FX. The latest visible TTM amount and change
+are shown directly; tooltips repeat the covered dates and comparison. TTM has its own empty state,
+so a range with no new payments can still show trailing income from earlier months.
+
+Tests: `test_dividend_growth.py` covers calendar boundaries, coverage, stopped/quarterly payers,
+forecast independence, range agreement, era deduplication and payment-date FX;
+`test_dividend_breakdown_contract.py` and `test_api_smoke.py` pin serialization and query validation.
+`DividendsTab.test.tsx` covers range/mode/forecast controls and failure/empty states.
 
 **The boundary itself leaked one dividend per security until 2026-08-05, and the reason is the
 splice's own premise.** The rule keeps estimates strictly *before* the first IBKR payment — but the

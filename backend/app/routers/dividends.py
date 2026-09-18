@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from app.clock import utcnow
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +104,7 @@ async def get_dividend_summary(
 async def get_dividend_breakdown(
     year: Optional[int] = Query(None, ge=2000, le=2100),
     forecast: bool = Query(True),
+    period: Optional[Literal["24m"]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -111,8 +112,10 @@ async def get_dividend_breakdown(
     cadence-based forecast projections. Reads only cached data — unlike /summary
     it never enqueues a sync, so it can never touch Yahoo.
     """
+    if year is not None and period is not None:
+        raise HTTPException(status_code=422, detail="Choose either year or period, not both")
     return await DividendService(db).get_dividend_breakdown(
-        year=year, include_forecast=forecast
+        year=year, include_forecast=forecast, period=period
     )
 
 

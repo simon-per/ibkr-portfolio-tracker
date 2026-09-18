@@ -3,7 +3,7 @@ Dividend Service
 Fetches dividend ex-dates from yfinance, computes income from tax lots,
 converts to EUR, and provides monthly summary data.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from datetime import timedelta, date
 from app.clock import utcnow
 from decimal import Decimal
@@ -889,6 +889,7 @@ class DividendService:
         year: Optional[int] = None,
         include_forecast: bool = True,
         as_of: Optional[date] = None,
+        period: Optional[Literal["24m"]] = None,
     ) -> Dict:
         """
         Dividends grouped by month × symbol plus per-security totals, optionally
@@ -902,6 +903,9 @@ class DividendService:
         injectable purely so tests can pin the forecast horizon.
         """
         as_of = as_of or date.today()
+        if period is not None and (period != "24m" or year is not None):
+            raise ValueError("Choose either a year or period='24m'")
+        current_month = as_of.strftime("%Y-%m")
         # The forecast reads the RAW history: a zero row means "held nothing at that
         # ex-date", which says nothing about whether the company pays — and its date
         # is evidence of the schedule. Only the realized figures are filtered.
@@ -926,6 +930,9 @@ class DividendService:
 
         win_start = date(year, 1, 1) if year is not None else None
         win_end = date(year, 12, 31) if year is not None else None
+        if period == "24m":
+            win_start = date.fromisoformat(self._shift_month(current_month, 23) + "-01")
+            win_end = date.fromisoformat(self._shift_month(current_month, -1) + "-01") - timedelta(days=1)
 
         def _in_window(d: date) -> bool:
             return (win_start is None or d >= win_start) and (win_end is None or d <= win_end)
@@ -1076,11 +1083,13 @@ class DividendService:
         # projection in one place instead of growing a second implementation.
         annual_actual: Dict[int, Decimal] = defaultdict(Decimal)
         month_actual_all: Dict[str, Decimal] = defaultdict(Decimal)
+        month_sources_all: Dict[str, set] = defaultdict(set)
         for p in all_payments:
             d = p.pay_date or p.ex_date
             value = base_fx.convert(self._net_eur(p), d)
             annual_actual[d.year] += value
             month_actual_all[d.strftime("%Y-%m")] += value
+            month_sources_all[d.strftime("%Y-%m")].add(p.source)
 
         def _net_between(after: date, through: date) -> Decimal:
             """Realized net in (after, through], each payment at its own date's rate."""
@@ -1350,15 +1359,37 @@ class DividendService:
 
         if year is not None:
             months_axis = [f"{year:04d}-{m:02d}" for m in range(1, 13)]
+        elif period == "24m":
+            months_axis = [self._shift_month(current_month, back) for back in range(23, -1, -1)]
         else:
             keys = sorted(set(monthly_actual) | set(monthly_forecast))
             months_axis = []
             if keys:
+                # A stopped payer still has elapsed zero-income months. Omitting
+                # those would freeze its rolling income at its final payout.
+                keys.append(current_month)
+                keys.sort()
                 y, m = (int(x) for x in keys[0].split("-"))
                 last_y, last_m = (int(x) for x in keys[-1].split("-"))
                 while (y, m) <= (last_y, last_m):
                     months_axis.append(f"{y:04d}-{m:02d}")
                     y, m = (y, m + 1) if m < 12 else (y + 1, 1)
+
+        def _calendar_ttm(mk: str) -> tuple[Optional[Decimal], set]:
+            """Twelve completed calendar buckets, before slicing the chart window.
+
+            Coverage begins in the first income month, matching the annual view's
+            conservative history boundary. Earlier months are unknown, not zero.
+            This deliberately differs from the headline's trailing 365 days.
+            """
+            start = self._shift_month(mk, 11)
+            if mk >= current_month or first_income is None or start < first_income.strftime("%Y-%m"):
+                return None, set()
+            keys = [self._shift_month(mk, back) for back in range(12)]
+            return (
+                sum((month_actual_all.get(key, Decimal("0")) for key in keys), Decimal("0")),
+                set().union(*(month_sources_all.get(key, set()) for key in keys)),
+            )
 
         months = []
         for mk in months_axis:
@@ -1368,8 +1399,20 @@ class DividendService:
             # "change" would be an artifact of the projection's own flat median —
             # it would read as the payout schedule shifting when nothing has.
             realized = month_actual_all.get(mk, Decimal("0"))
+            ttm_value, ttm_sources = _calendar_ttm(mk)
+            prev_ttm_value, prev_ttm_sources = _calendar_ttm(self._shift_month(mk, 1))
+            comparison_sources = ttm_sources | prev_ttm_sources
             months.append({
                 "month": mk,
+                "ttm_net_eur": round(float(ttm_value), 2) if ttm_value is not None else None,
+                "ttm_mom_pct": self._pct(ttm_value, prev_ttm_value) if ttm_value is not None else None,
+                "ttm_source": (
+                    "mixed" if len(ttm_sources) > 1 else next(iter(ttm_sources), None)
+                ),
+                "ttm_mom_crosses_era": (
+                    ttm_value is not None and prev_ttm_value is not None
+                    and len(comparison_sources) > 1
+                ),
                 "actual": {s: round(float(v), 2) for s, v in sorted(actual.items())},
                 "forecast": {s: round(float(v), 2) for s, v in sorted(forecast.items())},
                 "actual_total_eur": round(float(sum(actual.values(), Decimal("0"))), 2),
@@ -1486,6 +1529,7 @@ class DividendService:
         return {
             "years": years,
             "year": year,
+            "period": period,
             "months": months,
             "securities": sec_rows,
             "total_net_eur": round(float(total_net), 2),

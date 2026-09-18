@@ -176,8 +176,12 @@ async def test_a_second_run_writes_only_what_is_missing(monkeypatch):
         second = await service.sync_sibling_prices(security)
 
         # Only the provisional tail (PROVISIONAL_PRICE_DAYS) is re-stated on a warm cache.
+        # The cutoff is inclusive: today plus three prior calendar days can
+        # contain four weekdays. A fixed <=3 assertion fails on Thu/Fri.
+        cutoff = date.today() - timedelta(days=service.market_price_repo.PROVISIONAL_PRICE_DAYS)
+        expected = sum(row["date"] >= cutoff for row in closes)
         assert first > second
-        assert second <= 3
+        assert second == expected
     finally:
         await session.close()
         await engine.dispose()

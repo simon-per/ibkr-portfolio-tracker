@@ -401,3 +401,146 @@ async def test_an_empty_history_produces_zeros_and_nulls_rather_than_failing():
     finally:
         await session.close()
         await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_calendar_ttm_uses_history_outside_each_display_window():
+    engine, session = await _make_session()
+    try:
+        # Unequal monthly amounts catch shifted boundaries and missing lookback.
+        for i in range(45):
+            await _seed(session, date(2023 + i // 12, i % 12 + 1, 15), str(i + 1),
+                        source="ibkr" if i >= 36 else "yfinance_estimate")
+        svc = DividendService(session)
+        args = {"as_of": date(2026, 9, 18), "include_forecast": False}
+        all_time = await svc.get_dividend_breakdown(**args)
+        rolling = await svc.get_dividend_breakdown(period="24m", **args)
+        selected = await svc.get_dividend_breakdown(year=2026, **args)
+        by_month = {m["month"]: m for m in all_time["months"]}
+
+        assert rolling["period"] == "24m" and rolling["year"] is None
+        assert len(rolling["months"]) == 24
+        assert rolling["months"][0]["month"] == "2024-10"
+        assert rolling["months"][-1]["month"] == "2026-09"
+        assert rolling["months"][0]["ttm_net_eur"] == 198  # Nov 2023..Oct 2024
+        assert rolling["months"][0]["ttm_mom_pct"] == 6.5
+        assert rolling["total_net_eur"] == sum(range(22, 46))
+        assert rolling["securities"][0]["net_eur"] == rolling["total_net_eur"]
+        assert rolling["growth"] == selected["growth"] == all_time["growth"]
+        for response in (rolling, selected):
+            for month in response["months"]:
+                if month["month"] in by_month:
+                    for field in ("ttm_net_eur", "ttm_mom_pct", "ttm_source", "ttm_mom_crosses_era"):
+                        assert month[field] == by_month[month["month"]][field]
+        assert by_month["2023-11"]["ttm_net_eur"] is None
+        assert by_month["2023-12"]["ttm_net_eur"] == 78
+        assert by_month["2023-12"]["ttm_mom_pct"] is None
+        assert by_month["2024-02"]["ttm_net_eur"] == 102  # leap-year February
+        assert by_month["2026-01"]["ttm_source"] == "mixed"
+        assert by_month["2026-01"]["ttm_mom_crosses_era"] is True
+        assert by_month["2026-08"]["ttm_net_eur"] == 462
+        assert by_month["2026-09"]["ttm_net_eur"] is None
+        assert all(m["ttm_net_eur"] is None for m in selected["months"][8:])
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stopped_payer_ttm_reaches_zero_without_truncating_elapsed_months():
+    engine, session = await _make_session()
+    try:
+        await _seed(session, date(2023, 1, 15), "10")
+        r = await DividendService(session).get_dividend_breakdown(
+            as_of=date(2024, 3, 1), include_forecast=False,
+        )
+        months = {m["month"]: m for m in r["months"]}
+        assert r["months"][-1]["month"] == "2024-03"
+        assert months["2023-12"]["ttm_net_eur"] == 10
+        assert months["2024-01"]["ttm_net_eur"] == 0
+        assert months["2024-01"]["ttm_mom_pct"] == -100
+        assert months["2024-02"]["ttm_net_eur"] == 0
+        assert months["2024-02"]["ttm_mom_pct"] is None
+        assert months["2024-03"]["ttm_net_eur"] is None
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_calendar_ttm_forecast_independence_and_quarterly_cadence():
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2024, 1, 1), "100"))
+        await session.flush()
+        for year in (2024, 2025, 2026):
+            for month in (1, 4, 7, 10):
+                if (year, month) <= (2026, 7):
+                    await _seed_per_share(session, date(year, month, 15))
+        svc = DividendService(session)
+        on = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF)
+        off = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF, include_forecast=False)
+        assert on["total_forecast_net_eur"] > 0
+        assert off["total_forecast_net_eur"] == 0
+        for a, b in zip(on["months"], off["months"]):
+            assert a["ttm_net_eur"] == b["ttm_net_eur"]
+            assert a["ttm_mom_pct"] == b["ttm_mom_pct"]
+        assert [m["ttm_net_eur"] for m in on["months"][:6]] == [400] * 6
+        assert [m["ttm_mom_pct"] for m in on["months"][:6]] == [0] * 6
+        assert all(m["ttm_net_eur"] is None for m in on["months"][6:])
+        future = await svc.get_dividend_breakdown(year=2027, as_of=AS_OF)
+        assert all(m["ttm_net_eur"] is None for m in future["months"])
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_24_month_empty_history_is_unknown_and_conflicting_filters_refused():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        r = await svc.get_dividend_breakdown(period="24m", as_of=date(2026, 1, 1))
+        assert [r["months"][0]["month"], r["months"][-1]["month"]] == ["2024-02", "2026-01"]
+        assert len(r["months"]) == 24
+        assert all(m["ttm_net_eur"] is None and m["ttm_mom_pct"] is None for m in r["months"])
+        with pytest.raises(ValueError):
+            await svc.get_dividend_breakdown(year=2026, period="24m")
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_calendar_ttm_splices_duplicates_before_applying_payment_date_fx(monkeypatch):
+    from app.services.portfolio_service import BaseFx, PortfolioService
+
+    fx = BaseFx("CHF", {
+        date(2025, 1, 1): Decimal("0.90"),
+        date(2025, 7, 1): Decimal("0.95"),
+        date(2026, 1, 1): Decimal("0.80"),
+    })
+
+    async def load_fx(self):
+        return fx
+
+    monkeypatch.setattr(PortfolioService, "_load_base_fx", load_fx)
+    engine, session = await _make_session()
+    try:
+        for month in range(1, 13):
+            await _seed(session, date(2025, month, 15), "10")
+        # The estimate is the same payment on its ex-date. It must be consumed
+        # by the Jan 15 IBKR row, never entering any TTM bucket a second time.
+        await _seed(session, date(2026, 1, 2), "999")
+        await _seed(session, date(2026, 1, 15), "20", source="ibkr")
+        result = await DividendService(session).get_dividend_breakdown(
+            year=2026, as_of=date(2026, 2, 1), include_forecast=False,
+        )
+        jan = result["months"][0]
+        assert result["base_currency"] == "CHF"
+        assert jan["actual_total_eur"] == 16
+        assert jan["ttm_net_eur"] == 118  # 5*9 + 6*9.5 + 20*0.8
+        assert jan["ttm_source"] == "mixed"
+        assert jan["ttm_mom_pct"] == 6.3  # prior calendar TTM was 111
+    finally:
+        await session.close()
+        await engine.dispose()

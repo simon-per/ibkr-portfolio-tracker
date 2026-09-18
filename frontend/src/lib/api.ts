@@ -747,6 +747,11 @@ export interface DividendSummaryResponse {
 
 export interface DividendMonthBar {
   month: string;                    // "YYYY-MM"
+  /** Twelve completed calendar months; unavailable before sufficient history. */
+  ttm_net_eur?: number | null;
+  ttm_mom_pct?: number | null;
+  ttm_source?: 'ibkr' | 'mixed' | 'yfinance_estimate' | null;
+  ttm_mom_crosses_era?: boolean;
   /**
    * Growth of the REALIZED figure only, vs the previous month and the same month
    * a year earlier. null when the base is zero (constant for a quarterly payer)
@@ -906,7 +911,8 @@ export interface DividendForwardYield {
 
 export interface DividendBreakdownResponse {
   years: number[];
-  year: number | null;              // null = all time
+  year: number | null;              // null = all time, unless period is set
+  period?: '24m' | null;
   months: DividendMonthBar[];
   securities: DividendSecurityRow[];
   total_net_eur: number;
@@ -1382,9 +1388,10 @@ class ApiClient {
   }
 
   /** Read-only breakdown — unlike /summary it never enqueues a background sync. */
-  async getDividendBreakdown(year?: number): Promise<DividendBreakdownResponse> {
+  async getDividendBreakdown(year?: number, period?: '24m'): Promise<DividendBreakdownResponse> {
     const params = new URLSearchParams();
     if (year !== undefined) params.set('year', String(year));
+    if (period !== undefined) params.set('period', period);
     const qs = params.toString();
     return this.request<DividendBreakdownResponse>(`/api/dividends/breakdown${qs ? `?${qs}` : ''}`);
   }
