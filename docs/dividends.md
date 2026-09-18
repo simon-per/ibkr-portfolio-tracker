@@ -85,6 +85,16 @@ so pinning them equal catches either drifting. Measured on production before the
 both read 147.85 for 2026. The per-symbol maps likewise reconcile to the scalars they are drawn
 against, which is what keeps a stacked bar's segments adding up to the figure quoted beside it.
 
+**Within a cent or two on a wide book, and deliberately so.** Each per-symbol value is rounded to
+2dp on its own while the scalar is rounded once from the unrounded `Decimal` sum, so summing
+twenty-odd rounded segments can land a few cents off the correctly-rounded total. Measured live on
+2026-09-18: 16 of 32 points differed, worst case **0.03 on 309.96 — 0.01%**, thirty times inside the
+0.3% the owner already accepted for FX drift. Rounding the scalar from the rounded parts instead
+would accumulate that error into the headline, which is the figure people quote; the tooltip's own
+"Total" sums the same rounded segments it lists, so nothing a reader can add up disagrees with
+itself. The service-level test asserts **exact** equality on a clean two-security fixture, where no
+such drift exists — a tolerance there would hide a real bucketing bug.
+
 ### Ranking — one colour scheme for both views
 
 `buildChartSeries` ranks symbols once and projects both bucket sets through it, because `colorOf` is

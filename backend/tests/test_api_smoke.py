@@ -333,9 +333,16 @@ def test_the_shapes_that_broke_production_serialize(client):
         )
         # The split a stacked bar is drawn from must add up to the figure quoted
         # beside it, or the segments and the total are two computations.
-        assert sum(point["actual"].values()) == pytest.approx(point["net_eur"], abs=0.01)
+        #
+        # A few cents of tolerance, and only here: each per-symbol value is rounded
+        # on its own while the scalar is rounded once from the unrounded sum, so a
+        # window holding twenty-odd payers drifts by a cent or two (measured live:
+        # worst case 0.03 on 309.96). The service-level test asserts EXACT equality
+        # on a clean two-security fixture, which is where a real bucketing bug
+        # would show — widening that one would hide it.
+        assert sum(point["actual"].values()) == pytest.approx(point["net_eur"], abs=0.05)
         assert sum(point["forecast"].values()) == pytest.approx(
-            point["forecast_net_eur"], abs=0.01
+            point["forecast_net_eur"], abs=0.05
         )
     # The earliest covered windows straddle today — real receipts behind, projection
     # ahead. The last one is wholly in the future, so it has received nothing and

@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-18.** Latest local work, not yet deployed: **the Dividends TTM view is a
+**Last updated: 2026-09-18.** Latest, live on `170df7c`: **the Dividends TTM view is a
 stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
 rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
 it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
@@ -24,7 +24,8 @@ the same shape this service once served as `next_12m_vs_ttm_pct: -100.0`. And **
 the last projected payment** put All time in October while `year=` for the same year ran to December;
 it ends at the horizon now, so every range builds one identical series and only the slice differs.
 
-Verification: 1,520 backend and 648 frontend tests pass, plus TypeScript, build and lint on the
+Verified on production after deploy (see *Watch after the next deploy*). Locally: 1,520 backend and
+648 frontend tests pass, plus TypeScript, build and lint on the
 touched files. Browser checks at 1440px and 390px against synthetic fixtures — stacked segments
 drawn, trimming, future year, toggle, dark theme, no overflow, no console errors and no network.
 Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
@@ -760,14 +761,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The stacked, forecast-aware Dividends TTM awaits production verification (2026-09-18).**
-  `c0ba465` (the Monthly/TTM toggle and the 24-month range) is live and verified; the rebuild on
-  top of it is not deployed yet. Against cached live data, check: the December window equals
-  `growth.annual[<year>].total_eur` to the cent, and each point's per-symbol maps sum to its own
-  scalars — those two are the identities the new series is held to. Then in a browser: All time's
-  TTM axis reaching a year past the monthly chart's, the solid/dashed split, the legend rendering
-  in TTM mode, and the toggle dropping the open windows. Local verification used synthetic data
-  and made no Yahoo or Flex requests.
+- **The stacked, forecast-aware Dividends TTM is live on `170df7c` and verified against the API
+  (2026-09-18, 20:55 Berlin).** Both identities hold on production: the December window equals
+  that calendar year's annual row to the cent (2025 21.83, 2026 147.85, 2027 309.96 — all three
+  exact), and All time's rolling series reaches 2027-12 against the monthly chart's 2026-12, which
+  is the separate-array design doing its job. Per-symbol maps reconcile to their scalars within a
+  cent or two on wide windows — independent rounding, worst case 0.03 on 309.96 (0.01%), written
+  up in `docs/dividends.md`; not a defect and not worth chasing.
+  **Still to see in a browser on production**: the solid/dashed split on a real book, the legend
+  in TTM mode, the toggle dropping the open windows, and the tab at 390 px. Local verification
+  used synthetic fixtures and made no Yahoo or Flex requests.
 
 - **`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
   Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
