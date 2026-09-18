@@ -937,12 +937,48 @@ export interface DividendTtmPoint {
   partial: boolean;
 }
 
+/**
+ * How fast the rolling twelve-month total is moving: the geometric average
+ * monthly growth between two windows of `ttm_series`, and that rate compounded
+ * to a year.
+ *
+ * Derived from the UNWINDOWED series, which is why it arrives from the server
+ * rather than being computed here: with year=2026 selected this response carries
+ * no 2025 window, so no client could reach back six months from January.
+ */
+export interface DividendTtmPace {
+  monthly_pct: number;
+  /** The same rate over twelve months — compounded, never monthly * 12. */
+  annualized_pct: number;
+  from_month: string;
+  to_month: string;
+  /** What those two windows totalled, so the arithmetic on screen is auditable. */
+  from_eur: number;
+  to_eur: number;
+  /** Months actually spanned. Nominally 6, clamped to the history available. */
+  months: number;
+  /** Fewer than six were available. NOT DividendTtmPoint's `partial`, which means
+   *  something else entirely: that a window has not yet fully elapsed. */
+  short_history: boolean;
+  /** An anchor window carries projection, so the figure is forward-looking. Read
+   *  this rather than the Forecast toggle: with the toggle on and nothing
+   *  projected, both paces are the measured one and neither is an estimate. */
+  includes_forecast: boolean;
+  /** The anchors straddle the estimate -> IBKR boundary. */
+  crosses_era: boolean;
+}
+
 export interface DividendBreakdownResponse {
   years: number[];
   year: number | null;              // null = all time, unless period is set
   period?: '24m' | null;
   months: DividendMonthBar[];
   ttm_series: DividendTtmPoint[];
+  /** The pace of that series on the two bases the Forecast toggle picks between.
+   *  Both ride on one response so flipping stays instant. null when there are not
+   *  two covered windows to compare — never a zeroed object. */
+  ttm_pace_measured?: DividendTtmPace | null;
+  ttm_pace_projected?: DividendTtmPace | null;
   securities: DividendSecurityRow[];
   total_net_eur: number;
   total_forecast_net_eur: number;

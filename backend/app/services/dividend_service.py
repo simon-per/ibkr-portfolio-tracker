@@ -3,7 +3,7 @@ Dividend Service
 Fetches dividend ex-dates from yfinance, computes income from tax lots,
 converts to EUR, and provides monthly summary data.
 """
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 from datetime import timedelta, date
 from app.clock import utcnow
 from decimal import Decimal
@@ -683,9 +683,7 @@ class DividendService:
         first_income: Optional[date],
         current_month: str,
         horizon_month: str,
-        axis_start: Optional[str],
         axis_end: Optional[str],
-        windowed: bool,
         include_forecast: bool,
     ) -> List[Dict]:
         """
@@ -693,11 +691,14 @@ class DividendService:
 
         Three rules, each of which would be a wrong number the other way:
 
-        **The whole series is built before any of it is filtered.** A point's
-        month-over-month compares against the previous month's window, which on a
-        year view is the previous December — a point the reader never sees. Slicing
-        first would make January's change depend on the range selected, and the
-        figures for one month must be the same whichever range is showing it.
+        **The whole series is returned; narrowing to the selected range is the
+        caller's job.** A point's month-over-month compares against the previous
+        month's window, which on a year view is the previous December — a point
+        the reader never sees. Slicing before the comparisons would make January's
+        change depend on the range selected, and the figures for one month must be
+        the same whichever range is showing it. Slicing *here* would additionally
+        hide the full series from `_ttm_pace`, which has to measure over the whole
+        history for the same reason `DividendGrowth` does.
 
         **A window needs twelve months of history or it does not exist.** Coverage
         starts at the first month that carried income; before that the months are
@@ -716,7 +717,7 @@ class DividendService:
         simply stops at the last elapsed month rather than publishing windows that
         are short by however much of them has not happened yet.
         """
-        if first_income is None or axis_start is None or axis_end is None:
+        if first_income is None or axis_end is None:
             return []
 
         coverage_start = cls._shift_month(first_income.strftime("%Y-%m"), -11)
@@ -747,7 +748,11 @@ class DividendService:
             # chart or its forecast total.
             last = max(axis_end, horizon_month)
         else:
-            last = min(axis_end, cls._shift_month(current_month, 1))
+            # The last elapsed month, and NOT `min(axis_end, ...)`: capping the
+            # build at the selected range would make the series' extent depend on
+            # which year is showing, and the pace measured over it with it. The
+            # caller's slice narrows the wire to the same set either way.
+            last = cls._shift_month(current_month, 1)
 
         points: List[Dict] = []
         prev_total: Optional[Decimal] = None
@@ -790,11 +795,75 @@ class DividendService:
             prev_total, prev_forecast, prev_sources = total, fc, sources
             mk = cls._shift_month(mk, -1)
 
-        # Only now, with every comparison already made against its true neighbour,
-        # narrow to what the selected range should show.
-        if windowed:
-            points = [p for p in points if axis_start <= p["month"] <= axis_end]
         return points
+
+    @staticmethod
+    def _ttm_pace(
+        points: List[Dict], horizon_month: str, lookback: int = 6,
+    ) -> Tuple[Optional[Dict], Optional[Dict]]:
+        """
+        Growth pace of the rolling series, on the two bases the client picks
+        between: measured (elapsed windows only) and projected (through the end of
+        the projection horizon).
+
+        Both are returned on every response. The Forecast toggle chooses one, and
+        computing both server-side is what keeps flipping it instant — the same
+        reason the per-symbol forecast split rides along.
+
+        The measured anchors are windows with ``partial`` false, which are
+        necessarily all received: no projection can be dated on or before today, so
+        an elapsed window's forecast component is zero by construction rather than
+        by filtering.
+
+        The projected anchor is the last window **at or before the horizon**, not
+        simply the last point. `_rolling_twelve_months` ends at
+        ``max(axis_end, horizon_month)``; were an axis ever to reach past the
+        horizon, its final windows would be short by however much of themselves the
+        projection does not cover, and would read as a collapse.
+        """
+        def between(series: List[Dict]) -> Optional[Dict]:
+            if len(series) < 2:
+                # One window is a level, not a rate. Absent rather than 0.0, which
+                # would read as "flat" — an answer, on a book that has not said one.
+                return None
+            months = min(lookback, len(series) - 1)
+            start, end = series[-1 - months], series[-1]
+            base, current = start["total_eur"], end["total_eur"]
+            # A zero base makes the rate undefined, not large (`_pct`'s rule), and a
+            # negative endpoint has no real root. A `current` of exactly zero is
+            # fine: it is -100%/month, which is what a payer stopping looks like.
+            if base <= 0 or current < 0:
+                return None
+            monthly = (current / base) ** (1 / months) - 1
+            return {
+                "monthly_pct": round(monthly * 100, 2),
+                # Compounded, never monthly * 12 — the point of a geometric rate is
+                # that it multiplies back up.
+                "annualized_pct": round(((1 + monthly) ** 12 - 1) * 100, 1),
+                "from_month": start["month"],
+                "to_month": end["month"],
+                "from_eur": base,
+                "to_eur": current,
+                "months": months,
+                "short_history": months < lookback,
+                # From the anchors themselves. With the forecast requested but
+                # nothing projected, this series is the measured one and must not
+                # be badged an estimate on the strength of the flag.
+                "includes_forecast": (
+                    start["forecast_net_eur"] > 0 or end["forecast_net_eur"] > 0
+                ),
+                # Either anchor straddling the splice on its own ("mixed"), or the
+                # two disagreeing about provenance. A None is a window with no
+                # realized income at all, which straddles nothing.
+                "crosses_era": (
+                    "mixed" in (start["source"], end["source"])
+                    or len({s for s in (start["source"], end["source"]) if s}) > 1
+                ),
+            }
+
+        measured = [p for p in points if not p["partial"]]
+        projected = [p for p in points if p["month"] <= horizon_month]
+        return between(measured), between(projected)
 
     @staticmethod
     def _same_day_last_year(d: date) -> date:
@@ -1525,17 +1594,25 @@ class DividendService:
                     months_axis.append(f"{y:04d}-{m:02d}")
                     y, m = (y, m + 1) if m < 12 else (y + 1, 1)
 
-        ttm_series = self._rolling_twelve_months(
+        horizon_month = horizon_end.strftime("%Y-%m")
+        ttm_all = self._rolling_twelve_months(
             month_actual_sym_all=month_actual_sym_all,
             month_forecast_sym_all=month_forecast_sym_all,
             month_sources_all=month_sources_all,
             first_income=first_income,
             current_month=current_month,
-            horizon_month=horizon_end.strftime("%Y-%m"),
-            axis_start=months_axis[0] if months_axis else None,
+            horizon_month=horizon_month,
             axis_end=months_axis[-1] if months_axis else None,
-            windowed=year is not None or period == "24m",
             include_forecast=include_forecast,
+        )
+        # The pace reads the WHOLE series, the chart reads the selected slice. Both
+        # from one build: a second call for the unwindowed version would be two
+        # computations of one figure, and they only have to agree until they don't.
+        ttm_pace_measured, ttm_pace_projected = self._ttm_pace(ttm_all, horizon_month)
+        ttm_series = (
+            [p for p in ttm_all if months_axis[0] <= p["month"] <= months_axis[-1]]
+            if months_axis and (year is not None or period == "24m")
+            else ttm_all
         )
 
         months = []
@@ -1667,6 +1744,8 @@ class DividendService:
             "period": period,
             "months": months,
             "ttm_series": ttm_series,
+            "ttm_pace_measured": ttm_pace_measured,
+            "ttm_pace_projected": ttm_pace_projected,
             "securities": sec_rows,
             "total_net_eur": round(float(total_net), 2),
             "total_forecast_net_eur": round(float(total_forecast), 2),

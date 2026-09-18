@@ -352,6 +352,20 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert furthest["source"] is None
     assert furthest["forecast_net_eur"] == furthest["total_eur"] > 0
 
+    # No window here has fully elapsed, so there is no measured pace to report —
+    # absent rather than a rate derived from windows that are still running. The
+    # projected one exists, and has to compound back to the two window totals it
+    # names: that identity is the only thing tying the published rate to the series
+    # it came from, and it holds through the response_model rather than only in the
+    # service.
+    assert unwindowed["ttm_pace_measured"] is None
+    pace = unwindowed["ttm_pace_projected"]
+    assert pace["includes_forecast"] is True
+    assert pace["to_month"] == unwindowed["ttm_series"][-1]["month"]
+    assert (1 + pace["monthly_pct"] / 100) ** pace["months"] == pytest.approx(
+        pace["to_eur"] / pace["from_eur"], rel=1e-3
+    )
+
     # Completeness travels with the headline. `total_market_value_eur` is a sum over the
     # holdings the backend could price, so a partial one has to declare itself — the SBI
     # shape, where 446.93 CHF left this figure with only a sync warning to catch it. The

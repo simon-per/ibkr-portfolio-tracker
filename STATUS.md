@@ -5,7 +5,18 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-18.** Latest, live on `170df7c`: **the Dividends TTM view is a
+**Last updated: 2026-09-18.** Latest, not yet deployed: **the Dividends tab reports a growth
+pace** — the geometric average monthly growth of the rolling twelve-month series over six months,
+and that rate compounded to a year, in one strip under the KPI tiles. Two bases ride on every
+response and the Forecast toggle picks between them: between fully elapsed windows, or through the
+end of the projection horizon. Whether it reads `est.` is decided by the anchors carrying projection,
+not by the toggle, so a response with nothing projected cannot badge a measurement as a guess. It is
+the endpoint ratio rather than a product of monthly ratios (the only form that survives a zero window
+in between) and it annualizes by compounding, so it multiplies back to the two window totals printed
+beside it. Short history shrinks the span and says so; no base, or fewer than two windows, renders
+nothing. Rules in `docs/dividends.md`; what to check live is in *Watch after the next deploy*.
+
+Previously, live on `170df7c`: **the Dividends TTM view is a
 stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
 rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
 it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
@@ -24,10 +35,11 @@ the same shape this service once served as `next_12m_vs_ttm_pct: -100.0`. And **
 the last projected payment** put All time in October while `year=` for the same year ran to December;
 it ends at the horizon now, so every range builds one identical series and only the slice differs.
 
-Verified on production after deploy (see *Watch after the next deploy*). Locally: 1,520 backend and
-648 frontend tests pass, plus TypeScript, build and lint on the
-touched files. Browser checks at 1440px and 390px against synthetic fixtures — stacked segments
-drawn, trimming, future year, toggle, dark theme, no overflow, no console errors and no network.
+The stacked TTM was verified on production after deploy (see *Watch after the next deploy*); the
+growth pace has not been. Locally: 1,530 backend and 656 frontend tests pass, plus TypeScript and
+build. Browser checks at 1440px and 390px against synthetic fixtures covered the stacked chart —
+segments drawn, trimming, future year, toggle, dark theme, no overflow, no console errors and no
+network. **The pace strip has had no browser pass yet.**
 Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
 `AGENTS.md` is an exact copy of the root `CLAUDE.md`. Unrelated UI restyle changes already in the
 working tree were preserved and remain uncommitted.
@@ -761,6 +773,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The Dividends growth pace is built and unverified on production.** `ttm_pace_measured` /
+  `ttm_pace_projected` on `/api/dividends/breakdown`, shown as a strip under the KPI tiles: the
+  geometric average monthly growth of `ttm_series` over six months, and that rate compounded to a
+  year. The Forecast toggle picks which of the two is shown. **Check on the live response**: the
+  measured pace is identical across `?year=2025`, `?year=2026`, `?period=24m` and no filter;
+  `(1 + monthly_pct/100) ** months` reproduces `to_eur / from_eur`; `ttm_pace_projected.to_month`
+  is the horizon month and `ttm_pace_measured.to_month` the last elapsed one. **And in a browser**:
+  the strip's wrapping at 390 px, the `est.` badge following the object rather than the button, and
+  whether the forward pace on the real book reads as informative or as a restatement of the
+  forecast's flat median — if it is the latter, the honest fix is a default rather than a new
+  figure. Local verification used synthetic fixtures and made no Yahoo or Flex requests.
+
 - **The stacked, forecast-aware Dividends TTM is live on `170df7c` and verified against the API
   (2026-09-18, 20:55 Berlin).** Both identities hold on production: the December window equals
   that calendar year's annual row to the cent (2025 21.83, 2026 147.85, 2027 309.96 — all three
@@ -1182,7 +1206,12 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   manufactures a decline — the `next_12m_vs_ttm_pct: -100.0` shape again; and **end a series at
   the horizon, not at the last data point in it**, or two ranges disagree about which months
   exist. Simulating the change against production first produced the two identities it is now
-  tested on. Local only, not deployed.
+  tested on. Shipped as `170df7c`/`7ba36b8` and verified live. Then, same day, a **growth pace**
+  on that series — geometric average monthly growth over six months, plus the annualized rate,
+  in a strip under the KPI tiles, with the Forecast toggle picking between elapsed and projected
+  anchors. Its lesson: **an `est.` badge must come from the data, not the toggle that selected
+  it** — with the forecast requested and nothing projected, both bases are the measured one. Not
+  deployed.
 
 - **2026-09-13** — a health check ("have we committed everything… what are open bugs?": clean,
   green, on the latest commit; found the 09-12 18:00 slot had *skipped*, so `send_flex_request`

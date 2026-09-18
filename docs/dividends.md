@@ -420,4 +420,51 @@ only client-side growth arithmetic and copies the server's two rules exactly: ad
 never divide by zero. Tests: `tests/test_dividend_growth.py`, `src/lib/dividendGrowth.test.ts`,
 `src/lib/delta.test.ts`.
 
+### Growth pace — how fast the rolling total is moving
+
+`ttm_pace_measured` and `ttm_pace_projected` on the same response, rendered as one strip under the KPI
+tiles (`DividendGrowthPace`). The geometric average **monthly** growth between two windows of
+`ttm_series`, and that rate compounded to a year.
+
+**Siblings of `growth`, not members of it** — the same reason `forward_yield` is one. Every member of
+`DividendGrowth` comes from the 365-day and annual accumulators; this comes from calendar-month rolling
+windows, which is a different twelve months. `DividendTtmPoint` already labours to keep `growth.ttm`
+and the rolling series apart, and nesting one inside the other would undo that.
+
+**Computed as the endpoint ratio**, `(to/from) ** (1/months)`, never as a product of the monthly
+ratios. They are the same number — the intermediate terms telescope — but only this form survives a
+zero window in between, where the product form has one ratio at `0` and the next undefined. A payer
+stopping is exactly what takes a window to zero, and it is the case the rolling chart exists to show.
+
+**Geometric, not arithmetic.** The rate is published beside the two window totals it was measured
+between, so it has to compound back to them. An arithmetic mean of the six monthly percentages does
+not, and would print a figure contradicting the two numbers next to it. Annualizing likewise
+compounds: `(1+m)**12 - 1`, never `m * 12`.
+
+**The Forecast toggle picks the basis, and both are always sent** so flipping stays instant:
+
+| toggle | anchors |
+|---|---|
+| off | the last window with `partial` false, and six closed windows before it. Necessarily all received — no projection can be dated on or before today, so an elapsed window's forecast component is zero by construction. |
+| on | the last window **at or before the horizon month**, and six before it. Not simply the last point: `_rolling_twelve_months` ends at `max(axis_end, horizon_month)`, and a window past the horizon would be short by however much of itself the projection does not cover and read as a collapse. |
+
+Whether the strip says `est.` is read off `includes_forecast` on the object, **not** off the toggle.
+With the forecast requested and nothing projected the two paces are the same measured object, and
+badging it would mark a measurement as a guess — the same gate `projecting` applies to the series.
+
+The forward pace measures two projected windows against each other, and the projection is a flat median
+per-share amount on an inferred cadence, so on a book that is not changing it comes out at **zero**.
+That is correct and it is pinned; what it costs is that the forward rate describes the payout schedule
+as much as the portfolio, which the strip says on the surface rather than in a `title=`.
+
+**Degradation, in order.** Six months is the nominal lookback, not a precondition: fewer covered
+windows shrink the span, and `months` + `short_history` travel with the figure so "per month" cannot
+quietly mean three of them. Fewer than two windows, a zero `from` (undefined, not large — `_pct`'s
+rule) or a negative `to` (no real root) all yield `None`, and the strip renders nothing at all. Falling
+**to** zero is different: that is a measurable −100%/month and it is reported.
+
+The pace is measured over the **whole** series and then the series is sliced for the wire — which is
+why `_rolling_twelve_months` returns everything and `get_dividend_breakdown` does the narrowing. Pinned
+identical across `?year=2025`, `?year=2026`, `?period=24m` and all time.
+
 ---

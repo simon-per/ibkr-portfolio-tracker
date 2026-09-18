@@ -8,6 +8,7 @@ import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, 
 import { dividendColor, dividendPalette } from '@/lib/dividendColors'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
+import { DividendGrowthPace } from './DividendGrowthPace'
 import { DividendKpiCards } from './DividendKpiCards'
 import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
@@ -333,6 +334,12 @@ export function DividendsTab() {
   // empty — which is exactly when knowing the trend is most useful.
   const hasGrowth = (data?.growth?.annual?.length ?? 0) > 0
 
+  // One expression picks the basis, so the figure and its badge cannot disagree
+  // about which one is showing. Whether it reads as an estimate is then decided by
+  // the object itself (`includes_forecast`) rather than by this toggle: with the
+  // forecast requested and nothing projected, both paces ARE the measured one.
+  const pace = showForecast ? data?.ttm_pace_projected : data?.ttm_pace_measured
+
   return (
     <Card>
       <CardHeader>
@@ -430,6 +437,11 @@ export function DividendsTab() {
                 isLoading={isLoading}
               />
             )}
+
+            {/* Outside the chart branch below, so it survives an empty selected
+                year: the pace is measured over the whole history, and a year with
+                no income is exactly when the trend is worth knowing. */}
+            <DividendGrowthPace pace={pace} />
 
             {isLoading ? (
               <div className={cn(DIVIDEND_CHART_BOX, 'animate-pulse rounded bg-muted')} />
