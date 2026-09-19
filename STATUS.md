@@ -5,7 +5,43 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, not yet deployed: **the Dividends growth figure now
+**Last updated: 2026-09-19.** Latest, not yet deployed: **a dividend is now dated when the cash
+is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
+the cadence comes from yfinance's ex-date series and nothing shifted it — while `upcoming[].date`
+and `next_pay_date` were named as pay dates and the calendar headed *Expected next*. Combined with
+`horizon_start = as_of + 1` (a projection is deleted on its own date) and the era splice (which
+drops the estimate recording that same payment), a dividend that had gone ex was in **no figure at
+all** until IBKR posted the cash. Measured on production before the fix: six held securities at
+once, the oldest 22 days in, NVDA with another twelve to go on a 21-day lag.
+
+Three sources now date a projection, each named on the wire as `pay_date_source`: an IBKR
+**accrual** (`<OpenDividendAccruals>` — the only record carrying an ex-date and a pay date
+together, free on the statement already pulled, one portal tick away — see *Needs a human*), a
+**measured lag** per security (`median(pay − ex)` paired out of the raw history by the matcher the
+era splice already runs; every IBKR payment on record paired, and the per-security spread is a day
+or two), or the **ex-date**, now saying that is what it is rather than implying otherwise. A
+payment that has gone ex and not been paid is badged *payment pending* on the calendar and
+deliberately in no total — the cash has not arrived, so counting it would credit the account with
+money it has not been paid. `months[]`, `ttm_series`, `growth` and the toggle's closed-prefix
+guarantee are untouched in shape; the figures move because the dates are now pay dates, which is
+the fix. Accruals live in their own table and never reach `dividend_payments`. Rules in
+`docs/dividends.md`; what to check live is in *Watch after the next deploy*.
+
+Two things the work turned up. **`match_estimates_to_ibkr` is one function now** — the splice wants
+the matched estimates to drop and the lag wants their distances kept, off the identical pairing, and
+a second copy is the file's own opening warning. And **IBKR does send `exDate` on ordinary dividend
+cash transactions; `ibflex` 0.15 does not model it, so the sanitizer has been dropping it on every
+sync** — reading it would make the lag exact, but it needs parsing outside `ibflex` and is
+backward-looking, so it closes nothing the accruals do not (recorded in `docs/flex-and-sync.md` so
+it is not rediscovered as new). `test_flex_attr_coverage.py` also had a hole the work walked into:
+its extractor map was hand-kept, so a new extractor was not merely unchecked but *invisibly*
+unchecked — there is a family test for that now, and three extractors that were never covered are.
+
+Locally: 1,546 backend and 673 frontend tests pass, plus TypeScript, build and lint (the 16 lint
+errors are pre-existing and in files this did not touch). Nothing here has run against a real
+statement — the accrual path is exercised by fixtures only, and the section is still off.
+
+Before that, also not yet deployed: **the Dividends growth figure now
 answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
 six-month rate anchored at the projection horizon, so it read `Jan 27 – Dec 27` while the reader
 was looking at 2026 — the owner's verdict was "not really usable", and he was right: a rate that
@@ -300,6 +336,27 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 ---
 
 ## Needs a human
+
+- **Tick "Open Dividend Accruals" in the Flex Query, and the dividend calendar stops guessing
+  when the cash arrives.** On query `App_OpenLots` (1389408), add the **Open Dividend Accruals**
+  section. There are no field checkboxes worth fussing over — the parser reads `conid`, `exDate`,
+  `payDate`, `quantity`, `grossAmount`, `tax`, `netAmount` and `currency`, and tolerates any of them
+  missing. Everything else is built and deployed: `extract_dividend_accruals` reads it,
+  `sync_dividend_accruals` replaces the set wholesale, and the calendar prefers an announced pay
+  date over an inferred one the moment rows arrive. No code change, no redeploy.
+
+  **Why it is worth doing.** It is the only record IBKR publishes carrying an ex-date and a pay
+  date on one row, so it is the only way to know when a declared dividend will actually be paid.
+  Without it the calendar adds a lag measured from history, which works for the securities that
+  have already been paid through IBKR and falls back to the ex-date for the rest — about half the
+  ex-dated payers on the day this shipped, and disproportionately the ones sitting in the blind
+  window, because a position that has never been paid has nothing to measure.
+
+  **Why it is not urgent.** The feature works without it and says which date source it used, per
+  payment. An empty table is the supported default.
+
+  Like the Cash Report edit, **the portal edit itself resets the day's Flex generation**, so it
+  buys a free extra sync rather than costing one.
 
 - **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
   owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
@@ -783,6 +840,28 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **Pay-date-dated dividend projections are built and unverified on production, and they carry a
+  migration** (`v5e2a9b6c0d1`, additive: one empty `dividend_accruals` table). Read
+  `/api/dividends/breakdown?forecast=true` and check, in order:
+  - every `upcoming[]` entry has a `pay_date_source`, and none is `accrual` yet (the portal
+    section is off — see *Needs a human*);
+  - the six securities that were blind on 09-19 — SK Hynix, NVDA, IQQ, TSMC, NXPI, HPE — appear,
+    and the four with no measured lag (SK Hynix, TSMC, NXPI, HPE) read `ex_date` with `pending`
+    true rather than being absent;
+  - NVDA's next date sits about three weeks after its ex-date, not on it, and
+    `forecast_lag_days` on its row is in the low twenties;
+  - `growth`, `ttm_series` and the December-window identity still hold — the figures move because
+    the dates moved, but no window may go missing and no month may carry a projection before the
+    current one.
+
+  **And in a browser**: the *payment pending* badge on a real row, the `ex …` note beside a shifted
+  date, and the calendar at 390 px — the row gained two inline elements and is the one place this
+  change is visible. Local verification used fixtures only and made no Yahoo or Flex request.
+
+  Then, once the portal section is ticked: the next successful 18:00 Berlin `full_sync` should
+  report a non-zero `dividend_accruals_seen`, `pay_date_source` should flip to `accrual` for the
+  held payers, and an accrual should vanish within a sync of its cash posting.
+
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
   from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally
@@ -1207,6 +1286,21 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-19 (later)** — "verify whether forecasts use ex-dividend date, payment date, or
+  another date". They used the ex-date, everywhere, under field names that said pay date — and the
+  investigation turned that labelling question into a live defect: six held securities had gone ex
+  and were in no figure at all, because the projection dies on its own date and the era splice
+  drops the estimate recording the same payment. Projections are dated on an expected pay date now
+  (announced accrual > measured lag > ex-date, each named on the wire), and a gone-ex-unpaid
+  dividend is `pending` on the calendar and in no total. Three lessons. **A field name is a
+  claim** — `next_pay_date` carrying an ex-date was the whole bug, visible in the schema for
+  months. **Measure before designing**: reading production turned "the lag is probably stable"
+  into 7–29 days, stable per security, every payment paired — and revealed that half the payers
+  have nothing to measure, which is what made the accrual ingest worth building rather than
+  optional. And **a hand-kept map inside a guard is a hole in the guard**: the Flex attribute
+  coverage test was parametrized over a dict someone has to remember to extend, so a new extractor
+  was not unchecked but invisibly unchecked. Not deployed; the Flex section still needs a tick.
+
 - **2026-09-19** — rewrote yesterday's dividend growth pace after the owner called it unusable:
   it was unwindowed by design and so ignored the range selector entirely. Now CMGR/CAGR between
   the first and last window on screen, computed client-side from the array that already defines
@@ -1283,18 +1377,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   and every deploy since the beginning had been discarding the tail of the database.
   **Verify by re-reading, not by re-running**: the second run only revealed it because its
   `previous_as_of` disagreed with the first run's output.
-- **2026-09-08** — "the Forecast tab shows the total portfolio value as Total Contributions, but
-  gains are already baked in". The owner had it right, and reading the one component found three
-  more in the same place: the table column of the same name was a *different* number with no seed
-  at all, the seed was holdings-only so the Current button disagreed with the hero card, and the
-  formula was written out four times. Two lessons. **A legend entry is a claim about a quantity**,
-  and when a table column and a chart band share a name they have to share a function —
-  `lib/forecast.ts` is that function, and the family test is the table row equalling the series
-  point. And **the seed had to include cash for the arithmetic, not for taste**: money in counts a
-  deposit the moment it lands, so measuring it against holdings alone understates today's gain by
-  the idle balance — which settled a question that looked like a preference. Same evening: "I do
-  not want the Look-through warning to take up half the page" — ten near-identical staleness
-  lines above the content. The rule that a caveat must sit outside every collapsible was
-  written for a *qualifier*; a ten-line itemised list is the always-present-banner failure it
-  was never meant to protect, so the qualifier stayed on the KPI card and the list went into the
-  collapsed card at the bottom with its count in the header.
