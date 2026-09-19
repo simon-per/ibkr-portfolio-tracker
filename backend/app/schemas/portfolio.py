@@ -576,7 +576,7 @@ class DividendSecurityRow(BaseModel):
     next_pay_date: Optional[str] = None
     source: Optional[str] = None    # 'ibkr' | 'estimate' | 'mixed'; None = forecast-only
     # 'net' = sized from dividends actually received; 'gross_estimate' = from
-    # yfinance's gross per-share only, so withholding isn't deducted.
+    # yfinance's gross per-share converted to estimated net with the default factor.
     forecast_basis: Optional[str] = None
     # How thin the projection's inference is: how many dated payments defined the
     # schedule, and the median gap it settled on. Two samples is a guess with a
@@ -718,9 +718,9 @@ class DividendForwardYield(BaseModel):
     # position valued at 0.00 would add its projected income to the numerator and
     # nothing to the denominator — the SBI shape, which reads the yield *high*.
     unpriced_holdings: int
-    # How much of `annual_eur` is sized from yfinance gross per-share, which deducts no
-    # withholding. Quantified rather than flagged, so the caveat can be stated in a
-    # footnote instead of only asserted.
+    # How much of `annual_eur` is estimated net derived from yfinance gross per-share
+    # using assumed withholding. Quantified rather than flagged, so the caveat can
+    # be stated in a footnote instead of only asserted.
     gross_estimate_eur: float
     basis: str                              # 'net' | 'mixed' | 'gross_estimate'
 

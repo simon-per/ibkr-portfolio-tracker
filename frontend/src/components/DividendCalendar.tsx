@@ -132,9 +132,8 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
       {anyEstimate && (
         <div className="text-xs text-muted-foreground">
           <span className="text-amber-600 dark:text-amber-500">*</span>{' '}
-          sized from published gross dividends per share, because nothing has been
-          received from that holding yet — withholding tax is not deducted, so those
-          run a little high
+          estimated net from published gross dividends using an assumed withholding
+          deduction; actual net payments may differ
         </div>
       )}
     </div>
@@ -158,7 +157,7 @@ function Amount({ value, estimate }: { value: number; estimate: boolean }) {
       {estimate && (
         <span
           className="ml-0.5 text-amber-600 dark:text-amber-500"
-          title="Gross estimate — withholding not deducted"
+          title="Estimated net from gross — assumed withholding"
         >
           *
         </span>

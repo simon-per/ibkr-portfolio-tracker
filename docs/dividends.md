@@ -271,21 +271,34 @@ because the distance to a future horizon is a property of the question. Otherwis
 every payer look stopped and returned an empty year.
 
 `forecast_basis` reports which amount was used: `net` when a dividend has actually been received (net of
-withholding), `gross_estimate` when only yfinance's gross per-share exists — the latter runs a little
-high and the UI badges it. **"Actually received" means an IBKR row.** A `yfinance_estimate` row with
+withholding), `gross_estimate` for estimated net derived from yfinance's gross per-share.
+The latter uses `DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`: an assumed 15% deduction,
+not measured withholding, and the UI badges that assumption. **"Actually received" means an IBKR
+row.** A `yfinance_estimate` row with
 shares held also carries `gross > 0`, but `compute_dividend_income` writes its net as gross with zero
 withholding, so dividing that by the shares gives the gross per-share figure straight back — and until
 2026-09-12 `_forecast_inputs` stamped it `net` (SK Hynix read `net` on production with no IBKR payout
 on record; most payers took this path, since the IBKR duplicate of a yfinance per-share row is
-dropped). The `net` branch now requires `p.source == "ibkr"`; an estimate row that landed keeps
-contributing exactly the per-share figure it always did (its ex-date-converted EUR amount over the
+dropped). The `net` branch now requires `p.source == "ibkr"`; an estimate row that landed supplies
+the same gross per-share input as before (its ex-date-converted EUR amount over the
 shares — a better gross than `amount_per_share × one recent rate`, and the only figure when the FX
-dict lacks the currency), just under the `gross_estimate` label. The label moved; a size can move a
+dict lacks the currency), now multiplied by the default net factor under the unchanged
+`gross_estimate` label. In the earlier provenance fix the label moved; a size could move a
 little for a security that used to prefer `net`: its pre-ownership estimate rows contributed no size
 under that preference (their `net_ps` was `None`) and now enter the median at
 `amount_per_share × rate`. Measured on production across the deploy: forward yield 322.80 → 320.92
 (−0.6%), with the daily FX refresh between the two reads as the other contributor. Future years are selectable (`years` offers `as_of.year + 1`) and a future
 year is forecast in full rather than from today.
+
+**One gross-to-estimated-net helper, two read paths.** `_estimated_net_from_gross` applies the
+factor when `_forecast_inputs` selects its gross fallback and when an unpaid Yahoo estimate is
+emitted directly to the calendar. Both apply it before display-currency conversion and rounding;
+missing per-share inputs stay absent. Stored gross and historical estimates remain unchanged,
+as do shared income readers. Repeated reads always start from the original gross, so the factor
+cannot compound. IBKR-derived forecasts, accrual `netAmount` (or gross minus reported withholding
+when it is absent), and actual cash net bypass the factor. Accrual matching, pay dates, pending
+status and calendar-only treatment are unchanged. Handoff and factor-change regressions live in
+`tests/test_dividend_pay_date.py`.
 
 **Accumulating ETFs correctly show nothing** — DBPG, EMIM, IWDA, SXR8, VWCE, XAIX, XNAS (the `1C`/`ACC`
 suffixes), alongside genuine non-payers (AMD, Amazon, Arista, NU, Credo, Ondas). Verified rather than
@@ -474,11 +487,11 @@ It also silently disagreed with the Performance tab's *Yield on Cost* card, whic
 forward projection by cost since it shipped — one name, two definitions, on two screens.
 Pinned equal on a single-security book by `test_the_row_and_the_card_agree_on_yield_on_cost`.
 
-`basis` is the same three-way flag as elsewhere (`net` | `mixed` | `gross_estimate`) with
-`gross_estimate_eur` quantifying it, because a projection sized from yfinance gross per-share deducts
-no withholding — and a yield is the figure most likely to be checked against a broker's own, which
-quotes gross. The card shows it as *projected, part gross* in the **footnote**: a caveat reachable only
-by hovering does not exist on a touch device, which `DividendsTab` already learned once.
+`basis` retains the same three-way flag (`net` | `mixed` | `gross_estimate`) for compatibility.
+`gross_estimate_eur` quantifies the **estimated-net** contribution derived from gross, after the
+shared default factor. It is not the unreduced gross amount. The card shows *projected net,
+assumed withholding* in the footnote whenever this contribution exists; broker-derived net keeps
+its existing basis and amount.
 
 Note the deliberate asymmetry on a row: `forward_yield_pct` always covers the next twelve months while
 `forecast_net_eur` beside it is bounded by the selected window, so a row can show **no forecast and a

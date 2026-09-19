@@ -126,10 +126,8 @@ export function RiskMetricsCards({
       ? 'No projected dividends'
       : [
           `${formatCurrency(dividend.annual_eur)}/yr`,
-          // 'part gross', not 'part est.' — everything here is an estimate, and the
-          // thing worth saying is that some of it deducts no withholding and so runs
-          // high against the net figure the label otherwise implies.
-          dividend.basis === 'net' ? 'projected' : 'projected, part gross',
+          // Gross-derived amounts use assumed withholding, not broker-reported tax.
+          dividend.basis === 'net' ? 'projected' : 'projected net, assumed withholding',
           `${dividend.paying_holdings} of ${dividend.priced_holdings} pay`,
           ...(dividend.unpriced_holdings > 0
             ? [`${dividend.unpriced_holdings} unpriced`]

@@ -173,12 +173,10 @@ describe('the dividend rate cards', () => {
     expect(screen.queryByText('0.00%')).toBeNull()
   })
 
-  it('marks a rate whose projection is partly a gross estimate', () => {
-    // 7% of this account's projection deducts no withholding, so a bare "projected"
-    // would claim a net figure it is not. In the footnote, not only in the tooltip:
-    // a caveat reachable by hovering does not exist on a phone.
+  it('marks a rate whose projected net uses assumed withholding', () => {
+    // Keep the assumed withholding visible in the footnote, including on phones.
     renderWith({}, { dividend: { ...dividend, basis: 'mixed', gross_estimate_eur: 6.61 } })
-    expect(screen.getByText(/projected, part gross/)).toBeTruthy()
+    expect(screen.getByText(/projected net, assumed withholding/)).toBeTruthy()
   })
 
   it('names unpriced holdings, which are excluded from both sides', () => {

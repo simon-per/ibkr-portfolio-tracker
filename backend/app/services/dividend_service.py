@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # still discarding the decades yfinance returns.
 PRE_OWNERSHIP_HISTORY_YEARS = 3
 
+# Read-time estimate only; stored gross and broker-reported net remain unchanged.
+DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")
+
 # Below this many days held inside the trailing year, a trailing-12M yield divides
 # a partial year's income by a full position value and so reads low. 350 rather
 # than 365 to absorb a lot opened a few days into the window without flagging
@@ -147,15 +150,18 @@ def _summary_source(payments, ibkr_from) -> str:
     return "ibkr" if sources <= {"ibkr"} else "mixed"
 
 
+def _estimated_net_from_gross(gross: Optional[Decimal]) -> Optional[Decimal]:
+    """Apply the shared forecast assumption without rounding or mutating history."""
+    return gross * DEFAULT_DIVIDEND_NET_FACTOR if gross is not None else None
+
+
 def _forward_basis(total: Decimal, gross_estimate: Decimal) -> str:
     """
-    What the forward yield's numerator is net of: 'net', 'mixed' or 'gross_estimate'.
+    Provenance of the forward yield's net numerator.
 
-    Three-way for the same reason as {@link _summary_source}: a projection sized from
-    dividends actually received is net of real withholding, while one sized from
-    yfinance's gross per-share deducts none and so runs high. A flat 'net' on a total
-    that is 7% gross claims a precision it does not have — and a yield is the figure
-    most likely to be compared against a broker's own, which quotes gross.
+    'net' uses broker-reported net, while 'gross_estimate' uses estimated net derived
+    from gross with DEFAULT_DIVIDEND_NET_FACTOR. 'mixed' contains both. Keep these
+    wire values for compatibility; the factor is an assumption, not measured tax.
     """
     if gross_estimate <= 0:
         return "net"
@@ -1095,9 +1101,9 @@ class DividendService:
             if sec is None:
                 continue
             # Prefer a net-of-withholding per-share figure derived from what
-            # actually landed; fall back to the gross per-share yfinance
-            # publishes. Never mix the two inside one security — that would
-            # average a gross figure against a net one.
+            # actually landed; fall back to estimated net from yfinance's gross
+            # per-share. Keep the two provenances separate inside one security;
+            # the shared factor is applied only when selecting the gross fallback.
             #
             # Only an IBKR row is "what actually landed". A yfinance_estimate row
             # with shares held also has gross > 0, but compute_dividend_income writes
@@ -1140,7 +1146,7 @@ class DividendService:
                 HistPayment(
                     on_date=e.on_date,
                     per_share_eur=(e.per_share_eur[0] if prefer_net
-                                   else e.per_share_eur[1]),
+                                   else _estimated_net_from_gross(e.per_share_eur[1])),
                 )
                 for e in entries
             ]
@@ -1567,16 +1573,15 @@ class DividendService:
                     continue  # IBKR has announced it; the accrual above says it better
                 lag_days, lag_samples = pay_lags.get(p.security_id, (0, 0))
                 expected = ex + timedelta(days=lag_days if lag_samples else 0)
-                amt = base_fx.convert(self._net_eur(p), expected)
+                amt = base_fx.convert(_estimated_net_from_gross(self._net_eur(p)), expected)
                 upcoming.append({
                     "date": expected.isoformat(),
                     "ex_date": ex.isoformat(),
                     "security_id": p.security_id,
                     "symbol": _symbol(p.security_id),
                     "net_eur": round(float(amt), 2),
-                    # A yfinance row's "net" is its gross with zero withholding, so the
-                    # figure runs high and says so — `_forecast_inputs` makes the same
-                    # distinction for the same reason.
+                    # The stored Yahoo "net" is gross. Apply the same estimated-net
+                    # factor as `_forecast_inputs`, retaining the provenance label.
                     "basis": "gross_estimate",
                     "pay_date_source": "measured_lag" if lag_samples else "ex_date",
                     "pending": expected <= as_of,
@@ -1821,7 +1826,7 @@ class DividendService:
                 (cost_by_sec.get(sid, Decimal("0")) for sid in priced), Decimal("0")
             )
             # Part of the projection is sized from yfinance gross per-share, which
-            # deducts no withholding and so runs a little high. Reported as a share of
+            # uses assumed withholding to derive estimated net. Reported as a share of
             # the total rather than a bare flag, so the caveat can be quantified — and
             # rendered in the footnote, not only in a tooltip: a caveat reachable only
             # by hovering does not exist on a touch device.
@@ -2008,7 +2013,7 @@ class DividendService:
                 ),
                 # 'net' when the projection is sized from dividends actually
                 # received, 'gross_estimate' when only yfinance's gross per-share
-                # exists — the latter ignores withholding and so runs a little high.
+                # exists — converted to estimated net with the shared factor.
                 "forecast_basis": row["forecast_basis"],
                 # How thin the projection's inference is: how many dated payments
                 # defined the schedule, and the median gap it settled on. Two

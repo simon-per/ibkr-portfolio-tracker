@@ -499,3 +499,103 @@ async def test_an_absent_flex_section_is_a_supported_state():
     data = await _breakdown(session)
     assert data["upcoming"] == []
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("factor, expected", [(None, 85), (Decimal("0.72"), 72)])
+async def test_one_factor_sizes_both_gross_fallbacks_without_mutating_history(monkeypatch, factor, expected):
+    import app.services.dividend_service as module
+    from sqlalchemy import select
+    from app.models.dividend_payment import DividendPayment
+
+    if factor is not None:
+        monkeypatch.setattr(module, "DEFAULT_DIVIDEND_NET_FACTOR", factor)
+    engine, session = await _session()
+    try:
+        repo = DividendRepository(session)
+        # Establish the IBKR era without a matching payment for the recent ex-date.
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": date(2025, 1, 10), "currency": "EUR",
+            "gross_amount_eur": Decimal("100"), "net_amount_eur": Decimal("91"),
+            "withholding_tax_eur": Decimal("9"), "source": "ibkr",
+        })
+        for ex in (date(2025, 7, 8), date(2025, 10, 8), date(2026, 1, 8), date(2026, 4, 8)):
+            await repo.upsert_payment({
+                "security_id": 1, "ex_date": ex, "currency": "EUR",
+                "shares_held": Decimal("10"), "amount_per_share": Decimal("10"),
+                "gross_amount_eur": Decimal("100"), "net_amount_eur": Decimal("100"),
+                "withholding_tax_eur": Decimal("0"), "source": "yfinance_estimate",
+            })
+        await session.commit()
+        first = await _breakdown(session)
+        assert first["upcoming"]
+        assert {u["net_eur"] for u in first["upcoming"]} == {expected}
+        assert any(u["pending"] for u in first["upcoming"])
+        assert any(not u["pending"] for u in first["upcoming"])
+        assert first["total_forecast_net_eur"] > 0
+        assert first["total_net_eur"] == 91
+        assert await _breakdown(session) == first
+        session.expire_all()
+        stored = (await session.execute(select(DividendPayment).where(
+            DividendPayment.source == "yfinance_estimate",
+        ))).scalars().all()
+        assert len(stored) == 4
+        assert all(p.gross_amount_eur == p.net_amount_eur == Decimal("100") for p in stored)
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reported_net, tax, expected", [
+    (Decimal("92"), Decimal("-15"), 92),
+    (None, Decimal("-8"), 92),
+])
+async def test_pending_estimate_hands_off_to_accrual_then_actual_cash(reported_net, tax, expected):
+    engine, session = await _session()
+    try:
+        await _seed_quarterly(session)
+        repo = DividendRepository(session)
+        ex = date(2026, 4, 8)
+        pay = ex + timedelta(days=LAG)
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": ex, "currency": "EUR",
+            "shares_held": Decimal("10"), "amount_per_share": Decimal("10"),
+            "gross_amount_eur": Decimal("100"), "net_amount_eur": Decimal("100"),
+            "withholding_tax_eur": Decimal("0"), "source": "yfinance_estimate",
+        })
+        await session.commit()
+        svc = DividendService(session)
+        before = await _breakdown(session)
+        entry = next(u for u in before["upcoming"] if u["ex_date"] == ex.isoformat())
+        assert (entry["net_eur"], entry["pending"]) == (85, True)
+
+        await svc.sync_dividend_accruals([{
+            "conid": 100, "ex_date": ex, "pay_date": pay, "currency": "EUR",
+            "gross_amount": Decimal("100"), "tax": tax, "net_amount": reported_net,
+        }], {"100": 1})
+        await session.commit()
+        accrued = await _breakdown(session)
+        entries = [u for u in accrued["upcoming"] if u["ex_date"] == ex.isoformat()]
+        assert len(entries) == 1
+        assert (entries[0]["net_eur"], entries[0]["basis"], entries[0]["pending"]) == (expected, "net", True)
+        assert entries[0]["pay_date_source"] == "accrual"
+        assert accrued["total_net_eur"] == before["total_net_eur"]
+        assert accrued["months"] == before["months"]
+        assert accrued["ttm_series"] == before["ttm_series"]
+
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": pay, "pay_date": pay, "currency": "EUR",
+            "gross_amount_eur": Decimal("100"), "net_amount_eur": Decimal("91"),
+            "withholding_tax_eur": Decimal("9"), "source": "ibkr",
+        })
+        # Normal snapshot replacement clears the accrual after IBKR pays it.
+        await svc.sync_dividend_accruals([], {"100": 1})
+        await session.commit()
+        paid = await _breakdown(session)
+        assert not any(u["ex_date"] == ex.isoformat() for u in paid["upcoming"])
+        assert paid["total_net_eur"] == before["total_net_eur"] + 91
+        assert (pay, Decimal("91")) in await svc.ibkr_cash_receipts()
+    finally:
+        await session.close()
+        await engine.dispose()

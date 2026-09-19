@@ -5,7 +5,26 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, live on `c791fd9` and verified against the API: **a dividend
+**Last updated: 2026-09-19.** Latest, not yet deployed: **a forecast sized from Yahoo's gross
+per-share now deducts an assumed withholding of 15%** (`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`).
+Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
+overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
+high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
+applied at the two read paths that select the gross fallback (`_forecast_inputs`, and an unpaid Yahoo
+estimate emitted straight to the calendar), before currency conversion and rounding. **Stored history,
+broker-reported net, accrual `netAmount`, actual cash and every shared income reader are untouched**,
+and because each read starts from the stored gross the factor cannot compound — both pinned, the
+second by re-reading and comparing. The `net` | `mixed` | `gross_estimate` wire values are unchanged
+for compatibility, but `gross_estimate` now means *estimated net derived from gross*, and the
+captions say "assumed withholding" rather than "runs a little high".
+
+**The factor is a single global assumption, and this book is not single-jurisdiction.** 15% is the
+US and Dutch treaty rate; German, Korean and Taiwanese payers withhold materially more, so those
+projections still read high, just less so. A *measured* rate is derivable from data already stored —
+`withholding_tax_eur / gross_amount_eur` on IBKR rows, grouped by the ISIN-prefix country the DA-1
+report already groups by — and that is the honest version of this. Not built: see *Worth doing next*.
+
+Previously, live on `c791fd9` and verified against the API: **a dividend
 is now dated when the cash is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
 the cadence comes from yfinance's ex-date series and nothing shifted it — while `upcoming[].date`
 and `next_pay_date` were named as pay dates and the calendar headed *Expected next*. Combined with
@@ -841,6 +860,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The estimated-net factor is built and unverified on production.** Once it ships, read
+  `/api/dividends/breakdown?forecast=true` and check that a `gross_estimate` row's
+  `forecast_net_eur` and every `pending` calendar amount have fallen by 15% against the figures
+  recorded below, that `basis` / `forecast_basis` still read `gross_estimate` rather than flipping
+  to `net`, and that **`total_net_eur` and `growth.ttm` have not moved at all** — realized income
+  must be untouched. The DA-1 income on `/api/tax/report` is the second place to confirm that:
+  it reads the same rows and must be identical.
+
 - **Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
   (2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
   measured lag read `ex_date` and `pending`, NVDA reads `measured_lag` dated three weeks past its
@@ -1002,6 +1029,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   on-time sync look early.
 
 ## Worth doing next
+
+0. **Measure the withholding rate instead of assuming 15%.** `DEFAULT_DIVIDEND_NET_FACTOR = 0.85`
+   is one global constant applied to every gross-sized forecast, and it is the US/Dutch treaty
+   rate — German (26.375%), Korean and Taiwanese payers withhold materially more, so their
+   projections still read high. The honest figure is already in the database:
+   `withholding_tax_eur / gross_amount_eur` on the IBKR rows. It cannot be measured *per security*
+   where it is needed — a security with IBKR payments already takes the `net` branch and never
+   touches the factor — but it can be measured **per country**, off the ISIN prefix the DA-1
+   report already groups by, and applied to an unpaid holding in the same jurisdiction. That is
+   the same shape as the ex→pay lag: derive it from matched history, report the sample count, and
+   fall back to the global constant when a country has none. Until then the caption says "assumed
+   withholding", which is true and is the reason this is a *next* rather than a defect.
 
 0. **Brinson allocation / selection attribution against the benchmark — needs data first.**
    The Analytics tab (2026-09-13) shows each sector's *weight at start* beside its *share of
@@ -1193,6 +1232,11 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
 
 Each of these cost real time at least once.
 
+- **A fresh worktree needs its own dependencies.** The global Python installation has an older
+  FastAPI that cannot collect `test_api_hardening.py` (`iter_route_contexts` import error).
+  Use a Python 3.12 `backend/venv` with `backend/requirements.txt`; use placeholder Flex credentials
+  and `SCHEDULER_ENABLED=false` for offline tests.
+
 - **A service-level benchmark test can reach Yahoo.** `calculate_benchmark_value_over_time`
   calls `_ensure_prices_available` itself, which fetches whenever the fixture leaves a gap it
   considers missing — a leading gap at the range start, or a trailing day inside
@@ -1282,6 +1326,8 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-19 (net-factor follow-up)** — shared 0.85 factor for gross-derived forecasts and unpaid calendar estimates; captions and handoff regressions updated; local only.
+
 - **2026-09-19 (later)** — "verify whether forecasts use ex-dividend date, payment date, or
   another date". They used the ex-date, everywhere, under field names that said pay date — and the
   investigation turned that labelling question into a live defect: six held securities had gone ex
@@ -1328,48 +1374,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   decomposition, segments, rolling risk, drawdowns, closed positions), 6 backend and 14 frontend
   tests, one extracted loop (`attribution_rows`) instead of a second copy. Brinson deferred for
   want of benchmark sector data rather than approximated.
-
-- **2026-09-12** — "let's look for bugs or things that look wrong or not work properly and
-  try to fix it." Three read-only hunts in parallel (backend valuation, frontend, sync/ops),
-  each finding verified by reading the code and, where the public API allowed, against
-  production, before it went into the plan: 32 defects, 25 shipped in small commits with a
-  test each, seven recorded here instead or dropped. Three lessons, and a fourth from the
-  item that arrived last: **"checked and correct" is only as deep as the layer that was read**
-  — the sync/ops hunt cleared the Flex retry policy against the application's code, then read
-  the installed library and retracted it, and that retraction was the highest-severity finding
-  of the day. Three lessons. **Production being healthy proves
-  only that today's data is kind**: every sum identity held and every warning was legitimate,
-  and the bugs were all in the paths the data did not exercise — a range before inception,
-  a second account older than the Flex claim, a Yahoo bar landing on a NAV date, a 429 in the
-  one loop that reported nothing. **The silent shape is the default one**: a dict without a
-  `warnings` key looks finished, so the rule became "a step that can stop early says so on
-  its own result, and a job passes *every* step result to `_collect_warnings`". And **a
-  fix that contradicts a rule the codebase already pinned is not a fix** — recording a
-  sync run for an unparseable Flex file would have reversed the finpension CLI's own test
-  ("a file we never read is not a database event"), so it was dropped. Also: two files
-  carried two concerns each, and staging them in two steps kept every intermediate commit
-  self-consistent, which is what makes a small commit revertable. Afternoon: "why does the
-  carried price end? … we get the prices from somewhere or not?" — the owner was right that
-  dropping a 0.6% position out of the total to avoid a stale-price error of a fraction of
-  that was the wrong trade, and the same fund's other share class is quoted daily. Lesson:
-  **a level the NAV oracle refuses can still be a perfect source of returns** — the 49% gap
-  that made `0P0000S0OE.SW` the wrong *price* is irrelevant to it as an *anchor*, and the
-  oracle's job moved from "is the level right" to "do the moves track", checked on every
-  upload.
-- **2026-09-08 (night)** — "please look for issues and let's brainstorm", then "push it then".
-  A read-only audit with the codebase's own lenses (duplicate-name AST walk, stand-in values,
-  production reads, dependency advisories) found more in the operational layer than in the
-  arithmetic: seven identical stale-basket warnings on every run for two weeks, a public API on a
-  January-2024 Starlette with 14 advisories, a deploy script that took the site down for the
-  build, and a cache nothing read. Three lessons. **A warning that has been present for two
-  weeks is a feature request**, not an alert — the fix was the missing trigger, and the data had
-  been one HTTP call away all along. **A dependency pin is a decision that ages silently**; nothing
-  in the repo ever asked OSV, and the suite that made the bump safe (1,443 green, one test-code
-  fix) had been there for months. And **"push it" after a ranked list means the top of the
-  list**, so the four cheapest-per-risk items shipped and the rest went into *Worth doing next*
-  as items rather than as work. Then the verification found the biggest bug of the night by
-  accident: running the new basket refresh twice around a deploy showed the first run's
-  commits gone — `portfolio.db` is a file bind mount, so the WAL dies with the container,
-  and every deploy since the beginning had been discarding the tail of the database.
-  **Verify by re-reading, not by re-running**: the second run only revealed it because its
-  `previous_as_of` disagreed with the first run's output.

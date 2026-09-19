@@ -35,6 +35,18 @@ function payment(over: Partial<DividendUpcomingPayment> = {}): DividendUpcomingP
 }
 
 describe('DividendCalendar', () => {
+  it('labels gross-derived amounts as estimated net with assumed withholding', () => {
+    render(
+      <DividendCalendar
+        upcoming={[payment({ net_eur: 85, basis: 'gross_estimate', pending: true })]}
+        colorOf={colorOf}
+      />,
+    )
+    expect(screen.getByText(/estimated net from published gross dividends/)).toBeTruthy()
+    expect(screen.getByTitle('Estimated net from gross — assumed withholding')).toBeTruthy()
+    expect(screen.queryByText(/withholding tax is not deducted/)).toBeNull()
+  })
+
   it('shows the expected pay date and keeps the ex-date beside it', () => {
     render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} />)
     expect(screen.getByText('22 May')).toBeTruthy()

@@ -805,7 +805,7 @@ export interface DividendSecurityRow {
   /** Earliest projected payment — the date the CASH is expected, not the ex-date. */
   next_pay_date: string | null;
   source: 'ibkr' | 'estimate' | 'mixed' | null; // null = forecast-only row
-  /** 'net' = sized from dividends received; 'gross_estimate' = withholding not deducted. */
+  /** 'net' = sized from dividends received; 'gross_estimate' = estimated net derived from gross. */
   forecast_basis: 'net' | 'gross_estimate' | null;
   /** How many dated payments defined the schedule. 2 is a guess with a schedule attached. */
   forecast_samples: number | null;
@@ -931,7 +931,7 @@ export interface DividendForwardYield {
   priced_holdings: number;
   /** Held but unpriced, so excluded from both sides. Worth saying when non-zero. */
   unpriced_holdings: number;
-  /** How much of `annual_eur` deducts no withholding, so the caveat can be quantified. */
+  /** Estimated-net share of `annual_eur` derived from gross using assumed withholding. */
   gross_estimate_eur: number;
   basis: 'net' | 'mixed' | 'gross_estimate';
 }

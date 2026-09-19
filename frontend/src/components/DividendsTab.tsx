@@ -501,9 +501,9 @@ export function DividendsTab() {
                       </span>
                       {securities.some((r) => r.forecast_basis === 'gross_estimate') && (
                         <span>
-                          <span className="text-amber-600 dark:text-amber-500">*</span> projected
-                          from gross dividends per share — nothing received yet, so withholding
-                          is not deducted and these run a little high
+                          <span className="text-amber-600 dark:text-amber-500">*</span> estimated net
+                          from gross dividends using an assumed withholding deduction;
+                          actual net payments may differ
                         </span>
                       )}
                       {securities.some(

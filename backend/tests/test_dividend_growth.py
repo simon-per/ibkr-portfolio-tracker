@@ -567,8 +567,8 @@ async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_i
         assert by_m["2026-07"]["mom_includes_forecast"] is False
         # ...and this one is open AND projected.
         assert by_m["2026-10"]["net_eur"] == 300
-        assert by_m["2026-10"]["forecast_net_eur"] == 100
-        assert by_m["2026-10"]["total_eur"] == 400
+        assert by_m["2026-10"]["forecast_net_eur"] == 85  # gross 100 x 0.85
+        assert by_m["2026-10"]["total_eur"] == 385
         assert by_m["2026-10"]["mom_includes_forecast"] is True
     finally:
         await session.close()

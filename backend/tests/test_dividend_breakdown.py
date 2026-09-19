@@ -341,8 +341,8 @@ async def test_a_recently_bought_payer_is_forecast_from_its_own_history():
         assert row["payouts"] == 0          # nothing received yet...
         assert row["forecast_payouts"] >= 2  # ...but the schedule is known
         assert row["forecast_basis"] == "gross_estimate"
-        # 0.50/share x 100 shares
-        assert row["forecast_net_eur"] == pytest.approx(50.0 * row["forecast_payouts"])
+        # 0.50 gross/share x 100 shares x 0.85 estimated-net factor
+        assert row["forecast_net_eur"] == pytest.approx(42.5 * row["forecast_payouts"])
     finally:
         await session.close()
         await engine.dispose()
@@ -849,10 +849,8 @@ async def test_the_row_and_the_card_agree_on_yield_on_cost():
 @pytest.mark.asyncio
 async def test_the_forward_yield_declares_a_gross_estimate_contribution():
     """
-    A projection sized from yfinance's gross per-share deducts no withholding, so a
-    total carrying any of it is not the net figure a bare label would claim — and a
-    yield is the figure most likely to be checked against a broker's own, which quotes
-    gross. Quantified rather than flagged, so the footnote can say how much.
+    A projection sized from yfinance's gross per-share uses assumed withholding.
+    Quantify that estimated-net contribution separately from broker-derived net.
     """
     engine, session = await _make_session()
     try:
@@ -864,7 +862,7 @@ async def test_the_forward_yield_declares_a_gross_estimate_contribution():
         for d in QUARTERLY:
             await _seed_payment(session, 1, d, "10.00", "ibkr")
         # Per-share history with nothing received: the only thing that can size BBB's
-        # projection is yfinance's gross per-share, which is what `gross_estimate` means.
+        # projection is estimated net from gross, retaining `gross_estimate` provenance.
         for d in QUARTERLY:
             await DividendRepository(session).upsert_payment({
                 "security_id": 2, "ex_date": d, "pay_date": d, "currency": "EUR",
@@ -969,7 +967,7 @@ async def test_a_continuously_held_position_still_reports_full_coverage():
 
 
 @pytest.mark.asyncio
-async def test_an_estimate_that_landed_while_shares_were_held_is_still_gross():
+async def test_gross_derived_forecasts_keep_their_provenance_and_ibkr_net_is_unchanged():
     """
     `compute_dividend_income` writes a yfinance_estimate row's net as its gross with
     zero withholding. Dividing that by the shares gives the gross per-share figure
@@ -1003,7 +1001,9 @@ async def test_an_estimate_that_landed_while_shares_were_held_is_still_gross():
         rows = {r["symbol"]: r for r in out["securities"]}
         assert rows["AAA"]["forecast_basis"] == "gross_estimate"
         assert rows["BBB"]["forecast_basis"] == "net"
-        # And the total's three-way flag sees the gross half rather than a flat "net".
+        assert rows["AAA"]["forecast_net_eur"] == 4.25 * rows["AAA"]["forecast_payouts"]
+        assert rows["BBB"]["forecast_net_eur"] == 4.25 * rows["BBB"]["forecast_payouts"]
+        # Equal amounts still carry different provenance.
         assert out["forward_yield"]["basis"] == "mixed"
     finally:
         await session.close()
