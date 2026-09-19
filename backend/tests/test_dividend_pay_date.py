@@ -26,6 +26,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -599,3 +600,269 @@ async def test_pending_estimate_hands_off_to_accrual_then_actual_cash(reported_n
     finally:
         await session.close()
         await engine.dispose()
+# --- the projection tail: when NOTHING records the payment yet ---------------------
+
+async def _seed_estimates_only(session, *, last_ex, gap_days=91, count=4):
+    """
+    A payer yfinance records and IBKR has never paid — VT's exact shape on production:
+    a dozen estimate rows, no cash transaction of its own, so no lag is measurable for
+    it and its projected dates stay ex-dates.
+    """
+    repo = DividendRepository(session)
+    exes = [last_ex - timedelta(days=gap_days * i) for i in range(count)][::-1]
+    for ex in exes:
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": ex, "currency": "EUR",
+            "shares_held": Decimal("10"), "amount_per_share": Decimal("1.5"),
+            "gross_amount_eur": Decimal("15"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("15"), "source": "yfinance_estimate",
+        })
+    await session.commit()
+    return exes
+
+
+async def _seed_ibkr_era(session):
+    """
+    One IBKR payment on an UNRELATED security, long before anything else happens.
+
+    The era boundary is the account's, not the security's: on production `ibkr_from` is
+    2026-02-18 while VT has never paid a cent through IBKR. Without this the estimate
+    tail is switched off entirely (`ibkr_from is None`) and the handoff below would be
+    measured against a state the account has not been in since February.
+    """
+    session.add(Security(id=2, isin="US0378331005", symbol="AAPL", description="Apple",
+                         currency="USD", conid=200, asset_category="STK",
+                         exchange="NASDAQ"))
+    await session.flush()
+    await DividendRepository(session).upsert_payment({
+        "security_id": 2, "ex_date": date(2025, 6, 15), "pay_date": date(2025, 6, 15),
+        "currency": "EUR", "shares_held": Decimal("0"),
+        "gross_amount_eur": Decimal("5"), "withholding_tax_eur": Decimal("1"),
+        "net_amount_eur": Decimal("4"), "source": "ibkr",
+    })
+    await session.commit()
+
+
+# Last ex-date 2026-01-30, quarterly: the cadence puts the next payment on 2026-04-30,
+# which is YESTERDAY. That is the VT case exactly — ex 2026-09-18, read on the 19th.
+VT_LAST_EX = date(2026, 1, 30)
+VT_DUE = date(2026, 4, 30)
+
+
+@pytest.mark.asyncio
+async def test_a_payment_the_cadence_predicted_survives_its_own_date():
+    """
+    The VT case. Nothing records this dividend: yfinance writes its series the day AFTER
+    the ex-date, IBKR has never paid this security, and no accrual has been announced.
+    All we have is our own cadence — which named the date correctly and then threw the
+    payment away, because `horizon_start` is `as_of + 1`.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+
+    data = await _breakdown(session)
+    entry = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    assert entry["date"] == VT_DUE.isoformat() == (AS_OF - timedelta(days=1)).isoformat()
+    assert entry["pending"] is True
+    assert entry["pay_date_source"] == "ex_date"
+    assert entry["ex_date"] == VT_DUE.isoformat()   # no lag to shift it by
+    assert entry["basis"] == "gross_estimate"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_inferred_payment_reaches_the_calendar_and_no_total():
+    """
+    The same claim the estimate tail carries: the cash has not arrived, so calling it
+    income pays the account money it has not been paid, and backdating it into an elapsed
+    month breaks the closed-prefix guarantee the Forecast toggle rests on.
+
+    Compared against the same fixture one quarter earlier, whose overdue payment is old
+    enough to have expired — so the ONLY difference between the two runs is this entry.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+    data = await _breakdown(session)
+
+    entry = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    bar = next(m for m in data["months"] if m["month"] == entry["date"][:7])
+    assert (bar["actual_total_eur"], bar["forecast_total_eur"]) == (0, 0)
+    # Present on the calendar, absent from every total that sums the calendar.
+    assert entry["net_eur"] > 0
+    forward = sum(u["net_eur"] for u in data["upcoming"] if not u["pending"])
+    assert data["growth"]["next_12m_eur"] == pytest.approx(forward, abs=0.02)
+    assert data["total_forecast_net_eur"] == pytest.approx(
+        sum(u["net_eur"] for u in data["upcoming"]
+            if not u["pending"] and u["date"][:4] == str(AS_OF.year)), abs=0.02
+    )
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_next_pay_date_is_the_next_payment_not_the_overdue_one():
+    """`next_pay_date` answers "when next", and an overdue payment is not next."""
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+    data = await _breakdown(session)
+    row = next(r for r in data["securities"] if r["security_id"] == 1)
+    assert row["next_pay_date"] == "2026-07-30"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_position_opened_after_the_ex_date_is_owed_nothing():
+    """
+    Entitlement is fixed on the ex-date. Buying the day after it buys no dividend, and
+    an inference that ignored this would invent one for every position opened in the
+    last three months.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+    # Move the only lot to the day after the payment went ex.
+    lot = (await session.execute(select(TaxLot))).scalars().first()
+    lot.open_date = VT_DUE + timedelta(days=1)
+    await session.commit()
+
+    data = await _breakdown(session)
+    assert [u for u in data["upcoming"] if u["pending"]] == []
+    assert any(u["security_id"] == 1 for u in data["upcoming"]), \
+        "the future projections must still be there"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_overdue_payment_is_sized_by_the_holding_it_went_ex_with():
+    """Shares bought after the ex-date carry no entitlement, so they must not size it."""
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+    before = await _breakdown(session)
+    owed = next(u for u in before["upcoming"] if u["pending"])["net_eur"]
+
+    session.add(TaxLot(
+        security_id=1, open_date=VT_DUE + timedelta(days=1), quantity=Decimal("90"),
+        cost_basis=Decimal("54000"), cost_basis_eur=Decimal("54000"),
+        price_per_unit=Decimal("600"), currency="EUR", is_open=True,
+    ))
+    await session.commit()
+
+    after = await _breakdown(session)
+    entry = next(u for u in after["upcoming"] if u["pending"])
+    assert entry["net_eur"] == owed          # unchanged by the ten-fold position
+    assert next(u for u in after["upcoming"] if not u["pending"])["net_eur"] > owed
+    await engine.dispose()
+
+
+# A cadence that does NOT snap to a calendar period, so the projected dates step in
+# exact days and the expiry boundary can be landed on. 120 keeps the payer inside
+# STOPPED_AFTER_GAPS at ninety days stale, which a monthly one would not.
+SLOW_GAP = 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("age, still_shown", [
+    (PENDING_MAX_AGE_DAYS, True),
+    (PENDING_MAX_AGE_DAYS + 1, False),
+])
+async def test_an_inference_nothing_ever_confirms_stops_claiming(age, still_shown):
+    """
+    A synthetic payment expires; it is our own guess, and a guess nothing confirms in
+    three months is a calendar entry the reader learns to ignore — the same reason the
+    stale-basket banner had to become a refresh.
+
+    Pinned against the constant rather than the arithmetic: the bound currently falls
+    out of the projection's start date, and an edit there could unbound it in silence.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(
+        session, last_ex=AS_OF - timedelta(days=age + SLOW_GAP), gap_days=SLOW_GAP,
+    )
+    data = await _breakdown(session)
+    due = (AS_OF - timedelta(days=age)).isoformat()
+    assert [u["date"] for u in data["upcoming"] if u["pending"]] == (
+        [due] if still_shown else []
+    )
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_accrual_outlives_the_bound_an_inference_is_held_to():
+    """
+    The asymmetry is the point. An accrual is IBKR asserting the money is still owed,
+    and it leaves when IBKR stops saying so — the wholesale replace does that within a
+    sync of the cash posting. Ageing it out would delete a live, stated liability.
+    """
+    engine, session = await _session()
+    await _seed_quarterly(session)
+    old = AS_OF - timedelta(days=PENDING_MAX_AGE_DAYS * 2)
+    session.add(DividendAccrual(
+        security_id=1, ex_date=old - timedelta(days=14), pay_date=old, currency="EUR",
+        net_amount_eur=Decimal("12.5"), last_seen_at=utcnow(),
+    ))
+    await session.commit()
+    data = await _breakdown(session)
+    entry = next(u for u in data["upcoming"] if u["pay_date_source"] == "accrual")
+    assert (entry["date"], entry["pending"]) == (old.isoformat(), True)
+    await engine.dispose()
+
+
+# --- the handoff --------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("estimate, accrual, cash, shown", [
+    (False, False, False, 1),   # only our cadence knows
+    (True,  False, False, 1),   # yfinance publishes it the next day
+    (False, True,  False, 1),   # IBKR announces it
+    (True,  True,  False, 1),   # both — the announcement wins, once
+    (False, False, True,  0),   # the cash lands: realized income, off the calendar
+    (True,  False, True,  0),
+    (False, True,  True,  1),   # IBKR still calls the accrual open; its own replace ends it
+    (True,  True,  True,  1),
+])
+async def test_one_dividend_is_on_the_calendar_at_most_once(estimate, accrual, cash, shown):
+    """
+    The walk is `projection → yfinance row / accrual → actual cash`, and every state
+    along it must show the payment exactly once or not at all.
+
+    Written as the whole table rather than one test per edge, because the question is
+    "can this dividend ever appear twice" — a family question. Six separate assertions
+    is how the seventh combination goes unwritten.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)
+    repo = DividendRepository(session)
+
+    if estimate:
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": VT_DUE, "currency": "EUR",
+            "shares_held": Decimal("10"), "amount_per_share": Decimal("1.5"),
+            "gross_amount_eur": Decimal("15"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("15"), "source": "yfinance_estimate",
+        })
+    if accrual:
+        session.add(DividendAccrual(
+            security_id=1, ex_date=VT_DUE, pay_date=VT_DUE + timedelta(days=3),
+            currency="EUR", net_amount_eur=Decimal("12.75"), last_seen_at=utcnow(),
+        ))
+    if cash:
+        paid = VT_DUE + timedelta(days=3)
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": paid, "pay_date": paid, "currency": "EUR",
+            "shares_held": Decimal("0"), "gross_amount_eur": Decimal("15"),
+            "withholding_tax_eur": Decimal("2"), "net_amount_eur": Decimal("13"),
+            "source": "ibkr",
+        })
+    await session.commit()
+
+    data = await _breakdown(session)
+    same = [u for u in data["upcoming"]
+            if u["security_id"] == 1
+            and abs((date.fromisoformat(u["date"]) - VT_DUE).days) <= 7]
+    assert len(same) == shown, same
+    await engine.dispose()

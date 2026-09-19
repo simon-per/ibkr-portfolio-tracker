@@ -384,17 +384,52 @@ credit the account with money it has not been paid — the refusal `ibkr_cash_re
 the reader sees it on the calendar, badged *payment pending* in visible text, and nowhere else.
 That is strictly more than the nothing it used to be, and it moves no identity.
 
-Bounded at `PENDING_MAX_AGE_DAYS` (90), deliberately wider than `EX_TO_PAY_MAX_LAG_DAYS` (30)
-because **the two answer different questions**: 30 decides whether two rows are the same dividend,
-where too wide deletes real income, and 90 decides how long to keep saying "still expected", where
-Korean and Taiwanese payers routinely need more than a month. A payment IBKR reclassifies never
-arrives, and an entry that sits there for ever is how a reader learns to stop reading the calendar.
+**Two things can be pending, and the weaker one is nothing but our own inference.** The paragraph
+above covers the first: an estimate row exists and the cash has not come. But yfinance writes a
+dividend into its series the day *after* the ex-date, so for a day or two there is no row to
+rescue and the cadence is the only thing that knows. VT went ex on 2026-09-18 with its projection
+dated exactly there; `horizon_start` deleted it that morning and Yahoo's row was not due until the
+following evening, so read on the 19th the payment was again in no figure at all — the same hole,
+one notch narrower, and every payer passes through it on every cycle.
+
+So **a projection is kept once its own date passes**, badged `pending` beside the other, and
+emitted only when nothing else records the dividend: no estimate row within `ACCRUAL_MATCH_DAYS`,
+no accrual, no IBKR cash inside the lag window, and shares actually held on the **ex-date** — a
+position opened after it is owed nothing, and shares added since must not size it, so the amount is
+scaled to the holding the payment went ex with. The handoff needs no sequencing because each guard
+reads the raw data rather than what an earlier block emitted; a projection cannot even be generated
+once Yahoo publishes, since the cadence steps from the last *recorded* ex-date.
+
+Mechanically it is one widened call: `project_dividends` is asked from
+`min(horizon_start − lag, as_of − PENDING_MAX_AGE_DAYS)` and the result is split on `as_of`. A
+`min` rather than a single expression, so the pending bound never silently depends on 90 staying
+larger than a measured lag. Everything downstream of the split — `next_pay`, the annual and monthly
+accumulators, `next_12m`, the table rows, the chart — sees exactly what it saw before.
+
+**The inferred tails expire; an accrual does not.** Both pending tails are bounded at
+`PENDING_MAX_AGE_DAYS` (90) — deliberately wider than `EX_TO_PAY_MAX_LAG_DAYS` (30), because **the
+two answer different questions**: 30 decides whether two rows are the same dividend, where too wide
+deletes real income, and 90 decides how long to keep saying "still expected", where Korean and
+Taiwanese payers routinely need more than a month. A payment IBKR reclassifies never arrives, and
+an entry that sits there for ever is how a reader learns to stop reading the calendar.
+
+An accrual is read **unbounded**, and that asymmetry is the point. A row exists in
+`dividend_accruals` only because the last statement listed the dividend as open — `replace_all`
+having deleted everything the statement did not list — so it is IBKR asserting the money is still
+owed, not us guessing. Ageing it out would hide a live liability, and hide it exactly in the case
+that most needs seeing: a payment overdue by months. `_open_accruals` filtered at 90 days until
+2026-09-19, contradicting its own docstring; the filter is gone and `get_open` takes no date.
 
 **The matcher is one function now.** `_splice_by_era` wants the estimates to *drop* and
 `_measured_pay_lags` wants the ex→pay distances to *keep*, off the identical pairing — per security,
 nearest-first, one-to-one, bounded, never by amount. `match_estimates_to_ibkr` is that pairing, with
 `max_lag_days` a parameter precisely because the callers may legitimately diverge on it. A second
 copy of this is the failure mode at the top of CLAUDE.md.
+
+The handoff — **projection → yfinance row / accrual → actual cash** — is pinned as a table over
+every combination of the three, asserting the dividend is on the calendar at most once in each.
+Written as the family question ("can this dividend ever appear twice") rather than one test per
+edge, because one test per edge is how the combination nobody wrote goes unchecked.
 
 Tests: `tests/test_dividend_pay_date.py`, `src/components/DividendCalendar.test.tsx` (the calendar
 had none at all before), and the extraction is pinned behaviour-neutral by

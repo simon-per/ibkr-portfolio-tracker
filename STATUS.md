@@ -5,7 +5,19 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, live on `bb2bb48` and verified: **a forecast sized from
+**Last updated: 2026-09-19.** Latest, shipping now: **a projected dividend survives its own
+date.** The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues
+the ones it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between
+the projection being deleted on its own date and that row arriving, the payment is in nothing —
+which is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the
+date correctly a quarter earlier. A projection whose date has passed is now kept, badged `pending`
+on the calendar and in no total, and emitted only when nothing else records the dividend: no
+estimate row, no accrual, no cash inside the lag window, and shares actually held on the ex-date.
+It expires at `PENDING_MAX_AGE_DAYS`, because an inference nothing ever confirms has to stop
+claiming. **An accrual now does not** — `_open_accruals` had been ageing those out at the same 90
+days against its own docstring, hiding a liability IBKR was still asserting.
+
+Also live on `bb2bb48` and verified: **a forecast sized from
 Yahoo's gross per-share now deducts an assumed withholding of 15%**
 (`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`).
 Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
@@ -861,6 +873,21 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The projection-pending tail is built and A/B-verified against a production snapshot, not yet
+  deployed (2026-09-19, 12:20 Berlin).** One snapshot, one base currency, old code and new in
+  separate processes, across all six shapes `get_dividend_breakdown` serves (default, no-forecast,
+  each of three years, 24m): **every key except `upcoming` is byte-identical**, no existing
+  `upcoming` entry is removed or altered, and `upcoming` gains exactly one entry — VT, dated its
+  own ex-date, `gross_estimate`, `ex_date`, `pending`. The no-forecast view gains nothing, as it
+  must.
+
+  **After the deploy**, confirm on `/api/dividends/breakdown?forecast=true` that no non-`pending`
+  entry is dated on or before today. VT itself will probably have healed by then — its Yahoo row
+  was due at the 16:08 sync on the 19th — and that is the handoff working, not the fix failing, so
+  the durable check is the invariant rather than the security. Worth one browser pass too: nothing
+  in the frontend changed, so a pending row from this tail renders exactly like the existing ones,
+  which is the claim being checked.
+
 - **The estimated-net factor is live on `bb2bb48` and verified (2026-09-19, 11:25 Berlin).**
   Every gross-sized figure falls by exactly 0.85 — `forward_yield.annual_eur`,
   `growth.next_12m_eur`, `total_forecast_net_eur` and each `pending` calendar amount — while
@@ -1336,6 +1363,18 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-19 (the projection that died on its own date)** — "VT went ex yesterday and the
+  September payment is missing entirely". It was, and not for the reason suspected: the pending
+  tail added hours earlier was working correctly for five other securities, but it rescues
+  dividends **yfinance has recorded**, and yfinance publishes the row the day after the ex-date.
+  So a projection is now kept past its own date too. Two lessons. **Confirm the mechanism, do not
+  accept a plausible one** — "ex-date fallbacks are not retained" was nearly right and would have
+  produced a fix for a bug that did not exist; the API showed four ex-date fallbacks retained
+  correctly on the same screen. And **a bound written as a side effect is not a bound**: the
+  expiry falls out of the projection's start date, so it is pinned against the constant instead,
+  and the same look found `_open_accruals` silently ageing out accruals its own docstring promised
+  to keep.
+
 - **2026-09-19 (net-factor follow-up)** — merged Codex's shared 0.85 factor for gross-derived
   forecasts and unpaid calendar estimates, cherry-picked onto main so the restyle in the tree
   stayed untouched. Two lessons, both about checking rather than coding. **A base currency that
@@ -1384,11 +1423,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   anchors. Its lesson: **an `est.` badge must come from the data, not the toggle that selected
   it** — with the forecast requested and nothing projected, both bases are the measured one. Not
   deployed.
-
-- **2026-09-13** — a health check ("have we committed everything… what are open bugs?": clean,
-  green, on the latest commit; found the 09-12 18:00 slot had *skipped*, so `send_flex_request`
-  is still unexercised live), then a brainstorm the owner narrowed to "it is ALL ABOUT
-  ANALYTICS… I like charts", then the build: the Analytics tab and `/api/performance/*` (return
-  decomposition, segments, rolling risk, drawdowns, closed positions), 6 backend and 14 frontend
-  tests, one extracted loop (`attribution_rows`) instead of a second copy. Brinson deferred for
-  want of benchmark sector data rather than approximated.

@@ -1,5 +1,4 @@
-from typing import List, Optional
-from datetime import date
+from typing import List
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,11 +31,15 @@ class DividendAccrualRepository:
         await self.session.flush()
         return len(rows)
 
-    async def get_open(self, on_or_after: Optional[date] = None) -> List[DividendAccrual]:
-        """Accruals ordered by pay date, optionally only those paying on/after a date."""
-        stmt = select(DividendAccrual)
-        if on_or_after is not None:
-            stmt = stmt.where(DividendAccrual.pay_date >= on_or_after)
-        stmt = stmt.order_by(DividendAccrual.pay_date.asc())
-        result = await self.session.execute(stmt)
+    async def get_open(self) -> List[DividendAccrual]:
+        """
+        Every open accrual, ordered by pay date.
+
+        Unfiltered on purpose. The table holds exactly what the last statement listed as
+        open, so any row here is a dividend IBKR still says it owes — including one
+        overdue by months, which is the row a reader most needs to see.
+        """
+        result = await self.session.execute(
+            select(DividendAccrual).order_by(DividendAccrual.pay_date.asc())
+        )
         return list(result.scalars().all())
