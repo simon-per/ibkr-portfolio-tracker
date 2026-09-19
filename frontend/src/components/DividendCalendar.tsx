@@ -22,13 +22,20 @@ function monthHeading(iso: string): string {
 }
 
 /**
- * The next projected payments, dated and grouped by month.
+ * The next expected payments, dated and grouped by month.
  *
  * The projection has always produced dated payments; the chart aggregated them
- * into month buckets and discarded the days, so this costs nothing new. Every
- * amount here is inferred from the holding's own cadence — no dividend calendar
- * is published to any source this app reads — so the heading says so once rather
- * than badging each row.
+ * into month buckets and discarded the days, so this costs nothing new.
+ *
+ * **Every date here is when the CASH is expected.** It used to be the ex-date, because
+ * the cadence is inferred from yfinance's ex-date series and nothing shifted it — so a
+ * row vanished on the day the dividend went ex and did not come back until IBKR posted
+ * the money, up to a month later. `ex_date` rides beside each row so the shift can be
+ * checked rather than taken on trust, and `pay_date_source` says what produced it.
+ *
+ * A `pending` row is the one this exists for: gone ex, cash overdue, in none of the
+ * totals. It is badged **on the surface** rather than in a `title=`, which a touch
+ * device cannot reach — the lesson this tab already learned once.
  */
 export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   const groups = useMemo(() => {
@@ -45,13 +52,21 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   if (upcoming.length === 0) return null
 
   const anyEstimate = upcoming.some(p => p.basis === 'gross_estimate')
+  const anyPending = upcoming.some(p => p.pending)
+  // An announced pay date is IBKR's own; an inferred one is not. Saying "not an
+  // announced schedule" over rows that ARE announced would understate them, and saying
+  // nothing over rows that are not would overstate them — so the caption follows the
+  // weakest provenance actually on screen.
+  const allAnnounced = upcoming.every(p => p.pay_date_source === 'accrual')
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="text-sm font-medium">Expected next</span>
         <span className="text-xs text-muted-foreground">
-          projected from each holding&apos;s payout cadence — not an announced schedule
+          {allAnnounced
+            ? 'pay dates as announced by IBKR'
+            : "dated when the cash is expected — projected from each holding's payout cadence"}
         </span>
       </div>
 
@@ -82,7 +97,19 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                       style={{ backgroundColor: colorOf(p.symbol) }}
                       aria-hidden="true"
                     />
-                    <span className="min-w-0 flex-1 truncate">{p.symbol}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {p.symbol}
+                      {p.ex_date && p.ex_date !== p.date && (
+                        <span className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground">
+                          ex {dayLabel(p.ex_date)}
+                        </span>
+                      )}
+                      {p.pending && (
+                        <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                          payment pending
+                        </span>
+                      )}
+                    </span>
                     <Amount value={p.net_eur} estimate={p.basis === 'gross_estimate'} />
                   </li>
                 ))}
@@ -91,6 +118,16 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
           )
         })}
       </div>
+
+      {anyPending && (
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-amber-700 dark:text-amber-300">
+            payment pending
+          </span>{' '}
+          — the dividend has gone ex and the cash has not reached the account yet, so it
+          is not counted in any total on this tab until it does
+        </div>
+      )}
 
       {anyEstimate && (
         <div className="text-xs text-muted-foreground">

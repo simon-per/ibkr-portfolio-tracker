@@ -802,6 +802,7 @@ export interface DividendSecurityRow {
   yield_on_cost_pct: number | null;
   /** Share of the window's total (actual + forecast). */
   share_pct: number | null;
+  /** Earliest projected payment — the date the CASH is expected, not the ex-date. */
   next_pay_date: string | null;
   source: 'ibkr' | 'estimate' | 'mixed' | null; // null = forecast-only row
   /** 'net' = sized from dividends received; 'gross_estimate' = withholding not deducted. */
@@ -810,6 +811,14 @@ export interface DividendSecurityRow {
   forecast_samples: number | null;
   /** Median gap the cadence settled on, in days. */
   forecast_cadence_days: number | null;
+  /**
+   * How far the projected dates were moved from the ex-date to the day the cash is
+   * expected, and off how many observed ex→pay pairs. **Null, not 0**, when nothing
+   * could be measured: a 0 would claim the cash arrives on the ex-date, while null says
+   * the date on screen IS an ex-date.
+   */
+  forecast_lag_days: number | null;
+  forecast_lag_samples: number | null;
 }
 
 /** A figure beside the comparable it is measured against. */
@@ -862,13 +871,36 @@ export interface DividendGrowth {
   latest_month: DividendLatestMonth | null;
 }
 
-/** One projected payment, dated — the dividend calendar. */
+/**
+ * One expected payment, dated — the dividend calendar.
+ *
+ * `date` is when the CASH is expected, which is the question the calendar answers. It
+ * used to be the ex-date for most securities, because the cadence is inferred from
+ * yfinance's ex-date series and nothing shifted it; `ex_date` is metadata beside it now,
+ * and {@link DividendUpcomingPayment.pay_date_source} says how much to believe the shift.
+ */
 export interface DividendUpcomingPayment {
   date: string;
+  /** The ex-date it derives from. Null only for an accrual IBKR published without one. */
+  ex_date: string | null;
   security_id: number;
   symbol: string;
   net_eur: number;
   basis: 'net' | 'gross_estimate' | null;
+  /**
+   * Where `date` came from, weakest last:
+   * - `accrual` — IBKR announced this pay date. Authoritative.
+   * - `measured_lag` — the ex-date plus this security's own measured ex→pay distance.
+   * - `ex_date` — nothing could be measured, so this IS the ex-date and the cash lands
+   *   some days after it. Stated rather than implied.
+   */
+  pay_date_source: 'accrual' | 'measured_lag' | 'ex_date';
+  /**
+   * The expected pay date has passed with no IBKR cash row: the dividend has gone ex,
+   * the money is owed, and it is in none of the totals yet. Before this existed such a
+   * payment was invisible on every surface for up to a month.
+   */
+  pending: boolean;
 }
 
 /**
