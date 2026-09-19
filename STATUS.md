@@ -5,8 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, not yet deployed: **a dividend is now dated when the cash
-is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
+**Last updated: 2026-09-19.** Latest, live on `c791fd9` and verified against the API: **a dividend
+is now dated when the cash is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
 the cadence comes from yfinance's ex-date series and nothing shifted it — while `upcoming[].date`
 and `next_pay_date` were named as pay dates and the calendar headed *Expected next*. Combined with
 `horizon_start = as_of + 1` (a projection is deleted on its own date) and the era splice (which
@@ -37,9 +37,10 @@ it is not rediscovered as new). `test_flex_attr_coverage.py` also had a hole the
 its extractor map was hand-kept, so a new extractor was not merely unchecked but *invisibly*
 unchecked — there is a family test for that now, and three extractors that were never covered are.
 
-Locally: 1,546 backend and 673 frontend tests pass, plus TypeScript, build and lint (the 16 lint
-errors are pre-existing and in files this did not touch). Nothing here has run against a real
-statement — the accrual path is exercised by fixtures only, and the section is still off.
+1,546 backend and 673 frontend tests pass, plus TypeScript, build and lint (the 16 lint errors are
+pre-existing and in files this did not touch). **The accrual path has still never seen a real
+statement** — it is exercised by fixtures only and the Flex section is off, so every live date
+currently comes from a measured lag or the ex-date.
 
 Before that, also not yet deployed: **the Dividends growth figure now
 answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
@@ -840,27 +841,22 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **Pay-date-dated dividend projections are built and unverified on production, and they carry a
-  migration** (`v5e2a9b6c0d1`, additive: one empty `dividend_accruals` table). Read
-  `/api/dividends/breakdown?forecast=true` and check, in order:
-  - every `upcoming[]` entry has a `pay_date_source`, and none is `accrual` yet (the portal
-    section is off — see *Needs a human*);
-  - the six securities that were blind on 09-19 — SK Hynix, NVDA, IQQ, TSMC, NXPI, HPE — appear,
-    and the four with no measured lag (SK Hynix, TSMC, NXPI, HPE) read `ex_date` with `pending`
-    true rather than being absent;
-  - NVDA's next date sits about three weeks after its ex-date, not on it, and
-    `forecast_lag_days` on its row is in the low twenties;
-  - `growth`, `ttm_series` and the December-window identity still hold — the figures move because
-    the dates moved, but no window may go missing and no month may carry a projection before the
-    current one.
+- **Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
+  (2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
+  measured lag read `ex_date` and `pending`, NVDA reads `measured_lag` dated three weeks past its
+  ex-date. Eleven rows carry a lag, 7–29 days, matching what was measured before the change. Both
+  invariants hold — no elapsed month carries a projection, no non-pending entry is dated on or
+  before today — and the December-window-equals-calendar-year identity is exact for all three
+  years. The migration (`v5e2a9b6c0d1`, additive: one empty table) applied cleanly.
 
-  **And in a browser**: the *payment pending* badge on a real row, the `ex …` note beside a shifted
-  date, and the calendar at 390 px — the row gained two inline elements and is the one place this
-  change is visible. Local verification used fixtures only and made no Yahoo or Flex request.
+  **Still to see in a browser**: the *payment pending* badge on a real row, the `ex …` note beside
+  a shifted date, and the calendar at 390 px — that row gained two inline elements and is the one
+  place this change is visible. Everything checked so far was the API.
 
-  Then, once the portal section is ticked: the next successful 18:00 Berlin `full_sync` should
-  report a non-zero `dividend_accruals_seen`, `pay_date_source` should flip to `accrual` for the
-  held payers, and an accrual should vanish within a sync of its cash posting.
+  **And once the Flex section is ticked** (see *Needs a human*), which nothing has exercised yet:
+  the next successful 18:00 Berlin `full_sync` should report a non-zero `dividend_accruals_seen`,
+  `pay_date_source` should flip to `accrual` for the held payers, and an accrual should vanish
+  within a sync of its cash posting.
 
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
@@ -1299,7 +1295,7 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   have nothing to measure, which is what made the accrual ingest worth building rather than
   optional. And **a hand-kept map inside a guard is a hole in the guard**: the Flex attribute
   coverage test was parametrized over a dict someone has to remember to extend, so a new extractor
-  was not unchecked but invisibly unchecked. Not deployed; the Flex section still needs a tick.
+  was not unchecked but invisibly unchecked. Live and API-verified; the Flex section needs a tick.
 
 - **2026-09-19** — rewrote yesterday's dividend growth pace after the owner called it unusable:
   it was unwindowed by design and so ignored the range selector entirely. Now CMGR/CAGR between
