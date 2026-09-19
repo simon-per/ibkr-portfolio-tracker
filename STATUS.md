@@ -861,12 +861,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 ## Watch after the next deploy
 
 - **The estimated-net factor is built and unverified on production.** Once it ships, read
-  `/api/dividends/breakdown?forecast=true` and check that a `gross_estimate` row's
-  `forecast_net_eur` and every `pending` calendar amount have fallen by 15% against the figures
-  recorded below, that `basis` / `forecast_basis` still read `gross_estimate` rather than flipping
-  to `net`, and that **`total_net_eur` and `growth.ttm` have not moved at all** — realized income
-  must be untouched. The DA-1 income on `/api/tax/report` is the second place to confirm that:
-  it reads the same rows and must be identical.
+  `/api/dividends/breakdown?forecast=true` and check three things. Every figure sized from gross —
+  `forward_yield.annual_eur`, `growth.next_12m_eur`, a `gross_estimate` row's `forecast_net_eur`,
+  each `pending` calendar amount — must be **exactly 0.85×** what the same field read on `c791fd9`
+  (the whole projection was `gross_estimate`-based at the time, so `forward_yield.pct` falls with
+  it). `basis` and `forecast_basis` must still read `gross_estimate`, not flip to `net`. And
+  **`total_net_eur` and `growth.ttm` must not move at all** — realized income is untouched by
+  design, and `/api/tax/report`'s DA-1 income reads the same rows and must be identical. If any
+  realized figure moved, the factor has leaked out of the two read paths it belongs in.
 
 - **Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
   (2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
