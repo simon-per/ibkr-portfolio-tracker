@@ -3,11 +3,12 @@ Dividend Service
 Fetches dividend ex-dates from yfinance, computes income from tax lots,
 converts to EUR, and provides monthly summary data.
 """
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 from datetime import timedelta, date
 from app.clock import utcnow
 from decimal import Decimal
 from collections import defaultdict
+from statistics import median
 import logging
 import random
 import asyncio
@@ -23,7 +24,9 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.currency_service import CurrencyService
 from app.services.yahoo_rate_limit import is_rate_limit
-from app.services.dividend_forecast import HistPayment, infer_gap_days, project_dividends
+from app.services.dividend_forecast import (
+    ForecastPayment, HistPayment, infer_gap_days, project_dividends,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,77 @@ TTM_FULL_COVERAGE_DAYS = 350
 # 45 was tried first and was too wide: it matched an estimate exactly 45 days before the
 # boundary that was real January income, not the March payment's ex-date.
 EX_TO_PAY_MAX_LAG_DAYS = 30
+
+# How long a dividend that has gone ex but whose cash has not arrived stays on the
+# calendar as `pending`. Deliberately wider than EX_TO_PAY_MAX_LAG_DAYS, because the two
+# answer different questions: that one decides whether two ROWS are the same dividend
+# (too wide deletes real income, so it errs narrow), this one decides how long to keep
+# saying "still expected". Korean and Taiwanese payers routinely pay more than a month
+# after the ex-date, so 30 would drop exactly the payments that need the longest patience.
+#
+# Bounded rather than open-ended: a payment IBKR reclassifies or books under another
+# instrument never arrives, and an entry that sits on the calendar for ever is how a
+# reader learns to stop reading it — the same reason the stale-basket banner had to
+# become a refresh.
+PENDING_MAX_AGE_DAYS = 90
+
+# How close an accrual must sit to an inferred payment for the two to be the same
+# dividend. An accrual is authoritative and supersedes the inference; this is only the
+# question of WHICH inferred payment it supersedes. Half a monthly cycle, so a monthly
+# payer's genuinely separate next payment is never swallowed.
+ACCRUAL_MATCH_DAYS = 15
+
+
+def match_estimates_to_ibkr(
+    estimates: Iterable,
+    ibkr_rows: Iterable,
+    *,
+    max_lag_days: int = EX_TO_PAY_MAX_LAG_DAYS,
+) -> List[Tuple[Any, Any]]:
+    """
+    Pair each IBKR payment with the estimate that records the SAME dividend.
+
+    The two sources file one payment under different dates — yfinance under its ex-date,
+    IBKR under its pay-date, weeks apart — so identifying the pair is the only way to
+    tell a duplicate from a genuinely earlier dividend. Matched per security,
+    nearest-first, one-to-one, and bounded to the half-open window
+    ``[pay - max_lag_days, pay)``.
+
+    **Never by amount**: one side is gross and the other net, so equal amounts are
+    exactly what cannot be relied on. **One-to-one** is what makes a window wider than a
+    monthly cycle safe — each IBKR payment consumes at most one estimate, so a monthly
+    payer's earlier estimates survive instead of being swallowed by the same window.
+
+    Two callers ask two different questions of the same pairing, which is why this is a
+    function and not a line inside one of them: `_splice_by_era` wants the estimates to
+    DROP, and `_measured_pay_lags` wants the ex→pay distances to KEEP. A second
+    implementation of this matching is the failure mode this codebase keeps hitting.
+
+    ``max_lag_days`` is a parameter for the same reason. The splice must err narrow —
+    too wide deletes real income from a filing aid — while a mis-measured lag only
+    mis-dates a projection, so the two may legitimately diverge later.
+
+    Returns ``[(estimate, ibkr_row), ...]`` in IBKR pay-date order.
+    """
+    consumed: set = set()
+    pairs: List[Tuple[Any, Any]] = []
+    candidates = sorted(
+        estimates,
+        key=lambda p: (p.ex_date or p.pay_date),
+        reverse=True,  # nearest to the pay date first
+    )
+    for row in sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date)):
+        pay = row.pay_date or row.ex_date
+        earliest = pay - timedelta(days=max_lag_days)
+        for est in candidates:
+            if id(est) in consumed or est.security_id != row.security_id:
+                continue
+            ex = est.ex_date or est.pay_date
+            if earliest <= ex < pay:
+                consumed.add(id(est))
+                pairs.append((est, row))
+                break
+    return pairs
 
 
 def _summary_source(payments, ibkr_from) -> str:
@@ -499,6 +573,121 @@ class DividendService:
             "message": f"Recorded {saved} IBKR dividend payments",
         }
 
+    async def sync_dividend_accruals(
+        self, accruals: List[Dict], conid_to_security_id: Dict[str, int]
+    ) -> Dict:
+        """
+        Record the dividends IBKR has announced and not yet paid.
+
+        Replaces the whole set — see `DividendAccrualRepository.replace_all`. Does NOT
+        commit; the caller's sync transaction owns that. Tolerant of an empty list, which
+        is the normal state until the ``<OpenDividendAccruals>`` section is enabled in
+        the Flex Query, and is also what a statement says when everything has been paid.
+
+        **Refuses whole rather than half-applying.** A row whose currency has no cached
+        rate is skipped and counted, never stored unconverted into a column named `_eur`
+        — the same rule `sync_dividends_from_cash_transactions` learned. The pay date is
+        in the future and has no rate of its own, so the newest cached one is used: a
+        payment yet to happen is best sized at today's rate, exactly as the forecast
+        sizes a projection.
+        """
+        from app.repositories.dividend_accrual_repository import DividendAccrualRepository
+
+        repo = DividendAccrualRepository(self.db)
+        if not accruals:
+            # Still a replace: an enabled section listing nothing means every accrual has
+            # been paid, and leaving the old rows would keep promising money that landed.
+            # Harmless when the section is absent, since the table is empty anyway.
+            await repo.replace_all([])
+            return {"dividend_accruals": 0, "message": "No open dividend accruals"}
+
+        conid_map = {str(k): v for k, v in conid_to_security_id.items()}
+        fx = await self._latest_fx_to_eur(
+            {a.get("currency") for a in accruals if a.get("currency")}, date.today()
+        )
+
+        rows: List[Dict] = []
+        seen: set = set()
+        skipped_currencies: Dict[str, int] = {}
+        unknown_conids = 0
+        now = utcnow()
+        for a in accruals:
+            security_id = conid_map.get(str(a["conid"]))
+            if not security_id:
+                unknown_conids += 1
+                continue
+            key = (security_id, a["pay_date"])
+            if key in seen:
+                continue  # one open accrual per security per pay date
+            currency = a.get("currency") or "EUR"
+            rate = fx.get(currency)
+            if rate is None:
+                skipped_currencies[currency] = skipped_currencies.get(currency, 0) + 1
+                continue
+            gross = (a.get("gross_amount") or Decimal("0")) * rate
+            # IBKR reports accrued withholding as a negative, like the cash ledger does.
+            wht = -(a.get("tax") or Decimal("0")) * rate
+            net = a.get("net_amount")
+            net_eur = net * rate if net is not None else gross - wht
+            if net_eur <= 0:
+                # A reversal or a zero accrual is not an upcoming payment.
+                continue
+            seen.add(key)
+            rows.append({
+                "security_id": security_id,
+                "ex_date": a.get("ex_date"),
+                "pay_date": a["pay_date"],
+                "currency": currency,
+                "quantity": a.get("quantity"),
+                "gross_amount_eur": gross,
+                "withholding_tax_eur": wht,
+                "net_amount_eur": net_eur,
+                "last_seen_at": now,
+            })
+
+        saved = await repo.replace_all(rows)
+        logger.info(f"Recorded {saved} open dividend accrual(s) from Flex")
+
+        warnings: List[str] = []
+        if skipped_currencies:
+            detail = ", ".join(f"{n} in {cur}" for cur, n in sorted(skipped_currencies.items()))
+            warnings.append(
+                f"Skipped {sum(skipped_currencies.values())} announced dividend(s) with "
+                f"no cached FX rate ({detail}). Their expected payment dates fall back "
+                f"to a lag measured from history until a rate exists."
+            )
+            logger.warning(warnings[-1])
+        return {
+            "dividend_accruals": saved,
+            "accruals_skipped": sum(skipped_currencies.values()) + unknown_conids,
+            "warnings": warnings,
+            "message": f"Recorded {saved} open dividend accruals",
+        }
+
+    async def _open_accruals(self, as_of: date) -> Dict[int, List[Dict]]:
+        """
+        ``{security_id: [{ex_date, pay_date, net_eur}, ...]}`` for accruals still ahead.
+
+        Empty whenever the Flex section is not enabled, which is the supported default —
+        the caller then dates its projections from a measured lag instead and labels them
+        so. An accrual whose pay date has already passed is kept: it is still open, which
+        means IBKR has not paid it, and that is precisely the state the calendar exists
+        to show.
+        """
+        from app.repositories.dividend_accrual_repository import DividendAccrualRepository
+
+        rows = await DividendAccrualRepository(self.db).get_open(
+            on_or_after=as_of - timedelta(days=PENDING_MAX_AGE_DAYS)
+        )
+        out: Dict[int, List[Dict]] = defaultdict(list)
+        for r in rows:
+            out[r.security_id].append({
+                "ex_date": r.ex_date,
+                "pay_date": r.pay_date,
+                "net_eur": r.net_amount_eur,
+            })
+        return out
+
     async def _latest_fx_to_eur(self, currencies, as_of: date) -> Dict[str, Decimal]:
         """
         Newest cached <currency>→EUR rate on or before ``as_of``, per currency.
@@ -624,31 +813,51 @@ class DividendService:
         #     2026-02-10  yfinance_estimate     2026-02-18  ibkr
         # Four rows for two dividends, on every reader that splices.
         #
-        # Matched per security, nearest-first, one-to-one, and bounded — never by
-        # amount, which cannot work when one side is gross and the other net. The
-        # one-to-one part is what makes a window wider than a monthly cycle safe: an
-        # IBKR payment consumes at most one estimate, so a monthly payer's earlier
-        # estimates survive instead of being swallowed by the same window.
-        consumed: set = set()
-        candidates = sorted(
-            (p for p in kept if p.source != "ibkr"),
-            key=lambda p: (p.ex_date or p.pay_date),
-            reverse=True,  # nearest to the pay date first
-        )
-        for row in sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date)):
-            pay = row.pay_date or row.ex_date
-            earliest = pay - timedelta(days=EX_TO_PAY_MAX_LAG_DAYS)
-            for est in candidates:
-                if id(est) in consumed or est.security_id != row.security_id:
-                    continue
-                ex = est.ex_date or est.pay_date
-                if earliest <= ex < pay:
-                    consumed.add(id(est))
-                    break
+        # Matched per security, nearest-first, one-to-one, and bounded — the rules and
+        # the reason they are a shared function live on `match_estimates_to_ibkr`.
+        consumed = {
+            id(est) for est, _ in match_estimates_to_ibkr(
+                [p for p in kept if p.source != "ibkr"], ibkr_rows
+            )
+        }
 
         if consumed:
             kept = [p for p in kept if id(p) not in consumed]
         return kept, boundary
+
+    @staticmethod
+    def _measured_pay_lags(raw_payments: List) -> Dict[int, Tuple[int, int]]:
+        """
+        ``{security_id: (median_lag_days, samples)}`` — how long after its ex-date this
+        security's dividend actually reaches the account.
+
+        The only pay date this application ever learns comes from IBKR, and the only
+        ex-date from yfinance, on two different rows. Pairing them is what turns the two
+        halves into one measurement, and `match_estimates_to_ibkr` already knows how.
+
+        Read from the **raw** history rather than the spliced one, and that is the whole
+        reason this is measurable: `_splice_by_era` drops post-boundary estimates at READ
+        time, so the table still holds an estimate beside every IBKR payment. Measured on
+        production 2026-09-19: every IBKR payment on record paired, lags 7–29 days, and
+        stable per security to a day or two.
+
+        The median, not the mean — one late settlement should not move a schedule, the
+        same argument `dividend_forecast._per_share` makes about a special dividend.
+
+        Absent rather than zero for a security that has never been paid through IBKR: a
+        0-day lag is a claim that the cash arrives on the ex-date, and the caller needs to
+        know it is falling back to the ex-date rather than being told that is the answer.
+        """
+        estimates = [p for p in raw_payments if p.source != "ibkr"]
+        ibkr_rows = [p for p in raw_payments if p.source == "ibkr"]
+        if not ibkr_rows:
+            return {}
+        lags: Dict[int, List[int]] = defaultdict(list)
+        for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
+            ex = est.ex_date or est.pay_date
+            pay = row.pay_date or row.ex_date
+            lags[row.security_id].append((pay - ex).days)
+        return {sid: (int(median(v)), len(v)) for sid, v in lags.items()}
 
     @staticmethod
     def _pct(current: Decimal, base: Optional[Decimal]) -> Optional[float]:
@@ -820,7 +1029,11 @@ class DividendService:
         would be a second copy of these rules free to drift from this one, which
         is the failure mode this codebase keeps hitting.
 
-        Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at)``.
+        Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated)``, where
+        ``ex_dated`` is the set of securities whose cadence came from the yfinance
+        ex-date series. The caller needs it to know what a projected date MEANS: for
+        those securities it is an ex-date and has to be shifted to the expected pay date,
+        and for the rest it is already a pay date and must not be shifted twice.
         """
         taxlots = list((await self.db.execute(select(TaxLot))).scalars().all())
         lots_by_sec: Dict[int, List[TaxLot]] = defaultdict(list)
@@ -934,7 +1147,7 @@ class DividendService:
             if not prefer_net:
                 basis_by_sec[sid] = "gross_estimate"
 
-        return hist_by_sec, basis_by_sec, lots_by_sec, shares_at
+        return hist_by_sec, basis_by_sec, lots_by_sec, shares_at, set(schedule_source)
 
     async def get_dividend_summary(self) -> Dict:
         """
@@ -1067,6 +1280,7 @@ class DividendService:
                 "forecast_net": Decimal("0"), "sources": set(),
                 "forecast_basis": None,
                 "forecast_samples": None, "forecast_cadence_days": None,
+                "forecast_lag_days": None, "forecast_lag_samples": None,
             }
 
         # A ticker is only a safe chart key while it means one instrument. The same
@@ -1169,8 +1383,13 @@ class DividendService:
         horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
-            hist_by_sec, basis_by_sec, lots_by_sec, shares_at = \
+            hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated = \
                 await self._forecast_inputs(raw_payments, securities, as_of)
+
+            # What the ex→pay distance actually measures out at, per security, and the
+            # announced pay dates IBKR has published for dividends it has not yet paid.
+            pay_lags = self._measured_pay_lags(raw_payments)
+            accruals_by_sec = await self._open_accruals(as_of)
 
             horizon_start = as_of + timedelta(days=1)
 
@@ -1184,15 +1403,50 @@ class DividendService:
                 qty = shares_at(sid, as_of)
                 if qty <= 0:
                     continue
+                lag_days, lag_samples = pay_lags.get(sid, (0, 0))
+                # Only a cadence inferred from the yfinance ex-date series is an
+                # ex-date series. A security whose schedule came from IBKR rows is
+                # already pay-dated, and shifting it would push it a lag into the
+                # future twice over.
+                lag = lag_days if (sid in ex_dated and lag_samples) else 0
+                # Ask for the projection a lag EARLIER than the horizon, so a payment
+                # whose ex-date has just passed but whose cash is still ahead is
+                # produced rather than lost. After the shift below every emitted date
+                # is still strictly after `as_of`, which is the invariant the Forecast
+                # toggle rests on: an elapsed month provably contains no projection.
                 projected = project_dividends(hist_by_sec.get(sid, []), qty,
-                                              horizon_start, horizon_end,
+                                              horizon_start - timedelta(days=lag),
+                                              horizon_end,
                                               as_of=as_of)
+                if lag:
+                    projected = [
+                        ForecastPayment(on_date=fp.on_date + timedelta(days=lag),
+                                        net_eur=fp.net_eur)
+                        for fp in projected
+                    ]
+                    # The horizon was applied to the ex-date; re-apply it to the date
+                    # the money actually lands on. A payment going ex inside the
+                    # horizon and paying outside it is paid outside it.
+                    projected = [fp for fp in projected if fp.on_date <= horizon_end]
                 if not projected:
                     continue
 
                 symbol = _symbol(sid)
                 basis = basis_by_sec.get(sid)
+                # An announced pay date beats an inferred one outright, so an inferred
+                # payment sitting on top of an accrual is the same dividend counted
+                # twice. The accrual itself is emitted below.
+                accrual_pays = [a["pay_date"] for a in accruals_by_sec.get(sid, ())]
+                if accrual_pays:
+                    projected = [
+                        fp for fp in projected
+                        if not any(abs((fp.on_date - ap).days) <= ACCRUAL_MATCH_DAYS
+                                   for ap in accrual_pays)
+                    ]
+                    if not projected:
+                        continue
                 next_pay[sid] = min(fp.on_date for fp in projected)
+                pay_date_source = "measured_lag" if lag else "ex_date"
 
                 for fp in projected:
                     amt = base_fx.convert(fp.net_eur, fp.on_date)
@@ -1203,10 +1457,13 @@ class DividendService:
                         next_12m_by_sec[sid] += amt
                         upcoming.append({
                             "date": fp.on_date.isoformat(),
+                            "ex_date": (fp.on_date - timedelta(days=lag)).isoformat(),
                             "security_id": sid,
                             "symbol": symbol,
                             "net_eur": round(float(amt), 2),
                             "basis": basis,
+                            "pay_date_source": pay_date_source,
+                            "pending": False,
                         })
 
                 # Windowed figures stay exactly as before: a security only earns a
@@ -1226,6 +1483,12 @@ class DividendService:
                     by_sec[sid]["forecast_cadence_days"] = infer_gap_days(
                         [h.on_date for h in history]
                     )
+                    # How far the projected dates were moved, and off how many
+                    # observations. Absent when nothing was measured, so the UI can say
+                    # "this date is an ex-date" rather than imply a settled schedule —
+                    # the same reason `forecast_samples` rides along beside the cadence.
+                    by_sec[sid]["forecast_lag_days"] = lag if lag else None
+                    by_sec[sid]["forecast_lag_samples"] = lag_samples or None
                 for fp in in_window:
                     amt = base_fx.convert(fp.net_eur, fp.on_date)
                     row = by_sec[sid]
@@ -1233,6 +1496,91 @@ class DividendService:
                     row["forecast_net"] += amt
                     monthly_forecast[fp.on_date.strftime("%Y-%m")][symbol] += amt
                     total_forecast += amt
+
+            # ---- Announced, and gone-ex-but-unpaid -----------------------------
+            # Everything above projects payments that have not happened yet. These two
+            # blocks carry the ones that HAVE — a dividend is announced, or has already
+            # gone ex, and its cash simply has not reached the account.
+            #
+            # Until now that window was invisible. The projection for the payment
+            # disappears on its own date, and `_splice_by_era` drops the estimate
+            # recording it the moment the IBKR era has begun, so between the ex-date and
+            # the cash arriving the dividend was in no figure at all — measured at up to
+            # 29 days on this account, on six held securities at once.
+            #
+            # **Calendar only, deliberately.** Nothing here enters `months[]`,
+            # `ttm_series`, `next_12m_eur`, `forward_yield` or `growth`. Those are
+            # measured-or-projected-forward, and a payment in this state is neither: the
+            # cash has not arrived, so calling it income would credit the account with
+            # money it has not been paid, and calling it a projection would put a
+            # backdated entry inside an elapsed month — which is exactly the invariant
+            # the Forecast toggle reproduces the closed series from. The reader sees it
+            # on the calendar, badged, which is strictly more than the nothing they saw
+            # before and costs no identity.
+            for sid, accruals in accruals_by_sec.items():
+                if shares_at(sid, as_of) <= 0:
+                    continue
+                for a in accruals:
+                    if a["pay_date"] > next_12m_end:
+                        continue
+                    amt = base_fx.convert(a["net_eur"], a["pay_date"])
+                    upcoming.append({
+                        "date": a["pay_date"].isoformat(),
+                        "ex_date": a["ex_date"].isoformat() if a["ex_date"] else None,
+                        "security_id": sid,
+                        "symbol": _symbol(sid),
+                        "net_eur": round(float(amt), 2),
+                        # IBKR accrues net of the withholding it will deduct, so this
+                        # needs no `gross_estimate` caveat the way an inference does.
+                        "basis": "net",
+                        "pay_date_source": "accrual",
+                        "pending": a["pay_date"] <= as_of,
+                    })
+
+            ibkr_pays_by_sec: Dict[int, List[date]] = defaultdict(list)
+            for p in raw_payments:
+                if p.source == "ibkr":
+                    ibkr_pays_by_sec[p.security_id].append(p.pay_date or p.ex_date)
+
+            for p in raw_payments:
+                if p.source == "ibkr" or not self._is_income(p):
+                    continue
+                ex = p.ex_date or p.pay_date
+                # Only rows the splice has superseded: before the era began an estimate
+                # IS the income and is already counted, so repeating it here would show
+                # it twice.
+                if ex is None or ibkr_from is None or ex < ibkr_from:
+                    continue
+                if not (as_of - timedelta(days=PENDING_MAX_AGE_DAYS) <= ex <= as_of):
+                    continue
+                if shares_at(p.security_id, as_of) <= 0:
+                    continue
+                # The cash has landed if an IBKR payment sits inside the lag window
+                # after this ex-date — the same test `match_estimates_to_ibkr` makes,
+                # asked of one row.
+                if any(ex < pay <= ex + timedelta(days=EX_TO_PAY_MAX_LAG_DAYS)
+                       for pay in ibkr_pays_by_sec.get(p.security_id, ())):
+                    continue
+                accruals = accruals_by_sec.get(p.security_id, ())
+                if any(a["ex_date"] and abs((a["ex_date"] - ex).days) <= ACCRUAL_MATCH_DAYS
+                       for a in accruals):
+                    continue  # IBKR has announced it; the accrual above says it better
+                lag_days, lag_samples = pay_lags.get(p.security_id, (0, 0))
+                expected = ex + timedelta(days=lag_days if lag_samples else 0)
+                amt = base_fx.convert(self._net_eur(p), expected)
+                upcoming.append({
+                    "date": expected.isoformat(),
+                    "ex_date": ex.isoformat(),
+                    "security_id": p.security_id,
+                    "symbol": _symbol(p.security_id),
+                    "net_eur": round(float(amt), 2),
+                    # A yfinance row's "net" is its gross with zero withholding, so the
+                    # figure runs high and says so — `_forecast_inputs` makes the same
+                    # distinction for the same reason.
+                    "basis": "gross_estimate",
+                    "pay_date_source": "measured_lag" if lag_samples else "ex_date",
+                    "pending": expected <= as_of,
+                })
 
         upcoming.sort(key=lambda u: (u["date"], u["symbol"]))
 
@@ -1667,6 +2015,11 @@ class DividendService:
                 # samples is a guess with a schedule attached.
                 "forecast_samples": row["forecast_samples"],
                 "forecast_cadence_days": row["forecast_cadence_days"],
+                # How far the dates were moved off the ex-date, and off how many
+                # observed pairs. Absent means nothing was measured and the projected
+                # date IS an ex-date — never 0, which would claim same-day settlement.
+                "forecast_lag_days": row["forecast_lag_days"],
+                "forecast_lag_samples": row["forecast_lag_samples"],
             })
         sec_rows.sort(key=lambda r: r["net_eur"] + r["forecast_net_eur"], reverse=True)
 

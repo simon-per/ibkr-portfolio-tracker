@@ -36,7 +36,10 @@ EXTRACTOR_ELEMENT = {
     "extract_trades": "Trade",
     "extract_corporate_actions": "CorporateAction",
     "extract_cash_transactions": "CashTransaction",
+    "extract_dividend_accruals": "OpenDividendAccrual",
     "extract_cash_flows": "CashTransaction",
+    "extract_equity_summary": "EquitySummaryByReportDateInBase",
+    "extract_cash_report": "CashReportCurrency",
     "extract_transfers": "Transfer",
     "parse_flex_xml": "FlexStatement",
 }
@@ -106,6 +109,29 @@ def test_every_element_the_extractors_consume_has_an_entry():
             f"{extractor}() parses <{tag}> but INGESTED_ATTRS has no entry for it, so "
             f"every dropped attribute on that element is classified harmless."
         )
+
+
+def test_every_extractor_is_covered_by_this_file():
+    """
+    `EXTRACTOR_ELEMENT` is the one thing here that cannot be derived — the element type
+    is implied by the container an extractor walks, not written down. So it is
+    hand-kept, and a hand-kept map is a map someone forgets: an extractor left out of it
+    is not merely unchecked, it is *invisibly* unchecked, because the per-extractor test
+    above is parametrized over this very map and simply never runs for it.
+
+    That is the instance-versus-family distinction this codebase keeps relearning. Ask
+    whether a copy exists at all, not whether the copies agree.
+    """
+    defined = {
+        name for name in vars(IBKRService)
+        if name.startswith("extract_") and callable(getattr(IBKRService, name))
+    }
+    missing = defined - set(EXTRACTOR_ELEMENT)
+    assert not missing, (
+        f"{sorted(missing)} parse a Flex element that this file never checks, so every "
+        f"attribute they read could be dropped and classified cosmetic. Add each to "
+        f"EXTRACTOR_ELEMENT with the ibflex element it consumes."
+    )
 
 
 def test_the_classifier_agrees_with_the_map():

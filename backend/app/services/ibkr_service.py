@@ -162,6 +162,13 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
         "amount", "conid", "currency", "dateTime", "description", "reportDate",
         "settleDate", "symbol", "transactionID", "type",
     }),
+    # The one element IBKR publishes carrying an ex-date and a pay date TOGETHER. Its
+    # section is off by default; the extractor is tolerant of that, so ticking it in the
+    # portal is the whole setup.
+    "OpenDividendAccrual": frozenset({
+        "conid", "currency", "exDate", "payDate", "quantity", "grossAmount", "tax",
+        "netAmount", "symbol",
+    }),
     "Transfer": frozenset({
         # `date` is real schema here, not a Python builtin — it is the transfer's own
         # date, which `_transfer_to_flow` prefers over reportDate. A first hand-written
@@ -951,6 +958,55 @@ class IBKRService:
 
         logger.info(f"Extracted {len(txns)} dividend/withholding cash transaction(s) from Flex <CashTransactions>")
         return txns
+
+    async def extract_dividend_accruals(self, flex_data: Dict) -> List[Dict]:
+        """
+        Extract announced-but-unpaid dividends from the Flex <OpenDividendAccruals>
+        section.
+
+        **This is the only Flex element that carries an ex-date.** <CashTransaction> has
+        settleDate/dateTime/reportDate and no ex-date, and yfinance publishes an ex-date
+        and no pay date — so without this section nothing in the application can say when
+        a dividend that has gone ex is going to be paid, and the payment falls out of
+        every figure until the cash lands.
+
+        Tolerant: returns [] if the section is absent, which is the default state of a
+        Flex Query and must stay a supported one. Consumed by
+        `DividendService.sync_dividend_accruals`, which replaces the whole set — IBKR
+        publishes the currently-open accruals rather than a log, so a row disappearing IS
+        the signal that it was paid.
+
+        Amounts are signed as IBKR reports them: ``grossAmount``/``netAmount`` positive,
+        ``tax`` negative. The conversion to a positive withholding happens once, in the
+        service, beside the identical rule for cash transactions.
+        """
+        statement = flex_data['statement']
+        section = getattr(statement, 'OpenDividendAccruals', None)
+        if not section:
+            return []
+
+        accruals: List[Dict] = []
+        for acc in section:
+            conid = getattr(acc, 'conid', None)
+            pay_date = _as_date(getattr(acc, 'payDate', None))
+            if not conid or not pay_date:
+                # Without a pay date the row answers neither question this section is
+                # read for; without a conid it cannot be attached to a holding.
+                continue
+            accruals.append({
+                'conid': str(conid),
+                'symbol': getattr(acc, 'symbol', None),
+                'ex_date': _as_date(getattr(acc, 'exDate', None)),
+                'pay_date': pay_date,
+                'currency': getattr(acc, 'currency', None),
+                'quantity': _dec(getattr(acc, 'quantity', None)),
+                'gross_amount': _dec(getattr(acc, 'grossAmount', None)),
+                'tax': _dec(getattr(acc, 'tax', None)),
+                'net_amount': _dec(getattr(acc, 'netAmount', None)),
+            })
+
+        logger.info(f"Extracted {len(accruals)} open dividend accrual(s) from Flex")
+        return accruals
 
     async def extract_cash_flows(self, flex_data: Dict) -> List[Dict]:
         """

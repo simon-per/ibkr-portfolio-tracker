@@ -571,7 +571,9 @@ class DividendSecurityRow(BaseModel):
     # portfolio-level card, which has always been forward-over-cost.
     yield_on_cost_pct: Optional[float] = None
     share_pct: Optional[float] = None       # of the window's total (actual + forecast)
-    next_pay_date: Optional[str] = None     # earliest projected payment, if any
+    # Earliest projected payment, if any — the date the CASH is expected, not the
+    # ex-date. It carried an ex-date under this name until the pay-date shift.
+    next_pay_date: Optional[str] = None
     source: Optional[str] = None    # 'ibkr' | 'estimate' | 'mixed'; None = forecast-only
     # 'net' = sized from dividends actually received; 'gross_estimate' = from
     # yfinance's gross per-share only, so withholding isn't deducted.
@@ -582,6 +584,13 @@ class DividendSecurityRow(BaseModel):
     # from the wrong ticker, and nothing on the page said so.
     forecast_samples: Optional[int] = None
     forecast_cadence_days: Optional[int] = None
+    # How far the projected dates were moved from the ex-date to the day the cash is
+    # expected, and off how many observed ex→pay pairs. **Absent, not zero**, when
+    # nothing could be measured — a 0-day lag is a claim that the cash arrives on the
+    # ex-date, while absence says the date on screen IS an ex-date and lets the UI say
+    # so. Same reason `forecast_samples` rides beside the cadence.
+    forecast_lag_days: Optional[int] = None
+    forecast_lag_samples: Optional[int] = None
 
 
 class DividendDelta(BaseModel):
@@ -648,12 +657,33 @@ class DividendGrowth(BaseModel):
 
 
 class DividendUpcomingPayment(BaseModel):
-    """One projected payment, dated — the dividend calendar."""
+    """
+    One expected payment, dated — the dividend calendar.
+
+    ``date`` is when the CASH is expected, which is the question the calendar answers.
+    It used to be the ex-date for most securities, because the cadence is inferred from
+    yfinance's ex-date series and nothing shifted it; the ex-date is now metadata beside
+    it, and `pay_date_source` says how much that shift is worth believing.
+    """
     date: str
+    # The ex-date the payment derives from — metadata, so a reader can check the shift
+    # rather than take it on trust. Null only for an accrual IBKR published without one.
+    ex_date: Optional[str] = None
     security_id: int
     symbol: str
     net_eur: float
     basis: Optional[str] = None     # 'net' | 'gross_estimate'
+    # Where `date` came from, weakest last:
+    #   'accrual'      — IBKR announced this pay date. Authoritative.
+    #   'measured_lag' — the ex-date plus this security's own measured ex→pay distance.
+    #   'ex_date'      — nothing could be measured; this IS the ex-date, so the cash
+    #                    lands some days later. Stated rather than implied.
+    pay_date_source: str = "ex_date"
+    # The expected pay date has passed and no IBKR cash row has arrived: the dividend has
+    # gone ex, the money is owed, and it is in none of the totals yet. Shown on the
+    # calendar and deliberately nowhere else — see the service. Before this existed such
+    # a payment was invisible on every surface for up to a month.
+    pending: bool = False
 
 
 class DividendForwardYield(BaseModel):

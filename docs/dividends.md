@@ -292,8 +292,10 @@ suffixes), alongside genuine non-payers (AMD, Amazon, Arista, NU, Credo, Ondas).
 assumed: each has 600+ cached prices, so the Yahoo ticker resolves and the empty dividend series is real.
 **Don't "fix" their absence.**
 
-**Forecasts are inferred, because nothing forward-looking is cached** — no announced dividends
-anywhere, and the fundamentals/earnings tables carry no dividend fields. `dividend_forecast.py` is a
+**Forecasts are inferred, because almost nothing forward-looking is cached** — the fundamentals and
+earnings tables carry no dividend fields, and the only announced dividends anywhere are the Flex
+accruals below, which reach one payment ahead and only once the portal section is on.
+`dividend_forecast.py` is a
 pure module (no DB, no network, fast unit tests): cadence is the **median gap** between recent
 payments, the amount the **median** of recent payments scaled to the current holding — median so one
 special dividend doesn't inflate every projection. It refuses rather than guesses: nothing held, fewer
@@ -310,6 +312,108 @@ payment, so a wide projection sliced to a window equals projecting that window d
 **The chart's reach is deliberately narrower than the projection's** — without a selected year it
 still stops at 31 December. Coupling the two tripled the all-time chart's forecast total (46 → 162)
 by pulling next year's payments into it.
+
+### The date a projection carries, and the month a dividend used to spend in nobody's numbers
+
+**A projected payment is dated when the CASH is expected.** Until 2026-09-19 it was dated on the
+**ex-date**, and nothing said so: `project_dividends` steps from the last known payment, the schedule
+comes from yfinance's ex-date series wherever one exists (*Infer cadence from ONE dated series*
+above), and the result was served as `upcoming[].date` and `next_pay_date` and rendered under
+*Expected next*. Two dates for one event, one of them wearing the other's name.
+
+That mislabelling produced a real hole, and three rules had to line up for it:
+
+1. the projection is dated on the ex-date;
+2. `horizon_start = as_of + 1`, so a projection is deleted **on its own date**;
+3. `_splice_by_era` drops every `yfinance_estimate` dated on or after the era boundary, so the
+   estimate recording that same payment is not income either.
+
+So from the moment a dividend went ex until IBKR posted the cash, it was in **none** of `upcoming`,
+`months[]`, `ttm_series`, `next_12m_eur`, `forward_yield`, `growth`, the tax report, the activity
+ledger or XIRR. Measured on production 2026-09-19: **six held securities at once**, the oldest
+22 days in, and NVDA — whose measured lag is 21 days — with another twelve to go.
+
+**Three sources for the expected pay date, weakest last, and each named on the wire**
+(`upcoming[].pay_date_source`):
+
+- **`accrual`** — IBKR's `<OpenDividendAccruals>`, the only record anywhere carrying an ex-date and
+  a pay date together, with the net it will pay. Authoritative, and it costs nothing: it rides on
+  the statement already being pulled. Off by default in the portal — see *Announced dividends*.
+- **`measured_lag`** — the ex-date plus `median(pay_date − ex_date)` for that security, paired out
+  of the **raw** history. This is measurable only because `_splice_by_era` drops post-boundary
+  estimates at *read* time: the table still holds an estimate beside every IBKR payment. Measured
+  on production: every IBKR payment on record paired, lags 7–29 days, stable per security to a day
+  or two (Mastercard 29 both times, ASML/NASDAQ 8 three times; the widest spread was MCO's 11 and
+  21). `forecast_lag_days` and `forecast_lag_samples` ride on the row so a thin one declares
+  itself, exactly as `forecast_samples` does for the cadence.
+- **`ex_date`** — nothing could be measured, so the date IS an ex-date and the cash lands some days
+  later. **Stated, not implied**, and the lag is absent rather than `0`: a zero would claim
+  same-day settlement, which is the stand-in-for-an-unknown this file forbids everywhere else. Half
+  the held ex-dated payers were in this state on 2026-09-19, all of them positions that had not yet
+  been paid through IBKR, so it empties itself as payments land.
+
+**Only an ex-dated cadence is shifted.** A security whose schedule came from IBKR rows is already
+pay-dated, and shifting it would move it a lag into the future twice; `_forecast_inputs` returns the
+set it inferred from yfinance for exactly this.
+
+**The projection is asked for a lag earlier than the horizon**, so a payment that went ex in the
+last few days is produced rather than lost — and after the shift every emitted date is still
+strictly after `as_of`, which is what keeps *Monthly / TTM*'s closed-prefix guarantee intact. Do not
+"simplify" that by shifting after the horizon is applied: the payments worth recovering are exactly
+the ones the unshifted horizon excludes.
+
+**A dividend that has gone ex and not been paid is `pending`, and reaches the calendar only.** It
+comes from the spliced-away estimate itself, so the amount is the real per-share figure on the real
+share count rather than a projection, and it disappears the moment an IBKR row lands inside the lag
+window. It is deliberately in **no** total: the cash has not arrived, so counting it as income would
+credit the account with money it has not been paid — the refusal `ibkr_cash_receipts` already makes
+— and dating it inside an elapsed month would break the invariant the Forecast toggle rests on. So
+the reader sees it on the calendar, badged *payment pending* in visible text, and nowhere else.
+That is strictly more than the nothing it used to be, and it moves no identity.
+
+Bounded at `PENDING_MAX_AGE_DAYS` (90), deliberately wider than `EX_TO_PAY_MAX_LAG_DAYS` (30)
+because **the two answer different questions**: 30 decides whether two rows are the same dividend,
+where too wide deletes real income, and 90 decides how long to keep saying "still expected", where
+Korean and Taiwanese payers routinely need more than a month. A payment IBKR reclassifies never
+arrives, and an entry that sits there for ever is how a reader learns to stop reading the calendar.
+
+**The matcher is one function now.** `_splice_by_era` wants the estimates to *drop* and
+`_measured_pay_lags` wants the ex→pay distances to *keep*, off the identical pairing — per security,
+nearest-first, one-to-one, bounded, never by amount. `match_estimates_to_ibkr` is that pairing, with
+`max_lag_days` a parameter precisely because the callers may legitimately diverge on it. A second
+copy of this is the failure mode at the top of CLAUDE.md.
+
+Tests: `tests/test_dividend_pay_date.py`, `src/components/DividendCalendar.test.tsx` (the calendar
+had none at all before), and the extraction is pinned behaviour-neutral by
+`tests/test_era_splice_boundary.py` passing unchanged.
+
+### Announced dividends — `<OpenDividendAccruals>`
+
+The Flex section carrying `exDate`, `payDate`, `grossAmount`, `tax`, `netAmount` and `quantity` for
+dividends IBKR has declared and not yet paid. `ibflex` 0.15 has always modelled it; nothing read it
+until 2026-09-19.
+
+- **Its own table, `dividend_accruals`, never a third `source` on `dividend_payments`.** That table
+  is the income ledger, and every reader reaching it through `_splice_by_era` — DA-1 income, XIRR,
+  the cash balance, the Steuerwert — would then be counting money the account has not received. A
+  separate table cannot be read by accident.
+- **Replaced wholesale each sync.** IBKR publishes the currently-*open* set rather than a log, so a
+  paid accrual simply stops appearing; upserting would leave it promising money that had arrived.
+  An enabled section listing nothing means everything has been paid, so an empty list still clears.
+- **Ingested unconditionally**, like the Cash Report, so ticking the section in the portal is the
+  whole setup — no flag, no redeploy, and an empty table is the supported default.
+- Amounts convert at the **newest cached** rate, not at the pay date: that date is in the future and
+  has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
+  with no cached rate is skipped and warned about rather than stored unconverted.
+- An accrual supersedes the inference it duplicates, within `ACCRUAL_MATCH_DAYS` (15 — under half a
+  monthly cycle, so a monthly payer's genuinely separate next payment is never swallowed).
+
+**IBKR does send an ex-date on ordinary dividend cash transactions, and `ibflex` throws it away.**
+`CashTransaction.exDate` is in the list of ~27 attributes the sanitizer drops on every sync
+(`tests/test_flex_attr_coverage.py` pins it as *not* ingested), because the pinned 0.15 does not
+model the field. Reading it would make the lag exact instead of matched-by-proximity, and would give
+IBKR rows a real ex-date — but it needs parsing outside `ibflex`, and it is backward-looking, so it
+closes nothing the accruals do not. Recorded so nobody rediscovers it as new.
 
 ### The forward yield — the portfolio's dividend rate
 

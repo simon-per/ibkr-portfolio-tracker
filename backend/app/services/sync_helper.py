@@ -108,6 +108,16 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         cash_txns, conid_to_security_id
     )
 
+    # Dividends IBKR has announced and not yet paid, from <OpenDividendAccruals> — the
+    # only element carrying an ex-date and a pay date on one record. Ingested
+    # unconditionally like the cash sections below, so enabling the section in the portal
+    # needs no code change; an absent section is an empty list and a supported state.
+    # These are NOT income and never reach `dividend_payments` — see the model docstring.
+    accruals_data = await ibkr_service.extract_dividend_accruals(flex_data)
+    accrual_result = await DividendService(db).sync_dividend_accruals(
+        accruals_data, conid_to_security_id
+    )
+
     # Deposits/withdrawals from the same section — the only record of external money,
     # since lot cost basis cannot tell new money from redeployed sale proceeds. Transfers
     # come along so an incoming one can be excluded rather than read as a contribution.
@@ -180,6 +190,7 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     # A dividend skipped for want of an FX rate rides on a *successful* sync, so it is
     # structurally invisible unless hoisted here.
     warnings.extend(dividend_result.get("warnings") or [])
+    warnings.extend(accrual_result.get("warnings") or [])
     warnings.extend(flex_data.get('flex_warnings') or [])
 
     return {
@@ -198,6 +209,10 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         "corporate_actions_seen": len(corp_actions_data),
         "prices_invalidated": invalidated["prices_invalidated"],
         "cash_transactions_seen": len(cash_txns),
+        # The count STORED, not the raw row count, for the same reason `cash_balances_seen`
+        # is: 0 against a non-empty section would say "the portal edit did not take" about
+        # an edit that did. 0 with no section is the normal, supported state.
+        "dividend_accruals_seen": accrual_result.get("dividend_accruals", 0),
         "cash_flows_seen": flows["cash_flows_seen"],
         "cash_flows_skipped": flows["cash_flows_skipped"],
         "transfers_seen": flows["transfers_seen"],

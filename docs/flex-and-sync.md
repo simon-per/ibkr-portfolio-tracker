@@ -148,11 +148,28 @@ Required sections and the fields the parsers actually read:
 | **Transfers** | — | `type`, `direction`, `date`/`reportDate`, `cashTransfer`, `positionAmount`, `symbol`, `conid`, `company`, `transactionID` |
 | **Cash Report** *(optional)* | **Base Currency Summary** | `currency`, `toDate`, `endingCash`, `levelOfDetail` |
 | **Equity Summary in Base** *(optional)* | — | `reportDate`, `cash`, `stock`, `total` |
+| **Open Dividend Accruals** *(optional)* | — | `conid`, `symbol`, `exDate`, `payDate`, `quantity`, `grossAmount`, `tax`, `netAmount`, `currency` |
 
-**The two cash sections are the only optional ones**, and the only ones whose absence is a supported
-steady state rather than a gap: without either, `CashService` derives the balance from the trade,
-deposit and dividend ledgers and every surface badges it `derived`. Enabling one lets IBKR's own
-figure take over, which is the only way the app can see broker interest, account fees and FX spread.
+**The three optional sections are the only ones whose absence is a supported steady state** rather
+than a gap. Without either cash section, `CashService` derives the balance from the trade, deposit
+and dividend ledgers and every surface badges it `derived`; enabling one lets IBKR's own figure take
+over, which is the only way the app can see broker interest, account fees and FX spread.
+
+**Open Dividend Accruals is the only element IBKR publishes that carries an ex-date and a pay date
+together**, for dividends it has declared and not yet paid. Without it the dividend calendar dates a
+projection by adding a lag measured from history, and a payment that has gone ex but not settled is
+shown as `pending` off the estimate recording it — both work, both say which they are, and neither
+is as good as the announced date. `extract_dividend_accruals` runs unconditionally and returns `[]`
+when the section is absent, so ticking it in the portal is the whole setup: no flag, no redeploy,
+and the next successful sync populates `dividend_accruals`. The set is **replaced wholesale** every
+sync, because IBKR publishes the currently-open accruals rather than a log — a row disappearing *is*
+the statement saying it was paid. Accruals never enter `dividend_payments`: see *docs/dividends.md*,
+*Announced dividends*, for why unpaid money must not reach the income ledger.
+
+Note IBKR also sends **`exDate` on ordinary dividend `<CashTransaction>` rows** and the pinned
+`ibflex` 0.15 does not model the field, so the sanitizer drops it on every sync — it is one of the
+~27 cosmetic drops. Reading it would need parsing outside `ibflex` and is backward-looking, so it
+closes nothing the accruals do not; recorded here so it is not rediscovered as a finding.
 
 **They are different sections and not interchangeable.** `Cash Report` is per **currency** over the
 whole statement period, so it yields one anchor dated `toDate` per sync; `Equity Summary in Base` is
