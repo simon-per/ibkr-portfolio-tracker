@@ -536,13 +536,12 @@ async def test_a_stopped_payer_falls_to_a_measured_zero_and_the_open_month_is_ab
 async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_it():
     """
     The toggle never refetches, so the client filters `partial` locally — which is
-    only honest if the closed points are identical either way. They are, and by
-    construction rather than by luck: no projection can be dated on or before
-    today (`horizon_start = as_of + 1`), so a window that has fully elapsed cannot
-    contain one.
+    only honest if the closed points are identical either way. With nothing owed,
+    they are: the forward loop cannot date a projection on or before today, so a
+    fully elapsed window contains none.
 
-    Byte-identical, not "equal on the two fields someone thought to check" — the
-    premise that used to hold for the whole series now holds exactly here.
+    Byte-identical, not "equal on the two fields someone thought to check". The
+    case where a window DOES carry an unsettled payment is the next test.
     """
     engine, session = await _make_session()
     try:
@@ -573,6 +572,111 @@ async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_i
     finally:
         await session.close()
         await engine.dispose()
+
+
+async def _payer_owed_a_dividend(session):
+    """
+    A quarterly payer with an IBKR era, whose most recent dividend has gone ex and
+    has not paid — so an elapsed month carries an expected payment. The real shape:
+    six securities on this account were in it at once on 2026-09-19.
+    """
+    session.add(_lot(1, date(2024, 1, 1), "100"))
+    await session.flush()
+    for on in (date(2024, 6, 15), date(2024, 9, 15), date(2024, 12, 15),
+               date(2025, 3, 15), date(2025, 6, 15), date(2025, 9, 15),
+               date(2025, 12, 15), date(2026, 3, 15), date(2026, 6, 15)):
+        await _seed_per_share(session, on)
+    # One IBKR row, so an era boundary exists and the June estimate is on the far
+    # side of it: the splice drops it from income, which is what left it in nothing.
+    await _seed(session, date(2026, 5, 20), "40", source="ibkr")
+
+
+@pytest.mark.asyncio
+async def test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it():
+    """
+    `partial` means "this window has not fully elapsed", and it must not start
+    meaning "carries projection" — those diverged the moment a dividend could go ex
+    and not pay. Widening it would drop a window holding twelve months of MEASURED
+    income over one unsettled payment, which is the short-sum rule inverted.
+
+    So the closed window keeps its projection, and the client strips rather than
+    drops. This pins what that strip must produce, against the server's own
+    actual-only answer — the `realizedOnlyYears` arrangement, one rule named at
+    both ends of the language boundary. `withoutForecast` in dividendChart.ts is
+    the other end, covered by dividendChart.test.ts.
+    """
+    engine, session = await _make_session()
+    try:
+        await _payer_owed_a_dividend(session)
+        svc = DividendService(session)
+        on = await svc.get_dividend_breakdown(as_of=AS_OF)
+        off = await svc.get_dividend_breakdown(as_of=AS_OF, include_forecast=False)
+
+        owed = next(u for u in on["upcoming"] if u["date"] == "2026-06-15")
+        assert owed["pending"] is True and owed["net_eur"] == 85  # gross 100 x 0.85
+
+        on_pt = next(p for p in on["ttm_series"] if p["month"] == "2026-06")
+        prev = next(p for p in on["ttm_series"] if p["month"] == "2026-05")
+        assert on_pt["partial"] is False
+        assert on_pt["forecast_net_eur"] == owed["net_eur"]
+        assert on_pt["total_eur"] == on_pt["net_eur"] + owed["net_eur"]
+
+        off_pt = next(p for p in off["ttm_series"] if p["month"] == "2026-06")
+        assert {k: v for k, v in off_pt.items() if k != "mom_pct"} == {
+            **{k: v for k, v in on_pt.items() if k != "mom_pct"},
+            "forecast": {},
+            "forecast_net_eur": 0,
+            "total_eur": on_pt["net_eur"],
+            "mom_includes_forecast": False,
+        }
+        # Recomputed off the measured halves, one decimal place, zero base -> null.
+        assert off_pt["mom_pct"] == pytest.approx(
+            (on_pt["net_eur"] - prev["net_eur"]) / prev["net_eur"] * 100, abs=0.05
+        )
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+def test_an_overdue_payment_alone_does_not_stretch_the_series_into_next_year():
+    """
+    The reach gate reads FORWARD projections, not a non-empty forecast map. Fold an
+    overdue payment into that map and the old test — `bool(month_forecast_sym_all)`
+    — would run the series out to the horizon over months nothing is expected in,
+    decaying to 0.00 and drawing a collapse that never happened. That is the shape
+    this service once served as `next_12m_vs_ttm_pct: -100.0`.
+
+    Called directly: the fixture that produces a pending payment and no forward
+    projection at all needs a security with one dated payment and an era boundary
+    from another, which is a lot of scaffolding to pin two booleans.
+    """
+    common = dict(
+        month_actual_sym_all={f"2025-{m:02d}": {"AAA": Decimal("10")} for m in range(1, 13)},
+        month_sources_all={},
+        first_income=date(2025, 1, 15),
+        current_month="2026-03",
+        horizon_month="2027-12",
+        axis_start="2025-12",
+        axis_end="2026-03",
+        windowed=False,
+        include_forecast=True,
+    )
+    overdue_only = DividendService._rolling_twelve_months(
+        month_forecast_sym_all={"2026-01": {"AAA": Decimal("5")}},
+        has_forward_projection=False,
+        **common,
+    )
+    assert overdue_only[-1]["month"] == "2026-02"  # the last fully elapsed month
+    # ...and the overdue payment is still inside the windows that contain it.
+    assert overdue_only[-1]["forecast_net_eur"] == 5
+
+    with_forward = DividendService._rolling_twelve_months(
+        month_forecast_sym_all={"2026-01": {"AAA": Decimal("5")},
+                                "2026-06": {"AAA": Decimal("5")}},
+        has_forward_projection=True,
+        **common,
+    )
+    assert with_forward[-1]["month"] == "2027-12"
 
 
 @pytest.mark.asyncio

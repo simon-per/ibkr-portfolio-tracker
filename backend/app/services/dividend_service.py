@@ -908,6 +908,7 @@ class DividendService:
         axis_end: Optional[str],
         windowed: bool,
         include_forecast: bool,
+        has_forward_projection: bool,
     ) -> List[Dict]:
         """
         Rolling twelve-month totals, one point per month, stacked by symbol.
@@ -931,11 +932,18 @@ class DividendService:
         Only absent coverage is dropped.
 
         Forecast is folded in as though it had been received, so a window reaching
-        past today is part measured and part projected; `partial` says so, and the
-        client hides those points when the Forecast toggle is off. With
-        ``include_forecast`` false there is no projection to fold, so the series
-        simply stops at the last elapsed month rather than publishing windows that
-        are short by however much of them has not happened yet.
+        past today is part measured and part projected. With ``include_forecast``
+        false there is no projection to fold, so the series simply stops at the
+        last elapsed month rather than publishing windows that are short by
+        however much of them has not happened yet.
+
+        **`partial` means the window has not fully elapsed, and nothing else.** It
+        is deliberately not "carries projection": a dividend that went ex and has
+        not paid puts projection inside a CLOSED window, and dropping that window
+        would make twelve months of measured income absent over one unsettled
+        payment — the short-sum rule inverted. So the client hides a projection by
+        stripping it from the point (`withoutForecast` in `lib/dividendChart.ts`),
+        not by dropping the point; only genuinely open windows go.
         """
         if first_income is None or axis_start is None or axis_end is None:
             return []
@@ -952,7 +960,13 @@ class DividendService:
         # Portfolio-level, deliberately: asking it per window would punch holes in
         # an annual payer's series, where the window ending in January contains no
         # projection and the one ending in March does.
-        projecting = include_forecast and bool(month_forecast_sym_all)
+        #
+        # A FORWARD projection, specifically — not merely a non-empty
+        # `month_forecast_sym_all`, which now also carries calendar entries whose
+        # date has already passed. One overdue payment is not grounds to run the
+        # series out to next December over months nothing is expected in, which is
+        # the decay this gate exists to prevent.
+        projecting = include_forecast and has_forward_projection
         if projecting:
             # The HORIZON, not the last projected payment. Ending at the last
             # payment would put the series' end wherever one payer's final
@@ -1378,6 +1392,11 @@ class DividendService:
         month_forecast_sym_all: Dict[str, Dict[str, Decimal]] = defaultdict(
             lambda: defaultdict(Decimal)
         )
+        # Whether the cadence projected anything AHEAD of today, which is what
+        # decides how far the rolling series runs. Not `bool(month_forecast_sym_all)`
+        # any more: that dict now also carries calendar entries whose date has gone
+        # by, and those justify no reach at all. See `_rolling_twelve_months`.
+        has_forward_projection = False
         next_12m = Decimal("0")
         # The same 365-day total, split per security, for the forward yields. Kept
         # beside the aggregate rather than derived from the per-security table
@@ -1476,11 +1495,12 @@ class DividendService:
 
                 # A projection whose own date has gone by is not a forecast any more:
                 # the payment was expected and nothing has arrived. Split it off HERE,
-                # so every line below — next_pay, the annual and monthly accumulators,
-                # next_12m, the table rows, the chart — keeps seeing exactly what it
-                # saw before this existed. The rest are held back and emitted with the
-                # other two pending sources, behind the guards that ask whether
-                # something better already records the same dividend.
+                # so the lines below — next_pay, next_12m, the annual and monthly
+                # accumulators — see only what is still ahead. The rest are held back
+                # and emitted with the other two pending sources, behind the guards
+                # that ask whether something better already records the same dividend;
+                # the fold at the end of the block then puts them in the forecast
+                # buckets under the one rule that covers all three.
                 overdue.extend((sid, fp, lag, pay_date_source, basis)
                                for fp in projected if fp.on_date <= as_of)
                 projected = [fp for fp in projected if fp.on_date > as_of]
@@ -1537,8 +1557,10 @@ class DividendService:
                     monthly_forecast[fp.on_date.strftime("%Y-%m")][symbol] += amt
                     total_forecast += amt
 
+            has_forward_projection = bool(month_forecast_sym_all)
+
             # ---- Announced, and gone-ex-but-unpaid -----------------------------
-            # Everything above projects payments that have not happened yet. These two
+            # Everything above projects payments that have not happened yet. These three
             # blocks carry the ones that HAVE — a dividend is announced, or has already
             # gone ex, and its cash simply has not reached the account.
             #
@@ -1548,15 +1570,14 @@ class DividendService:
             # the cash arriving the dividend was in no figure at all — measured at up to
             # 29 days on this account, on six held securities at once.
             #
-            # **Calendar only, deliberately.** Nothing here enters `months[]`,
-            # `ttm_series`, `next_12m_eur`, `forward_yield` or `growth`. Those are
-            # measured-or-projected-forward, and a payment in this state is neither: the
-            # cash has not arrived, so calling it income would credit the account with
-            # money it has not been paid, and calling it a projection would put a
-            # backdated entry inside an elapsed month — which is exactly the invariant
-            # the Forecast toggle reproduces the closed series from. The reader sees it
-            # on the calendar, badged, which is strictly more than the nothing they saw
-            # before and costs no identity.
+            # Each block appends to `upcoming` and records the same payment in
+            # `calendar_folds`, which one pass below folds into the forecast
+            # accumulators. Collected rather than folded in place: the three blocks
+            # differ only in where the payment came from and what guards it had to
+            # clear, and three copies of the fold is how the two of them that get
+            # edited together stop agreeing with the third.
+            calendar_folds: List[Tuple[date, str, int, Decimal, Optional[str]]] = []
+
             for sid, accruals in accruals_by_sec.items():
                 if shares_at(sid, as_of) <= 0:
                     continue
@@ -1576,6 +1597,9 @@ class DividendService:
                         "pay_date_source": "accrual",
                         "pending": a["pay_date"] <= as_of,
                     })
+                    calendar_folds.append(
+                        (a["pay_date"], _symbol(sid), sid, amt, "net")
+                    )
 
             ibkr_pays_by_sec: Dict[int, List[date]] = defaultdict(list)
             est_ex_by_sec: Dict[int, List[date]] = defaultdict(list)
@@ -1632,6 +1656,10 @@ class DividendService:
                     "pay_date_source": "measured_lag" if lag_samples else "ex_date",
                     "pending": expected <= as_of,
                 })
+                calendar_folds.append(
+                    (expected, _symbol(p.security_id), p.security_id, amt,
+                     "gross_estimate")
+                )
 
             # The weakest of the three, and the last resort: NOTHING records this
             # payment. The cadence says one was due, the measured lag (or its absence)
@@ -1678,6 +1706,48 @@ class DividendService:
                     "pay_date_source": source,
                     "pending": True,
                 })
+                calendar_folds.append((fp.on_date, _symbol(sid), sid, amt, basis))
+
+            # ---- The calendar IS the forecast ----------------------------------
+            # One rule for all four producers of `upcoming`: money this portfolio
+            # expects and has not received belongs in the forecast buckets, dated
+            # where the calendar dates it. The forward loop above already folds its
+            # own; these three used to reach the calendar and nothing else, so a
+            # payment that had actually gone ex — the most certain money on the
+            # list — was the only kind missing from every chart and every total.
+            # Measured on production 2026-09-19: 28.88 of 114.55.
+            #
+            # Two directions this must NOT go.
+            #
+            # Never the realized side. The cash has not arrived; `monthly_actual`,
+            # `annual_actual`, `total_net_eur` and `growth.ttm/ytd` stay measured.
+            #
+            # Never `next_12m` (and so never `forward_yield`) for a payment already
+            # due. That figure is as_of -> as_of+365, and a backlog entry is before
+            # it, not inside it — folding one in would inflate a run-rate with a
+            # payment whose cycle is already counted. A calendar entry dated AHEAD
+            # of today is inside it and does belong: an estimate row arriving makes
+            # the cadence step past that payment, so excluding it silently cost the
+            # forward figures one payment per security until the cash landed.
+            for on_date, symbol, sid, amt, basis in calendar_folds:
+                annual_forecast[on_date.year] += amt
+                month_forecast_sym_all[on_date.strftime("%Y-%m")][symbol] += amt
+                if on_date > as_of:
+                    next_pay[sid] = min(on_date, next_pay.get(sid, date.max))
+                    if on_date <= next_12m_end:
+                        next_12m += amt
+                        next_12m_by_sec[sid] += amt
+                if _in_window(on_date) and on_date <= chart_end:
+                    row = by_sec.setdefault(sid, _new_row())
+                    row["forecast_payouts"] += 1
+                    row["forecast_net"] += amt
+                    # Only when the cadence did not already label the row. A
+                    # security projecting from received dividends is `net`, and one
+                    # unsettled gross-sized entry must not relabel its whole row.
+                    if row["forecast_basis"] is None:
+                        row["forecast_basis"] = basis
+                    monthly_forecast[on_date.strftime("%Y-%m")][symbol] += amt
+                    total_forecast += amt
 
         upcoming.sort(key=lambda u: (u["date"], u["symbol"]))
 
@@ -1981,6 +2051,7 @@ class DividendService:
             axis_end=months_axis[-1] if months_axis else None,
             windowed=year is not None or period == "24m",
             include_forecast=include_forecast,
+            has_forward_projection=has_forward_projection,
         )
         # The earliest window that exists over the WHOLE history, regardless of the
         # selected range. The client cannot derive it: with ?year=2026 the response

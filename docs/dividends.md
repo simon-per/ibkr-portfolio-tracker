@@ -39,10 +39,37 @@ part projected; the bar splits each symbol into a solid segment and a translucen
 same stack, which is the monthly chart's existing vocabulary. `partial` marks such a window, and
 that — not `forecast_net_eur > 0` — is what the Forecast toggle filters on: an open window can
 contain no projection at all when the next payment falls outside it. With the toggle off the client
-drops the partial points, which reproduces the pre-forecast series **exactly**, and it can do that
-without refetching because no projection is ever dated on or before today (`horizon_start = as_of + 1`),
-so a fully elapsed window provably contains none. `test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_it`
-asserts byte equality rather than equality on the two fields someone thought to check.
+drops the partial points, which reproduces the pre-forecast series without refetching.
+
+**`partial` means the window has not fully elapsed, and nothing else — and the two facts it used to
+imply together have come apart.** Until the calendar started feeding the forecast (*A dividend that
+has gone ex* below), no projection could be dated on or before today, so "open" and "carries
+projection" picked out the same points and dropping the open ones left exactly the measured series.
+A dividend that has gone ex and not paid is dated in the past, so a **closed** window can now carry
+projection. Widening `partial` to cover it was the wrong repair: it would drop a window holding
+twelve months of *measured* income over one late payment, which is the short-sum rule inverted —
+the rule says a window without twelve months behind it does not exist, not that a complete one
+stops existing. So the client **strips instead of dropping**: `withoutForecast` in
+`lib/dividendChart.ts` empties `forecast`, sets `total_eur` to `net_eur` and recomputes `mom_pct`
+off the measured halves, so the pace, the header amount and the change chips all describe what is
+actually drawn. It is the sibling of `realizedOnlyYears` in `dividendGrowth.ts` — the same
+cross-boundary duplicate, legitimate for the same reason: both ends name the two server rules they
+copy (one decimal place; a zero base yields nothing).
+
+Its one honest gap is the **first** point of a windowed response, whose predecessor is a month the
+client never received: it reports no change rather than one measured against the wrong neighbour,
+which would make a window's figure depend on the range showing it.
+
+`test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_it` still pins byte equality
+for a book with nothing owed; `test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it`
+pins the strip against the server's own `forecast=false` answer, and `dividendChart.test.ts` pins
+the other end of it.
+
+**The rolling series' reach reads *forward* projections specifically** (`has_forward_projection`),
+not a non-empty forecast map. Once an overdue payment can be in that map, `bool(month_forecast_sym_all)`
+would run the series out to next December over months nothing is expected in — decaying to 0.00 and
+drawing a collapse that never happened, which is the `next_12m_vs_ttm_pct: -100.0` shape the gate
+exists to prevent.
 
 **Folding a projection into a rolling total is legitimate where folding it into a single month is
 not** (see *Growth* rule 5 below, which forbids exactly that). A projected month's change is the
@@ -375,14 +402,39 @@ strictly after `as_of`, which is what keeps *Monthly / TTM*'s closed-prefix guar
 "simplify" that by shifting after the horizon is applied: the payments worth recovering are exactly
 the ones the unshifted horizon excludes.
 
-**A dividend that has gone ex and not been paid is `pending`, and reaches the calendar only.** It
-comes from the spliced-away estimate itself, so the amount is the real per-share figure on the real
-share count rather than a projection, and it disappears the moment an IBKR row lands inside the lag
-window. It is deliberately in **no** total: the cash has not arrived, so counting it as income would
-credit the account with money it has not been paid — the refusal `ibkr_cash_receipts` already makes
-— and dating it inside an elapsed month would break the invariant the Forecast toggle rests on. So
-the reader sees it on the calendar, badged *payment pending* in visible text, and nowhere else.
-That is strictly more than the nothing it used to be, and it moves no identity.
+**A dividend that has gone ex and not been paid is `pending`.** It comes from the spliced-away
+estimate itself, so the amount is the real per-share figure on the real share count rather than a
+projection, and it disappears the moment an IBKR row lands inside the lag window. It is never
+income: the cash has not arrived, so counting it as received would credit the account with money it
+has not been paid — the refusal `ibkr_cash_receipts` already makes.
+
+**But the calendar IS the forecast.** These tails first shipped reaching `upcoming` and nothing
+else (2026-09-19, same day as the fix below it), on the reasoning that a payment neither measured
+nor projected-forward belongs in no aggregate. That was too narrow, and the giveaway is which money
+it excluded: a dividend that has actually gone ex is the *most* certain entry on the calendar, and
+it was the only kind missing from every chart and every total. Measured on production the same day:
+**28.88 of 114.55** — September's translucent segment read 20.60 while the calendar below it listed
+47.91 for that month.
+
+So one rule covers all four producers of `upcoming`: **money this portfolio expects and has not
+received goes in the forecast buckets, dated where the calendar dates it** — `months[].forecast`,
+`ttm_series[].forecast`, `growth.annual[].forecast_net_eur`, the per-security `forecast_net_eur`,
+and `total_forecast_net_eur`. The three tails collect into `calendar_folds` and one pass folds
+them, rather than each block growing its own copy of the four accumulator lines.
+
+Two directions it must not go. **Never the realized side** — `monthly_actual`, `annual_actual`,
+`total_net_eur` and `growth.ttm`/`ytd` stay measured, which is what makes the toggle honest. And
+**never `next_12m_eur` (so never `forward_yield`) for a payment already due**: that figure is
+`as_of → as_of + 365` and a backlog entry sits before it, so folding one in would inflate a
+run-rate with a cycle already counted. A calendar entry dated *ahead* of today is inside that
+window and does belong — and excluding it was not merely an omission, because the cadence steps
+past a recorded ex-date: from the moment yfinance wrote the row until the cash landed, the forward
+figures were short one payment per security. `next_pay_date` follows the same gate, so the table
+and the calendar name the same next payment.
+
+The identity that falls out, and the one worth testing:
+`next_12m_eur == sum(net_eur for upcoming if not pending)`, exactly — every non-pending entry is
+dated after today and inside 365 days, by each tail's own bound.
 
 **Two things can be pending, and the weaker one is nothing but our own inference.** The paragraph
 above covers the first: an estimate row exists and the cash has not come. But yfinance writes a
@@ -403,8 +455,9 @@ once Yahoo publishes, since the cadence steps from the last *recorded* ex-date.
 Mechanically it is one widened call: `project_dividends` is asked from
 `min(horizon_start − lag, as_of − PENDING_MAX_AGE_DAYS)` and the result is split on `as_of`. A
 `min` rather than a single expression, so the pending bound never silently depends on 90 staying
-larger than a measured lag. Everything downstream of the split — `next_pay`, the annual and monthly
-accumulators, `next_12m`, the table rows, the chart — sees exactly what it saw before.
+larger than a measured lag. Below the split, `next_pay` and `next_12m` see only what is still
+ahead; the overdue half is held back, cleared by the guards above, and folded with the other two
+tails.
 
 **The inferred tails expire; an accrual does not.** Both pending tails are bounded at
 `PENDING_MAX_AGE_DAYS` (90) — deliberately wider than `EX_TO_PAY_MAX_LAG_DAYS` (30), because **the

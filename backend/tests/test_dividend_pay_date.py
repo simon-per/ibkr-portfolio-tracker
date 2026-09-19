@@ -17,10 +17,17 @@ What closes it, weakest last:
   history by the matcher the era splice already runs;
 - the **ex-date**, unchanged, and now saying that is what it is.
 
-The invariant these must not break is that no projection is ever dated on or before
-today. The Forecast toggle reproduces the pre-forecast series exactly by dropping open
-windows, and that is only sound because an elapsed month provably contains no
-projection.
+Everything that reaches the calendar reaches the forecast buckets with it, dated where
+the calendar dates it: a payment that has gone ex is the most certain money on the list,
+and it used to be the only kind absent from every chart and every total. What it never
+reaches is the realized side, or `next_12m_eur`/`forward_yield` once its date has passed
+— a backlog entry is before that window, not inside it.
+
+Which means a projection CAN now sit inside an elapsed month, so `partial` keeps meaning
+"this window has not fully elapsed" and the client hides a projection by stripping it
+from the point rather than by dropping the point. `_forecast_inputs` and the forward loop
+still never date one on or before today; that is now a property of the forward series
+alone, pinned below.
 """
 from datetime import date, timedelta
 from decimal import Decimal
@@ -285,6 +292,20 @@ async def test_a_dividend_that_has_gone_ex_stays_visible_until_the_cash_arrives(
     assert entry["date"] == (recent_ex + timedelta(days=LAG)).isoformat()
     assert entry["pending"] is False      # the cash is not due yet
     assert entry["basis"] == "gross_estimate"
+
+    # Declared, gone ex, cash due inside the next twelve months: the most certain
+    # money on the calendar, and until this change the only kind excluded from the
+    # forward figures. Excluding it did not merely omit a payment — the cadence
+    # steps PAST a recorded ex-date, so `next_12m_eur` lost one payment per security
+    # from the moment yfinance wrote the row until the cash landed.
+    bar = next(m for m in data["months"] if m["month"] == entry["date"][:7])
+    assert bar["forecast_total_eur"] >= entry["net_eur"]
+    assert data["growth"]["next_12m_eur"] == pytest.approx(
+        sum(u["net_eur"] for u in data["upcoming"] if not u["pending"]), abs=0.02
+    )
+    row = next(r for r in data["securities"] if r["security_id"] == 1)
+    assert row["next_pay_date"] == entry["date"]
+    assert row["forward_yield_pct"] is not None
     await engine.dispose()
 
 
@@ -332,7 +353,17 @@ async def test_the_pending_entry_disappears_once_the_ibkr_row_lands():
     await session.commit()
     after = await _breakdown(session)
     assert not any(u["ex_date"] == recent_ex.isoformat() for u in after["upcoming"])
-    # ...and it is realized income now, not a promise.
+    # ...and it is realized income now, not a promise. In the same bar: the
+    # translucent segment gives way to a solid one, which is the whole point of
+    # showing the expected payment there rather than only on the calendar.
+    entry = next(u for u in before["upcoming"] if u["ex_date"] == recent_ex.isoformat())
+    mk = pay.strftime("%Y-%m")
+    was = next(m for m in before["months"] if m["month"] == mk)
+    now = next(m for m in after["months"] if m["month"] == mk)
+    assert now["forecast_total_eur"] == pytest.approx(
+        was["forecast_total_eur"] - entry["net_eur"]
+    )
+    assert now["actual_total_eur"] == pytest.approx(was["actual_total_eur"] + 13)
     assert after["total_net_eur"] > before["total_net_eur"]
     await engine.dispose()
 
@@ -369,16 +400,17 @@ async def test_a_payment_that_never_arrives_leaves_the_calendar_rather_than_sitt
 
 
 @pytest.mark.asyncio
-async def test_a_pending_payment_reaches_the_calendar_and_nothing_else():
+async def test_a_pending_payment_is_projected_income_and_never_realized_income():
     """
-    It is neither measured income nor a forward projection: the cash has not arrived, so
-    crediting it would pay the account money it has not received, and backdating it into
-    an elapsed month would break the toggle's closed-prefix guarantee.
+    The cash has not arrived, so crediting it as income would pay the account money it
+    has not received — but it is money the portfolio expects, which is what the forecast
+    buckets hold. It lands in the bar for the month it was due, translucent, and in none
+    of the realized figures.
 
-    Its own month must stay empty on both sides of the bar — that, and the realized
-    totals not moving, is the whole claim. The *forecast* totals legitimately move,
-    because the same new row is also a new last-known payment and the schedule steps from
-    it; asserting those equal would be asserting the forecast ignores its own history.
+    The *forecast* totals move by more than this entry, because the same new row is also
+    a new last-known payment and the schedule steps from it; asserting those equal would
+    be asserting the forecast ignores its own history. So the claim is made on the entry's
+    own month, which the plain fixture leaves empty.
     """
     engine, session = await _session()
     await _seed_quarterly(session)
@@ -396,8 +428,11 @@ async def test_a_pending_payment_reaches_the_calendar_and_nothing_else():
 
     entry = next(u for u in withp["upcoming"] if u["ex_date"] == overdue_ex.isoformat())
     assert entry["pending"] is True
+    was = next(m for m in plain["months"] if m["month"] == entry["date"][:7])
     bar = next(m for m in withp["months"] if m["month"] == entry["date"][:7])
-    assert (bar["actual_total_eur"], bar["forecast_total_eur"]) == (0, 0)
+    assert (was["actual_total_eur"], was["forecast_total_eur"]) == (0, 0)
+    assert bar["actual_total_eur"] == 0
+    assert bar["forecast_total_eur"] == entry["net_eur"] > 0
     assert withp["total_net_eur"] == plain["total_net_eur"]
     assert withp["growth"]["ttm"] == plain["growth"]["ttm"]
     assert withp["growth"]["ytd"] == plain["growth"]["ytd"]
@@ -582,8 +617,18 @@ async def test_pending_estimate_hands_off_to_accrual_then_actual_cash(reported_n
         assert (entries[0]["net_eur"], entries[0]["basis"], entries[0]["pending"]) == (expected, "net", True)
         assert entries[0]["pay_date_source"] == "accrual"
         assert accrued["total_net_eur"] == before["total_net_eur"]
-        assert accrued["months"] == before["months"]
-        assert accrued["ttm_series"] == before["ttm_series"]
+        # The calendar entry is replaced one-for-one, so the bar it sits in moves by
+        # exactly the difference between the two amounts and by nothing else — the
+        # accrual is IBKR's own figure superseding our estimated net, which is the
+        # whole reason it outranks it. Realized income does not move at all.
+        moved = entries[0]["net_eur"] - entry["net_eur"]
+        for was, now in zip(before["months"], accrued["months"], strict=True):
+            assert now["month"] == was["month"]
+            assert now["actual"] == was["actual"]
+            delta = pytest.approx(moved if now["month"] == pay.strftime("%Y-%m") else 0)
+            assert now["forecast_total_eur"] - was["forecast_total_eur"] == delta
+        for was, now in zip(before["ttm_series"], accrued["ttm_series"], strict=True):
+            assert now["month"] == was["month"] and now["net_eur"] == was["net_eur"]
 
         await repo.upsert_payment({
             "security_id": 1, "ex_date": pay, "pay_date": pay, "currency": "EUR",
@@ -672,14 +717,17 @@ async def test_a_payment_the_cadence_predicted_survives_its_own_date():
 
 
 @pytest.mark.asyncio
-async def test_the_inferred_payment_reaches_the_calendar_and_no_total():
+async def test_every_chart_total_is_the_calendar_summed_the_same_way():
     """
-    The same claim the estimate tail carries: the cash has not arrived, so calling it
-    income pays the account money it has not been paid, and backdating it into an elapsed
-    month breaks the closed-prefix guarantee the Forecast toggle rests on.
+    The family question, not the instance one: which other code publishes the same money?
+    Four producers feed `upcoming` — the cadence, an accrual, an estimate row and this
+    inferred tail — and the chart totals must be that list re-summed, or a reader adding
+    up the calendar lands somewhere the chart does not.
 
-    Compared against the same fixture one quarter earlier, whose overdue payment is old
-    enough to have expired — so the ONLY difference between the two runs is this entry.
+    Two sums, because the two figures answer different questions.
+    `total_forecast_net_eur` is the selected window, so it takes everything dated in it.
+    `next_12m_eur` is as_of -> as_of+365, so it takes what is still AHEAD — and `pending`
+    is exactly the entries whose date has gone by, which makes it the slice.
     """
     engine, session = await _session()
     await _seed_ibkr_era(session)
@@ -687,16 +735,26 @@ async def test_the_inferred_payment_reaches_the_calendar_and_no_total():
     data = await _breakdown(session)
 
     entry = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    assert entry["pending"] is True and entry["net_eur"] > 0
     bar = next(m for m in data["months"] if m["month"] == entry["date"][:7])
-    assert (bar["actual_total_eur"], bar["forecast_total_eur"]) == (0, 0)
-    # Present on the calendar, absent from every total that sums the calendar.
-    assert entry["net_eur"] > 0
+    assert bar["actual_total_eur"] == 0
+    assert bar["forecast_total_eur"] >= entry["net_eur"]
+
     forward = sum(u["net_eur"] for u in data["upcoming"] if not u["pending"])
     assert data["growth"]["next_12m_eur"] == pytest.approx(forward, abs=0.02)
     assert data["total_forecast_net_eur"] == pytest.approx(
         sum(u["net_eur"] for u in data["upcoming"]
-            if not u["pending"] and u["date"][:4] == str(AS_OF.year)), abs=0.02
+            if u["date"][:4] == str(AS_OF.year)), abs=0.02
     )
+    # ...and per month, so the right bar carries it rather than merely the right total.
+    by_month: dict = {}
+    for u in data["upcoming"]:
+        if u["date"][:4] == str(AS_OF.year):
+            by_month[u["date"][:7]] = by_month.get(u["date"][:7], 0) + u["net_eur"]
+    for m in data["months"]:
+        assert m["forecast_total_eur"] == pytest.approx(
+            by_month.get(m["month"], 0), abs=0.02
+        )
     await engine.dispose()
 
 

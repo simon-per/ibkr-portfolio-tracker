@@ -43,9 +43,41 @@ export interface ChartSeries {
 }
 
 export interface ChartSeriesOptions {
-  /** false hides projections: the FC keys stay put, and `ttm` drops its open windows. */
+  /** false hides projections: `ttm` drops its open windows and strips the rest. */
   showForecast?: boolean
   maxSeries?: number
+}
+
+/**
+ * One rolling window as it reads with projections hidden.
+ *
+ * A window is dropped for being OPEN, never for carrying projection — those are
+ * different facts, and the server's `partial` is the first. A dividend that has
+ * gone ex and not paid puts projection inside a fully elapsed window, and
+ * dropping that window would make twelve months of measured income vanish over
+ * one unsettled payment. So the point stays and loses its forecast half, which
+ * also means `total_eur` describes what is actually drawn.
+ *
+ * `mom_pct` compared two totals, so it is recomputed off the measured halves —
+ * the sibling of `realizedOnlyYears` in dividendGrowth.ts, copying the same two
+ * server rules it does: one decimal place, and a zero base yields nothing rather
+ * than a percentage. The previous window is the one before it in the SERVER's
+ * series, so a point keeps the same change whichever range is showing it; the
+ * first point of a windowed response has no predecessor here, and reports null
+ * rather than a change measured against the wrong neighbour.
+ */
+function withoutForecast(p: DividendTtmPoint, prev: DividendTtmPoint | undefined): DividendTtmPoint {
+  if (p.forecast_net_eur === 0 && !p.mom_includes_forecast) return p
+  return {
+    ...p,
+    forecast: {},
+    forecast_net_eur: 0,
+    total_eur: p.net_eur,
+    mom_pct: !prev || prev.net_eur <= 0
+      ? null
+      : Math.round(((p.net_eur - prev.net_eur) / prev.net_eur) * 1000) / 10,
+    mom_includes_forecast: false,
+  }
 }
 
 /**
@@ -125,10 +157,17 @@ export function buildChartSeries(
 
   const chartData = data.months.map((m) => row(m.month, m.actual, m.forecast))
   // With projections hidden, a window reaching into the future would report only
-  // the part of itself that has happened — so those windows are dropped, which
-  // leaves exactly the series this chart drew before the forecast was folded in.
-  // Filtered in one place, so the rows and the points behind them cannot diverge.
-  const ttmPoints = (data.ttm_series ?? []).filter((p) => showForecast || !p.partial)
+  // the part of itself that has happened — so those windows are dropped, and the
+  // elapsed ones that carry an unsettled payment lose their forecast half. Done
+  // in one place, so the rows, the points behind them and everything derived from
+  // those points (the pace, the header amount, the change chips) cannot diverge.
+  const series = data.ttm_series ?? []
+  const ttmPoints = showForecast
+    ? series
+    : series.reduce<DividendTtmPoint[]>((out, p, i) => {
+      if (!p.partial) out.push(withoutForecast(p, series[i - 1]))
+      return out
+    }, [])
   const ttmData = ttmPoints.map((p) => row(p.month, p.actual, p.forecast))
 
   return { chartData, ttmData, ttmPoints, stackSymbols: hasOther ? [...top, OTHER] : top }

@@ -5,17 +5,38 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, live on `ec35713` and verified: **a projected dividend
-survives its own date.** The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues
-the ones it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between
-the projection being deleted on its own date and that row arriving, the payment is in nothing —
-which is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the
-date correctly a quarter earlier. A projection whose date has passed is now kept, badged `pending`
-on the calendar and in no total, and emitted only when nothing else records the dividend: no
-estimate row, no accrual, no cash inside the lag window, and shares actually held on the ex-date.
-It expires at `PENDING_MAX_AGE_DAYS`, because an inference nothing ever confirms has to stop
-claiming. **An accrual now does not** — `_open_accruals` had been ageing those out at the same 90
-days against its own docstring, hiding a liability IBKR was still asserting.
+**Last updated: 2026-09-19.** Latest, shipping now and **not yet verified on production** (the
+snapshot A/B the last two dividend changes had was unavailable — see *Watch after the next
+deploy*): **the calendar is the forecast.** The two
+pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
+that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
+actually gone ex is the *most* certain entry on the calendar, and it was the only kind absent from
+every chart and every total — the VT payment showed as *payment pending* under a September bar whose
+translucent segment did not contain it. One rule now covers all four producers of `upcoming`: money
+expected and not received goes in the forecast buckets, dated where the calendar dates it. Never the
+realized side, and never `next_12m_eur`/`forward_yield` for a payment already due — a backlog entry
+sits *before* that window. One dated ahead of today is inside it and now counts, which also closes a
+quiet understatement: the cadence steps past a recorded ex-date, so from the moment yfinance wrote
+the row until the cash landed, the forward figures were short one payment per security.
+
+The load-bearing consequence is that **`partial` and "carries projection" have come apart.** A
+closed rolling window can now hold an unsettled payment, so the Forecast toggle **strips** it from
+the point rather than dropping the point — dropping would make twelve months of measured income
+vanish over one late payment. `withoutForecast` in `lib/dividendChart.ts`, the sibling of
+`realizedOnlyYears`. `_rolling_twelve_months` now takes `has_forward_projection` so an overdue
+payment cannot stretch the series into next year.
+
+Previously today, live on `ec35713` and verified: **a projected dividend survives its own date.**
+The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues the ones
+it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between the
+projection being deleted on its own date and that row arriving, the payment was in nothing — which
+is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the date
+correctly a quarter earlier. A projection whose date has passed is kept, badged `pending`, emitted
+only when nothing else records the dividend: no estimate row, no accrual, no cash inside the lag
+window, and shares actually held on the ex-date. It expires at `PENDING_MAX_AGE_DAYS`, because an
+inference nothing ever confirms has to stop claiming. **An accrual does not** — `_open_accruals` had
+been ageing those out at the same 90 days against its own docstring, hiding a liability IBKR was
+still asserting.
 
 Also live on `bb2bb48` and verified: **a forecast sized from
 Yahoo's gross per-share now deducts an assumed withholding of 15%**
@@ -873,6 +894,35 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **Folding the calendar into the forecast is built and green (1568 backend, 676 frontend), but it
+  is the first dividends change since 2026-09-08 that ships with NO A/B against a production
+  snapshot** — the snapshot pull was blocked as a production read, so the predicted deltas below are
+  arithmetic over the live `forecast=true` response under the old code, not the new code's output.
+  Treat the post-deploy check as the verification rather than a confirmation.
+
+  Predicted on `/api/dividends/breakdown?forecast=true` (base CHF, as read 2026-09-19 20:15 Berlin,
+  old code in the second column):
+
+  | figure | before | after |
+  |---|---|---|
+  | `months[2026-08].forecast_total_eur` | 0.00 | 0.19 |
+  | `months[2026-09].forecast_total_eur` | 20.60 | 47.91 |
+  | `months[2026-10].forecast_total_eur` | 0.39 | 1.77 |
+  | `total_forecast_net_eur` | 85.67 | ~114.55 |
+  | `growth.next_12m_eur` | 263.45 | ~264.83 |
+  | `total_net_eur`, `growth.ttm`/`ytd`, every `actual_total_eur` | — | unchanged |
+
+  The durable checks, which outlive those figures: **per month, `months[].forecast_total_eur` equals
+  the calendar entries dated in it** (to a cent or two of per-entry rounding), and
+  **`next_12m_eur == sum(net_eur for upcoming if not pending)`**. Both are what the folding rule
+  means; a drift in either is the bug.
+
+  **A browser pass is the other half**, because the frontend changed this time. With Forecast ON,
+  September's translucent segment should roughly double. With it OFF: the rolling chart must still
+  show the window ending 2026-08 — it carries 000660.KS's unsettled 0.19 and would be the point a
+  wrong `partial` deletes — drawn at its measured height, and no bar anywhere should be translucent.
+  Toggling must not repaint a single series colour.
+
 - **The projection-pending tail is live on `ec35713` and verified against the API
   (2026-09-19, 12:35 Berlin).** VT's September payment is on the calendar dated its own ex-date,
   `pending`, `ex_date`, at the amount the pre-ship A/B predicted; `next_pay_date` still reads the
@@ -1370,6 +1420,18 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-19 (the calendar is the forecast)** — "VT is in *Expected next* but not in the chart's
+  translucent portion; I think that boundary is too conservative." It was, and wider than the
+  report: the trace found four producers of `upcoming` and only one reaching the aggregates, so a
+  gone-ex dividend — the most certain money there — was the sole kind missing, 28.88 of 114.55 on
+  production. Two lessons. **A conservative boundary is still a claim**, and "calendar only" quietly
+  asserted the chart and the calendar answer different questions when they answer the same one; the
+  test that would have caught it is "which other code publishes this money", not "does the pending
+  entry appear". And **when two facts have always coincided, one of them is load-bearing and nobody
+  knows which**: `partial` meant "open" and "carries projection" at once until an overdue payment
+  separated them, and the tempting repair (widen `partial`) would have deleted whole measured
+  windows.
+
 - **2026-09-19 (the projection that died on its own date)** — "VT went ex yesterday and the
   September payment is missing entirely". It was, and not for the reason suspected: the pending
   tail added hours earlier was working correctly for five other securities, but it rescues
@@ -1414,19 +1476,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   the code: **a figure shown beside a filter must answer that filter** — "computed over the full
   history" is right for the KPI tiles because they are labelled as such, and wrong for anything
   sitting under a range dropdown. Not deployed.
-
-- **2026-09-18** — copied CLAUDE.md to AGENTS.md; shipped dividend Monthly/TTM and Last 24 months
-  (`c0ba465`, live); then rebuilt TTM at the owner's request as a forecast-aware stacked column
-  chart on its own `ttm_series`, trimmed of uncoverable months and working on a future year.
-  Lessons, each a wrong number avoided: **a rolling window is already a total, so ranking by the
-  sum of windows ranks by payment timing** (January lands in twelve windows, December in one);
-  **gate an extension on the projection existing, not on the flag asking for one**, or the flag
-  manufactures a decline — the `next_12m_vs_ttm_pct: -100.0` shape again; and **end a series at
-  the horizon, not at the last data point in it**, or two ranges disagree about which months
-  exist. Simulating the change against production first produced the two identities it is now
-  tested on. Shipped as `170df7c`/`7ba36b8` and verified live. Then, same day, a **growth pace**
-  on that series — geometric average monthly growth over six months, plus the annualized rate,
-  in a strip under the KPI tiles, with the Forecast toggle picking between elapsed and projected
-  anchors. Its lesson: **an `est.` badge must come from the data, not the toggle that selected
-  it** — with the forecast requested and nothing projected, both bases are the measured one. Not
-  deployed.

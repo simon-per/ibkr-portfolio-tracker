@@ -965,7 +965,9 @@ export interface DividendTtmPoint {
   source: 'ibkr' | 'mixed' | 'yfinance_estimate' | null;
   mom_crosses_era: boolean;
   /** The window reaches the current month or beyond, so it is not fully elapsed.
-   *  What the Forecast toggle filters on. */
+   *  What the Forecast toggle DROPS on — deliberately not "carries projection",
+   *  which a closed window can now do when a dividend has gone ex and not paid.
+   *  Those keep their point and lose their forecast half (`withoutForecast`). */
   partial: boolean;
 }
 

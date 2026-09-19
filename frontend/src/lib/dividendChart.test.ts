@@ -12,7 +12,9 @@ type Bucket = { month: string; actual?: Record<string, number>; forecast?: Recor
 
 const sum = (o: Record<string, number> = {}) => Object.values(o).reduce((a, b) => a + b, 0)
 
-function response(months: Bucket[], ttm: (Bucket & { partial?: boolean })[] = []): DividendBreakdownResponse {
+type TtmBucket = Bucket & { partial?: boolean; mom_pct?: number | null }
+
+function response(months: Bucket[], ttm: TtmBucket[] = []): DividendBreakdownResponse {
   return {
     years: [2026],
     year: 2026,
@@ -32,7 +34,7 @@ function response(months: Bucket[], ttm: (Bucket & { partial?: boolean })[] = []
       net_eur: sum(p.actual),
       forecast_net_eur: sum(p.forecast),
       total_eur: sum(p.actual) + sum(p.forecast),
-      mom_pct: null,
+      mom_pct: p.mom_pct ?? null,
       mom_includes_forecast: sum(p.forecast) > 0,
       source: 'ibkr',
       mom_crosses_era: false,
@@ -179,6 +181,47 @@ describe('the rolling series shares one ranking with the monthly one', () => {
     // projection-only symbol keeps its slot either way.
     expect(off.stackSymbols).toEqual(on.stackSymbols)
     expect(on.stackSymbols).toContain('ZZZ')
+  })
+
+  it('strips an unsettled payment from a closed window instead of dropping it', () => {
+    // A dividend that has gone ex and not paid puts projection inside a window
+    // that HAS fully elapsed. Dropping that point would make twelve months of
+    // measured income vanish over one late payment, so it stays and loses its
+    // forecast half — and everything read off it has to describe what is drawn.
+    const data = response(
+      [{ month: '2026-08', actual: { AAA: 5 }, forecast: { AAA: 2 } }],
+      [{ month: '2026-07', actual: { AAA: 100 }, mom_pct: 10 },
+       { month: '2026-08', actual: { AAA: 120 }, forecast: { AAA: 2 }, mom_pct: 22 },
+       { month: '2026-09', actual: { AAA: 130 }, forecast: { AAA: 9 }, partial: true }],
+    )
+    const { ttmPoints, ttmData } = buildChartSeries(data, { showForecast: false })
+
+    expect(ttmPoints.map((p) => p.month)).toEqual(['2026-07', '2026-08'])
+    const closed = ttmPoints[1]
+    expect(closed.forecast).toEqual({})
+    expect(closed.forecast_net_eur).toBe(0)
+    expect(closed.total_eur).toBe(120)         // not 122 — the bar's real height
+    expect(closed.mom_includes_forecast).toBe(false)
+    expect(closed.mom_pct).toBe(20)            // 120 over 100, not the server's 22
+    // No forecast key survives into the row either, or the legend would offer a
+    // "translucent = forecast" swatch for a segment that is not drawn.
+    expect(ttmData[1][FC + 'AAA']).toBeUndefined()
+    // Untouched where there is nothing to strip: the same object, not a copy.
+    expect(ttmPoints[0]).toBe(data.ttm_series![0])
+  })
+
+  it('reports no change rather than a wrong one for the first window shown', () => {
+    // A windowed response is already sliced, so the earliest point's predecessor
+    // is a month the client never received. Measuring against the point after it
+    // would make a window's change depend on the range showing it — the thing the
+    // server builds the series whole to prevent — so it reports nothing.
+    const data = response(
+      [{ month: '2026-08', actual: { AAA: 5 } }],
+      [{ month: '2026-08', actual: { AAA: 120 }, forecast: { AAA: 2 }, mom_pct: 22 }],
+    )
+    const { ttmPoints } = buildChartSeries(data, { showForecast: false })
+    expect(ttmPoints[0].mom_pct).toBeNull()
+    expect(ttmPoints[0].total_eur).toBe(120)
   })
 
   it('keeps rows and points aligned, which is what the chart relies on', () => {
