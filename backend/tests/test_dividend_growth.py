@@ -788,288 +788,49 @@ async def test_ttm_splices_duplicates_before_applying_payment_date_fx(monkeypatc
         await engine.dispose()
 
 
-async def _seed_doubling_book(session):
-    """
-    A book whose rolling twelve-month total doubles over six months.
-
-    10 a month through 2025 puts the window ending 2025-12 at 120; 30 a month
-    from January leaves the window ending 2026-06 at 60 + 180 = 240. Chosen so
-    the pace has a closed form — 2 ** (1/6) a month, 300% a year — rather than a
-    figure only this implementation can produce.
-    """
-    for month in range(1, 13):
-        await _seed(session, date(2025, month, 15), "10")
-    for month in range(1, 7):
-        await _seed(session, date(2026, month, 15), "30")
-
-
-async def _seed_quarterly_per_share_book(session):
-    """
-    A steady quarterly payer with a dated per-share series, which is what makes a
-    cadence inferable and therefore a projection exist at all.
-
-    Two years of it, deliberately: one year is enough to project forward but
-    leaves no window closed, and the measured pace would then be absent for want
-    of history rather than for the reason under test.
-    """
-    session.add(_lot(1, date(2024, 1, 1), "100"))
-    await session.flush()
-    for year, months in ((2024, (8, 11)), (2025, (2, 5, 8, 11)), (2026, (2, 5))):
-        for month in months:
-            await _seed_per_share(session, date(year, month, 15))
-
-
 @pytest.mark.asyncio
-async def test_the_growth_pace_compounds_back_to_the_two_windows_it_names():
+async def test_the_coverage_start_is_the_same_month_whichever_range_is_asked_for():
     """
-    The figure on screen sits beside the two window totals it was derived from,
-    so the one thing it must never do is disagree with them.
+    The one unwindowed fact the rolling series needs and cannot carry.
 
-    Pins the arithmetic that would: an ARITHMETIC mean of the six monthly changes
-    does not compound back to the endpoints (Jensen), and annualizing by
-    multiplying by twelve rather than compounding understates a rising book and
-    overstates a falling one. Both produce a plausible number beside two totals
-    it contradicts.
-    """
-    engine, session = await _make_session()
-    try:
-        await _seed_doubling_book(session)
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-        pace = r["ttm_pace_measured"]
-
-        assert (pace["from_month"], pace["from_eur"]) == ("2025-12", 120.0)
-        assert (pace["to_month"], pace["to_eur"]) == ("2026-06", 240.0)
-        assert pace["months"] == 6
-        assert pace["short_history"] is False
-        # 2 ** (1/6) - 1
-        assert pace["monthly_pct"] == 12.25
-        # Compounded over a year, not multiplied: 2 ** 2 - 1, never 12 * 12.25.
-        assert pace["annualized_pct"] == 300.0
-
-        # The identity itself, stated rather than implied by the constants above.
-        grown = (1 + pace["monthly_pct"] / 100) ** pace["months"]
-        assert grown == pytest.approx(pace["to_eur"] / pace["from_eur"], rel=1e-3)
-
-        # One provenance on both sides, so nothing is flagged as a source change.
-        assert pace["crosses_era"] is False
-        assert pace["includes_forecast"] is False
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_the_growth_pace_is_the_same_whichever_range_is_selected():
-    """
-    The pace is derived from `ttm_series`, which IS windowed on the wire — with
-    year=2026 selected the response carries no 2025 window at all. Measuring the
-    pace after that slice would make it say something different in every range,
-    and the 2026 view could not reach back to December to compare against.
-    """
-    engine, session = await _make_session()
-    try:
-        await _seed_doubling_book(session)
-        svc = DividendService(session)
-
-        paces = [
-            (await svc.get_dividend_breakdown(as_of=AS_OF))["ttm_pace_measured"],
-            (await svc.get_dividend_breakdown(year=2025, as_of=AS_OF))["ttm_pace_measured"],
-            (await svc.get_dividend_breakdown(year=2026, as_of=AS_OF))["ttm_pace_measured"],
-            (await svc.get_dividend_breakdown(period="24m", as_of=AS_OF))["ttm_pace_measured"],
-        ]
-
-        assert all(p == paces[0] for p in paces)
-        # ...while the series they came from genuinely differs between them.
-        year_view = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF)
-        assert all(p["month"] >= "2026-01" for p in year_view["ttm_series"])
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_the_measured_pace_ignores_a_projection_that_reaches_next_year():
-    """
-    Both bases ride on one response so the Forecast toggle stays instant, which
-    only works if each is anchored on its own windows rather than on whichever
-    the flag produced.
-
-    The measured side must stop at the last fully elapsed window even with a
-    projection running to the end of next year — and that window is necessarily
-    all received, because no projection can be dated on or before today.
-    """
-    engine, session = await _make_session()
-    try:
-        await _seed_quarterly_per_share_book(session)
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-        measured, projected = r["ttm_pace_measured"], r["ttm_pace_projected"]
-
-        assert measured["to_month"] == "2026-06"      # AS_OF is 2026-07-29
-        assert measured["includes_forecast"] is False
-        # The horizon, not the last projected payment: a quarterly payer's final
-        # 2027 projection lands in November, and ending there would put the pace's
-        # anchor wherever one payer's schedule happened to fall.
-        assert projected["to_month"] == "2027-12"
-        assert projected["includes_forecast"] is True
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_a_stable_payer_projects_a_flat_pace_rather_than_manufactured_growth():
-    """
-    The forward pace measures two projected windows against each other, and the
-    projection is a flat median per-share amount on an inferred cadence. On a
-    book that is not changing it must therefore come out at zero.
-
-    Anything else would be the shape this service once served as
-    `next_12m_vs_ttm_pct: -100.0` — a figure manufactured by the projection's own
-    mechanics and presented as a trend.
-    """
-    engine, session = await _make_session()
-    try:
-        await _seed_quarterly_per_share_book(session)
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-        projected = r["ttm_pace_projected"]
-
-        assert projected["monthly_pct"] == 0.0
-        assert projected["annualized_pct"] == 0.0
-        assert projected["from_eur"] == projected["to_eur"]
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_the_pace_shrinks_its_span_rather_than_inventing_the_months_it_lacks():
-    """
-    Six months is the nominal lookback, not a precondition. A book with four
-    covered windows has three months of trend to report, and reporting them over
-    a stated three-month span is more use than reporting nothing — as long as the
-    span travels with the figure, which `months` and `short_history` do.
-
-    One window is a level and not a rate at all, and that degrades to absent.
-    """
-    engine, session = await _make_session()
-    try:
-        # First income 2025-04 puts the first covered window at 2026-03, so four
-        # windows are closed by AS_OF.
-        for d in [date(2025, m, 15) for m in range(4, 13)] + \
-                 [date(2026, m, 15) for m in range(1, 4)]:
-            await _seed(session, d, "10")
-        for month in range(4, 7):
-            await _seed(session, date(2026, month, 15), "20")
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-        pace = r["ttm_pace_measured"]
-
-        assert (pace["from_month"], pace["to_month"]) == ("2026-03", "2026-06")
-        assert pace["months"] == 3
-        assert pace["short_history"] is True
-        assert (pace["from_eur"], pace["to_eur"]) == (120.0, 150.0)
-        grown = (1 + pace["monthly_pct"] / 100) ** pace["months"]
-        assert grown == pytest.approx(150 / 120, rel=1e-3)
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_a_single_covered_window_is_a_level_not_a_rate():
-    engine, session = await _make_session()
-    try:
-        await _seed(session, date(2025, 7, 15), "10")
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-
-        assert len(r["ttm_series"]) == 1
-        assert r["ttm_pace_measured"] is None
-        assert r["ttm_pace_projected"] is None
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_a_stopped_payer_paces_to_minus_one_hundred_and_a_zero_base_is_absent():
-    """
-    The two ends of the same rule. Falling to zero is a real, measurable -100% a
-    month and the chart exists to show it; growing FROM zero is undefined, not
-    large, exactly as `_pct` treats it — so it is absent rather than a number.
-    """
-    engine, session = await _make_session()
-    try:
-        for month in range(1, 7):
-            await _seed(session, date(2025, month, 15), "10")
-
-        stopped = (await DividendService(session).get_dividend_breakdown(as_of=AS_OF))
-        pace = stopped["ttm_pace_measured"]
-        assert (pace["from_eur"], pace["to_eur"]) == (60.0, 0.0)
-        assert pace["monthly_pct"] == -100.0
-        assert pace["annualized_pct"] == -100.0
-    finally:
-        await session.close()
-        await engine.dispose()
-
-    engine, session = await _make_session()
-    try:
-        # A gap year: the window six months back holds nothing, so there is no
-        # base to grow from even though nineteen windows are covered.
-        await _seed(session, date(2024, 1, 15), "100")
-        for month in range(1, 7):
-            await _seed(session, date(2026, month, 15), "10")
-
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-        assert len(r["ttm_series"]) > 6
-        assert r["ttm_pace_measured"] is None
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_the_pace_marks_anchors_that_straddle_the_era_splice():
-    """
-    Part of a change across the splice is a change of source, not of income —
-    the same caveat `growth.ttm_crosses_era` and `DividendTtmPoint.mom_crosses_era`
-    already carry, and it has to travel with this figure too.
+    A growth rate measured between the first and last window ON SCREEN has a
+    coverage-limited base whenever that first window is also the first that has
+    ever existed — the account was still being funded inside those twelve months,
+    the `yoy_vs_partial` shape. With ?year=2026 the response holds only 2026
+    windows, so nothing in it could answer that; this field does, and it must not
+    move with the range.
     """
     engine, session = await _make_session()
     try:
         for month in range(1, 13):
             await _seed(session, date(2025, month, 15), "10")
         for month in range(1, 7):
-            await _seed(session, date(2026, month, 15), "30", source="ibkr")
+            await _seed(session, date(2026, month, 15), "30")
+        svc = DividendService(session)
 
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
+        allt = await svc.get_dividend_breakdown(as_of=AS_OF)
+        y25 = await svc.get_dividend_breakdown(year=2025, as_of=AS_OF)
+        y26 = await svc.get_dividend_breakdown(year=2026, as_of=AS_OF)
+        m24 = await svc.get_dividend_breakdown(period="24m", as_of=AS_OF)
 
-        assert r["ttm_pace_measured"]["crosses_era"] is True
+        # First income 2025-01, so the earliest window a year can cover ends 2025-12.
+        assert allt["ttm_coverage_start"] == "2025-12"
+        assert {r["ttm_coverage_start"] for r in (allt, y25, y26, m24)} == {"2025-12"}
+        # It equals the first point only where the range reaches back that far.
+        assert allt["ttm_series"][0]["month"] == "2025-12"
+        assert y26["ttm_series"][0]["month"] == "2026-01"
     finally:
         await session.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_without_a_projection_the_two_paces_agree_and_neither_is_an_estimate():
-    """
-    The gate is on a projection EXISTING, not on the flag asking for one. With
-    the forecast requested and nothing projected, the forward pace IS the measured
-    pace, and badging it `est.` on the strength of the toggle would mark a
-    measurement as a guess.
-    """
+async def test_no_income_means_no_coverage_start_rather_than_a_month():
     engine, session = await _make_session()
     try:
-        await _seed_doubling_book(session)
-
         r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
-
-        assert r["total_forecast_net_eur"] == 0
-        assert r["ttm_pace_projected"] == r["ttm_pace_measured"]
-        assert r["ttm_pace_projected"]["includes_forecast"] is False
+        assert r["ttm_coverage_start"] is None
+        assert r["ttm_series"] == []
     finally:
         await session.close()
         await engine.dispose()

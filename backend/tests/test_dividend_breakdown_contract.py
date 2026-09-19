@@ -42,7 +42,6 @@ from app.schemas.portfolio import (
     DividendLatestMonth,
     DividendMonthBar,
     DividendSecurityRow,
-    DividendTtmPace,
     DividendTtmPoint,
     DividendUpcomingPayment,
 )
@@ -132,8 +131,6 @@ def _pairs(payload):
         ("DividendGrowth", growth, DividendGrowth),
         ("DividendForwardYield", payload["forward_yield"], DividendForwardYield),
         ("DividendLatestMonth", growth["latest_month"], DividendLatestMonth),
-        ("DividendTtmPace (measured)", payload["ttm_pace_measured"], DividendTtmPace),
-        ("DividendTtmPace (projected)", payload["ttm_pace_projected"], DividendTtmPace),
     ]
     for key in ("ttm", "ytd", "avg_month"):
         out.append((f"DividendDelta ({key})", growth[key], DividendDelta))
@@ -166,12 +163,9 @@ async def test_the_fixture_populates_every_nested_model():
         assert payload["growth"]["annual"], "no annual rows"
         assert payload["months"], "no month bars"
         assert payload["ttm_series"], "no covered rolling window"
-        # Both bases, or the model is only ever compared on one of them. The
-        # fixture reaches four closed windows and a projection to next year, so
-        # it exercises the short-history path on one side and a full six-month
-        # span on the other.
-        assert payload["ttm_pace_measured"]["short_history"] is True
-        assert payload["ttm_pace_projected"]["includes_forecast"] is True
+        # Unwindowed by construction, and the only thing in the payload that says
+        # whether a range's earliest window is also the earliest on record.
+        assert payload["ttm_coverage_start"] == payload["ttm_series"][0]["month"]
         assert payload["securities"], "no security rows"
         assert payload["upcoming"], "no projected payments"
         # One of each provenance, or the splice is not being exercised.

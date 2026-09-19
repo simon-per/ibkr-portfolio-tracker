@@ -1,6 +1,6 @@
 import type { DividendTtmPoint } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { dividendTtmWindowLabel, NOT_PER_SHARE_CAVEAT } from '@/lib/dividendChart'
+import { dividendTtmWindowLabel } from '@/lib/dividendChart'
 import { cn } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
@@ -144,7 +144,10 @@ export function DividendTtmChart({
             the change is a change of source.
           </p>
         )}
-        <p>{NOT_PER_SHARE_CAVEAT}</p>
+        <p>
+          Portfolio dividend income also moves with what is held and with exchange rates;
+          this is not a measure of dividend increases per share.
+        </p>
       </div>
     </section>
   )

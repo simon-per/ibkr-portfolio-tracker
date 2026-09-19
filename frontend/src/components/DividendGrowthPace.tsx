@@ -1,88 +1,83 @@
-import type { DividendTtmPace } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { dividendTtmWindowLabel, NOT_PER_SHARE_CAVEAT } from '@/lib/dividendChart'
+import { dividendMonthLabel } from '@/lib/dividendChart'
+import type { DividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 
-const ERA_CAVEAT =
-  'The two windows this rate is measured between span the switch from Yahoo Finance '
-  + 'estimates to IBKR actuals, so part of the change is a change of source.'
-
-const FORECAST_NOTE =
-  'A projected window assumes every holding keeps paying at its current per-share '
-  + 'rate on its own cadence, so a forward pace reflects the payout schedule as much '
-  + 'as growth. Turn Forecast off for the rate between windows that have fully elapsed.'
+const RAMP_CAVEAT =
+  'Measured from the earliest twelve-month window on record. The portfolio was '
+  + 'still being funded inside it, so the rate reflects money going in as much as '
+  + 'dividends going up. Narrow the range for a like-for-like read.'
 
 interface DividendGrowthPaceProps {
-  /** null whenever there are not two covered windows to compare. */
-  pace: DividendTtmPace | null | undefined
+  /** null whenever the selected range has no two windows to compare. */
+  pace: DividendPace | null
 }
 
 /**
- * How fast the rolling twelve-month total is moving, per month and per year.
+ * How fast dividend income grew across the windows currently on screen.
  *
- * A strip rather than a tile row: the two figures are one quantity in two units,
- * and giving each a tile of its own would present them as two findings. It sits
- * under the four KPI tiles because it is derived from the chart below it, and it
- * stays on screen in both chart modes — the rate is a fact about the income, not
- * an annotation on one view of it.
+ * "Income growth", not "growth pace": naming what is measured is what keeps a
+ * reader from taking it for per-share dividend increases, and it does in one
+ * word what a sentence of caveat used to do.
  *
- * Renders nothing at all when the server sends no pace. A dash beside "growth
- * pace" would still occupy the reader with a figure that does not exist; the
- * chart below already explains that a rolling total needs twelve months behind
- * it.
+ * A strip rather than tiles. The four KPI tiles above are all range-independent
+ * (365 days through today, this year to date), and six tiles that look alike
+ * where two follow the range selector and four ignore it is the confusing
+ * version of this.
  */
 export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
   const formatCurrency = useFormatCurrency()
   if (!pace) return null
 
-  const caveat = pace.crosses_era ? ERA_CAVEAT : undefined
+  const caveat = pace.coverage_limited ? RAMP_CAVEAT : undefined
 
   return (
     <section
-      aria-label="Dividend growth pace"
-      className="space-y-1 rounded-lg border border-border bg-card/50 px-4 py-3"
+      aria-label="Dividend income growth"
+      className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg border border-border bg-card/50 px-4 py-3"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className="text-xs font-medium text-muted-foreground">Growth pace</span>
-        {/* flatBand 0 on both: the default band exists to mute lumpy series, and a
-            rolling window geometrically averaged is the opposite of lumpy. Muting
-            2%/month as noise would hide a rate that compounds to +27% a year. */}
+      <span className="text-xs font-medium text-muted-foreground">Income growth</span>
+      {/* The acronym leads and the unit trails it: "CMGR +15.3% /mo" is how the
+          figure is said, where DeltaChip's own value-then-label order would give
+          "+15.3% CMGR". flatBand 0 on both — the default band mutes lumpy series,
+          and a rolling twelve-month total is the opposite of lumpy. */}
+      <span className="inline-flex items-baseline gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">CMGR</span>
         <DeltaChip
-          pct={pace.monthly_pct}
-          label="per month"
+          pct={pace.cmgr_pct}
+          label="/mo"
           flatBand={0}
           projected={pace.includes_forecast}
           caveat={caveat}
           className="text-sm"
+          title={`Compound monthly growth rate over ${pace.months} months.`}
         />
-        <DeltaChip
-          pct={pace.annualized_pct}
-          label="a year"
-          flatBand={0}
-          projected={pace.includes_forecast}
-          caveat={caveat}
-          className="text-sm"
-          title={
-            `The monthly rate compounded over twelve months, not multiplied by twelve.`
-          }
-        />
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        {dividendTtmWindowLabel(pace.to_month)} against {dividendTtmWindowLabel(pace.from_month)}
+      </span>
+      {pace.cagr_pct != null && (
+        <span className="inline-flex items-baseline gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">CAGR</span>
+          <DeltaChip
+            pct={pace.cagr_pct}
+            label="/yr"
+            flatBand={0}
+            projected={pace.includes_forecast}
+            caveat={caveat}
+            className="text-sm"
+            title="The monthly rate compounded over twelve months, not multiplied by twelve."
+          />
+        </span>
+      )}
+      {/* The two windows it is measured between, so the figure can be checked
+          against the first and last bar of the chart below — and, when the base is
+          the earliest window there is, four words saying so. The dagger carries the
+          full reason, but a marker whose meaning lives only in a hover is one the
+          reader on a phone never gets. */}
+      <span className="text-xs text-muted-foreground">
+        {dividendMonthLabel(pace.from_month, true)} → {dividendMonthLabel(pace.to_month, true)}
         {' · '}
         {formatCurrency(pace.from_eur)} → {formatCurrency(pace.to_eur)}
-        {/* The span travels with the figure rather than living in a tooltip: a rate
-            labelled "per month" that rests on three of them is a different claim. */}
-        {pace.short_history
-          ? ` · over ${pace.months} month${pace.months === 1 ? '' : 's'} of the rolling series, not 6`
-          : ''}
-      </p>
-
-      {pace.includes_forecast && (
-        <p className="text-xs text-muted-foreground">{FORECAST_NOTE}</p>
-      )}
-      <p className="text-xs text-muted-foreground">{NOT_PER_SHARE_CAVEAT}</p>
+        {pace.coverage_limited && ' · from the first window on record'}
+      </span>
     </section>
   )
 }

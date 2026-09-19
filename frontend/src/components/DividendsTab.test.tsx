@@ -45,18 +45,9 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
         forecast_net_eur: 50, total_eur: 150, mom_pct: 25, mom_includes_forecast: true,
         source: 'mixed', mom_crosses_era: false, partial: true },
     ],
-    // Both bases, as the server always sends them: the toggle picks one, it does
-    // not cause one to be computed.
-    ttm_pace_measured: {
-      monthly_pct: 2.4, annualized_pct: 32.9, from_month: '2025-07', to_month: '2026-01',
-      from_eur: 104, to_eur: 120, months: 6, short_history: false,
-      includes_forecast: false, crosses_era: false,
-    },
-    ttm_pace_projected: {
-      monthly_pct: 1.1, annualized_pct: 14, from_month: '2025-08', to_month: '2026-02',
-      from_eur: 140, to_eur: 150, months: 6, short_history: false,
-      includes_forecast: true, crosses_era: false,
-    },
+    // The earliest window on record. Equal to the first ttm_series point here, so
+    // the fixture exercises the coverage-limited marker.
+    ttm_coverage_start: '2026-01',
     total_net_eur: period === '24m' ? 200 : 30, total_forecast_net_eur: 50,
     securities: [], ibkr_from: '2025-06-01', base_currency: 'EUR',
     growth: {
@@ -106,36 +97,36 @@ describe('Dividend chart controls', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('paces off projected windows with the forecast on and elapsed ones with it off', async () => {
-    // The two bases ride on one response, so switching must not refetch — and the
-    // `est.` marker has to follow the figure rather than the button, or a measured
-    // rate and a projected one look the same.
+  it('measures growth across the windows on screen, and follows the toggle', async () => {
+    // The bug this replaced: the rate was anchored at the projection horizon and
+    // read the same whatever the reader selected. Hiding projections drops the
+    // open window, so the span shortens and the figure must move with it —
+    // without refetching, since both windows are already on the response.
     const request = vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
     const user = userEvent.setup()
     mount()
     await screen.findByText(/Received/)
 
-    const forward = screen.getByLabelText('Dividend growth pace')
-    expect(forward.textContent).toContain('+1.1%')
-    expect(forward.textContent).toContain('est.')
+    const withForecast = screen.getByLabelText('Dividend income growth').textContent!
+    expect(withForecast).toContain('Jan 26')
+    expect(withForecast).toContain('Feb 26')   // the open window is the endpoint
+    expect(withForecast).toContain('est.')
 
     await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
-    const measured = screen.getByLabelText('Dividend growth pace')
-    expect(measured.textContent).toContain('+2.4%')
-    expect(measured.textContent).not.toContain('est.')
+    // One closed window left, so there is no span to measure and no figure.
+    expect(screen.queryByLabelText('Dividend income growth')).toBeNull()
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the growth pace on screen in both chart modes', async () => {
-    // It describes the income, not one view of it — and the monthly chart is the
-    // one a reader lands on, where nothing else says which way the trend runs.
+  it('keeps the growth figure on screen in both chart modes', async () => {
+    // It describes the income over the selected range, not one view of it.
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
     const user = userEvent.setup()
     mount()
     await screen.findByText(/Received/)
-    expect(screen.getByLabelText('Dividend growth pace')).toBeTruthy()
+    expect(screen.getByLabelText('Dividend income growth')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByLabelText('Dividend growth pace')).toBeTruthy()
+    expect(screen.getByLabelText('Dividend income growth')).toBeTruthy()
   })
 
   it('shows the per-symbol key and the forecast key in TTM mode, not only monthly', async () => {

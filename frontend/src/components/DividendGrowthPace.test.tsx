@@ -1,73 +1,81 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import type { DividendTtmPace } from '@/lib/api'
+import type { DividendPace } from '@/lib/dividendPace'
 import { DividendGrowthPace } from './DividendGrowthPace'
 
 afterEach(cleanup)
 
-function pace(over: Partial<DividendTtmPace> = {}): DividendTtmPace {
+function pace(over: Partial<DividendPace> = {}): DividendPace {
   return {
-    monthly_pct: 12.25, annualized_pct: 300, from_month: '2025-12', to_month: '2026-06',
-    from_eur: 120, to_eur: 240, months: 6, short_history: false,
-    includes_forecast: false, crosses_era: false,
+    cmgr_pct: 18.33, cagr_pct: 653.5, from_month: '2026-01', to_month: '2026-12',
+    from_eur: 23.22, to_eur: 147.86, months: 11,
+    includes_forecast: false, coverage_limited: false,
     ...over,
   }
 }
 
-describe('the dividend growth pace strip', () => {
-  it('shows the rate in both units, and the windows it was measured between', () => {
-    render(<DividendGrowthPace pace={pace()} />)
-    const strip = screen.getByLabelText('Dividend growth pace')
+const strip = () => screen.getByLabelText('Dividend income growth')
 
-    // Rendered by DeltaChip at the app's one decimal place; the wire carries two,
-    // which is what the compounding identity is checked against server-side.
-    expect(strip.textContent).toContain('+12.3%')
-    expect(strip.textContent).toContain('per month')
-    expect(strip.textContent).toContain('+300%')
-    expect(strip.textContent).toContain('a year')
-    // The two totals it compounds between, on the surface — they are what makes
-    // the rate checkable against the chart below rather than merely asserted.
-    expect(strip.textContent).toContain('Jan 25 – Dec 25')
-    expect(strip.textContent).toContain('Jul 25 – Jun 26')
-    expect(strip.textContent).toContain('120.00')
-    expect(strip.textContent).toContain('240.00')
+describe('the dividend income growth strip', () => {
+  it('names both rates and the windows they were measured between', () => {
+    render(<DividendGrowthPace pace={pace()} />)
+
+    expect(strip().textContent).toContain('CMGR')
+    expect(strip().textContent).toContain('+18.3%')
+    expect(strip().textContent).toContain('/mo')
+    expect(strip().textContent).toContain('CAGR')
+    expect(strip().textContent).toContain('/yr')
+    // The two endpoints, so the figure can be checked against the chart below
+    // rather than taken on trust.
+    expect(strip().textContent).toContain('Jan 26')
+    expect(strip().textContent).toContain('Dec 26')
+    expect(strip().textContent).toContain('23.22')
+    expect(strip().textContent).toContain('147.86')
   })
 
-  it('does not call a measured rate an estimate', () => {
-    render(<DividendGrowthPace pace={pace()} />)
-    expect(screen.getByLabelText('Dividend growth pace').textContent).not.toContain('est.')
+  it('drops CAGR when there is under a year of span to annualize from', () => {
+    render(<DividendGrowthPace pace={pace({ cagr_pct: null, months: 7 })} />)
+    expect(strip().textContent).toContain('CMGR')
+    expect(strip().textContent).not.toContain('CAGR')
   })
 
-  it('marks a rate resting on projected windows, and says what that costs', () => {
-    // The whole point of the projected basis: the forward rate is as much a
-    // statement about the inferred payout schedule as about the portfolio, and
-    // that has to be legible without hovering anything.
+  it('marks a base the account was still being funded inside, on the surface', () => {
+    render(<DividendGrowthPace pace={pace({ coverage_limited: true })} />)
+    // The dagger carries the full reason in its title, but a marker whose meaning
+    // exists only in a hover is one a touch device never reaches — so the short
+    // form is visible text.
+    expect(strip().textContent).toContain('†')
+    expect(strip().textContent).toContain('from the first window on record')
+    expect(strip().querySelector('[aria-label*="still being funded"]')).toBeTruthy()
+  })
+
+  it('does not mark a rate whose base is a full window', () => {
+    render(<DividendGrowthPace pace={pace()} />)
+    expect(strip().textContent).not.toContain('†')
+    expect(strip().textContent).not.toContain('first window on record')
+  })
+
+  it('marks a rate resting on projected windows, and only then', () => {
     render(<DividendGrowthPace pace={pace({ includes_forecast: true })} />)
-    const strip = screen.getByLabelText('Dividend growth pace')
-
-    expect(strip.textContent).toContain('est.')
-    expect(strip.textContent).toContain('keeps paying at its current per-share rate')
-  })
-
-  it('states the span when it is shorter than the six months claimed', () => {
-    // A rate labelled "per month" that rests on three of them is a different
-    // claim, so the span travels with the figure instead of sitting in a title.
-    render(<DividendGrowthPace pace={pace({ months: 3, short_history: true })} />)
-    expect(screen.getByLabelText('Dividend growth pace').textContent).toContain('over 3 months of the rolling series, not 6')
-  })
-
-  it('always says this is not per-share dividend growth', () => {
-    // As visible text. The distinction between a portfolio earning more because
-    // it bought more and a company raising its dividend is the one a reader is
-    // most likely to get wrong, and a caveat behind a hover does not exist.
+    expect(strip().textContent).toContain('est.')
+    cleanup()
     render(<DividendGrowthPace pace={pace()} />)
-    expect(screen.getByLabelText('Dividend growth pace').textContent).toContain('not a measure of dividend increases per share')
+    expect(strip().textContent).not.toContain('est.')
   })
 
-  it('renders nothing rather than a dash when the server sends no pace', () => {
-    // Absent, not zeroed: "0.0% per month" on a book with too little history
-    // reads as "flat", which is an answer it has not earned.
+  it('stays two lines of figures, with no explanatory prose', () => {
+    // The first version carried two paragraphs and the owner asked for KPIs. The
+    // qualifiers live on the chips as `est.` and `†` instead, so this pins that
+    // the prose does not creep back.
+    render(<DividendGrowthPace pace={pace({ includes_forecast: true, coverage_limited: true })} />)
+    expect(strip().textContent!.length).toBeLessThan(170)
+    expect(strip().querySelectorAll('p')).toHaveLength(0)
+  })
+
+  it('renders nothing rather than a dash when the range has no pace', () => {
+    // Absent, not zeroed: "0.0%" on a range with one window reads as "flat",
+    // which is an answer it has not earned.
     const { container } = render(<DividendGrowthPace pace={null} />)
     expect(container.innerHTML).toBe('')
   })

@@ -6,6 +6,7 @@ import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC } from '@/lib/dividendChart'
 import { dividendColor, dividendPalette } from '@/lib/dividendColors'
+import { dividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
 import { DividendGrowthPace } from './DividendGrowthPace'
@@ -334,11 +335,14 @@ export function DividendsTab() {
   // empty — which is exactly when knowing the trend is most useful.
   const hasGrowth = (data?.growth?.annual?.length ?? 0) > 0
 
-  // One expression picks the basis, so the figure and its badge cannot disagree
-  // about which one is showing. Whether it reads as an estimate is then decided by
-  // the object itself (`includes_forecast`) rather than by this toggle: with the
-  // forecast requested and nothing projected, both paces ARE the measured one.
-  const pace = showForecast ? data?.ttm_pace_projected : data?.ttm_pace_measured
+  // Measured across `ttmPoints`, which is already the range slice with the open
+  // windows dropped when Forecast is off — so the rate answers the range the
+  // reader selected, and "which windows are showing" is stated once rather than
+  // recomputed here or restated on the server.
+  const pace = useMemo(
+    () => dividendPace(ttmPoints, data?.ttm_coverage_start),
+    [ttmPoints, data],
+  )
 
   return (
     <Card>

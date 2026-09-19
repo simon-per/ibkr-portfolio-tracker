@@ -536,59 +536,6 @@ class DividendTtmPoint(BaseModel):
     partial: bool = False
 
 
-class DividendTtmPace(BaseModel):
-    """
-    How fast the rolling twelve-month total is moving: the geometric average
-    monthly growth between two windows of `ttm_series`, and the same rate
-    compounded to a year.
-
-    Computed as the ENDPOINT ratio, ``(to/from) ** (1/months)``, not as a product
-    of the monthly ratios. The two are the same number — the intermediate terms
-    telescope — but only this form survives a zero window in between, where the
-    product form has one ratio at 0 and the next undefined. A payer stopping is
-    exactly what takes a window to zero, and it is the case this series exists to
-    show, so the form that keeps working there is the one written.
-
-    Geometric rather than arithmetic because the rate has to compound back to the
-    change actually observed between `from_eur` and `to_eur`, which are published
-    right beside it. An arithmetic mean of the monthly percentages does not, so it
-    would print a pace contradicting the two figures next to it.
-
-    Derived from the UNWINDOWED series, like everything in DividendGrowth: with
-    year=2026 selected the client holds no 2025 windows and could not see the
-    window six months before January.
-    """
-    monthly_pct: float              # geometric average growth per month
-    # The same rate over twelve months: (1 + monthly) ** 12 - 1, never monthly * 12.
-    annualized_pct: float
-
-    from_month: str                 # "YYYY-MM" — the earlier window's ending month
-    to_month: str
-    # What those two windows totalled. Emitted so the arithmetic on screen is
-    # auditable against the chart above it rather than asserted.
-    from_eur: float
-    to_eur: float
-
-    # Months actually spanned. Nominally 6; clamped to the history available, the
-    # same way ContributionWindow clamps its divisor.
-    months: int
-    # Fewer than the nominal six were available, so the rate rests on a shorter
-    # span than the label implies. Deliberately NOT called `partial`: in
-    # DividendTtmPoint that word means "the window has not fully elapsed", and one
-    # word carrying two meanings across adjacent models is how a reader gets it
-    # backwards.
-    short_history: bool = False
-
-    # Either anchor window carries projection, so the figure is forward-looking.
-    # Measured from the anchors, not from the caller's toggle — with the forecast
-    # requested but nothing projected the two paces are identical and neither may
-    # be badged as an estimate.
-    includes_forecast: bool = False
-    # The anchors jointly span the estimate -> IBKR boundary, so part of the
-    # change is a change of source rather than of income.
-    crosses_era: bool = False
-
-
 class DividendSecurityRow(BaseModel):
     """Per-security dividend totals for the selected window."""
     security_id: int
@@ -757,22 +704,14 @@ class DividendBreakdownResponse(BaseModel):
     # as `months`. Reaches further than `months` on the all-time view by design —
     # see DividendTtmPoint. Empty until twelve months of history exist.
     ttm_series: List[DividendTtmPoint] = []
-    # How fast that series is moving, on the two bases the Forecast toggle picks
-    # between: `measured` between fully elapsed windows, `projected` through the
-    # end of the projection horizon. Both ride on one response so the toggle stays
-    # instant, exactly as the per-symbol forecast split does.
-    #
-    # Siblings of `growth` rather than members of it, for the reason
-    # DividendForwardYield is one: every member of DividendGrowth is derived from
-    # the 365-day and annual accumulators, while this comes from calendar-month
-    # rolling windows — a different twelve months, which DividendTtmPoint already
-    # labours to keep distinct from `growth.ttm`.
-    #
-    # None when there are not two covered windows to compare, never a zeroed
-    # object: 0.0%/month on a book with no history reads as "flat", which is an
-    # answer.
-    ttm_pace_measured: Optional[DividendTtmPace] = None
-    ttm_pace_projected: Optional[DividendTtmPace] = None
+    # The earliest rolling window that exists over the WHOLE history, "YYYY-MM".
+    # Unwindowed on purpose, and the one thing the client cannot work out for
+    # itself: with ?year=2026 the response carries only 2026 windows, so nothing
+    # in it says whether an earlier one exists. That decides whether a growth rate
+    # measured from the first window on screen has a coverage-limited base — the
+    # account was still being funded inside that twelve months, the same shape
+    # `DividendAnnualRow.yoy_vs_partial` marks.
+    ttm_coverage_start: Optional[str] = None
     securities: List[DividendSecurityRow]
     total_net_eur: float
     total_forecast_net_eur: float

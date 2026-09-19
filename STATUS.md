@@ -5,19 +5,27 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-18.** Latest, not yet deployed: **the Dividends tab reports a growth
-pace** — the geometric average monthly growth of the rolling twelve-month series over six months,
-and that rate compounded to a year, in one strip under the KPI tiles. Two bases ride on every
-response and the Forecast toggle picks between them: between fully elapsed windows, or through the
-end of the projection horizon. Whether it reads `est.` is decided by the anchors carrying projection,
-not by the toggle, so a response with nothing projected cannot badge a measurement as a guess. It is
-the endpoint ratio rather than a product of monthly ratios (the only form that survives a zero window
-in between) and it annualizes by compounding, so it multiplies back to the two window totals printed
-beside it. Short history shrinks the span and says so; no base, or fewer than two windows, renders
-nothing. Rules in `docs/dividends.md`; what to check live is in *Watch after the next deploy*.
+**Last updated: 2026-09-19.** Latest, not yet deployed: **the Dividends growth figure now
+answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
+six-month rate anchored at the projection horizon, so it read `Jan 27 – Dec 27` while the reader
+was looking at 2026 — the owner's verdict was "not really usable", and he was right: a rate that
+ignores the filter above it is not a rate for anything on screen. It is now **CMGR** between the
+first and last rolling window actually displayed, plus **CAGR** when that span reaches twelve
+months, in one strip with the two endpoint totals beside it and no prose. Computed client-side in
+`lib/dividendPace.ts` from `ttmPoints` — that array already *is* the displayed set, range-sliced by
+the server and stripped of open windows when Forecast is off, so "which windows are showing" stays
+stated once instead of being restated in Python. The server keeps one new field,
+`ttm_coverage_start`, which is the only thing a windowed response cannot work out for itself.
+`DividendTtmPace` and the two `ttm_pace_*` fields are gone.
 
-Previously, live on `170df7c`: **the Dividends TTM view is a
-stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
+On this book every range reaching back to the first covered window starts at CHF 3.77 — the account
+mid-funding — and reports +15% to +28% a month. That is arithmetically true and nearly meaningless,
+so it carries `†` plus four words of visible text; narrowing the range gives the clean read (2026
++18.3%/mo with the forecast, +14.5% without). Rules in `docs/dividends.md`; what to check live is in
+*Watch after the next deploy*.
+
+Live on `d4640d4` (which still carries the unwindowed pace this replaces): **the Dividends TTM
+view is a stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
 rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
 it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
 The rolling series moved off `months[]` onto its own `ttm_series`, because on All time it runs to
@@ -36,10 +44,12 @@ the last projected payment** put All time in October while `year=` for the same 
 it ends at the horizon now, so every range builds one identical series and only the slice differs.
 
 The stacked TTM was verified on production after deploy (see *Watch after the next deploy*); the
-growth pace has not been. Locally: 1,530 backend and 656 frontend tests pass, plus TypeScript and
-build. Browser checks at 1440px and 390px against synthetic fixtures covered the stacked chart —
-segments drawn, trimming, future year, toggle, dark theme, no overflow, no console errors and no
-network. **The pace strip has had no browser pass yet.**
+growth figure has not been. Locally: 1,522 backend and 665 frontend tests pass, plus TypeScript,
+build and lint. The backend count FELL by eight against `d4640d4` and that is the whole pace
+removal — nine tests plus the auto-generated `DividendTtmPace` contract-drift case, against two
+added for `ttm_coverage_start`; the collected-id diff was checked rather than the totals.
+Browser checks at 1440px and 390px plus dark, replaying the five live `d4640d4` payloads so every
+range was verified against real figures — no overflow, no console errors, no network.
 Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
 `AGENTS.md` is an exact copy of the root `CLAUDE.md`. Unrelated UI restyle changes already in the
 working tree were preserved and remain uncommitted.
@@ -773,17 +783,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The Dividends growth pace is built and unverified on production.** `ttm_pace_measured` /
-  `ttm_pace_projected` on `/api/dividends/breakdown`, shown as a strip under the KPI tiles: the
-  geometric average monthly growth of `ttm_series` over six months, and that rate compounded to a
-  year. The Forecast toggle picks which of the two is shown. **Check on the live response**: the
-  measured pace is identical across `?year=2025`, `?year=2026`, `?period=24m` and no filter;
-  `(1 + monthly_pct/100) ** months` reproduces `to_eur / from_eur`; `ttm_pace_projected.to_month`
-  is the horizon month and `ttm_pace_measured.to_month` the last elapsed one. **And in a browser**:
-  the strip's wrapping at 390 px, the `est.` badge following the object rather than the button, and
-  whether the forward pace on the real book reads as informative or as a restatement of the
-  forecast's flat median — if it is the latter, the honest fix is a default rather than a new
-  figure. Local verification used synthetic fixtures and made no Yahoo or Flex requests.
+- **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
+  CAGR at twelve months of span or more) between the first and last rolling window on screen,
+  from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally
+  against the five live `d4640d4` payloads replayed through a browser, and every range matched:
+  All time +15.3%/mo & +451%/yr, 24m +21.3% & +918%, 2025 +28.5% (no CAGR, 7-month span), 2026
+  +18.3% with forecast and +14.5% without, 2027 +6.6%, 2027 with forecast off renders nothing.
+  **Check on production**: those figures against the real API, that `ttm_coverage_start` is
+  `2025-05` in every range, and that the `†` shows on All time / 24m / 2025 and not on 2026 / 2027.
+  **And in a browser**: whether the All-time figure is worth keeping at all once seen in context —
+  if the funding ramp makes it noise rather than information, dropping CAGR on coverage-limited
+  ranges is a two-line change.
 
 - **The stacked, forecast-aware Dividends TTM is live on `170df7c` and verified against the API
   (2026-09-18, 20:55 Berlin).** Both identities hold on production: the December window equals
@@ -1196,6 +1206,14 @@ One line each, newest first. **Drop the oldest rather than growing this list** �
 detail; this exists so the next session knows what just moved without reading it. Distinct from the
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
+
+- **2026-09-19** — rewrote yesterday's dividend growth pace after the owner called it unusable:
+  it was unwindowed by design and so ignored the range selector entirely. Now CMGR/CAGR between
+  the first and last window on screen, computed client-side from the array that already defines
+  which windows those are, with the server-side pair deleted. The lesson is about the decision, not
+  the code: **a figure shown beside a filter must answer that filter** — "computed over the full
+  history" is right for the KPI tiles because they are labelled as such, and wrong for anything
+  sitting under a range dropdown. Not deployed.
 
 - **2026-09-18** — copied CLAUDE.md to AGENTS.md; shipped dividend Monthly/TTM and Last 24 months
   (`c0ba465`, live); then rebuilt TTM at the owner's request as a forecast-aware stacked column

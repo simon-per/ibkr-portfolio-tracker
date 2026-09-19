@@ -22,18 +22,6 @@ export function dividendTtmWindowLabel(month: string): string {
   return `${dividendMonthLabel(key, true)} – ${dividendMonthLabel(month, true)}`
 }
 
-/**
- * What every figure derived from dividend income has to say once, in one place.
- *
- * It qualifies the rolling chart and the growth pace equally, and it was written
- * out separately in each until the second reader of the second copy asked whether
- * they meant the same thing. They do; a sentence stated twice is a sentence that
- * eventually is not.
- */
-export const NOT_PER_SHARE_CAVEAT =
-  'Portfolio dividend income also moves with what is held and with exchange rates; '
-  + 'this is not a measure of dividend increases per share.'
-
 export interface ChartSeries {
   /** One row per month, keyed by series name (and FC-prefixed name for forecast). */
   chartData: Record<string, number | string>[]
