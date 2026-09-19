@@ -5,9 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, shipping now and **not yet verified on production** (the
-snapshot A/B the last two dividend changes had was unavailable — see *Watch after the next
-deploy*): **the calendar is the forecast.** The two
+**Last updated: 2026-09-19.** Latest, live on `9e808fe` and API-verified (the browser half is
+still open — see *Watch after the next deploy*): **the calendar is the forecast.** The two
 pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
 that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
 actually gone ex is the *most* certain entry on the calendar, and it was the only kind absent from
@@ -894,34 +893,35 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **Folding the calendar into the forecast is built and green (1568 backend, 676 frontend), but it
-  is the first dividends change since 2026-09-08 that ships with NO A/B against a production
-  snapshot** — the snapshot pull was blocked as a production read, so the predicted deltas below are
-  arithmetic over the live `forecast=true` response under the old code, not the new code's output.
-  Treat the post-deploy check as the verification rather than a confirmation.
+- **Folding the calendar into the forecast is live on `9e808fe` and API-verified (2026-09-19,
+  20:45 Berlin) — but the browser half is NOT done, and this change touched the frontend.**
 
-  Predicted on `/api/dividends/breakdown?forecast=true` (base CHF, as read 2026-09-19 20:15 Berlin,
-  old code in the second column):
+  Verified by comparing the live response against the same endpoint read under the old code twenty
+  minutes earlier — a before/after on one unchanged database, which is the A/B the blocked snapshot
+  pull was for, just taken across the deploy instead of across two processes. **Every realized
+  figure is byte-identical**: `total_net_eur`, `growth.ttm`/`ytd`/`avg_month`, all 31 monthly actual
+  bars, all 32 `ttm_series` measured points, every annual actual. **The calendar is untouched** —
+  90 entries before and after, none added, removed or altered — so the fold moved money into the
+  charts without disturbing the list it reads from. The forecast side moved exactly as predicted:
+  `2026-08` 0.00 → 0.19, `2026-09` 20.60 → 47.92, `2026-10` 0.39 → 1.77,
+  `total_forecast_net_eur` 85.67 → 114.56, `next_12m_eur` 263.45 → 264.83.
 
-  | figure | before | after |
-  |---|---|---|
-  | `months[2026-08].forecast_total_eur` | 0.00 | 0.19 |
-  | `months[2026-09].forecast_total_eur` | 20.60 | 47.91 |
-  | `months[2026-10].forecast_total_eur` | 0.39 | 1.77 |
-  | `total_forecast_net_eur` | 85.67 | ~114.55 |
-  | `growth.next_12m_eur` | 263.45 | ~264.83 |
-  | `total_net_eur`, `growth.ttm`/`ytd`, every `actual_total_eur` | — | unchanged |
+  The two durable checks, which outlive those figures: **per month,
+  `months[].forecast_total_eur` equals the calendar entries dated in it** — measured, every month
+  within 0.01 — and **`next_12m_eur == sum(net_eur for upcoming if not pending)`** — 264.83 against
+  264.76, the per-entry rounding gap across ~60 entries (0.03%, inside the documented tolerance).
+  A drift beyond a cent or two in either is the bug.
 
-  The durable checks, which outlive those figures: **per month, `months[].forecast_total_eur` equals
-  the calendar entries dated in it** (to a cent or two of per-entry rounding), and
-  **`next_12m_eur == sum(net_eur for upcoming if not pending)`**. Both are what the folding rule
-  means; a drift in either is the bug.
+  And the point the whole client change exists for: the window ending **`2026-08` is `partial:
+  false` and now carries 0.19** of unsettled 000660.KS — measured 60.06, total 60.24. That is a
+  projection inside a closed window, which could not happen before.
 
-  **A browser pass is the other half**, because the frontend changed this time. With Forecast ON,
-  September's translucent segment should roughly double. With it OFF: the rolling chart must still
-  show the window ending 2026-08 — it carries 000660.KS's unsettled 0.19 and would be the point a
-  wrong `partial` deletes — drawn at its measured height, and no bar anywhere should be translucent.
-  Toggling must not repaint a single series colour.
+  **What remains is the browser pass.** With Forecast ON, September's translucent segment should
+  roughly double. With it OFF, the rolling chart must **still show the 2026-08 window** — that is
+  precisely the point a wrong `partial` would delete — drawn at 60.06 rather than 60.24, with
+  nothing translucent anywhere and no series changing colour on the toggle. Nothing in the API can
+  answer that; `withoutForecast` is covered by unit tests and by
+  `test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it`, but neither mounts a bar.
 
 - **The projection-pending tail is live on `ec35713` and verified against the API
   (2026-09-19, 12:35 Berlin).** VT's September payment is on the calendar dated its own ex-date,
