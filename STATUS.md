@@ -5,8 +5,9 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, not yet deployed: **a forecast sized from Yahoo's gross
-per-share now deducts an assumed withholding of 15%** (`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`).
+**Last updated: 2026-09-19.** Latest, live on `bb2bb48` and verified: **a forecast sized from
+Yahoo's gross per-share now deducts an assumed withholding of 15%**
+(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`).
 Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
 overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
 high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
@@ -61,7 +62,7 @@ pre-existing and in files this did not touch). **The accrual path has still neve
 statement** — it is exercised by fixtures only and the Flex section is off, so every live date
 currently comes from a measured lag or the ex-date.
 
-Before that, also not yet deployed: **the Dividends growth figure now
+Before that, and live since `c791fd9`: **the Dividends growth figure now
 answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
 six-month rate anchored at the projection horizon, so it read `Jan 27 – Dec 27` while the reader
 was looking at 2026 — the owner's verdict was "not really usable", and he was right: a rate that
@@ -860,15 +861,22 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The estimated-net factor is built and unverified on production.** Once it ships, read
-  `/api/dividends/breakdown?forecast=true` and check three things. Every figure sized from gross —
-  `forward_yield.annual_eur`, `growth.next_12m_eur`, a `gross_estimate` row's `forecast_net_eur`,
-  each `pending` calendar amount — must be **exactly 0.85×** what the same field read on `c791fd9`
-  (the whole projection was `gross_estimate`-based at the time, so `forward_yield.pct` falls with
-  it). `basis` and `forecast_basis` must still read `gross_estimate`, not flip to `net`. And
-  **`total_net_eur` and `growth.ttm` must not move at all** — realized income is untouched by
-  design, and `/api/tax/report`'s DA-1 income reads the same rows and must be identical. If any
-  realized figure moved, the factor has leaked out of the two read paths it belongs in.
+- **The estimated-net factor is live on `bb2bb48` and verified (2026-09-19, 11:25 Berlin).**
+  Every gross-sized figure falls by exactly 0.85 — `forward_yield.annual_eur`,
+  `growth.next_12m_eur`, `total_forecast_net_eur` and each `pending` calendar amount — while
+  **every realized figure is byte-identical**: `total_net_eur`, `growth.ttm` / `ytd`, the annual
+  actuals, all 31 monthly actual totals and all 32 `ttm_series` measured points. Provenance stays
+  `gross_estimate` rather than flipping to `net`, and a second read returns the first read's
+  numbers, so the factor cannot compound.
+
+  **Verified by an A/B against one database snapshot, not by comparing two live reads — and that
+  distinction is the lesson.** The first attempt compared production before and after the deploy
+  and reported realized income moving by 7%, which would have meant the factor had escaped into
+  the income ledger. It had not: the base currency was switched from EUR to CHF between the two
+  reads, so every figure moved by FX as well. **Any check phrased as "this number should become
+  that number" is unsound here** — `app_settings.base_currency` changes under you, and CLAUDE.md
+  says so in its first paragraph. Hold the currency fixed by comparing one payload against
+  another built from the same snapshot, or compare ratios inside a single payload.
 
 - **Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
   (2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
@@ -1328,7 +1336,15 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
-- **2026-09-19 (net-factor follow-up)** — shared 0.85 factor for gross-derived forecasts and unpaid calendar estimates; captions and handoff regressions updated; local only.
+- **2026-09-19 (net-factor follow-up)** — merged Codex's shared 0.85 factor for gross-derived
+  forecasts and unpaid calendar estimates, cherry-picked onto main so the restyle in the tree
+  stayed untouched. Two lessons, both about checking rather than coding. **A base currency that
+  changes under you invalidates every before/after comparison**: the first post-deploy check
+  read realized income as having fallen 7% and it had not — EUR became CHF between the two
+  reads. Hold the currency fixed with an A/B on one snapshot. And **a constant can be right in
+  direction and still wrong in detail**: 0.85 is the US/Dutch treaty rate applied to a book that
+  also holds German, Korean and Taiwanese payers, and the measured rate is already in the
+  database — recorded as *Worth doing next* rather than waved through.
 
 - **2026-09-19 (later)** — "verify whether forecasts use ex-dividend date, payment date, or
   another date". They used the ex-date, everywhere, under field names that said pay date — and the
