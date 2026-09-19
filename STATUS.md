@@ -5,8 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, shipping now: **a projected dividend survives its own
-date.** The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues
+**Last updated: 2026-09-19.** Latest, live on `ec35713` and verified: **a projected dividend
+survives its own date.** The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues
 the ones it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between
 the projection being deleted on its own date and that row arriving, the payment is in nothing —
 which is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the
@@ -873,20 +873,27 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The projection-pending tail is built and A/B-verified against a production snapshot, not yet
-  deployed (2026-09-19, 12:20 Berlin).** One snapshot, one base currency, old code and new in
+- **The projection-pending tail is live on `ec35713` and verified against the API
+  (2026-09-19, 12:35 Berlin).** VT's September payment is on the calendar dated its own ex-date,
+  `pending`, `ex_date`, at the amount the pre-ship A/B predicted; `next_pay_date` still reads the
+  next *future* payment; no non-`pending` entry is dated on or before today; and no security
+  carries two entries on one date.
+
+  Verified before shipping by an A/B against one production snapshot, one base currency, old code
+  and new in
   separate processes, across all six shapes `get_dividend_breakdown` serves (default, no-forecast,
   each of three years, 24m): **every key except `upcoming` is byte-identical**, no existing
   `upcoming` entry is removed or altered, and `upcoming` gains exactly one entry — VT, dated its
   own ex-date, `gross_estimate`, `ex_date`, `pending`. The no-forecast view gains nothing, as it
   must.
 
-  **After the deploy**, confirm on `/api/dividends/breakdown?forecast=true` that no non-`pending`
-  entry is dated on or before today. VT itself will probably have healed by then — its Yahoo row
-  was due at the 16:08 sync on the 19th — and that is the handoff working, not the fix failing, so
-  the durable check is the invariant rather than the security. Worth one browser pass too: nothing
-  in the frontend changed, so a pending row from this tail renders exactly like the existing ones,
-  which is the claim being checked.
+  **Still to see: the handoff on real data.** VT's Yahoo row was due at the 16:08 sync on the
+  19th. When it lands, the projection stops being generated at all (the cadence steps from the last
+  recorded ex-date) and the estimate tail takes the entry over — so VT should stay on the calendar,
+  once, with the amount moving from the projected one to the recorded one. Two entries on 09-18, or
+  none, is the thing to catch. A browser pass is worth it too, though nothing in the frontend
+  changed: a pending row from this tail renders exactly like the five that were already there,
+  which is itself the claim.
 
 - **The estimated-net factor is live on `bb2bb48` and verified (2026-09-19, 11:25 Berlin).**
   Every gross-sized figure falls by exactly 0.85 — `forward_yield.annual_eur`,
