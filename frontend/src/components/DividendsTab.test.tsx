@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api, type DividendBreakdownResponse } from '@/lib/api'
@@ -50,6 +50,7 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
     ttm_coverage_start: '2026-01',
     total_net_eur: period === '24m' ? 200 : 30, total_forecast_net_eur: 50,
     securities: [], ibkr_from: '2025-06-01', base_currency: 'EUR',
+    forecast_withholding_pct: 15,
     growth: {
       ttm: { net_eur: 130, prev_net_eur: 100, pct: 30 },
       ytd: { net_eur: 30, prev_net_eur: 20, pct: 50 },
@@ -68,6 +69,78 @@ function mount() {
 }
 
 describe('Dividend chart controls', () => {
+  it('shows the applied withholding and refetches dividends after saving a new rate', async () => {
+    let withholdingPct = 15
+    const request = vi.spyOn(api, 'getDividendBreakdown').mockImplementation(async () => ({
+      ...response(2026),
+      forecast_withholding_pct: withholdingPct,
+    }))
+    const update = vi.spyOn(api, 'updateDividendWithholding').mockImplementation(async (pct) => {
+      withholdingPct = pct
+      return {
+        base_currency: 'EUR',
+        supported_currencies: ['EUR', 'CHF', 'USD'],
+        dividend_forecast_withholding_pct: pct,
+      }
+    })
+    const user = userEvent.setup()
+    mount()
+
+    const trigger = await screen.findByRole('button', { name: 'Edit forecast withholding' })
+    expect(trigger.textContent).toBe('WHT 15%')
+    await user.click(trigger)
+    const input = screen.getByLabelText('Withholding percentage')
+    await user.clear(input)
+    await user.type(input, '26.375')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(26.375))
+    await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(1))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Edit forecast withholding' }).textContent)
+        .toBe('WHT 26.375%'),
+    )
+  })
+
+  it('refuses an invalid withholding percentage before making a request', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    const update = vi.spyOn(api, 'updateDividendWithholding')
+    const user = userEvent.setup()
+    mount()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit forecast withholding' }))
+    const input = screen.getByLabelText('Withholding percentage')
+    await user.clear(input)
+    await user.type(input, '101')
+    expect(screen.getByRole('alert').textContent).toMatch(/0 to 100/)
+    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+
+    await user.clear(input)
+    await user.type(input, '26.3751')
+    expect(screen.getByRole('alert').textContent).toMatch(/three decimal places/)
+    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('keeps the control open and shows the API error when saving fails', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    vi.spyOn(api, 'updateDividendWithholding').mockRejectedValue(
+      new Error('This action needs the admin key.'),
+    )
+    const user = userEvent.setup()
+    mount()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit forecast withholding' }))
+    const input = screen.getByLabelText('Withholding percentage')
+    await user.clear(input)
+    await user.type(input, '20')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/needs the admin key/)
+    expect(screen.getByLabelText('Withholding percentage')).toBeTruthy()
+  })
+
   it('switches chart modes and forecasts without refetching or moving a closed window', async () => {
     const request = vi.spyOn(api, 'getDividendBreakdown').mockImplementation(async (year, period) => response(year, period))
     const user = userEvent.setup()
@@ -95,6 +168,26 @@ describe('Dividend chart controls', () => {
     expect(closed.textContent).not.toContain('projected')
     expect(screen.queryByText(/projected \+/)).toBeNull()
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the planning year and returns to the current year when forecast is off', async () => {
+    const request = vi.spyOn(api, 'getDividendBreakdown')
+      .mockImplementation(async (selectedYear, period) => response(selectedYear, period))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+
+    const period = screen.getByRole('combobox', { name: 'Dividend period' })
+    await user.selectOptions(period, '2027')
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith(2027, undefined))
+
+    await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith(2026, undefined))
+    expect((period as HTMLSelectElement).value).toBe('2026')
+    expect(within(period).queryByRole('option', { name: '2027' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
+    expect(within(period).getByRole('option', { name: '2027' })).toBeTruthy()
   })
 
   it('measures growth across the windows on screen, and follows the toggle', async () => {

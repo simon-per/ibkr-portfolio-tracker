@@ -14,8 +14,10 @@ import { DividendKpiCards } from './DividendKpiCards'
 import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
+import { DividendWithholdingControl } from './DividendWithholdingControl'
 import { useTheme } from './ThemeProvider'
 import { cn } from '@/lib/utils'
+import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 
 function SourceBadge({ row }: { row: DividendSecurityRow }) {
@@ -239,7 +241,9 @@ function dividendColumns(deps: {
 }
 
 export function DividendsTab() {
-  const currentYear = new Date().getFullYear()
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [year, setYear] = useState<number | 'all' | '24m'>(currentYear)
   const [chartMode, setChartMode] = useState<'monthly' | 'ttm'>('monthly')
   const [showForecast, setShowForecast] = useState(true)
@@ -264,8 +268,8 @@ export function DividendsTab() {
   // is invisible to the component suite, which mocks recharts' container away.
   // Both views come out of one call so they cannot rank symbols differently.
   const { chartData, ttmData, ttmPoints, stackSymbols } = useMemo(
-    () => buildChartSeries(data, { showForecast }),
-    [data, showForecast],
+    () => buildChartSeries(data, { showForecast, currentMonth }),
+    [data, showForecast, currentMonth],
   )
 
   const colorOf = (sym: string) => dividendColor(sym, stackSymbols, palette)
@@ -295,8 +299,18 @@ export function DividendsTab() {
 
   const yearOptions = useMemo(() => {
     const ys = data?.years?.length ? [...data.years] : [currentYear]
-    return ys.sort((a, b) => b - a)
-  }, [data, currentYear])
+    return ys
+      .filter((candidate) => showForecast || candidate <= currentYear)
+      .sort((a, b) => b - a)
+  }, [data, currentYear, showForecast])
+
+  const toggleForecast = () => {
+    const next = !showForecast
+    // A future year exists only to display projections. Keep the select and the
+    // chart on the same valid range when those projections are hidden.
+    if (!next && typeof year === 'number' && year > currentYear) setYear(currentYear)
+    setShowForecast(next)
+  }
 
   const securities = useMemo(() => {
     const rows = data?.securities ?? []
@@ -410,8 +424,11 @@ export function DividendsTab() {
                 </option>
               ))}
             </select>
+            {data && (
+              <DividendWithholdingControl appliedPct={data.forecast_withholding_pct} />
+            )}
             <button
-              onClick={() => setShowForecast((v) => !v)}
+              onClick={toggleForecast}
               className={cn(
                 'inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors',
                 showForecast
@@ -502,7 +519,9 @@ export function DividendsTab() {
                       {securities.some((r) => r.forecast_basis === 'gross_estimate') && (
                         <span>
                           <span className="text-amber-600 dark:text-amber-500">*</span> estimated net
-                          from gross dividends using an assumed withholding deduction;
+                          from gross dividends using {formatDividendWithholdingPct(
+                            data.forecast_withholding_pct,
+                          )}% assumed withholding;
                           actual net payments may differ
                         </span>
                       )}
@@ -544,7 +563,11 @@ export function DividendsTab() {
                       showForecast={showForecast}
                     />
                   )}
-                  <DividendCalendar upcoming={upcoming} colorOf={colorOf} />
+                  <DividendCalendar
+                    upcoming={upcoming}
+                    colorOf={colorOf}
+                    withholdingPct={data.forecast_withholding_pct}
+                  />
                 </div>
 
                 <DataTable

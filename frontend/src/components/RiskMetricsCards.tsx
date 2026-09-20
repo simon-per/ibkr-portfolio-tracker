@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
+import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 
 /**
  * Beta needs a benchmark, and there are three separate reasons it can be
@@ -46,6 +47,8 @@ interface RiskMetricsCardsProps {
    * Those are different things and the footnote says which.
    */
   dividend?: DividendForwardYield | null
+  /** Exact assumption used by the same breakdown response as `dividend`. */
+  dividendWithholdingPct?: number
   /** Its query failed. Absent data must be a stated failure, not a confident dash. */
   dividendError?: boolean
   isLoading?: boolean
@@ -74,7 +77,7 @@ function shortDate(iso: string): string {
 }
 
 export function RiskMetricsCards({
-  metrics, dividend, dividendError, isLoading, isError,
+  metrics, dividend, dividendWithholdingPct, dividendError, isLoading, isError,
 }: RiskMetricsCardsProps) {
   const formatCurrency = useFormatCurrency()
 
@@ -127,7 +130,13 @@ export function RiskMetricsCards({
       : [
           `${formatCurrency(dividend.annual_eur)}/yr`,
           // Gross-derived amounts use assumed withholding, not broker-reported tax.
-          dividend.basis === 'net' ? 'projected' : 'projected net, assumed withholding',
+          dividend.basis === 'net'
+            ? 'projected'
+            : `projected net, ${
+                dividendWithholdingPct == null
+                  ? 'assumed withholding'
+                  : `${formatDividendWithholdingPct(dividendWithholdingPct)}% assumed withholding`
+              }`,
           `${dividend.paying_holdings} of ${dividend.priced_holdings} pay`,
           ...(dividend.unpriced_holdings > 0
             ? [`${dividend.unpriced_holdings} unpriced`]

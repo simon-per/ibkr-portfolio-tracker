@@ -538,16 +538,21 @@ async def test_an_absent_flex_section_is_a_supported_state():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("factor, expected", [(None, 85), (Decimal("0.72"), 72)])
-async def test_one_factor_sizes_both_gross_fallbacks_without_mutating_history(monkeypatch, factor, expected):
-    import app.services.dividend_service as module
+@pytest.mark.parametrize(
+    "factor, expected, withholding_pct",
+    [(None, 85, 15), (Decimal("0.72"), 72, 28)],
+)
+async def test_one_factor_sizes_both_gross_fallbacks_without_mutating_history(
+    factor, expected, withholding_pct
+):
+    from app.repositories.app_settings_repository import AppSettingsRepository
     from sqlalchemy import select
     from app.models.dividend_payment import DividendPayment
 
-    if factor is not None:
-        monkeypatch.setattr(module, "DEFAULT_DIVIDEND_NET_FACTOR", factor)
     engine, session = await _session()
     try:
+        if factor is not None:
+            await AppSettingsRepository(session).set_dividend_net_factor(factor)
         repo = DividendRepository(session)
         # Establish the IBKR era without a matching payment for the recent ex-date.
         await repo.upsert_payment({
@@ -564,6 +569,7 @@ async def test_one_factor_sizes_both_gross_fallbacks_without_mutating_history(mo
             })
         await session.commit()
         first = await _breakdown(session)
+        assert first["forecast_withholding_pct"] == withholding_pct
         assert first["upcoming"]
         assert {u["net_eur"] for u in first["upcoming"]} == {expected}
         assert any(u["pending"] for u in first["upcoming"])

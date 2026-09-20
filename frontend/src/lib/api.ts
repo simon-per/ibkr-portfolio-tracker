@@ -9,6 +9,8 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 export interface AppSettings {
   base_currency: string;
   supported_currencies: string[];
+  /** Assumed tax deducted from gross-derived dividend forecasts only. */
+  dividend_forecast_withholding_pct: number;
 }
 
 /**
@@ -989,6 +991,8 @@ export interface DividendBreakdownResponse {
   /** Era-splice boundary: estimates strictly before, IBKR actuals from here. */
   ibkr_from: string | null;
   base_currency: string;
+  /** Exact assumption used to turn gross-derived forecasts into estimated net. */
+  forecast_withholding_pct: number;
   /** Optional so an older backend payload still parses. */
   growth?: DividendGrowth | null;
   /** null = no projection, nothing priced, or nothing projecting. Never a zeroed object. */
@@ -1258,6 +1262,13 @@ class ApiClient {
     return this.request<AppSettings>('/api/settings/base-currency', {
       method: 'PUT',
       body: JSON.stringify({ base_currency: baseCurrency }),
+    });
+  }
+
+  async updateDividendWithholding(withholdingPct: number): Promise<AppSettings> {
+    return this.request<AppSettings>('/api/settings/dividend-withholding', {
+      method: 'PUT',
+      body: JSON.stringify({ dividend_forecast_withholding_pct: withholdingPct }),
     });
   }
 

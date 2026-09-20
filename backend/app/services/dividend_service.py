@@ -3,30 +3,34 @@ Dividend Service
 Fetches dividend ex-dates from yfinance, computes income from tax lots,
 converts to EUR, and provides monthly summary data.
 """
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
-from datetime import timedelta, date
-from app.clock import utcnow
-from decimal import Decimal
-from collections import defaultdict
-from statistics import median
+import asyncio
 import logging
 import random
-import asyncio
-import yfinance as yf
+from collections import defaultdict
+from datetime import date, timedelta
+from decimal import Decimal
+from statistics import median
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
-from sqlalchemy import select, func
+import yfinance as yf
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow
 from app.models.security import Security
-from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.taxlot import TaxLot
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.currency_service import CurrencyService
-from app.services.yahoo_rate_limit import is_rate_limit
 from app.services.dividend_forecast import (
-    ForecastPayment, HistPayment, infer_gap_days, project_dividends,
+    ForecastPayment,
+    HistPayment,
+    infer_gap_days,
+    project_dividends,
 )
+from app.services.yahoo_eligibility import yahoo_eligible
+from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +39,6 @@ logger = logging.getLogger(__name__)
 # none of its own; three years is several cycles of any real schedule while
 # still discarding the decades yfinance returns.
 PRE_OWNERSHIP_HISTORY_YEARS = 3
-
-# Read-time estimate only; stored gross and broker-reported net remain unchanged.
-DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")
 
 # Below this many days held inside the trailing year, a trailing-12M yield divides
 # a partial year's income by a full position value and so reads low. 350 rather
@@ -150,9 +151,11 @@ def _summary_source(payments, ibkr_from) -> str:
     return "ibkr" if sources <= {"ibkr"} else "mixed"
 
 
-def _estimated_net_from_gross(gross: Optional[Decimal]) -> Optional[Decimal]:
+def _estimated_net_from_gross(
+    gross: Optional[Decimal], net_factor: Decimal
+) -> Optional[Decimal]:
     """Apply the shared forecast assumption without rounding or mutating history."""
-    return gross * DEFAULT_DIVIDEND_NET_FACTOR if gross is not None else None
+    return gross * net_factor if gross is not None else None
 
 
 def _forward_basis(total: Decimal, gross_estimate: Decimal) -> str:
@@ -160,8 +163,8 @@ def _forward_basis(total: Decimal, gross_estimate: Decimal) -> str:
     Provenance of the forward yield's net numerator.
 
     'net' uses broker-reported net, while 'gross_estimate' uses estimated net derived
-    from gross with DEFAULT_DIVIDEND_NET_FACTOR. 'mixed' contains both. Keep these
-    wire values for compatibility; the factor is an assumption, not measured tax.
+    from gross with the configured forecast net factor. 'mixed' contains both. Keep
+    these wire values for compatibility; the factor is an assumption, not measured tax.
     """
     if gross_estimate <= 0:
         return "net"
@@ -597,7 +600,9 @@ class DividendService:
         payment yet to happen is best sized at today's rate, exactly as the forecast
         sizes a projection.
         """
-        from app.repositories.dividend_accrual_repository import DividendAccrualRepository
+        from app.repositories.dividend_accrual_repository import (
+            DividendAccrualRepository,
+        )
 
         repo = DividendAccrualRepository(self.db)
         if not accruals:
@@ -688,7 +693,9 @@ class DividendService:
         asserting — and would hide it precisely in the case that most needs seeing, a
         payment overdue by months.
         """
-        from app.repositories.dividend_accrual_repository import DividendAccrualRepository
+        from app.repositories.dividend_accrual_repository import (
+            DividendAccrualRepository,
+        )
 
         rows = await DividendAccrualRepository(self.db).get_open()
         out: Dict[int, List[Dict]] = defaultdict(list)
@@ -1043,7 +1050,11 @@ class DividendService:
             return date(d.year - 1, 2, 28)
 
     async def _forecast_inputs(
-        self, raw_payments: List, securities: Dict[int, Security], as_of: date
+        self,
+        raw_payments: List,
+        securities: Dict[int, Security],
+        as_of: date,
+        net_factor: Decimal,
     ) -> tuple:
         """
         Everything ``project_dividends`` needs, assembled once.
@@ -1165,8 +1176,11 @@ class DividendService:
             hist_by_sec[sid] = [
                 HistPayment(
                     on_date=e.on_date,
-                    per_share_eur=(e.per_share_eur[0] if prefer_net
-                                   else _estimated_net_from_gross(e.per_share_eur[1])),
+                    per_share_eur=(
+                        e.per_share_eur[0]
+                        if prefer_net
+                        else _estimated_net_from_gross(e.per_share_eur[1], net_factor)
+                    ),
                 )
                 for e in entries
             ]
@@ -1265,6 +1279,7 @@ class DividendService:
         injectable purely so tests can pin the forecast horizon.
         """
         as_of = as_of or date.today()
+        net_factor = await AppSettingsRepository(self.db).get_dividend_net_factor()
         if period is not None and (period != "24m" or year is not None):
             raise ValueError("Choose either a year or period='24m'")
         current_month = as_of.strftime("%Y-%m")
@@ -1415,7 +1430,9 @@ class DividendService:
 
         if include_forecast:
             hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated = \
-                await self._forecast_inputs(raw_payments, securities, as_of)
+                await self._forecast_inputs(
+                    raw_payments, securities, as_of, net_factor
+                )
 
             # What the ex→pay distance actually measures out at, per security, and the
             # announced pay dates IBKR has published for dividends it has not yet paid.
@@ -1643,7 +1660,9 @@ class DividendService:
                     continue  # IBKR has announced it; the accrual above says it better
                 lag_days, lag_samples = pay_lags.get(p.security_id, (0, 0))
                 expected = ex + timedelta(days=lag_days if lag_samples else 0)
-                amt = base_fx.convert(_estimated_net_from_gross(self._net_eur(p)), expected)
+                amt = base_fx.convert(
+                    _estimated_net_from_gross(self._net_eur(p), net_factor), expected
+                )
                 upcoming.append({
                     "date": expected.isoformat(),
                     "ex_date": ex.isoformat(),
@@ -2203,6 +2222,9 @@ class DividendService:
             "total_forecast_net_eur": round(float(total_forecast), 2),
             "ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "base_currency": base_fx.base_currency,
+            "forecast_withholding_pct": round(
+                float((Decimal(1) - net_factor) * Decimal(100)), 3
+            ),
             "growth": growth,
             "forward_yield": forward_yield,
             "upcoming": upcoming,

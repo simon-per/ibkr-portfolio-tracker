@@ -561,6 +561,7 @@ export function Dashboard() {
             <RiskMetricsCards
               metrics={riskMetrics}
               dividend={dividendBreakdown?.forward_yield}
+              dividendWithholdingPct={dividendBreakdown?.forecast_withholding_pct}
               dividendError={dividendBreakdownError}
               isLoading={chartLoading || positionsLoading}
               isError={chartError || positionsError}

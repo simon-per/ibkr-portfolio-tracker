@@ -2,18 +2,27 @@
 App Settings Repository
 Key/value persistence for application-level settings.
 """
-from typing import Optional
+import logging
 from datetime import date
+from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_settings import AppSetting
 
+logger = logging.getLogger(__name__)
+
 # The base (display) currency the whole portfolio is reported in.
 BASE_CURRENCY_KEY = "base_currency"
 DEFAULT_BASE_CURRENCY = "EUR"
 SUPPORTED_BASE_CURRENCIES = ["EUR", "CHF", "USD"]
+
+# Read-time forecast policy. Yahoo publishes gross dividends per share; this factor
+# turns them into an estimated net amount without rewriting the stored gross history.
+DIVIDEND_FORECAST_NET_FACTOR_KEY = "dividend_forecast_net_factor"
+DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")
 
 # The to_date of the last successful IBKR sync. Used as the window start when
 # attributing a share-count drop to trades / corporate actions in the period
@@ -69,6 +78,35 @@ class AppSettingsRepository:
             )
         await self.set(BASE_CURRENCY_KEY, currency)
         return currency
+
+    async def get_dividend_net_factor(self) -> Decimal:
+        """Return the shared gross-to-net forecast factor, safely defaulted."""
+        raw = await self.get(DIVIDEND_FORECAST_NET_FACTOR_KEY)
+        if raw is None:
+            return DEFAULT_DIVIDEND_NET_FACTOR
+        try:
+            factor = Decimal(raw)
+        except (InvalidOperation, TypeError):
+            factor = Decimal("NaN")
+        if not factor.is_finite() or not Decimal(0) <= factor <= Decimal(1):
+            logger.warning(
+                "Invalid stored dividend forecast net factor %r; using %s",
+                raw,
+                DEFAULT_DIVIDEND_NET_FACTOR,
+            )
+            return DEFAULT_DIVIDEND_NET_FACTOR
+        return factor
+
+    async def set_dividend_net_factor(self, factor: Decimal) -> Decimal:
+        """Persist a validated gross-to-net forecast factor in the inclusive 0..1 range."""
+        try:
+            factor = Decimal(str(factor))
+        except (InvalidOperation, TypeError) as exc:
+            raise ValueError("Dividend forecast net factor must be a number") from exc
+        if not factor.is_finite() or not Decimal(0) <= factor <= Decimal(1):
+            raise ValueError("Dividend forecast net factor must be between 0 and 1")
+        await self.set(DIVIDEND_FORECAST_NET_FACTOR_KEY, format(factor, "f"))
+        return factor
 
     async def get_last_sync_to_date(self) -> Optional[date]:
         val = await self.get(LAST_IBKR_SYNC_TO_DATE_KEY)

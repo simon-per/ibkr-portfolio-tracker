@@ -1,11 +1,13 @@
 import { useMemo } from 'react'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendUpcomingPayment } from '@/lib/api'
+import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 
 interface DividendCalendarProps {
   upcoming: DividendUpcomingPayment[]
   /** Colour per stack symbol, shared with the chart so the two agree. */
   colorOf: (symbol: string) => string
+  withholdingPct: number
 }
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -37,7 +39,7 @@ function monthHeading(iso: string): string {
  * totals. It is badged **on the surface** rather than in a `title=`, which a touch
  * device cannot reach — the lesson this tab already learned once.
  */
-export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
+export function DividendCalendar({ upcoming, colorOf, withholdingPct }: DividendCalendarProps) {
   const groups = useMemo(() => {
     const byMonth = new Map<string, DividendUpcomingPayment[]>()
     for (const p of upcoming) {
@@ -110,7 +112,11 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                         </span>
                       )}
                     </span>
-                    <Amount value={p.net_eur} estimate={p.basis === 'gross_estimate'} />
+                    <Amount
+                      value={p.net_eur}
+                      estimate={p.basis === 'gross_estimate'}
+                      withholdingPct={withholdingPct}
+                    />
                   </li>
                 ))}
               </ul>
@@ -132,8 +138,9 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
       {anyEstimate && (
         <div className="text-xs text-muted-foreground">
           <span className="text-amber-600 dark:text-amber-500">*</span>{' '}
-          estimated net from published gross dividends using an assumed withholding
-          deduction; actual net payments may differ
+          estimated net from published gross dividends using {formatDividendWithholdingPct(
+            withholdingPct,
+          )}% assumed withholding; actual net payments may differ
         </div>
       )}
     </div>
@@ -149,7 +156,15 @@ function MonthTotal({ total }: { total: number }) {
   )
 }
 
-function Amount({ value, estimate }: { value: number; estimate: boolean }) {
+function Amount({
+  value,
+  estimate,
+  withholdingPct,
+}: {
+  value: number
+  estimate: boolean
+  withholdingPct: number
+}) {
   const formatCurrency = useFormatCurrency()
   return (
     <span className="shrink-0 tabular-nums">
@@ -157,7 +172,7 @@ function Amount({ value, estimate }: { value: number; estimate: boolean }) {
       {estimate && (
         <span
           className="ml-0.5 text-amber-600 dark:text-amber-500"
-          title="Estimated net from gross — assumed withholding"
+          title={`Estimated net from gross — ${formatDividendWithholdingPct(withholdingPct)}% assumed withholding`}
         >
           *
         </span>

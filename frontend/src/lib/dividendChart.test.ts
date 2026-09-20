@@ -45,6 +45,7 @@ function response(months: Bucket[], ttm: TtmBucket[] = []): DividendBreakdownRes
     total_forecast_net_eur: 0,
     ibkr_from: null,
     base_currency: 'CHF',
+    forecast_withholding_pct: 15,
   }
 }
 
@@ -99,6 +100,24 @@ describe('buildChartSeries', () => {
     ]))
     expect(chartData.map((r) => r.month)).toEqual(['2026-01', '2026-02'])
     expect(chartData[0]['AAA']).toBeUndefined()
+  })
+
+  it('keeps elapsed gaps but removes future month labels when forecast is off', () => {
+    const data = response([
+      { month: '2026-08' },
+      { month: '2026-09', actual: { AAA: 5 } },
+      { month: '2026-10', forecast: { AAA: 6 } },
+      { month: '2026-11' },
+      { month: '2026-12', forecast: { AAA: 6 } },
+    ])
+
+    const on = buildChartSeries(data, { showForecast: true, currentMonth: '2026-09' })
+    const off = buildChartSeries(data, { showForecast: false, currentMonth: '2026-09' })
+
+    expect(on.chartData.map((row) => row.month)).toEqual([
+      '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
+    ])
+    expect(off.chartData.map((row) => row.month)).toEqual(['2026-08', '2026-09'])
   })
 
   it('handles no data at all', () => {

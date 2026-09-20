@@ -61,7 +61,11 @@ function renderProbe() {
   return { ...result, client }
 }
 
-const CHF_SETTINGS = { base_currency: 'CHF', supported_currencies: ['EUR', 'CHF', 'USD'] }
+const CHF_SETTINGS = {
+  base_currency: 'CHF',
+  supported_currencies: ['EUR', 'CHF', 'USD'],
+  dividend_forecast_withholding_pct: 15,
+}
 
 function read(id: string): string {
   return screen.getByTestId(id).textContent ?? ''
@@ -121,7 +125,11 @@ describe('CurrencyProvider', () => {
     it('writes the new settings and invalidates everything', async () => {
       // Every money figure depends on the base currency, so a partial
       // invalidation would leave surfaces disagreeing with the label.
-      const USD_SETTINGS = { base_currency: 'USD', supported_currencies: ['EUR', 'CHF', 'USD'] }
+      const USD_SETTINGS = {
+        base_currency: 'USD',
+        supported_currencies: ['EUR', 'CHF', 'USD'],
+        dividend_forecast_withholding_pct: 15,
+      }
       // `invalidateQueries()` invalidates *everything*, `['settings']` included, so
       // the optimistic `setQueryData` is immediately overwritten by a refetch. The
       // server's answer therefore wins — which is right, because the value was just

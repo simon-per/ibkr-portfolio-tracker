@@ -24,6 +24,12 @@ It filters the monthly bars, received/projected totals and per-security table to
 The KPI strip and upcoming calendar remain unwindowed. Selecting an annual row restores that
 calendar year without changing the chart mode.
 
+The next calendar year is a planning range and is offered only while **Forecast** is on. Turning
+Forecast off while viewing it returns the filter to the current year. The monthly chart likewise
+stops at the current month with Forecast off; elapsed zero-income months remain on the axis, while
+future buckets whose projected bars were just hidden do not remain as empty labels. The response is
+still fetched once with its forecast data so flipping the toggle stays instant.
+
 **TTM is `ttm_series`, its own top-level array — not fields on `months[]`, and not the KPI strip's
 365 days through today.** One point per calendar month, stacked by symbol exactly like the monthly
 bars, computed server-side from the unwindowed, era-spliced, payment-date-converted history. It is
@@ -299,8 +305,12 @@ every payer look stopped and returned an empty year.
 
 `forecast_basis` reports which amount was used: `net` when a dividend has actually been received (net of
 withholding), `gross_estimate` for estimated net derived from yfinance's gross per-share.
-The latter uses `DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`: an assumed 15% deduction,
-not measured withholding, and the UI badges that assumption. **"Actually received" means an IBKR
+The latter uses the application setting `dividend_forecast_net_factor`, defaulting to
+`DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`: an assumed 15% deduction, not measured
+withholding. The Dividends tab exposes that assumption as **WHT 15%**, and the response carries
+`forecast_withholding_pct` so every caption states the exact percentage used for its numbers.
+Changing it recomputes the read-time forecast; it does not rewrite a dividend row or call Yahoo.
+**"Actually received" means an IBKR
 row.** A `yfinance_estimate` row with
 shares held also carries `gross > 0`, but `compute_dividend_income` writes its net as gross with zero
 withholding, so dividing that by the shares gives the gross per-share figure straight back — and until
@@ -309,20 +319,24 @@ on record; most payers took this path, since the IBKR duplicate of a yfinance pe
 dropped). The `net` branch now requires `p.source == "ibkr"`; an estimate row that landed supplies
 the same gross per-share input as before (its ex-date-converted EUR amount over the
 shares — a better gross than `amount_per_share × one recent rate`, and the only figure when the FX
-dict lacks the currency), now multiplied by the default net factor under the unchanged
+dict lacks the currency), now multiplied by the configured net factor under the unchanged
 `gross_estimate` label. In the earlier provenance fix the label moved; a size could move a
 little for a security that used to prefer `net`: its pre-ownership estimate rows contributed no size
 under that preference (their `net_ps` was `None`) and now enter the median at
 `amount_per_share × rate`. Measured on production across the deploy: forward yield 322.80 → 320.92
-(−0.6%), with the daily FX refresh between the two reads as the other contributor. Future years are selectable (`years` offers `as_of.year + 1`) and a future
-year is forecast in full rather than from today.
+(−0.6%), with the daily FX refresh between the two reads as the other contributor. The response's
+`years` still offers `as_of.year + 1`; the client exposes that future planning year while Forecast is
+on, and a future year is forecast in full rather than from today.
 
 **One gross-to-estimated-net helper, two read paths.** `_estimated_net_from_gross` applies the
-factor when `_forecast_inputs` selects its gross fallback and when an unpaid Yahoo estimate is
+factor passed from the settings repository when `_forecast_inputs` selects its gross fallback and
+when an unpaid Yahoo estimate is
 emitted directly to the calendar. Both apply it before display-currency conversion and rounding;
 missing per-share inputs stay absent. Stored gross and historical estimates remain unchanged,
 as do shared income readers. Repeated reads always start from the original gross, so the factor
-cannot compound. IBKR-derived forecasts, accrual `netAmount` (or gross minus reported withholding
+cannot compound. `GET /api/settings` publishes the percentage and authenticated
+`PUT /api/settings/dividend-withholding` persists it; `0 ≤ withholding ≤ 100` maps to
+`net factor = 1 − withholding / 100`, with up to three decimal places accepted. IBKR-derived forecasts, accrual `netAmount` (or gross minus reported withholding
 when it is absent), and actual cash net bypass the factor. Accrual matching, pay dates, pending
 status and calendar-only treatment are unchanged. Handoff and factor-change regressions live in
 `tests/test_dividend_pay_date.py`.
@@ -577,9 +591,9 @@ Pinned equal on a single-security book by `test_the_row_and_the_card_agree_on_yi
 
 `basis` retains the same three-way flag (`net` | `mixed` | `gross_estimate`) for compatibility.
 `gross_estimate_eur` quantifies the **estimated-net** contribution derived from gross, after the
-shared default factor. It is not the unreduced gross amount. The card shows *projected net,
-assumed withholding* in the footnote whenever this contribution exists; broker-derived net keeps
-its existing basis and amount.
+shared configured factor. It is not the unreduced gross amount. The card shows *projected net,
+assumed withholding* and the exact percentage whenever this contribution exists; the Dividends tab
+uses the same response value in its captions. Broker-derived net keeps its existing basis and amount.
 
 Note the deliberate asymmetry on a row: `forward_yield_pct` always covers the next twelve months while
 `forecast_net_eur` beside it is bounded by the selected window, so a row can show **no forecast and a

@@ -5,7 +5,20 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-19.** Latest, live on `9e808fe` and API-verified (the browser half is
+**Last updated: 2026-09-20.** Local, not shipped: the gross-derived dividend forecast assumption is
+now adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`, accepts 0–100%,
+refetches every active dividend breakdown after saving, and reports the exact applied percentage in
+the response and visible caveats. The setting still touches only the two gross-derived forecast
+paths; actual IBKR net, accruals, realized history and stored rows remain unchanged. Targeted backend,
+frontend and TypeScript checks pass. Full verification: 1,573 backend tests and 682 frontend tests,
+plus the production build and scoped ESLint on the new dividend files. `Dashboard.tsx` retains its
+pre-existing Fast Refresh export lint error at line 83. The browser pass could not run because this
+Codex session has no browser runtime. The unrelated UI restyle already in the working tree remains preserved.
+Also local: turning Forecast off now stops the monthly axis at the current month, removes future-year
+options, and returns a currently selected planning year to the current year instead of leaving an
+empty chart and an impossible select value.
+
+Latest production behavior remains live on `9e808fe` and API-verified (the browser half is
 still open — see *Watch after the next deploy*): **the calendar is the forecast.** The two
 pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
 that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
@@ -39,7 +52,7 @@ still asserting.
 
 Also live on `bb2bb48` and verified: **a forecast sized from
 Yahoo's gross per-share now deducts an assumed withholding of 15%**
-(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`).
+(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`; locally this is now the user-adjustable default).
 Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
 overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
 high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
@@ -893,6 +906,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The adjustable WHT control is local and not shipped.** After its deploy, set a temporary value
+  through the Dividends-tab popover, confirm every gross-derived chart/calendar/yield figure refetches,
+  then restore the intended value. Check the popover at 390 px and confirm the Performance dividend
+  cards show the same exact percentage. Realized figures must remain unchanged. This needs no Yahoo
+  or Flex call; `/api/dividends/breakdown` is a pure database read. With Forecast off, also confirm
+  that the monthly axis ends at the current month and the next calendar year is absent from both the
+  period select and the realized-only per-year panel.
+
 - **Folding the calendar into the forecast is live on `9e808fe` and API-verified (2026-09-19,
   20:45 Berlin) — but the browser half is NOT done, and this change touched the frontend.**
 
@@ -1124,17 +1145,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
-0. **Measure the withholding rate instead of assuming 15%.** `DEFAULT_DIVIDEND_NET_FACTOR = 0.85`
-   is one global constant applied to every gross-sized forecast, and it is the US/Dutch treaty
-   rate — German (26.375%), Korean and Taiwanese payers withhold materially more, so their
-   projections still read high. The honest figure is already in the database:
+0. **Measure withholding per country instead of relying on one global manual assumption.** The
+   setting now defaults to 15% and is adjustable from the Dividends tab, but one percentage still
+   applies to every gross-sized forecast. The default is the US/Dutch treaty rate; German (26.375%),
+   Korean and Taiwanese payers withhold materially more. The measured figure is already in the database:
    `withholding_tax_eur / gross_amount_eur` on the IBKR rows. It cannot be measured *per security*
    where it is needed — a security with IBKR payments already takes the `net` branch and never
    touches the factor — but it can be measured **per country**, off the ISIN prefix the DA-1
    report already groups by, and applied to an unpaid holding in the same jurisdiction. That is
    the same shape as the ex→pay lag: derive it from matched history, report the sample count, and
-   fall back to the global constant when a country has none. Until then the caption says "assumed
-   withholding", which is true and is the reason this is a *next* rather than a defect.
+   fall back to the user-controlled global setting when a country has none. Until then every affected
+   caption gives the exact assumed percentage, which is why this remains an enhancement rather than a defect.
 
 0. **Brinson allocation / selection attribution against the benchmark — needs data first.**
    The Analytics tab (2026-09-13) shows each sector's *weight at start* beside its *share of
@@ -1420,6 +1441,17 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-20 (forecast-off ranges)** — stopped the monthly chart from retaining empty future
+  month labels after its forecast bars disappear, and removed the next-year planning range while
+  Forecast is off. Switching the toggle off from that year now returns to the current year, keeping
+  the selector, request and chart on one valid range.
+
+- **2026-09-20 (adjustable dividend withholding)** — replaced the hardcoded 0.85 gross-to-net
+  forecast factor with a persisted global setting and a WHT percentage control beside Forecast.
+  The response names the exact assumption it used, saving refetches every active dividend range,
+  and actual IBKR income remains outside the setting. The design stays deliberately global and
+  manual; measuring by country remains the next accuracy step.
+
 - **2026-09-19 (the calendar is the forecast)** — "VT is in *Expected next* but not in the chart's
   translucent portion; I think that boundary is too conservative." It was, and wider than the
   report: the trace found four producers of `upcoming` and only one reaching the aggregates, so a
@@ -1453,26 +1485,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   direction and still wrong in detail**: 0.85 is the US/Dutch treaty rate applied to a book that
   also holds German, Korean and Taiwanese payers, and the measured rate is already in the
   database — recorded as *Worth doing next* rather than waved through.
-
-- **2026-09-19 (later)** — "verify whether forecasts use ex-dividend date, payment date, or
-  another date". They used the ex-date, everywhere, under field names that said pay date — and the
-  investigation turned that labelling question into a live defect: six held securities had gone ex
-  and were in no figure at all, because the projection dies on its own date and the era splice
-  drops the estimate recording the same payment. Projections are dated on an expected pay date now
-  (announced accrual > measured lag > ex-date, each named on the wire), and a gone-ex-unpaid
-  dividend is `pending` on the calendar and in no total. Three lessons. **A field name is a
-  claim** — `next_pay_date` carrying an ex-date was the whole bug, visible in the schema for
-  months. **Measure before designing**: reading production turned "the lag is probably stable"
-  into 7–29 days, stable per security, every payment paired — and revealed that half the payers
-  have nothing to measure, which is what made the accrual ingest worth building rather than
-  optional. And **a hand-kept map inside a guard is a hole in the guard**: the Flex attribute
-  coverage test was parametrized over a dict someone has to remember to extend, so a new extractor
-  was not unchecked but invisibly unchecked. Live and API-verified; the Flex section needs a tick.
-
-- **2026-09-19** — rewrote yesterday's dividend growth pace after the owner called it unusable:
-  it was unwindowed by design and so ignored the range selector entirely. Now CMGR/CAGR between
-  the first and last window on screen, computed client-side from the array that already defines
-  which windows those are, with the server-side pair deleted. The lesson is about the decision, not
-  the code: **a figure shown beside a filter must answer that filter** — "computed over the full
-  history" is right for the KPI tiles because they are labelled as such, and wrong for anything
-  sitting under a range dropdown. Not deployed.

@@ -42,7 +42,11 @@ const dividend: DividendForwardYield = {
  */
 function renderWith(
   overrides: Partial<RiskMetrics> = {},
-  props: { dividend?: DividendForwardYield | null; dividendError?: boolean } = {},
+  props: {
+    dividend?: DividendForwardYield | null
+    dividendWithholdingPct?: number
+    dividendError?: boolean
+  } = {},
 ) {
   return render(<RiskMetricsCards metrics={{ ...base, ...overrides }} {...props} />)
 }
@@ -175,8 +179,11 @@ describe('the dividend rate cards', () => {
 
   it('marks a rate whose projected net uses assumed withholding', () => {
     // Keep the assumed withholding visible in the footnote, including on phones.
-    renderWith({}, { dividend: { ...dividend, basis: 'mixed', gross_estimate_eur: 6.61 } })
-    expect(screen.getByText(/projected net, assumed withholding/)).toBeTruthy()
+    renderWith({}, {
+      dividend: { ...dividend, basis: 'mixed', gross_estimate_eur: 6.61 },
+      dividendWithholdingPct: 26.375,
+    })
+    expect(screen.getByText(/projected net, 26.375% assumed withholding/)).toBeTruthy()
   })
 
   it('names unpriced holdings, which are excluded from both sides', () => {

@@ -145,10 +145,30 @@ describe('request', () => {
   })
 
   it('returns the parsed body on success', async () => {
-    mockFetch({ base_currency: 'CHF', supported_currencies: ['EUR'] })
+    mockFetch({
+      base_currency: 'CHF',
+      supported_currencies: ['EUR'],
+      dividend_forecast_withholding_pct: 15,
+    })
     await expect(api.getSettings()).resolves.toEqual({
       base_currency: 'CHF',
       supported_currencies: ['EUR'],
+      dividend_forecast_withholding_pct: 15,
+    })
+  })
+
+  it('sends the dividend withholding setting as a percentage', async () => {
+    const spy = mockFetch({
+      base_currency: 'CHF',
+      supported_currencies: ['EUR'],
+      dividend_forecast_withholding_pct: 26.375,
+    })
+    await api.updateDividendWithholding(26.375)
+
+    expect(spy.mock.calls[0][0]).toContain('/api/settings/dividend-withholding')
+    expect(spy.mock.calls[0][1]).toMatchObject({
+      method: 'PUT',
+      body: JSON.stringify({ dividend_forecast_withholding_pct: 26.375 }),
     })
   })
 

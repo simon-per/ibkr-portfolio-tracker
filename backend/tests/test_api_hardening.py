@@ -115,6 +115,12 @@ def test_a_mutating_request_without_a_key_is_refused(client, monkeypatch):
     # A generic client is told how to authenticate rather than left to guess.
     assert r.headers["WWW-Authenticate"].startswith("Bearer")
 
+    r = client.put(
+        "/api/settings/dividend-withholding",
+        json={"dividend_forecast_withholding_pct": 20},
+    )
+    assert r.status_code == 401
+
 
 def test_a_wrong_key_is_refused(client, monkeypatch):
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
@@ -146,6 +152,26 @@ def test_reads_stay_open_because_the_ui_has_no_login(client, monkeypatch):
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
     for path in ("/health", "/api/settings", "/api/portfolio/benchmarks"):
         assert client.get(path).status_code == 200, path
+
+
+def test_dividend_withholding_setting_round_trips_and_validates(client):
+    initial = client.get("/api/settings").json()
+    assert initial["dividend_forecast_withholding_pct"] == 15
+
+    changed = client.put(
+        "/api/settings/dividend-withholding",
+        json={"dividend_forecast_withholding_pct": 26.375},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["dividend_forecast_withholding_pct"] == 26.375
+    assert client.get("/api/settings").json()["dividend_forecast_withholding_pct"] == 26.375
+
+    for invalid in (-0.001, 100.001, 26.3751):
+        response = client.put(
+            "/api/settings/dividend-withholding",
+            json={"dividend_forecast_withholding_pct": invalid},
+        )
+        assert response.status_code == 422
 
 
 def test_health_stays_reachable_for_the_deploy_script(client, monkeypatch):

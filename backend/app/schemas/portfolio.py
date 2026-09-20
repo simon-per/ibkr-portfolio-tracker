@@ -748,6 +748,8 @@ class DividendBreakdownResponse(BaseModel):
     # Era-splice boundary: yfinance estimates strictly before, IBKR rows from here.
     ibkr_from: Optional[str] = None
     base_currency: str
+    # The exact read-time assumption applied only to gross-derived forecasts.
+    forecast_withholding_pct: float
     growth: Optional[DividendGrowth] = None
     # None = no projection was run, or nothing held is priced. Never a zeroed object.
     forward_yield: Optional[DividendForwardYield] = None

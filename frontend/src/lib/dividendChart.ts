@@ -45,6 +45,12 @@ export interface ChartSeries {
 export interface ChartSeriesOptions {
   /** false hides projections: `ttm` drops its open windows and strips the rest. */
   showForecast?: boolean
+  /**
+   * Forecast-off monthly charts stop here. The server still sends the selected
+   * year's full axis so Forecast can be toggled instantly; keeping later buckets
+   * after hiding their bars leaves empty future month labels behind.
+   */
+  currentMonth?: string
   maxSeries?: number
 }
 
@@ -90,7 +96,7 @@ function withoutForecast(p: DividendTtmPoint, prev: DividendTtmPoint | undefined
  */
 export function buildChartSeries(
   data: DividendBreakdownResponse | undefined,
-  { showForecast = true, maxSeries = MAX_SERIES }: ChartSeriesOptions = {},
+  { showForecast = true, currentMonth, maxSeries = MAX_SERIES }: ChartSeriesOptions = {},
 ): ChartSeries {
   if (!data) return { chartData: [], ttmData: [], ttmPoints: [], stackSymbols: [] }
 
@@ -155,7 +161,10 @@ export function buildChartSeries(
     return out
   }
 
-  const chartData = data.months.map((m) => row(m.month, m.actual, m.forecast))
+  const monthlyBuckets = !showForecast && currentMonth
+    ? data.months.filter((m) => m.month <= currentMonth)
+    : data.months
+  const chartData = monthlyBuckets.map((m) => row(m.month, m.actual, m.forecast))
   // With projections hidden, a window reaching into the future would report only
   // the part of itself that has happened — so those windows are dropped, and the
   // elapsed ones that carry an unsettled payment lose their forecast half. Done
