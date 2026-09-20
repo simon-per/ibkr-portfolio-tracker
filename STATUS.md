@@ -5,7 +5,35 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-20.** Latest, live on `a719644` and API-verified: the gross-derived dividend
+**Last updated: 2026-09-20.** Latest, verified locally and ready to deploy: **a holding on the
+Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
+range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
+measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
+slots, while the calendar turned every upcoming payment grey in a past-year view. The order is now
+`stack_order` on the response, computed once over the whole history and **identical in every
+range**; the client's own ranking is deleted rather than duplicated, and with it the widest-window
+rule that only existed because the client ranked from a slice. Thirteen holdings get an identity
+(eight hues, then five muted steps) and the rest fold into Other, which is 2.6–12.6% of a range on
+this book against ~22% before. The palette moved into `index.css` as `--viz-series-*` and was
+re-stepped for the **all-pairs** list that identity assignment implies: four slots are the
+untouched `--viz-sector-*` hues, the other four plus the Other grey moved by ΔE 2–7, and the light
+green that measured **1.5 from the Other grey** under red-green CVD — wrong on the shipped chart —
+is gone. `lib/dividendColors.test.ts` now reads the hexes back out of `index.css` and measures
+them, surfaces included. The legend became a control: ordered by what the range paid, hover or
+focus to dim the rest, click to pin, and Other opens to name the holdings inside it. Verified
+against a production snapshot: one `stack_order` across six ranges, both forecast settings.
+1,575 backend and 704 frontend tests, TypeScript, build and touched-file lint all pass. **The
+browser pass has not run.**
+
+Before that, and still uncommitted: the frontend visual
+hierarchy refresh gives the dashboard a centred 1,400 px content shell, separates canvas and card
+surfaces in both themes, aligns the chart and semantic colour palette, and combines the two dense
+Performance metric rows into shared KPI panels. The hero-card grids count occupied tracks so their
+two-column hero plus detail cards fill the desktop row. All 683 frontend tests and the production
+build pass; touched-file lint is clean except for the existing Fast Refresh finding on unchanged
+`Dashboard.tsx:83`.
+
+The dividend controls remain live on `a719644` and API-verified: the gross-derived dividend
 forecast assumption is adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`,
 accepts 0–100%, refetches every active dividend breakdown after saving, and reports the exact applied
 percentage in the response and visible caveats. The setting still touches only the two gross-derived
@@ -16,7 +44,7 @@ axis at the current month, removes future-year options, and returns a selected p
 current year. CI is green; full verification is 1,573 backend tests, 682 frontend tests and the
 production build. `/health` reports the exact commit, scheduler persistence and write auth enabled;
 the deployed chunk carries the new controls. The browser pass could not run because this Codex
-session has no browser runtime. The unrelated UI restyle remains local and uncommitted.
+session had no browser runtime.
 
 Earlier production behavior on `9e808fe` remains API-verified (the browser half is
 still open — see *Watch after the next deploy*): **the calendar is the forecast.** The two
@@ -851,6 +879,24 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
+- **`stack_order` is invariant across every range and NOT across `?forecast=false`** — deliberate,
+  2026-09-20. Projections have to count toward the colour order: measured on production, VT, QQQM,
+  2330, SOXQ and GRID have *zero* realized income and are the chart's five biggest series, VT alone
+  being 45.61 of 190, so a realized-only ranking would fold the largest bars into Other and leave a
+  future planning year colourless. The route still accepts `forecast=false`, which ranks a different
+  set — nothing in the app sends it, because the client fetches once with projections and hides them
+  in the browser so the toggle stays instant. Making it invariant means running the projection for a
+  caller who asked not to have it, and that block is ~200 lines interlocked with `next_12m`,
+  `upcoming`, the accrual tail and the annual accumulators. Pinned both ways in
+  `test_dividend_growth.py`; do not "fix" it by dropping projections from the ranking.
+- **The Allocation tab's seven-step neutral ramp is stepped for a white card only** — measured
+  2026-09-20 while fitting the dividend one, pre-existing and not introduced by the visual refresh.
+  `NEUTRAL_STEPS` runs L*55 → 24, so against the dark card its last three steps measure
+  **2.20 / 1.83 / 1.55:1** and those sector tiles sink into the surface; its top step also measures
+  ΔE 6.0 against `--viz-sector-3` under red-green CVD. The dividend ramp is five per-theme steps in
+  `index.css` for exactly these reasons and deliberately does not share this one — seven steps and
+  five cannot be spaced from one set. Fixing Allocation means per-theme `--viz-muted-*` tokens and a
+  visible dark-mode change to that tab, which is its own piece of work.
 - **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** This closes what used to
   be *Worth doing next* item 0: a security quoted in the base currency is valued through
   native→EUR→base with two independently rounded ECB quotes, ~0.12% high (`3.615 × 121.201101`
@@ -905,6 +951,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
 ## Watch after the next deploy
+
+- **The stable dividend colours have not been seen in a browser.** Everything below the pixels is
+  verified — the service, the transform, the palette measurements and one production snapshot run
+  through the real service — but no part of this session could render the tab. What to check, at
+  1440 px and 390 px and in both themes: step All time → 24m → 2026 → 2025 → 2024 → 2027 and
+  confirm no holding changes colour **or vertical position**; that the five muted steps read as a
+  de-emphasis ramp rather than as five more series, in dark mode especially, where they are the
+  light end of the range; that a legend of up to thirteen entries plus Other still wraps sanely at
+  390 px; that hover-dim, click-to-pin and the Other disclosure all work on a touch device; and
+  that the calendar swatches match the chart in a past-year view, which is where they used to go
+  grey. If the ramp reads badly, `SERIES_MUTED` in `lib/dividendColors.ts` is the one number to
+  change — but the hexes are measured against the hues, so re-run `dividendColors.test.ts` after.
 
 - **The adjustable WHT and forecast-off range fixes are live on `a719644` and API/bundle-verified.**
   The write path, forecast recomputation, realized-field isolation and exact restoration were checked
@@ -1440,6 +1498,19 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-20 (dividend colours follow the holding)** — a holding's colour was its rank inside the
+  selected range's top eight, so changing the period repainted the chart; the order now rides on the
+  response as `stack_order`, identical in every range, and the client's ranking is gone. Eight hues
+  plus five muted steps, re-stepped for the all-pairs CVD list with the measurements asserted out of
+  `index.css`, and a legend that orders by the range, dims on hover, pins on click and opens Other.
+  Verified against a production snapshot; the browser pass is still open.
+
+- **2026-09-20 (dashboard visual hierarchy)** — restyled the dashboard around a constrained content
+  shell, separate canvas/card surfaces, a consistent blue/emerald/rose palette and shared KPI panels
+  for dense metric rows. Hero-card grids now count occupied tracks, and semantic text colours retain
+  AA contrast in both themes. Verified with 683 frontend tests and a production build; deployment is
+  pending.
+
 - **2026-09-20 (forecast-off ranges)** — stopped the monthly chart from retaining empty future
   month labels after its forecast bars disappear, and removed the next-year planning range while
   Forecast is off. Switching the toggle off from that year now returns to the current year, keeping
@@ -1464,24 +1535,4 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   separated them, and the tempting repair (widen `partial`) would have deleted whole measured
   windows.
 
-- **2026-09-19 (the projection that died on its own date)** — "VT went ex yesterday and the
-  September payment is missing entirely". It was, and not for the reason suspected: the pending
-  tail added hours earlier was working correctly for five other securities, but it rescues
-  dividends **yfinance has recorded**, and yfinance publishes the row the day after the ex-date.
-  So a projection is now kept past its own date too. Two lessons. **Confirm the mechanism, do not
-  accept a plausible one** — "ex-date fallbacks are not retained" was nearly right and would have
-  produced a fix for a bug that did not exist; the API showed four ex-date fallbacks retained
-  correctly on the same screen. And **a bound written as a side effect is not a bound**: the
-  expiry falls out of the projection's start date, so it is pinned against the constant instead,
-  and the same look found `_open_accruals` silently ageing out accruals its own docstring promised
-  to keep.
 
-- **2026-09-19 (net-factor follow-up)** — merged Codex's shared 0.85 factor for gross-derived
-  forecasts and unpaid calendar estimates, cherry-picked onto main so the restyle in the tree
-  stayed untouched. Two lessons, both about checking rather than coding. **A base currency that
-  changes under you invalidates every before/after comparison**: the first post-deploy check
-  read realized income as having fallen 7% and it had not — EUR became CHF between the two
-  reads. Hold the currency fixed with an A/B on one snapshot. And **a constant can be right in
-  direction and still wrong in detail**: 0.85 is the US/Dutch treaty rate applied to a book that
-  also holds German, Korean and Taiwanese payers, and the measured rate is already in the
-  database — recorded as *Worth doing next* rather than waved through.
