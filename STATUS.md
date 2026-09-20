@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-20.** Latest, verified locally and ready to deploy: **a holding on the
+**Last updated: 2026-09-20.** Latest, live on `26576f8` and API-verified: **a holding on the
 Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
 range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
 measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
@@ -20,18 +20,22 @@ untouched `--viz-sector-*` hues, the other four plus the Other grey moved by ΔE
 green that measured **1.5 from the Other grey** under red-green CVD — wrong on the shipped chart —
 is gone. `lib/dividendColors.test.ts` now reads the hexes back out of `index.css` and measures
 them, surfaces included. The legend became a control: ordered by what the range paid, hover or
-focus to dim the rest, click to pin, and Other opens to name the holdings inside it. Verified
-against a production snapshot: one `stack_order` across six ranges, both forecast settings.
-1,575 backend and 704 frontend tests, TypeScript, build and touched-file lint all pass. **The
-browser pass has not run.**
+focus to dim the rest, click to pin, and Other opens to name the holdings inside it.
 
-Before that, and still uncommitted: the frontend visual
-hierarchy refresh gives the dashboard a centred 1,400 px content shell, separates canvas and card
+Verified on production after the deploy: `/health` reports the commit, and **the six ranges return
+one byte-identical `stack_order`** (28 payers, `VT, QQQM, ASML (NASDAQ), SPGI, META, 2330, GOOGL,
+SOXQ` hued and `GRID, MA, GOOG, NXPI, AVGO` muted), which is the whole claim. The deployed
+stylesheet carries both themes' `--viz-series-*` sets at the measured hexes and none of the four
+replaced ones. Before the push: one production snapshot run through the real service, agreeing on
+both forecast settings, plus 1,575 backend and 704 frontend tests, TypeScript, build and
+touched-file lint. **The browser pass has not run** — see *Watch after the next deploy*.
+
+Deployed alongside it on `4bd3f7f`, and carried in the working tree from an earlier session: the
+frontend visual hierarchy refresh gives the dashboard a centred 1,400 px content shell, separates canvas and card
 surfaces in both themes, aligns the chart and semantic colour palette, and combines the two dense
 Performance metric rows into shared KPI panels. The hero-card grids count occupied tracks so their
-two-column hero plus detail cards fill the desktop row. All 683 frontend tests and the production
-build pass; touched-file lint is clean except for the existing Fast Refresh finding on unchanged
-`Dashboard.tsx:83`.
+two-column hero plus detail cards fill the desktop row. It was verified locally when it was
+written; this session only carried it, and it has had no browser pass either.
 
 The dividend controls remain live on `a719644` and API-verified: the gross-derived dividend
 forecast assumption is adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`,
@@ -952,9 +956,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The stable dividend colours have not been seen in a browser.** Everything below the pixels is
-  verified — the service, the transform, the palette measurements and one production snapshot run
-  through the real service — but no part of this session could render the tab. What to check, at
+- **The stable dividend colours are live on `26576f8` and have not been seen in a browser.**
+  Everything below the pixels is verified — the service, the transform, the palette measurements,
+  one production snapshot through the real service, and the deployed API and stylesheet — but no
+  part of this session could render the tab. What to check, at
   1440 px and 390 px and in both themes: step All time → 24m → 2026 → 2025 → 2024 → 2027 and
   confirm no holding changes colour **or vertical position**; that the five muted steps read as a
   de-emphasis ramp rather than as five more series, in dark mode especially, where they are the
