@@ -48,6 +48,10 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
     // The earliest window on record. Equal to the first ttm_series point here, so
     // the fixture exercises the coverage-limited marker.
     ttm_coverage_start: '2026-01',
+    // The server's colour order, identical whatever `year`/`period` asked for — BBB is on
+    // it without appearing in this window's buckets, which is the normal case for a range
+    // narrower than the history.
+    stack_order: ['AAA', 'BBB'],
     total_net_eur: period === '24m' ? 200 : 30, total_forecast_net_eur: 50,
     securities: [], ibkr_from: '2025-06-01', base_currency: 'EUR',
     forecast_withholding_pct: 15,
@@ -326,5 +330,97 @@ describe('Dividend chart controls', () => {
     expect(latest.textContent).toContain('€0.00')
     expect(latest.textContent).toContain('100%')
     expect(screen.queryByText(/No twelve-month window is covered/)).toBeNull()
+  })
+})
+
+/**
+ * The chart is invisible here — recharts' container is mocked away — so these cover the
+ * legend as a control surface: what it lists, in what order, and what clicking does. The
+ * dimming it drives is a prop on `DividendStackChart` and is covered where the transform is.
+ */
+describe('The dividend legend', () => {
+  function withSymbols(symbols: Record<string, number>): DividendBreakdownResponse {
+    const data = response(2026)
+    data.months = [{
+      month: '2026-01', actual: symbols, forecast: {},
+      actual_total_eur: Object.values(symbols).reduce((a, b) => a + b, 0),
+      forecast_total_eur: 0,
+    }]
+    data.ttm_series = []
+    // Biggest first, as the server sends it.
+    data.stack_order = Object.entries(symbols).sort((a, b) => b[1] - a[1]).map(([s]) => s)
+    data.securities = data.stack_order.map((symbol, i) => ({
+      security_id: i + 1, symbol, exchange: null, description: symbol,
+      payouts: 1, gross_eur: symbols[symbol], withholding_eur: 0, net_eur: symbols[symbol],
+      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
+      forward_yield_pct: null, trailing_yield_partial: false, days_held_in_ttm: 365,
+      yield_on_cost_pct: null, share_pct: null, next_pay_date: null, source: 'ibkr',
+      forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
+      forecast_lag_days: null, forecast_lag_samples: null,
+    }))
+    return data
+  }
+
+  it('lists what is on screen, biggest in this range first', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(
+      withSymbols({ SMALL: 1, BIG: 90, MID: 40 }),
+    )
+    mount()
+    await screen.findByText(/Received/)
+    const names = screen.getAllByRole('button')
+      .map((b) => b.textContent ?? '')
+      .filter((t) => ['BIG', 'MID', 'SMALL'].includes(t))
+    expect(names).toEqual(['BIG', 'MID', 'SMALL'])
+  })
+
+  it('pins a holding on click and lets go on a second click', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSymbols({ AAA: 10, BBB: 5 }))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    const entry = screen.getByRole('button', { name: 'AAA' })
+    expect(entry.getAttribute('aria-pressed')).toBe('false')
+    await user.click(entry)
+    expect(screen.getByRole('button', { name: 'AAA' }).getAttribute('aria-pressed')).toBe('true')
+    await user.click(screen.getByRole('button', { name: 'AAA' }))
+    expect(screen.getByRole('button', { name: 'AAA' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('lets go of a pin when the range no longer contains that holding', async () => {
+    // The pin survives the pointer leaving, so it has to survive the range changing too —
+    // and a pin on a symbol that is no longer drawn would dim every series against nothing,
+    // with no visible control left to undo it.
+    vi.spyOn(api, 'getDividendBreakdown')
+      .mockResolvedValueOnce(withSymbols({ AAA: 10, BBB: 5 }))
+      .mockResolvedValueOnce(withSymbols({ BBB: 5 }))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    await user.click(screen.getByRole('button', { name: 'AAA' }))
+    expect(screen.getByRole('button', { name: 'AAA' }).getAttribute('aria-pressed')).toBe('true')
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Dividend period' }), '24m')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'AAA' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'BBB' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('says how many holdings the fold holds, and opens to name them', async () => {
+    // More symbols than there are identity colours, so the tail really folds.
+    const symbols: Record<string, number> = {}
+    for (let i = 0; i < 16; i++) symbols[`S${String(i).padStart(2, '0')}`] = 100 - i
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSymbols(symbols))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+
+    const fold = screen.getByRole('button', { name: /^Other · 3 holdings$/ })
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    // Scoped to the disclosure: every symbol also appears in the table underneath.
+    expect(screen.queryByLabelText('Holdings folded into Other')).toBeNull()
+    await user.click(fold)
+    const list = screen.getByLabelText('Holdings folded into Other')
+    expect(within(list).getByText('S13')).toBeTruthy()
+    expect(within(list).getByText('S15')).toBeTruthy()
+    expect(within(list).queryByText('S00')).toBeNull()
   })
 })

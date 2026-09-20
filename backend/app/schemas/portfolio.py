@@ -742,6 +742,17 @@ class DividendBreakdownResponse(BaseModel):
     # account was still being funded inside that twelve months, the same shape
     # `DividendAnnualRow.yoy_vs_partial` marks.
     ttm_coverage_start: Optional[str] = None
+    # Every symbol with income or a projection over the WHOLE history, biggest first.
+    # This is the colour order, and the one thing that makes a holding's colour stable:
+    # it is identical in every range, so the client keys the palette on a symbol's
+    # position here rather than on its rank inside the slice it was sent. Unwindowed
+    # like `ttm_coverage_start`, and for the same reason — a windowed response cannot
+    # derive it.
+    #
+    # It is invariant across `year` and `period`, and NOT across `forecast`: with
+    # projections excluded a book whose largest series are entirely projected ranks a
+    # different set. The client never varies that flag — see the service.
+    stack_order: List[str] = []
     securities: List[DividendSecurityRow]
     total_net_eur: float
     total_forecast_net_eur: float

@@ -2082,6 +2082,39 @@ class DividendService:
             if first_income is not None else None
         )
 
+        # The colour order: every symbol this book has ever been paid by or is
+        # projected to be paid by, biggest first. Unwindowed for the same reason
+        # `ttm_coverage_start` is, and with one further property the client depends
+        # on — it is IDENTICAL for `year=`, `period=24m` and all time, so a symbol
+        # cannot change colour when the range changes. The client used to rank the
+        # symbols itself out of whatever slice it had been sent, which is precisely
+        # why it could not: the top eight of 2025 are not the top eight of 2026, and
+        # every symbol after the first difference shifted a palette slot.
+        #
+        # **Forecast buckets count, and that makes this the one input the order does
+        # depend on.** Measured on production: VT, QQQM, 2330, SOXQ and GRID have
+        # zero realized income and are the chart's biggest series (VT alone is 45.61
+        # of 190), so a realized-only ranking would fold the five largest bars into
+        # Other and leave every future planning year colourless. The price is that
+        # `forecast=false` — reachable on the route, and asked for by nothing in the
+        # app — ranks a different set. The client fetches once WITH projections and
+        # hides them in the browser precisely so the toggle stays instant, so no
+        # rendering ever crosses that boundary. Pinned both ways in
+        # `test_dividend_growth.py`; do not "fix" the flag dependency by dropping the
+        # projections from the ranking.
+        #
+        # The symbol is the tie-break so equal totals cannot flip between requests.
+        stack_totals: Dict[str, Decimal] = defaultdict(Decimal)
+        for by_symbol in month_actual_sym_all.values():
+            for sym, v in by_symbol.items():
+                stack_totals[sym] += v
+        for by_symbol in month_forecast_sym_all.values():
+            for sym, v in by_symbol.items():
+                stack_totals[sym] += v
+        stack_order = [
+            sym for sym, _ in sorted(stack_totals.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
         months = []
         for mk in months_axis:
             actual = monthly_actual.get(mk, {})
@@ -2217,6 +2250,7 @@ class DividendService:
             "months": months,
             "ttm_series": ttm_series,
             "ttm_coverage_start": ttm_coverage_start,
+            "stack_order": stack_order,
             "securities": sec_rows,
             "total_net_eur": round(float(total_net), 2),
             "total_forecast_net_eur": round(float(total_forecast), 2),

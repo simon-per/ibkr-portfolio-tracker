@@ -326,6 +326,31 @@ written out **four** times across `DividendsTab` and `DividendTtmChart` before t
 owner. `PerformanceAttribution` is the exception and keeps a numeric height: its height is
 *data*-driven, one row per security, so a CSS height would squash thirty bars into 240px.
 
+### Colour by identity, never by row position
+
+Four places now assign a categorical colour, and all four assign it to the **entity**:
+`sectorColors.ts` (a fixed taxonomy), `benchmarkColors.ts` (position in the full `/benchmarks`
+list), `allocationSectorPaint` (canonical position, with a neutral ramp for the tail) and
+`dividendColors.ts` (position in the response's `stack_order`). Every one of them was a positional
+palette first, and each was found the same way — something that should have kept its colour did
+not: deselecting a benchmark recoloured the other two, a sync that reordered the chart moved
+`Unknown`, and changing the Dividends range repainted most of the stack.
+
+They are deliberately **not** one helper. What they share is the rule, not the code: a fixed
+taxonomy, a server-supplied list, a canonical position plus a ramp, and a server-supplied rank plus
+a ramp have different tails, and one signature covering all four would carry every tail as an
+option. The shared thing is written here instead, and the family question is asked per module.
+
+`--viz-series-1..8`, `--viz-series-muted-1..5` and `--viz-series-other` in `index.css` are the
+dividend stack's palette; slots 1, 4, 5 and 6 **are** `--viz-sector-1..4`, which is why re-stepping
+it left the Allocation and look-through tabs alone. The measurements behind the hexes are asserted
+by `lib/dividendColors.test.ts`, which reads them back out of `index.css` — including each card
+surface, so a theme re-step that makes a muted step invisible fails there. Its ramp is five steps
+and `sectorColors.ts`'s is seven; one set sized for both would be spaced for neither, so they stay
+separate.
+
+---
+
 **The Dividends tab's two views come out of one `DividendStackChart`**, for the same reason a table
 and its card list come from one `Column[]`. The monthly bars and the rolling twelve-month bars are
 the same picture over different buckets — same symbols, same colours, same solid/dashed split — and

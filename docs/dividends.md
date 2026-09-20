@@ -16,7 +16,8 @@ from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
 ### Monthly / TTM and the rolling 24-month range
 
 The chart has two views of the same data, **Monthly** (default) and **TTM**, both stacked by symbol
-from one ranking so a series cannot change colour when the view is switched — see *Ranking* below.
+in the order the server publishes, so no control on the tab can change a holding's colour — see
+*Colour follows the holding* below.
 It defaults to the current calendar year with Forecast on. **Last 24 months**
 uses `period=24m`: the first of the month 23 months ago through the end of the current month.
 It filters the monthly bars, received/projected totals and per-security table together. `year` and
@@ -128,34 +129,57 @@ would accumulate that error into the headline, which is the figure people quote;
 itself. The service-level test asserts **exact** equality on a clean two-security fixture, where no
 such drift exists — a tolerance there would hide a real bucketing bug.
 
-### Ranking — one colour scheme for both views
+### Colour follows the holding, not its rank
 
-`buildChartSeries` ranks symbols once and projects both bucket sets through it, because `colorOf` is
-`palette[stackSymbols.indexOf(sym)]`: two rankings would repaint the chart on a view switch, the
-same failure the "toggling cannot repaint series" test exists to prevent.
+**`stack_order` is the colour order**: every symbol with realized income or a projection over the
+whole history, biggest first, with the symbol as the tie-break. `dividendColor(symbol, stackOrder)`
+is `hue[rank]` for the first 8, a muted step for ranks 9–13, and the *Other* grey for everything
+after — so a holding's colour depends on the holding and on nothing else on screen.
 
-A symbol scores its total across `months[]` **plus its widest single rolling window** — never the
-sum of those windows. A window is already a twelve-month total, so summing counts a January payment
-once per window it falls in (twelve) and a December one exactly once: that ranks symbols by *when*
-they paid rather than how much, a 12× swing big enough to reorder the monthly stack for a reason no
-reader could infer. The widest window is a year of income counted once, and it degenerates to the
-old months-only ranking when `ttm_series` is empty. The rolling series earns a vote at all because a
-future-year view's `months[]` holds nothing but projection, so ranking on it alone would fold every
-symbol that paid in the preceding year into *Other*.
+**It replaced a per-view ranking, which is what made the chart repaint.** `buildChartSeries` used to
+rank the slice it had been sent and hand the top eight to `palette[stackSymbols.indexOf(sym)]`.
+Measured on production before the change, the top-eight set differed in **every** range: All time
+and 2025 shared four of eight symbols, GOOGL moved from the third slot to the sixth, and the
+calendar — which takes the same `colorOf` — turned every upcoming payment grey in a past-year view.
+This is the rule `sectorColors.ts` and `benchmarkColors.ts` already state, arrived at the same way.
 
-Ranking reads the **unfiltered** series, before the `partial` filter, or hiding projections would
-move a colour. `MAX_SERIES` and the two palettes now live together in `lib/dividendColors.ts`: they
-were one number stated in two files, and raising the cap alone would have handed the extra symbols
-grey — indistinguishable from the *Other* bucket, with nothing failing.
+Two subtleties died with that ranking rather than moving, and neither should be reintroduced:
+scoring a symbol by its **widest single rolling window** (a guard against summing twelve
+overlapping windows, which ranked symbols by *when* they paid — a 12x swing), and ranking over the
+**unfiltered** series so the Forecast toggle could not repaint. Both existed only because the
+client ranked from a windowed payload. The server sees the whole history, so a plain sum is correct
+and the client has no ranking left to get wrong.
+
+**Projections count toward the order, and that is the one input it is not invariant across.**
+Measured on production: VT, QQQM, 2330, SOXQ and GRID have *zero* realized income and are the
+chart's five biggest series — VT alone is 45.61 of 190 — so a realized-only ranking would fold the
+largest bars into *Other* and leave a future planning year colourless. The cost is that
+`?forecast=false`, which the route accepts and nothing in the app sends, ranks a different set. The
+client fetches once **with** projections and hides them in the browser so the toggle stays instant,
+so no rendering crosses that boundary. Both halves are pinned in `test_dividend_growth.py`.
+
+**Thirteen identities, and the split is measured rather than chosen.** Eight hues plus five muted
+steps: several hues collapse toward a neutral under CVD (`--viz-sector-3` becomes L\*64 C\*4 under
+deuteranopia), which forbids the lightness bands they land in, and a fill needs 3:1 against its own
+card to be visible — what is left fits five steps ≥ ΔE 6.3 apart. Seven would have to be spaced
+~4.5, below what a de-emphasis ramp is for. On this book the fold is then 2.6–12.6% of a range
+depending on which one, against ~22% for the old eight-slot scheme on All time alone.
+
+The hexes live in `index.css` as `--viz-series-*`; `lib/dividendColors.ts` owns only the assignment,
+the same split `sectorColors.ts` states. Because colour follows the holding, the visible set is an
+arbitrary subset and any two slots can sit side by side — so the pairlist is **all-pairs**, not the
+consecutive one the old fixed-order palette relied on. `dividendColors.test.ts` reads the values
+back out of `index.css` and measures them, surfaces included, rather than restating a docblock.
 
 Tests: `test_dividend_growth.py` covers coverage trimming, stopped/quarterly payers, forecast
 folding, a future year, the per-symbol reconciliation, the no-projection gate, range agreement, era
 deduplication and payment-date FX; `test_dividend_breakdown_contract.py` and `test_api_smoke.py` pin
-serialization and query validation. On the client the transform is covered by
-`src/lib/dividendChart.test.ts` — **not** `DividendsTab.test.tsx`, which mocks recharts'
-`ResponsiveContainer` away so no `<Bar>` ever mounts; that file covers controls, captions and states.
-`dividendColors.test.ts` asks the family question (can every slot be told apart?) rather than the
-instance one (are these two numbers equal?).
+serialization and query validation. `test_dividend_growth.py` also pins `stack_order` equal across every range and records the forecast
+dependency. On the client the transform is covered by `src/lib/dividendChart.test.ts` — **not**
+`DividendsTab.test.tsx`, which mocks recharts' `ResponsiveContainer` away so no `<Bar>` ever mounts;
+that file covers controls, captions, the legend and states. `dividendColors.test.ts` asks the two
+family questions — *can a view repaint a holding* and *can every slot be told apart* — rather than
+the instance ones.
 
 **The boundary itself leaked one dividend per security until 2026-08-05, and the reason is the
 splice's own premise.** The rule keeps estimates strictly *before* the first IBKR payment — but the

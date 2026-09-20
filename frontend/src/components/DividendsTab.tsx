@@ -4,8 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { api } from '@/lib/api'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC } from '@/lib/dividendChart'
-import { dividendColor, dividendPalette } from '@/lib/dividendColors'
+import {
+  buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, legendEntries, OTHER,
+} from '@/lib/dividendChart'
+import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { dividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
@@ -15,7 +17,6 @@ import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
-import { useTheme } from './ThemeProvider'
 import { cn } from '@/lib/utils'
 import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -247,7 +248,12 @@ export function DividendsTab() {
   const [year, setYear] = useState<number | 'all' | '24m'>(currentYear)
   const [chartMode, setChartMode] = useState<'monthly' | 'ttm'>('monthly')
   const [showForecast, setShowForecast] = useState(true)
-  const { theme } = useTheme()
+  // Hovering or focusing a legend entry highlights its segments; clicking one pins that
+  // highlight so it survives the pointer leaving. `pinned` wins, so a click is not undone
+  // by the mouse moving away.
+  const [hovered, setHovered] = useState<string | null>(null)
+  const [pinned, setPinned] = useState<string | null>(null)
+  const [otherOpen, setOtherOpen] = useState(false)
   const formatCurrency = useFormatCurrency()
 
   const { data, isLoading, isError } = useQuery({
@@ -260,19 +266,21 @@ export function DividendsTab() {
     staleTime: 30 * 60 * 1000,
   })
 
-  const palette = dividendPalette(theme)
-
   // Extracted so it can be unit-tested: this transformation already carried one
   // silent bug (ranking by a key space the data didn't use), and with no browser
   // in the loop a test is the only way to catch the next one — the chart itself
   // is invisible to the component suite, which mocks recharts' container away.
-  // Both views come out of one call so they cannot rank symbols differently.
+  // Both views come out of one call, over one server-supplied order, so neither the
+  // view nor the toggle can move a series.
   const { chartData, ttmData, ttmPoints, stackSymbols } = useMemo(
     () => buildChartSeries(data, { showForecast, currentMonth }),
     [data, showForecast, currentMonth],
   )
 
-  const colorOf = (sym: string) => dividendColor(sym, stackSymbols, palette)
+  // The colour order is the server's, not this view's — see `lib/dividendColors.ts`.
+  // `stackSymbols` is only what is drawn here, and a holding's colour must not depend on it.
+  const stackOrder = useMemo(() => data?.stack_order ?? [], [data])
+  const colorOf = (sym: string) => dividendColor(sym, stackOrder)
 
   // Growth per month rides on the response rather than being derived here: it is
   // measured over the whole history, which a year-filtered payload doesn't carry.
@@ -342,8 +350,29 @@ export function DividendsTab() {
   const chartHasForecast = visibleRows.some((row) =>
     Object.entries(row).some(([k, v]) => k.startsWith(FC) && typeof v === 'number' && v > 0),
   )
-  const legendSymbols = stackSymbols.filter((s) =>
-    visibleRows.some((row) => typeof row[s] === 'number' || typeof row[FC + s] === 'number'),
+  // Only what is actually on screen: a swatch for a bucket with no segment behind it is a
+  // legend entry for nothing.
+  const legend = useMemo(
+    () => legendEntries(visibleRows, stackSymbols),
+    [visibleRows, stackSymbols],
+  )
+  // A pin only counts while the holding it names is on screen. Switching to a range that
+  // does not contain it would otherwise dim every series against a symbol nobody can see,
+  // with no visible control to undo it; the pin is kept, so going back restores it.
+  const pinnedVisible = pinned != null && legend.some((e) => e.symbol === pinned) ? pinned : null
+  const activeSymbol = pinnedVisible ?? hovered
+  // What the fold contains, from the same per-security rows the table below renders, so the
+  // two cannot disagree about a holding's figure for this range.
+  const otherMembers = useMemo(
+    () => securities
+      .filter((r) => !hasIdentity(r.symbol, stackOrder))
+      .map((r) => ({
+        symbol: r.symbol,
+        total: r.net_eur + (showForecast ? r.forecast_net_eur : 0),
+      }))
+      .filter((r) => r.total > 0)
+      .sort((a, b) => b.total - a.total),
+    [securities, stackOrder, showForecast],
   )
   // The growth block is unwindowed, so it stands even when the selected year is
   // empty — which is exactly when knowing the trend is most useful.
@@ -481,6 +510,7 @@ export function DividendsTab() {
                     colorOf={colorOf}
                     showForecast={showForecast}
                     multiYear={typeof year !== 'number'}
+                    activeSymbol={activeSymbol}
                   />
                 ) : (
                   <DividendStackChart
@@ -491,6 +521,7 @@ export function DividendsTab() {
                     multiYear={typeof year !== 'number'}
                     tooltipTitle={(m) => monthLabel(m, true)}
                     tooltipFooter={monthlyTooltipFooter}
+                    activeSymbol={activeSymbol}
                   />
                 )}
 
@@ -499,17 +530,66 @@ export function DividendsTab() {
                     a projection as a measurement and not. The legend already wraps, so
                     they are simply visible now, matching DividendCalendar and
                     DividendYearComparison, which both spell theirs out. */}
+                {/* Both views are stacked by the same symbols in the same colours, so the
+                    key belongs to both. Ordered by what this range paid — the one thing the
+                    chart cannot show — which is free now that colour no longer follows rank.
+                    Real buttons, so isolating a holding works from the keyboard and on a
+                    touch device, where a hover-only affordance does not exist at all. */}
+                <div className="-mx-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+                  {legend.map(({ symbol, total }) => {
+                    const dimmed = activeSymbol != null && activeSymbol !== symbol
+                    const isOther = symbol === OTHER
+                    return (
+                      <button
+                        key={symbol}
+                        type="button"
+                        onMouseEnter={() => setHovered(symbol)}
+                        onMouseLeave={() => setHovered(null)}
+                        onFocus={() => setHovered(symbol)}
+                        onBlur={() => setHovered(null)}
+                        onClick={() =>
+                          isOther
+                            ? setOtherOpen((open) => !open)
+                            : setPinned((cur) => (cur === symbol ? null : symbol))
+                        }
+                        aria-pressed={isOther ? undefined : pinnedVisible === symbol}
+                        aria-expanded={isOther ? otherOpen : undefined}
+                        title={`${symbol}: ${formatCurrency(total)} in this range`}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded px-1 py-0.5 transition-opacity hover:bg-accent',
+                          dimmed && 'opacity-40',
+                          !isOther && pinnedVisible === symbol && 'bg-accent font-medium text-foreground',
+                        )}
+                      >
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                          style={{ backgroundColor: colorOf(symbol) }}
+                        />
+                        {isOther
+                          ? `Other · ${otherMembers.length} holding${otherMembers.length === 1 ? '' : 's'}`
+                          : symbol}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* What is inside the fold, on the surface rather than in a tooltip. It can
+                    be a fifth of the bar, and until this there was no way to look in. */}
+                {otherOpen && otherMembers.length > 0 && (
+                  <ul
+                    aria-label="Holdings folded into Other"
+                    className="flex flex-wrap gap-x-4 gap-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                  >
+                    {otherMembers.map((m) => (
+                      <li key={m.symbol} className="inline-flex items-center gap-1.5">
+                        <span>{m.symbol}</span>
+                        <span className="tabular-nums">{formatCurrency(m.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                  {/* Both views are stacked by the same symbols in the same
-                      colours, so the key belongs to both. Filtered to what is
-                      actually on screen: a swatch for a bucket with no segment
-                      behind it is a legend entry for nothing. */}
-                  {legendSymbols.map((s) => (
-                    <span key={s} className="inline-flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: colorOf(s) }} />
-                      {s}
-                    </span>
-                  ))}
                   {showForecast && chartHasForecast && (
                     <>
                       <span className="inline-flex items-center gap-1.5">

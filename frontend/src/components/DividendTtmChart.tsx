@@ -17,6 +17,8 @@ interface DividendTtmChartProps {
   colorOf: (symbol: string) => string
   showForecast: boolean
   multiYear: boolean
+  /** Highlighted from the legend; passed straight through to the shared chart. */
+  activeSymbol?: string | null
 }
 
 /**
@@ -33,7 +35,7 @@ interface DividendTtmChartProps {
  * that has already happened.
  */
 export function DividendTtmChart({
-  data, points, stackSymbols, colorOf, showForecast, multiYear,
+  data, points, stackSymbols, colorOf, showForecast, multiYear, activeSymbol = null,
 }: DividendTtmChartProps) {
   const formatCurrency = useFormatCurrency()
   const latest = points.at(-1)
@@ -102,6 +104,7 @@ export function DividendTtmChart({
           colorOf={colorOf}
           showForecast={showForecast}
           multiYear={multiYear}
+          activeSymbol={activeSymbol}
           tooltipTitle={dividendTtmWindowLabel}
           tooltipFooter={(month) => {
             const p = byMonth.get(month)

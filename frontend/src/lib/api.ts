@@ -985,6 +985,12 @@ export interface DividendBreakdownResponse {
    *  growth rate measured from the first window on screen has a base the account
    *  was still being funded inside. */
   ttm_coverage_start?: string | null;
+  /** Every symbol with income or a projection over the WHOLE history, biggest first, and
+   *  identical in every range. A holding's colour is its position here — see
+   *  `lib/dividendColors.ts`. The client must keep fetching with projections included
+   *  (it does; the Forecast toggle hides them here rather than refetching), because the
+   *  order does depend on that one flag. */
+  stack_order: string[];
   securities: DividendSecurityRow[];
   total_net_eur: number;
   total_forecast_net_eur: number;

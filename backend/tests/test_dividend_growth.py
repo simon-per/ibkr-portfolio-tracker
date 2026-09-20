@@ -837,6 +837,102 @@ async def test_the_three_ranges_agree_on_every_shared_month_with_the_forecast_on
 
 
 @pytest.mark.asyncio
+async def test_stack_order_is_one_ranking_that_every_range_repeats():
+    """
+    The colour order, and the reason it lives on the server.
+
+    A holding's colour is its position in `stack_order`, so this list is the only thing
+    standing between the reader and a chart that repaints when the range changes. It has to
+    be identical for every range — not merely consistent, IDENTICAL — because the client
+    indexes a palette with it. The client used to rank the slice it had been sent, which is
+    how the top eight of 2025 came to be a different eight from the top eight of 2026, with
+    every symbol after the first difference shifted one slot.
+
+    It also has to rank by income rather than by what the selected window happens to hold,
+    which is what the ordering assertion below pins: BETA out-earns ALPHA over the whole
+    history while ALPHA is the only one paying inside 2026.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(Security(id=2, isin="US0000000002", symbol="BETA", description="Beta Inc",
+                             currency="EUR", conid=200, asset_category="STK", exchange="XETRA"))
+        session.add(Security(id=3, isin="US0000000003", symbol="GAMMA", description="Gamma Ltd",
+                             currency="EUR", conid=300, asset_category="STK", exchange="XETRA"))
+        await session.flush()
+        # BETA: the biggest payer overall, and nothing inside 2026.
+        for month in (3, 6, 9):
+            await _seed(session, date(2025, month, 15), "40", security_id=2)
+        # ALPHA: smaller overall, but the only payer the 2026 window sees.
+        await _seed(session, date(2026, 2, 15), "30", security_id=1)
+        await _seed(session, date(2025, 2, 15), "5", security_id=1)
+        # GAMMA: the tail.
+        await _seed(session, date(2025, 5, 15), "1", security_id=3)
+
+        svc = DividendService(session)
+        full = await svc.get_dividend_breakdown(as_of=AS_OF)
+        assert full["stack_order"] == ["BETA", "AAA", "GAMMA"]
+
+        hidden_full = await svc.get_dividend_breakdown(as_of=AS_OF, include_forecast=False)
+        for kwargs in ({"period": "24m"}, {"year": 2026}, {"year": 2025}, {"year": 2027}):
+            other = await svc.get_dividend_breakdown(as_of=AS_OF, **kwargs)
+            assert other["stack_order"] == full["stack_order"], kwargs
+            # Range-invariance holds on either side of the forecast flag, which is what
+            # the chart needs: the client fetches once and never changes the flag.
+            hidden = await svc.get_dividend_breakdown(
+                as_of=AS_OF, include_forecast=False, **kwargs,
+            )
+            assert hidden["stack_order"] == hidden_full["stack_order"], kwargs
+
+        # The 2026 window really does see only ALPHA, or the assertion above is vacuous.
+        year_2026 = await svc.get_dividend_breakdown(as_of=AS_OF, year=2026)
+        paid_in_2026 = {s for m in year_2026["months"] for s in m["actual"]}
+        assert paid_in_2026 == {"AAA"}
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stack_order_counts_projections_and_so_moves_with_that_one_flag():
+    """
+    A holding bought last week is on the calendar with no realized history at all. Ranking
+    on realized income alone would leave it — and the whole of a future planning year, which
+    is nothing but projection — with no colour to be drawn in. Measured on production: VT,
+    QQQM, 2330, SOXQ and GRID have zero realized income and are the five biggest series on
+    the chart, VT alone being 45.61 of 190.
+
+    The price is the one input the order is not invariant across, and it is pinned here
+    rather than left to be discovered: `forecast=false` ranks a different set. Nothing in
+    the app asks for that — the response is fetched once WITH projections and the toggle
+    hides them client-side — but the route accepts it, so the behaviour is recorded.
+    """
+    engine, session = await _make_session()
+    try:
+        await _quarterly_payer(session)
+        session.add(Security(id=2, isin="US0000000002", symbol="BETA", description="Beta Inc",
+                             currency="EUR", conid=200, asset_category="STK", exchange="XETRA"))
+        await session.flush()
+        # Between AAA's realized history (11 x 100) and its history plus projection, so the
+        # two rankings really do disagree about which of them is the biggest payer.
+        await _seed(session, date(2026, 6, 15), "1300", security_id=2)
+
+        svc = DividendService(session)
+        r = await svc.get_dividend_breakdown(as_of=AS_OF, year=2027)
+        assert r["stack_order"][0] == "AAA", "the projection-only year still has its colours"
+        assert any(m["forecast"] for m in r["months"])
+        assert not any(m["actual"] for m in r["months"])
+
+        hidden = await svc.get_dividend_breakdown(as_of=AS_OF, include_forecast=False)
+        assert hidden["stack_order"][0] == "BETA"
+        assert hidden["stack_order"] != r["stack_order"], (
+            "recorded, not endorsed: dropping the projections really does re-rank"
+        )
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_24_month_empty_history_is_absent_and_conflicting_filters_refused():
     engine, session = await _make_session()
     try:

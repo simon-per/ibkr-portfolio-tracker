@@ -163,6 +163,75 @@
     --viz-via-funds-ink: #f8fafc;
   }
 
+  /**
+   * The dividend stack's series palette — eight hues, five muted steps and one Other grey.
+   *
+   * `lib/dividendColors.ts` owns only the assignment; these are the values, per theme, the
+   * same split `sectorColors.ts` states. A holding's colour is its position in the response's
+   * `stack_order`, so any two slots can end up side by side — which is why the pairlist here
+   * is **all-pairs** rather than the consecutive one the old fixed-order palette could rely
+   * on. Measured with CIEDE2000 over Viénot-1999 CVD simulation:
+   *
+   * - hues 1-8 and the Other grey clear ΔE **9.82** (light) and **9.46** (dark) on the
+   *   all-pairs list under normal vision, protanopia and deuteranopia. The dark figure IS
+   *   the ceiling: it is `--viz-sector-2` against `--viz-sector-4`, and neither may move.
+   * - **Tritanopia is not cleared and cannot be**, at eight slots, by anything on record —
+   *   Okabe-Ito measures 2.9 and Tol muted 3.6 on the same list. It was not cleared before
+   *   this palette either (2.4 light / 0.3 dark). Every figure here is asserted rather than
+   *   recorded: `lib/dividendColors.test.ts` reads these values back out of this file and
+   *   measures them, because the last set of measurements was true of an ordering the
+   *   palette no longer has.
+   * - slots 1, 4, 5 and 6 ARE `--viz-sector-1..4`, unchanged, so the Allocation and
+   *   look-through tabs do not move. Only the other four needed re-stepping, and every
+   *   failure measured was one of theirs.
+   * - **No hue may collapse toward a neutral under CVD** (projected C* >= 14), or a muted step
+   *   at the same lightness becomes indistinguishable from it. This is what moved the old
+   *   `#1baf7a` (deuteran L*58 C*12) and `#e34948` (protan L*40 C*11): they sat exactly where
+   *   the ramp needed room. `--viz-sector-3` still collapses (light: deuteran L*64 C*4) and
+   *   cannot move, which is what holds the light ramp below L*56 and the dark one above L*44.
+   *
+   * The muted steps are a **de-emphasis ramp, not a second hue set**: they say "outside the
+   * eight biggest payers" and are told apart by lightness (>= ΔE 6.3 between neighbours, and
+   * >= 8.5 from every hue) plus the legend, never by hue. Each steps away from its own card surface — dark on white, light
+   * on the dark card — and clears 3:1 against it, so a thin segment is still visible. The
+   * Allocation tab's seven-step ramp in `sectorColors.ts` is deliberately NOT shared: it needs
+   * seven steps for seven canonical sectors and this needs five, and one set sized for both
+   * would be spaced for neither.
+   */
+  :root {
+    --viz-series-1: #2a78d6;   /* = --viz-sector-1 */
+    --viz-series-2: #ec7b4c;
+    --viz-series-3: #53af70;
+    --viz-series-4: #eda100;   /* = --viz-sector-2 */
+    --viz-series-5: #e87ba4;   /* = --viz-sector-3 */
+    --viz-series-6: #008300;   /* = --viz-sector-4 */
+    --viz-series-7: #5538ad;
+    --viz-series-8: #e05443;
+    --viz-series-muted-1: #1b2a2f;
+    --viz-series-muted-2: #2e3e43;
+    --viz-series-muted-3: #435358;
+    --viz-series-muted-4: #56666b;
+    --viz-series-muted-5: #67777d;
+    --viz-series-other: #828276;
+  }
+
+  .dark {
+    --viz-series-1: #3987e5;
+    --viz-series-2: #ef4722;
+    --viz-series-3: #029a4f;
+    --viz-series-4: #c98500;
+    --viz-series-5: #d55181;
+    --viz-series-6: #008300;
+    --viz-series-7: #9c9de9;
+    --viz-series-8: #d36c5b;
+    --viz-series-muted-1: #5d7586;
+    --viz-series-muted-2: #758d9f;
+    --viz-series-muted-3: #8ea6b9;
+    --viz-series-muted-4: #a7c0d3;
+    --viz-series-muted-5: #c1dbee;
+    --viz-series-other: #8e887d;
+  }
+
   html {
     /* iOS Safari inflates type in landscape unless told not to, and the scale here is
        already chosen per breakpoint. */

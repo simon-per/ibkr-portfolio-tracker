@@ -1,7 +1,7 @@
 import type { DividendBreakdownResponse, DividendTtmPoint } from './api'
+import { SERIES_IDENTITIES } from './dividendColors'
 
-/** Beyond this many series the palette runs out; the rest fold into one muted bucket. */
-export const MAX_SERIES = 8
+/** The fold. Not a symbol, and never present in `stack_order`. */
 export const OTHER = 'Other'
 /** dataKey prefix marking a forecast series, so one stack can carry both. */
 export const FC = 'f:'
@@ -38,7 +38,11 @@ export interface ChartSeries {
    * with any field name we invented.
    */
   ttmPoints: DividendTtmPoint[]
-  /** Stack order == palette order, so adjacent segments are the validated colour pairs. */
+  /**
+   * The symbols drawn as themselves, in `stack_order` — so a holding keeps its
+   * vertical place in the bar as well as its colour, whichever range is showing.
+   * `OTHER` is appended when anything folded.
+   */
   stackSymbols: string[]
 }
 
@@ -51,6 +55,7 @@ export interface ChartSeriesOptions {
    * after hiding their bars leaves empty future month labels behind.
    */
   currentMonth?: string
+  /** Overridable for tests; production always uses the palette's own count. */
   maxSeries?: number
 }
 
@@ -89,52 +94,35 @@ function withoutForecast(p: DividendTtmPoint, prev: DividendTtmPoint | undefined
 /**
  * Turn the month buckets into Recharts rows.
  *
- * Series are ranked from the buckets themselves, never from `securities[].symbol`:
- * the backend disambiguates a ticker spanning two instruments as "ASML (AEB)", so
- * ranking by bare symbol matched nothing and silently dumped both ASML series into
- * "Other". The two must be read from one source.
+ * **Which symbols are drawn is not decided here, and that is the point.** This function
+ * used to rank the buckets it had been sent and hand the top eight to the palette by
+ * position, so every range produced a different ranking and a holding changed colour when
+ * the range changed. The order now arrives on the response as `stack_order`, computed once
+ * over the whole history and identical in every range, and this reads the first
+ * `SERIES_IDENTITIES` of it.
+ *
+ * Two subtleties disappeared with that ranking rather than moving: scoring a symbol by its
+ * widest single rolling window (a guard against summing twelve overlapping windows, which
+ * ranked symbols by WHEN they paid), and ranking over the unfiltered series so the Forecast
+ * toggle could not repaint. The server sees the whole history, so neither has anything left
+ * to correct — see `docs/dividends.md`.
+ *
+ * The keys are still the buckets' own, never `securities[].symbol`: the backend disambiguates
+ * a ticker spanning two instruments as "ASML (AEB)", and the two must be read from one source.
  */
 export function buildChartSeries(
   data: DividendBreakdownResponse | undefined,
-  { showForecast = true, currentMonth, maxSeries = MAX_SERIES }: ChartSeriesOptions = {},
+  { showForecast = true, currentMonth, maxSeries = SERIES_IDENTITIES }: ChartSeriesOptions = {},
 ): ChartSeries {
   if (!data) return { chartData: [], ttmData: [], ttmPoints: [], stackSymbols: [] }
 
-  const totals = new Map<string, number>()
-  const add = (sym: string, v: number) => totals.set(sym, (totals.get(sym) ?? 0) + v)
-  for (const m of data.months) {
-    for (const [sym, v] of [...Object.entries(m.actual), ...Object.entries(m.forecast)]) {
-      add(sym, v)
-    }
-  }
-
-  // The rolling series gets a vote too, or a symbol that paid across the eleven
-  // months PRECEDING the visible range — the whole of a future year's view, for
-  // instance — is folded into Other on the chart that does show it.
-  //
-  // Its contribution is the WIDEST single window, never the sum of them. A window
-  // is already a twelve-month total, so summing counts a January payment once per
-  // window it falls in (twelve) and a December one once — ranking symbols by WHEN
-  // they paid rather than how much, a 12x swing that would quietly reorder the
-  // monthly stack too. The widest window is a year of income, counted once.
-  const widest = new Map<string, number>()
-  // Ranked over the UNFILTERED series: if hiding projections could change which
-  // symbols hold slots, flipping the toggle would repaint the chart.
-  for (const p of data.ttm_series ?? []) {
-    for (const sym of new Set([...Object.keys(p.actual), ...Object.keys(p.forecast)])) {
-      const v = (p.actual[sym] ?? 0) + (p.forecast[sym] ?? 0)
-      if (v > (widest.get(sym) ?? 0)) widest.set(sym, v)
-    }
-  }
-  for (const [sym, v] of widest) add(sym, v)
-
-  const top = [...totals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxSeries)
-    .map(([s]) => s)
-  // Alphabetical keeps a symbol's colour stable when switching years.
-  top.sort()
-  const hasOther = totals.size > top.length
+  // `?? []` only covers a response from a backend older than this build, which one image
+  // and one deploy make impossible; it folds everything into Other rather than throwing.
+  // Deliberately NOT a client-side ranking fallback — a second ranking is the thing this
+  // change removed, and one that runs only in an unreachable case would never be looked at.
+  const top = (data.stack_order ?? []).slice(0, maxSeries)
+  const identity = new Set(top)
+  let hasOther = false
 
   /**
    * One bucket pair -> one Recharts row. Both series go through this, so the
@@ -149,12 +137,12 @@ export function buildChartSeries(
     let otherActual = 0
     let otherForecast = 0
     for (const [sym, v] of Object.entries(actual)) {
-      if (top.includes(sym)) out[sym] = v
-      else otherActual += v
+      if (identity.has(sym)) out[sym] = v
+      else { otherActual += v; hasOther = true }
     }
     for (const [sym, v] of Object.entries(forecast)) {
-      if (top.includes(sym)) out[FC + sym] = v
-      else otherForecast += v
+      if (identity.has(sym)) out[FC + sym] = v
+      else { otherForecast += v; hasOther = true }
     }
     if (otherActual > 0) out[OTHER] = Math.round(otherActual * 100) / 100
     if (otherForecast > 0) out[FC + OTHER] = Math.round(otherForecast * 100) / 100
@@ -179,7 +167,39 @@ export function buildChartSeries(
     }, [])
   const ttmData = ttmPoints.map((p) => row(p.month, p.actual, p.forecast))
 
-  return { chartData, ttmData, ttmPoints, stackSymbols: hasOther ? [...top, OTHER] : top }
+  // `hasOther` is set by `row`, so the fold is reported only when something actually
+  // folded in the months this response carries — a symbol ranked 14th that paid nothing
+  // in the selected year must not put an empty Other in the legend.
+  const drawn = top.filter((s) =>
+    chartData.some((r) => s in r || FC + s in r) || ttmData.some((r) => s in r || FC + s in r))
+  return { chartData, ttmData, ttmPoints, stackSymbols: hasOther ? [...drawn, OTHER] : drawn }
+}
+
+/**
+ * Legend entries for the rows actually on screen, biggest first.
+ *
+ * Ordered by what the SELECTED range paid rather than by the stack, because that is the one
+ * question the chart itself cannot answer, and because order and colour are independent now:
+ * re-ordering the legend moves no colour. Measured and projected are summed — the legend
+ * names a holding, and the bar shows the split.
+ */
+export function legendEntries(
+  rows: Record<string, number | string>[],
+  stackSymbols: string[],
+): { symbol: string; total: number }[] {
+  const out: { symbol: string; total: number }[] = []
+  for (const symbol of stackSymbols) {
+    let total = 0
+    let seen = false
+    for (const row of rows) {
+      const a = row[symbol]
+      const f = row[FC + symbol]
+      if (typeof a === 'number') { total += a; seen = true }
+      if (typeof f === 'number') { total += f; seen = true }
+    }
+    if (seen) out.push({ symbol, total })
+  }
+  return out.sort((a, b) => b.total - a.total)
 }
 
 /**

@@ -26,6 +26,8 @@ interface DividendStackChartProps {
   tooltipTitle: (month: string) => string
   /** Anything below the total — delta chips, provenance caveats. */
   tooltipFooter?: (month: string) => ReactNode
+  /** Highlighted from the legend: every other series fades back. */
+  activeSymbol?: string | null
 }
 
 /**
@@ -43,6 +45,7 @@ interface DividendStackChartProps {
  */
 export function DividendStackChart({
   data, stackSymbols, colorOf, showForecast, multiYear, tooltipTitle, tooltipFooter,
+  activeSymbol = null,
 }: DividendStackChartProps) {
   const curSym = useCurrencySymbol()
   const formatCurrency = useFormatCurrency()
@@ -50,6 +53,10 @@ export function DividendStackChart({
 
   const formatAxisTick = (v: number) =>
     Math.abs(v) >= 1000 ? `${curSym}${(v / 1000).toFixed(1)}k` : `${curSym}${v}`
+
+  // Faded rather than hidden: dropping the other series would restack the bar and move the
+  // highlighted segment, which is the one thing the reader is trying to follow.
+  const faded = (symbol: string) => activeSymbol != null && activeSymbol !== symbol
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderTooltip = ({ active, payload, label }: any) => {
@@ -138,6 +145,7 @@ export function DividendStackChart({
               dataKey={s}
               stackId="d"
               fill={colorOf(s)}
+              fillOpacity={faded(s) ? 0.18 : 1}
               stroke="hsl(var(--card))"
               strokeWidth={1}
               isAnimationActive={false}
@@ -154,8 +162,9 @@ export function DividendStackChart({
                 dataKey={FC + s}
                 stackId="d"
                 fill={colorOf(s)}
-                fillOpacity={0.4}
+                fillOpacity={faded(s) ? 0.08 : 0.4}
                 stroke={colorOf(s)}
+                strokeOpacity={faded(s) ? 0.25 : 1}
                 strokeDasharray="3 2"
                 strokeWidth={1}
                 isAnimationActive={false}
