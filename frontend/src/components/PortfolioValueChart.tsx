@@ -120,12 +120,15 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       ? { key: 'total_value_eur', name: 'Total Value' }
       : { key: 'market_value_eur', name: 'Market Value' }
     return [
-      { ...baseline, color: '#8b5cf6', show: showBaseline, toggle: () => setShowBaseline(v => !v) },
-      { ...value, color: '#22c55e', show: showValue, toggle: () => setShowValue(v => !v) },
+      // Total Value carries the primary blue; Money In is the quiet reference line it is
+      // read against; cash and profit take the two secondary hues. Hex rather than CSS
+      // variables because the legend chips derive an alpha background from the string.
+      { ...baseline, color: '#94a3b8', show: showBaseline, toggle: () => setShowBaseline(v => !v) },
+      { ...value, color: '#3b82f6', show: showValue, toggle: () => setShowValue(v => !v) },
       ...(cashTracked
-        ? [{ key: 'cash_eur', name: 'Cash', color: '#38bdf8', show: showCash, toggle: () => setShowCash(v => !v) }]
+        ? [{ key: 'cash_eur', name: 'Cash', color: '#14b8a6', show: showCash, toggle: () => setShowCash(v => !v) }]
         : []),
-      { key: 'profit_eur', name: 'Profit/Loss', color: '#f59e0b', show: showProfit, toggle: () => setShowProfit(v => !v) },
+      { key: 'profit_eur', name: 'Profit/Loss', color: '#10b981', show: showProfit, toggle: () => setShowProfit(v => !v) },
     ]
   }, [cashTracked, showBaseline, showValue, showCash, showProfit])
 

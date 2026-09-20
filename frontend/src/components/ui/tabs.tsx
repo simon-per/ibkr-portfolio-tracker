@@ -117,7 +117,7 @@ export function TabsList({ children, className, label = 'Sections' }: TabsListPr
       // 40px, so desktop is unchanged, but a mobile consumer can raise the triggers to
       // a real touch target without being clipped by a fixed height.
       className={cn(
-        'inline-flex min-h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground',
+        'inline-flex min-h-10 items-center justify-center rounded-lg bg-muted/70 p-1 text-muted-foreground',
         className,
       )}
     >
@@ -152,8 +152,8 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
       // `shrink-0` keeps the pills at their label width inside the mobile scroller;
       // it is inert in the desktop grid.
       className={cn(
-        'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 sm:min-h-0',
-        isActive ? 'bg-background text-foreground shadow-sm' : 'hover:bg-background/50',
+        'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 sm:min-h-0',
+        isActive ? 'bg-card text-foreground shadow-sm' : 'hover:text-foreground',
         className,
       )}
     >

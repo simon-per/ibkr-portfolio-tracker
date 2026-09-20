@@ -79,18 +79,18 @@ import {
 import { formatDate } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
-const GAIN = '#16a34a'
-const LOSS = '#dc2626'
+const GAIN = '#10b981'
+const LOSS = '#f43f5e'
 const TOTAL = '#64748b'
 const FLOW = '#94a3b8'
 /** Leg colours: price and FX are the two the eye should separate first. */
 const LEG_COLORS: Record<LegKey, string> = {
-  price_effect_eur: '#2563eb',
+  price_effect_eur: '#3b82f6',
   fx_effect_eur: '#f59e0b',
-  dividends_eur: '#16a34a',
-  cash_adjustment_eur: '#0891b2',
-  unsplit_eur: '#a855f7',
-  unexplained_eur: '#9ca3af',
+  dividends_eur: '#10b981',
+  cash_adjustment_eur: '#14b8a6',
+  unsplit_eur: '#8b5cf6',
+  unexplained_eur: '#94a3b8',
 }
 const GRID = 'hsl(var(--border))'
 const AXIS = 'hsl(var(--muted-foreground))'
@@ -255,7 +255,7 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
         ) : decomposition.isLoading || !w ? (
           <KpiCardSkeleton count={6} />
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-7">
             <KpiCard
               label="Gain"
               hero
@@ -367,7 +367,7 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={rolling} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(d: string) => d.slice(0, 7)} minTickGap={32} />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(d: string) => formatDate(d)} minTickGap={48} interval="preserveStartEnd" />
                   <YAxis yAxisId="ratio" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={36} />
                   <YAxis yAxisId="vol" orientation="right" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={40} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                   <Tooltip

@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown, Activity, Target, Shield, PieChart } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
+import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 
 interface PerformanceMetricsCardsProps {
   metrics: {
@@ -53,9 +53,9 @@ export function PerformanceMetricsCards({
 }: PerformanceMetricsCardsProps) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
-        <KpiCardSkeleton count={6} />
-      </div>
+      <KpiPanel>
+        <KpiCardSkeleton tile count={6} />
+      </KpiPanel>
     )
   }
 
@@ -83,7 +83,7 @@ export function PerformanceMetricsCards({
   const unvalued = metrics.unvaluedPositions ?? 0
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
+    <KpiPanel>
       {/* Outside the cards, in the row's own flow — the rule MonthlyReturnsHeatmap and
           PerformanceAttribution both had to learn: a caveat you have to open something to
           reach is as good as absent, and the figure it qualifies is on screen either way.
@@ -107,6 +107,7 @@ export function PerformanceMetricsCards({
       {/* Annual Return (XIRR). A window under 30 days reports simple_period instead, and
           the label follows it rather than annualising a few days of noise. */}
       <KpiCard
+        tile
         label={metrics.xirrMethod === 'simple_period' ? 'Period Return' : 'Annual Return (XIRR)'}
         // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
         // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
@@ -128,6 +129,7 @@ export function PerformanceMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Max Drawdown"
         icon={<TrendingDown className="h-4 w-4 text-red-600" />}
         value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
@@ -140,6 +142,7 @@ export function PerformanceMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Sharpe Ratio"
         icon={<Activity className="h-4 w-4 text-muted-foreground" />}
         value={metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : null}
@@ -152,6 +155,7 @@ export function PerformanceMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Win Rate"
         icon={<Target className="h-4 w-4 text-muted-foreground" />}
         value={metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : null}
@@ -165,6 +169,7 @@ export function PerformanceMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Calmar Ratio"
         icon={<Shield className="h-4 w-4 text-muted-foreground" />}
         value={metrics.calmarRatio !== null ? metrics.calmarRatio.toFixed(2) : null}
@@ -176,6 +181,7 @@ export function PerformanceMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Top 5 Weight"
         icon={<PieChart className="h-4 w-4 text-muted-foreground" />}
         value={metrics.top5Weight !== null ? `${metrics.top5Weight.toFixed(1)}%` : null}
@@ -191,6 +197,6 @@ export function PerformanceMetricsCards({
             ? `Concentration risk · ${metrics.effectiveHoldings.toFixed(1)} effective`
             : 'Concentration risk'}
       />
-    </div>
+    </KpiPanel>
   )
 }

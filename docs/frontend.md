@@ -237,6 +237,21 @@ is a Yahoo request, and it is handed the selection as a prop rather than re-read
 
 ---
 
+## Visual hierarchy and KPI panels
+
+The dashboard canvas and surface colours live in `index.css`; semantic gain, loss and warning text
+keeps using `green-*`, `red-*` and `yellow-*`, with the accessible emerald, rose and amber aliases
+owned by `tailwind.config.js`. Chart series that need literal hex values follow the same palette.
+The page shell is centred at `max-w-[1400px]` so the wide desktop layout remains readable.
+
+`ui/KpiCard.tsx` owns both KPI renderings. A standalone `KpiCard` is used for the summary and hero
+figures; `KpiPanel` contains `tile` cards for dense metric rows, with one panel border and shared
+hairline dividers. A hero consumes two grid tracks, so any explicit desktop grid must count occupied
+tracks rather than cards: five summary cards need six tracks and the Analytics hero plus five detail
+cards need seven. Loading states use the same rendering and track count as the data they replace.
+
+---
+
 ## The mobile layout — one description, two renderings
 
 The app is built to work at **390x844**, and the rule that keeps it that way is that a table and its

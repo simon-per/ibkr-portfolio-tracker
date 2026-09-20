@@ -26,7 +26,7 @@ export function PortfolioSummaryCards({
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-6">
         <KpiCardSkeleton count={5} />
       </div>
     )
@@ -78,11 +78,11 @@ export function PortfolioSummaryCards({
     /* Two-up rather than one card per row below `md`: stacked, the three KPI rows came
        to ~1,660px of scrolling past numbers before the chart — about two phone screens,
        and the opposite of the reading order this page wants. */
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-6">
       {unpriced > 0 && (
         <div
           role="alert"
-          className="col-span-2 lg:col-span-5 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+          className="col-span-2 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
         >
           <span className="font-medium">
             {hasCash ? 'Total Value' : 'Market Value'} is incomplete — {unpriced}{' '}

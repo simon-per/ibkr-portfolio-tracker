@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { ABSENT, KpiCard, KpiCardSkeleton } from './KpiCard'
+import { ABSENT, KpiCard, KpiCardSkeleton, KpiPanel } from './KpiCard'
 
 // Explicit, because there is no vitest setup file — jsdom is opted into per file, so
 // testing-library's auto-cleanup is never registered and renders otherwise accumulate
@@ -116,6 +116,22 @@ describe('KpiCard', () => {
   it('renders one skeleton per requested slot', () => {
     const { container } = render(<KpiCardSkeleton count={6} />)
     expect(container.querySelectorAll('.animate-pulse').length).toBe(6)
+  })
+
+  it('renders tile KPIs as cells in one shared panel', () => {
+    const { container } = render(
+      <KpiPanel>
+        <KpiCard tile label="Volatility" value="12.4%" />
+        <KpiCard tile label="Sortino" value="1.42" />
+      </KpiPanel>,
+    )
+    const panel = container.firstElementChild
+    const grid = panel?.firstElementChild
+    expect(panel?.className).toContain('rounded-xl')
+    expect(grid?.className).toContain('grid-cols-2')
+    expect(grid?.children).toHaveLength(2)
+    expect(grid?.children[0]?.className).toContain('p-4')
+    expect(grid?.children[0]?.className).not.toContain('border')
   })
 })
 

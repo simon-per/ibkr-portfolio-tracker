@@ -132,7 +132,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                   {sorted.map((entry, index) => (
                     <Cell
                       key={index}
-                      fill={entry.pnl_contribution_eur >= 0 ? '#16a34a' : '#dc2626'}
+                      fill={entry.pnl_contribution_eur >= 0 ? '#10b981' : '#f43f5e'}
                     />
                   ))}
                 </Bar>

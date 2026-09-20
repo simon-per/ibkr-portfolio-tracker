@@ -1,6 +1,6 @@
 import { Activity, Coins, Gauge, PiggyBank, Scale, TrendingDown } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
+import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
 import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
@@ -45,7 +45,7 @@ interface RiskMetricsCardsProps {
    *
    * `undefined` means not loaded, `null` means the backend had no rate to report.
    * Those are different things and the footnote says which.
-   */
+  */
   dividend?: DividendForwardYield | null
   /** Exact assumption used by the same breakdown response as `dividend`. */
   dividendWithholdingPct?: number
@@ -83,9 +83,9 @@ export function RiskMetricsCards({
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
-        <KpiCardSkeleton count={6} />
-      </div>
+      <KpiPanel>
+        <KpiCardSkeleton tile count={6} />
+      </KpiPanel>
     )
   }
 
@@ -156,8 +156,9 @@ export function RiskMetricsCards({
     metrics.currentDrawdownPct !== null && metrics.currentDrawdownPct < -0.05
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-6">
+    <KpiPanel>
       <KpiCard
+        tile
         label="Volatility"
         icon={<Activity className="h-4 w-4 text-muted-foreground" />}
         value={metrics.volatilityPct !== null ? `${metrics.volatilityPct.toFixed(1)}%` : null}
@@ -167,6 +168,7 @@ export function RiskMetricsCards({
       />
 
       <KpiCard
+        tile
         label="Sortino Ratio"
         icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
         value={metrics.sortino !== null ? metrics.sortino.toFixed(2) : null}
@@ -182,6 +184,7 @@ export function RiskMetricsCards({
       {/* Beta vs the primary benchmark. Three distinct reasons it can be absent, and the
           footnote is what tells them apart — the value is a dash in all three. */}
       <KpiCard
+        tile
         label="Beta"
         icon={<Scale className="h-4 w-4 text-muted-foreground" />}
         value={beta?.beta != null ? beta.beta.toFixed(2) : null}
@@ -196,6 +199,7 @@ export function RiskMetricsCards({
 
       {/* Current drawdown, with the worst one for context */}
       <KpiCard
+        tile
         label="Current Drawdown"
         icon={<TrendingDown
           className={`h-4 w-4 ${inDrawdown ? 'text-red-600' : 'text-muted-foreground'}`}
@@ -226,6 +230,7 @@ export function RiskMetricsCards({
           weighted on the client; the backend divides two figures it already holds.
           The per-security column on the Dividends tab is the audit. */}
       <KpiCard
+        tile
         label="Dividend Yield"
         icon={<Coins className="h-4 w-4 text-muted-foreground" />}
         value={dividend != null ? `${dividend.pct.toFixed(2)}%` : null}
@@ -238,6 +243,7 @@ export function RiskMetricsCards({
           appreciation. Both denominators cover the same securities, which is the only
           reason that reading is valid. */}
       <KpiCard
+        tile
         label="Yield on Cost"
         icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
         value={dividend?.on_cost_pct != null ? `${dividend.on_cost_pct.toFixed(2)}%` : null}
@@ -252,6 +258,6 @@ export function RiskMetricsCards({
               ? 'No projected dividends'
               : 'Same income over what it cost'}
       />
-    </div>
+    </KpiPanel>
   )
 }

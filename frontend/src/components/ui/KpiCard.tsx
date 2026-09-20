@@ -1,42 +1,40 @@
+/**
+ * One KPI: a label, a value, an optional icon and an optional footnote.
+ *
+ * Extracted because sixteen cards across four files each hand-rolled the same
+ * `CardHeader` + `CardTitle className="text-sm font-medium"` + `CardContent` + value +
+ * footnote shape, with four different ideas of what an absent value looks like (an em
+ * dash, `N/A`, a blank, a `0`). The dash-for-absent rule lives here now — pass
+ * `value={null}` — and a caller cannot accidentally colour a missing number as good news.
+ *
+ * Two renderings from one component (2026-09-13): the default is a standalone card; `tile`
+ * drops the card chrome so a `KpiPanel` can seat six of them in one bordered panel with
+ * hairline dividers. The Performance tab's two metric rows used to be twelve separate
+ * boxes under five more — seventeen identical rectangles before the first chart — and the
+ * panel is what makes the hero row read as the headline and the rest as its detail.
+ */
 import type { ReactNode } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
-/**
- * One KPI card, rendered from a description instead of hand-written per instance.
- *
- * There were sixteen copies of this markup across `PortfolioSummaryCards`,
- * `PerformanceMetricsCards`, `RiskMetricsCards` and `DividendKpiCards`, each repeating
- * the same header/value/footnote tree, the same `text-lg font-bold tabular-nums
- * sm:text-2xl`, and its own idea of what an absent value looks like. Making the values
- * responsive was sixteen mechanical edits that should have been one — which is the
- * concrete cost CLAUDE.md's *dominant failure mode* section predicts, and why extracting
- * this was the top item in STATUS.md's *Worth doing next*.
- *
- * The subtler win is `value == null`. Three of the four files agreed that an absent
- * metric must never render as `0`, and then disagreed about how to say so: `RiskMetrics`
- * had an `Absent()` helper rendering an em dash, `PerformanceMetrics` inlined `N/A`
- * twice. Absence is now one code path, so "unknown is not zero" is structural rather
- * than a convention each new card has to remember.
- */
 export type KpiTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'muted'
 
 const TONE_CLASS: Record<KpiTone, string> = {
   neutral: '',
-  positive: 'text-green-600',
-  negative: 'text-red-600',
-  warning: 'text-yellow-600',
+  positive: 'text-green-600 dark:text-green-400',
+  negative: 'text-red-600 dark:text-red-400',
+  warning: 'text-yellow-600 dark:text-yellow-400',
   muted: 'text-muted-foreground',
 }
 
 /**
- * `text-lg` on a phone, `text-2xl` from `sm` up. A 2-up cell has a ~141px interior and a
- * seven-figure currency string renders at ~182px in `text-2xl`, so the small size is
- * load-bearing rather than cosmetic — see STATUS.md's mobile-layout notes.
+ * `text-lg` below `sm`: two cards share 358px, and "CHF 48,561.36" is ~182px in `text-2xl`.
+ * The hero keeps its size because it has the whole row to itself.
  */
-const VALUE_CLASS = 'text-lg font-bold tabular-nums sm:text-2xl'
+const VALUE_CLASS = 'text-lg font-semibold tracking-tight tabular-nums sm:text-2xl'
+const HERO_VALUE_CLASS = 'text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl'
+const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
 
-/** What an unknown metric looks like. A dash, never a zero. */
 export const ABSENT = '—'
 
 export interface KpiCardProps {
@@ -53,59 +51,101 @@ export interface KpiCardProps {
   /** Arbitrary content in place of `sub` — a `DeltaChip`, say, that must keep its own colours. */
   footer?: ReactNode
   /**
-   * Full width in a 2-up phone grid, and never shrinks its value to `text-lg`. For the
-   * one figure the page is actually about; the rest tile underneath it.
+   * Full width in a 2-up phone grid and two columns on desktop, and never shrinks its
+   * value to `text-lg`. For the one figure the page is actually about; the rest tile
+   * underneath it.
    */
   hero?: boolean
+  /** Render without card chrome, for use inside a {@link KpiPanel}. */
+  tile?: boolean
   /** Native tooltip, for a figure that needs a caveat the footnote has no room for. */
   title?: string
   className?: string
 }
 
 export function KpiCard({
-  label, value, tone = 'neutral', icon, sub, footer, hero, title, className,
+  label, value, tone = 'neutral', icon, sub, footer, hero, tile, title, className,
 }: KpiCardProps) {
   const absent = value == null
-  return (
-    <Card className={cn(hero && 'col-span-2 lg:col-span-1', className)} title={title}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div
-          className={cn(
-            hero ? 'text-2xl font-bold tabular-nums' : VALUE_CLASS,
-            TONE_CLASS[absent ? 'muted' : tone],
-          )}
-        >
-          {absent ? ABSENT : value}
+  const body = (
+    <>
+      <div
+        className={cn(
+          hero ? HERO_VALUE_CLASS : VALUE_CLASS,
+          TONE_CLASS[absent ? 'muted' : tone],
+        )}
+      >
+        {absent ? ABSENT : value}
+      </div>
+      {footer}
+      {sub != null && <p className="mt-1 text-xs leading-snug text-muted-foreground">{sub}</p>}
+    </>
+  )
+
+  if (tile) {
+    return (
+      <div className={cn('flex flex-col gap-2 p-4 sm:p-5', hero && 'col-span-2', className)} title={title}>
+        <div className="flex items-center justify-between gap-2">
+          <span className={LABEL_CLASS}>{label}</span>
+          {icon && <span className="opacity-70">{icon}</span>}
         </div>
-        {footer}
-        {sub != null && <p className="text-xs text-muted-foreground">{sub}</p>}
-      </CardContent>
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <Card className={cn(hero && 'col-span-2', className)} title={title}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className={LABEL_CLASS}>{label}</CardTitle>
+        {icon && <span className="opacity-70">{icon}</span>}
+      </CardHeader>
+      <CardContent>{body}</CardContent>
     </Card>
   )
 }
 
-/**
- * The loading row. Was copied verbatim four times, each with its own hardcoded count and
- * its own `Loading...` title — so a skeleton row could differ in shape from the row it
- * stands in for, which is the one thing a skeleton must not do.
- */
-export function KpiCardSkeleton({ count }: { count: number }) {
+export function KpiCardSkeleton({ count, tile }: { count: number; tile?: boolean }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <Card key={i}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Loading...</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-8 bg-muted animate-pulse rounded" />
-          </CardContent>
-        </Card>
+        tile ? (
+          <div key={i} className="flex flex-col gap-2 p-4 sm:p-5">
+            <span className={LABEL_CLASS}>Loading...</span>
+            <div className="h-7 animate-pulse rounded bg-muted" />
+          </div>
+        ) : (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className={LABEL_CLASS}>Loading...</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-7 animate-pulse rounded bg-muted" />
+            </CardContent>
+          </Card>
+        )
       ))}
     </>
+  )
+}
+
+/**
+ * One bordered panel holding several `tile` KPIs, separated by hairlines rather than by
+ * gaps and borders. `gap-px` over a border-coloured background is the divider trick: the
+ * tiles paint the card colour and the 1px seams between them show the panel's background.
+ * The phone keeps two columns, so a six-metric row is three rows of two.
+ */
+export function KpiPanel({
+  children, columns = 6, className,
+}: { children: ReactNode; columns?: 4 | 5 | 6; className?: string }) {
+  const cols = {
+    4: 'md:grid-cols-2 lg:grid-cols-4',
+    5: 'md:grid-cols-3 lg:grid-cols-5',
+    6: 'md:grid-cols-3 lg:grid-cols-6',
+  }[columns]
+  return (
+    <div className={cn('overflow-hidden rounded-xl border border-border/70 bg-border/60', className)}>
+      <div className={cn('grid grid-cols-2 gap-px [&>*]:bg-card', cols)}>{children}</div>
+    </div>
   )
 }

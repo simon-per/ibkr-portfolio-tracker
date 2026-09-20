@@ -369,15 +369,15 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="border-b">
-        <div className="w-full px-4 py-3 sm:py-4">
+      <div className="border-b border-border/70 bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+        <div className="mx-auto w-full max-w-[1400px] px-4 py-3 sm:px-6 sm:py-4">
           {/* Wraps below `sm`: the title block and the four controls cannot share a
               358px row, and `justify-between` on a row that cannot wrap is what pushed
               the cluster past the viewport edge. `items-start` so the controls sit
               level with the title rather than with the bottom of the status block. */}
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
             <div className="min-w-0">
-              <h1 className="text-xl font-bold tracking-tight sm:text-3xl">Portfolio Analyzer</h1>
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Portfolio Analyzer</h1>
               {/* Hidden below `sm`: the strapline costs a line of an 844px screen and
                   tells a returning user nothing they do not already know. */}
               <p className="text-muted-foreground mt-1 hidden sm:block">
@@ -494,8 +494,9 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="w-full px-4 py-4 sm:py-6">
+      {/* Main Content. Constrained and centred: at 1440px and wider a full-bleed grid of
+          KPI cards reads as a spreadsheet, and every reference app constrains its content. */}
+      <div className="mx-auto w-full max-w-[1400px] px-4 py-4 sm:px-6 sm:py-6">
         <Tabs defaultValue="performance" className="space-y-6 sm:space-y-8">
           {/* Sticky and full-bleed below `sm`, exactly today's eight-column grid above
               it.

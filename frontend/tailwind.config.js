@@ -1,3 +1,5 @@
+import colors from 'tailwindcss/colors'
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
@@ -8,6 +10,13 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Gains and losses are written as `text-green-600 dark:text-green-400` and
+        // `text-red-600 dark:text-red-400` at ~70 call sites and pinned by several tests.
+        // Rather than rename them, the two scales are re-pointed at emerald and rose —
+        // calmer on the new canvas and still 4.5:1 on both themes.
+        green: { ...colors.green, 400: colors.emerald[400], 500: colors.emerald[500], 600: colors.emerald[700] },
+        red: { ...colors.red, 400: colors.rose[400], 500: colors.rose[500], 600: colors.rose[600] },
+        yellow: { ...colors.yellow, 400: colors.amber[400], 500: colors.amber[500], 600: colors.amber[700] },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

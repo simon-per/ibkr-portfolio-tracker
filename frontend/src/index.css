@@ -2,50 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Theme tokens — restyled 2026-09-13 at the owner's request ("make it look way cleaner,
+ * like modern portfolio tracking apps").
+ *
+ * The page is no longer white-on-white / black-on-black: the canvas is a soft grey (light)
+ * or deep navy (dark) and cards sit one step lighter on it with a low-contrast border, so
+ * structure comes from surfaces rather than from lines. The primary is a blue rather than
+ * near-black, which also becomes the value line on every chart. Radius went from 8 to 12px.
+ * Every existing `hsl(var(--x))` reference keeps working; only the values moved.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 220 20% 97%;
+    --foreground: 224 30% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 224 30% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --popover-foreground: 224 30% 10%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 94%;
+    --secondary-foreground: 224 30% 10%;
+    --muted: 220 16% 94%;
+    --muted-foreground: 220 10% 44%;
+    --accent: 220 16% 94%;
+    --accent-foreground: 224 30% 10%;
+    --destructive: 350 89% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 89%;
+    --input: 220 14% 89%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background: 224 32% 7%;
+    --foreground: 214 20% 94%;
+    --card: 224 28% 10%;
+    --card-foreground: 214 20% 94%;
+    --popover: 224 28% 11%;
+    --popover-foreground: 214 20% 94%;
+    --primary: 217 91% 62%;
+    --primary-foreground: 224 32% 7%;
+    --secondary: 223 22% 15%;
+    --secondary-foreground: 214 20% 94%;
+    --muted: 223 22% 14%;
+    --muted-foreground: 218 12% 62%;
+    --accent: 223 22% 15%;
+    --accent-foreground: 214 20% 94%;
+    --destructive: 350 80% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 223 18% 17%;
+    --input: 223 18% 19%;
+    --ring: 217 91% 62%;
   }
 }
 
@@ -165,6 +175,11 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Inter where installed, otherwise the platform UI face; the CSP forbids a webfont. */
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     /* Several surfaces now scroll horizontally on purpose — the tab strip, the range
        pills, every ScrollableTable. Without this, reaching the end of one chains the
        scroll to the page and fires the browser's back-swipe gesture. */
