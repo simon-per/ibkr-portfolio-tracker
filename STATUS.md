@@ -5,20 +5,20 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-20.** Local, not shipped: the gross-derived dividend forecast assumption is
-now adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`, accepts 0–100%,
-refetches every active dividend breakdown after saving, and reports the exact applied percentage in
-the response and visible caveats. The setting still touches only the two gross-derived forecast
-paths; actual IBKR net, accruals, realized history and stored rows remain unchanged. Targeted backend,
-frontend and TypeScript checks pass. Full verification: 1,573 backend tests and 682 frontend tests,
-plus the production build and scoped ESLint on the new dividend files. `Dashboard.tsx` retains its
-pre-existing Fast Refresh export lint error at line 83. The browser pass could not run because this
-Codex session has no browser runtime. The unrelated UI restyle already in the working tree remains preserved.
-Also local: turning Forecast off now stops the monthly axis at the current month, removes future-year
-options, and returns a currently selected planning year to the current year instead of leaving an
-empty chart and an impossible select value.
+**Last updated: 2026-09-20.** Latest, live on `a719644` and API-verified: the gross-derived dividend
+forecast assumption is adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`,
+accepts 0–100%, refetches every active dividend breakdown after saving, and reports the exact applied
+percentage in the response and visible caveats. The setting still touches only the two gross-derived
+forecast paths; actual IBKR net, accruals, realized history and stored rows remain unchanged. A live
+`15 → 26.375 → 15%` round trip changed the forecast fingerprint, left the realized fingerprint
+identical, and restored the original response exactly. Turning Forecast off now stops the monthly
+axis at the current month, removes future-year options, and returns a selected planning year to the
+current year. CI is green; full verification is 1,573 backend tests, 682 frontend tests and the
+production build. `/health` reports the exact commit, scheduler persistence and write auth enabled;
+the deployed chunk carries the new controls. The browser pass could not run because this Codex
+session has no browser runtime. The unrelated UI restyle remains local and uncommitted.
 
-Latest production behavior remains live on `9e808fe` and API-verified (the browser half is
+Earlier production behavior on `9e808fe` remains API-verified (the browser half is
 still open — see *Watch after the next deploy*): **the calendar is the forecast.** The two
 pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
 that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
@@ -52,7 +52,7 @@ still asserting.
 
 Also live on `bb2bb48` and verified: **a forecast sized from
 Yahoo's gross per-share now deducts an assumed withholding of 15%**
-(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`; locally this is now the user-adjustable default).
+(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`; this is now the user-adjustable default).
 Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
 overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
 high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
@@ -906,13 +906,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The adjustable WHT control is local and not shipped.** After its deploy, set a temporary value
-  through the Dividends-tab popover, confirm every gross-derived chart/calendar/yield figure refetches,
-  then restore the intended value. Check the popover at 390 px and confirm the Performance dividend
-  cards show the same exact percentage. Realized figures must remain unchanged. This needs no Yahoo
-  or Flex call; `/api/dividends/breakdown` is a pure database read. With Forecast off, also confirm
-  that the monthly axis ends at the current month and the next calendar year is absent from both the
-  period select and the realized-only per-year panel.
+- **The adjustable WHT and forecast-off range fixes are live on `a719644` and API/bundle-verified.**
+  The write path, forecast recomputation, realized-field isolation and exact restoration were checked
+  on production. The deployed lazy chunk contains the WHT control, precision help and forecast toggle.
+  What remains is visual interaction because this session has no browser runtime: check the popover at
+  390 px, confirm its save/refetch feedback and the Performance-card percentage, then turn Forecast off
+  and confirm the monthly axis and both year selectors expose no future range.
 
 - **Folding the calendar into the forecast is live on `9e808fe` and API-verified (2026-09-19,
   20:45 Berlin) — but the browser half is NOT done, and this change touched the frontend.**
@@ -1444,13 +1443,14 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 - **2026-09-20 (forecast-off ranges)** — stopped the monthly chart from retaining empty future
   month labels after its forecast bars disappear, and removed the next-year planning range while
   Forecast is off. Switching the toggle off from that year now returns to the current year, keeping
-  the selector, request and chart on one valid range.
+  the selector, request and chart on one valid range. Live on `a719644`; API/bundle-verified.
 
 - **2026-09-20 (adjustable dividend withholding)** — replaced the hardcoded 0.85 gross-to-net
   forecast factor with a persisted global setting and a WHT percentage control beside Forecast.
   The response names the exact assumption it used, saving refetches every active dividend range,
   and actual IBKR income remains outside the setting. The design stays deliberately global and
-  manual; measuring by country remains the next accuracy step.
+  manual; measuring by country remains the next accuracy step. Live on `a719644`; the production
+  round trip changed forecasts, preserved realized fields and restored 15% exactly.
 
 - **2026-09-19 (the calendar is the forecast)** — "VT is in *Expected next* but not in the chart's
   translucent portion; I think that boundary is too conservative." It was, and wider than the

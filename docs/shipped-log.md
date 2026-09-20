@@ -7,6 +7,30 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-09-20 — adjustable dividend withholding and honest forecast-off ranges
+
+The 0.85 gross-to-estimated-net factor was correct as a default but fixed in code, so every payer
+used an assumed 15% withholding rate and the owner could not correct it. The Dividends tab now has
+a **WHT** control backed by `app_settings`; it accepts 0–100% with three decimal places, refetches
+active dividend ranges, and exposes the exact applied percentage in settings and dividend responses.
+Only gross-derived forecasts use it. IBKR net payments, accruals, realized history and stored rows
+remain outside the setting.
+
+The same pass fixed two forecast-toggle range leaks. With Forecast off, the monthly axis stops at
+the current month instead of retaining empty future labels, while elapsed zero-income months remain.
+The next-year planning range disappears from the selector and realized-only year panel; switching
+Forecast off while viewing it returns to the current year.
+
+**Verified on production, 14:25 Berlin, commit `a719644`.** CI passed both jobs. The exact staged
+snapshot passed 1,573 backend tests, 682 frontend tests and the production build; Gitleaks passed
+with full redaction. `/health` reported the exact commit, healthy status, persistent scheduler job
+store and write auth enabled. The live settings and dividend endpoints both reported 15%, and the
+deployed Dividends chunk contained the WHT control, three-decimal help and forecast toggle. A bounded
+authenticated round trip set 26.375%, confirmed the forecast fingerprint changed while a hash of all
+realized dividend fields stayed identical, then restored 15% and the original forecast fingerprint
+exactly. No Yahoo or Flex call was made. The visual interaction pass remains open because the session
+had no browser runtime.
+
 ## Picking this up cold — the 2026-08-08 handoff
 
 Check `/health`'s commit against `git rev-parse origin/main` before assuming a symptom is unfixed.
