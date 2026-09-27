@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PortfolioValueChart } from './PortfolioValueChart'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import type { PortfolioValuePoint } from '@/lib/api'
@@ -152,5 +152,38 @@ describe('the benchmark anchor note', () => {
       /The S&P 500 benchmark line starts from a day the portfolio could not be fully valued/,
     )
     expect(alert.textContent).toMatch(/understated for the whole range/)
+  })
+})
+
+/**
+ * The profit line starts at 0 on the range's first point. Without a sentence saying so, a
+ * line at 0 reads as an account that has made nothing — the misreading the benchmark note
+ * exists to stop, the other way round.
+ */
+describe('the profit anchor note', () => {
+  it('says the line starts at 0 on the first day of the range', () => {
+    render(<PortfolioValueChart data={HEALTHY} />)
+    const note = screen.getByText(/starts at 0 on Mar 2, 2026/)
+    expect(note.textContent).toMatch(/over this range, contributions\s+excluded/)
+  })
+
+  it('disappears with the line it describes', () => {
+    render(<PortfolioValueChart data={HEALTHY} />)
+    fireEvent.click(screen.getByRole('button', { name: /Profit\/Loss/ }))
+    expect(screen.queryByText(/starts at 0 on/)).toBeNull()
+  })
+
+  it('says the line is overstated when the first day could not be fully valued', () => {
+    render(<PortfolioValueChart data={[point('2026-03-02', 600, 2), ...HEALTHY.slice(1)]} />)
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toMatch(
+      /The Profit\/Loss line starts from a day the portfolio could not be fully valued/,
+    )
+    expect(alert.textContent).toMatch(/overstated for the whole range/)
+  })
+
+  it('does not blame the anchor for an unpriced day later in the range', () => {
+    render(<PortfolioValueChart data={[...HEALTHY, point('2026-03-05', 0, 5)]} />)
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Profit\/Loss line starts/)
   })
 })

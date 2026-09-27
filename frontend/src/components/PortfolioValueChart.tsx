@@ -14,6 +14,7 @@ import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import { rangeProfitAnchorUnpriced, rangeProfitSeries } from '@/lib/rangeProfit'
 import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 
 /**
@@ -111,6 +112,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
    * Profit is then the gap between them, which is TOTAL profit (realized, unrealized
    * and dividends) rather than the unrealized-only figure the holdings pair produces.
    * Both are honest; they are different quantities, so the label changes with the mode.
+   * The line draws that gap's change since the range's first point, not the gap itself.
    */
   const series = useMemo(() => {
     const baseline = cashTracked
@@ -168,12 +170,12 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       benchmarkLookups[b.key] = lookup
     }
 
-    return data.map(point => {
-      // Profit follows whichever pair is on screen, so the third line is always the
-      // gap between the other two rather than a quantity of its own.
-      const profit = cashTracked
-        ? (point.total_value_eur ?? 0) - (point.money_in_eur ?? 0)
-        : point.market_value_eur - point.cost_basis_eur
+    // Profit follows whichever pair is on screen, rebased to 0 on the range's first point
+    // so it starts where the benchmarks do. See `rangeProfit.ts`.
+    const profits = rangeProfitSeries(data, cashTracked)
+
+    return data.map((point, i) => {
+      const profit = profits[i]
       const row: Record<string, number | string | null> = {
         cost_basis_eur: point.cost_basis_eur,
         market_value_eur: point.market_value_eur,
@@ -228,6 +230,13 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     .map(b => b.name)
   const understatedCount = understatedNames.length
   const understatedText = understatedNames.join(' and ')
+
+  // The profit line is rebased to 0 on the first point, so it needs the same sentence the
+  // benchmarks get — without it a line starting at 0 reads as an account that has made
+  // nothing. Only while the line is drawn. An unpriced first day shifts every later point
+  // UP (the anchor's value is short), so it joins the notice with its own direction.
+  const profitStart = showProfit && data?.[0] ? formatDate(data[0].date) : null
+  const profitAnchorUnpriced = showProfit ? rangeProfitAnchorUnpriced(data ?? []) > 0 : false
 
   /**
    * X tick labels.
@@ -360,7 +369,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
 
   return (
     <div className="space-y-4">
-      {(incomplete.days > 0 || understatedCount > 0) && (
+      {(incomplete.days > 0 || understatedCount > 0 || profitAnchorUnpriced) && (
         <div
           role="alert"
           className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
@@ -389,6 +398,15 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
               range, not only that day.
             </>
           )}
+          {profitAnchorUnpriced && (
+            <>
+              {incomplete.days > 0 || understatedCount > 0 ? ' ' : ''}
+              <span className="font-medium">
+                The Profit/Loss line starts from a day the portfolio could not be fully valued
+              </span>
+              , so it is overstated for the whole range, not only that day.
+            </>
+          )}
         </div>
       )}
 
@@ -398,6 +416,14 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
           uninvested cash, and <span className="font-medium text-foreground">Money In</span> is
           what you contributed — so a sale moves value between the lines instead of off the
           chart, and the gap between them is total profit. Cash is {caveat}.
+        </p>
+      )}
+
+      {profitStart && (
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Profit/Loss</span> starts at 0 on{' '}
+          {profitStart} — what the account gained or lost over this range, contributions
+          excluded, rather than since you started.
         </p>
       )}
 

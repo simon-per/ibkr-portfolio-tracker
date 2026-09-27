@@ -5,7 +5,9 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-20.** Latest, live on `26576f8` and API-verified: **a holding on the
+**Last updated: 2026-09-27.** Newest, in the working tree and not yet deployed: **the value chart's
+Profit/Loss line starts at 0 on the first day of the range**, like the benchmarks do since
+2026-09-07 — see *Watch after the next deploy*. Before that, live on `26576f8` and API-verified: **a holding on the
 Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
 range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
 measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
@@ -956,6 +958,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The Profit/Loss line is rebased to 0 on the range's first point** (`lib/rangeProfit.ts`),
+  frontend only. On 3M/1Y confirm the green line starts at 0 on the same day the benchmark lines
+  start, that its last value equals the change in Total Value minus the change in Money In over the
+  range, that the new sentence under the chart names that day, and that toggling Profit/Loss off
+  removes the sentence. ALL should look almost unchanged: the inception gap is near 0.
+
 - **The stable dividend colours are live on `26576f8` and have not been seen in a browser.**
   Everything below the pixels is verified — the service, the transform, the palette measurements,
   one production snapshot through the real service, and the deployed API and stylesheet — but no
@@ -1409,6 +1417,12 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
 
 Each of these cost real time at least once.
 
+- **Node 26 breaks every frontend test that touches `localStorage`** (60 tests in 5 files on
+  2026-09-27: `Cannot read properties of undefined (reading 'clear')`). Node's own experimental
+  `localStorage` global shadows jsdom's and is undefined without `--localstorage-file`. Not a
+  regression in the code: `npx -y node@22 node_modules/vitest/vitest.mjs run` from `frontend/`
+  passed 715/715 the same day. Read the failing files before trusting a red count. A fresh worktree also has no `frontend/node_modules` — `npm ci` first.
+
 - **A fresh worktree needs its own dependencies.** The global Python installation has an older
   FastAPI that cannot collect `test_api_hardening.py` (`iter_route_contexts` import error).
   Use a Python 3.12 `backend/venv` with `backend/requirements.txt`; use placeholder Flex credentials
@@ -1503,6 +1517,12 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-27 (profit line from 0)** — the value chart's Profit/Loss line was the since-inception
+  gap, so on 3M it started at two years of profit while the benchmarks start at the range. It is now
+  that gap's change since the chart's first point — a shift, which is right for a quantity already
+  net of contributions — with a sentence naming the start day and an overstatement clause when that
+  day was not fully priced. TypeScript, build and 715/715 frontend tests (Node 22) pass; not in a browser, not merged.
+
 - **2026-09-20 (dividend colours follow the holding)** — a holding's colour was its rank inside the
   selected range's top eight, so changing the period repainted the chart; the order now rides on the
   response as `stack_order`, identical in every range, and the client's ranking is gone. Eight hues
@@ -1527,17 +1547,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   and actual IBKR income remains outside the setting. The design stays deliberately global and
   manual; measuring by country remains the next accuracy step. Live on `a719644`; the production
   round trip changed forecasts, preserved realized fields and restored 15% exactly.
-
-- **2026-09-19 (the calendar is the forecast)** — "VT is in *Expected next* but not in the chart's
-  translucent portion; I think that boundary is too conservative." It was, and wider than the
-  report: the trace found four producers of `upcoming` and only one reaching the aggregates, so a
-  gone-ex dividend — the most certain money there — was the sole kind missing, 28.88 of 114.55 on
-  production. Two lessons. **A conservative boundary is still a claim**, and "calendar only" quietly
-  asserted the chart and the calendar answer different questions when they answer the same one; the
-  test that would have caught it is "which other code publishes this money", not "does the pending
-  entry appear". And **when two facts have always coincided, one of them is load-bearing and nobody
-  knows which**: `partial` meant "open" and "carries projection" at once until an overdue payment
-  separated them, and the tempting repair (widen `partial`) would have deleted whole measured
-  windows.
-
-

@@ -184,6 +184,17 @@ against **Money In** (cumulative contributions), with Profit/Loss as the gap. Th
 *total* profit — realized, unrealized and dividends — rather than the unrealized-only
 figure the old pair produced.
 
+**The drawn Profit/Loss line is that gap rebased to 0 on the chart's first point**
+(2026-09-27, `lib/rangeProfit.ts`), the same point the window-anchored benchmark is seeded
+from, so every line starts on one day. Before, on 3M it started at two years of profit the
+range does not draw. It is a **shift**, and a shift is right here for the reason a scale was
+wrong for the benchmark: the gap is already net of contributions — a deposit raises Money In
+by what it raises Total Value — so subtracting a constant keeps in-window flows out of it. A
+first point with `unpriced_holdings > 0` has an understated value, so every later profit
+point is **overstated** by it; the chart says so in its incomplete-valuation notice, with
+that direction. The all-time figure stays on the summary cards. Tests:
+`rangeProfit.test.ts`, the profit anchor cases in `PortfolioValueChart.test.tsx`.
+
 It is the only pairing with no step on a trade, and the two rejected alternatives say
 why. Keeping **Market Value vs Cost Basis** and adding cash as a third line leaves the
 cliff exactly where it was. Pairing total value with **cost + cash** removes the value
