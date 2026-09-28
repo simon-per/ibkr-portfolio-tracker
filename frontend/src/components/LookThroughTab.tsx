@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { api } from '@/lib/api'
 import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -588,19 +589,13 @@ export function LookThroughTab() {
                   portfolio and are not rescaled.
                 </CardDescription>
               </div>
-              <div className="flex gap-1" role="group" aria-label="How many companies to show">
-                {LIMITS.map((option) => (
-                  <Button
-                    key={option}
-                    size="sm"
-                    variant={option === limit ? 'default' : 'outline'}
-                    aria-pressed={option === limit}
-                    onClick={() => setLimit(option)}
-                  >
-                    Top {option}
-                  </Button>
-                ))}
-              </div>
+              <SegmentedControl<LimitOption>
+                label="How many companies to show"
+                variant="buttons"
+                value={limit}
+                onChange={setLimit}
+                options={LIMITS.map(option => ({ value: option, label: `Top ${option}` }))}
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               {data.companies.length === 0 ? (

@@ -4,6 +4,7 @@ import type { Column } from './DataTable'
 import { positionColumns } from '../PositionsList'
 import { watchlistColumns } from '../watchlistColumns'
 import { lookthroughColumns } from '../LookThroughTab'
+import { cryptoHoldingColumns } from '../cryptoColumns'
 
 /**
  * The family test CLAUDE.md asks for: written against "every table that renders through
@@ -102,6 +103,27 @@ const SPARSE_LOOKTHROUGH = {
   identity_conflicts: [],
 }
 
+// An unpriced coin with nothing reported: the shape CoinStats produces for a token it
+// cannot identify, and every figure but the quantity is null.
+const SPARSE_CRYPTO_HOLDING = {
+  coin_id: 'x',
+  symbol: null,
+  name: null,
+  rank: null,
+  is_fiat: false,
+  status: 'unpriced',
+  quantity: 0,
+  price: null,
+  value: null,
+  weight_pct: null,
+  change_24h_pct: null,
+  avg_buy: null,
+  total_cost: null,
+  unrealized_pl: null,
+  unrealized_pl_pct: null,
+  realized_pl: null,
+}
+
 const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   [
     'Positions',
@@ -122,6 +144,11 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
     // directly-held listing, and one reached only directly has no contributing funds. Both
     // arrays empty at once is the shape a cell must not index into blindly.
     SPARSE_LOOKTHROUGH,
+  ],
+  [
+    'Crypto holdings',
+    cryptoHoldingColumns({ formatCurrency: money, formatPrice: money }) as never,
+    SPARSE_CRYPTO_HOLDING,
   ],
 ]
 

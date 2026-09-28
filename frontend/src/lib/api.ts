@@ -1137,6 +1137,119 @@ function activityQuery(params: ActivityParams): string {
   return s ? `?${s}` : '';
 }
 
+// ── Crypto (docs/crypto.md) ─────────────────────────────────────────────────────────
+//
+// Named exactly like the Pydantic models in backend/app/schemas/crypto.py, which is what
+// lets test_api_contract_drift.py pair them. Every money figure is already in
+// `base_currency`; `null` is "not reported" or "no exchange rate", never zero.
+
+/** One coin of the newest snapshot. Spam tokens are counted on the portfolio, never listed. */
+export interface CryptoHoldingItem {
+  coin_id: string;
+  symbol: string | null;
+  name: string | null;
+  /** CoinStats' market-cap rank. */
+  rank: number | null;
+  is_fiat: boolean;
+  /** `valued`, or `unpriced` when CoinStats has no price for it. */
+  status: string;
+  quantity: number;
+  price: number | null;
+  value: number | null;
+  /** Share of CoinStats' portfolio total — never renormalised. */
+  weight_pct: number | null;
+  change_24h_pct: number | null;
+  /** Cost, average buy and P&L are CoinStats' USD figures at the snapshot's rate. */
+  avg_buy: number | null;
+  total_cost: number | null;
+  unrealized_pl: number | null;
+  unrealized_pl_pct: number | null;
+  realized_pl: number | null;
+}
+
+/** `/api/crypto/portfolio`: the newest snapshot — totals and holdings from the same sync. */
+export interface CryptoPortfolioResponse {
+  configured: boolean;
+  base_currency: string;
+  /** When the snapshot was taken (UTC, ISO 8601); null when none exists yet. */
+  as_of: string | null;
+  total_value: number | null;
+  /** Σ of the valued holdings. */
+  itemised_value: number | null;
+  /** total − itemised: anything CoinStats totals but does not list. DeFi is not in the total. */
+  unitemised_value: number | null;
+  defi_value: number | null;
+  total_cost: number | null;
+  unrealized_pl: number | null;
+  unrealized_pl_pct: number | null;
+  realized_pl: number | null;
+  realized_pl_pct: number | null;
+  all_time_pl: number | null;
+  all_time_pl_pct: number | null;
+  change_24h: number | null;
+  change_24h_pct: number | null;
+  /** Set whenever the base is not USD — print it beside cost and P&L. */
+  fx_caveat: string | null;
+  fx_unavailable: number;
+  valued_count: number;
+  spam_count: number;
+  unpriced_count: number;
+  unpriced_symbols: string[];
+  holdings: CryptoHoldingItem[];
+  /** Valued coin ids by market-cap rank: the colour identity order. */
+  color_order: string[];
+  warnings: string[];
+}
+
+export interface CryptoHistoryPoint {
+  date: string;
+  value: number | null;
+  /** CoinStats' cash-flow-adjusted P&L on that day. */
+  pnl: number | null;
+}
+
+/** `/api/crypto/history`: CoinStats' daily history, ending at the newest snapshot. */
+export interface CryptoHistoryResponse {
+  configured: boolean;
+  base_currency: string;
+  points: CryptoHistoryPoint[];
+  fetched_at: string | null;
+  fx_caveat: string | null;
+  fx_unavailable: number;
+  warnings: string[];
+}
+
+export interface CryptoLastRun {
+  status: string;
+  reason: string | null;
+  message: string | null;
+  finished_at: string | null;
+}
+
+/** `/api/crypto/status`: the last crypto run and the credit balance it saw. */
+export interface CryptoStatusResponse {
+  configured: boolean;
+  last_run: CryptoLastRun | null;
+  last_snapshot_at: string | null;
+  next_run: string | null;
+  sync_in_progress: boolean;
+  manual_retry_after_seconds: number;
+  credits_remaining: number | null;
+  credits_total: number | null;
+  credits_plan: string | null;
+  credits_spent_last_run: number | null;
+}
+
+/** `POST /api/crypto/sync`. */
+export interface CryptoSyncResponse {
+  type: string;
+  status: string;
+  reason: string | null;
+  message: string;
+  warnings: string[];
+  timestamp: string | null;
+}
+
 /** `/health`. Identifies the running build so a deploy can be confirmed from the UI. */
 export interface HealthResponse {
   status: string;
@@ -1173,6 +1286,19 @@ export class UnauthorizedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'UnauthorizedError';
+  }
+}
+
+/**
+ * Thrown for a 403: the server refuses whoever asks. The crypto routes answer it when the
+ * server has no admin key configured at all — they fail closed rather than open — so no
+ * key the browser could add would help, and the view has to say that instead of pointing
+ * at the lock button.
+ */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
   }
 }
 
@@ -1246,6 +1372,9 @@ class ApiClient {
               ? 'The saved admin key was rejected. Update it to make changes.'
               : 'This action needs the admin key. Add it via the lock button.'
           );
+        }
+        if (response.status === 403) {
+          throw new ForbiddenError(detail);
         }
         throw new Error(detail);
       }
@@ -1500,6 +1629,25 @@ class ApiClient {
   /** <a href> target — a plain navigation, so the browser handles the download. */
   getActivityCsvUrl(params: ActivityParams = {}): string {
     return `${this.baseUrl}/api/portfolio/activity.csv${activityQuery(params)}`;
+  }
+
+  // Crypto (docs/crypto.md). Every route needs the admin key, reads included: a 401 is
+  // UnauthorizedError, and a 403 (no key configured on the server) is ForbiddenError.
+  async getCryptoPortfolio(): Promise<CryptoPortfolioResponse> {
+    return this.request<CryptoPortfolioResponse>('/api/crypto/portfolio');
+  }
+
+  async getCryptoHistory(): Promise<CryptoHistoryResponse> {
+    return this.request<CryptoHistoryResponse>('/api/crypto/history');
+  }
+
+  async getCryptoStatus(): Promise<CryptoStatusResponse> {
+    return this.request<CryptoStatusResponse>('/api/crypto/status');
+  }
+
+  /** Reaches CoinStats: a 409 means it is not configured, a 429 that a run is in flight or cooling down. */
+  async syncCrypto(): Promise<CryptoSyncResponse> {
+    return this.request<CryptoSyncResponse>('/api/crypto/sync', { method: 'POST' });
   }
 
   // Health check

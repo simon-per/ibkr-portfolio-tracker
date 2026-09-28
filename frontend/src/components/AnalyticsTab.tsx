@@ -48,7 +48,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { KpiCard, KpiCardSkeleton, ABSENT } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { api } from '@/lib/api'
@@ -228,23 +228,15 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
             {w && w.start_date !== dateRange.start ? ` · valued from ${formatDate(w.start_date)}` : ''}
           </p>
         </div>
-        <div
+        <SegmentedControl
+          label="Time range"
+          variant="buttons"
+          value={selectedRange}
+          onChange={setSelectedRange}
           className="flex gap-1 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="group"
-          aria-label="Time range"
-        >
-          {TIME_RANGES.map((range) => (
-            <Button
-              key={range}
-              variant={selectedRange === range ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSelectedRange(range)}
-              className="shrink-0 snap-start"
-            >
-              {range}
-            </Button>
-          ))}
-        </div>
+          buttonClassName="shrink-0 snap-start"
+          options={TIME_RANGES.map(range => ({ value: range, label: range }))}
+        />
       </div>
 
       {/* 1. Decomposition KPIs */}
@@ -626,13 +618,16 @@ function SegmentsCard({
               basket cannot place stays visible as its own row.
             </CardDescription>
           </div>
-          <div className="flex gap-1" role="group" aria-label="Segment dimension">
-            {(['sector', 'country'] as Dimension[]).map((d) => (
-              <Button key={d} size="sm" variant={dimension === d ? 'default' : 'outline'} onClick={() => setDimension(d)}>
-                {d === 'sector' ? 'Sector' : 'Country'}
-              </Button>
-            ))}
-          </div>
+          <SegmentedControl<Dimension>
+            label="Segment dimension"
+            variant="buttons"
+            value={dimension}
+            onChange={setDimension}
+            options={[
+              { value: 'sector', label: 'Sector' },
+              { value: 'country', label: 'Country' },
+            ]}
+          />
         </div>
       </CardHeader>
       <CardContent>

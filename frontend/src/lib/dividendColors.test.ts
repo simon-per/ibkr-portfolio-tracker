@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   dividendColor, hasIdentity, OTHER_COLOR, SERIES_HUES, SERIES_IDENTITIES, SERIES_MUTED,
+  seriesColor,
 } from './dividendColors'
 import { OTHER } from './dividendChart'
 
@@ -286,5 +287,22 @@ describe.each(['light', 'dark'] as const)('the %s palette clears its pairlist', 
     for (const [slot, sector] of [[1, 1], [4, 2], [5, 3], [6, 4]]) {
       expect(cssVar(theme, `viz-series-${slot}`)).toBe(cssVar(theme, `viz-sector-${sector}`))
     }
+  })
+})
+
+describe('seriesColor — the one assignment dividends and the crypto donut share', () => {
+  const order = Array.from({ length: SERIES_IDENTITIES + 2 }, (_, i) => `k${i}`)
+
+  it('is the dividend assignment, not a copy of it', () => {
+    for (const key of [...order, 'absent']) {
+      expect(seriesColor(key, order)).toBe(dividendColor(key, order))
+    }
+  })
+
+  it('colours a key by its place in the identity order, whatever else is shown', () => {
+    // The crypto order is market-cap rank: BTC stays slot 1 when SOL outgrows it by value.
+    expect(seriesColor('bitcoin', ['bitcoin', 'solana'])).toBe('var(--viz-series-1)')
+    expect(seriesColor('solana', ['bitcoin', 'solana'])).toBe('var(--viz-series-2)')
+    expect(seriesColor('unranked', ['bitcoin'])).toBe(OTHER_COLOR)
   })
 })

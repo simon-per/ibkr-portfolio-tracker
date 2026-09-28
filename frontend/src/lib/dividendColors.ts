@@ -45,18 +45,32 @@ const MUTED = Array.from({ length: SERIES_MUTED }, (_, i) => `var(--viz-series-m
 export const OTHER_COLOR = 'var(--viz-series-other)'
 
 /**
- * A symbol's colour, by its rank in the response's `stack_order`.
+ * A key's colour, by its position in an identity order the server computed.
  *
- * Anything the order does not carry — a projected payment for a security whose history the
- * slice never mentioned — falls to the Other grey rather than throwing, which is the honest
- * answer for a symbol with no place in the ranking.
+ * Generalised from `dividendColor` on 2026-09-28 for the crypto donut, whose order is
+ * `color_order` — valued coins by CoinStats' market-cap rank, which belongs to the coin and
+ * not to its size in the portfolio. Same palette, same folding rule, one implementation:
+ * a second copy of this assignment is exactly how two charts come to disagree about which
+ * colour a thing is.
+ *
+ * Anything the order does not carry falls to the Other grey rather than throwing, which is
+ * the honest answer for a key with no place in the ranking.
  */
-export function dividendColor(symbol: string, stackOrder: readonly string[]): string {
-  // The fold's own key is not a symbol and is never in `stack_order`, so it lands here
-  // through the same branch an unranked symbol does.
-  const rank = stackOrder.indexOf(symbol)
+export function seriesColor(key: string, order: readonly string[]): string {
+  const rank = order.indexOf(key)
   if (rank < 0 || rank >= SERIES_IDENTITIES) return OTHER_COLOR
   return rank < SERIES_HUES ? HUES[rank] : MUTED[rank - SERIES_HUES]
+}
+
+/**
+ * A symbol's colour, by its rank in the response's `stack_order`.
+ *
+ * A projected payment for a security whose history the slice never mentioned is not in
+ * the order, and the fold's own key is never in it; both land on Other through the same
+ * branch.
+ */
+export function dividendColor(symbol: string, stackOrder: readonly string[]): string {
+  return seriesColor(symbol, stackOrder)
 }
 
 /** True while the symbol is drawn as itself rather than folded away. */

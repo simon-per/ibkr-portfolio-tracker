@@ -15,6 +15,40 @@ export function formatCurrency(value: number, currency: string = "EUR"): string 
 }
 
 /**
+ * A per-unit price that keeps its significant digits.
+ *
+ * `formatCurrency` is fixed at two decimals, which is right for amounts and wrong for a
+ * crypto price: a token worth 0.0000123 would print as "$0.00" — a price of zero, which
+ * reads as worthless rather than cheap. Below 1 this keeps up to six significant digits
+ * instead; at 1 and above it is exactly `formatCurrency`.
+ */
+export function formatPrice(value: number, currency: string = "EUR"): string {
+  const abs = Math.abs(value)
+  if (abs === 0 || abs >= 1 || !Number.isFinite(value)) return formatCurrency(value, currency)
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumSignificantDigits: 2,
+    maximumSignificantDigits: 6,
+  }).format(value)
+}
+
+/**
+ * A holding's quantity, with no more digits than it needs: "5", "0.01", "1,000,000",
+ * "0.00012345". Below 1 it keeps six significant digits (a 0.00000123 BTC balance is not
+ * zero); from 1 it keeps up to four decimals, and from 1,000 up to two.
+ */
+export function formatQuantity(value: number): string {
+  const abs = Math.abs(value)
+  if (abs > 0 && abs < 1) {
+    return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 6 }).format(value)
+  }
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: abs >= 1000 ? 2 : 4,
+  }).format(value)
+}
+
+/**
  * A word-length code is separated from its amount by a **non-breaking** space
  * (U+00A0), written as an escape here so it cannot be mistaken for a plain space
  * or silently normalised by an editor. That is what `Intl.NumberFormat` itself

@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import {
   API_KEY_STORAGE_KEY,
+  ForbiddenError,
   UnauthorizedError,
   api,
   describeErrorBody,
@@ -216,5 +217,41 @@ describe('request', () => {
   it('propagates a network failure as an Error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
     await expect(api.getSettings()).rejects.toThrow(/Failed to fetch/)
+  })
+})
+
+describe('the crypto routes', () => {
+  it("turns a 403 into ForbiddenError carrying the server's reason", async () => {
+    // The crypto routes fail closed: with no key configured on the server they answer 403,
+    // which no key in the browser can fix — the view must be able to tell it from a 401.
+    mockFetch(
+      { detail: 'This endpoint serves private data and the server has no admin key configured.' },
+      { ok: false, status: 403, statusText: 'Forbidden' },
+    )
+    const failure = api.getCryptoPortfolio()
+    await expect(failure).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(failure).rejects.toThrow('no admin key configured')
+  })
+
+  it('keeps a 401 an UnauthorizedError, which the lock button can fix', async () => {
+    mockFetch({ detail: 'nope' }, { ok: false, status: 401, statusText: 'Unauthorized' })
+    await expect(api.getCryptoStatus()).rejects.toBeInstanceOf(UnauthorizedError)
+  })
+
+  it('reads and syncs at the documented paths, sending the key on reads too', async () => {
+    setApiKey('secret')
+    const spy = mockFetch({})
+    await api.getCryptoPortfolio()
+    await api.getCryptoHistory()
+    await api.getCryptoStatus()
+    await api.syncCrypto()
+    const calls = spy.mock.calls.map(([url, init]) => [String(url), init?.method ?? 'GET'])
+    expect(calls.map(([url]) => url.slice(url.indexOf('/api/')))).toEqual([
+      '/api/crypto/portfolio', '/api/crypto/history', '/api/crypto/status', '/api/crypto/sync',
+    ])
+    expect(calls[3][1]).toBe('POST')
+    for (const [, init] of spy.mock.calls) {
+      expect(init.headers['X-API-Key']).toBe('secret')
+    }
   })
 })

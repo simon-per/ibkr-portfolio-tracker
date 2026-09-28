@@ -20,6 +20,7 @@ import { DividendWithholdingControl } from './DividendWithholdingControl'
 import { cn } from '@/lib/utils'
 import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 function SourceBadge({ row }: { row: DividendSecurityRow }) {
   if (row.payouts === 0 && row.forecast_payouts > 0) {
@@ -418,22 +419,15 @@ export function DividendsTab() {
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label="Dividend chart view">
-              {(['monthly', 'ttm'] as const).map(mode => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={chartMode === mode}
-                  onClick={() => setChartMode(mode)}
-                  className={cn(
-                    'h-8 rounded px-3 text-sm font-medium transition-colors',
-                    chartMode === mode ? 'bg-primary text-primary-foreground' : 'hover:bg-accent',
-                  )}
-                >
-                  {mode === 'monthly' ? 'Monthly' : 'TTM'}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              label="Dividend chart view"
+              value={chartMode}
+              onChange={setChartMode}
+              options={[
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'ttm', label: 'TTM' },
+              ]}
+            />
             <label htmlFor="dividend-year" className="sr-only">
               Dividend period
             </label>

@@ -39,8 +39,8 @@ const DividendsTab = lazy(() => import('./DividendsTab').then(m => ({ default: m
 const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ default: m.LookThroughTab })))
 const AnalyticsTab = lazy(() => import('./AnalyticsTab').then(m => ({ default: m.AnalyticsTab })))
 import { cashIsTracked } from '@/lib/portfolioCash'
-import { ThemeToggle } from './ThemeToggle'
-import { AdminKeyButton } from './AdminKeyButton'
+import { AppHeader } from './AppHeader'
+import { AppFooter } from './AppFooter'
 import { SyncStatusMessage } from './SyncStatusMessage'
 import { BenchmarkPicker } from './BenchmarkPicker'
 import { benchmarkColor } from '@/lib/benchmarkColors'
@@ -94,10 +94,9 @@ export function readSelectedBenchmarks(): string[] {
 
 export function Dashboard() {
   const queryClient = useQueryClient()
-  const {
-    baseCurrency, supportedCurrencies, setBaseCurrency,
-    isUpdating: currencyUpdating, updateError: currencyError, currencyIsAssumed,
-  } = useBaseCurrency()
+  // The currency controls themselves live in the shared AppHeader; this view only needs
+  // the code for its own captions.
+  const { baseCurrency } = useBaseCurrency()
   const curSym = useCurrencySymbol()
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
@@ -243,15 +242,6 @@ export function Dashboard() {
     refetchInterval: 60_000,
   })
 
-  // Which build is live, whether the scheduler is armed, and whether writes are
-  // protected. Rendered in the footer so "did my deploy land" is answerable from the
-  // browser instead of over ssh. Refetched on mount only — it changes on deploy.
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => api.healthCheck(),
-    staleTime: Infinity,
-  })
-
   // The header line's value change and period gain over the selected range. Extracted
   // to `periodChange` and unit-tested: inline it read the raw endpoints of a series every
   // other consumer trims, and published `0%` for two percentages that were undefined —
@@ -368,131 +358,95 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b border-border/70 bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-        <div className="mx-auto w-full max-w-[1400px] px-4 py-3 sm:px-6 sm:py-4">
-          {/* Wraps below `sm`: the title block and the four controls cannot share a
-              358px row, and `justify-between` on a row that cannot wrap is what pushed
-              the cluster past the viewport edge. `items-start` so the controls sit
-              level with the title rather than with the bottom of the status block. */}
-          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Portfolio Analyzer</h1>
-              {/* Hidden below `sm`: the strapline costs a line of an 844px screen and
-                  tells a returning user nothing they do not already know. */}
-              <p className="text-muted-foreground mt-1 hidden sm:block">
-                Track your IBKR portfolio with cost basis and market value
-              </p>
-              {schedulerStatus && schedulerStatus.status === 'running' && (
-                // Short timestamps at every width, not short only on phones: two full
-                // toLocaleString() values are ~50 characters each, and "8/2/26, 8:00 AM"
-                // answers "did the sync run" just as well on a desktop. One format,
-                // nothing to drift.
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3 shrink-0" />
-                  {schedulerStatus.last_sync ? (
-                    <span>
-                      Last sync: {formatShortDateTime(schedulerStatus.last_sync.timestamp)} ({schedulerStatus.last_sync.status})
-                    </span>
-                  ) : (
-                    <span>No sync has run yet</span>
-                  )}
-                  {schedulerStatus.jobs.length > 0 && schedulerStatus.jobs[0].next_run_time && (
-                    <span>
-                      · Next: {formatShortDateTime(schedulerStatus.jobs[0].next_run_time)}
-                    </span>
-                  )}
-                </div>
-              )}
-              {/* A bare "(error)" isn't actionable — show what actually went wrong. */}
-              {schedulerStatus?.last_sync?.status === 'error' && schedulerStatus.last_sync.message && (
-                <p className="mt-1 max-w-3xl text-xs text-amber-700 dark:text-amber-400">
-                  {schedulerStatus.last_sync.message}
-                </p>
-              )}
-              {/* Warnings ride on SUCCESSFUL runs (stale prices, skipped lots,
-                  reclassified transfers) — they were computed and persisted but
-                  never rendered anywhere, which is how a mispriced position once
-                  went unnoticed for months. */}
-              {(schedulerStatus?.last_sync?.warnings?.length ?? 0) > 0 && (
-                <details className="mt-1 max-w-3xl">
-                  <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-400">
-                    ⚠ {schedulerStatus?.last_sync?.warnings?.length} warning
-                    {(schedulerStatus?.last_sync?.warnings?.length ?? 0) > 1 ? 's' : ''} from the
-                    last sync
-                  </summary>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-amber-700/90 dark:text-amber-400/90">
-                    {(schedulerStatus?.last_sync?.warnings ?? []).map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </div>
-            {/* Wraps: at 390px the currency select plus the sync button are
-                wider than the viewport, and without this the whole page scrolled
-                horizontally by ~25px on every tab. */}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <select
-                value={baseCurrency}
-                onChange={(e) => setBaseCurrency(e.target.value)}
-                disabled={currencyUpdating}
-                title="Base currency"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium disabled:opacity-50"
-              >
-                {supportedCurrencies.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              {currencyError && (
-                <span className="max-w-[12rem] text-xs leading-tight text-red-600 dark:text-red-400" role="alert">
-                  {currencyError}
-                </span>
-              )}
-              {/* Without this the app labels every figure `€` on a failed settings
-                  fetch while the numbers behind them are whatever the account
-                  actually uses — and `staleTime: Infinity` makes that stick for the
-                  session rather than blink. */}
-              {currencyIsAssumed && !currencyError && (
-                <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
-                  Couldn't read your display currency — showing {baseCurrency}, which may not be it.
-                </span>
-              )}
-              <ThemeToggle />
-              <AdminKeyButton writeAuthEnabled={health?.write_auth_enabled} />
-              {/* The label is hidden below `sm`, not the button, and not moved into an
-                  overflow menu — that would be a second rendering of a four-control
-                  set. The icon plus this name carry the same meaning to a screen
-                  reader as the visible label does. */}
-              <Button
-                onClick={handleSync}
-                disabled={syncMutation.isPending}
-                variant="outline"
-                className="px-3 sm:px-4"
-                aria-label={syncMutation.isPending ? 'Syncing IBKR data' : 'Sync IBKR data'}
-              >
-                {syncMutation.isPending ? (
-                  <RefreshCw className="h-4 w-4 animate-spin sm:mr-2" />
+      {/* Header — shared with the crypto view; this view fills its three slots. */}
+      <AppHeader
+        strapline="Track your IBKR portfolio with cost basis and market value"
+        status={
+          <>
+            {schedulerStatus && schedulerStatus.status === 'running' && (
+              // Short timestamps at every width, not short only on phones: two full
+              // toLocaleString() values are ~50 characters each, and "8/2/26, 8:00 AM"
+              // answers "did the sync run" just as well on a desktop. One format,
+              // nothing to drift.
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3 shrink-0" />
+                {schedulerStatus.last_sync ? (
+                  <span>
+                    Last sync: {formatShortDateTime(schedulerStatus.last_sync.timestamp)} ({schedulerStatus.last_sync.status})
+                  </span>
                 ) : (
-                  <Download className="h-4 w-4 sm:mr-2" />
+                  <span>No sync has run yet</span>
                 )}
-                <span className="hidden sm:inline">
-                  {syncMutation.isPending ? 'Syncing...' : 'Sync IBKR Data'}
-                </span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Sync status messages — see SyncStatusMessage for why the skip state is
-              neutral rather than red. */}
-          <SyncStatusMessage
-            data={syncMutation.isSuccess ? syncMutation.data : undefined}
-            error={syncMutation.isError ? syncMutation.error : null}
-            isPending={syncMutation.isPending}
-            onForce={() => syncMutation.mutate(true)}
-          />
-        </div>
-      </div>
+                {schedulerStatus.jobs.length > 0 && schedulerStatus.jobs[0].next_run_time && (
+                  <span>
+                    · Next: {formatShortDateTime(schedulerStatus.jobs[0].next_run_time)}
+                  </span>
+                )}
+              </div>
+            )}
+            {/* A bare "(error)" isn't actionable — show what actually went wrong. */}
+            {schedulerStatus?.last_sync?.status === 'error' && schedulerStatus.last_sync.message && (
+              <p className="mt-1 max-w-3xl text-xs text-amber-700 dark:text-amber-400">
+                {schedulerStatus.last_sync.message}
+              </p>
+            )}
+            {/* Warnings ride on SUCCESSFUL runs (stale prices, skipped lots,
+                reclassified transfers) — they were computed and persisted but
+                never rendered anywhere, which is how a mispriced position once
+                went unnoticed for months. */}
+            {(schedulerStatus?.last_sync?.warnings?.length ?? 0) > 0 && (
+              <details className="mt-1 max-w-3xl">
+                <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-400">
+                  ⚠ {schedulerStatus?.last_sync?.warnings?.length} warning
+                  {(schedulerStatus?.last_sync?.warnings?.length ?? 0) > 1 ? 's' : ''} from the
+                  last sync
+                </summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-amber-700/90 dark:text-amber-400/90">
+                  {(schedulerStatus?.last_sync?.warnings ?? []).map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        }
+        actions={
+          <>
+            {/* The label is hidden below `sm`, not the button, and not moved into an
+                overflow menu — that would be a second rendering of a four-control
+                set. The icon plus this name carry the same meaning to a screen
+                reader as the visible label does. */}
+            <Button
+              onClick={handleSync}
+              disabled={syncMutation.isPending}
+              variant="outline"
+              className="px-3 sm:px-4"
+              aria-label={syncMutation.isPending ? 'Syncing IBKR data' : 'Sync IBKR data'}
+            >
+              {syncMutation.isPending ? (
+                <RefreshCw className="h-4 w-4 animate-spin sm:mr-2" />
+              ) : (
+                <Download className="h-4 w-4 sm:mr-2" />
+              )}
+              <span className="hidden sm:inline">
+                {syncMutation.isPending ? 'Syncing...' : 'Sync IBKR Data'}
+              </span>
+            </Button>
+          </>
+        }
+        below={
+          <>
+            {/* Sync status messages — see SyncStatusMessage for why the skip state is
+                neutral rather than red. */}
+            <SyncStatusMessage
+              data={syncMutation.isSuccess ? syncMutation.data : undefined}
+              error={syncMutation.isError ? syncMutation.error : null}
+              isPending={syncMutation.isPending}
+              onForce={() => syncMutation.mutate(true)}
+            />
+          </>
+        }
+      />
 
       {/* Main Content. Constrained and centred: at 1440px and wider a full-bleed grid of
           KPI cards reads as a spreadsheet, and every reference app constrains its content. */}
@@ -766,33 +720,7 @@ export function Dashboard() {
         </Tabs>
       </div>
 
-      {/* Build identity. /health used to return only {"status":"healthy"}, so
-          confirming a deploy had landed — or that the scheduler was armed at all —
-          meant ssh'ing to the box. */}
-      {health && (
-        <footer className="border-t">
-          {/* A flex row rather than inline spans with `ml-*`: those margins survive a
-              wrap and indent the start of the next line. */}
-          <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs text-muted-foreground">
-            <span>Portfolio Analyzer v{health.version}</span>
-            {health.commit && health.commit !== 'unknown' && (
-              <span className="font-mono">{health.commit.slice(0, 7)}</span>
-            )}
-            {/* Both call out a *disabled* safeguard, never a working one: a scheduler
-                that has quietly stopped looks exactly like a healthy site. */}
-            {!health.scheduler_enabled && (
-              <span className="text-amber-700 dark:text-amber-400">
-                · scheduler disabled — no automatic syncs
-              </span>
-            )}
-            {!health.write_auth_enabled && (
-              <span className="text-amber-700 dark:text-amber-400">
-                · write API unauthenticated
-              </span>
-            )}
-          </div>
-        </footer>
-      )}
+      <AppFooter />
     </div>
   )
 }

@@ -11,7 +11,8 @@ interface AdminKeyButtonProps {
 }
 
 /**
- * Set or clear the admin key that authorises writes.
+ * Set or clear the admin key that authorises writes — and, for the crypto book, reads too
+ * (its routes are private: docs/crypto.md).
  *
  * The API is a single-tenant deployment behind a public nginx, so the key is a shared
  * secret rather than a per-user credential — there is no login to hang it off, and
@@ -45,6 +46,9 @@ export function AdminKeyButton({ writeAuthEnabled }: AdminKeyButtonProps) {
     setSaved(false)
     setDraft('')
     setOpen(false)
+    // Private figures must not outlive the key that unlocked them: without this the crypto
+    // book stays on screen, from the cache, until something happens to refetch it.
+    queryClient.removeQueries({ queryKey: ['crypto'] })
   }
 
   return (
@@ -63,8 +67,8 @@ export function AdminKeyButton({ writeAuthEnabled }: AdminKeyButtonProps) {
         <div>
           <p className="text-sm font-medium">Admin key</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Required to sync, change the base currency, or edit the watchlist. Reading the
-            portfolio never needs it.
+            Required to sync, change the base currency, edit the watchlist, or view the
+            crypto book. Reading the stock portfolio never needs it.
           </p>
         </div>
         <form

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { Download, ArrowLeftRight, Banknote, Coins, Split } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -288,56 +289,44 @@ export function ActivityTab() {
                 second row — and the kind group below cost two more. The negative
                 margin plus matching padding let the row reach the card edge, so the
                 next pill is visibly half-cut instead of the group looking complete. */}
-            <div
+            <SegmentedControl
+              label="Time range"
+              variant="buttons"
+              value={range}
+              onChange={r => withReset(setRange)(r)}
               className="-mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto px-1 sm:flex-wrap sm:overflow-visible"
-              role="group"
-              aria-label="Time range"
-            >
-              {RANGES.map(r => (
-                <Button
-                  key={r}
-                  size="sm"
-                  variant={range === r ? 'default' : 'outline'}
-                  aria-pressed={range === r}
-                  onClick={() => withReset(setRange)(r)}
-                  className="shrink-0 snap-start"
-                >
-                  {r}
-                </Button>
-              ))}
-            </div>
+              buttonClassName="shrink-0 snap-start"
+              options={RANGES.map(r => ({ value: r, label: r }))}
+            />
 
-            <div
+            {/* Empty selection means everything, so nothing is highlighted and no
+                combination of clicks can produce an empty table by accident. */}
+            <SegmentedControl
+              label="Event types"
+              variant="buttons"
+              isSelected={kind => kinds.includes(kind)}
+              onToggle={kind => toggleKind(kind)}
               className="-mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto px-1 sm:flex-wrap sm:overflow-visible"
-              role="group"
-              aria-label="Event types"
-            >
-              {ALL_KINDS.map(kind => {
+              buttonClassName="shrink-0 snap-start px-2.5 sm:px-3"
+              options={ALL_KINDS.map(kind => {
                 const Icon = KIND_ICONS[kind]
-                // Empty selection means everything, so nothing is highlighted and no
-                // combination of clicks can produce an empty table by accident.
-                const active = kinds.includes(kind)
-                return (
-                  <Button
-                    key={kind}
-                    size="sm"
-                    variant={active ? 'default' : 'outline'}
-                    aria-pressed={active}
-                    onClick={() => toggleKind(kind)}
-                    className="shrink-0 snap-start px-2.5 sm:px-3"
-                  >
-                    {/* Icon-only below `sm`: "Corporate actions" and its three siblings
-                        come to ~430px of labels, and the icons are already the thing
-                        that distinguishes them. The label survives for screen readers,
-                        so this sheds pixels rather than meaning — the same trade
-                        DividendYearComparison makes for its bar at this width. */}
-                    <Icon className="h-4 w-4 sm:mr-1.5 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
-                    <span className="hidden sm:inline">{KIND_LABELS[kind]}</span>
-                    <span className="sr-only sm:hidden">{KIND_LABELS[kind]}</span>
-                  </Button>
-                )
+                return {
+                  value: kind,
+                  label: (
+                    <>
+                      {/* Icon-only below `sm`: "Corporate actions" and its three siblings
+                          come to ~430px of labels, and the icons are already the thing
+                          that distinguishes them. The label survives for screen readers,
+                          so this sheds pixels rather than meaning — the same trade
+                          DividendYearComparison makes for its bar at this width. */}
+                      <Icon className="h-4 w-4 sm:mr-1.5 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
+                      <span className="hidden sm:inline">{KIND_LABELS[kind]}</span>
+                      <span className="sr-only sm:hidden">{KIND_LABELS[kind]}</span>
+                    </>
+                  ),
+                }
               })}
-            </div>
+            />
 
             <form
               onSubmit={e => {

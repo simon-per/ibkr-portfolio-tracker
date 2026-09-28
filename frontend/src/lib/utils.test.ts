@@ -5,6 +5,8 @@ import {
   formatCurrency,
   formatDate,
   formatPercent,
+  formatPrice,
+  formatQuantity,
   formatShortDateTime,
   parseLocalDate,
   tooltipValue,
@@ -188,5 +190,38 @@ describe('cn', () => {
   it('lets a later Tailwind class win over an earlier conflicting one', () => {
     // The reason this wraps twMerge rather than clsx alone.
     expect(cn('p-2', 'p-4')).toBe('p-4')
+  })
+})
+
+describe('formatPrice', () => {
+  it('is formatCurrency from 1 up', () => {
+    expect(formatPrice(60_000, 'USD')).toBe(formatCurrency(60_000, 'USD'))
+    expect(formatPrice(1, 'EUR')).toBe('€1.00')
+  })
+
+  it('keeps the significant digits of a sub-unit price instead of printing 0.00', () => {
+    // A token worth 0.0000123 is cheap, not worthless — "$0.00" says worthless.
+    expect(formatPrice(0.0000123, 'USD')).toBe('$0.0000123')
+    expect(formatPrice(0.5, 'USD')).toBe('$0.50')
+    expect(formatPrice(0.123456789, 'USD')).toBe('$0.123457')
+  })
+
+  it('stays pinned to en-US in every currency', () => {
+    expect(formatPrice(0.25, 'CHF')).toBe('CHF\u00a00.25')
+    expect(formatPrice(0, 'EUR')).toBe('€0.00')
+  })
+})
+
+describe('formatQuantity', () => {
+  it('prints no more digits than a holding needs', () => {
+    expect(formatQuantity(5)).toBe('5')
+    expect(formatQuantity(0.01)).toBe('0.01')
+    expect(formatQuantity(1_000_000)).toBe('1,000,000')
+    expect(formatQuantity(12.345678)).toBe('12.3457')
+  })
+
+  it('keeps a small balance visible rather than rounding it to 0', () => {
+    expect(formatQuantity(0.00000123)).toBe('0.00000123')
+    expect(formatQuantity(0.000123456789)).toBe('0.000123457')
   })
 })
