@@ -336,20 +336,14 @@ class BenchmarkService:
     async def _preload_fx_rates(
         self, from_currency: str, start_date: date, end_date: date, lookback_days: int = 14
     ) -> Dict[date, Decimal]:
-        """Load from_currency→EUR exchange rates into {date: rate} dict."""
-        extended_start = start_date - timedelta(days=lookback_days)
-        result = await self.db.execute(
-            select(ExchangeRate)
-            .where(
-                and_(
-                    ExchangeRate.from_currency == from_currency,
-                    ExchangeRate.to_currency == "EUR",
-                    ExchangeRate.date >= extended_start,
-                    ExchangeRate.date <= end_date,
-                )
-            )
+        """Load from_currency→EUR exchange rates into {date: rate} dict. The query is
+        `fx_preload`'s, shared with the portfolio and crypto readers."""
+        from app.services.fx_preload import preload_eur_rates
+
+        cache = await preload_eur_rates(
+            self.db, {from_currency}, start_date, end_date, lookback_days
         )
-        return {er.date: er.rate for er in result.scalars().all()}
+        return {day: rate for (_currency, day), rate in cache.items()}
 
     @staticmethod
     def _get_with_fallback(

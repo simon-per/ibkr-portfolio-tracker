@@ -2,7 +2,6 @@
 Portfolio Service
 Calculates cost basis and market value for the portfolio over time.
 """
-import bisect
 import calendar
 from collections import defaultdict
 from typing import List, Dict, Optional, Sequence, Tuple
@@ -20,6 +19,10 @@ from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED
 from app.services.native_amounts import NativeToBase
+# `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
+# benchmark_service import it from.
+from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
+from app.services.fx_preload import eur_rate_on, preload_eur_rates
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
@@ -46,47 +49,6 @@ def _shift_months(from_date: date, months: int) -> date:
     year, month = divmod(total, 12)
     month += 1
     return date(year, month, min(from_date.day, calendar.monthrange(year, month)[1]))
-
-
-class BaseFx:
-    """
-    Converts EUR-denominated amounts into the selected base (display) currency
-    at a given date. The whole portfolio pipeline computes values in EUR; this
-    applies a single EUR->base factor as a read-time projection.
-
-    - Cost basis is converted at each lot's open_date (so the cost-basis line
-      only moves on buys/sells, never with day-to-day FX).
-    - Market value is converted at the valuation date.
-
-    When base_currency == 'EUR' this is a no-op (rate 1.0).
-    """
-
-    def __init__(self, base_currency: str, rate_cache: Dict[date, Decimal]):
-        self.base_currency = base_currency
-        self.rate_cache = rate_cache  # {date: EUR->base rate}
-        self._sorted_dates = sorted(rate_cache.keys())
-
-    def _rate_on(self, on_date: date) -> Optional[Decimal]:
-        rate = self.rate_cache.get(on_date)
-        if rate is not None:
-            return rate
-        if not self._sorted_dates:
-            return None
-        # Carry-forward: most recent rate on/before on_date
-        idx = bisect.bisect_right(self._sorted_dates, on_date)
-        if idx > 0:
-            return self.rate_cache[self._sorted_dates[idx - 1]]
-        # on_date precedes all cached rates: carry the earliest back
-        return self.rate_cache[self._sorted_dates[0]]
-
-    def convert(self, amount_eur: Decimal, on_date: date) -> Decimal:
-        if self.base_currency == "EUR" or not amount_eur:
-            return amount_eur
-        rate = self._rate_on(on_date)
-        if rate is None:
-            # No rate available anywhere: fall back to EUR value rather than zero.
-            return amount_eur
-        return amount_eur * rate
 
 
 class PortfolioService:
@@ -129,45 +91,16 @@ class PortfolioService:
         Build a BaseFx for the configured base currency, loading EUR->base daily
         rates over the full portfolio history (earliest lot open_date .. today).
 
-        Reads cached ExchangeRate rows; if none exist yet (base just switched and
-        backfill was skipped), fetches the whole range once from Frankfurter.
+        The loader itself is `base_fx.load_base_fx`, shared with the crypto view, which
+        loads over its own window; this method only decides the stock book's window.
         """
         base_currency = await self.get_base_currency()
         if base_currency == "EUR":
             return BaseFx("EUR", {})
-
-        from app.models.exchange_rate import ExchangeRate
-
-        today = date.today()
         min_open = (await self.db.execute(select(func.min(TaxLot.open_date)))).scalar()
-        start = min_open or (today - timedelta(days=365))
-
-        async def load_cache() -> Dict[date, Decimal]:
-            rows = (await self.db.execute(
-                select(ExchangeRate).where(
-                    ExchangeRate.from_currency == "EUR",
-                    ExchangeRate.to_currency == base_currency,
-                    ExchangeRate.date >= start,
-                    ExchangeRate.date <= today,
-                )
-            )).scalars().all()
-            return {r.date: r.rate for r in rows}
-
-        cache = await load_cache()
-        if not cache:
-            # Safety net: populate EUR->base history once, then reload.
-            try:
-                await self.currency_service._batch_fetch_rates(
-                    from_currency="EUR",
-                    target_date=today,
-                    to_currency=base_currency,
-                    days_back=max((today - start).days, 30),
-                )
-                cache = await load_cache()
-            except Exception as e:
-                logger.warning(f"Could not backfill EUR->{base_currency} rates: {e}")
-
-        return BaseFx(base_currency, cache)
+        return await load_base_fx(
+            self.db, self.currency_service, base_currency, default_start(min_open)
+        )
 
     async def _load_position_start_dates(self) -> Dict[int, date]:
         """
@@ -1979,8 +1912,6 @@ class PortfolioService:
 
         Returns: {(from_currency, date): rate}
         """
-        from app.models.exchange_rate import ExchangeRate
-
         currencies = {s.currency for s in securities if s.currency != 'EUR'}
 
         # Also include actual price currencies (may differ from security.currency)
@@ -1989,32 +1920,11 @@ class PortfolioService:
                 if price_curr != 'EUR':
                     currencies.add(price_curr)
 
-        if not currencies:
-            return {}
-
-        # Extend start_date backwards to support forward-fill
-        extended_start_date = start_date - timedelta(days=lookback_days)
-
-        result = await self.db.execute(
-            select(ExchangeRate)
-            .where(
-                and_(
-                    ExchangeRate.from_currency.in_(currencies),
-                    ExchangeRate.to_currency == 'EUR',
-                    ExchangeRate.date >= extended_start_date,
-                    ExchangeRate.date <= end_date
-                )
-            )
+        # One query over the window, extended backwards for the forward-fill; the query
+        # and the fill are `fx_preload`'s, shared with the benchmark and crypto readers.
+        return await preload_eur_rates(
+            self.db, currencies, start_date, end_date, lookback_days
         )
-
-        all_rates = result.scalars().all()
-
-        # Build dict: {(from_currency, date): rate}
-        rate_cache = {}
-        for rate in all_rates:
-            rate_cache[(rate.from_currency, rate.date)] = rate.rate
-
-        return rate_cache
 
     def _get_market_price_with_fallback(
         self,
@@ -2083,28 +1993,13 @@ class PortfolioService:
         Returns:
             Exchange rate as Decimal, or None if no rate found within lookback window
         """
-        # Try exact date first
-        rate = exchange_rate_cache.get((from_currency, target_date))
-        if rate:
-            return rate
-
-        # Try previous days (up to max_lookback_days)
-        for days_back in range(1, max_lookback_days + 1):
-            fallback_date = target_date - timedelta(days=days_back)
-            rate = exchange_rate_cache.get((from_currency, fallback_date))
-            if rate:
-                logger.debug(
-                    f"Using {days_back}-day-old exchange rate for {from_currency} "
-                    f"on {target_date}: {rate} (from {fallback_date})"
-                )
-                return rate
-
-        # No rate found within lookback window
-        logger.warning(
-            f"No exchange rate found for {from_currency} on {target_date} "
-            f"(checked {max_lookback_days} days back)"
-        )
-        return None
+        rate = eur_rate_on(exchange_rate_cache, from_currency, target_date, max_lookback_days)
+        if rate is None:
+            logger.warning(
+                f"No exchange rate found for {from_currency} on {target_date} "
+                f"(checked {max_lookback_days} days back)"
+            )
+        return rate
 
     def _calculate_daily_value(
         self,
