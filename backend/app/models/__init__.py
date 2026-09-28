@@ -25,6 +25,8 @@ from app.models.sync_run import SyncRun
 from app.models.ticker_mapping import TickerMapping
 from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.isin_identity import IsinIdentity
+# The crypto book (docs/crypto.md): its own tables, read by nothing on the stock side.
+from app.models.crypto import CryptoSnapshot, CryptoHolding, CryptoDailyPoint
 
 __all__ = [
     "Security",
@@ -48,4 +50,7 @@ __all__ = [
     "EtfBasket",
     "EtfHolding",
     "IsinIdentity",
+    "CryptoSnapshot",
+    "CryptoHolding",
+    "CryptoDailyPoint",
 ]

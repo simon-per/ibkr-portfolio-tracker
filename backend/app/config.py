@@ -32,6 +32,20 @@ class Settings(BaseSettings):
     # has to be in place *before* `IDENTITY_MAX_ISINS` is worth raising.
     openfigi_api_key: str = ""
 
+    # CoinStats public API, which feeds the crypto view (docs/crypto.md). All three are
+    # optional and empty by default: without the key *and* the share token the crypto sync
+    # does nothing and the view says it is not configured.
+    #
+    # The share token is what makes the portfolio the owner connected *in the CoinStats
+    # app* reachable at all — the API's `portfolioId` only covers portfolios connected
+    # through the API itself — and it grants read access to that portfolio to anyone who
+    # holds it, so it is a secret exactly like the key. The passcode is the optional
+    # 6-digit lock CoinStats puts on a share link. All three travel in request headers,
+    # never the URL, and app/redact.py masks the two long ones.
+    coin_stats_api_key: str = ""
+    coin_stats_share_token: str = ""
+    coin_stats_share_passcode: str = ""
+
     # Database Configuration
     database_url: str = "sqlite+aiosqlite:///./portfolio.db"
 

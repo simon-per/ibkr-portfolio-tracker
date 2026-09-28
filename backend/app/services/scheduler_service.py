@@ -226,6 +226,24 @@ FULL_SYNC_HOUR = 18
 MARKET_DATA_HOURS = (8, 11, 13, 15, 20, 22)
 ALL_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_DATA_HOURS}))
 
+# The crypto sync (docs/crypto.md) rides the same eight slots **by derivation, not by
+# copy**, so the deploy guard — which is checked against ALL_SYNC_HOURS — already covers
+# every crypto run and no ops script needs to learn a new hour. It shares minute :00 with
+# the stock jobs on purpose: its only upstream is CoinStats, it holds no gate the stock
+# jobs use, and it never opens a write transaction during an HTTP call.
+CRYPTO_SYNC_HOURS = ALL_SYNC_HOURS
+
+# Which pipeline a registered job belongs to. The public `/api/scheduler/status` lists
+# the stock group only — the dashboard reads `jobs[0]` as its "Next:" and the daily
+# validator counts the jobs — while `/api/crypto/status` reads the crypto group.
+STOCK_JOB_GROUP = "stock"
+CRYPTO_JOB_GROUP = "crypto"
+
+# The `sync_runs.sync_type` values the stock scheduler's own jobs record — the
+# `_gated_job` names below and the `type` of each job's result. The status endpoint's
+# "last sync" means the newest of these, never a crypto run that finished later.
+SCHEDULED_JOB_TYPES = ("full_sync", "market_data_only", "ibkr_sync")
+
 
 def _collect_warnings(job_result: dict, *step_results) -> None:
     """
@@ -273,6 +291,8 @@ class SchedulerService:
         # Ids registered by this build, filled in by `_add_or_keep` and consumed by
         # `_prune_unknown_jobs` to evict jobs the persistent store outlived.
         self._registered_job_ids: set = set()
+        # job id -> STOCK_JOB_GROUP | CRYPTO_JOB_GROUP, from the same registration.
+        self._job_groups: dict = {}
 
     async def sync_ibkr_data(self, force: bool = False) -> dict:
         """
@@ -1395,7 +1415,10 @@ class SchedulerService:
         logger.info("=" * 80)
         return self.last_sync_result
 
-    def _add_or_keep(self, job_id: str, func, trigger: CronTrigger, name: str) -> None:
+    def _add_or_keep(
+        self, job_id: str, func, trigger: CronTrigger, name: str,
+        group: str = STOCK_JOB_GROUP,
+    ) -> None:
         """
         Register a job, **preserving a stored run time when the schedule is unchanged**.
 
@@ -1412,6 +1435,7 @@ class SchedulerService:
         # Feeds `_prune_unknown_jobs`, so the set of live jobs is defined by what was
         # actually registered rather than by a second list free to fall out of step.
         self._registered_job_ids.add(job_id)
+        self._job_groups[job_id] = group
 
         existing = self.scheduler.get_job(job_id)
         if existing is not None and str(existing.trigger) == str(trigger):
@@ -1479,10 +1503,13 @@ class SchedulerService:
 
     def start(self):
         """
-        Start the scheduler with 8 daily syncs (Europe/Berlin):
+        Start the scheduler with 8 daily stock syncs (Europe/Berlin):
         - 18:00: Full sync (IBKR + 730 days market data) — the day's one generation
         - 00:00: IBKR only — the recovery attempt, a no-op unless 18:00 failed
         - MARKET_DATA_HOURS: market data only (7 days), through both sessions
+
+        plus the crypto sync at the same eight slots (CRYPTO_SYNC_HOURS), in its own
+        job group.
 
         Jobs are persisted to `settings.scheduler_jobstore_url` so a restart that
         overlaps a slot recovers it instead of losing it — see MISFIRE_GRACE_SECONDS.
@@ -1620,6 +1647,16 @@ class SchedulerService:
                 f'Market Data Sync ({hour:02d}:00 Europe/Berlin)',
             )
 
+        # The crypto sync: CoinStats only, under its own gate, never touching
+        # `last_sync_result`. Numbered ids for the reason the groups above are.
+        for index, hour in enumerate(CRYPTO_SYNC_HOURS, start=1):
+            self._add_or_keep(
+                f'crypto_sync_{index}', crypto_sync_job_entry,
+                CronTrigger(hour=hour, minute=0, timezone='Europe/Berlin'),
+                f'Crypto Sync ({hour:02d}:00 Europe/Berlin)',
+                group=CRYPTO_JOB_GROUP,
+            )
+
         self._prune_unknown_jobs()
         self.scheduler.resume()
 
@@ -1639,6 +1676,42 @@ class SchedulerService:
         self.scheduler.shutdown(wait=True)
         self.scheduler = None
         logger.info("Scheduler shut down successfully")
+
+    def jobs_in_group(self, group: str) -> list:
+        """The live jobs this build registered under `group`, in APScheduler's order."""
+        if self.scheduler is None:
+            return []
+        return [
+            job for job in self.scheduler.get_jobs()
+            if self._job_groups.get(job.id) == group
+        ]
+
+    def next_run_time(self, group: str) -> Optional[datetime]:
+        """The soonest run of any job in `group`, or None when nothing is scheduled."""
+        times = [job.next_run_time for job in self.jobs_in_group(group) if job.next_run_time]
+        return min(times) if times else None
+
+    async def crypto_sync_job(self) -> Optional[dict]:
+        """
+        One scheduled crypto sync (docs/crypto.md).
+
+        Its own gate, never `SYNC_PIPELINE`: the stock pipeline and this one share no
+        upstream, and entering that gate would put the stock Sync buttons on cooldown.
+        Never sets `last_sync_result`, which is the stock pipeline's "last sync". Nothing
+        at all when CoinStats is not configured — not even a skipped row.
+        """
+        from app.services.coinstats_client import is_configured
+        from app.services.crypto_service import CRYPTO_GATE, CryptoSyncService
+
+        if not is_configured():
+            return None
+        try:
+            with single_flight(CRYPTO_GATE):
+                return await CryptoSyncService().sync()
+        except SyncBusy as e:
+            # The manual button is mid-run; its result is this slot's result.
+            logger.info(f"crypto sync skipped: {e}")
+            return None
 
     async def trigger_sync_now(self) -> dict:
         """
@@ -1699,3 +1772,7 @@ async def ibkr_only_sync_job_entry() -> dict:
 
 async def market_data_only_sync_job_entry() -> dict:
     return await get_scheduler().market_data_only_sync_job()
+
+
+async def crypto_sync_job_entry() -> Optional[dict]:
+    return await get_scheduler().crypto_sync_job()

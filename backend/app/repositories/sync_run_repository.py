@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime, timezone
 from app.clock import utcnow
 
@@ -75,17 +75,33 @@ class SyncRunRepository:
                 pass
             return None
 
-    async def get_latest(self, sync_type: Optional[str] = None) -> Optional[SyncRun]:
+    async def get_latest(
+        self,
+        sync_type: Optional[str] = None,
+        sync_types: Optional[Iterable[str]] = None,
+    ) -> Optional[SyncRun]:
+        """The newest run, optionally of one type or of any of several. `sync_types`
+        exists for `/api/scheduler/status`, whose "last sync" means the stock pipeline's
+        last job and must not become a crypto run that happened to finish later."""
         stmt = select(SyncRun).order_by(SyncRun.finished_at.desc(), SyncRun.id.desc()).limit(1)
         if sync_type:
             stmt = stmt.where(SyncRun.sync_type == sync_type)
+        if sync_types is not None:
+            stmt = stmt.where(SyncRun.sync_type.in_(list(sync_types)))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_recent(self, limit: int = 20) -> List[SyncRun]:
+    async def get_recent(
+        self, limit: int = 20, exclude_types: Iterable[str] = ()
+    ) -> List[SyncRun]:
+        """The newest runs. `exclude_types` lets the public history leave out the crypto
+        sync's rows, which belong to the admin-gated `/api/crypto/status`."""
+        stmt = select(SyncRun)
+        excluded = list(exclude_types)
+        if excluded:
+            stmt = stmt.where(SyncRun.sync_type.not_in(excluded))
         result = await self.session.execute(
-            select(SyncRun)
-            .order_by(SyncRun.finished_at.desc(), SyncRun.id.desc())
+            stmt.order_by(SyncRun.finished_at.desc(), SyncRun.id.desc())
             .limit(max(1, min(limit, 200)))
         )
         return list(result.scalars().all())

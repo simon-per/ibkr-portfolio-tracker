@@ -149,6 +149,8 @@ def test_a_bearer_token_is_accepted_too(client, monkeypatch):
 
 
 def test_reads_stay_open_because_the_ui_has_no_login(client, monkeypatch):
+    """The one exception is `/api/crypto`, whose reads are private and fail closed —
+    pinned route by route in `tests/test_crypto_auth.py`."""
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
     for path in ("/health", "/api/settings", "/api/portfolio/benchmarks"):
         assert client.get(path).status_code == 200, path

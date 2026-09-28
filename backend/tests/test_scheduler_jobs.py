@@ -37,13 +37,17 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import settings
 from app.services.scheduler_service import (
     ALL_SYNC_HOURS,
+    CRYPTO_JOB_GROUP,
+    CRYPTO_SYNC_HOURS,
     FULL_SYNC_HOUR,
     IBKR_ONLY_HOURS,
     MARKET_DATA_HOURS,
     MISFIRE_GRACE_SECONDS,
     STALE_PRICE_DAYS,
+    STOCK_JOB_GROUP,
     SchedulerService,
     _collect_warnings,
+    crypto_sync_job_entry,
     full_sync_job_entry,
     ibkr_only_sync_job_entry,
     market_data_only_sync_job_entry,
@@ -55,9 +59,13 @@ from app.services.finpension_ingest import (
 )
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 
-# One job per declared hour — pinned by test_scheduler_registers_every_declared_job,
-# which asserts no two of the three groups share one.
-EXPECTED_JOB_COUNT = len(ALL_SYNC_HOURS)
+# One stock job per declared hour — test_scheduler_registers_every_declared_job asserts
+# no two of the three stock groups share one — plus one crypto job at each of those same
+# hours. The crypto group shares every slot deliberately (CRYPTO_SYNC_HOURS is derived
+# from ALL_SYNC_HOURS): its only upstream is CoinStats and it holds none of the stock
+# gates. Counted from the declared ids rather than restated.
+def _expected_job_count() -> int:
+    return len(_declared_job_ids())
 
 
 class _Spy:
@@ -497,6 +505,7 @@ def _declared_job_ids() -> set:
         'full_sync_job',
         *(f'ibkr_retry_{i}' for i in range(1, len(IBKR_ONLY_HOURS) + 1)),
         *(f'market_sync_{i}' for i in range(1, len(MARKET_DATA_HOURS) + 1)),
+        *(f'crypto_sync_{i}' for i in range(1, len(CRYPTO_SYNC_HOURS) + 1)),
     }
 
 
@@ -511,7 +520,8 @@ async def test_scheduler_registers_every_declared_job(jobstore_url):
 
         assert set(jobs) == _declared_job_ids()
         # The IBKR jobs must not collide with a market-data job, or a Yahoo sync and
-        # an IBKR sync run concurrently against the same DB.
+        # an IBKR sync run concurrently against the same DB. (The crypto jobs share
+        # every slot on purpose — see _expected_job_count.)
         for index, hour in enumerate(IBKR_ONLY_HOURS, start=1):
             assert _trigger_hour(jobs[f'ibkr_retry_{index}']) == hour
         assert _trigger_hour(jobs['full_sync_job']) == FULL_SYNC_HOUR
@@ -762,10 +772,10 @@ async def test_a_schedule_change_still_takes_effect(jobstore_url, monkeypatch):
         # Same id, a different hour: the trigger repr differs, so it is replaced.
         real_add_or_keep = SchedulerService._add_or_keep
 
-        def shifted(self, job_id, func, trigger, name):
+        def shifted(self, job_id, func, trigger, name, **kwargs):
             if job_id == 'full_sync_job':
                 trigger = CronTrigger(hour=9, minute=0, timezone='Europe/Berlin')
-            return real_add_or_keep(self, job_id, func, trigger, name)
+            return real_add_or_keep(self, job_id, func, trigger, name, **kwargs)
 
         monkeypatch.setattr(SchedulerService, "_add_or_keep", shifted)
         second.start()
@@ -795,6 +805,7 @@ async def test_jobs_are_serializable_into_the_persistent_store(jobstore_url):
         assert funcs['full_sync_job'] is full_sync_job_entry
         assert funcs['ibkr_retry_1'] is ibkr_only_sync_job_entry
         assert funcs['market_sync_1'] is market_data_only_sync_job_entry
+        assert funcs['crypto_sync_1'] is crypto_sync_job_entry
     finally:
         second.shutdown()
 
@@ -806,7 +817,7 @@ async def test_an_empty_jobstore_url_keeps_the_scheduler_in_memory(monkeypatch):
     svc = SchedulerService()
     try:
         svc.start()
-        assert len(svc.scheduler.get_jobs()) == EXPECTED_JOB_COUNT
+        assert len(svc.scheduler.get_jobs()) == _expected_job_count()
     finally:
         svc.shutdown()
 
@@ -856,7 +867,7 @@ async def test_an_unusable_job_store_degrades_instead_of_killing_the_container(
 
         # Came up anyway, with the full schedule.
         assert svc.scheduler is not None
-        assert len(svc.scheduler.get_jobs()) == EXPECTED_JOB_COUNT
+        assert len(svc.scheduler.get_jobs()) == _expected_job_count()
         # And said so, rather than degrading silently.
         assert any("running in memory" in r.getMessage() for r in caplog.records)
     finally:
@@ -1191,3 +1202,59 @@ async def test_a_complete_benchmark_warmup_is_not_flagged(monkeypatch):
     assert result["rate_limited"] is False
     assert result["benchmarks_synced"] == result["benchmarks_total"] == 2
     assert "warnings" not in result
+
+
+
+# --- the crypto group (docs/crypto.md) ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_crypto_jobs_ride_the_stock_slots_in_their_own_group(jobstore_url):
+    """
+    The crypto sync runs at exactly the stock slots — derived, not copied, so the deploy
+    guard (checked against ALL_SYNC_HOURS) covers it with no ops change — and sits in its
+    own group, which is what keeps it out of the public `/api/scheduler/status` list.
+    """
+    assert CRYPTO_SYNC_HOURS == ALL_SYNC_HOURS
+    svc = SchedulerService()
+    try:
+        svc.start()
+        crypto = svc.jobs_in_group(CRYPTO_JOB_GROUP)
+        stock = svc.jobs_in_group(STOCK_JOB_GROUP)
+        assert {j.id for j in crypto} == {
+            f'crypto_sync_{i}' for i in range(1, len(CRYPTO_SYNC_HOURS) + 1)
+        }
+        assert sorted(_trigger_hour(j) for j in crypto) == sorted(CRYPTO_SYNC_HOURS)
+        assert not any(j.id.startswith('crypto_sync_') for j in stock)
+        assert len(stock) + len(crypto) == _expected_job_count()
+        assert svc.next_run_time(CRYPTO_JOB_GROUP) == min(j.next_run_time for j in crypto)
+    finally:
+        svc.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_crypto_job_never_touches_the_stock_last_sync(monkeypatch):
+    """`last_sync_result` is the stock pipeline's "last sync"; a crypto run must not
+    become it, and an unconfigured crypto job must do nothing at all."""
+    svc = SchedulerService()
+    svc.last_sync_result = {"type": "market_data_only", "status": "success"}
+
+    ran = []
+
+    class FakeSync:
+        async def sync(self):
+            ran.append(True)
+            return {"type": "crypto_sync", "status": "success"}
+
+    import app.services.crypto_service as crypto_service
+    monkeypatch.setattr(crypto_service, "CryptoSyncService", FakeSync)
+
+    # conftest blanks the CoinStats credentials: not configured, nothing runs.
+    assert await svc.crypto_sync_job() is None
+    assert ran == []
+
+    monkeypatch.setattr(settings, "coin_stats_api_key", "k" * 20)
+    monkeypatch.setattr(settings, "coin_stats_share_token", "t" * 20)
+    assert (await svc.crypto_sync_job())["type"] == "crypto_sync"
+    assert ran == [True]
+    assert svc.last_sync_result == {"type": "market_data_only", "status": "success"}

@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.redact import redact_secrets
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.scheduler_service import get_scheduler
+from app.services.scheduler_service import (
+    SCHEDULED_JOB_TYPES,
+    STOCK_JOB_GROUP,
+    get_scheduler,
+)
 from app.single_flight import SyncBusy, single_flight
 
 logger = logging.getLogger(__name__)
@@ -26,12 +30,16 @@ async def _last_sync(scheduler, db: AsyncSession) -> Optional[Dict]:
     The in-memory value is lost on every container restart, and auto-deploy restarts on
     each push — so without this fallback the daily validator can see `last_sync: null`
     and wrongly conclude that no sync ran.
+
+    The fallback reads the stock scheduler's own run types only (`SCHEDULED_JOB_TYPES`,
+    a whitelist): the crypto sync records `crypto_sync` rows at the same slots, and the
+    newest row of *any* type would make the dashboard's "Last sync" a crypto run.
     """
     if scheduler.last_sync_result:
         # In-memory job results carry raw step errors; redact like the stored rows.
         return redact_secrets(scheduler.last_sync_result)
     try:
-        run = await SyncRunRepository(db).get_latest()
+        run = await SyncRunRepository(db).get_latest(sync_types=SCHEDULED_JOB_TYPES)
         return SyncRunRepository.to_dict(run) if run else None
     except Exception as e:  # history is a convenience; never fail the status call
         logger.warning(f"Could not read persisted sync history: {e}")
@@ -92,8 +100,11 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
                 "last_sync": await _last_sync(scheduler, db),
             }
 
+        # The stock pipeline's jobs only. The crypto jobs share its slots and are
+        # reported by the admin-gated `/api/crypto/status`; listing them here would put
+        # a crypto job at `jobs[0]`, which the dashboard reads as its "Next:" run.
         jobs = []
-        for job in scheduler.scheduler.get_jobs():
+        for job in scheduler.jobs_in_group(STOCK_JOB_GROUP):
             jobs.append({
                 "id": job.id,
                 "name": job.name,
@@ -118,10 +129,16 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
 async def get_sync_history(limit: int = 20, db: AsyncSession = Depends(get_db)):
     """
     Recent sync attempts, newest first — the durable record of what ran and what broke.
+
+    Leaves out the crypto sync's rows: this endpoint is public and the crypto book is
+    not, and eight crypto rows a day would crowd the stock runs out of the default page.
+    They are served by the admin-gated `/api/crypto/status`.
     """
+    from app.services.crypto_service import SYNC_TYPE as CRYPTO_SYNC_TYPE
+
     try:
         repo = SyncRunRepository(db)
-        runs = await repo.get_recent(limit)
+        runs = await repo.get_recent(limit, exclude_types=(CRYPTO_SYNC_TYPE,))
         return {"count": len(runs), "runs": [SyncRunRepository.to_dict(r) for r in runs]}
     except Exception as e:
         raise HTTPException(

@@ -16,7 +16,7 @@ quietly spend the rate-limit budget (CLAUDE.md rule 1).
 
 POST routes are deliberately not exercised — they start real syncs.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -24,9 +24,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base, get_db
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
+from app.models.crypto import CryptoDailyPoint, CryptoHolding, CryptoSnapshot
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.dividend_payment import DividendPayment
 from app.models.exchange_rate import ExchangeRate
@@ -79,6 +81,15 @@ READ_ENDPOINTS = [
     f"/api/performance/segments?start_date={START}&end_date={TODAY}",
     "/api/performance/closed-positions",
 ]
+
+# The crypto book's reads need the admin key (docs/crypto.md), so they run through
+# their own test below rather than the open-read loop.
+CRYPTO_READ_ENDPOINTS = [
+    "/api/crypto/portfolio",
+    "/api/crypto/history",
+    "/api/crypto/status",
+]
+SMOKE_ADMIN_TOKEN = "smoke-admin-token-long-enough"
 
 
 def _weekdays(start: date, end: date):
@@ -178,6 +189,38 @@ async def _seed(session: AsyncSession) -> None:
         amount=Decimal("3000"), amount_eur=Decimal("3000"), currency="EUR",
         description="deposit",
     ))
+
+    # The crypto book: a valued coin, an unpriced one, a flagged spam token and a fiat
+    # balance, plus three days of CoinStats history, all USD like CoinStats itself —
+    # served in the CHF base through the weekday-only rates above (a weekend TODAY
+    # forward-fills from Friday). Invented figures, like everything in this fixture.
+    snapshot = CryptoSnapshot(
+        taken_at=datetime.combine(TODAY, time(9)), total_value_usd=700.0,
+        defi_value_usd=None, total_cost_usd=500.0, unrealized_pl_usd=200.0,
+        unrealized_pl_pct=40.0, realized_pl_usd=None, realized_pl_pct=None,
+        all_time_pl_usd=200.0, all_time_pl_pct=40.0, pl_24h_usd=None,
+        valued_count=2, spam_count=1, unpriced_count=1, credits_remaining=19_000,
+        credits_total=20_000, credits_plan="free", credits_spent=18, warnings=None,
+    )
+    session.add(snapshot)
+    await session.flush()
+    for coin_id, symbol, status, count, price in (
+        ("bitcoin", "BTC", "valued", 0.01, 60_000.0),
+        ("FiatCoinEUR", "EUR", "valued", 50.0, 1.1),
+        ("mystery-token", "MYST", "unpriced", 3.0, None),
+        ("scam-token", "SCAM.EXAMPLE", "spam", 1e6, None),
+    ):
+        session.add(CryptoHolding(
+            snapshot_id=snapshot.id, coin_id=coin_id, symbol=symbol, name=symbol,
+            rank=1 if coin_id == "bitcoin" else None, is_fiat=coin_id == "FiatCoinEUR",
+            status=status, count=count, price_usd=price,
+            value_usd=count * price if price else None,
+        ))
+    for back in (1, 2, 3):
+        session.add(CryptoDailyPoint(
+            date=TODAY - timedelta(days=back), value_usd=650.0 + back, pnl_usd=150.0,
+            fetched_at=datetime.combine(TODAY, time(6)),
+        ))
     await session.flush()
     await session.commit()
 
@@ -241,6 +284,33 @@ def client(monkeypatch):
 def test_read_endpoint_responds(client, path):
     r = client.get(path)
     assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:400]}"
+
+
+@pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)
+def test_crypto_read_endpoint_responds_to_the_admin_key(client, monkeypatch, path):
+    monkeypatch.setattr(settings, "api_admin_token", SMOKE_ADMIN_TOKEN, raising=False)
+    assert client.get(path).status_code == 401
+    r = client.get(path, headers={"X-API-Key": SMOKE_ADMIN_TOKEN})
+    assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:400]}"
+
+
+def test_the_crypto_book_serializes_in_the_base_currency(client, monkeypatch):
+    monkeypatch.setattr(settings, "api_admin_token", SMOKE_ADMIN_TOKEN, raising=False)
+    headers = {"X-API-Key": SMOKE_ADMIN_TOKEN}
+
+    book = client.get("/api/crypto/portfolio", headers=headers).json()
+    assert book["base_currency"] == "CHF"
+    assert book["total_value"] == pytest.approx(700 * 0.9 * 0.94, abs=0.01)
+    assert book["itemised_value"] == pytest.approx(655 * 0.9 * 0.94, abs=0.01)
+    assert book["unitemised_value"] == pytest.approx(45 * 0.9 * 0.94, abs=0.01)
+    assert book["fx_caveat"]  # CHF base: cost and P&L are USD at one day's rate
+    assert [h["status"] for h in book["holdings"]] == ["valued", "valued", "unpriced"]
+    assert book["spam_count"] == 1 and "SCAM.EXAMPLE" not in str(book)
+    assert book["realized_pl"] is None  # unknown stays absent, never 0.00
+
+    history = client.get("/api/crypto/history", headers=headers).json()
+    assert history["points"][-1]["date"] == TODAY.isoformat()
+    assert history["points"][-1]["value"] == pytest.approx(book["total_value"], abs=0.01)
 
 
 def test_the_shapes_that_broke_production_serialize(client):

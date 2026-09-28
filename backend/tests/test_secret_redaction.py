@@ -85,3 +85,43 @@ def test_to_dict_redacts_rows_written_before_the_fix():
     out = SyncRunRepository.to_dict(poisoned_row)
     assert FAKE_TOKEN not in str(out)
     assert "&t=[REDACTED]" in out["message"]
+
+
+# --- CoinStats (the crypto view) -------------------------------------------------------
+#
+# The key and the share token travel in request headers, which transport errors do not
+# stringify, so these are the second line of defence. The share token is as sensitive as
+# the key: it grants read access to the whole connected portfolio.
+
+FAKE_COINSTATS_KEY = "cs-key-0123456789abcdefghijklmnop"
+FAKE_SHARE_TOKEN = "shareTOKENabcdef0123456789"
+
+
+def test_coinstats_key_and_share_token_are_masked(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "coin_stats_api_key", FAKE_COINSTATS_KEY)
+    monkeypatch.setattr(settings, "coin_stats_share_token", FAKE_SHARE_TOKEN)
+    message = (
+        f"CoinStats said 401 for key {FAKE_COINSTATS_KEY} "
+        f"and https://coinstats.app/p/{FAKE_SHARE_TOKEN}"
+    )
+    out = redact_secrets({"message": message, "nested": [message]})
+    assert FAKE_COINSTATS_KEY not in str(out)
+    assert FAKE_SHARE_TOKEN not in str(out)
+    assert out["message"].count("[REDACTED]") == 2
+
+
+def test_the_six_digit_passcode_is_never_substring_replaced(monkeypatch):
+    """Replacing six digits would mangle any figure that happens to contain them; the
+    passcode only ever travels in a header, so it is deliberately not a literal mask."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "coin_stats_share_passcode", "123456")
+    assert redact_secrets("synced 1234567 rows") == "synced 1234567 rows"
+
+
+def test_a_password_style_passcode_is_masked(monkeypatch):
+    """CoinStats accepts passcodes longer than six digits; one long enough to replace
+    safely is masked like the key and the token."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "coin_stats_share_passcode", "pass-C0de!")
+    assert "pass-C0de!" not in redact_secrets("header passcode pass-C0de! leaked")
