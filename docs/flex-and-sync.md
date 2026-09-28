@@ -385,6 +385,12 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 08:00, 11:00, 13:00, 15:00, 20:00, 22:00 | | `market_data_only_sync_job` (7d) | yes |
 | **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
+| every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
+
+**The crypto sync rides every one of these slots, and adds none.** `CRYPTO_SYNC_HOURS` is
+*derived* from `ALL_SYNC_HOURS`, so the deploy guard already covers it; it runs under its own
+`crypto-sync` gate (never `SYNC_PIPELINE`), in its own job group — which is what keeps it out of
+the public `/api/scheduler/status` list and "last sync" — and never touches `last_sync_result`.
 
 **Yahoo is repriced at seven hours — 8, 11, 13, 15, 18, 20, 22 — and that set has not
 changed** since the 2026-08-04 widening. What moved on 2026-08-08 is only *which job* makes the
@@ -731,7 +737,9 @@ a failed SendRequest carries it — and those went verbatim into `sync_runs.mess
 scrubbed 2026-07-28; **rotate the token if this ever recurs** — that instruction is about a *new* leak, which would mean the redaction below had failed. The 07-28 exposure itself the owner decided on 2026-08-17 to accept rather than rotate; STATUS.md records why, and it is not to be re-raised). `SyncRunRepository.record()` redacts on
 write and `to_dict()` again on read, so rows written before the fix or restored from a backup can't leak
 either; the routers redact their `HTTPException` details. The `q=` query id stays readable — public in
-these docs and useless alone. Tests: `tests/test_secret_redaction.py`.
+these docs and useless alone. The CoinStats key and share token are literal masks too — belt and
+braces, since they travel only in headers ([crypto.md](crypto.md)); the six-digit share passcode is
+deliberately not one. Tests: `tests/test_secret_redaction.py`.
 
 **A price that never arrives is otherwise silent.** `portfolio_service` values a position with no price
 at **0.00** and moves on, so deleting SBI's poisoned prices took 446.93 CHF off the total with nothing
@@ -956,7 +964,10 @@ last, so a rejection from any of them still carries a correlation id:
   `test_every_mutating_route_is_covered_without_being_annotated` walks the live route table to prove
   it. **Empty token = disabled**, so shipping it could not 401 the running site; startup warns loudly
   while it is off, the same treatment `SCHEDULER_ENABLED` gets. Reads stay open because the frontend
-  has no login and gating them would black out the UI.
+  has no login and gating them would black out the UI — **except `PRIVATE_PREFIXES`
+  (`/api/crypto`)**, where every method but OPTIONS needs the key and the routes **fail closed**
+  (403) when no token is configured; the view unlocks with the key the browser already holds.
+  `tests/test_crypto_auth.py` walks those routes the way the mutating walk does ([crypto.md](crypto.md)).
 - **`app/rate_limit.py`** is a fixed-window per-client counter (`RATE_LIMIT_PER_MINUTE`, 0 disables).
   `single_flight` fences the sync *pipelines*; nothing bounded the expensive anonymous reads. Keyed on
   the first `X-Forwarded-For` entry, since nginx makes `request.client.host` always loopback — forging

@@ -328,10 +328,13 @@ owner. `PerformanceAttribution` is the exception and keeps a numeric height: its
 
 ### Colour by identity, never by row position
 
-Four places now assign a categorical colour, and all four assign it to the **entity**:
+Five places now assign a categorical colour, and all five assign it to the **entity**:
 `sectorColors.ts` (a fixed taxonomy), `benchmarkColors.ts` (position in the full `/benchmarks`
-list), `allocationSectorPaint` (canonical position, with a neutral ramp for the tail) and
-`dividendColors.ts` (position in the response's `stack_order`). Every one of them was a positional
+list), `allocationSectorPaint` (canonical position, with a neutral ramp for the tail),
+`dividendColors.ts` (position in the response's `stack_order`) and the crypto donut, which calls the
+same module's `seriesColor(key, order)` with `/api/crypto/portfolio`'s `color_order` — valued coins
+by CoinStats' market-cap rank, so a coin overtaking another by value cannot repaint it
+([crypto.md](crypto.md)). `dividendColor` is a thin wrapper over `seriesColor`. Every one of them was a positional
 palette first, and each was found the same way — something that should have kept its colour did
 not: deselecting a benchmark recoloured the other two, a sync that reordered the chart moved
 `Unknown`, and changing the Dividends range repainted most of the stack.
@@ -342,7 +345,7 @@ a ramp have different tails, and one signature covering all four would carry eve
 option. The shared thing is written here instead, and the family question is asked per module.
 
 `--viz-series-1..8`, `--viz-series-muted-1..5` and `--viz-series-other` in `index.css` are the
-dividend stack's palette; slots 1, 4, 5 and 6 **are** `--viz-sector-1..4`, which is why re-stepping
+dividend stack's palette, and the crypto donut's; slots 1, 4, 5 and 6 **are** `--viz-sector-1..4`, which is why re-stepping
 it left the Allocation and look-through tabs alone. The measurements behind the hexes are asserted
 by `lib/dividendColors.test.ts`, which reads them back out of `index.css` — including each card
 surface, so a theme re-step that makes a muted step invisible fails there. Its ramp is five steps
@@ -368,3 +371,41 @@ making it render children needs a fixed-size `<BarChart width height>` and buys 
 charts.
 
 ---
+
+---
+
+## Two books — the Stocks | Crypto mode
+
+The header's **Stocks | Crypto** switch (`ModeToggle.tsx`, immediately before `ThemeToggle`) swaps
+the whole page under the header between the stock book and the crypto book
+([crypto.md](crypto.md)). A **mode, not a tab**: the crypto view shares no figure with the stock
+view, and a tab beside Performance would sit in the same strip and invite reading one number
+against the other. `lib/portfolioMode.tsx` holds it, persisted per browser through
+`readStored/writeStored` under `ibkr-portfolio-mode` and **validated on read** — anything but
+`crypto` is stocks.
+
+- **`AppHeader.tsx` / `AppFooter.tsx`** are `Dashboard`'s header and footer moved verbatim
+  (2026-09-28). The shared controls live there — title, base currency, the mode switch, theme, admin
+  key — and each view fills three slots with its own parts (`status`: last/next sync and warnings;
+  `actions`: its Sync button; `below`: the result of a press), keeping the queries and mutation that
+  feed them. The header knows nothing about IBKR or CoinStats.
+- **`CryptoDashboard.tsx`** is eager and small; the page itself, `CryptoOverview.tsx`, is lazy
+  behind `LazyTabPanel` (its own chunk, and its own boundary so a crash leaves the header — and the
+  way back to stocks — working). `App.tsx` wraps the whole crypto view in a `CryptoBoundary` whose
+  fallback offers **Back to stocks**: the mode is persisted, so the app-wide boundary's Reload would
+  land straight back in a crashing crypto view.
+- **Refusals are states, not errors.** `/api/crypto/*` is private and fails closed, so
+  `lib/cryptoAccess.ts` tells **locked** (401: this browser has not presented the key — the lock
+  button fixes it) from **no key on the server** (403, `ForbiddenError` in `api.ts`, or
+  `health.write_auth_enabled === false`: no browser can fix it). Crypto reads never retry a
+  refusal and status polling stops at one.
+- **No tab strip in crypto mode.** The e2e suite holds the page to exactly one `tablist`, and the
+  mode switch is a `role="group"`, never tab roles.
+
+### `SegmentedControl` — the one toggle group
+
+`components/ui/SegmentedControl.tsx` is every `role="group"` + `aria-pressed` button row in the
+app: the mode switch, the crypto chart's Value | P&L and ranges, and the six groups Activity (×2),
+Analytics (×2), Dividends and Look-through used to hand-roll — one of which had already lost its
+`aria-pressed`. Two looks (`segmented`, `buttons`), single-select or a set of independent toggles.
+`SegmentedControl.test.tsx` scans `components/` so a seventh copy fails.

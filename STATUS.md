@@ -5,9 +5,28 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-27.** Newest, in the working tree and not yet deployed: **the value chart's
+**Last updated: 2026-09-28.** Newest, pushed on 2026-09-28 and awaiting its deploy checks (see
+*Watch after the next deploy*): **a separate
+Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
+the whole page. The crypto book has its own tables (`crypto_*`, migration `w6f3b0c7d1e2`), service,
+routes and view and shares no figure with the stocks — pinned both ways over the import graph by
+`tests/test_crypto_isolation.py`. `/api/crypto/*` needs the admin key **for reads too** and fails
+closed without one. Eight crypto jobs ride the existing slots under their own gate; the public
+`/api/scheduler/*` endpoints stay stock-only. Everything is in [docs/crypto.md](docs/crypto.md).
+Stock-side code it touched, all behaviour-preserving: the FX preload and `BaseFx` loader extracted
+into `fx_preload.py` / `base_fx.py`, the header and footer moved out of `Dashboard.tsx`, and the six
+hand-rolled toggle groups moved onto `ui/SegmentedControl.tsx`. Verified locally — the full backend
+suite, 762 frontend tests, the build, headless-browser passes of both modes at 1440 and 390 in both
+themes, and **two real syncs of the owner's CoinStats portfolio** after the shape probe. The real
+answers changed five things the documentation had implied, each now in `docs/crypto.md`: the real
+rate limit is tighter than documented (2 s between calls now), DeFi is reported beside the total
+rather than in it, the P&L history is one day's amount per point (summed over the range, from 0),
+the value history is sampled every three days, and sold coins come back at quantity 0 (skipped
+without a warning). The same push carries `7fe0aab`, merged the same day: **the value chart's
 Profit/Loss line starts at 0 on the first day of the range**, like the benchmarks do since
-2026-09-07 — see *Watch after the next deploy*. Before that, live on `26576f8` and API-verified: **a holding on the
+2026-09-07.
+
+Before that, live on `26576f8` and API-verified: **a holding on the
 Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
 range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
 measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
@@ -436,6 +455,15 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 ---
 
 ## Needs a human
+
+- **Put the three CoinStats keys on the VPS once the crypto code is deployed.**
+  `COIN_STATS_API_KEY`, `COIN_STATS_SHARE_TOKEN` and `COIN_STATS_SHARE_PASSCODE` are in the local
+  `backend/.env` (the share link was created on 2026-09-28, with a password-style passcode). They
+  go into `/root/IBKR_investment_tracker/backend/.env` **after** the deploy, then
+  `GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d`, never `restart`, and one authenticated
+  `POST /api/crypto/sync`. The repo-root `.env` also still holds the API key; the app never reads
+  that file (the root `.env.example` now says so). The key is on the free plan, and the probe
+  plus two real syncs spent about 150 of the month's credits.
 
 - **Tick "Open Dividend Accruals" in the Flex Query, and the dividend calendar stops guessing
   when the cash arrives.** On query `App_OpenLots` (1389408), add the **Open Dividend Accruals**
@@ -885,6 +913,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
+- **Crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**
+  — the owner's choice on 2026-09-28 over showing the crypto book in USD. They leave out every FX
+  move since purchase, so they will not match the CoinStats app set to the same currency; the view
+  says so beside the figures (`fx_caveat`), and a USD base shows CoinStats' own numbers exactly.
+  Values (total, holdings, the value chart) convert at their own dates and are exact.
+
 - **`stack_order` is invariant across every range and NOT across `?forecast=false`** — deliberate,
   2026-09-20. Projections have to count toward the colour order: measured on production, VT, QQQM,
   2330, SOXQ and GRID have *zero* realized income and are the chart's five biggest series, VT alone
@@ -957,6 +991,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
 ## Watch after the next deploy
+
+- **The crypto mode, once deployed and given its keys.** Anonymous `/api/crypto/*` answers 401;
+  with the key, `/api/crypto/status` shows the first scheduled `crypto_sync` succeeding at a Berlin
+  slot and its credits line moving by a run's documented cost. `/api/scheduler/status` must still
+  list only the eight stock jobs with a stock run as `last_sync`, and `/api/scheduler/history` must
+  show no crypto rows — the `ibkr-sync-validator` routine reads both. Then a browser pass with real
+  data: the total against the CoinStats app (allowing for price drift), and the not-itemised line
+  small or explained. Local browser passes with invented and with real data are done.
 
 - **The Profit/Loss line is rebased to 0 on the range's first point** (`lib/rangeProfit.ts`),
   frontend only. On 3M/1Y confirm the green line starts at 0 on the same day the benchmark lines
@@ -1215,6 +1257,24 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
+0. **Stop the backend test suite writing into the developer's database.** Found 2026-09-28:
+   `tests/test_scheduler_jobs.py`'s spy fixture runs real scheduler jobs, and `_record_run` opens
+   the app's own `AsyncSessionLocal`, bound to `settings.database_url`. Without a
+   `backend/portfolio.db` the insert fails silently, which is why nobody noticed; with one it writes
+   fake `ibkr_sync` rows (a success with 38 securities, a `Code=1025: locked` error) — into a
+   **production snapshot**, if that is what `DATABASE_URL` points at, as this file recommends for
+   local work. The fix is conftest pointing the app's engine at a throwaway database for the whole
+   session; until then, never run the suite against a snapshot you still need.
+
+0. **Crypto follow-ups, in the order they matter.** (a) A finer value history for the short
+   ranges: `type=all` samples every three days, so 1M draws about ten points; a daily
+   `type=3m` pull is 10 credits a day. (b) A Binance / Phantom split: one share token per
+   connection, summed, with CoinStats' per-portfolio P&L labelled as such. (c) A transactions
+   ledger (4 credits a page), storing no wallet addresses or hashes. (d) `app.main` registers CORS
+   innermost, so in local cross-origin dev a 401 arrives as a CORS failure; moving it outermost
+   would let the locked state show locally without the Vite proxy (production is same-origin and
+   unaffected).
+
 0. **Measure withholding per country instead of relying on one global manual assumption.** The
    setting now defaults to 15% and is adjustable from the Dividends tab, but one percentage still
    applies to every gross-sized forecast. The default is the US/Dutch treaty rate; German (26.375%),
@@ -1417,11 +1477,21 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
 
 Each of these cost real time at least once.
 
-- **Node 26 breaks every frontend test that touches `localStorage`** (60 tests in 5 files on
-  2026-09-27: `Cannot read properties of undefined (reading 'clear')`). Node's own experimental
-  `localStorage` global shadows jsdom's and is undefined without `--localstorage-file`. Not a
-  regression in the code: `npx -y node@22 node_modules/vitest/vitest.mjs run` from `frontend/`
-  passed 715/715 the same day. Read the failing files before trusting a red count. A fresh worktree also has no `frontend/node_modules` — `npm ci` first.
+- **Node 26 breaks every frontend test that touches `localStorage`** (60 failures in 5 files,
+  seen 2026-09-27 and again 2026-09-28: `Cannot read properties of undefined (reading 'clear')`).
+  Node's own experimental `localStorage` global shadows jsdom's. Not a regression in the code:
+  `NODE_OPTIONS=--no-experimental-webstorage npx vitest run` from `frontend/` runs the suite green,
+  as does `npx -y node@22 node_modules/vitest/vitest.mjs run`. CI uses Node 20 and is unaffected.
+  Read the failing files before trusting a red count. A fresh worktree also has no
+  `frontend/node_modules` — `npm ci` first.
+- **A fresh checkout here had no `backend/venv`, no `backend/.env` and only Python 3.14.** CI and the
+  image run 3.11: `uv venv --python 3.11 backend/venv` then `uv pip install --python
+  backend/venv/Scripts/python.exe -r backend/requirements.txt`. Start `backend/.env` from
+  `backend/.env.example` with placeholder IBKR values, `SCHEDULER_ENABLED=false` and an
+  `API_ADMIN_TOKEN` — Crypto mode refuses to open without one.
+- **Vite's dev proxy forwards `/api` only.** Running with `VITE_API_URL=` (same-origin, the only way
+  a 401 reaches the page locally — see *Worth doing next*) leaves `/health` unproxied, so the footer
+  and the lock button disappear. Normal work uses the default `VITE_API_URL`.
 
 - **A fresh worktree needs its own dependencies.** The global Python installation has an older
   FastAPI that cannot collect `test_api_hardening.py` (`iter_route_contexts` import error).
@@ -1517,6 +1587,16 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-09-28 (crypto mode)** — "both stocks and crypto inside the tracker, clearly separate": a
+  Stocks | Crypto switch beside the theme toggle, a CoinStats-fed crypto book with its own tables,
+  routes and view, locked behind the admin key and failing closed. Separate by construction rather
+  than by filter — the opposite of 3a — and pinned over the import graph. The design review before
+  it caught four blockers the first plan had: a GET that would have reached Frankfurter and written
+  rows, `Numeric(18,6)` zeroing token prices, the scheduler tests' fixed job count, and an
+  isolation rule the plan itself broke. The first real CoinStats answers then overturned five
+  documented assumptions (see the top of this file). Verified locally on the real portfolio, and
+  pushed together with `7fe0aab` (merged the same day).
+
 - **2026-09-27 (profit line from 0)** — the value chart's Profit/Loss line was the since-inception
   gap, so on 3M it started at two years of profit while the benchmarks start at the range. It is now
   that gap's change since the chart's first point — a shift, which is right for a quantity already
@@ -1540,10 +1620,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   month labels after its forecast bars disappear, and removed the next-year planning range while
   Forecast is off. Switching the toggle off from that year now returns to the current year, keeping
   the selector, request and chart on one valid range. Live on `a719644`; API/bundle-verified.
-
-- **2026-09-20 (adjustable dividend withholding)** — replaced the hardcoded 0.85 gross-to-net
-  forecast factor with a persisted global setting and a WHT percentage control beside Forecast.
-  The response names the exact assumption it used, saving refetches every active dividend range,
-  and actual IBKR income remains outside the setting. The design stays deliberately global and
-  manual; measuring by country remains the next accuracy step. Live on `a719644`; the production
-  round trip changed forecasts, preserved realized fields and restored 15% exactly.

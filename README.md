@@ -204,6 +204,12 @@ Docker Compose manages the backend FastAPI container and an nginx container serv
 - `GET  /api/analyst-ratings/{security_id}`
 - `GET  /api/watchlist` · `POST /api/watchlist` · `DELETE /api/watchlist/{id}`
 
+### Crypto (CoinStats — admin key required for every route, reads included)
+- `GET  /api/crypto/portfolio` — totals and holdings from the newest snapshot, in the base currency
+- `GET  /api/crypto/history` — daily value and cash-flow-adjusted P&L
+- `GET  /api/crypto/status` — last run, next run, CoinStats credits
+- `POST /api/crypto/sync` — sync now (at most every 10 minutes); see `docs/crypto.md`
+
 ## Database Schema (high level)
 
 Core tables: `securities`, `taxlots`, `market_prices`, `exchange_rates`, `ticker_mappings`, `fundamental_metrics`, `earnings_events`, `dividends`, `watchlist`, `benchmark_cache`.

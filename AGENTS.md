@@ -2,10 +2,12 @@
 
 Full-stack portfolio tracker for an Interactive Brokers account plus a Swiss pillar 3a account:
 securities, tax lots, trades, corporate actions, dividends and cash; cost-basis vs. market-value
-charts; a Swiss tax report; company-level look-through of the ETFs. All money is stored in EUR and
-projected into a base currency the user switches at will (`app_settings.base_currency`,
-EUR/CHF/USD) — **read it from `/api/settings`, never from a document**; it has been both CHF and
-EUR, and every figure moves with it.
+charts; a Swiss tax report; company-level look-through of the ETFs. A crypto book from CoinStats
+lives beside it in its own **Crypto** mode and shares no figure with the stocks
+([docs/crypto.md](docs/crypto.md)). All money is stored in EUR — the crypto book's USD, as
+CoinStats reports it, is the one exception — and projected into a base currency the user switches
+at will (`app_settings.base_currency`, EUR/CHF/USD) — **read it from `/api/settings`, never from a
+document**; it has been both CHF and EUR, and every figure moves with it.
 
 **Live:** https://portfolio.srv1211053.hstgr.cloud · **Repo is PUBLIC** (never commit account data)
 
@@ -30,6 +32,7 @@ holds it — the index below maps them.
 | [docs/dividends.md](docs/dividends.md) | `dividend_service`, the era splice, purging estimates, the forecast, forward yield, growth |
 | [docs/cash-contributions-benchmark.md](docs/cash-contributions-benchmark.md) | `cash_service`, Total Value vs Money In, `get_contributions`, the benchmark and its anchors |
 | [docs/pillar3a.md](docs/pillar3a.md) | the second account, `finpension_*`, account isolation, `price_source`, the NAV oracle |
+| [docs/crypto.md](docs/crypto.md) | the crypto book: `coinstats_client`, `crypto_service`, `/api/crypto`, the Crypto mode, CoinStats credits, the share token |
 | [docs/activity-ledger.md](docs/activity-ledger.md) | `activity_service` |
 | [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh |
 | [docs/pricing-and-fx.md](docs/pricing-and-fx.md) | ticker mapping, `manage_mappings`, minor-unit quotes, `currency_service`, Frankfurter and the fallback |
@@ -188,13 +191,17 @@ Each of these was a bug first; the file for the area has the story.
 - **No upload endpoints.** `/api/` is public; the CLIs under `app/cli/` over ssh are the write path
   for anything not on the sync, and each records a `sync_runs` row. Every `POST/PUT/PATCH/DELETE`
   under `/api/` is gated by `app/auth.py` middleware (method-keyed, so a new route is covered the
-  moment it exists); reads are open and rate-limited.
+  moment it exists); reads are open and rate-limited — **except under `/api/crypto`, whose reads
+  need the key too and fail closed** when no key is configured (docs/crypto.md).
 - **A `response_model` is a filter.** Complete the model before attaching one, and pin the
   service's key set against it in both directions (`test_dividend_summary_contract.py`).
 - **Pillar 3a blends everywhere except where it must not.** `reconcile_taxlots`, the wipe guard
   and `restamp_unsourced_closed_lots` are scoped to `account=IBKR`; the tax report excludes 3a;
   every other reader sees one portfolio. `tests/test_account_isolation.py` pins the destructive
   paths plus an AST rule.
+- **Crypto blends nowhere** — the opposite of 3a. Its own tables, service, router and view, never
+  an `account` label; no stock reader can see a crypto row because none is written to a stock
+  table. `tests/test_crypto_isolation.py` pins the import graph both ways (docs/crypto.md).
 - **`price_source` is the Yahoo opt-out**, honoured at every Yahoo call site
   (`tests/test_yahoo_eligibility_family.py`).
 - **Frontend formatters are pinned to `en-US`** in `lib/utils.ts`; a bare `toLocaleString()`
