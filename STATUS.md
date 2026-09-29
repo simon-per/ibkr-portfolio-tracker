@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-28.** Newest, pushed on 2026-09-28 and awaiting its deploy checks (see
+**Last updated: 2026-09-29.** Newest, pushed on 2026-09-28, deployed with its CoinStats keys, awaiting the first production crypto sync (see
 *Watch after the next deploy*): **a separate
 Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
 the whole page. The crypto book has its own tables (`crypto_*`, migration `w6f3b0c7d1e2`), service,
@@ -456,14 +456,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **Put the three CoinStats keys on the VPS once the crypto code is deployed.**
-  `COIN_STATS_API_KEY`, `COIN_STATS_SHARE_TOKEN` and `COIN_STATS_SHARE_PASSCODE` are in the local
-  `backend/.env` (the share link was created on 2026-09-28, with a password-style passcode). They
-  go into `/root/IBKR_investment_tracker/backend/.env` **after** the deploy, then
-  `GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d`, never `restart`, and one authenticated
-  `POST /api/crypto/sync`. The repo-root `.env` also still holds the API key; the app never reads
-  that file (the root `.env.example` now says so). The key is on the free plan, and the probe
-  plus two real syncs spent about 150 of the month's credits.
+- **Run the first crypto sync on production.** The three CoinStats keys went into the VPS
+  `backend/.env` on 2026-09-29 and the container was recreated with `up -d` (`/health` healthy on
+  `4a14f41`). What remains is one authenticated **Sync crypto** on the site, or waiting for the next
+  slot. The repo-root `.env` also still holds the API key; the app never reads that file (the root
+  `.env.example` now says so). The key is on the free plan, and the probe plus two real syncs spent
+  about 150 of the month's credits.
 
 - **Tick "Open Dividend Accruals" in the Flex Query, and the dividend calendar stops guessing
   when the cash arrives.** On query `App_OpenLots` (1389408), add the **Open Dividend Accruals**
@@ -919,6 +917,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   says so beside the figures (`fx_caveat`), and a USD base shows CoinStats' own numbers exactly.
   Values (total, holdings, the value chart) convert at their own dates and are exact.
 
+- **CoinStats counts transfers to and from an untracked exchange as profit and loss.** Seen
+  2026-09-29 in the owner's history: around mid- and late December 2025 (and partly late September
+  2025) the value moves by a large share within one three-day sample, and CoinStats' P&L history
+  moves by the same amount, where a later deposit (August 2026) was recognised as a deposit. The
+  likely cause is coins moving to and from Kraken, which is not connected. Our history mirrors
+  CoinStats (`crypto_daily` is replaced wholesale on every pull), so the fix lives in CoinStats, not
+  here. The owner is closing Kraken; the plan is to export its ledger CSVs first, then connect it
+  read-only to CoinStats or import the CSVs, and to confirm with CoinStats whether an imported
+  portfolio keeps its history once the account is gone. Never rewrite the history on our side.
+
 - **`stack_order` is invariant across every range and NOT across `?forecast=false`** — deliberate,
   2026-09-20. Projections have to count toward the colour order: measured on production, VT, QQQM,
   2330, SOXQ and GRID have *zero* realized income and are the chart's five biggest series, VT alone
@@ -992,11 +1000,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The crypto mode, once deployed and given its keys.** Anonymous `/api/crypto/*` answers 401;
-  with the key, `/api/crypto/status` shows the first scheduled `crypto_sync` succeeding at a Berlin
-  slot and its credits line moving by a run's documented cost. `/api/scheduler/status` must still
-  list only the eight stock jobs with a stock run as `last_sync`, and `/api/scheduler/history` must
-  show no crypto rows — the `ibkr-sync-validator` routine reads both. Then a browser pass with real
+- **The crypto mode, once given its keys.** Deployed (`/health` on `4a14f41`, checked 2026-09-29):
+  anonymous `/api/crypto/*` answers 401, `/api/scheduler/status` lists only the eight stock jobs and
+  `/api/scheduler/history` has no crypto rows. Still unverified now that the VPS has the CoinStats
+  keys: with the key, `/api/crypto/status` shows the first scheduled `crypto_sync` succeeding at a
+  Berlin slot and its credits line moving by a run's documented cost, while the two scheduler
+  endpoints stay stock-only (the `ibkr-sync-validator` routine reads both). Then a browser pass with real
   data: the total against the CoinStats app (allowing for price drift), and the not-itemised line
   small or explained. Local browser passes with invented and with real data are done.
 
