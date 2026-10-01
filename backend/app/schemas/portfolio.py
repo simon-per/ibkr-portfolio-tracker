@@ -632,18 +632,33 @@ class DividendLatestMonth(BaseModel):
     yoy_pct: Optional[float] = None
 
 
-class DividendLatestQuarter(BaseModel):
+class DividendYtdPace(BaseModel):
     """
-    The last completed calendar quarter of realized income, against the quarter
-    before it and the same quarter a year earlier. Quarters because the core ETFs
-    pay in Mar/Jun/Sep/Dec, so each quarter holds one payout spike.
+    This year's average month so far (finished months only) against last year's
+    total ÷ 12. `prev_year_partial`: income began partway through last year, so
+    the base is understated and the growth overstated.
     """
-    quarter: str                    # "2026-Q3"
+    net_eur: float                  # per month, Jan through the last finished month
+    prev_net_eur: float             # per month, last year ÷ 12
+    pct: Optional[float] = None
+    months: int                     # finished months this year
+    prev_year: int
+    prev_year_partial: bool = False
+
+
+class DividendRecentPace(BaseModel):
+    """
+    The last three finished months against the three before them, per month.
+    Rolling, not calendar quarters: any three consecutive months hold exactly one
+    of the core ETFs' Mar/Jun/Sep/Dec payouts.
+    """
     net_eur: float
-    prev_quarter: str               # the quarter qoq_pct compares against
     prev_net_eur: float
-    qoq_pct: Optional[float] = None
-    yoy_pct: Optional[float] = None
+    pct: Optional[float] = None
+    start: str                      # "YYYY-MM", inclusive
+    end: str
+    prev_start: str
+    prev_end: str
 
 
 class DividendGrowth(BaseModel):
@@ -668,7 +683,8 @@ class DividendGrowth(BaseModel):
     next_12m_vs_ttm_pct: Optional[float] = None   # forecast vs measured — mark it
     annual: List[DividendAnnualRow]
     latest_month: Optional[DividendLatestMonth] = None
-    latest_quarter: Optional[DividendLatestQuarter] = None
+    ytd_pace: Optional[DividendYtdPace] = None
+    recent_pace: Optional[DividendRecentPace] = None
 
 
 class DividendUpcomingPayment(BaseModel):

@@ -22,10 +22,19 @@ function amount(value: number): string {
   })
 }
 
-/** '2026-Q3' -> 'Q3', or 'Q3 2026' with the year. */
-function quarterName(key: string, withYear = false): string {
-  const [y, q] = key.split('-')
-  return withYear ? `${q} ${y}` : q
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** '2026-07' -> 'Jul', or 'Jul 2026' with the year. */
+function monthName(key: string, withYear = false): string {
+  const [y, m] = key.split('-')
+  const name = MONTH_NAMES[Number(m) - 1] ?? m
+  return withYear ? `${name} ${y}` : name
+}
+
+/** '2026-07'..'2026-09' -> 'Jul–Sep'. */
+function span(start: string, end: string, withYear = false): string {
+  return `${monthName(start)}–${monthName(end, withYear)}`
 }
 
 function Tile({
@@ -79,7 +88,7 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
   }
   if (!growth) return null
 
-  const { ttm, ytd, avg_month: avgMonth, latest_quarter: quarter } = growth
+  const { ttm, ytd, avg_month: avgMonth, ytd_pace: ytdPace, recent_pace: recent } = growth
   const thisYear = new Date().getFullYear()
 
   const eraCaveat = growth.ttm_crosses_era && ibkrFrom
@@ -138,27 +147,41 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
         title={
           `Last 12 months divided by 12: ${formatCurrency(avgMonth.net_eur)} a month,`
           + ` against ${formatCurrency(avgMonth.prev_net_eur ?? 0)} over the prior year.`
-          + ` The growth compares the two averages — the same measure as the 12-month`
-          + ` one, since both sides are divided by 12. A single month's change is not`
-          + ` shown: on a quarterly schedule it measures which month a payer pays in.`
+          + ` Below it, two reference paces over finished months: this year's average`
+          + ` against last year's, and the last three months against the three before.`
+          + ` A single month's change is not shown: on a quarterly schedule it measures`
+          + ` which month a payer pays in.`
         }
       >
-        <DeltaChip pct={avgMonth.pct} label="vs last year's avg" />
-        {quarter && (
+        {ytdPace ? (
           <DeltaChip
-            pct={quarter.qoq_pct}
-            label={`${quarterName(quarter.quarter)} vs ${quarterName(quarter.prev_quarter)}`}
+            pct={ytdPace.pct}
+            label={`${thisYear} vs ${ytdPace.prev_year}`}
+            caveat={ytdPace.prev_year_partial
+              ? `Income began partway through ${ytdPace.prev_year}, but the year is still`
+                + ` divided by 12 — its average is understated and the growth overstated.`
+              : undefined}
             title={
-              `${quarterName(quarter.quarter, true)}: ${formatCurrency(quarter.net_eur)},`
-              + ` against ${formatCurrency(quarter.prev_net_eur)} in`
-              + ` ${quarterName(quarter.prev_quarter, true)}.`
-              + (quarter.yoy_pct != null
-                ? ` Against the same quarter last year: ${quarter.yoy_pct > 0 ? '+' : ''}`
-                  + `${quarter.yoy_pct.toFixed(1)}%.`
-                : ' No payments in the same quarter last year to compare with.')
-              + ` The last completed quarter — the one in progress is never compared.`
-              + ` Quarters, not months, because the core ETFs pay in Mar/Jun/Sep/Dec`
-              + ` and every quarter holds one of those payouts.`
+              `${thisYear} so far: ${formatCurrency(ytdPace.net_eur)} a month`
+              + ` (${ytdPace.months} finished month${ytdPace.months === 1 ? '' : 's'}),`
+              + ` against ${formatCurrency(ytdPace.prev_net_eur)} a month in`
+              + ` ${ytdPace.prev_year} (the year ÷ 12). Finished months only, so it moves`
+              + ` on the 1st.`
+            }
+          />
+        ) : (
+          <DeltaChip pct={avgMonth.pct} label="vs prior 12M" />
+        )}
+        {recent && (
+          <DeltaChip
+            pct={recent.pct}
+            label={`${span(recent.start, recent.end)} vs ${span(recent.prev_start, recent.prev_end)}`}
+            title={
+              `${span(recent.start, recent.end, true)}: ${formatCurrency(recent.net_eur)} a month,`
+              + ` against ${formatCurrency(recent.prev_net_eur)} in`
+              + ` ${span(recent.prev_start, recent.prev_end, true)}. Three finished months`
+              + ` against the three before — any three months in a row hold exactly one of`
+              + ` the core ETFs' Mar/Jun/Sep/Dec payouts, so the spikes do not skew it.`
             }
           />
         )}

@@ -639,12 +639,15 @@ projection in one place instead of growing a second implementation to drift.
 April does not: month-over-month swings ±90% on cadence alone and says nothing about the portfolio.
 MoM survives only in the chart tooltip. It used to sit, with the latest month's YoY, under the
 *Average per month* KPI — where it read as the average's own growth (one large September showed
-+507% MoM, +1484% YoY beside a modest average). That tile now shows `avg_month.pct` (the average
-against last year's average) and `latest_quarter.qoq_pct`: the last **completed** calendar quarter
-against the one before, with the same quarter a year earlier in the hover. Quarters because the core
-ETFs pay in Mar/Jun/Sep/Dec, so every quarter holds exactly one payout spike; the quarter in progress
-is never compared (two days into October is not a quarter). `latest_month` stays in the payload; no
-KPI renders it.
++507% MoM, +1484% YoY beside a modest average). That tile now carries two reference paces, both per month and both over
+**finished** months only (the month in progress may not have paid yet, and a finished-month figure is
+the month bars summed): `ytd_pace`, this year so far ÷ finished months against last year ÷ 12
+(`prev_year_partial` flags a last year whose income began after January), and `recent_pace`, the last
+three finished months against the three before. Rolling months, not calendar quarters: any three
+consecutive months hold exactly one of the core ETFs' Mar/Jun/Sep/Dec payouts, so the window moves
+monthly and still compares like with like. Day-based windows were considered and rejected — a payout
+sliding across a moving boundary changes the figure overnight with no new income. The paces lag by up
+to a month; the headline average does not. `latest_month` stays in the payload; no KPI renders it.
 
 Each of these was a wrong number before it was a rule:
 

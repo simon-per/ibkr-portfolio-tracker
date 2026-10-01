@@ -40,7 +40,8 @@ from app.schemas.portfolio import (
     DividendForwardYield,
     DividendGrowth,
     DividendLatestMonth,
-    DividendLatestQuarter,
+    DividendRecentPace,
+    DividendYtdPace,
     DividendMonthBar,
     DividendSecurityRow,
     DividendTtmPoint,
@@ -132,7 +133,8 @@ def _pairs(payload):
         ("DividendGrowth", growth, DividendGrowth),
         ("DividendForwardYield", payload["forward_yield"], DividendForwardYield),
         ("DividendLatestMonth", growth["latest_month"], DividendLatestMonth),
-        ("DividendLatestQuarter", growth["latest_quarter"], DividendLatestQuarter),
+        ("DividendYtdPace", growth["ytd_pace"], DividendYtdPace),
+        ("DividendRecentPace", growth["recent_pace"], DividendRecentPace),
     ]
     for key in ("ttm", "ytd", "avg_month"):
         out.append((f"DividendDelta ({key})", growth[key], DividendDelta))
@@ -162,7 +164,8 @@ async def test_the_fixture_populates_every_nested_model():
         payload = await _payload(session)
         assert payload["forward_yield"] is not None
         assert payload["growth"]["latest_month"] is not None
-        assert payload["growth"]["latest_quarter"] is not None
+        assert payload["growth"]["ytd_pace"] is not None
+        assert payload["growth"]["recent_pace"] is not None
         assert payload["growth"]["annual"], "no annual rows"
         assert payload["months"], "no month bars"
         assert payload["ttm_series"], "no covered rolling window"

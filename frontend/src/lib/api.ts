@@ -853,13 +853,26 @@ export interface DividendLatestMonth {
   yoy_pct: number | null;
 }
 
-export interface DividendLatestQuarter {
-  quarter: string;          // "2026-Q3"
+/** This year's average month so far against last year's ÷ 12. Finished months only. */
+export interface DividendYtdPace {
   net_eur: number;
-  prev_quarter: string;     // what qoq_pct compares against
   prev_net_eur: number;
-  qoq_pct: number | null;
-  yoy_pct: number | null;
+  pct: number | null;
+  months: number;
+  prev_year: number;
+  /** Income began partway through last year: the base is understated. */
+  prev_year_partial: boolean;
+}
+
+/** Last three finished months against the three before, per month. Keys are "YYYY-MM". */
+export interface DividendRecentPace {
+  net_eur: number;
+  prev_net_eur: number;
+  pct: number | null;
+  start: string;
+  end: string;
+  prev_start: string;
+  prev_end: string;
 }
 
 /**
@@ -880,8 +893,8 @@ export interface DividendGrowth {
   next_12m_vs_ttm_pct: number | null;
   annual: DividendAnnualRow[];
   latest_month: DividendLatestMonth | null;
-  /** Last COMPLETED calendar quarter; the one in progress is never used. */
-  latest_quarter: DividendLatestQuarter | null;
+  ytd_pace: DividendYtdPace | null;
+  recent_pace: DividendRecentPace | null;
 }
 
 /**

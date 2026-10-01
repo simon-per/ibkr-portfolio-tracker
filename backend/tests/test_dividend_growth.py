@@ -380,32 +380,53 @@ async def test_latest_month_reports_the_last_realized_month_not_a_projected_one(
 
 
 @pytest.mark.asyncio
-async def test_latest_quarter_is_the_last_completed_one_against_its_neighbours():
+async def test_the_two_paces_compare_finished_months_per_month():
     """
-    The quarter KPI reads the last COMPLETED quarter (Q2 on 29 July), against Q1
-    and against Q2 a year earlier. July's payment sits in the quarter in progress
-    and must not count — a quarter four weeks old is not a quarter.
+    On 29 July: this year's pace is Jan-Jun ÷ 6 against 2025 ÷ 12, and the recent
+    pace is Apr-Jun against Jan-Mar, each ÷ 3. July's payment sits in the month in
+    progress and must count in neither.
     """
     engine, session = await _make_session()
     try:
         session.add(_lot(1, date(2024, 1, 1), "100"))
         await session.flush()
-        await _seed_per_share(session, date(2025, 6, 15), per_share="0.50")  # Q2 2025: 50
-        await _seed_per_share(session, date(2026, 3, 15))                    # Q1 2026: 100
-        await _seed_per_share(session, date(2026, 4, 15))                    # Q2 2026: 200
-        await _seed_per_share(session, date(2026, 6, 15))
-        await _seed_per_share(session, date(2026, 7, 15))                    # Q3, in progress
+        await _seed_per_share(session, date(2024, 12, 15))                   # income from 2024
+        await _seed_per_share(session, date(2025, 3, 15))                    # 2025: 300
+        await _seed_per_share(session, date(2025, 9, 15), per_share="2.00")
+        await _seed_per_share(session, date(2026, 3, 15))                    # Jan-Mar: 100
+        await _seed_per_share(session, date(2026, 4, 15))                    # Apr-Jun: 300
+        await _seed_per_share(session, date(2026, 6, 15), per_share="2.00")
+        await _seed_per_share(session, date(2026, 7, 15))                    # in progress
 
-        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
+        g = (await DividendService(session).get_dividend_breakdown(as_of=AS_OF))["growth"]
 
-        assert r["growth"]["latest_quarter"] == {
-            "quarter": "2026-Q2",
-            "net_eur": 200.00,
-            "prev_quarter": "2026-Q1",
-            "prev_net_eur": 100.00,
-            "qoq_pct": 100.0,
-            "yoy_pct": 300.0,
+        assert g["ytd_pace"] == {
+            "net_eur": 66.67, "prev_net_eur": 25.00, "pct": 166.7,
+            "months": 6, "prev_year": 2025, "prev_year_partial": False,
         }
+        assert g["recent_pace"] == {
+            "net_eur": 100.00, "prev_net_eur": 33.33, "pct": 200.0,
+            "start": "2026-04", "end": "2026-06",
+            "prev_start": "2026-01", "prev_end": "2026-03",
+        }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_prior_year_that_started_late_is_flagged_not_trusted():
+    """Income from March 2025 divided by 12 understates the base; say so."""
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2024, 1, 1), "100"))
+        await session.flush()
+        await _seed_per_share(session, date(2025, 3, 15))
+        await _seed_per_share(session, date(2026, 3, 15))
+
+        g = (await DividendService(session).get_dividend_breakdown(as_of=AS_OF))["growth"]
+
+        assert g["ytd_pace"]["prev_year_partial"] is True
     finally:
         await session.close()
         await engine.dispose()

@@ -1877,39 +1877,61 @@ class DividendService:
                 ),
             }
 
-        # The last COMPLETED calendar quarter, against the one before it and the same
-        # quarter a year earlier. Quarters rather than months because the core ETFs
-        # here pay in Mar/Jun/Sep/Dec: every quarter holds exactly one of those
-        # spikes, so quarter against quarter compares like with like where a month
-        # against the month before only measures the payout calendar. The quarter
-        # in progress is never used — two days into October is not a quarter.
-        latest_quarter = None
-        if month_actual_all:
-            q_start = date(as_of.year, 3 * ((as_of.month - 1) // 3) + 1, 1)
-            q_end_key = self._shift_month(q_start.strftime("%Y-%m"), 1)
+        # Two paces under the monthly average, both per month and both over FINISHED
+        # months only — the month in progress may simply not have paid yet, and a
+        # finished-month figure is the month bars summed, which a reader can check.
+        # They lag by up to a month; the headline average above them does not.
+        #  * ytd_pace: this year's average month so far against last year's (÷12).
+        #  * recent_pace: the last three months against the three before them.
+        #    Rolling months rather than calendar quarters, and three because the
+        #    core ETFs pay in Mar/Jun/Sep/Dec: ANY three consecutive months hold
+        #    exactly one of those spikes, so the window can move every month and
+        #    still compare like with like — where month against month only
+        #    measures the payout calendar.
+        ytd_pace = None
+        recent_pace = None
+        income_keys = sorted(k for k, v in month_actual_all.items() if v > 0)
+        if income_keys:
+            last_full = self._shift_month(as_of.strftime("%Y-%m"), 1)
 
-            def _quarter_total(end_key: str) -> Decimal:
+            def _span_total(end_key: str, months: int) -> Decimal:
                 return sum(
                     (month_actual_all.get(self._shift_month(end_key, i), Decimal("0"))
-                     for i in range(3)),
+                     for i in range(months)),
                     Decimal("0"),
                 )
 
-            def _quarter_label(end_key: str) -> str:
-                return f"{end_key[:4]}-Q{(int(end_key[5:7]) - 1) // 3 + 1}"
+            ytd_months = as_of.month - 1
+            if ytd_months > 0:
+                prev_year = as_of.year - 1
+                ytd_avg = _span_total(last_full, ytd_months) / ytd_months
+                prev_avg = _span_total(f"{prev_year}-12", 12) / 12
+                ytd_pace = {
+                    "net_eur": round(float(ytd_avg), 2),
+                    "prev_net_eur": round(float(prev_avg), 2),
+                    "pct": self._pct(ytd_avg, prev_avg),
+                    "months": ytd_months,
+                    "prev_year": prev_year,
+                    # Income that starts partway through last year still gets ÷12,
+                    # which understates the base and overstates the growth. Flag
+                    # it rather than divide by a coverage the data cannot prove.
+                    "prev_year_partial": (
+                        income_keys[0][:4] == str(prev_year)
+                        and income_keys[0] > f"{prev_year}-01"
+                    ),
+                }
 
-            q_total = _quarter_total(q_end_key)
-            prev_q_end_key = self._shift_month(q_end_key, 3)
-            prev_q_total = _quarter_total(prev_q_end_key)
-            latest_quarter = {
-                "quarter": _quarter_label(q_end_key),
-                "net_eur": round(float(q_total), 2),
-                "prev_quarter": _quarter_label(prev_q_end_key),
-                "prev_net_eur": round(float(prev_q_total), 2),
-                "qoq_pct": self._pct(q_total, prev_q_total),
-                "yoy_pct": self._pct(
-                    q_total, _quarter_total(self._shift_month(q_end_key, 12))
-                ),
+            prev_end = self._shift_month(last_full, 3)
+            recent_avg = _span_total(last_full, 3) / 3
+            prior_avg = _span_total(prev_end, 3) / 3
+            recent_pace = {
+                "net_eur": round(float(recent_avg), 2),
+                "prev_net_eur": round(float(prior_avg), 2),
+                "pct": self._pct(recent_avg, prior_avg),
+                "start": self._shift_month(last_full, 2),
+                "end": last_full,
+                "prev_start": self._shift_month(prev_end, 2),
+                "prev_end": prev_end,
             }
 
         growth = {
@@ -1942,7 +1964,8 @@ class DividendService:
             ),
             "annual": annual_rows,
             "latest_month": latest_month,
-            "latest_quarter": latest_quarter,
+            "ytd_pace": ytd_pace,
+            "recent_pace": recent_pace,
         }
 
         # Trailing-12-month yield: spliced net over the current market value.
