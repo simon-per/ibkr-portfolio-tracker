@@ -637,7 +637,10 @@ projection in one place instead of growing a second implementation to drift.
 
 **Rolling 12 months leads; raw MoM cannot.** This account's payers are quarterly, so March pays and
 April does not: month-over-month swings ±90% on cadence alone and says nothing about the portfolio.
-MoM survives as a labelled figure on the latest realized month and in the chart tooltip.
+MoM survives only in the chart tooltip. It used to sit, with the latest month's YoY, under the
+*Average per month* KPI — where it read as the average's own growth (one large September showed
++507% MoM, +1484% YoY beside a modest average). That tile now shows `avg_month.pct`: the average
+against last year's average. `latest_month` stays in the payload; no KPI renders it.
 
 Each of these was a wrong number before it was a rule:
 

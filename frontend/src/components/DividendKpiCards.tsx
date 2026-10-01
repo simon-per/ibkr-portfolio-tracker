@@ -8,9 +8,6 @@ interface DividendKpiCardsProps {
   isLoading?: boolean
 }
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
 /**
  * Cents matter here and whole units do not, until the figure gets large.
  *
@@ -23,12 +20,6 @@ function amount(value: number): string {
   return value.toLocaleString('en-US', {
     minimumFractionDigits: decimals, maximumFractionDigits: decimals,
   })
-}
-
-/** '2026-07' -> 'Jul 2026'. A raw month key beside formatted money reads as debug output. */
-function monthName(key: string): string {
-  const [y, m] = key.split('-')
-  return `${MONTH_NAMES[Number(m) - 1] ?? m} ${y}`
 }
 
 function Tile({
@@ -46,8 +37,8 @@ function Tile({
       <div className="mt-1 text-2xl font-semibold leading-none tracking-tight tabular-nums">
         {value}
       </div>
-      {/* Wraps: in the 2-up mobile grid a tile is ~155px of usable width, and the
-          latest-month footer (month + MoM + YoY) is wider than that. Unwrapped it
+      {/* Wraps: in the 2-up mobile grid a tile is ~155px of usable width, and a
+          chip plus its label can be wider than that. Unwrapped, a footer once
           pushed the whole page into horizontal scroll. */}
       <div className="mt-2 flex min-h-[1.25rem] flex-wrap items-center gap-x-1.5 gap-y-1">
         {children}
@@ -62,8 +53,10 @@ function Tile({
  *
  * Rolling twelve months leads rather than month-over-month, because dividends
  * here are quarterly: March pays and April does not, so a raw MoM swings by
- * ±90% on cadence alone and would say nothing about the portfolio. MoM survives
- * as a labelled footnote on the latest month.
+ * ±90% on cadence alone and would say nothing about the portfolio. The average
+ * tile once carried the latest month's MoM/YoY as a footnote; sitting under the
+ * average it read as the average's own growth (one large September showed +507%),
+ * so it now compares the average with last year's average instead.
  */
 export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCardsProps) {
   const curSym = useCurrencySymbol()
@@ -80,7 +73,7 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
   }
   if (!growth) return null
 
-  const { ttm, ytd, avg_month: avgMonth, latest_month: latest } = growth
+  const { ttm, ytd, avg_month: avgMonth } = growth
   const thisYear = new Date().getFullYear()
 
   const eraCaveat = growth.ttm_crosses_era && ibkrFrom
@@ -139,27 +132,12 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
         title={
           `Last 12 months divided by 12: ${formatCurrency(avgMonth.net_eur)} a month,`
           + ` against ${formatCurrency(avgMonth.prev_net_eur ?? 0)} over the prior year.`
-          + ` The growth is the same measure as the 12-month one — both sides are`
-          + ` divided by the same 12.`
+          + ` The growth compares the two averages — the same measure as the 12-month`
+          + ` one, since both sides are divided by 12. A single month's change is not`
+          + ` shown: on a quarterly schedule it measures which month a payer pays in.`
         }
       >
-        {latest ? (
-          <span
-            className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground"
-            title={
-              `${latest.month}: ${formatCurrency(latest.net_eur)} — the most recent`
-              + ` month money actually arrived. Month-over-month is shown for`
-              + ` completeness, but on a quarterly schedule it mostly reflects which`
-              + ` month a payer happens to pay in.`
-            }
-          >
-            <span>{monthName(latest.month)}</span>
-            <DeltaChip pct={latest.mom_pct} label="MoM" />
-            <DeltaChip pct={latest.yoy_pct} label="YoY" />
-          </span>
-        ) : (
-          <DeltaChip pct={avgMonth.pct} label="vs prior 12M" />
-        )}
+        <DeltaChip pct={avgMonth.pct} label="vs last year's average" />
       </Tile>
     </div>
   )
