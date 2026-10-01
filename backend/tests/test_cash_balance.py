@@ -238,6 +238,52 @@ async def test_a_measured_balance_overrides_the_derivation():
 
 
 @pytest.mark.asyncio
+async def test_a_withdrawal_inside_a_measured_balance_is_not_debited_again_on_settlement():
+    """
+    Read off production on 2026-10-01: a disbursement initiated 09-28 and settling 09-30
+    was already deducted in IBKR's 09-28 `endingCash`. Stored under its settle date, the
+    measured correction absorbed it on 09-28 and the derived ledger subtracted it again
+    on 09-30 — cash -4,470 CHF and Total Value 4.5k low from then on. Built through the
+    real extractor so the dating rule is what is under test.
+    """
+    from types import SimpleNamespace
+    from datetime import datetime
+    from ibflex import enums
+    from app.repositories.cash_flow_repository import CashFlowRepository
+    from app.services.currency_service import CurrencyService
+    from app.services.ibkr_service import IBKRService
+    from app.services.sync_helper import persist_cash_flows
+
+    def ct(key, amount, report, settle):
+        return SimpleNamespace(
+            type=enums.CashAction.DEPOSITWITHDRAW, conid=None, symbol=None,
+            transactionID=key, reportDate=report, settleDate=settle,
+            dateTime=datetime(report.year, report.month, report.day, 12, 0),
+            amount=Decimal(amount), currency="EUR", description=key,
+        )
+
+    engine, session = await _make_session()
+    try:
+        flows = await IBKRService(token="t", query_id="q").extract_cash_flows({
+            "statement": SimpleNamespace(CashTransactions=[
+                ct("DEPOSIT", "7000", date(2026, 9, 28), date(2026, 9, 28)),
+                ct("WITHDRAWAL", "-4500", date(2026, 9, 28), date(2026, 9, 30)),
+            ])
+        })
+        await persist_cash_flows(CashFlowRepository(session), CurrencyService(session), flows)
+        # IBKR's own end-of-day figure for the 28th, the withdrawal already out of it.
+        session.add(CashBalance(
+            report_date=date(2026, 9, 28), currency="EUR", cash=Decimal("2500"),
+        ))
+        await session.flush()
+
+        assert await _balance(session, date(2026, 9, 28)) == Decimal("2500")
+        assert await _balance(session, date(2026, 9, 30)) == Decimal("2500")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_days_before_measurement_are_not_reported_as_measured():
     """
     The Flex window is bounded, so measured history begins whenever the portal section

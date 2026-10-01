@@ -5,7 +5,14 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-09-29.** Newest, pushed on 2026-09-28, deployed with its CoinStats keys, awaiting the first production crypto sync (see
+**Last updated: 2026-10-01.** Newest: **a deposit or withdrawal is dated when IBKR books it into
+cash, not when it settles** (`extract_cash_flows`: `reportDate` → `dateTime` → `settleDate`). A
+disbursement initiated 09-28 and settling 09-30 was already out of IBKR's measured 09-28 balance, so
+the ledger debited it a second time on 09-30 — cash about −4.5k, Total Value low by the withdrawal —
+and the benchmark bought that day's deposit on 09-28 but sold the withdrawal only on 09-30, a
+two-day spike on every index line. The fix corrects production by itself on the first Flex sync
+after deploy (see *Watch after the next deploy*). Rule in `docs/cash-contributions-benchmark.md`.
+Before that, pushed on 2026-09-28, deployed with its CoinStats keys, awaiting the first production crypto sync (see
 *Watch after the next deploy*): **a separate
 Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
 the whole page. The crypto book has its own tables (`crypto_*`, migration `w6f3b0c7d1e2`), service,
@@ -1000,6 +1007,20 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The 09-28 withdrawal re-dates itself on the first Flex sync after the cash-flow dating fix.**
+  Nothing to run by hand, and no manual sync (rule 2). Afterwards: `/api/portfolio/activity` lists
+  the `DISBURSEMENT INITIATED` row on 2026-09-28, not 09-30; `value-over-time` from 09-25 shows
+  `cash_eur` at tens of CHF on 09-28 and every day after, not about −4.5k, with `total_value_eur` equal to
+  holdings + cash; `money_in_eur` steps once on 09-28 by the net of deposit and withdrawal; and the
+  benchmark lines on the chart have no 09-28 → 09-30 hump. If the row still reads 09-30 after a
+  successful sync, IBKR sent neither `reportDate` nor `dateTime` on it. Check the statement before
+  touching code.
+
+- **`test_api_smoke.py::test_the_shapes_that_broke_production_serialize` fails locally on
+  2026-10-01, and it fails with or without the cash-flow change.** A dividend breakdown row has
+  `forecast_payouts > 0` with `forecast_samples` None, which looks date-dependent (a new month).
+  Not investigated. It is the dividends forecast, not cash.
+
 - **The crypto mode, once given its keys.** Deployed (`/health` on `4a14f41`, checked 2026-09-29):
   anonymous `/api/crypto/*` answers 401, `/api/scheduler/status` lists only the eight stock jobs and
   `/api/scheduler/history` has no crypto rows. Still unverified now that the VPS has the CoinStats
@@ -1596,6 +1617,12 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-01 (withdrawal counted twice)** — a withdrawal stored under its settle date was
+  debited a second time after IBKR's measured balance had already taken it out, so Total Value
+  read low and the benchmark spiked for two days. Deposits and withdrawals are now dated by
+  `reportDate`. Three regression tests fail on the old order. Backend suite green apart from one
+  dividend smoke assertion that fails before the change too.
+
 - **2026-09-28 (crypto mode)** — "both stocks and crypto inside the tracker, clearly separate": a
   Stocks | Crypto switch beside the theme toggle, a CoinStats-fed crypto book with its own tables,
   routes and view, locked behind the admin key and failing closed. Separate by construction rather
@@ -1624,8 +1651,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   for dense metric rows. Hero-card grids now count occupied tracks, and semantic text colours retain
   AA contrast in both themes. Verified with 683 frontend tests and a production build; deployment is
   pending.
-
-- **2026-09-20 (forecast-off ranges)** — stopped the monthly chart from retaining empty future
-  month labels after its forecast bars disappear, and removed the next-year planning range while
-  Forecast is off. Switching the toggle off from that year now returns to the current year, keeping
-  the selector, request and chart on one valid range. Live on `a719644`; API/bundle-verified.

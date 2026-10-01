@@ -110,7 +110,34 @@ async def test_extract_cash_flows_keeps_conid_less_deposits():
     assert flows[0]["ib_key"] == "D1"
     assert flows[0]["flow_type"] == "DEPOSITWITHDRAW"
     assert flows[0]["amount"] == Decimal("1000")
-    assert flows[0]["flow_date"] == date(2026, 2, 5)  # settleDate preferred
+    assert flows[0]["flow_date"] == date(2026, 2, 4)  # reportDate, not settleDate
+
+
+@pytest.mark.asyncio
+async def test_a_withdrawal_is_dated_when_ibkr_debits_it_not_when_it_settles():
+    """
+    A disbursement is debited from cash the day it is initiated. Read off production:
+    one initiated 2026-09-28 and settling 09-30 was already inside the 09-28 Cash
+    Report `endingCash`, so dating it by settleDate debited it a second time on 09-30
+    (cash read -4,470 CHF) and left the benchmark two days of a deposit with no
+    withdrawal beside it. The flow is dated on the cash ledger's basis: reportDate,
+    then dateTime, and settleDate only when IBKR sent neither.
+    """
+    statement = SimpleNamespace(CashTransactions=[
+        _deposit(transactionID="W", amount=Decimal("-4517.50"), currency="CHF",
+                 reportDate=date(2026, 9, 28), dateTime=datetime(2026, 9, 28, 14, 0),
+                 settleDate=date(2026, 9, 30), description="DISBURSEMENT INITIATED BY X"),
+        _deposit(transactionID="NO_REPORT", reportDate=None,
+                 dateTime=datetime(2026, 9, 28, 14, 0), settleDate=date(2026, 9, 30)),
+        _deposit(transactionID="SETTLE_ONLY", reportDate=None, dateTime=None,
+                 settleDate=date(2026, 9, 30)),
+    ])
+
+    flows = {f["ib_key"]: f for f in await _svc().extract_cash_flows(_flex(statement))}
+
+    assert flows["W"]["flow_date"] == date(2026, 9, 28)
+    assert flows["NO_REPORT"]["flow_date"] == date(2026, 9, 28)
+    assert flows["SETTLE_ONLY"]["flow_date"] == date(2026, 9, 30)
 
 
 @pytest.mark.asyncio
@@ -229,10 +256,10 @@ async def test_a_deposit_matching_a_transfers_cash_leg_is_reclassified():
         svc = _svc()
         deposits = await svc.extract_cash_flows(_flex(SimpleNamespace(CashTransactions=[
             # Same date/amount/currency as the transfer's cash leg below.
-            _deposit(transactionID="D_TR", settleDate=date(2026, 1, 20),
+            _deposit(transactionID="D_TR", reportDate=date(2026, 1, 20),
                      amount=Decimal("2500"), description="INCOMING ACCT TRANSFER"),
             # A genuine, unrelated deposit.
-            _deposit(transactionID="D_REAL", settleDate=date(2026, 2, 5),
+            _deposit(transactionID="D_REAL", reportDate=date(2026, 2, 5),
                      amount=Decimal("1000")),
         ])))
         transfers = await svc.extract_transfers(_flex(SimpleNamespace(Transfers=[
@@ -270,7 +297,7 @@ async def test_an_in_kind_transfer_does_not_swallow_same_day_deposits():
     try:
         svc = _svc()
         deposits = await svc.extract_cash_flows(_flex(SimpleNamespace(CashTransactions=[
-            _deposit(transactionID="D_SAMEDAY", settleDate=date(2026, 1, 20),
+            _deposit(transactionID="D_SAMEDAY", reportDate=date(2026, 1, 20),
                      amount=Decimal("900")),
         ])))
         transfers = await svc.extract_transfers(_flex(SimpleNamespace(Transfers=[

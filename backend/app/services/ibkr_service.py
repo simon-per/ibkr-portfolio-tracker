@@ -1033,9 +1033,14 @@ class IBKRService:
             if ct_type is not ibflex_enums.CashAction.DEPOSITWITHDRAW:
                 continue
 
-            # settleDate first: when the cash actually landed, not when it was announced.
-            flow_date = _as_date(getattr(ct, 'settleDate', None)) or _as_date(getattr(ct, 'dateTime', None)) \
-                or _as_date(getattr(ct, 'reportDate', None))
+            # The day IBKR books it into cash, not the day it settles. `endingCash` (what
+            # `extract_cash_report` stores) and trades (`tradeDate`) are on that basis, and
+            # a withdrawal is debited when it is initiated: a disbursement initiated on
+            # 2026-09-28 that settled 09-30 was already inside the 09-28 measured balance,
+            # so dating it by settleDate debited it a second time two days later (cash
+            # -4,470 CHF) and handed the benchmark a deposit with no withdrawal beside it.
+            flow_date = _as_date(getattr(ct, 'reportDate', None)) or _as_date(getattr(ct, 'dateTime', None)) \
+                or _as_date(getattr(ct, 'settleDate', None))
             if not flow_date:
                 continue
 

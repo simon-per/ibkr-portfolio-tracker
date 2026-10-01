@@ -48,7 +48,7 @@ is also why this is **not** spliced at `coverage_from` the way `get_contribution
 the splice exists because *lot cost basis* cannot survive a rotation, and cash is not
 built from lot cost basis.
 
-Four rules, each of which would be a wrong number the other way:
+Five rules, each of which would be a wrong number the other way:
 
 - **Every cash-flow type counts, not `get_deposits()`'s whitelist.** That one answers
   "was money *added*", where a transfer must never count; this asks "did cash *move*",
@@ -65,6 +65,20 @@ Four rules, each of which would be a wrong number the other way:
 - **Each event converts at its own date**, matching how the timeline converts a lot's
   cost at its `open_date`. The two lines are on one chart and have to agree about which
   day's rate applies to a franc.
+- **A deposit or withdrawal is dated when IBKR books it into cash, not when it settles**
+  — `reportDate`, then `dateTime`, then `settleDate` (`extract_cash_flows`). Trades sit on
+  `tradeDate` and the measured `endingCash` is trade-date basis, so a settle date puts the
+  same franc on two days. Found 2026-10-01: a disbursement initiated 09-28 and settling
+  09-30 was already out of IBKR's 09-28 balance; stored on 09-30, the measured correction
+  absorbed it on the 28th and the ledger debited it again on the 30th — cash −4,470 CHF,
+  Total Value 4.5k low — while the benchmark, fed the same legs, bought the day's deposit
+  on the 28th and sold the withdrawal two days later, a spike on every index line. The
+  upsert keys on `ib_key` and overwrites `flow_date`, so a re-sync re-dates rows inside
+  the Flex window by itself. Dividend `pay_date` stays on `settleDate` deliberately: the
+  pay-date lag and the calendar are built on it, and for a dividend the two coincide.
+  Tests: `test_a_withdrawal_is_dated_when_ibkr_debits_it_not_when_it_settles`,
+  `test_a_withdrawal_inside_a_measured_balance_is_not_debited_again_on_settlement`,
+  `test_a_withdrawal_initiated_beside_a_deposit_leaves_no_spike_and_no_double_debit`.
 - **`unknown` is not zero.** No ledger row at all means there is nothing to derive from,
   and `cash_source` says so; a *derived* zero is a real answer for a fully deployed
   account. Collapsing them renders "we have no idea" as "you hold no cash" — the

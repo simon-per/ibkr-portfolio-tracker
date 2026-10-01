@@ -287,6 +287,63 @@ async def test_a_contribution_inside_the_window_buys_index_shares():
 
 
 @pytest.mark.asyncio
+async def test_a_withdrawal_initiated_beside_a_deposit_leaves_no_spike_and_no_double_debit():
+    """
+    Read off production on 2026-10-01: EUR 7,000 deposited and CHF 4,517.50 withdrawn,
+    the disbursement initiated on 09-28 and settling 09-30. Dated by settleDate, the
+    benchmark bought the whole deposit on the 28th and sold the withdrawal only on the
+    30th — a two-day spike on every index line — while the portfolio, whose 09-28
+    measured balance already excluded the withdrawal, debited it a second time on the
+    30th and sat 4.5k low from then on. Dated when IBKR books it, the two legs land on
+    one day, and the benchmark and Total Value move together and stay together.
+    """
+    from types import SimpleNamespace
+    from datetime import datetime
+    from ibflex import enums
+    from app.models.cash_balance import CashBalance
+    from app.repositories.cash_flow_repository import CashFlowRepository
+    from app.services.currency_service import CurrencyService
+    from app.services.ibkr_service import IBKRService
+    from app.services.sync_helper import persist_cash_flows
+
+    def ct(key, amount, report, settle):
+        return SimpleNamespace(
+            type=enums.CashAction.DEPOSITWITHDRAW, conid=None, symbol=None,
+            transactionID=key, reportDate=report, settleDate=settle,
+            dateTime=datetime(report.year, report.month, report.day, 12, 0),
+            amount=Decimal(amount), currency="EUR", description=key,
+        )
+
+    engine, session = await _session()
+    try:
+        await _standard_book(session)
+        flows = await IBKRService(token="t", query_id="q").extract_cash_flows({
+            "statement": SimpleNamespace(CashTransactions=[
+                ct("DEPOSIT", "7000", date(2026, 3, 11), date(2026, 3, 11)),
+                ct("WITHDRAWAL", "-4500", date(2026, 3, 11), date(2026, 3, 13)),
+            ])
+        })
+        await persist_cash_flows(CashFlowRepository(session), CurrencyService(session), flows)
+        # IBKR's end-of-day cash on the 11th, the withdrawal already out of it:
+        # 1,500 deposited earlier + 7,000 - 4,500.
+        session.add(CashBalance(
+            report_date=date(2026, 3, 11), currency="EUR", cash=Decimal("4000"),
+        ))
+        await session.flush()
+
+        window = await _series(session, *WINDOW, anchor="window")
+        chart = await _chart(session, *WINDOW)
+
+        for day in ("2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16"):
+            assert window[day]["benchmark_value_eur"] == pytest.approx(5200), day
+            assert chart[day]["total_value_eur"] == pytest.approx(5200, abs=0.02), day
+        assert window["2026-03-11"]["external_flow_eur"] == pytest.approx(2500)
+        assert window["2026-03-13"]["external_flow_eur"] == pytest.approx(0)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_flow_free_daily_ratios_are_identical_to_the_absolute_series():
     """
     Beta regresses day-over-day ratios on flow-free days. Between contributions the share
