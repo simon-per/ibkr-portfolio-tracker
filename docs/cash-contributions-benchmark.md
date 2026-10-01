@@ -161,6 +161,12 @@ the stored native→EUR and EUR→base rates are not exact inverses: 12,501.58 C
 as 12,502.03 under a CHF base. Four significant figures in, on the one number in this app
 people reconcile against a broker statement line by line.
 
+**The same holds for every deposit and withdrawal**, through `cash_flow_in_base`
+(`native_amounts.py`) — the one function the cash ledger, Money In, the activity ledger and
+the tax report call. Until 2026-10-01 each converted `amount_eur` inline and none had the
+exemption, so a CHF 4,500.00 withdrawal stored at a stale CHF→EUR rate read CHF 4,517.50
+everywhere it appeared. `tests/test_cash_flow_in_base.py` fails on a fifth inline copy.
+
 `_apply_measured` splices them in as *corrections*: a measured row is a level while the
 timeline sweeps deltas, so each becomes `measured − derived-so-far`. That keeps the whole
 thing one sorted event list, which is what stops the chart, the summary card and the

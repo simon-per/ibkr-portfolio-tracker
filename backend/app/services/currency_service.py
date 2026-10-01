@@ -53,6 +53,12 @@ class CurrencyService:
     FALLBACK_SOURCE = "er-api-latest"
     FALLBACK_MAX_AGE_DAYS = 7
 
+    # Appended to the origin's tag when a rate is copied onto a later date. A copy is a
+    # stand-in exactly like a fallback row — the day's real quote may simply not have been
+    # published yet — and `_store_published_rate` has to be able to tell it apart from a
+    # quote for that day, or the copy outlives the quote it was standing in for.
+    CARRIED_SUFFIX = "+carried"
+
     # Currencies we keep a daily rate for even while nothing is held in them.
     #
     # Only the ones Frankfurter *cannot* serve are listed: for an ECB currency the
@@ -161,7 +167,8 @@ class CurrencyService:
         CARRY_FORWARD_MAX_AGE_DAYS.
 
         Caches it under the requested date keeping the provider tag of the row it came
-        from, so the audit trail survives the copy.
+        from, so the audit trail survives the copy, plus `CARRIED_SUFFIX`, so the copy can
+        be replaced once that day's real quote is published.
         """
         recent = await self._get_most_recent_rate(from_currency, target_date, to_currency)
         if not recent:
@@ -174,6 +181,8 @@ class CurrencyService:
                 f"({rate_date}) onto {target_date} — beyond {self.CARRY_FORWARD_MAX_AGE_DAYS} days"
             )
             return None
+        if not source.endswith(self.CARRIED_SUFFIX):
+            source = f"{source}{self.CARRIED_SUFFIX}"
         await self._cache_rate(from_currency, to_currency, target_date, rate, source=source)
         return rate
 
@@ -286,10 +295,16 @@ class CurrencyService:
                         rate_date = date.fromisoformat(date_str)
                         rate_decimal = Decimal(str(rate_value))
 
-                        # Check if already cached
-                        existing = await self._get_cached_rate(from_currency, rate_date, to_currency)
-                        if not existing:
-                            await self._cache_rate(from_currency, to_currency, rate_date, rate_decimal)
+                        # A published ECB quote replaces a stand-in for the same day. Before
+                        # it is published a date is filled by a carry-forward copy or the
+                        # fallback's *latest* rate, and keeping that row once the real
+                        # one exists made the stand-in permanent: found 2026-10-01, a
+                        # fallback CHF->EUR of 1.05918 on 09-28 against the ECB's 1.0566,
+                        # carried onto 09-30 and never corrected, put a CHF 4,500
+                        # withdrawal in at CHF 4,517.50.
+                        await self._store_published_rate(
+                            from_currency, to_currency, rate_date, rate_decimal
+                        )
 
                 logger.debug(f"Cached {len(rates_by_date)} rates")
                 # An empty `rates` is a *successful* request that carried no data — the
@@ -566,6 +581,37 @@ class CurrencyService:
                 raise ValueError(f"Failed to fetch exchange rate: {str(e)}")
             except httpx.RequestError as e:
                 raise ValueError(f"Network error while fetching exchange rate: {str(e)}")
+
+    async def _store_published_rate(
+        self, from_currency: str, to_currency: str, rate_date: date, rate: Decimal
+    ) -> None:
+        """
+        Cache a Frankfurter quote, overwriting a **stand-in** stored for the same day — a
+        fallback row or a carried copy — and nothing else. A row from any other source
+        (a hand-loaded rate, a test fixture, an earlier quote) is left alone: replacing
+        only what announced itself as provisional keeps this from rewriting history.
+        """
+        existing = (await self.session.execute(
+            select(ExchangeRate).where(
+                ExchangeRate.date == rate_date,
+                ExchangeRate.from_currency == from_currency,
+                ExchangeRate.to_currency == to_currency,
+            )
+        )).scalar_one_or_none()
+        if existing is None:
+            await self._cache_rate(from_currency, to_currency, rate_date, rate)
+        elif self._is_stand_in(existing.source):
+            logger.info(
+                f"Replacing {from_currency}/{to_currency} {existing.rate} "
+                f"({existing.source}) on {rate_date} with the published {rate}"
+            )
+            existing.rate = rate
+            existing.source = "frankfurter"
+            await self.session.flush()
+
+    def _is_stand_in(self, source: Optional[str]) -> bool:
+        source = source or ""
+        return source == self.FALLBACK_SOURCE or source.endswith(self.CARRIED_SUFFIX)
 
     async def _cache_rate(
         self,

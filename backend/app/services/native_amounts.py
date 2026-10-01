@@ -94,3 +94,21 @@ class NativeToBase:
                 return None
             eur = amount * rate
         return self._base_fx.convert(eur, on_date)
+
+
+def cash_flow_in_base(flow, base_fx) -> Decimal:
+    """
+    A `cash_flows` row in the base currency — the one way every reader does it.
+
+    A flow already in the base currency is its own `amount`, never `amount_eur`
+    projected back. The stored native->EUR rate and the EUR->base rate are separate
+    series and are not exact inverses, so the round trip turns a franc figure the broker
+    states exactly into a near miss. Found 2026-10-01: a CHF 4,500.00 withdrawal stored
+    at a stale CHF->EUR rate came back as CHF 4,517.50 in the activity ledger, Money In
+    and the cash line — on the number people check against their bank. The same
+    exemption `NativeToBase.convert` makes for a cash balance; four readers had each
+    converted `amount_eur` inline, so none had it.
+    """
+    if flow.amount is not None and flow.currency and flow.currency == base_fx.base_currency:
+        return flow.amount
+    return base_fx.convert(flow.amount_eur or Decimal("0"), flow.flow_date)

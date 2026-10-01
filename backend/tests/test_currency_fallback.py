@@ -227,7 +227,7 @@ async def test_carry_forward_preserves_the_provider_tag(monkeypatch, session):
     assert rate == Decimal("0.02716")
     carried = [r for r in await _rows(session) if r.date == date.today()]
     assert len(carried) == 1
-    assert carried[0].source == CurrencyService.FALLBACK_SOURCE
+    assert carried[0].source == CurrencyService.FALLBACK_SOURCE + CurrencyService.CARRIED_SUFFIX
 
 
 @pytest.mark.asyncio
@@ -403,3 +403,45 @@ async def test_warm_rates_ignores_the_target_currency_itself(monkeypatch, sessio
     assert calls == []
     assert summary["currencies"] == []
     assert await _rows(session) == []
+
+
+@pytest.mark.parametrize("stand_in", [
+    CurrencyService.FALLBACK_SOURCE,
+    "frankfurter" + CurrencyService.CARRIED_SUFFIX,
+    CurrencyService.FALLBACK_SOURCE + CurrencyService.CARRIED_SUFFIX,
+])
+@pytest.mark.asyncio
+async def test_a_published_quote_replaces_the_stand_in_for_its_day(monkeypatch, session, stand_in):
+    """
+    Found 2026-10-01: the fallback's latest CHF->EUR (1.05918) was stored under 09-28
+    before the ECB published that day, then carried onto 09-30, and the real quote
+    (1.0566) was skipped on every later fetch because a row already existed. A CHF 4,500
+    withdrawal read as CHF 4,517.50. A stand-in now gives way to the published figure.
+    """
+    day = date.today() - timedelta(days=2)
+    session.add(ExchangeRate(date=day, from_currency="CHF", to_currency="EUR",
+                             rate=Decimal("1.0591772946"), source=stand_in))
+    await session.flush()
+    install_fake_http(monkeypatch, payload=frankfurter_range_payload(1.0566, on=day))
+
+    assert await CurrencyService(session)._batch_fetch_rates("CHF", date.today(), "EUR")
+
+    rows = [r for r in await _rows(session) if r.date == day]
+    assert len(rows) == 1
+    assert rows[0].rate == Decimal("1.0566") and rows[0].source == "frankfurter"
+
+
+@pytest.mark.asyncio
+async def test_a_rate_that_is_not_a_stand_in_is_never_rewritten(monkeypatch, session):
+    """Only what announced itself as provisional gives way — a hand-loaded rate does not."""
+    day = date.today() - timedelta(days=2)
+    session.add(ExchangeRate(date=day, from_currency="CHF", to_currency="EUR",
+                             rate=Decimal("1.06"), source="manual"))
+    await session.flush()
+    install_fake_http(monkeypatch, payload=frankfurter_range_payload(1.0566, on=day))
+
+    await CurrencyService(session)._batch_fetch_rates("CHF", date.today(), "EUR")
+
+    rows = [r for r in await _rows(session) if r.date == day]
+    assert rows[0].rate == Decimal("1.06") and rows[0].source == "manual"
+

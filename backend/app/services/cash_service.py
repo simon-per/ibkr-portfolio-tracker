@@ -64,7 +64,7 @@ from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
-from app.services.native_amounts import NativeToBase
+from app.services.native_amounts import NativeToBase, cash_flow_in_base
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +156,7 @@ class CashService:
         #    rows this account holds carry a zero amount and so contribute nothing either
         #    way, which is the correct answer rather than a lucky one.
         for f in await CashFlowRepository(self.db).get_all():
-            by_account[f.account].append((
-                f.flow_date, base_fx.convert(f.amount_eur or Decimal("0"), f.flow_date)
-            ))
+            by_account[f.account].append((f.flow_date, cash_flow_in_base(f, base_fx)))
 
         # 3. Dividends actually paid into the account. IBKR rows only, and the rule for
         #    which those are lives in DividendService beside every other rule about

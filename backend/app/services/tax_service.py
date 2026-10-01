@@ -27,6 +27,7 @@ from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
+from app.services.native_amounts import cash_flow_in_base
 from app.services.portfolio_service import PortfolioService
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,7 @@ class TaxService:
             )).scalars().all()
             has_exempt = True
             for flow in rows:
-                converted = base_fx.convert(flow.amount_eur, flow.flow_date)
+                converted = cash_flow_in_base(flow, base_fx)
                 if converted is not None:
                     exempt_contributions += converted
             # Stated so the reader can see the assets exist and are deliberately

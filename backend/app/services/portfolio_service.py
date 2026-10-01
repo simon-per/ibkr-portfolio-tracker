@@ -18,7 +18,7 @@ from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED
-from app.services.native_amounts import NativeToBase
+from app.services.native_amounts import NativeToBase, cash_flow_in_base
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
@@ -571,7 +571,7 @@ class PortfolioService:
         deposits_from = await flow_repo.earliest_deposit_date()
         transfer_in_date = await flow_repo.earliest_transfer_in_date()
         deposit_legs: List[Tuple[date, Decimal]] = [
-            (f.flow_date, base_fx.convert(f.amount_eur or Decimal("0"), f.flow_date))
+            (f.flow_date, cash_flow_in_base(f, base_fx))
             for f in await flow_repo.get_deposits()
         ]
 

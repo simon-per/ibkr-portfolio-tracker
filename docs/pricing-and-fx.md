@@ -92,7 +92,17 @@ refuses older dates rather than backdating a current rate onto an old tax lot. N
 **cache → Frankfurter → carry-forward → fallback → carry-forward → raise.**
 
 - Carry-forward comes *before* the fallback because Friday's real ECB rate beats today's
-  approximation over a weekend. It preserves the source tag of the row it copies.
+  approximation over a weekend. It preserves the source tag of the row it copies, plus
+  `+carried`.
+- **A stand-in gives way to the published quote.** A fallback row or a carried copy fills a date
+  before the ECB has published it; when a later Frankfurter range fetch (the warm-up runs at every
+  slot, 30 days back) returns that date, `_store_published_rate` overwrites the stand-in. Any
+  other row — a hand-loaded rate, an earlier quote — is left alone. Until 2026-10-01 nothing was
+  ever replaced: a fallback CHF→EUR of 1.05918 stored for 09-28 (ECB: 1.0566) was carried onto
+  09-30 and stayed, and a CHF 4,500 withdrawal read CHF 4,517.50. Rows carried before the tag
+  existed say `frankfurter` and are not recognised; they age out of the 30-day window. Amounts
+  already persisted at a stand-in rate (`cash_flows.amount_eur`, a lot's `cost_basis_eur`) move
+  only when a sync re-writes them.
 - The fallback now also covers currencies that *are* in `SUPPORTED_CURRENCIES` when Frankfurter
   answers with nothing. That demotes the hardcoded list from load-bearing to advisory: a provider
   outage or the ECB list drifting degrades the rate instead of erasing a position (a raise here makes

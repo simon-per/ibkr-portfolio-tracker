@@ -1016,6 +1016,13 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   successful sync, IBKR sent neither `reportDate` nor `dateTime` on it. Check the statement before
   touching code.
 
+- **A CHF withdrawal reads exactly CHF 4,500 again, and stand-in FX rates now give way.** After
+  this deploy the Activity row for the 09-28 disbursement should read −4,500.00, not −4,517.50, and
+  Money In should step by exactly deposit − 4,500. Separately, the next market-data slot's
+  warm-up should replace the stale `er-api-latest` CHF→EUR rows for 09-28 and 09-30 with
+  Frankfurter's figures (the log line is `Replacing CHF/EUR … with the published …`). The
+  stored `amount_eur` of that withdrawal is re-written at the next Flex sync.
+
 - **CI was red on `f814337`, so auto-deploy refused it — fixed in the next commit.** The
   smoke test's quarterly dividend payer first fell due on 2026-10-01 and exposed a real gap: a row
   whose only in-window payment was the overdue cadence inference served `forecast_payouts > 0`
@@ -1619,6 +1626,11 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-01 (CHF 4,517.50 for a CHF 4,500 withdrawal)** — the extra 17.50 was ours: a
+  fallback rate stored before the ECB published was carried forward and never replaced, and a
+  CHF flow was round-tripped through EUR on a CHF base. Fixed both — `cash_flow_in_base` for
+  the four readers, and a published quote now overwrites a stand-in.
+
 - **2026-10-01 (withdrawal counted twice)** — a withdrawal stored under its settle date was
   debited a second time after IBKR's measured balance had already taken it out, so Total Value
   read low and the benchmark spiked for two days. Deposits and withdrawals are now dated by
@@ -1647,9 +1659,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   plus five muted steps, re-stepped for the all-pairs CVD list with the measurements asserted out of
   `index.css`, and a legend that orders by the range, dims on hover, pins on click and opens Other.
   Verified against a production snapshot; the browser pass is still open.
-
-- **2026-09-20 (dashboard visual hierarchy)** — restyled the dashboard around a constrained content
-  shell, separate canvas/card surfaces, a consistent blue/emerald/rose palette and shared KPI panels
-  for dense metric rows. Hero-card grids now count occupied tracks, and semantic text colours retain
-  AA contrast in both themes. Verified with 683 frontend tests and a production build; deployment is
-  pending.

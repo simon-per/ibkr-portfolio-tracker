@@ -38,7 +38,7 @@ from app.repositories.corporate_action_repository import CorporateActionReposito
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
-from app.services.native_amounts import NativeToBase
+from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.dividend_service import DividendService, EX_TO_PAY_MAX_LAG_DAYS
 
 logger = logging.getLogger(__name__)
@@ -245,7 +245,7 @@ class ActivityService:
                 quantity=None,
                 price=None,
                 currency=f.currency,
-                amount_base=_f(base_fx.convert(f.amount_eur, f.flow_date)),
+                amount_base=_f(cash_flow_in_base(f, base_fx)),
                 realized_pnl_base=None,
                 # The whole reason this endpoint exists. A transfer moves capital saved
                 # elsewhere years earlier and its lots already carry their own open_date,
