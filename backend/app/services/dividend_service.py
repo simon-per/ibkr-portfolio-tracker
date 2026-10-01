@@ -1877,6 +1877,41 @@ class DividendService:
                 ),
             }
 
+        # The last COMPLETED calendar quarter, against the one before it and the same
+        # quarter a year earlier. Quarters rather than months because the core ETFs
+        # here pay in Mar/Jun/Sep/Dec: every quarter holds exactly one of those
+        # spikes, so quarter against quarter compares like with like where a month
+        # against the month before only measures the payout calendar. The quarter
+        # in progress is never used — two days into October is not a quarter.
+        latest_quarter = None
+        if month_actual_all:
+            q_start = date(as_of.year, 3 * ((as_of.month - 1) // 3) + 1, 1)
+            q_end_key = self._shift_month(q_start.strftime("%Y-%m"), 1)
+
+            def _quarter_total(end_key: str) -> Decimal:
+                return sum(
+                    (month_actual_all.get(self._shift_month(end_key, i), Decimal("0"))
+                     for i in range(3)),
+                    Decimal("0"),
+                )
+
+            def _quarter_label(end_key: str) -> str:
+                return f"{end_key[:4]}-Q{(int(end_key[5:7]) - 1) // 3 + 1}"
+
+            q_total = _quarter_total(q_end_key)
+            prev_q_end_key = self._shift_month(q_end_key, 3)
+            prev_q_total = _quarter_total(prev_q_end_key)
+            latest_quarter = {
+                "quarter": _quarter_label(q_end_key),
+                "net_eur": round(float(q_total), 2),
+                "prev_quarter": _quarter_label(prev_q_end_key),
+                "prev_net_eur": round(float(prev_q_total), 2),
+                "qoq_pct": self._pct(q_total, prev_q_total),
+                "yoy_pct": self._pct(
+                    q_total, _quarter_total(self._shift_month(q_end_key, 12))
+                ),
+            }
+
         growth = {
             "ttm": {
                 "net_eur": round(float(ttm_total), 2),
@@ -1907,6 +1942,7 @@ class DividendService:
             ),
             "annual": annual_rows,
             "latest_month": latest_month,
+            "latest_quarter": latest_quarter,
         }
 
         # Trailing-12-month yield: spliced net over the current market value.

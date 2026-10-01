@@ -22,6 +22,12 @@ function amount(value: number): string {
   })
 }
 
+/** '2026-Q3' -> 'Q3', or 'Q3 2026' with the year. */
+function quarterName(key: string, withYear = false): string {
+  const [y, q] = key.split('-')
+  return withYear ? `${q} ${y}` : q
+}
+
 function Tile({
   label, value, sub, children, title,
 }: {
@@ -73,7 +79,7 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
   }
   if (!growth) return null
 
-  const { ttm, ytd, avg_month: avgMonth } = growth
+  const { ttm, ytd, avg_month: avgMonth, latest_quarter: quarter } = growth
   const thisYear = new Date().getFullYear()
 
   const eraCaveat = growth.ttm_crosses_era && ibkrFrom
@@ -137,7 +143,25 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
           + ` shown: on a quarterly schedule it measures which month a payer pays in.`
         }
       >
-        <DeltaChip pct={avgMonth.pct} label="vs last year's average" />
+        <DeltaChip pct={avgMonth.pct} label="vs last year's avg" />
+        {quarter && (
+          <DeltaChip
+            pct={quarter.qoq_pct}
+            label={`${quarterName(quarter.quarter)} vs ${quarterName(quarter.prev_quarter)}`}
+            title={
+              `${quarterName(quarter.quarter, true)}: ${formatCurrency(quarter.net_eur)},`
+              + ` against ${formatCurrency(quarter.prev_net_eur)} in`
+              + ` ${quarterName(quarter.prev_quarter, true)}.`
+              + (quarter.yoy_pct != null
+                ? ` Against the same quarter last year: ${quarter.yoy_pct > 0 ? '+' : ''}`
+                  + `${quarter.yoy_pct.toFixed(1)}%.`
+                : ' No payments in the same quarter last year to compare with.')
+              + ` The last completed quarter — the one in progress is never compared.`
+              + ` Quarters, not months, because the core ETFs pay in Mar/Jun/Sep/Dec`
+              + ` and every quarter holds one of those payouts.`
+            }
+          />
+        )}
       </Tile>
     </div>
   )

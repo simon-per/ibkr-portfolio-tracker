@@ -380,6 +380,38 @@ async def test_latest_month_reports_the_last_realized_month_not_a_projected_one(
 
 
 @pytest.mark.asyncio
+async def test_latest_quarter_is_the_last_completed_one_against_its_neighbours():
+    """
+    The quarter KPI reads the last COMPLETED quarter (Q2 on 29 July), against Q1
+    and against Q2 a year earlier. July's payment sits in the quarter in progress
+    and must not count — a quarter four weeks old is not a quarter.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2024, 1, 1), "100"))
+        await session.flush()
+        await _seed_per_share(session, date(2025, 6, 15), per_share="0.50")  # Q2 2025: 50
+        await _seed_per_share(session, date(2026, 3, 15))                    # Q1 2026: 100
+        await _seed_per_share(session, date(2026, 4, 15))                    # Q2 2026: 200
+        await _seed_per_share(session, date(2026, 6, 15))
+        await _seed_per_share(session, date(2026, 7, 15))                    # Q3, in progress
+
+        r = await DividendService(session).get_dividend_breakdown(as_of=AS_OF)
+
+        assert r["growth"]["latest_quarter"] == {
+            "quarter": "2026-Q2",
+            "net_eur": 200.00,
+            "prev_quarter": "2026-Q1",
+            "prev_net_eur": 100.00,
+            "qoq_pct": 100.0,
+            "yoy_pct": 300.0,
+        }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_an_empty_history_produces_zeros_and_nulls_rather_than_failing():
     """
     A fresh account, or one whose dividends have not synced yet, must render the

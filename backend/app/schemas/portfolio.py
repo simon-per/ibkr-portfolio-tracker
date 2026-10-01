@@ -632,6 +632,20 @@ class DividendLatestMonth(BaseModel):
     yoy_pct: Optional[float] = None
 
 
+class DividendLatestQuarter(BaseModel):
+    """
+    The last completed calendar quarter of realized income, against the quarter
+    before it and the same quarter a year earlier. Quarters because the core ETFs
+    pay in Mar/Jun/Sep/Dec, so each quarter holds one payout spike.
+    """
+    quarter: str                    # "2026-Q3"
+    net_eur: float
+    prev_quarter: str               # the quarter qoq_pct compares against
+    prev_net_eur: float
+    qoq_pct: Optional[float] = None
+    yoy_pct: Optional[float] = None
+
+
 class DividendGrowth(BaseModel):
     """
     Growth of dividend income, computed over the FULL history regardless of the
@@ -654,6 +668,7 @@ class DividendGrowth(BaseModel):
     next_12m_vs_ttm_pct: Optional[float] = None   # forecast vs measured — mark it
     annual: List[DividendAnnualRow]
     latest_month: Optional[DividendLatestMonth] = None
+    latest_quarter: Optional[DividendLatestQuarter] = None
 
 
 class DividendUpcomingPayment(BaseModel):

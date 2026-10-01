@@ -639,8 +639,12 @@ projection in one place instead of growing a second implementation to drift.
 April does not: month-over-month swings ±90% on cadence alone and says nothing about the portfolio.
 MoM survives only in the chart tooltip. It used to sit, with the latest month's YoY, under the
 *Average per month* KPI — where it read as the average's own growth (one large September showed
-+507% MoM, +1484% YoY beside a modest average). That tile now shows `avg_month.pct`: the average
-against last year's average. `latest_month` stays in the payload; no KPI renders it.
++507% MoM, +1484% YoY beside a modest average). That tile now shows `avg_month.pct` (the average
+against last year's average) and `latest_quarter.qoq_pct`: the last **completed** calendar quarter
+against the one before, with the same quarter a year earlier in the hover. Quarters because the core
+ETFs pay in Mar/Jun/Sep/Dec, so every quarter holds exactly one payout spike; the quarter in progress
+is never compared (two days into October is not a quarter). `latest_month` stays in the payload; no
+KPI renders it.
 
 Each of these was a wrong number before it was a rule:
 

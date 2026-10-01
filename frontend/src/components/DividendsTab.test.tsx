@@ -61,6 +61,7 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
       avg_month: { net_eur: 10, prev_net_eur: 8, pct: 25 },
       ttm_crosses_era: true, next_12m_eur: 160, next_12m_vs_ttm_pct: 23.1,
       latest_month: null,
+      latest_quarter: null,
       annual: [{ year: 2025, net_eur: 100, forecast_net_eur: 0, total_eur: 100,
         yoy_pct: null, yoy_includes_forecast: false, yoy_vs_partial: false, partial: false }],
     },

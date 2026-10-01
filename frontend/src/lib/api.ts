@@ -853,6 +853,15 @@ export interface DividendLatestMonth {
   yoy_pct: number | null;
 }
 
+export interface DividendLatestQuarter {
+  quarter: string;          // "2026-Q3"
+  net_eur: number;
+  prev_quarter: string;     // what qoq_pct compares against
+  prev_net_eur: number;
+  qoq_pct: number | null;
+  yoy_pct: number | null;
+}
+
 /**
  * Growth of dividend income, computed over the FULL history regardless of the
  * year filter — with a year selected the response carries no prior-year months,
@@ -871,6 +880,8 @@ export interface DividendGrowth {
   next_12m_vs_ttm_pct: number | null;
   annual: DividendAnnualRow[];
   latest_month: DividendLatestMonth | null;
+  /** Last COMPLETED calendar quarter; the one in progress is never used. */
+  latest_quarter: DividendLatestQuarter | null;
 }
 
 /**
