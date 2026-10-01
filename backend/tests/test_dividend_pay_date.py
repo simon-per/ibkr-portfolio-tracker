@@ -723,6 +723,30 @@ async def test_a_payment_the_cadence_predicted_survives_its_own_date():
 
 
 @pytest.mark.asyncio
+async def test_an_overdue_only_row_still_reports_the_history_it_rests_on():
+    """
+    Found 2026-10-01, when the smoke fixture's quarterly payer first fell due on the day
+    the suite ran: a security whose ONLY payment in the selected year was the overdue
+    inference served `forecast_payouts > 0` beside `forecast_samples: None` — a
+    projection with its evidence missing. Read on New Year's Day for the year just
+    ended, so the next forward projection is out of the window and cannot set the
+    count on the overdue payment's behalf.
+    """
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=date(2026, 9, 25))   # due late December
+
+    data = await _breakdown(session, as_of=date(2027, 1, 1), year=2026)
+    entry = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    assert entry["pending"] is True and entry["date"][:4] == "2026"
+    row = next(r for r in data["securities"] if r["security_id"] == 1)
+    assert row["forecast_payouts"] == 1
+    assert row["forecast_samples"] == 4
+    assert row["forecast_cadence_days"] is not None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_every_chart_total_is_the_calendar_summed_the_same_way():
     """
     The family question, not the instance one: which other code publishes the same money?

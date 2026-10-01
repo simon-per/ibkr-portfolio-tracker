@@ -1593,7 +1593,10 @@ class DividendService:
             # differ only in where the payment came from and what guards it had to
             # clear, and three copies of the fold is how the two of them that get
             # edited together stop agreeing with the third.
-            calendar_folds: List[Tuple[date, str, int, Decimal, Optional[str]]] = []
+            # The last field says whether the entry is our inference from the cadence
+            # (the overdue block) rather than a record (an accrual, a Yahoo row): only an
+            # inference has a sample count to report.
+            calendar_folds: List[Tuple[date, str, int, Decimal, Optional[str], bool]] = []
 
             for sid, accruals in accruals_by_sec.items():
                 if shares_at(sid, as_of) <= 0:
@@ -1615,7 +1618,7 @@ class DividendService:
                         "pending": a["pay_date"] <= as_of,
                     })
                     calendar_folds.append(
-                        (a["pay_date"], _symbol(sid), sid, amt, "net")
+                        (a["pay_date"], _symbol(sid), sid, amt, "net", False)
                     )
 
             ibkr_pays_by_sec: Dict[int, List[date]] = defaultdict(list)
@@ -1677,7 +1680,7 @@ class DividendService:
                 })
                 calendar_folds.append(
                     (expected, _symbol(p.security_id), p.security_id, amt,
-                     "gross_estimate")
+                     "gross_estimate", False)
                 )
 
             # The weakest of the three, and the last resort: NOTHING records this
@@ -1725,7 +1728,7 @@ class DividendService:
                     "pay_date_source": source,
                     "pending": True,
                 })
-                calendar_folds.append((fp.on_date, _symbol(sid), sid, amt, basis))
+                calendar_folds.append((fp.on_date, _symbol(sid), sid, amt, basis, True))
 
             # ---- The calendar IS the forecast ----------------------------------
             # One rule for all four producers of `upcoming`: money this portfolio
@@ -1748,7 +1751,7 @@ class DividendService:
             # of today is inside it and does belong: an estimate row arriving makes
             # the cadence step past that payment, so excluding it silently cost the
             # forward figures one payment per security until the cash landed.
-            for on_date, symbol, sid, amt, basis in calendar_folds:
+            for on_date, symbol, sid, amt, basis, inferred in calendar_folds:
                 annual_forecast[on_date.year] += amt
                 month_forecast_sym_all[on_date.strftime("%Y-%m")][symbol] += amt
                 if on_date > as_of:
@@ -1765,6 +1768,18 @@ class DividendService:
                     # unsettled gross-sized entry must not relabel its whole row.
                     if row["forecast_basis"] is None:
                         row["forecast_basis"] = basis
+                    # An overdue inference rests on the same history as a forward
+                    # projection, so it reports how thin that history is the same way.
+                    # Without this a security whose only in-window payment was overdue
+                    # served `forecast_payouts > 0` beside `forecast_samples: None`, a
+                    # projection with its evidence missing (found 2026-10-01, when the
+                    # smoke fixture's quarterly payer first fell due on the day).
+                    if inferred and row["forecast_samples"] is None:
+                        history = hist_by_sec.get(sid, [])
+                        row["forecast_samples"] = len(history)
+                        row["forecast_cadence_days"] = infer_gap_days(
+                            [h.on_date for h in history]
+                        )
                     monthly_forecast[on_date.strftime("%Y-%m")][symbol] += amt
                     total_forecast += amt
 

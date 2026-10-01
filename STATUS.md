@@ -1016,10 +1016,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   successful sync, IBKR sent neither `reportDate` nor `dateTime` on it. Check the statement before
   touching code.
 
-- **`test_api_smoke.py::test_the_shapes_that_broke_production_serialize` fails locally on
-  2026-10-01, and it fails with or without the cash-flow change.** A dividend breakdown row has
-  `forecast_payouts > 0` with `forecast_samples` None, which looks date-dependent (a new month).
-  Not investigated. It is the dividends forecast, not cash.
+- **CI was red on `f814337`, so auto-deploy refused it — fixed in the next commit.** The
+  smoke test's quarterly dividend payer first fell due on 2026-10-01 and exposed a real gap: a row
+  whose only in-window payment was the overdue cadence inference served `forecast_payouts > 0`
+  with `forecast_samples: None`. The overdue fold now reports the history it rests on (pinned by
+  `test_an_overdue_only_row_still_reports_the_history_it_rests_on`). Confirm CI is green and that
+  `/health` moves past `76a9788`; the cash-dating fix only reaches production with it.
 
 - **The crypto mode, once given its keys.** Deployed (`/health` on `4a14f41`, checked 2026-09-29):
   anonymous `/api/crypto/*` answers 401, `/api/scheduler/status` lists only the eight stock jobs and

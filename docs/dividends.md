@@ -304,7 +304,7 @@ null`, ≥2 of them) they alone define the schedule; IBKR rows still supply the 
 — which is exactly what SBI did (see *A wrong mapping poisons dividends too* below). The rule stays,
 because the alternative resurrects the double-count; what changed is that a thin or suspect inference now
 declares itself. `forecast_samples` and `forecast_cadence_days` ride on each breakdown row (badged at
-n≤2), and `find_dividends_predating_their_mapping()` warns when the rows came from an older ticker.
+n≤2) — on an overdue inference too, not only a forward projection, since both rest on the same history — and `find_dividends_predating_their_mapping()` warns when the rows came from an older ticker.
 **Earlier revisions of this file cited "SBI's monthly read as 28 days" as an example here. That was the
 poisoned data, not a real schedule — don't reinstate it.**
 
