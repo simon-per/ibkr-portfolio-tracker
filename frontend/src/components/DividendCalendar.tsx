@@ -106,6 +106,17 @@ export function DividendCalendar({ upcoming, colorOf, withholdingPct }: Dividend
                           ex {dayLabel(p.ex_date)}
                         </span>
                       )}
+                      {/* The date on this row IS the ex-date: nothing gave a pay date
+                          (no accrual, never paid through IBKR, so no lag to measure).
+                          Said on the surface, or it reads as the day the cash lands. */}
+                      {p.pay_date_source === 'ex_date' && (
+                        <span
+                          className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground"
+                          title="No pay date is known for this holding yet: IBKR has not announced it and it has never paid through IBKR, so there is no lag to measure. The cash lands some days to weeks after the ex-date shown."
+                        >
+                          ex-date · pay date unknown
+                        </span>
+                      )}
                       {p.pending && (
                         <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
                           payment pending

@@ -54,9 +54,10 @@ describe('DividendCalendar', () => {
     expect(screen.getByText('ex 8 May')).toBeTruthy()
   })
 
-  it('does not repeat the date as an ex-date when nothing could be measured', () => {
+  it('says the date is an ex-date when no pay date could be found', () => {
     // `pay_date_source: 'ex_date'` means the row IS the ex-date. Printing "ex 8 May"
-    // next to "8 May" would dress a fallback up as a measurement.
+    // next to "8 May" would dress a fallback up as a measurement; printing nothing
+    // let "8 May" read as the day the cash lands.
     render(
       <DividendCalendar
         upcoming={[payment({ date: '2026-05-08', pay_date_source: 'ex_date' })]}
@@ -65,6 +66,7 @@ describe('DividendCalendar', () => {
       />,
     )
     expect(screen.queryByText(/^ex /)).toBeNull()
+    expect(screen.getByText('ex-date · pay date unknown')).toBeTruthy()
   })
 
   it('badges an overdue payment in visible text, not in a tooltip', () => {

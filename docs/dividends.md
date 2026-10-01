@@ -428,7 +428,10 @@ ledger or XIRR. Measured on production 2026-09-19: **six held securities at once
   later. **Stated, not implied**, and the lag is absent rather than `0`: a zero would claim
   same-day settlement, which is the stand-in-for-an-unknown this file forbids everywhere else. Half
   the held ex-dated payers were in this state on 2026-09-19, all of them positions that had not yet
-  been paid through IBKR, so it empties itself as payments land.
+  been paid through IBKR, so it empties itself as payments land. The calendar says so on the row
+  ("ex-date · pay date unknown"): with the `ex X` hint suppressed (date and ex-date are equal),
+  the bare date otherwise read as the day the cash lands. Korean and Taiwanese payers sit here
+  longest — their cash arrives one to two months after the ex-date.
 
 **Only an ex-dated cadence is shifted.** A security whose schedule came from IBKR rows is already
 pay-dated, and shifting it would move it a lag into the future twice; `_forecast_inputs` returns the

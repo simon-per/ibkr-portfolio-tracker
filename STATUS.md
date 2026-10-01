@@ -5,13 +5,18 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-01.** Newest: **a deposit or withdrawal is dated when IBKR books it into
-cash, not when it settles** (`extract_cash_flows`: `reportDate` → `dateTime` → `settleDate`). A
-disbursement initiated 09-28 and settling 09-30 was already out of IBKR's measured 09-28 balance, so
-the ledger debited it a second time on 09-30 — cash about −4.5k, Total Value low by the withdrawal —
-and the benchmark bought that day's deposit on 09-28 but sold the withdrawal only on 09-30, a
-two-day spike on every index line. The fix corrects production by itself on the first Flex sync
-after deploy (see *Watch after the next deploy*). Rule in `docs/cash-contributions-benchmark.md`.
+**Last updated: 2026-10-01.** Newest, pushed as `abef3ae`: **the Dividends tab's *Average per
+month* tile carries two reference paces instead of the latest month's MoM/YoY**, which under the
+average read as the average's own growth (one large September showed +507% / +1484%). Both are per
+month over finished months only: this year so far against last year ÷ 12, and the last three months
+against the three before (any three months hold exactly one Mar/Jun/Sep/Dec ETF payout). New
+`growth.ytd_pace` / `growth.recent_pace`; rules in `docs/dividends.md`. See *Watch after the next
+deploy*.
+
+Before that, verified on production on `dd78f97`: a deposit or withdrawal is dated when IBKR books it
+into cash, not when it settles, and a CHF withdrawal on a CHF base reads its CHF amount — the 09-28
+disbursement reads −4,500.00 on 09-28. Written up in `docs/shipped-log.md`.
+
 Before that, pushed on 2026-09-28, deployed with its CoinStats keys, awaiting the first production crypto sync (see
 *Watch after the next deploy*): **a separate
 Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
@@ -1007,28 +1012,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The 09-28 withdrawal re-dates itself on the first Flex sync after the cash-flow dating fix.**
-  Nothing to run by hand, and no manual sync (rule 2). Afterwards: `/api/portfolio/activity` lists
-  the `DISBURSEMENT INITIATED` row on 2026-09-28, not 09-30; `value-over-time` from 09-25 shows
-  `cash_eur` at tens of CHF on 09-28 and every day after, not about −4.5k, with `total_value_eur` equal to
-  holdings + cash; `money_in_eur` steps once on 09-28 by the net of deposit and withdrawal; and the
-  benchmark lines on the chart have no 09-28 → 09-30 hump. If the row still reads 09-30 after a
-  successful sync, IBKR sent neither `reportDate` nor `dateTime` on it. Check the statement before
-  touching code.
+- **The dividend paces under *Average per month*** (`abef3ae`). `/api/dividends/breakdown` carries
+  `growth.ytd_pace` (`months` = finished months this year) and `growth.recent_pace` (`start`/`end`
+  = the last three finished months). In a browser at 1440 and 390 px: the tile shows "2026 vs 2025"
+  and "Jul–Sep vs Apr–Jun" chips that wrap rather than scroll, hovers name both averages, and the
+  figures match the month bars summed by hand. On the calendar, the rows with no known pay date
+  (`pay_date_source: ex_date`, five pending on 2026-10-01) read "ex-date · pay date unknown".
 
-- **A CHF withdrawal reads exactly CHF 4,500 again, and stand-in FX rates now give way.** After
-  this deploy the Activity row for the 09-28 disbursement should read −4,500.00, not −4,517.50, and
-  Money In should step by exactly deposit − 4,500. Separately, the next market-data slot's
-  warm-up should replace the stale `er-api-latest` CHF→EUR rows for 09-28 and 09-30 with
-  Frankfurter's figures (the log line is `Replacing CHF/EUR … with the published …`). The
-  stored `amount_eur` of that withdrawal is re-written at the next Flex sync.
-
-- **CI was red on `f814337`, so auto-deploy refused it — fixed in the next commit.** The
-  smoke test's quarterly dividend payer first fell due on 2026-10-01 and exposed a real gap: a row
-  whose only in-window payment was the overdue cadence inference served `forecast_payouts > 0`
-  with `forecast_samples: None`. The overdue fold now reports the history it rests on (pinned by
-  `test_an_overdue_only_row_still_reports_the_history_it_rests_on`). Confirm CI is green and that
-  `/health` moves past `76a9788`; the cash-dating fix only reaches production with it.
+- **Leftovers of the 09-28 withdrawal fixes** (the core is verified, see `docs/shipped-log.md`). Not
+  yet seen: the benchmark lines on the chart with no 09-28 → 09-30 hump, and the next market-data
+  warm-up replacing the stale `er-api-latest` CHF→EUR rows for 09-28 and 09-30 (log line
+  `Replacing CHF/EUR … with the published …`).
 
 - **The crypto mode, once given its keys.** Deployed (`/health` on `4a14f41`, checked 2026-09-29):
   anonymous `/api/crypto/*` answers 401, `/api/scheduler/status` lists only the eight stock jobs and
@@ -1626,10 +1620,15 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-01 (dividend paces)** — "what is +507% MoM?": the average tile's footer was the latest
+  month against the month before, which on a quarterly ETF calendar measures the calendar. Replaced,
+  after two iterations with the owner, by two per-month paces over finished months (YTD vs last year
+  ÷ 12; last three months vs the three before). Day-based windows were weighed and rejected.
+
 - **2026-10-01 (CHF 4,517.50 for a CHF 4,500 withdrawal)** — the extra 17.50 was ours: a
   fallback rate stored before the ECB published was carried forward and never replaced, and a
   CHF flow was round-tripped through EUR on a CHF base. Fixed both — `cash_flow_in_base` for
-  the four readers, and a published quote now overwrites a stand-in.
+  the four readers, and a published quote now overwrites a stand-in. Verified live on `dd78f97`.
 
 - **2026-10-01 (withdrawal counted twice)** — a withdrawal stored under its settle date was
   debited a second time after IBKR's measured balance had already taken it out, so Total Value
@@ -1652,10 +1651,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   that gap's change since the chart's first point — a shift, which is right for a quantity already
   net of contributions — with a sentence naming the start day and an overstatement clause when that
   day was not fully priced. TypeScript, build and 715/715 frontend tests (Node 22) pass; not in a browser, not merged.
-
-- **2026-09-20 (dividend colours follow the holding)** — a holding's colour was its rank inside the
-  selected range's top eight, so changing the period repainted the chart; the order now rides on the
-  response as `stack_order`, identical in every range, and the client's ranking is gone. Eight hues
-  plus five muted steps, re-stepped for the all-pairs CVD list with the measurements asserted out of
-  `index.css`, and a legend that orders by the range, dims on hover, pins on click and opens Other.
-  Verified against a production snapshot; the browser pass is still open.

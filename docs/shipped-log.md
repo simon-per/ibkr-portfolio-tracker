@@ -7,6 +7,25 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-01 — withdrawals dated when booked, and a CHF withdrawal reads CHF
+
+A disbursement initiated on 09-28 was stored under its settle date (09-30). IBKR's measured cash
+balance had already taken it out on 09-28, so the ledger debited it a second time on 09-30: cash
+read about −4.5k, Total Value read low by the withdrawal, and the benchmark bought the same day's
+deposit on 09-28 but sold the withdrawal only on 09-30, a two-day spike on every index line. Deposits
+and withdrawals are now dated `reportDate` → `dateTime` → `settleDate` (`f814337`). Separately, the
+CHF 4,500 withdrawal read CHF 4,517.50: a CHF flow was round-tripped through EUR at a stand-in
+`er-api-latest` rate that was carried forward and never replaced. `cash_flow_in_base` now returns
+a base-currency flow's own amount for all four readers, and a published Frankfurter quote overwrites
+a stand-in (`4357a53`). CI had been red on `f814337` from an unrelated date-dependent dividend smoke
+case, fixed in `bdbe5da`, which is what held the deploy back.
+
+**Verified on production, 18:20 Berlin, commit `dd78f97`.** CI green; the activity ledger lists the
+disbursement on 2026-09-28 at −4,500.00 CHF beside the 09-28 deposit; after the 17:40 Flex sync,
+cash from 09-28 on reads tens of CHF rather than about −4.5k, Total Value equals holdings + cash, and
+Money In steps once on 09-28. Not yet seen: the chart's benchmark lines and the stand-in FX rows
+being replaced (STATUS.md, *Watch after the next deploy*).
+
 ## Shipped 2026-09-20 — adjustable dividend withholding and honest forecast-off ranges
 
 The 0.85 gross-to-estimated-net factor was correct as a default but fixed in code, so every payer
