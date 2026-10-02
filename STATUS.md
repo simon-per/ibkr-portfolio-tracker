@@ -1012,9 +1012,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The dividend paces under *Average per month*** (`abef3ae`). `/api/dividends/breakdown` carries
-  `growth.ytd_pace` (`months` = finished months this year) and `growth.recent_pace` (`start`/`end`
-  = the last three finished months). In a browser at 1440 and 390 px: the tile shows "2026 vs 2025"
+- **The dividend paces under *Average per month*** (live on `93d0e1c`, API-verified 2026-10-02:
+  `growth.ytd_pace` covers 9 finished months, `growth.recent_pace` is Jul–Sep vs Apr–Jun and equals
+  the month bars summed ÷ 3). Not yet seen in a browser at 1440 and 390 px: the tile shows "2026 vs 2025"
   and "Jul–Sep vs Apr–Jun" chips that wrap rather than scroll, hovers name both averages, and the
   figures match the month bars summed by hand. On the calendar, the rows with no known pay date
   (`pay_date_source: ex_date`, five pending on 2026-10-01) read "ex-date · pay date unknown".
