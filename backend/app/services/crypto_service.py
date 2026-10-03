@@ -443,17 +443,49 @@ def prices_agree(reference: float, other: float, tolerance: float) -> bool:
     return reference > 0 and abs(other - reference) <= tolerance * reference
 
 
+def price_agreeing(
+    reference: Optional[float], candidate_prices: Dict[str, float]
+) -> List[str]:
+    """The candidates trading within `PRICE_MATCH_TOLERANCE` of CoinStats' price."""
+    if reference is None:
+        return []
+    return sorted(gid for gid, p in candidate_prices.items()
+                  if prices_agree(reference, p, PRICE_MATCH_TOLERANCE))
+
+
 def pick_by_price(
     reference: Optional[float], candidate_prices: Dict[str, float]
 ) -> Optional[str]:
     """The one candidate trading within `PRICE_MATCH_TOLERANCE` of CoinStats' price, or
-    None when none does or several do — two tokens at one price are not told apart by
-    guessing."""
-    if reference is None:
-        return None
-    close = [gid for gid, p in candidate_prices.items()
-             if prices_agree(reference, p, PRICE_MATCH_TOLERANCE)]
+    None when none does or several do (see `pick_dominant` for the several)."""
+    close = price_agreeing(reference, candidate_prices)
     return close[0] if len(close) == 1 else None
+
+
+# When several candidates trade at the same price, they are one asset and its bridged or
+# wrapped copies — which track its price exactly, so price cannot separate them. Size can:
+# measured 2026-10-03, `binancecoin` at a 102 bn USD market cap beside a bridged "BNB" at
+# 289 k, both at 765.42 USD. The original dwarfs every copy; demand it by a wide margin, so
+# two genuinely comparable assets are never told apart by a guess.
+MARKET_CAP_DOMINANCE = 100
+
+
+def pick_dominant(caps: Dict[str, Optional[float]]) -> Optional[str]:
+    """The candidate whose market cap is at least `MARKET_CAP_DOMINANCE` × every other's
+    (a candidate CoinGecko lists with no market cap counts as none), else None."""
+    ranked = sorted(((c, g) for g, c in caps.items() if c and c > 0), reverse=True)
+    if not ranked:
+        return None
+    if len(ranked) == 1 or ranked[0][0] >= MARKET_CAP_DOMINANCE * ranked[1][0]:
+        return ranked[0][1]
+    return None
+
+
+# Stored as `method` on an unmatched row. A row stored under an older version of the
+# matching rules is re-asked at the next sync rather than after `MAPPING_RECHECK_DAYS`,
+# so a better rule reaches every coin it could match without a data migration.
+MAPPING_RULES_VERSION = 3
+UNMATCHED_METHOD = f"none:v{MAPPING_RULES_VERSION}"
 
 
 class CryptoSyncService:
@@ -669,8 +701,11 @@ class CryptoSyncService:
                     c for c in sorted(needed)
                     if c not in mapping_rows or (
                         mapping_rows[c].coingecko_id is None
-                        and now - mapping_rows[c].checked_at
-                        > timedelta(days=MAPPING_RECHECK_DAYS)
+                        and (
+                            mapping_rows[c].method != UNMATCHED_METHOD
+                            or now - mapping_rows[c].checked_at
+                            > timedelta(days=MAPPING_RECHECK_DAYS)
+                        )
                     )
                 ]
                 quoted: Dict[str, float] = {}
@@ -711,10 +746,17 @@ class CryptoSyncService:
                         if price_error is not None and coin in ambiguous:
                             continue
                         if gid is None and coin in ambiguous:
-                            gid = pick_by_price(
+                            agreeing = price_agreeing(
                                 ref, {g: quoted[g] for g in ambiguous[coin] if g in quoted}
                             )
-                            method = "symbol+price" if gid else None
+                            method = None
+                            if len(agreeing) == 1:
+                                gid, method = agreeing[0], "symbol+price"
+                            elif len(agreeing) > 1:
+                                # An asset and its bridged copies: one more call, and only
+                                # for this rare case.
+                                gid = pick_dominant(await gecko.market_caps(agreeing))
+                                method = "symbol+price+cap" if gid else None
                         elif gid and ref and gid in quoted and not prices_agree(
                             ref, quoted[gid], PRICE_SANITY_TOLERANCE
                         ):
@@ -727,7 +769,9 @@ class CryptoSyncService:
                         mapping[coin] = gid
                         result.mapping_rows.append({
                             "coinstats_id": coin, "coingecko_id": gid,
-                            "symbol": symbols.get(coin), "method": method, "checked_at": now,
+                            "symbol": symbols.get(coin),
+                            "method": method if gid else UNMATCHED_METHOD,
+                            "checked_at": now,
                         })
                     if price_error is not None:
                         raise price_error

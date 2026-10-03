@@ -205,7 +205,7 @@ class FakeCoinGecko:
     `responses[path] = (status, body)` overrides a path. Every request is logged.
     """
 
-    def __init__(self, prices: Optional[Dict[str, float]] = None, listing=None):
+    def __init__(self, prices: Optional[Dict[str, float]] = None, listing=None, caps=None):
         self.base = prices if prices is not None else {
             "bitcoin": 60_000.0, "solana": 100.0, "usd-coin": 1.0,
         }
@@ -214,6 +214,7 @@ class FakeCoinGecko:
             {"id": "solana", "symbol": "sol", "name": "Solana"},
             {"id": "ethereum", "symbol": "eth", "name": "Ethereum"},
         ]
+        self.caps: Dict[str, Optional[float]] = caps or {}
         self.responses: Dict[str, Tuple[int, Any]] = {}
         self.calls: List[str] = []
         self.headers: List[Dict[str, str]] = []
@@ -230,6 +231,11 @@ class FakeCoinGecko:
             return httpx.Response(status, json=body)
         if path == "/coins/list":
             return httpx.Response(200, json=self.listing)
+        if path == "/coins/markets":
+            ids = request.url.params["ids"].split(",")
+            return httpx.Response(200, json=[
+                {"id": i, "market_cap": self.caps.get(i)} for i in ids if i in self.base
+            ])
         if path == "/simple/price":
             ids = request.url.params["ids"].split(",")
             return httpx.Response(200, json={

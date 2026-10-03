@@ -206,6 +206,20 @@ class CoinGeckoClient:
                 })
         return out
 
+    async def market_caps(self, ids: Iterable[str]) -> Dict[str, Optional[float]]:
+        """`/coins/markets` in USD: `{coingecko_id: market_cap}` for the ids asked (at most
+        one page of 250). A coin CoinGecko lists without a market cap maps to None."""
+        wanted = sorted(set(ids))[:250]
+        body = await self._get("/coins/markets", params={
+            "vs_currency": "usd", "ids": ",".join(wanted), "per_page": 250,
+        })
+        if not isinstance(body, list):
+            raise CoinGeckoTransientError("/coins/markets: expected a list")
+        return {
+            item["id"]: _finite(item.get("market_cap"))
+            for item in body if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+
     async def simple_price(self, ids: Iterable[str]) -> Dict[str, float]:
         """`/simple/price` in USD: `{coingecko_id: price}` for each id CoinGecko priced.
         An id it did not price is absent from the result, never 0."""

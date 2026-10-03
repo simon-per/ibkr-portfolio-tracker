@@ -1155,7 +1155,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   cash posting. 005930/000660 are not accrued yet and stay inferred.
 
 - **Crypto after the BNB fix.** Press **Sync crypto** once deployed: no "No CoinGecko coin found"
-  warning; `crypto_coin_ids` maps BNB with `method = symbol+price`; Total value, Today and P&L
+  warning; `crypto_coin_ids` maps BNB with `method = symbol+price+cap` (the first fix's price rule alone
+  could not choose: a bridged "BNB" trades at the identical price — `pick_dominant` settles it by
+  market cap); Total value, Today and P&L
   since 1 Jan show figures and the chart draws from 1 Jan; the total is within price drift of the
   CoinStats app. If any coin is still unmatched, the tile reads "Excludes … — no price" instead of
   "—". Browser pass at 1440 and 390 px.

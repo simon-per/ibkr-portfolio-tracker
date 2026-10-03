@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
+from app.clock import utcnow
 from app.models.crypto import (
     SPAM,
     UNPRICED,
@@ -470,3 +471,84 @@ async def test_an_exact_id_at_the_wrong_price_is_refused(db, monkeypatch):
             select(CryptoCoinId).where(CryptoCoinId.coinstats_id == "solana")
         )).scalar_one()
     assert row.coingecko_id is None
+
+
+# --- an asset and its bridged copy: same price, told apart by size -------------------------
+#
+# Measured 2026-10-03: CoinGecko lists two "BNB" — `binancecoin` (102 bn USD market cap) and a
+# bridged copy (289 k) — both at 765.42 USD, so the price rule alone refused to choose.
+
+from app.services.crypto_service import (  # noqa: E402
+    UNMATCHED_METHOD,
+    pick_dominant,
+)
+
+_TWIN_LISTING = [
+    {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"},
+    {"id": "binancecoin", "symbol": "bnb", "name": "BNB"},
+    {"id": "some-bridged-bnb", "symbol": "bnb", "name": "Bridged BNB"},
+]
+
+
+def test_the_original_dwarfs_its_copies_or_nothing_is_chosen():
+    assert pick_dominant({"binancecoin": 1.02e11, "some-bridged-bnb": 2.89e5}) == "binancecoin"
+    assert pick_dominant({"binancecoin": 1.02e11, "some-bridged-bnb": None}) == "binancecoin"
+    # Two comparable assets at one price are not told apart by a guess.
+    assert pick_dominant({"a": 5e9, "b": 2e9}) is None
+    assert pick_dominant({"a": None, "b": None}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_copy_at_the_same_price_loses_to_the_original(db, monkeypatch):
+    configure(monkeypatch)
+    configure_gecko(monkeypatch)
+    book = FakeCoinStats(coins=[coin("bitcoin", "BTC", 0.01, 60_000.0, rank=1),
+                                coin("binance-coin", "BNB", 0.5, 765.0, rank=4)],
+                         value=value_body(total=982.5))
+    gecko = FakeCoinGecko(
+        prices={"bitcoin": 60_000.0, "binancecoin": 765.42, "some-bridged-bnb": 765.42},
+        listing=_TWIN_LISTING,
+        caps={"binancecoin": 1.02e11, "some-bridged-bnb": 2.89e5},
+    )
+    result = await _service(db, book, gecko).sync()
+    assert not any("No CoinGecko coin found" in w for w in result["warnings"])
+    async with db() as s:
+        row = (await s.execute(
+            select(CryptoCoinId).where(CryptoCoinId.coinstats_id == "binance-coin")
+        )).scalar_one()
+    assert (row.coingecko_id, row.method) == ("binancecoin", "symbol+price+cap")
+
+
+@pytest.mark.asyncio
+async def test_a_coin_left_unmatched_by_older_rules_is_asked_again_at_once(db, monkeypatch):
+    configure(monkeypatch)
+    configure_gecko(monkeypatch)
+    async with db() as s:
+        s.add(CryptoCoinId(coinstats_id="binance-coin", coingecko_id=None, symbol="BNB",
+                           method=None, checked_at=utcnow()))
+        await s.commit()
+    book = FakeCoinStats(coins=[coin("bitcoin", "BTC", 0.01, 60_000.0, rank=1),
+                                coin("binance-coin", "BNB", 0.5, 765.0, rank=4)],
+                         value=value_body(total=982.5))
+    gecko = FakeCoinGecko(
+        prices={"bitcoin": 60_000.0, "binancecoin": 765.42, "some-bridged-bnb": 765.42},
+        listing=_TWIN_LISTING,
+        caps={"binancecoin": 1.02e11, "some-bridged-bnb": 2.89e5},
+    )
+    await _service(db, book, gecko).sync()
+    async with db() as s:
+        row = (await s.execute(
+            select(CryptoCoinId).where(CryptoCoinId.coinstats_id == "binance-coin")
+        )).scalar_one()
+    assert row.coingecko_id == "binancecoin"
+    # Unmatched under the CURRENT rules waits out the week, as before.
+    gecko2 = FakeCoinGecko()
+    async with db() as s:
+        s.add(CryptoCoinId(coinstats_id="obscure-token", coingecko_id=None, symbol="OBSC",
+                           method=UNMATCHED_METHOD, checked_at=utcnow()))
+        await s.commit()
+    await _service(db, FakeCoinStats(
+        coins=[coin("bitcoin", "BTC", 0.01, 60_000.0, rank=1),
+               coin("obscure-token", "OBSC", 10.0, 2.0, rank=800)],
+        value=value_body(total=620.0)), gecko2).sync()
+    assert "/coins/list" not in gecko2.calls

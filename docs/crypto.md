@@ -92,15 +92,22 @@ slugs (`bitcoin`, `ethereum`), so an exact id match resolves most; a **unique** 
 the fallback. **A symbol several CoinGecko coins share is settled by price, never by guessing**:
 CoinStats prices every coin it lists, so the candidates (up to `MAX_SYMBOL_CANDIDATES`) are quoted
 in one `/simple/price` call and the one trading within `PRICE_MATCH_TOLERANCE` (10%) of CoinStats'
-price is the coin — when exactly one does (`method = "symbol+price"`). Found on BNB, 2026-10-03:
-CoinStats' id is not CoinGecko's `binancecoin` and dozens of tokens use the symbol. **Every new
+price is the coin — when exactly one does (`method = "symbol+price"`). **When several do, they are
+one asset and its bridged copies**, which track its price exactly, so size decides: one
+`/coins/markets` call, and the candidate whose market cap is at least `MARKET_CAP_DOMINANCE` (100×)
+every other's wins (`symbol+price+cap`); comparable sizes stay unmatched. Found on BNB, 2026-10-03:
+CoinStats' id is not CoinGecko's `binancecoin`, and the only other "BNB" is a bridged copy at the
+identical 765.42 USD — 102 bn USD market cap against 289 k. **Every new
 match, by id or symbol, is price-checked the same way**: more than `PRICE_SANITY_TOLERANCE` (25%)
 from CoinStats' price and it is refused with a warning, so a coincidental id cannot value the
 position as another token. The same call doubles as today's spot price, so a first sync still costs
 one price call. Without CoinStats' prices (the rebuild CLI's past-only coins) neither check runs. An
 unmatched coin keeps a row with `coingecko_id` NULL, is named in the run's warnings, is left out of
-every figure (below), and is re-asked after `MAPPING_RECHECK_DAYS`. Migration `z9c5e1a3b7d4`
-cleared the unmatched rows once so the price rule applied at once.
+every figure (below), and is re-asked after `MAPPING_RECHECK_DAYS` — or at the next sync when its
+row was stored under older rules: an unmatched row's `method` is `none:v<MAPPING_RULES_VERSION>`,
+so **bump `MAPPING_RULES_VERSION` whenever the matching rules improve** and every unmatched coin is
+retried at once, with no data migration. (`z9c5e1a3b7d4` was the one-off migration before this
+existed.)
 
 **Closes** (`crypto_book.daily_closes`): a CoinGecko point belongs to the UTC day that ends at
 or after it, so the daily point at 00:00 UTC closes the day before; inside a day (hourly data for
