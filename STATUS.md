@@ -5,7 +5,17 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-01.** Newest, pushed as `abef3ae`: **the Dividends tab's *Average per
+**Last updated: 2026-10-03.** Newest, **committed locally, not pushed**: **the crypto book computes
+its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
+or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
+holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
+CoinStats history pull is gone (−35 credits a day), and a one-off CLI rebuilds the holdings back to
+23 Aug from CoinStats' transaction list. The KPI tiles are Total value, Today, P&L since 1 Jan 2026
+and Coins; the chart gains 1W · MTD · YTD. USDC without a price is valued at its 1.00 USD peg,
+flagged as one (owner's decision). Migration `x7a3c9e1f5b2d`. Everything is in
+[docs/crypto.md](docs/crypto.md); see *Needs a human* and *Watch after the next deploy*.
+
+Before that, pushed as `abef3ae`: **the Dividends tab's *Average per
 month* tile carries two reference paces instead of the latest month's MoM/YoY**, which under the
 average read as the average's own growth (one large September showed +507% / +1484%). Both are per
 month over finished months only: this year so far against last year ÷ 12, and the last three months
@@ -468,6 +478,25 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
+- **Give the crypto book its prices, then rebuild its holdings — in this order.** Code committed
+  locally on 2026-10-03, not pushed yet.
+  1. Push and let auto-deploy land it (off-slot), and confirm `/health` reports the new commit.
+     **Not before**: pydantic-settings forbids unknown keys in `backend/.env`, so the key must not
+     reach a `.env` read by code that does not declare `coingecko_api_key` yet.
+  2. Get a free **CoinGecko Demo** key (coingecko.com → Developer Dashboard) and add
+     `COINGECKO_API_KEY=…` to `/root/IBKR_investment_tracker/backend/.env`.
+  3. `cd /root/IBKR_investment_tracker/backend && GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d`
+     (never `restart`), then `/health` and `GET /api/crypto/status` → `prices_configured: true`.
+  4. Let one crypto sync run (a slot, or the **Sync crypto** button), so a snapshot-sourced
+     holdings day exists.
+  5. Off-slot, over ssh:
+     `docker exec backend-portfolio-backend-1 python -m app.cli.crypto_rebuild_holdings --probe`
+     — read which `--legs` / `--fees` reading the patterns support (do the transfer legs add up
+     to `coinData.count`? are outflows signed?); then the same with `--dry-run` (and those flags):
+     the 23–25 Aug basket must be the one you expect, and every synced day must read "agrees";
+     then without `--dry-run`. It refuses whole on a negative quantity or a moved window; never
+     paste its output anywhere committed.
+
 - **Run the first crypto sync on production.** The three CoinStats keys went into the VPS
   `backend/.env` on 2026-09-29 and the container was recreated with `up -d` (`/health` healthy on
   `4a14f41`). What remains is one authenticated **Sync crypto** on the site, or waiting for the next
@@ -923,13 +952,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
-- **Crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**
+- **Goes away with the CoinGecko book (committed 2026-10-03, not yet deployed — delete once
+  verified): crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**
   — the owner's choice on 2026-09-28 over showing the crypto book in USD. They leave out every FX
   move since purchase, so they will not match the CoinStats app set to the same currency; the view
   says so beside the figures (`fx_caveat`), and a USD base shows CoinStats' own numbers exactly.
   Values (total, holdings, the value chart) convert at their own dates and are exact.
 
-- **CoinStats counts transfers to and from an untracked exchange as profit and loss.** Seen
+- **Resolved by design once the CoinGecko book is deployed and verified (2026-10-03, see *Watch
+  after the next deploy*) — keep this entry until then.** The book's P&L is now yesterday's coins
+  × the price move, so a transfer cannot be a gain. Until then: **CoinStats counts transfers to
+  and from an untracked exchange as profit and loss.** Seen
   2026-09-29 in the owner's history: around mid- and late December 2025 (and partly late September
   2025) the value moves by a large share within one three-day sample, and CoinStats' P&L history
   moves by the same amount, where a later deposit (August 2026) was recognised as a deposit. The
@@ -1011,6 +1044,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
 ## Watch after the next deploy
+
+- **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; after the key and the
+  rebuild, see *Needs a human*). Check: `/api/crypto/history` starts on 2026-01-01, `reconstructed`
+  ends the day before the first synced day, and there is no jump around 22 Aug or in December;
+  the total is within price drift of the CoinStats app (CoinStats' own total includes exchange
+  cash, shown here beside it); `/api/crypto/status` credits fall by about 35 a day less than
+  before; `/api/scheduler/history` still has no `crypto_*` rows. A run's warnings should not
+  name an unmatched coin — if one does, its days read unknown and the total is blank until a
+  mapping exists (no CLI for a manual mapping yet). Then a browser pass at 1440 and 390 px: the
+  four tiles, the shaded reconstructed span and its sentence, 1W/MTD/YTD, the *peg* badge if USDC
+  is held. `crypto_daily` is no longer written; compare it with the new series once, then drop it
+  (*Worth doing next*).
 
 - **The dividend paces under *Average per month*** (live on `93d0e1c`, API-verified 2026-10-02:
   `growth.ytd_pace` covers 9 finished months, `growth.recent_pace` is Jul–Sep vs Apr–Jun and equals
@@ -1289,6 +1334,11 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   on-time sync look early.
 
 ## Worth doing next
+
+- **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
+  longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
+  and the probe's mention. Also worth having then: a way to set a CoinStats→CoinGecko mapping by
+  hand for a coin `/coins/list` cannot match.
 
 0. **Stop the backend test suite writing into the developer's database.** Found 2026-09-28:
    `tests/test_scheduler_jobs.py`'s spy fixture runs real scheduler jobs, and `_record_run` opens
@@ -1620,6 +1670,13 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-03 (crypto on CoinGecko)** — "prices from CoinGecko, the book from 1 Jan 2026, the
+  23 Aug basket carried back, and no Kraken spike": the series is computed from per-coin daily
+  holdings × CoinGecko closes, `pnl = yesterday's qty × price move`; CoinStats' history pull
+  dropped; a refuse-whole CLI rebuilds 23 Aug → first sync from the transaction list (shape not
+  confirmed yet — `--probe` first). USDC pegged at 1.00 by owner decision; 1W/MTD/YTD ranges.
+  Local only; key and rebuild need a human.
+
 - **2026-10-01 (dividend paces)** — "what is +507% MoM?": the average tile's footer was the latest
   month against the month before, which on a quarterly ETF calendar measures the calendar. Replaced,
   after two iterations with the owner, by two per-month paces over finished months (YTD vs last year
@@ -1645,9 +1702,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   isolation rule the plan itself broke. The first real CoinStats answers then overturned five
   documented assumptions (see the top of this file). Verified locally on the real portfolio, and
   pushed together with `7fe0aab` (merged the same day).
-
-- **2026-09-27 (profit line from 0)** — the value chart's Profit/Loss line was the since-inception
-  gap, so on 3M it started at two years of profit while the benchmarks start at the range. It is now
-  that gap's change since the chart's first point — a shift, which is right for a quantity already
-  net of contributions — with a sentence naming the start day and an overstatement clause when that
-  day was not fully priced. TypeScript, build and 715/715 frontend tests (Node 22) pass; not in a browser, not merged.

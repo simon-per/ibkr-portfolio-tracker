@@ -32,7 +32,7 @@ holds it — the index below maps them.
 | [docs/dividends.md](docs/dividends.md) | `dividend_service`, the era splice, purging estimates, the forecast, forward yield, growth |
 | [docs/cash-contributions-benchmark.md](docs/cash-contributions-benchmark.md) | `cash_service`, Total Value vs Money In, `get_contributions`, the benchmark and its anchors |
 | [docs/pillar3a.md](docs/pillar3a.md) | the second account, `finpension_*`, account isolation, `price_source`, the NAV oracle |
-| [docs/crypto.md](docs/crypto.md) | the crypto book: `coinstats_client`, `crypto_service`, `/api/crypto`, the Crypto mode, CoinStats credits, the share token |
+| [docs/crypto.md](docs/crypto.md) | the crypto book: `coinstats_client`, `coingecko_client`, `crypto_book`, `crypto_service`, `/api/crypto`, the Crypto mode, CoinStats credits, the share token, the rebuild CLI, the USDC peg |
 | [docs/activity-ledger.md](docs/activity-ledger.md) | `activity_service` |
 | [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh |
 | [docs/pricing-and-fx.md](docs/pricing-and-fx.md) | ticker mapping, `manage_mappings`, minor-unit quotes, `currency_service`, Frankfurter and the fallback |
