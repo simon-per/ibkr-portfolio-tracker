@@ -251,10 +251,12 @@ without rewriting any history. Everything starts at `CRYPTO_HISTORY_START = 2026
 earlier is computed, fetched or drawn.
 
 - **The reconstructed span.** Every day before the first `snapshot`-sourced holdings day carries
-  `reconstructed: true`: before the earliest set (the 23 Aug basket once the CLI has run), that
-  basket at each day's price; between it and the first synced day, the quantities the CLI rebuilt
-  from transactions. Until the CLI runs, the first synced day's basket stands in for the whole
-  year. The chart shades the span and says which is which under it.
+  `reconstructed: true`: before the earliest set, that basket at each day's price; between it and
+  the first synced day, quantities the rebuild CLI wrote, if it has run. **As decided on 2026-10-03
+  it has not**: the first synced day's basket (3 Oct 2026) stands in for every earlier day, and
+  because every later day's set is stored, coins added later (Revolut X) never rewrite that span.
+  The chart shades it and says so under it. Why the CLI was not run: STATUS.md, *Known rough
+  edges*.
 - **Left out and counted, never valued at 0.** A held coin with no price that day is left out of
   that day's value, and out of its P&L whenever either end of its move is unpriced — so a coin
   gaining or losing its price is never a gain or a loss. It is named on the surface: the Total

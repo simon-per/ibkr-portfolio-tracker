@@ -38,11 +38,11 @@ Before that, deployed with it (`ac23ed5`): **the crypto book computes
 its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
 or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
 holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
-CoinStats history pull is gone (−35 credits a day), and a one-off CLI rebuilds the holdings back to
-23 Aug from CoinStats' transaction list. The KPI tiles are Total value, Today, P&L since 1 Jan 2026
+CoinStats history pull is gone (−35 credits a day); the one-off rebuild CLI exists but was not
+run (owner's decision — the 3 Oct basket stands in for earlier days, see *Known rough edges*). The KPI tiles are Total value, Today, P&L since 1 Jan 2026
 and Coins; the chart gains 1W · MTD · YTD. USDC without a price is valued at its 1.00 USD peg,
 flagged as one (owner's decision). Migration `x7a3c9e1f5b2d`. Everything is in
-[docs/crypto.md](docs/crypto.md); see *Needs a human* and *Watch after the next deploy*.
+[docs/crypto.md](docs/crypto.md); see *Watch after the next deploy*.
 
 Before that, pushed as `abef3ae`: **the Dividends tab's *Average per
 month* tile carries two reference paces instead of the latest month's MoM/YoY**, which under the
@@ -507,30 +507,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **Give the crypto book its prices, then rebuild its holdings — in this order.**
-  1. Done: deployed, `/health` on `7d1cb99` (2026-10-03). Before that, the key could not go in:
-     pydantic-settings forbids unknown keys in `backend/.env`.
-  2. Get a free **CoinGecko Demo** key (coingecko.com → Developer Dashboard) and add
-     `COINGECKO_API_KEY=…` to `/root/IBKR_investment_tracker/backend/.env`.
-  3. `cd /root/IBKR_investment_tracker/backend && GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d`
-     (never `restart`), then `/health` and `GET /api/crypto/status` → `prices_configured: true`.
-  4. Let one crypto sync run (a slot, or the **Sync crypto** button), so a snapshot-sourced
-     holdings day exists.
-  5. Off-slot, over ssh:
-     `docker exec backend-portfolio-backend-1 python -m app.cli.crypto_rebuild_holdings --probe`
-     — read which `--legs` / `--fees` reading the patterns support (do the transfer legs add up
-     to `coinData.count`? are outflows signed?); then the same with `--dry-run` (and those flags):
-     the 23–25 Aug basket must be the one you expect, and every synced day must read "agrees";
-     then without `--dry-run`. It refuses whole on a negative quantity or a moved window; never
-     paste its output anywhere committed.
-
-- **Run the first crypto sync on production.** The three CoinStats keys went into the VPS
-  `backend/.env` on 2026-09-29 and the container was recreated with `up -d` (`/health` healthy on
-  `4a14f41`). What remains is one authenticated **Sync crypto** on the site, or waiting for the next
-  slot. The repo-root `.env` also still holds the API key; the app never reads that file (the root
-  `.env.example` now says so). The key is on the free plan, and the probe plus two real syncs spent
-  about 150 of the month's credits.
-
 - **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
   owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
   "$LOCAL"` and re-runs `deploy.sh`; it never restores the snapshot `backup-db.sh` just took
@@ -913,6 +889,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
+- **The crypto history before 3 Oct 2026 is the 3 Oct basket at each day's price** (owner's
+  decision, 2026-10-03). The rebuild CLI was meant to reconstruct the real quantities back to
+  23 Aug from CoinStats' transactions; its first dry run (fees ignored) refused with BNB going
+  negative from 23 Aug — almost certainly Binance trading fees taken in BNB, carried only in each
+  trade's `fee` field — and the owner chose the simple path instead: no rebuild. The first synced
+  day's basket stands in for every earlier day, and since each day's set is stored, later coins
+  (Revolut X) only ever enter from their own day — the span is never rewritten. If the rebuild is
+  ever wanted, `--fees subtract` is the run to try first, and the CLI should stop paging once it
+  passes the reference date (it reads the whole history today, up to 400 credits a run).
+
 - **Goes away with the CoinGecko book (committed 2026-10-03, not yet deployed — delete once
   verified): crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**
   — the owner's choice on 2026-09-28 over showing the crypto book in USD. They leave out every FX
@@ -1006,9 +992,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; after the key and the
-  rebuild, see *Needs a human*). Check: `/api/crypto/history` starts on 2026-01-01, `reconstructed`
-  ends the day before the first synced day, and there is no jump around 22 Aug or in December;
+- **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
+  BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
+  starts on 2026-01-01, `reconstructed` ends on 2026-10-02 (the 3 Oct basket stands in, by owner
+  decision — see *Known rough edges*), and there is no jump in December;
   the total is within price drift of the CoinStats app (CoinStats' own total includes exchange
   cash, shown here beside it); `/api/crypto/status` credits fall by about 35 a day less than
   before; `/api/scheduler/history` still has no `crypto_*` rows. A run's warnings should not
