@@ -11,17 +11,18 @@ import { CryptoAllocationChart } from './CryptoAllocationChart'
 import { cryptoHoldingColumns, sortCryptoHoldings, type CryptoSortColumn } from './cryptoColumns'
 import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
 import { cryptoAccess, retryUnlessRefused } from '@/lib/cryptoAccess'
-import { formatCount, formatCurrency as formatIn, formatPrice, formatShortDateTime } from '@/lib/utils'
+import { formatCount, formatCurrency as formatIn, formatDate, formatPrice, formatShortDateTime } from '@/lib/utils'
+import { reconstructedCaption } from '@/lib/cryptoChart'
 
 /**
  * The crypto book (docs/crypto.md): one page, no tab strip — the section strip is the
  * stock view's, and the e2e suite holds the page to exactly one.
  *
- * Every figure arrives in the base currency from `/api/crypto/*` and is CoinStats' own;
- * nothing is recomputed here. What this page adds is the reading of it — and that means
- * the qualifiers sit on the surface beside the figures they qualify: when the snapshot was
- * taken, that cost and P&L are USD figures at one day's rate, which coins could not be
- * priced, and how much of the total CoinStats does not itemise.
+ * Every figure arrives in the base currency from `/api/crypto/*`: CoinStats' holdings at
+ * CoinGecko's prices, computed by the backend; nothing is recomputed here. What this page
+ * adds is the reading of it — and that means the qualifiers sit on the surface beside the
+ * figures they qualify: when the snapshot was taken, which days of the P&L are
+ * reconstructed, which coins could not be priced, and what sits beside the total.
  */
 
 function Notice({
@@ -41,9 +42,6 @@ function Notice({
 
 const signTone = (value: number | null | undefined): KpiTone =>
   value == null ? 'neutral' : value >= 0 ? 'positive' : 'negative'
-
-const signedPct = (value: number | null | undefined) =>
-  value == null ? undefined : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
 
 export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) {
   const portfolioQuery = useQuery({
@@ -171,9 +169,13 @@ function CryptoBook({
     [baseCurrency],
   )
 
-  const warnings = [...portfolio.warnings, ...historyWarnings]
-  const unitemised = portfolio.unitemised_value
+  // The two endpoints name the same unknown day the same way; say it once.
+  const warnings = [...new Set([...portfolio.warnings, ...historyWarnings])]
   const plural = (n: number, word: string) => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`
+  const startLabel = formatDate(portfolio.start_date)
+  const reconstructed = reconstructedCaption(
+    portfolio.start_date, portfolio.basket_date, portfolio.first_snapshot_date, formatDate,
+  )
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -192,63 +194,59 @@ function CryptoBook({
       )}
 
       <section aria-label="Crypto totals" className="space-y-2">
-        <KpiPanel columns={6}>
+        <KpiPanel columns={4}>
           <KpiCard
             tile
             hero
             label="Total value"
             value={money(portfolio.total_value)}
-            footer={
-              <DeltaChip pct={portfolio.change_24h_pct} label="24h" flatBand={0} />
-            }
-            sub={portfolio.change_24h != null ? `${signedMoney(portfolio.change_24h)} over 24 hours` : undefined}
-          />
-          <KpiCard tile label="Cost basis" value={money(portfolio.total_cost)} sub="What CoinStats counts as paid in" />
-          <KpiCard
-            tile
-            label="Unrealized P&L"
-            value={signedMoney(portfolio.unrealized_pl)}
-            tone={signTone(portfolio.unrealized_pl)}
-            sub={signedPct(portfolio.unrealized_pl_pct)}
+            sub={portfolio.total_value == null && portfolio.no_price_symbols.length > 0
+              ? `Unknown: no price for ${portfolio.no_price_symbols.join(', ')}`
+              : 'Coins × CoinGecko price'}
           />
           <KpiCard
             tile
-            label="Realized P&L"
-            value={signedMoney(portfolio.realized_pl)}
-            tone={signTone(portfolio.realized_pl)}
-            sub={signedPct(portfolio.realized_pl_pct)}
+            label="Today"
+            value={signedMoney(portfolio.change_today)}
+            tone={signTone(portfolio.change_today)}
+            footer={<DeltaChip pct={portfolio.change_today_pct} label="since 00:00 UTC" flatBand={0} />}
           />
           <KpiCard
             tile
-            label="All-time P&L"
-            value={signedMoney(portfolio.all_time_pl)}
-            tone={signTone(portfolio.all_time_pl)}
-            sub={signedPct(portfolio.all_time_pl_pct)}
+            label={`P&L since ${startLabel}`}
+            value={signedMoney(portfolio.pnl_since_start)}
+            tone={signTone(portfolio.pnl_since_start)}
+            sub="Price moves only — buys, sales and transfers are not gains"
+          />
+          <KpiCard
+            tile
+            label="Coins"
+            value={formatCount(portfolio.valued_count)}
+            sub={portfolio.unpriced_count > 0 ? `${plural(portfolio.unpriced_count, 'unpriced coin')} left out` : undefined}
           />
         </KpiPanel>
 
         {/* The qualifiers, on the surface beside the figures they qualify. */}
         <div className="space-y-1 text-xs text-muted-foreground">
           <p>
-            As of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : '—'} · figures
-            computed by CoinStats
+            Holdings as of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : '—'} from
+            CoinStats · prices from CoinGecko
+            {portfolio.prices_as_of ? `, ${formatShortDateTime(portfolio.prices_as_of)}` : ''}
+            {portfolio.cash_value
+              ? ` · plus ${formatCurrency(portfolio.cash_value)} in exchange cash, not in this total`
+              : ''}
             {portfolio.defi_value
               ? ` · plus ${formatCurrency(portfolio.defi_value)} in DeFi positions, which CoinStats reports separately and are not in this total`
               : ''}
           </p>
-          {portfolio.fx_caveat && (
-            <p className="text-amber-700 dark:text-amber-400">{portfolio.fx_caveat}</p>
+          {reconstructed && <p>P&amp;L since {startLabel}: {reconstructed}</p>}
+          {portfolio.peg_note && (
+            <p className="text-amber-700 dark:text-amber-400">{portfolio.peg_note}</p>
           )}
           {portfolio.unpriced_count > 0 && (
             <p className="text-amber-700 dark:text-amber-400">
               {plural(portfolio.unpriced_count, 'coin')} CoinStats cannot price, left out of every
               total rather than valued at zero: {portfolio.unpriced_symbols.join(', ')}
-            </p>
-          )}
-          {unitemised != null && unitemised > 0 && (
-            <p>
-              Not itemised: {formatCurrency(unitemised)} — the part of CoinStats&apos; total its
-              holdings list does not cover.
             </p>
           )}
           {portfolio.spam_count > 0 && (
@@ -261,7 +259,7 @@ function CryptoBook({
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Crypto over time</CardTitle>
-            <CardDescription>CoinStats&apos; daily history in {baseCurrency}</CardDescription>
+            <CardDescription>Daily, from {startLabel}, in {baseCurrency}</CardDescription>
           </CardHeader>
           <CardContent>
             {historyFailed ? (
@@ -271,14 +269,19 @@ function CryptoBook({
             ) : historyLoading ? (
               <div className="h-[260px] animate-pulse rounded-md bg-muted sm:h-[340px]" />
             ) : (
-              <CryptoHistoryChart points={history} />
+              <CryptoHistoryChart
+                points={history}
+                startDate={portfolio.start_date}
+                basketDate={portfolio.basket_date}
+                firstSnapshotDate={portfolio.first_snapshot_date}
+              />
             )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle>Allocation</CardTitle>
-            <CardDescription>Shares of the whole total — not rescaled</CardDescription>
+            <CardDescription>Shares of the priced coins&apos; total</CardDescription>
           </CardHeader>
           <CardContent>
             <CryptoAllocationChart portfolio={portfolio} />
@@ -290,7 +293,7 @@ function CryptoBook({
         <CardHeader>
           <CardTitle>Holdings</CardTitle>
           <CardDescription>
-            {plural(portfolio.valued_count, 'priced coin')}
+            {plural(portfolio.valued_count, 'coin')}
             {portfolio.unpriced_count > 0 ? `, ${plural(portfolio.unpriced_count, 'unpriced')}` : ''}
           </CardDescription>
         </CardHeader>
@@ -300,26 +303,19 @@ function CryptoBook({
             columns={columns}
             getRowKey={h => h.coin_id}
             label="Crypto holdings"
-            caption="Crypto holdings from CoinStats"
+            caption="Crypto holdings from CoinStats at CoinGecko prices"
             sort={{ column: sortColumn, direction: sortDirection, onSort: handleSort }}
             minWidthClassName="min-w-[760px]"
             footer={[
-              { key: 'itemised-label', spans: ['coin', 'quantity', 'price'], content: 'Itemised total' },
+              { key: 'total-label', spans: ['coin', 'quantity', 'price'], content: 'Total' },
               {
-                key: 'itemised-value',
+                key: 'total-value',
                 spans: ['value'],
                 align: 'right',
-                content: money(portfolio.itemised_value) ?? '—',
+                content: money(portfolio.total_value) ?? '—',
               },
             ]}
           />
-          {unitemised != null && unitemised !== 0 && (
-            <p className="text-sm text-muted-foreground">
-              Not itemised: <span className="font-medium text-foreground tabular-nums">{formatCurrency(unitemised)}</span>
-              {' '}· CoinStats&apos; total:{' '}
-              <span className="font-medium text-foreground tabular-nums">{money(portfolio.total_value) ?? '—'}</span>
-            </p>
-          )}
         </CardContent>
       </Card>
     </div>

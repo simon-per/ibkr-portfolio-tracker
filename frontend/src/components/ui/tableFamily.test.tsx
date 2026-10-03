@@ -110,18 +110,13 @@ const SPARSE_CRYPTO_HOLDING = {
   symbol: null,
   name: null,
   rank: null,
-  is_fiat: false,
   status: 'unpriced',
   quantity: 0,
   price: null,
+  price_source: null,
   value: null,
   weight_pct: null,
-  change_24h_pct: null,
-  avg_buy: null,
-  total_cost: null,
-  unrealized_pl: null,
-  unrealized_pl_pct: null,
-  realized_pl: null,
+  change_today_pct: null,
 }
 
 const FAMILY: Array<[string, Column<never, string>[], unknown]> = [

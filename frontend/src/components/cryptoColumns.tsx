@@ -2,9 +2,9 @@ import type { Column } from '@/components/ui/DataTable'
 import type { CryptoHoldingItem } from '@/lib/api'
 import { formatQuantity } from '@/lib/utils'
 
-export type CryptoSortColumn = 'symbol' | 'value' | 'change' | 'unrealized' | 'weight'
+export type CryptoSortColumn = 'symbol' | 'value' | 'change' | 'weight'
 
-/** What a figure CoinStats did not report shows. Never a zero: a 0.00 claims a value. */
+/** What an unknown figure shows. Never a zero: a 0.00 claims a value. */
 const ABSENT = '—'
 
 const signedTone = (value: number | null) =>
@@ -22,11 +22,11 @@ const BADGE =
  * A factory for the reason `positionColumns` is one: the cells close over the currency
  * formatters, and the table-family test imports the exact array the view renders.
  *
- * Every figure is in the base currency already. An **unpriced** coin — CoinStats has no
- * price for it — shows a dash for price, value and weight and says so in a badge; valuing
- * it at 0.00 would publish a fabricated total loss on the one screen someone opens to see
- * which coin. Cost, average buy and P&L are CoinStats' USD figures at one day's rate; the
- * overview prints that caveat above the table, where it applies to every row at once.
+ * Every figure is in the base currency already; prices are CoinGecko's. An **unpriced**
+ * coin (CoinStats has no price) or one with **no price** that day (CoinGecko has none)
+ * shows a dash for price, value and weight and says so in a badge; valuing it at 0.00
+ * would publish a fabricated total loss on the one screen someone opens to see which
+ * coin. A stablecoin valued at its fixed peg says so beside the price.
  */
 export function cryptoHoldingColumns(deps: {
   formatCurrency: (value: number) => string
@@ -46,15 +46,20 @@ export function cryptoHoldingColumns(deps: {
       cell: (h, view) => {
         const tags = (
           <>
-            {h.is_fiat && (
-              <span className={BADGE} title="A fiat balance held on an exchange">cash</span>
-            )}
             {h.status === 'unpriced' && (
               <span
                 className="ml-1.5 rounded border border-amber-300/60 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 align-middle dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
                 title="CoinStats has no price for this coin, so it is left out of every total rather than valued at zero."
               >
                 unpriced
+              </span>
+            )}
+            {h.status === 'no_price' && (
+              <span
+                className="ml-1.5 rounded border border-amber-300/60 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 align-middle dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                title="CoinGecko has no price for this coin today, so the total is unknown rather than understated."
+              >
+                no price
               </span>
             )}
           </>
@@ -97,7 +102,12 @@ export function cryptoHoldingColumns(deps: {
       header: 'Price',
       align: 'right',
       cellClassName: 'tabular-nums',
-      cell: h => price(h.price),
+      cell: h => (
+        <>
+          {price(h.price)}
+          {h.price_source === 'peg' && <span className={BADGE}>peg</span>}
+        </>
+      ),
     },
     {
       key: 'value',
@@ -111,50 +121,15 @@ export function cryptoHoldingColumns(deps: {
     },
     {
       key: 'change',
-      header: '24h',
-      shortHeader: '24h',
+      header: 'Today',
+      shortHeader: 'Today',
       sortKey: 'change',
       align: 'right',
       mobile: 'delta',
       cellClassName: 'tabular-nums',
-      tone: h => signedTone(h.change_24h_pct),
-      cell: h => pct(h.change_24h_pct),
-    },
-    {
-      key: 'avg_buy',
-      header: 'Avg buy',
-      align: 'right',
-      cellClassName: 'tabular-nums',
-      hint: {
-        description:
-          "CoinStats' average purchase price, in USD as CoinStats keeps it, converted at the snapshot's rate.",
-      },
-      cell: h => price(h.avg_buy),
-    },
-    {
-      key: 'unrealized',
-      header: 'Unrealized P&L',
-      shortHeader: 'Unrealized P&L',
-      sortKey: 'unrealized',
-      align: 'right',
-      cellClassName: 'tabular-nums',
-      tone: h => signedTone(h.unrealized_pl),
-      hint: {
-        description:
-          "CoinStats' figure: current value less cost basis, measured in USD and converted at the snapshot's rate.",
-      },
-      cell: (h, view) => {
-        const amount = money(h.unrealized_pl)
-        if (h.unrealized_pl_pct == null) return amount
-        return view === 'table' ? (
-          <>
-            <div>{amount}</div>
-            <div className="text-xs">{pct(h.unrealized_pl_pct)}</div>
-          </>
-        ) : (
-          `${amount} (${pct(h.unrealized_pl_pct)})`
-        )
-      },
+      tone: h => signedTone(h.change_today_pct),
+      hint: { description: "Price move since the previous day's close (00:00 UTC)." },
+      cell: h => pct(h.change_today_pct),
     },
     {
       key: 'weight',
@@ -165,7 +140,7 @@ export function cryptoHoldingColumns(deps: {
       cellClassName: 'tabular-nums',
       hint: {
         description:
-          "Share of CoinStats' whole portfolio total. Not rescaled: what CoinStats totals but does not list stays out of every row.",
+          "Share of the book's total: the priced coins at CoinGecko's price. Exchange cash and DeFi sit beside the total, not in it.",
       },
       cell: h => (h.weight_pct == null ? ABSENT : `${h.weight_pct.toFixed(2)}%`),
     },
@@ -183,8 +158,7 @@ export function sortCryptoHoldings(
     switch (column) {
       case 'symbol': return (h.symbol ?? h.coin_id).toUpperCase()
       case 'value': return h.value
-      case 'change': return h.change_24h_pct
-      case 'unrealized': return h.unrealized_pl
+      case 'change': return h.change_today_pct
       case 'weight': return h.weight_pct
     }
   }

@@ -1174,51 +1174,52 @@ export interface CryptoHoldingItem {
   name: string | null;
   /** CoinStats' market-cap rank. */
   rank: number | null;
-  is_fiat: boolean;
-  /** `valued`, or `unpriced` when CoinStats has no price for it. */
+  /** `valued`; `no_price` when CoinGecko has no price that day; `unpriced` when CoinStats has none. */
   status: string;
   quantity: number;
+  /** CoinGecko's price, or the stablecoin peg (`price_source`). */
   price: number | null;
+  /** `coingecko`, or `peg` for USDC valued at exactly 1.00 USD — never a market price. */
+  price_source: string | null;
   value: number | null;
-  /** Share of CoinStats' portfolio total — never renormalised. */
+  /** Share of the book's total — never renormalised. */
   weight_pct: number | null;
-  change_24h_pct: number | null;
-  /** Cost, average buy and P&L are CoinStats' USD figures at the snapshot's rate. */
-  avg_buy: number | null;
-  total_cost: number | null;
-  unrealized_pl: number | null;
-  unrealized_pl_pct: number | null;
-  realized_pl: number | null;
+  /** Price move since the previous UTC day's close. */
+  change_today_pct: number | null;
 }
 
-/** `/api/crypto/portfolio`: the newest snapshot — totals and holdings from the same sync. */
+/** `/api/crypto/portfolio`: the newest snapshot's coins at CoinGecko prices. */
 export interface CryptoPortfolioResponse {
   configured: boolean;
+  /** Whether the server has a CoinGecko key; without one every price is unknown. */
+  prices_configured: boolean;
   base_currency: string;
-  /** When the snapshot was taken (UTC, ISO 8601); null when none exists yet. */
+  /** When the holdings snapshot was taken (UTC, ISO 8601); null when none exists yet. */
   as_of: string | null;
+  prices_as_of: string | null;
+  /** Σ count × price; null when any coin has no price, never a smaller known number. */
   total_value: number | null;
-  /** Σ of the valued holdings. */
-  itemised_value: number | null;
-  /** total − itemised: anything CoinStats totals but does not list. DeFi is not in the total. */
-  unitemised_value: number | null;
+  /** DeFi positions, beside the total, not in it. */
   defi_value: number | null;
-  total_cost: number | null;
-  unrealized_pl: number | null;
-  unrealized_pl_pct: number | null;
-  realized_pl: number | null;
-  realized_pl_pct: number | null;
-  all_time_pl: number | null;
-  all_time_pl_pct: number | null;
-  change_24h: number | null;
-  change_24h_pct: number | null;
-  /** Set whenever the base is not USD — print it beside cost and P&L. */
-  fx_caveat: string | null;
+  /** Fiat held on exchanges, beside the total, not in it. */
+  cash_value: number | null;
+  /** Yesterday's coins × the price move since yesterday's UTC close. */
+  change_today: number | null;
+  change_today_pct: number | null;
+  /** Σ daily P&L after `start_date`: price moves only, never deposits or transfers. */
+  pnl_since_start: number | null;
+  start_date: string;
+  /** The earliest holdings set, used for every day before it. */
+  basket_date: string | null;
+  /** The first day whose holdings came from a sync; earlier days are reconstructed. */
+  first_snapshot_date: string | null;
+  peg_note: string | null;
   fx_unavailable: number;
   valued_count: number;
   spam_count: number;
   unpriced_count: number;
   unpriced_symbols: string[];
+  no_price_symbols: string[];
   holdings: CryptoHoldingItem[];
   /** Valued coin ids by market-cap rank: the colour identity order. */
   color_order: string[];
@@ -1228,17 +1229,23 @@ export interface CryptoPortfolioResponse {
 export interface CryptoHistoryPoint {
   date: string;
   value: number | null;
-  /** CoinStats' cash-flow-adjusted P&L on that day. */
+  /** Yesterday's coins × the day's price move; null on the first day or when unknown. */
   pnl: number | null;
+  /** Before the first synced holdings day: an earlier or rebuilt basket at that day's prices. */
+  reconstructed: boolean;
 }
 
-/** `/api/crypto/history`: CoinStats' daily history, ending at the newest snapshot. */
+/** `/api/crypto/history`: the book's daily value and P&L from `start_date`. */
 export interface CryptoHistoryResponse {
   configured: boolean;
+  prices_configured: boolean;
   base_currency: string;
   points: CryptoHistoryPoint[];
+  start_date: string;
+  basket_date: string | null;
+  first_snapshot_date: string | null;
   fetched_at: string | null;
-  fx_caveat: string | null;
+  peg_note: string | null;
   fx_unavailable: number;
   warnings: string[];
 }
@@ -1253,6 +1260,7 @@ export interface CryptoLastRun {
 /** `/api/crypto/status`: the last crypto run and the credit balance it saw. */
 export interface CryptoStatusResponse {
   configured: boolean;
+  prices_configured: boolean;
   last_run: CryptoLastRun | null;
   last_snapshot_at: string | null;
   next_run: string | null;

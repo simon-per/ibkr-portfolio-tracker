@@ -23,6 +23,7 @@ afterEach(() => {
 
 const STATUS: CryptoStatusResponse = {
   configured: true,
+  prices_configured: true,
   last_run: {
     status: 'success', reason: null, message: 'Crypto snapshot stored',
     finished_at: '2026-09-20T12:00:05+00:00',
@@ -39,12 +40,12 @@ const STATUS: CryptoStatusResponse = {
 
 /** Configured, never synced: the overview shows its first-sync prompt. */
 const EMPTY_BOOK: CryptoPortfolioResponse = {
-  configured: true, base_currency: 'EUR', as_of: null, total_value: null,
-  itemised_value: null, unitemised_value: null, defi_value: null, total_cost: null,
-  unrealized_pl: null, unrealized_pl_pct: null, realized_pl: null, realized_pl_pct: null,
-  all_time_pl: null, all_time_pl_pct: null, change_24h: null, change_24h_pct: null,
-  fx_caveat: null, fx_unavailable: 0, valued_count: 0, spam_count: 0, unpriced_count: 0,
-  unpriced_symbols: [], holdings: [], color_order: [], warnings: [],
+  configured: true, prices_configured: true, base_currency: 'EUR', as_of: null,
+  prices_as_of: null, total_value: null, defi_value: null, cash_value: null,
+  change_today: null, change_today_pct: null, pnl_since_start: null,
+  start_date: '2026-01-01', basket_date: null, first_snapshot_date: null, peg_note: null,
+  fx_unavailable: 0, valued_count: 0, spam_count: 0, unpriced_count: 0,
+  unpriced_symbols: [], no_price_symbols: [], holdings: [], color_order: [], warnings: [],
 }
 
 beforeEach(() => {

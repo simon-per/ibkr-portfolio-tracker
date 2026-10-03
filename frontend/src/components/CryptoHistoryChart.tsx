@@ -3,6 +3,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -11,7 +12,15 @@ import {
 } from 'recharts'
 import type { CryptoHistoryPoint } from '@/lib/api'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
-import { CRYPTO_RANGES, rangePnlSeries, sliceRange, valueSeries, type CryptoRange } from '@/lib/cryptoChart'
+import {
+  CRYPTO_RANGES,
+  rangePnlSeries,
+  reconstructedCaption,
+  reconstructedSpan,
+  sliceRange,
+  valueSeries,
+  type CryptoRange,
+} from '@/lib/cryptoChart'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
@@ -28,36 +37,46 @@ const CHART_BOX = 'h-[260px] sm:h-[340px]'
 type Metric = 'value' | 'pnl'
 
 const VALUE_CAPTION =
-  'What the holdings were worth each day. Deposits and withdrawals move this line, so it is not a return.'
+  "What the holdings were worth each day at CoinGecko's prices. Buying, selling and transfers move this line, so it is not a return."
 
 /** The P&L caption names the day the line starts from, like the stock chart's does. */
 function pnlCaption(firstDate: string | undefined): string {
   const from = firstDate ? ` from 0 on ${formatDate(firstDate)}` : ''
-  return `What the account gained or lost over this range${from}: CoinStats' daily P&L, summed, ` +
-    'with deposits and withdrawals not counted as gains.'
+  return `What the coins gained or lost over this range${from}: each day, the previous day's ` +
+    'coins times the price move — so buying, selling and transfers are never gains.'
 }
 
 /**
- * CoinStats' daily history — value or P&L — over a range sliced client-side.
+ * The book's daily history — value or P&L — over a range sliced client-side.
  *
  * A missing point is a gap in the line, never a zero: `connectNulls` is off on purpose,
- * because a line drawn through a day nobody measured asserts a value for it.
+ * because a line drawn through a day nobody could price asserts a value for it. The days
+ * before the first synced holdings are shaded, and the sentence under the chart says what
+ * they are — on the surface, not in a hover.
  */
-export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryPoint[] }) {
+export function CryptoHistoryChart({
+  points, startDate, basketDate, firstSnapshotDate,
+}: {
+  points: readonly CryptoHistoryPoint[]
+  startDate: string
+  basketDate: string | null
+  firstSnapshotDate: string | null
+}) {
   const [metric, setMetric] = useState<Metric>('value')
-  const [range, setRange] = useState<CryptoRange>('1Y')
+  const [range, setRange] = useState<CryptoRange>('YTD')
   const formatCurrency = useFormatCurrency()
   const curSym = useCurrencySymbol()
   const isCompact = useIsCompact()
 
+  const visible = useMemo(() => sliceRange(points, range), [points, range])
   const data = useMemo(() => {
-    const visible = sliceRange(points, range)
-    // Sampled every three days: drawn through the samples — see `valueSeries`.
-    if (metric === 'value') return valueSeries(visible).map(p => ({ date: p.date, y: p.value }))
-    // Daily amounts, summed over what is on screen — see `rangePnlSeries`.
-    const pnl = rangePnlSeries(visible)
-    return visible.map((p, i) => ({ date: p.date, y: pnl[i] }))
-  }, [points, range, metric])
+    // Daily values, unknown days as gaps — see `valueSeries`; daily P&L summed over what
+    // is on screen — see `rangePnlSeries`.
+    const ys = metric === 'value' ? valueSeries(visible) : rangePnlSeries(visible)
+    return visible.map((p, i) => ({ date: p.date, y: ys[i] }))
+  }, [visible, metric])
+  const shaded = useMemo(() => reconstructedSpan(visible), [visible])
+  const caption = reconstructedCaption(startDate, basketDate, firstSnapshotDate, formatDate)
 
   const axis = useMemo(() => {
     const values = data.map(d => d.y).filter((v): v is number => v != null)
@@ -72,7 +91,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
     return niceTicks(paddedMin, max + pad, isCompact ? 4 : 6, floor)
   }, [data, metric, isCompact])
 
-  const shortRange = range === '1M' || range === '3M'
+  const shortRange = range === '1W' || range === 'MTD' || range === '1M' || range === '3M'
   const formatXAxisTick = (value: string) => {
     const date = parseLocalDate(value)
     if (Number.isNaN(date.getTime())) return ''
@@ -116,7 +135,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
       {axis === null ? (
         <div className={`flex w-full ${CHART_BOX} items-center justify-center rounded-lg border border-dashed bg-muted/10 px-4 text-center text-sm text-muted-foreground`}>
           {points.length === 0
-            ? "No history yet — CoinStats' daily history arrives with the first sync of the day."
+            ? 'No history yet — it starts with the first crypto sync.'
             : 'Nothing measured in this range.'}
         </div>
       ) : (
@@ -140,6 +159,15 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
                 ticks={axis.ticks}
                 width={isCompact ? 48 : 64}
               />
+              {shaded && (
+                <ReferenceArea
+                  x1={shaded.from}
+                  x2={shaded.to}
+                  fill="hsl(var(--muted-foreground))"
+                  fillOpacity={0.08}
+                  ifOverflow="hidden"
+                />
+              )}
               {metric === 'pnl' && <ReferenceLine y={0} stroke="hsl(var(--border))" />}
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
@@ -162,6 +190,9 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
             </LineChart>
           </ResponsiveContainer>
         </div>
+      )}
+      {shaded && caption && (
+        <p className="text-xs text-muted-foreground">{caption}</p>
       )}
     </div>
   )

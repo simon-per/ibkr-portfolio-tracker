@@ -39,46 +39,46 @@ beforeEach(() => {
 /** Invented figures, like every crypto fixture in this repo. */
 function book(over: Partial<CryptoPortfolioResponse> = {}): CryptoPortfolioResponse {
   return {
-    configured: true, base_currency: 'CHF', as_of: '2026-09-20T12:00:00+00:00',
-    total_value: 1000, itemised_value: 900, unitemised_value: 100, defi_value: null,
-    total_cost: 700, unrealized_pl: 200, unrealized_pl_pct: 28.57, realized_pl: -10,
-    realized_pl_pct: -1.4, all_time_pl: 190, all_time_pl_pct: 27.1, change_24h: 12,
-    change_24h_pct: 1.35, fx_caveat: "Cost and P&L are CoinStats' USD figures converted at the 2026-09-20 rate; FX moves since purchase are not in them.",
+    configured: true, prices_configured: true, base_currency: 'CHF',
+    as_of: '2026-09-20T12:00:00+00:00', prices_as_of: '2026-09-20T12:00:03+00:00',
+    total_value: 1000, defi_value: null, cash_value: 400, change_today: -10,
+    change_today_pct: 1.35, pnl_since_start: 190, start_date: '2026-01-01',
+    basket_date: '2026-08-23', first_snapshot_date: '2026-09-15',
+    peg_note: 'Valued at a fixed 1.00 USD peg where CoinGecko has no price — USDC on 2 days. A deliberate exception, not a market price.',
     fx_unavailable: 0, valued_count: 2, spam_count: 3, unpriced_count: 1,
-    unpriced_symbols: ['MYST'],
+    unpriced_symbols: ['MYST'], no_price_symbols: [],
     holdings: [
       {
-        coin_id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', rank: 1, is_fiat: false,
-        status: 'valued', quantity: 0.01, price: 50_000, value: 500, weight_pct: 50,
-        change_24h_pct: 2, avg_buy: 40_000, total_cost: 400, unrealized_pl: 100,
-        unrealized_pl_pct: 25, realized_pl: 0,
+        coin_id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', rank: 1, status: 'valued',
+        quantity: 0.01, price: 50_000, price_source: 'coingecko', value: 500,
+        weight_pct: 50, change_today_pct: 2,
       },
       {
-        coin_id: 'FiatCoinEUR', symbol: 'EUR', name: 'Euro', rank: null, is_fiat: true,
-        status: 'valued', quantity: 400, price: 1, value: 400, weight_pct: 40,
-        change_24h_pct: 0, avg_buy: null, total_cost: null, unrealized_pl: null,
-        unrealized_pl_pct: null, realized_pl: null,
+        coin_id: 'usd-coin', symbol: 'USDC', name: 'USDC', rank: 7, status: 'valued',
+        quantity: 500, price: 1, price_source: 'peg', value: 500, weight_pct: 50,
+        change_today_pct: 0,
       },
       {
-        coin_id: 'mystery-token', symbol: 'MYST', name: 'Mystery', rank: null, is_fiat: false,
-        status: 'unpriced', quantity: 42, price: null, value: null, weight_pct: null,
-        change_24h_pct: null, avg_buy: null, total_cost: null, unrealized_pl: null,
-        unrealized_pl_pct: null, realized_pl: null,
+        coin_id: 'mystery-token', symbol: 'MYST', name: 'Mystery', rank: null,
+        status: 'unpriced', quantity: 42, price: null, price_source: null, value: null,
+        weight_pct: null, change_today_pct: null,
       },
     ],
-    color_order: ['bitcoin', 'FiatCoinEUR'],
+    color_order: ['bitcoin', 'usd-coin'],
     warnings: ['CoinStats credits are low: 3000 of 20000 left this period.'],
     ...over,
   }
 }
 
 const HISTORY: CryptoHistoryResponse = {
-  configured: true, base_currency: 'CHF', fetched_at: '2026-09-20T06:00:00+00:00',
-  fx_caveat: null, fx_unavailable: 0, warnings: [],
+  configured: true, prices_configured: true, base_currency: 'CHF',
+  fetched_at: '2026-09-20T06:00:00+00:00', start_date: '2026-01-01',
+  basket_date: '2026-08-23', first_snapshot_date: '2026-09-19', peg_note: null,
+  fx_unavailable: 0, warnings: [],
   points: [
-    { date: '2026-09-18', value: 950, pnl: 150 },
-    { date: '2026-09-19', value: null, pnl: null },
-    { date: '2026-09-20', value: 1000, pnl: 190 },
+    { date: '2026-09-18', value: 950, pnl: 15, reconstructed: true },
+    { date: '2026-09-19', value: null, pnl: null, reconstructed: false },
+    { date: '2026-09-20', value: 1000, pnl: 19, reconstructed: false },
   ],
 }
 
@@ -145,28 +145,45 @@ describe('a populated crypto book', () => {
     vi.spyOn(api, 'getCryptoHistory').mockResolvedValue(HISTORY)
   })
 
-  it('shows the totals in the base currency with the 24h change', async () => {
+  it('shows the total, today and the P&L since 1 January in the base currency', async () => {
     renderOverview()
     const totals = await screen.findByRole('region', { name: 'Crypto totals' })
     expect(within(totals).getByText('Total value')).toBeTruthy()
     expect(within(totals).getByText(/1,000\.00/)).toBeTruthy()
+    expect(within(totals).getByText('Today')).toBeTruthy()
     expect(within(totals).getByText('+1.4%')).toBeTruthy()
+    expect(within(totals).getByText(/^P&L since Jan 1, 2026$/)).toBeTruthy()
     // The base currency comes from /api/settings, like every other figure in the app.
     expect(await within(totals).findByText(/^-CHF\s10\.00$/)).toBeTruthy()
+    expect(within(totals).getByText(/^\+CHF\s190\.00$/)).toBeTruthy()
+    // CoinStats' cost and P&L tiles are gone.
+    expect(within(totals).queryByText('Cost basis')).toBeNull()
+    expect(within(totals).queryByText('Unrealized P&L')).toBeNull()
   })
 
   it('puts every qualifier on the surface, not behind a hover', async () => {
     renderOverview()
     await screen.findByRole('region', { name: 'Crypto totals' })
-    expect(screen.getByText(/figures computed by CoinStats/)).toBeTruthy()
-    expect(screen.getByText(/USD figures converted at the 2026-09-20 rate/)).toBeTruthy()
+    expect(screen.getByText(/prices from CoinGecko/)).toBeTruthy()
+    expect(screen.getByText(/in exchange cash, not in this total/)).toBeTruthy()
+    expect(screen.getByText(/the Aug 23, 2026 coins at each day's price/)).toBeTruthy()
+    expect(screen.getByText(/rebuilt from CoinStats' transactions/)).toBeTruthy()
+    expect(screen.getByText(/fixed 1.00 USD peg/)).toBeTruthy()
     expect(screen.getByText(/cannot price, left out of every total rather than valued at zero: MYST/)).toBeTruthy()
-    expect(screen.getAllByText(/Not itemised/).length).toBeGreaterThan(0)
     expect(screen.getByText('3 spam tokens hidden.')).toBeTruthy()
     expect(screen.getByText(/credits are low/)).toBeTruthy()
   })
 
-  it('lists holdings with an unpriced coin as a dash and a fiat balance badged', async () => {
+  it('says why the total is unknown when a coin has no price', async () => {
+    vi.spyOn(api, 'getCryptoPortfolio').mockResolvedValue(book({
+      total_value: null, no_price_symbols: ['ETH'],
+    }))
+    renderOverview()
+    const totals = await screen.findByRole('region', { name: 'Crypto totals' })
+    expect(within(totals).getByText('Unknown: no price for ETH')).toBeTruthy()
+  })
+
+  it('lists holdings with an unpriced coin as a dash and a pegged price badged', async () => {
     renderOverview()
     const table = await screen.findByRole('table')
     const rows = within(table).getAllByRole('row')
@@ -174,15 +191,14 @@ describe('a populated crypto book', () => {
     expect(myst?.textContent).toContain('unpriced')
     expect(myst?.textContent).toContain('—')
     expect(myst?.textContent).not.toContain('0.00')
-    const eur = rows.find(r => r.textContent?.includes('Euro'))
-    expect(eur?.textContent).toContain('cash')
+    const usdc = rows.find(r => r.textContent?.includes('USDC'))
+    expect(usdc?.textContent).toContain('peg')
   })
 
-  it('draws the chart and the allocation, with the unitemised share in the legend', async () => {
+  it('draws the chart and the allocation, with every share in the legend', async () => {
     renderOverview()
     await waitFor(() => expect(screen.getAllByTestId('chart')).toHaveLength(2))
     const legend = screen.getByRole('list', { name: 'Allocation by coin' })
-    expect(within(legend).getByText('10.0%')).toBeTruthy()
-    expect(within(legend).getByText(/Not itemised/)).toBeTruthy()
+    expect(within(legend).getAllByText('50.0%')).toHaveLength(2)
   })
 })

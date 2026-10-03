@@ -7,11 +7,10 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { tooltipValue } from '@/lib/utils'
 
 /**
- * The crypto book by coin, as shares of CoinStats' whole total.
+ * The crypto book by coin, as shares of the priced coins' total.
  *
  * The legend carries every slice's share in text, so nothing here is readable only on
- * hover — the donut is the picture, the list is the figures. "Not itemised" is a slice
- * of its own rather than spread over the coins (see `allocationSlices`).
+ * hover — the donut is the picture, the list is the figures (see `allocationSlices`).
  */
 export function CryptoAllocationChart({ portfolio }: { portfolio: CryptoPortfolioResponse }) {
   const formatCurrency = useFormatCurrency()
@@ -62,9 +61,6 @@ export function CryptoAllocationChart({ portfolio }: { portfolio: CryptoPortfoli
             />
             <span className="min-w-0 flex-1 truncate">
               {slice.label}
-              {slice.kind === 'unitemised' && (
-                <span className="text-xs text-muted-foreground"> · in CoinStats' total, not in its list</span>
-              )}
             </span>
             <span className="tabular-nums text-muted-foreground">
               {slice.pct == null ? '—' : `${slice.pct.toFixed(1)}%`}
