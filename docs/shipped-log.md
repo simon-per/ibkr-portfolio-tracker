@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-03 — Korean and Taiwanese dividends pair with their cash
+
+Every ex→pay pairing was bounded at 30 days; SK Hynix went ex 2026-08-28 and paid 09-30 (33 days),
+so its cash never paired, the dividend stayed *pending* beside the money that had arrived, and no
+KRW/TWD payer ever got a measured lag. `max_pay_lag_days(currency)` gives KRW and TWD 75 days
+(`ca83856`). Same day, `7d1cb99`: an IBKR accrual is matched to the inference it replaces on the
+ex-date rather than the pay date.
+
+**Verified on production, `ca83856`.** `/api/dividends/breakdown`: no pending entry for 000660.KS's
+08-28 ex-date; its row reads `forecast_lag_days: 33`, `forecast_lag_samples: 1`; its next payment is
+ex 11-28, dated 12-31, `measured_lag`. The remaining pending entries (2330, NXPI, HPE, 005930) are
+genuinely unpaid; the first three await tonight's accruals.
+
 ## Shipped 2026-10-01 — withdrawals dated when booked, and a CHF withdrawal reads CHF
 
 A disbursement initiated on 09-28 was stored under its settle date (09-30). IBKR's measured cash

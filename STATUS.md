@@ -9,7 +9,8 @@
 Every ex→pay pairing was bounded at 30 days, and SK Hynix paid 33 days after its ex-date, so its
 September cash never paired: the 28 Aug dividend stayed *pending* beside the money that had arrived,
 and no KRW/TWD payer ever got a measured lag. A KRW or TWD payment now gets 75 days through one
-helper, `max_pay_lag_days(currency)`; everything else keeps 30. See *Watch after the next deploy*.
+helper, `max_pay_lag_days(currency)`; everything else keeps 30. Verified live on `ca83856`
+(`docs/shipped-log.md`).
 
 Before that, pushed as `7d1cb99`: **an IBKR accrual is matched to the inference it replaces on
 the ex-date, not the pay date.** With no measured lag an inferred payment is dated on its ex-date,
@@ -1183,10 +1184,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
   cash posting. 005930/000660 are not accrued yet and stay inferred.
 
-- **The KRW/TWD pairing window.** After deploy, on `/api/dividends/breakdown`: 000660.KS has no
-  `pending` entry for its 2026-08-28 ex-date (its cash landed 09-30), its row reads
-  `forecast_lag_days: 33`, `forecast_lag_samples: 1`, and its next payment is `measured_lag`-dated
-  about a month after the ex-date. Next 12M moves only by the removed duplicate.
 
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
