@@ -5,14 +5,20 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-03.** Newest: **an IBKR accrual is matched to the inference it replaces on
+**Last updated: 2026-10-03.** Newest: **Korean and Taiwanese dividends pair with their cash.**
+Every ex→pay pairing was bounded at 30 days, and SK Hynix paid 33 days after its ex-date, so its
+September cash never paired: the 28 Aug dividend stayed *pending* beside the money that had arrived,
+and no KRW/TWD payer ever got a measured lag. A KRW or TWD payment now gets 75 days through one
+helper, `max_pay_lag_days(currency)`; everything else keeps 30. See *Watch after the next deploy*.
+
+Before that, pushed as `7d1cb99`: **an IBKR accrual is matched to the inference it replaces on
 the ex-date, not the pay date.** With no measured lag an inferred payment is dated on its ex-date,
 and IBKR pays up to a month later (22 and 29 days on held payers), so the pay-date match left the
 guess on the calendar beside IBKR's row — one dividend shown and forecast twice. One helper,
 `_accrual_covers`, now serves the forward/overdue loop and the estimate tail; IBKR's accrual is the
 first source for both dates. Rules in `docs/dividends.md`.
 
-Before that, pushed as `ac23ed5`: **the crypto book computes
+Before that, deployed with it (`ac23ed5`): **the crypto book computes
 its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
 or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
 holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
@@ -485,11 +491,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **Give the crypto book its prices, then rebuild its holdings — in this order.** Code committed
-  locally on 2026-10-03, not pushed yet.
-  1. Push and let auto-deploy land it (off-slot), and confirm `/health` reports the new commit.
-     **Not before**: pydantic-settings forbids unknown keys in `backend/.env`, so the key must not
-     reach a `.env` read by code that does not declare `coingecko_api_key` yet.
+- **Give the crypto book its prices, then rebuild its holdings — in this order.**
+  1. Done: deployed, `/health` on `7d1cb99` (2026-10-03). Before that, the key could not go in:
+     pydantic-settings forbids unknown keys in `backend/.env`.
   2. Get a free **CoinGecko Demo** key (coingecko.com → Developer Dashboard) and add
      `COINGECKO_API_KEY=…` to `/root/IBKR_investment_tracker/backend/.env`.
   3. `cd /root/IBKR_investment_tracker/backend && GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d`
@@ -1179,6 +1183,11 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
   cash posting. 005930/000660 are not accrued yet and stay inferred.
 
+- **The KRW/TWD pairing window.** After deploy, on `/api/dividends/breakdown`: 000660.KS has no
+  `pending` entry for its 2026-08-28 ex-date (its cash landed 09-30), its row reads
+  `forecast_lag_days: 33`, `forecast_lag_samples: 1`, and its next payment is `measured_lag`-dated
+  about a month after the ex-date. Next 12M moves only by the removed duplicate.
+
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
   from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally
@@ -1662,7 +1671,9 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
   ex-date survived beside an accrual paying a month later. Now matched on ex-date through one
-  helper; four tests including the forecast swap and a later quarter left alone.
+  helper; four tests including the forecast swap and a later quarter left alone. Then "why do
+  the Korean stocks misbehave": SK Hynix paid 33 days after ex, past the 30-day pairing window, so
+  KRW/TWD get 75. Flex sections reviewed: four `ibflex`-modelled ones recommended for ticking.
 
 - **2026-10-03 (crypto on CoinGecko)** — "prices from CoinGecko, the book from 1 Jan 2026, the
   23 Aug basket carried back, and no Kraken spike": the series is computed from per-coin daily

@@ -192,6 +192,13 @@ card, XIRR inflows, DA-1 income, ledger).
 
 `_splice_by_era` now also matches estimate to IBKR row **per security, nearest-first, one-to-one, and
 bounded by `EX_TO_PAY_MAX_LAG_DAYS`** (30 — Mastercard's 29-day lag is the widest real one here).
+**Except a KRW or TWD payment, which gets `SLOW_PAYER_MAX_LAG_DAYS` (75)**, read through
+`max_pay_lag_days(currency)` by every pairing (the matcher, `_cash_has_landed`, the ledger's fetch
+widening). SK Hynix went ex 2026-08-28 and paid 09-30 — 33 days — so under 30 its cash never paired:
+the dividend stayed *pending* beside the money that had arrived, and no lag was ever measured, which
+is why the Asian payers sat on "ex-date · pay date unknown" for good. Keyed on the payment row's own
+currency so the matcher decides from the rows alone. 75 stays under a quarterly cycle, and the
+one-to-one match takes the nearest estimate, so the previous quarter is never swallowed.
 Never by amount: one side is gross and the other net, so equal amounts are exactly what cannot be
 relied on. One-to-one is what makes the window safe for a monthly payer, whose cycle is shorter than
 the window — each IBKR payment consumes at most one estimate, so earlier months survive.

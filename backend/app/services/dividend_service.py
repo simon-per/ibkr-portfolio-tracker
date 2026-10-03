@@ -63,6 +63,27 @@ TTM_FULL_COVERAGE_DAYS = 350
 # boundary that was real January income, not the March payment's ex-date.
 EX_TO_PAY_MAX_LAG_DAYS = 30
 
+# The exception to that bound: Korean and Taiwanese payers. Their cash routinely lands
+# more than a month after the ex-date — SK Hynix went ex 2026-08-28 and paid on 09-30,
+# 33 days — so under 30 the IBKR payment never paired with its estimate: the pending
+# row never cleared beside the cash that had arrived, and no lag was ever measured.
+# Keyed by the PAYMENT's currency, which every row carries, so the matcher decides it
+# from the rows alone and none of its five readers has to look a security up.
+#
+# 75 stays under a quarterly cycle (~91 days) and the match is one-to-one, nearest
+# first, so a quarterly payer's previous dividend is never swallowed. The 45-day
+# failure above was a USD/EUR payer, which keeps 30.
+SLOW_PAYER_CURRENCIES = frozenset({"KRW", "TWD"})
+SLOW_PAYER_MAX_LAG_DAYS = 75
+
+
+def max_pay_lag_days(currency: Optional[str]) -> int:
+    """How far after its ex-date a dividend paid in ``currency`` may land and still be
+    the same dividend. The one rule every ex→pay pairing reads."""
+    if currency and currency.upper() in SLOW_PAYER_CURRENCIES:
+        return SLOW_PAYER_MAX_LAG_DAYS
+    return EX_TO_PAY_MAX_LAG_DAYS
+
 # How long a dividend that has gone ex but whose cash has not arrived stays on the
 # calendar as `pending`. Deliberately wider than EX_TO_PAY_MAX_LAG_DAYS, because the two
 # answer different questions: that one decides whether two ROWS are the same dividend
@@ -87,7 +108,7 @@ def match_estimates_to_ibkr(
     estimates: Iterable,
     ibkr_rows: Iterable,
     *,
-    max_lag_days: int = EX_TO_PAY_MAX_LAG_DAYS,
+    max_lag_days: Optional[int] = None,
 ) -> List[Tuple[Any, Any]]:
     """
     Pair each IBKR payment with the estimate that records the SAME dividend.
@@ -110,7 +131,8 @@ def match_estimates_to_ibkr(
 
     ``max_lag_days`` is a parameter for the same reason. The splice must err narrow —
     too wide deletes real income from a filing aid — while a mis-measured lag only
-    mis-dates a projection, so the two may legitimately diverge later.
+    mis-dates a projection, so the two may legitimately diverge later. Left as None it
+    is decided per IBKR row by `max_pay_lag_days` from the payment's currency.
 
     Returns ``[(estimate, ibkr_row), ...]`` in IBKR pay-date order.
     """
@@ -123,7 +145,9 @@ def match_estimates_to_ibkr(
     )
     for row in sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date)):
         pay = row.pay_date or row.ex_date
-        earliest = pay - timedelta(days=max_lag_days)
+        window = (max_lag_days if max_lag_days is not None
+                  else max_pay_lag_days(getattr(row, "currency", None)))
+        earliest = pay - timedelta(days=window)
         for est in candidates:
             if id(est) in consumed or est.security_id != row.security_id:
                 continue
@@ -1643,11 +1667,13 @@ class DividendService:
                         (a["pay_date"], _symbol(sid), sid, amt, "net", False)
                     )
 
-            ibkr_pays_by_sec: Dict[int, List[date]] = defaultdict(list)
+            ibkr_pays_by_sec: Dict[int, List[Tuple[date, int]]] = defaultdict(list)
             est_ex_by_sec: Dict[int, List[date]] = defaultdict(list)
             for p in raw_payments:
                 if p.source == "ibkr":
-                    ibkr_pays_by_sec[p.security_id].append(p.pay_date or p.ex_date)
+                    ibkr_pays_by_sec[p.security_id].append(
+                        (p.pay_date or p.ex_date, max_pay_lag_days(p.currency))
+                    )
                 elif (p.ex_date or p.pay_date) is not None:
                     est_ex_by_sec[p.security_id].append(p.ex_date or p.pay_date)
 
@@ -1661,8 +1687,8 @@ class DividendService:
                 on looking right: a dividend still shown as owed after the cash
                 arrived, or dropped before it did.
                 """
-                return any(ex < pay <= ex + timedelta(days=EX_TO_PAY_MAX_LAG_DAYS)
-                           for pay in ibkr_pays_by_sec.get(sid, ()))
+                return any(ex < pay <= ex + timedelta(days=window)
+                           for pay, window in ibkr_pays_by_sec.get(sid, ()))
 
             for p in raw_payments:
                 if p.source == "ibkr" or not self._is_income(p):

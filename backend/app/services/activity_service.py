@@ -39,7 +39,11 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
-from app.services.dividend_service import DividendService, EX_TO_PAY_MAX_LAG_DAYS
+from app.services.dividend_service import (
+    DividendService,
+    EX_TO_PAY_MAX_LAG_DAYS,
+    SLOW_PAYER_MAX_LAG_DAYS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +327,9 @@ class ActivityService:
         would otherwise show an estimate whose IBKR twin lands on the 18th.
         """
         repo = DividendRepository(self.db)
-        lag = timedelta(days=EX_TO_PAY_MAX_LAG_DAYS)
+        # The widest pairing window any currency gets, so a Korean or Taiwanese twin is
+        # fetched too.
+        lag = timedelta(days=max(EX_TO_PAY_MAX_LAG_DAYS, SLOW_PAYER_MAX_LAG_DAYS))
         widened = await repo.get_between(start - lag, end + lag)
         ibkr_from = await repo.earliest_ibkr_payment_date()
         kept, _ = DividendService._splice_by_era(widened, boundary=ibkr_from)

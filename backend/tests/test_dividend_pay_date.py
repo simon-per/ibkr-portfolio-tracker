@@ -1052,3 +1052,68 @@ async def test_an_accrual_without_an_ex_date_still_matches_on_pay_date():
     same = _near(data, date(2026, 5, 18), days=20)
     assert [u["pay_date_source"] for u in same] == ["accrual"]
     await engine.dispose()
+
+
+# --- Korean and Taiwanese payers: cash more than 30 days after the ex-date ---------------
+#
+# SK Hynix's shape on production: ex 2026-08-28, cash 2026-09-30 — 33 days. Under one 30-day
+# window for every currency the cash never paired with its ex-date, so the dividend stayed
+# "pending" beside the money that had arrived, and no lag was ever measured.
+
+def _krw(security_id, source, ex_date, pay_date=None, currency="KRW"):
+    row = Row(security_id, source, ex_date, pay_date)
+    row.currency = currency
+    return row
+
+
+def test_a_korean_payment_33_days_after_its_ex_date_pairs():
+    est = [_krw(1, "yfinance_estimate", date(2026, 8, 28))]
+    ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30))]
+    assert len(match_estimates_to_ibkr(est, ibkr)) == 1
+
+
+def test_a_dollar_payment_33_days_after_keeps_the_narrow_window():
+    est = [_krw(1, "yfinance_estimate", date(2026, 8, 28), currency="USD")]
+    ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30), currency="USD")]
+    assert match_estimates_to_ibkr(est, ibkr) == []
+
+
+def test_the_wider_window_never_reaches_the_previous_quarter():
+    prev = _krw(1, "yfinance_estimate", date(2026, 5, 28))
+    this = _krw(1, "yfinance_estimate", date(2026, 8, 28))
+    ibkr = [_krw(1, "ibkr", date(2026, 9, 30), date(2026, 9, 30))]
+    pairs = match_estimates_to_ibkr([prev, this], ibkr)
+    assert [e.ex_date for e, _ in pairs] == [date(2026, 8, 28)]
+    # Alone, the previous quarter is out of reach too: 125 days.
+    assert match_estimates_to_ibkr([prev], ibkr) == []
+
+
+@pytest.mark.asyncio
+async def test_a_korean_dividend_paid_after_33_days_leaves_pending_and_teaches_the_lag():
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    repo = DividendRepository(session)
+    for ex in (date(2025, 11, 28), date(2026, 2, 28), date(2026, 5, 28), date(2026, 8, 28)):
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": ex, "currency": "KRW",
+            "shares_held": Decimal("10"), "amount_per_share": Decimal("0.03"),
+            "gross_amount_eur": Decimal("0.3"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("0.3"), "source": "yfinance_estimate",
+        })
+    paid = date(2026, 9, 30)
+    await repo.upsert_payment({
+        "security_id": 1, "ex_date": paid, "pay_date": paid, "currency": "KRW",
+        "shares_held": Decimal("0"), "gross_amount_eur": Decimal("0.3"),
+        "withholding_tax_eur": Decimal("0.07"), "net_amount_eur": Decimal("0.23"),
+        "source": "ibkr",
+    })
+    await session.commit()
+
+    data = await _breakdown(session, as_of=date(2026, 10, 3))
+    assert [u for u in data["upcoming"] if u["security_id"] == 1 and u["pending"]] == []
+    row = next(r for r in data["securities"] if r["security_id"] == 1)
+    assert (row["forecast_lag_days"], row["forecast_lag_samples"]) == (33, 1)
+    nxt = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    assert (nxt["ex_date"], nxt["date"]) == ("2026-11-28", "2026-12-31")
+    assert nxt["pay_date_source"] == "measured_lag"
+    await engine.dispose()
