@@ -34,6 +34,7 @@ def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "coin_stats_api_key", "", raising=False)
     monkeypatch.setattr(settings, "coin_stats_share_token", "", raising=False)
     monkeypatch.setattr(settings, "coin_stats_share_passcode", "", raising=False)
+    monkeypatch.setattr(settings, "coingecko_api_key", "", raising=False)
     rate_limit.reset()
     yield
     rate_limit.reset()

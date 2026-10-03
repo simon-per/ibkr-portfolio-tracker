@@ -52,13 +52,22 @@ CREDIT_COST = {
     "coins": 8,
     "chart": 10,
     "pl_history": 25,
+    "transactions": 4,
 }
+# `chart` and `pl_history` are no longer asked by the sync (the book computes its own
+# history since 2026-10-02); only `app/cli/coinstats_probe.py` still calls them.
+# `transactions` is per page and asked only by `app/cli/crypto_rebuild_holdings.py`.
 
 # `/portfolio/coins` pages. The probe (app/cli/coinstats_probe.py) measures how many a
 # real portfolio needs; the cap bounds a wallet full of airdropped spam tokens, which would
 # otherwise cost 8 credits for every hundred of them on every sync.
 COINS_PAGE_LIMIT = 100
 MAX_COIN_PAGES = 5
+
+# `/portfolio/transactions` pages, read once by the rebuild CLI. The cap bounds the credits
+# a one-off run can spend (`tests/test_crypto_budget.py`); more pages is a refusal.
+TRANSACTIONS_PAGE_LIMIT = 100
+MAX_TRANSACTION_PAGES = 100
 
 
 class CoinStatsError(Exception):
@@ -299,3 +308,13 @@ class CoinStatsClient:
         if not isinstance(body, dict) or not isinstance(body.get("result"), list):
             raise CoinStatsTransientError("/portfolio/pl/history: expected a `result` list")
         return body
+
+    async def portfolio_transactions_page(self, page: int) -> Any:
+        """One page of `GET /portfolio/transactions` in USD, returned **raw**: the list's
+        exact shape is not confirmed yet, so the rebuild CLI checks it and refuses whole
+        on anything it does not recognise. Never logged — items carry addresses and
+        hashes."""
+        return await self._get(
+            "/portfolio/transactions", "transactions",
+            params={"page": page, "limit": TRANSACTIONS_PAGE_LIMIT, "currency": "USD"},
+        )

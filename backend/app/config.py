@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     coin_stats_share_token: str = ""
     coin_stats_share_passcode: str = ""
 
+    # CoinGecko's free Demo API key (docs/crypto.md): the crypto book's price source. Sent
+    # only in the `x-cg-demo-api-key` header, never the URL, and masked by app/redact.py.
+    # Optional: without it the crypto sync still stores CoinStats' snapshot and today's
+    # holdings, records a warning, and every value it cannot price reads as unknown.
+    coingecko_api_key: str = ""
+
     # Database Configuration
     database_url: str = "sqlite+aiosqlite:///./portfolio.db"
 

@@ -26,7 +26,10 @@ from app.models.ticker_mapping import TickerMapping
 from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.isin_identity import IsinIdentity
 # The crypto book (docs/crypto.md): its own tables, read by nothing on the stock side.
-from app.models.crypto import CryptoSnapshot, CryptoHolding, CryptoDailyPoint
+from app.models.crypto import (
+    CryptoSnapshot, CryptoHolding, CryptoDailyPoint, CryptoDailyHolding, CryptoCoinPrice,
+    CryptoCoinId,
+)
 
 __all__ = [
     "Security",
@@ -53,4 +56,7 @@ __all__ = [
     "CryptoSnapshot",
     "CryptoHolding",
     "CryptoDailyPoint",
+    "CryptoDailyHolding",
+    "CryptoCoinPrice",
+    "CryptoCoinId",
 ]

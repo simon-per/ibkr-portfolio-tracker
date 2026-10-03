@@ -8,7 +8,7 @@ recorded verbatim into `sync_runs.message` and re-served forever by the
 unauthenticated `/api/scheduler/status` and `/history` endpoints; production
 really did leak the token that way (found and scrubbed 2026-07-28).
 
-The CoinStats key and share token are masked the same way. They travel in request
+The CoinStats key and share token, and the CoinGecko key, are masked the same way. They travel in request
 headers, which transport errors do not stringify, so this is the second line of
 defence rather than the first — a secret that never enters a message cannot leak
 from one, and one that somehow does is still caught here.
@@ -43,6 +43,7 @@ _LITERAL_SECRET_SETTINGS = (
     "coin_stats_api_key",
     "coin_stats_share_token",
     "coin_stats_share_passcode",
+    "coingecko_api_key",
 )
 
 
