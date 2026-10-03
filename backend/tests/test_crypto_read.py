@@ -1,34 +1,65 @@
 """
-The crypto book as `/api/crypto` serves it: base-currency projection, and what the read
-path must never do.
+The crypto book as `/api/crypto` serves it: the computed series, base-currency projection,
+and what the read path must never do.
 
 **Database only.** Every network path the FX machinery owns is replaced by a raiser —
-Frankfurter's range fetch, the fallback provider, `get_exchange_rate` itself — and so is
-the CoinStats client, so a GET that reached for any of them fails here rather than
-quietly spending a rate limit or taking SQLite's write lock in production. The seeded
-rates are **weekday-only** and the snapshot is taken on a **Sunday**, which is the case
-that sent a naive read path to the network: the ECB publishes nothing at weekends.
+Frankfurter's range fetch, the fallback provider, `get_exchange_rate` itself — and so are
+the CoinStats and CoinGecko clients, so a GET that reached for any of them fails here
+rather than quietly spending a rate limit or taking SQLite's write lock in production. The
+seeded rates are **weekday-only** and the snapshot is taken on a **Sunday**, the case that
+sent a naive read path to the network: the ECB publishes nothing at weekends.
 
-Every figure is invented (see `tests/crypto_fakes.py`).
+The book (every figure invented, see `tests/crypto_fakes.py`):
+
+    day     holdings (source)                     prices (CoinGecko)
+    01-01   — (before the first set: 01-02's)     BTC 50k, SOL 100
+    01-02   BTC 0.01, SOL 5          (snapshot)   BTC 55k, SOL 100
+    01-03   + ETH 1 arrives          (snapshot)   BTC 60k, SOL 100, ETH 3000
+    01-04   + USDC 100 arrives       (snapshot)   BTC 60k, SOL 100, ETH 3100, USDC: none
+
+    value   1000, 1050, 4100, 4300 (USDC at its 1.00 peg)
+    pnl     None, 50, 50, 100 — ETH and USDC arriving move the value, never the P&L
 """
 from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import delete
 
 from app.models.app_settings import AppSetting
-from app.models.crypto import SPAM, UNPRICED, VALUED, CryptoDailyPoint, CryptoHolding, CryptoSnapshot
+from app.models.crypto import (
+    SPAM,
+    UNPRICED,
+    VALUED,
+    CryptoCoinId,
+    CryptoCoinPrice,
+    CryptoDailyHolding,
+    CryptoHolding,
+    CryptoSnapshot,
+)
 from app.models.exchange_rate import ExchangeRate
-from app.services import coinstats_client
+from app.services import coingecko_client, coinstats_client, crypto_service
 from app.services.crypto_service import CryptoService
 from app.services.currency_service import CurrencyService
 from tests.crypto_fakes import memory_session_factory
 
-FRIDAY = date(2026, 9, 18)
-SUNDAY_NOON = datetime(2026, 9, 20, 12, 0)
+SUNDAY_NOON = datetime(2026, 1, 4, 12, 0)
+USD_EUR_DEC31 = Decimal("0.90")
 USD_EUR = Decimal("0.85")
 EUR_CHF = Decimal("0.94")
+
+PRICES = {
+    "bitcoin": {1: 50_000.0, 2: 55_000.0, 3: 60_000.0, 4: 60_000.0},
+    "solana": {1: 100.0, 2: 100.0, 3: 100.0, 4: 100.0},
+    "ethereum": {3: 3000.0, 4: 3100.0},
+}
+SETS = {
+    2: {"bitcoin": ("BTC", 0.01), "solana": ("SOL", 5.0)},
+    3: {"bitcoin": ("BTC", 0.01), "solana": ("SOL", 5.0), "ethereum": ("ETH", 1.0)},
+    4: {"bitcoin": ("BTC", 0.01), "solana": ("SOL", 5.0), "ethereum": ("ETH", 1.0),
+        "usd-coin": ("USDC", 100.0)},
+}
 
 
 def _network(*_args, **_kwargs):
@@ -41,18 +72,16 @@ def _no_network(monkeypatch):
                  "_fetch_fallback_rate", "_fetch_from_api", "warm_rates"):
         monkeypatch.setattr(CurrencyService, name, _network)
     monkeypatch.setattr(coinstats_client.CoinStatsClient, "__init__", _network)
+    monkeypatch.setattr(coingecko_client.CoinGeckoClient, "__init__", _network)
+    monkeypatch.setattr(crypto_service, "utcnow", lambda: SUNDAY_NOON)
 
 
-def _holding(snapshot_id, coin_id, symbol, status, count, price, *, rank=None, fiat=False,
-             cost=None, avg=None, unrealized=None, pct=None, realized=None, change=None):
+def _holding(snapshot_id, coin_id, symbol, status, count, price, *, rank=None, fiat=False):
     return CryptoHolding(
         snapshot_id=snapshot_id, coin_id=coin_id, symbol=symbol, name=symbol.title(),
         rank=rank, is_fiat=fiat, status=status, count=count,
         price_usd=price if status == VALUED else None,
         value_usd=count * price if status == VALUED else None,
-        total_cost_usd=cost, avg_buy_usd=avg, unrealized_pl_usd=unrealized,
-        unrealized_pl_pct=pct, realized_pl_usd=realized, pl_24h_usd=None,
-        change_24h_pct=change,
     )
 
 
@@ -60,45 +89,54 @@ def _holding(snapshot_id, coin_id, symbol, status, count, price, *, rank=None, f
 async def session():
     engine, factory = await memory_session_factory()
     async with factory() as s:
-        # An older snapshot whose holdings must never be paired with the newer total.
-        old = CryptoSnapshot(taken_at=datetime(2026, 9, 19, 8), total_value_usd=5.0,
+        # An older snapshot whose holdings must never be paired with the newer one.
+        old = CryptoSnapshot(taken_at=datetime(2026, 1, 3, 8), total_value_usd=5.0,
                              valued_count=1, spam_count=0, unpriced_count=0)
         s.add(old)
         await s.flush()
         s.add(_holding(old.id, "dogecoin", "DOGE", VALUED, 50.0, 0.1, rank=9))
 
         snap = CryptoSnapshot(
-            taken_at=SUNDAY_NOON, total_value_usd=1310.0, defi_value_usd=0.0,
-            total_cost_usd=910.0, unrealized_pl_usd=300.0, unrealized_pl_pct=32.97,
-            realized_pl_usd=10.0, realized_pl_pct=1.1, all_time_pl_usd=310.0,
-            all_time_pl_pct=34.07, pl_24h_usd=7.0, valued_count=3, spam_count=1,
-            unpriced_count=1, credits_remaining=19_900, credits_total=20_000,
-            credits_plan="free", credits_spent=53, warnings=["a warning from the sync"],
+            taken_at=SUNDAY_NOON, total_value_usd=4410.0, defi_value_usd=0.0,
+            valued_count=5, spam_count=1, unpriced_count=1, credits_remaining=19_900,
+            credits_total=20_000, credits_plan="free", credits_spent=18,
+            warnings=["a warning from the sync"],
         )
         s.add(snap)
         await s.flush()
         s.add_all([
-            _holding(snap.id, "solana", "SOL", VALUED, 5.0, 100.0, rank=5, cost=400.0,
-                     avg=80.0, unrealized=100.0, pct=25.0, realized=0.0, change=-1.0),
-            _holding(snap.id, "bitcoin", "BTC", VALUED, 0.01, 60_000.0, rank=1, cost=400.0,
-                     avg=40_000.0, unrealized=200.0, pct=50.0, realized=10.0, change=2.0),
+            _holding(snap.id, "solana", "SOL", VALUED, 5.0, 101.0, rank=5),
+            _holding(snap.id, "bitcoin", "BTC", VALUED, 0.01, 60_100.0, rank=1),
+            _holding(snap.id, "ethereum", "ETH", VALUED, 1.0, 3101.0, rank=2),
+            _holding(snap.id, "usd-coin", "USDC", VALUED, 100.0, 1.0, rank=7),
             _holding(snap.id, "FiatCoinEUR", "EUR", VALUED, 100.0, 1.1, fiat=True),
             _holding(snap.id, "mystery-token", "MYST", UNPRICED, 42.0, None),
             _holding(snap.id, "scam-token", "VISIT-SCAM.EXAMPLE", SPAM, 1e6, None),
         ])
-        s.add_all([
-            CryptoDailyPoint(date=date(2026, 9, 17), value_usd=1000.0, pnl_usd=100.0,
-                             fetched_at=datetime(2026, 9, 20, 6)),
-            CryptoDailyPoint(date=date(2026, 9, 19), value_usd=1200.0, pnl_usd=250.0,
-                             fetched_at=datetime(2026, 9, 20, 6)),
-        ])
+        for day, coins in SETS.items():
+            s.add_all(
+                CryptoDailyHolding(date=date(2026, 1, day), coin_id=c, symbol=sym, count=n,
+                                   source="snapshot")
+                for c, (sym, n) in coins.items()
+            )
+        for coin, sym in (("bitcoin", "BTC"), ("solana", "SOL"), ("ethereum", "ETH"),
+                          ("usd-coin", "USDC")):
+            s.add(CryptoCoinId(coinstats_id=coin, coingecko_id=coin, symbol=sym, method="id",
+                               checked_at=datetime(2026, 1, 4)))
+        for coin, days in PRICES.items():
+            s.add_all(
+                CryptoCoinPrice(coingecko_id=coin, date=date(2026, 1, d), price_usd=p,
+                                source="spot" if d == 4 else "daily",
+                                fetched_at=datetime(2026, 1, 4, 11))
+                for d, p in days.items()
+            )
         # Weekday-only rates, as the ECB publishes them.
         s.add_all([
-            ExchangeRate(date=date(2026, 9, 17), from_currency="USD", to_currency="EUR",
-                         rate=Decimal("0.84"), source="test"),
-            ExchangeRate(date=FRIDAY, from_currency="USD", to_currency="EUR",
+            ExchangeRate(date=date(2025, 12, 31), from_currency="USD", to_currency="EUR",
+                         rate=USD_EUR_DEC31, source="test"),
+            ExchangeRate(date=date(2026, 1, 2), from_currency="USD", to_currency="EUR",
                          rate=USD_EUR, source="test"),
-            ExchangeRate(date=FRIDAY, from_currency="EUR", to_currency="CHF",
+            ExchangeRate(date=date(2026, 1, 2), from_currency="EUR", to_currency="CHF",
                          rate=EUR_CHF, source="test"),
         ])
         await s.commit()
@@ -112,102 +150,115 @@ async def _base(session, currency):
     await session.commit()
 
 
+async def _drop_price(session, coin, day):
+    await session.execute(delete(CryptoCoinPrice).where(
+        CryptoCoinPrice.coingecko_id == coin, CryptoCoinPrice.date == date(2026, 1, day)
+    ))
+    await session.commit()
+
+
 @pytest.mark.asyncio
-async def test_usd_base_serves_coinstats_figures_exactly_and_needs_no_rate(session):
+async def test_the_history_is_quantities_times_prices_from_the_first_of_january(session):
+    await _base(session, "USD")
+    out = await CryptoService(session).history()
+    points = {p["date"]: p for p in out["points"]}
+    assert list(points) == ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]
+    assert [p["value"] for p in out["points"]] == [1000.0, 1050.0, 4100.0, 4300.0]
+    # ETH arriving on 01-03 and USDC on 01-04 move the value and never the P&L.
+    assert [p["pnl"] for p in out["points"]] == [None, 50.0, 50.0, 100.0]
+    # Before the first synced day the earliest basket is used, and says so.
+    assert [p["reconstructed"] for p in out["points"]] == [True, False, False, False]
+    assert out["start_date"] == "2026-01-01"
+    assert out["basket_date"] == out["first_snapshot_date"] == "2026-01-02"
+
+
+@pytest.mark.asyncio
+async def test_usdc_without_a_price_is_pegged_at_one_dollar_and_says_so(session):
     await _base(session, "USD")
     out = await CryptoService(session).portfolio()
-    assert out["base_currency"] == "USD"
-    assert out["total_value"] == 1310.0
-    assert out["itemised_value"] == 1210.0
-    assert out["unitemised_value"] == 100.0
-    assert out["fx_caveat"] is None
-    assert out["fx_unavailable"] == 0
+    usdc = next(h for h in out["holdings"] if h["coin_id"] == "usd-coin")
+    assert usdc["price"] == 1.0 and usdc["price_source"] == "peg"
+    assert usdc["value"] == 100.0
+    btc = next(h for h in out["holdings"] if h["coin_id"] == "bitcoin")
+    assert btc["price_source"] == "coingecko"
+    assert out["peg_note"] and "USDC" in out["peg_note"]
 
 
 @pytest.mark.asyncio
-async def test_a_sunday_snapshot_converts_at_friday_rates_without_the_network(session):
+async def test_any_other_coin_without_a_price_makes_the_total_unknown(session):
+    await _base(session, "USD")
+    await _drop_price(session, "ethereum", 4)
+    out = await CryptoService(session).portfolio()
+    assert out["total_value"] is None
+    eth = next(h for h in out["holdings"] if h["coin_id"] == "ethereum")
+    assert eth["status"] == "no_price" and eth["price"] is None and eth["value"] is None
+    assert eth["weight_pct"] is None
+    assert out["no_price_symbols"] == ["ETH"]
+    assert any("ETH" in w and "unknown" in w for w in out["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_day_is_unknown_and_so_is_every_sum_through_it(session):
+    await _base(session, "USD")
+    await _drop_price(session, "ethereum", 3)
+    history = await CryptoService(session).history()
+    values = {p["date"]: (p["value"], p["pnl"]) for p in history["points"]}
+    assert values["2026-01-03"] == (None, 50.0)  # ETH unpriced that day; 01-02's coins are
+    assert values["2026-01-04"] == (4300.0, None)  # the move from an unknown price
+    assert any("ETH" in w for w in history["warnings"])
+    portfolio = await CryptoService(session).portfolio()
+    assert portfolio["pnl_since_start"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_tiles_come_from_the_same_series_as_the_chart(session):
+    await _base(session, "USD")
+    out = await CryptoService(session).portfolio()
+    assert out["total_value"] == 4300.0
+    assert out["pnl_since_start"] == 200.0
+    assert out["change_today"] == 100.0
+    assert out["change_today_pct"] == pytest.approx(100 / 4100 * 100, abs=0.01)
+    eth = next(h for h in out["holdings"] if h["coin_id"] == "ethereum")
+    assert eth["change_today_pct"] == pytest.approx(3.33, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_a_sunday_converts_at_friday_rates_without_the_network(session):
     await _base(session, "CHF")
     out = await CryptoService(session).portfolio()
     factor = float(USD_EUR * EUR_CHF)
-    assert out["total_value"] == pytest.approx(1310.0 * factor, abs=0.01)
+    assert out["total_value"] == pytest.approx(4300 * factor, abs=0.01)
     btc = next(h for h in out["holdings"] if h["coin_id"] == "bitcoin")
-    assert btc["price"] == pytest.approx(60_000.0 * factor, rel=1e-7)
-    assert btc["value"] == pytest.approx(600.0 * factor, abs=0.01)
-    # Cost and P&L are USD figures at one day's rate — and the response says so.
-    assert out["unrealized_pl"] == pytest.approx(300.0 * factor, abs=0.01)
-    assert out["fx_caveat"] and "2026-09-20" in out["fx_caveat"]
-    # Percentages are ratios: the same in every currency.
-    assert btc["unrealized_pl_pct"] == 50.0
+    assert btc["price"] == pytest.approx(60_000 * factor, rel=1e-7)
 
 
 @pytest.mark.asyncio
-async def test_totals_and_table_come_from_the_newest_snapshot_only(session):
+async def test_each_history_point_converts_at_its_own_date(session):
+    await _base(session, "EUR")
+    out = await CryptoService(session).history()
+    points = {p["date"]: p for p in out["points"]}
+    assert points["2026-01-01"]["value"] == pytest.approx(1000 * 0.90, abs=0.01)
+    assert points["2026-01-04"]["value"] == pytest.approx(4300 * 0.85, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_holdings_weights_cash_spam_and_unpriced(session):
     await _base(session, "USD")
     out = await CryptoService(session).portfolio()
     ids = [h["coin_id"] for h in out["holdings"]]
-    assert "dogecoin" not in ids
-    # Valued by value, largest first, then the unpriced; spam never itemised.
-    assert ids == ["bitcoin", "solana", "FiatCoinEUR", "mystery-token"]
-
-
-@pytest.mark.asyncio
-async def test_weights_are_shares_of_the_total_and_never_renormalised(session):
-    await _base(session, "USD")
-    out = await CryptoService(session).portfolio()
+    # Valued by value, largest first, then the unpriced; spam never itemised, the older
+    # snapshot's coins never paired with this one, exchange cash beside the total.
+    assert ids == ["ethereum", "bitcoin", "solana", "usd-coin", "mystery-token"]
+    assert out["cash_value"] == 110.0
     weights = [h["weight_pct"] for h in out["holdings"] if h["status"] == VALUED]
-    assert weights == [pytest.approx(45.8, abs=0.01), pytest.approx(38.17, abs=0.01),
-                       pytest.approx(8.4, abs=0.01)]
-    # The shortfall is the unitemised share, reported rather than spread over the rows.
-    assert sum(weights) == pytest.approx(100 * 1210 / 1310, abs=0.02)
-
-
-@pytest.mark.asyncio
-async def test_spam_is_counted_but_never_named_and_unpriced_is_both(session):
-    await _base(session, "USD")
-    out = await CryptoService(session).portfolio()
-    assert out["spam_count"] == 1
-    assert out["unpriced_count"] == 1 and out["unpriced_symbols"] == ["MYST"]
-    assert "VISIT-SCAM.EXAMPLE" not in str(out)
-    myst = next(h for h in out["holdings"] if h["coin_id"] == "mystery-token")
-    assert myst["price"] is None and myst["value"] is None and myst["weight_pct"] is None
-
-
-@pytest.mark.asyncio
-async def test_colour_order_is_market_cap_rank_not_position(session):
-    await _base(session, "USD")
-    out = await CryptoService(session).portfolio()
-    # Unranked (the fiat balance) last; BTC first although SOL could outgrow it.
-    assert out["color_order"] == ["bitcoin", "solana", "FiatCoinEUR"]
-
-
-@pytest.mark.asyncio
-async def test_24h_change_is_measured_against_the_value_a_day_ago(session):
-    await _base(session, "USD")
-    out = await CryptoService(session).portfolio()
-    assert out["change_24h"] == 7.0
-    assert out["change_24h_pct"] == pytest.approx(7.0 / (1210.0 - 7.0) * 100, abs=0.01)
-
-
-@pytest.mark.asyncio
-async def test_a_missing_usd_rate_is_absent_and_counted_never_zero(session):
-    """Far enough from any cached USD->EUR rate that the forward-fill refuses."""
-    await _base(session, "EUR")
-    session.add(CryptoSnapshot(
-        taken_at=datetime(2026, 12, 1, 9), total_value_usd=100.0,
-        valued_count=0, spam_count=0, unpriced_count=0,
-    ))
-    await session.commit()
-    out = await CryptoService(session).portfolio()
-    assert out["total_value"] is None
-    assert out["fx_unavailable"] >= 1
-    assert any("could not be converted" in w for w in out["warnings"])
+    assert sum(weights) == pytest.approx(100, abs=0.05)
+    assert out["spam_count"] == 1 and "VISIT-SCAM.EXAMPLE" not in str(out)
+    assert out["unpriced_symbols"] == ["MYST"]
+    assert out["color_order"] == ["bitcoin", "ethereum", "solana", "usd-coin"]
 
 
 @pytest.mark.asyncio
 async def test_no_eur_to_base_rate_at_all_is_unconvertible_not_euros_in_disguise(session):
-    """`BaseFx` hands back the EUR amount when it has no rate at all; here that would
-    print euros under a GBP label. The crypto view reports it missing instead — and never
-    backfills from inside the GET."""
     await _base(session, "GBP")
     out = await CryptoService(session).portfolio()
     assert out["total_value"] is None
@@ -215,57 +266,38 @@ async def test_no_eur_to_base_rate_at_all_is_unconvertible_not_euros_in_disguise
 
 
 @pytest.mark.asyncio
-async def test_the_history_converts_each_point_at_its_date_and_ends_at_the_snapshot(session):
-    await _base(session, "EUR")
-    out = await CryptoService(session).history()
-    points = {p["date"]: p for p in out["points"]}
-    assert list(points) == ["2026-09-17", "2026-09-19", "2026-09-20"]
-    assert points["2026-09-17"]["value"] == pytest.approx(1000 * 0.84, abs=0.01)
-    # Saturday: Friday's rate, from the preload — not a network fetch.
-    assert points["2026-09-19"]["value"] == pytest.approx(1200 * 0.85, abs=0.01)
-    # The newest snapshot is the last point, so the chart is current between pulls.
-    assert points["2026-09-20"]["value"] == pytest.approx(1310 * 0.85, abs=0.01)
-    assert points["2026-09-20"]["pnl"] is None
-    assert out["fx_caveat"] is not None
+async def test_without_a_coingecko_key_the_page_still_answers_with_unknowns(session):
+    await _base(session, "USD")
+    await session.execute(delete(CryptoCoinPrice))
+    await session.commit()
+    out = await CryptoService(session).portfolio()
+    assert out["prices_configured"] is False  # conftest blanks the key
+    assert out["total_value"] is None and out["pnl_since_start"] is None
+    assert any("COINGECKO_API_KEY" in w for w in out["warnings"])
+    history = await CryptoService(session).history()
+    # USDC's peg is the only thing left with a value; every day is unknown.
+    assert all(p["value"] is None for p in history["points"])
 
 
 @pytest.mark.asyncio
-async def test_an_empty_book_answers_with_empty_shapes(monkeypatch):
+async def test_an_empty_book_answers_with_empty_shapes():
     engine, factory = await memory_session_factory()
     try:
         async with factory() as s:
             portfolio = await CryptoService(s).portfolio()
             history = await CryptoService(s).history()
         assert portfolio["holdings"] == [] and portfolio["total_value"] is None
-        assert portfolio["configured"] is False  # conftest blanks the credentials
+        assert portfolio["configured"] is False
         assert history["points"] == []
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_status_reports_the_last_snapshot_and_credits_without_asking_coinstats(session):
+async def test_status_reports_the_last_snapshot_and_credits_without_asking_anyone(session):
     out = await CryptoService(session).status(
         next_run=None, sync_in_progress=False, retry_after_seconds=0
     )
     assert out["last_run"] is None
     assert out["credits_remaining"] == 19_900 and out["credits_plan"] == "free"
-    assert out["last_snapshot_at"].startswith("2026-09-20T12:00:00")
-    assert out["last_snapshot_at"].endswith("+00:00")
-
-
-@pytest.mark.asyncio
-async def test_a_rounding_sized_gap_is_not_served_as_not_itemised(session):
-    """CoinStats' total and its per-coin figures disagree in the last digits; inside the
-    tolerance that is rounding, and a "Not itemised" line of cents would be noise."""
-    from sqlalchemy import select as sa_select
-
-    await _base(session, "USD")
-    snap = (await session.execute(
-        sa_select(CryptoSnapshot).where(CryptoSnapshot.taken_at == SUNDAY_NOON)
-    )).scalar_one()
-    snap.total_value_usd = 1210.0 * (1 - 0.000002)  # a few ten-thousandths of a percent low
-    await session.commit()
-    out = await CryptoService(session).portfolio()
-    assert out["unitemised_value"] == 0.0
-    assert not any("add up to more" in w for w in out["warnings"])
+    assert out["last_snapshot_at"].startswith("2026-01-04T12:00:00")

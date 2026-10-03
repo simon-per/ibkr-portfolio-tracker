@@ -130,15 +130,15 @@ async def get_sync_history(limit: int = 20, db: AsyncSession = Depends(get_db)):
     """
     Recent sync attempts, newest first — the durable record of what ran and what broke.
 
-    Leaves out the crypto sync's rows: this endpoint is public and the crypto book is
+    Leaves out the crypto runs (the sync and the rebuild CLI): this endpoint is public and the crypto book is
     not, and eight crypto rows a day would crowd the stock runs out of the default page.
     They are served by the admin-gated `/api/crypto/status`.
     """
-    from app.services.crypto_service import SYNC_TYPE as CRYPTO_SYNC_TYPE
+    from app.services.crypto_service import PUBLIC_EXCLUDED_SYNC_TYPES
 
     try:
         repo = SyncRunRepository(db)
-        runs = await repo.get_recent(limit, exclude_types=(CRYPTO_SYNC_TYPE,))
+        runs = await repo.get_recent(limit, exclude_types=PUBLIC_EXCLUDED_SYNC_TYPES)
         return {"count": len(runs), "runs": [SyncRunRepository.to_dict(r) for r in runs]}
     except Exception as e:
         raise HTTPException(

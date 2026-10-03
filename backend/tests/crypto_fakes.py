@@ -19,10 +19,12 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401  register every mapper
 from app.config import settings
 from app.database import Base
+from app.services.coingecko_client import CoinGeckoClient
 from app.services.coinstats_client import COINS_PAGE_LIMIT, CoinStatsClient
 
 KEY = "test-coinstats-key-0123456789"
 TOKEN = "test-share-token-0123456789"
+GECKO_KEY = "test-coingecko-key-0123456789"
 
 
 def configure(monkeypatch) -> None:
@@ -30,6 +32,11 @@ def configure(monkeypatch) -> None:
     monkeypatch.setattr(settings, "coin_stats_api_key", KEY)
     monkeypatch.setattr(settings, "coin_stats_share_token", TOKEN)
     monkeypatch.setattr(settings, "coin_stats_share_passcode", "")
+
+
+def configure_gecko(monkeypatch) -> None:
+    """Point the CoinGecko setting at a fake key (conftest blanks it for every test)."""
+    monkeypatch.setattr(settings, "coingecko_api_key", GECKO_KEY)
 
 
 def money(usd: Optional[float]) -> Optional[Dict[str, float]]:
@@ -117,17 +124,6 @@ def credits_body(remaining: int = 19_900, total: int = 20_000) -> Dict[str, Any]
     }
 
 
-def history_bodies(days: int, end: datetime) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """A chart body and a P&L body covering `days` consecutive UTC days ending at `end`."""
-    rows, points = [], []
-    for offset in range(days):
-        stamp = end - timedelta(days=days - 1 - offset)
-        rows.append([int(stamp.timestamp()), 1000.0 + offset, 0.0, 0.0])
-        points.append({"date": stamp.isoformat(), "profitLoss": 10.0 + offset,
-                       "profitLossPercent": 1.0})
-    return {"result": rows}, {"result": points, "meta": {"interval": "daily"}}
-
-
 async def _no_sleep(_seconds: float) -> None:
     return None
 
@@ -143,17 +139,13 @@ class FakeCoinStats:
         coins: Optional[List[Dict[str, Any]]] = None,
         value: Optional[Dict[str, Any]] = None,
         credits: Optional[Dict[str, Any]] = None,
-        history_days: int = 30,
     ):
-        end = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
-        chart, pl = history_bodies(history_days, end)
         self.coins = default_coins() if coins is None else coins
         self.responses: Dict[str, Tuple[int, Any]] = {
             "/v1/usage/credits": (200, credits or credits_body()),
             "/v1/portfolio/value": (200, value or value_body()),
-            "/v1/portfolio/chart": (200, chart),
-            "/v1/portfolio/pl/history": (200, pl),
         }
+        self.transaction_pages: List[Any] = []
         self.coin_page_status: Dict[int, int] = {}
         self.calls: List[str] = []
 
@@ -172,6 +164,10 @@ class FakeCoinStats:
             return httpx.Response(
                 200, json={"result": self.coins[start:start + COINS_PAGE_LIMIT]}
             )
+        if path == "/v1/portfolio/transactions":
+            page = int(request.url.params.get("page", 1))
+            body = self.transaction_pages[page - 1] if page <= len(self.transaction_pages)                 else {"result": []}
+            return httpx.Response(200, json=body)
         status, body = self.responses[path]
         return httpx.Response(status, json=body)
 
@@ -200,3 +196,61 @@ async def memory_session_factory():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+class FakeCoinGecko:
+    """
+    CoinGecko's Demo API as an `httpx.MockTransport` handler. `listing` is `/coins/list`;
+    `price(gid, day)` is the invented close on a UTC day (and the spot price today);
+    `responses[path] = (status, body)` overrides a path. Every request is logged.
+    """
+
+    def __init__(self, prices: Optional[Dict[str, float]] = None, listing=None):
+        self.base = prices if prices is not None else {
+            "bitcoin": 60_000.0, "solana": 100.0, "usd-coin": 1.0,
+        }
+        self.listing = listing if listing is not None else [
+            {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"},
+            {"id": "solana", "symbol": "sol", "name": "Solana"},
+            {"id": "ethereum", "symbol": "eth", "name": "Ethereum"},
+        ]
+        self.responses: Dict[str, Tuple[int, Any]] = {}
+        self.calls: List[str] = []
+        self.headers: List[Dict[str, str]] = []
+
+    def price(self, gid: str, day) -> Optional[float]:
+        return self.base.get(gid)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path.replace("/api/v3", "", 1)
+        self.calls.append(path)
+        self.headers.append(dict(request.headers))
+        if path in self.responses:
+            status, body = self.responses[path]
+            return httpx.Response(status, json=body)
+        if path == "/coins/list":
+            return httpx.Response(200, json=self.listing)
+        if path == "/simple/price":
+            ids = request.url.params["ids"].split(",")
+            return httpx.Response(200, json={
+                i: {"usd": self.base[i]} for i in ids if i in self.base
+            })
+        if path.startswith("/coins/") and path.endswith("/market_chart/range"):
+            gid = path.split("/")[2]
+            start = int(request.url.params["from"])
+            end = int(request.url.params["to"])
+            points = []
+            stamp = start + 86_400  # daily points at 00:00 UTC close the day before
+            while stamp <= end:
+                day = datetime.fromtimestamp(stamp - 1, tz=timezone.utc).date()
+                price = self.price(gid, day)
+                if price is not None:
+                    points.append([stamp * 1000, price])
+                stamp += 86_400
+            return httpx.Response(200, json={"prices": points})
+        return httpx.Response(404, json={"error": "not found"})
+
+    def client_factory(self):
+        return lambda: CoinGeckoClient(
+            transport=httpx.MockTransport(self.handler), min_interval_s=0, sleep=_no_sleep
+        )

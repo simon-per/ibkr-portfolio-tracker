@@ -1,19 +1,25 @@
 """
-The crypto book: synced from CoinStats, read back in the base currency (docs/crypto.md).
+The crypto book: holdings from CoinStats, prices from CoinGecko, read back in the base
+currency (docs/crypto.md).
 
-**Separate from the stock book by construction.** This module writes only the three
-`crypto_*` tables and reads only those plus the shared FX rows, settings and sync history;
-no stock reader reads a `crypto_*` table. `tests/test_crypto_isolation.py` pins both.
+**Separate from the stock book by construction.** This module writes only the `crypto_*`
+tables and reads only those plus the shared FX rows, settings and sync history; no stock
+reader reads a `crypto_*` table. `tests/test_crypto_isolation.py` pins both.
 
-## Sync — two refuse-whole units, all HTTP before any write
+## Sync — all HTTP before any write
 
 1. **Snapshot** — `/portfolio/value` + every page of `/portfolio/coins`. Stored in one
    short transaction, or not at all: a failed page, or a coin list that is empty while
-   CoinStats reports a positive total (the wipe guard), keeps the previous snapshot.
-2. **History** — `/portfolio/chart` + `/portfolio/pl/history`, at most two *attempts* per
-   Berlin day. Replaces `crypto_daily` wholesale, or is refused when it is empty or much
-   shorter than what is stored. A history or FX failure is a **warning on a successful
-   run**; it never costs the snapshot the run already paid for.
+   CoinStats reports a positive total (the wipe guard), keeps the previous snapshot. The
+   same transaction replaces today's `crypto_daily_holdings` set.
+2. **Prices** — CoinGecko: the id mapping when a coin is new, `/simple/price` for today,
+   and the daily closes a held coin is still missing. Without `COINGECKO_API_KEY` this is
+   skipped with a warning; a CoinGecko failure abandons the pass with a warning. Neither
+   ever costs the snapshot.
+
+The value and P&L history are **computed**, not fetched (`crypto_book.py`): CoinStats'
+`/portfolio/chart` and `/portfolio/pl/history` are no longer asked, because CoinStats'
+history counted transfers from an untracked exchange as profit.
 
 No write transaction is ever open during an HTTP call — the job shares minute :00 with
 the stock jobs, and SQLite has one writer. Every run leaves a `sync_runs` row carrying
@@ -22,26 +28,18 @@ type, status, reason and a message only: counts, credits and warnings live on
 
 ## Read — database only
 
-A GET must not reach the network or take SQLite's write lock, and
-`CurrencyService.get_exchange_rate` does both on a cache miss (which, for a daily series,
-is every weekend). So amounts are projected through the same `NativeToBase` every other
-reader uses, over `fx_preload.PreloadedRates` — one query up front, then pure lookups.
-The sync keeps those rates warm for the crypto window.
-
-Values convert at their own date. Cost, average buy and P&L are CoinStats' **USD**
-figures converted at the snapshot's rate, which leaves out every FX move since purchase —
-so whenever the base is not USD the response carries `fx_caveat`, and the view prints it
-beside those figures. An amount with no rate is `None` and counted, never zero. Spam and
-unpriced coins are excluded **and counted**. Weights are shares of CoinStats' total and
-are never renormalised; the gap is served as `unitemised_value`.
+A GET must not reach the network or take SQLite's write lock, so amounts are projected
+through the same `NativeToBase` every other reader uses, over `fx_preload.PreloadedRates`
+— one query up front, then pure lookups. Every figure converts at its own date. An amount
+with no price or no rate is `None` and counted, never zero.
 """
 import asyncio
 import logging
 import math
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select
@@ -51,10 +49,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
 from app.models.crypto import (
+    HOLDINGS_FROM_SNAPSHOT,
+    PRICE_DAILY,
+    PRICE_SPOT,
     SPAM,
     UNPRICED,
     VALUED,
-    CryptoDailyPoint,
+    CryptoCoinId,
+    CryptoCoinPrice,
+    CryptoDailyHolding,
     CryptoHolding,
     CryptoSnapshot,
 )
@@ -65,6 +68,12 @@ from app.repositories.app_settings_repository import (
 )
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.base_fx import load_base_fx
+from app.services.coingecko_client import (
+    HISTORY_LIMIT_DAYS,
+    CoinGeckoClient,
+    CoinGeckoError,
+)
+from app.services.coingecko_client import is_configured as prices_configured
 from app.services.coinstats_client import (
     CREDIT_COST,
     CoinStatsAuthError,
@@ -74,6 +83,17 @@ from app.services.coinstats_client import (
     CoinStatsQuotaError,
     is_configured,
 )
+from app.services.crypto_book import (
+    CRYPTO_HISTORY_START,
+    PRICE_PEG,
+    DayPoint,
+    HoldingsTimeline,
+    PriceBook,
+    compute_series,
+    daily_closes,
+    needed_price_dates,
+    peg_for,
+)
 from app.services.currency_service import CurrencyService
 from app.services.fx_preload import FX_LOOKBACK_DAYS, PreloadedRates, preload_eur_rates
 from app.services.native_amounts import NativeToBase
@@ -81,6 +101,10 @@ from app.services.native_amounts import NativeToBase
 logger = logging.getLogger(__name__)
 
 SYNC_TYPE = "crypto_sync"
+# The one-off rebuild CLI's run type (app/cli/crypto_rebuild_holdings.py).
+REBUILD_SYNC_TYPE = "crypto_rebuild"
+# Every crypto run type: the public `/api/scheduler/history` leaves all of them out.
+PUBLIC_EXCLUDED_SYNC_TYPES = (SYNC_TYPE, REBUILD_SYNC_TYPE)
 
 # The crypto sync's own gates. Never `SYNC_PIPELINE`: entering that one would put the
 # stock Sync buttons on cooldown, and a crypto run has no upstream in common with them.
@@ -90,19 +114,11 @@ CRYPTO_GATE = "crypto-sync"
 CRYPTO_MANUAL_GATE = "crypto-sync-manual"
 MANUAL_COOLDOWN_SECONDS = 600
 
-# A snapshot run costs /portfolio/value plus one page of coins; the history pull costs the
-# chart plus the P&L history. Derived from the client's documented costs, never restated.
+# A snapshot run costs /portfolio/value plus one page of coins. Derived from the client's
+# documented costs, never restated.
 SNAPSHOT_RUN_COST = CREDIT_COST["value"] + CREDIT_COST["coins"]
-HISTORY_PULL_COST = CREDIT_COST["chart"] + CREDIT_COST["pl_history"]
-# Below this balance the daily history pull is skipped, so the month's last credits go to
-# the snapshot — the figures people open the view for.
-HISTORY_CREDIT_FLOOR = 500
 # `warnings[]` says so when the month's balance falls under this share of the plan.
 CREDITS_LOW_FRACTION = 0.2
-# Attempts at the history pull per Berlin day: one, plus one retry for a transient failure.
-HISTORY_ATTEMPTS_PER_DAY = 2
-# A replacement history shorter than this share of the stored one is refused.
-HISTORY_SHRINK_REFUSE_FRACTION = 0.5
 # The FX warm-up re-fetches the whole crypto window only when the cache does not already
 # reach within this many days of its start: a window starting on a weekend or over Easter
 # has no rate on its first day, and without the slack every run would re-ask for it.
@@ -111,24 +127,18 @@ FX_WARM_SLACK_DAYS = 7
 # between runs, so twelve means at least one scheduled run failed.
 STALE_SNAPSHOT_HOURS = 12
 
-# A total-minus-holdings gap within this share of the total is rounding, not a position:
-# CoinStats' `totalValue` and its per-coin figures disagree in the last digits (measured
-# 2026-09-28: a few ten-thousandths of a percent), and serving that as "Not itemised"
-# would print a line of cents on every sync. Reported as 0 inside it, as itself outside.
-UNITEMISED_ROUNDING_PCT = 0.05
+# CoinGecko re-asks, bounded (CLAUDE.md, *Bound every retry*):
+# an unmatched coin is looked up in `/coins/list` again after this many days;
+MAPPING_RECHECK_DAYS = 7
+# a coin whose daily closes are still incomplete is asked again after this many hours —
+# a day CoinGecko cannot fill (before a listing) would otherwise be asked at every slot.
+CLOSES_RECHECK_HOURS = 6
 
 BERLIN = ZoneInfo("Europe/Berlin")
 
-# `CryptoSnapshot.history_status`
-HISTORY_REFRESHED = "refreshed"
-HISTORY_FAILED = "failed"
-HISTORY_REFUSED = "refused"
-HISTORY_SKIPPED_CREDITS = "skipped_credits"
-_HISTORY_ATTEMPTS = (HISTORY_REFRESHED, HISTORY_FAILED, HISTORY_REFUSED)
-
-FX_CAVEAT = (
-    "Cost and P&L are CoinStats' USD figures converted at the {day} rate; FX moves "
-    "since purchase are not in them."
+COINGECKO_NOT_CONFIGURED = (
+    "CoinGecko is not configured (COINGECKO_API_KEY): prices were not refreshed, and "
+    "every day without a stored price reads as unknown."
 )
 
 
@@ -341,41 +351,18 @@ def _to_utc_date(stamp: Any) -> Optional[date]:
     return None
 
 
-def parse_history(
-    chart_rows: Iterable[Any], pl_body: Dict[str, Any]
-) -> Dict[date, Tuple[Optional[float], Optional[float]]]:
-    """
-    `{day: (value_usd, pnl_usd)}` from the chart rows (`[timestamp, usd, btc, eth]`) and
-    the P&L points (`{date, profitLoss}`). Several points on one UTC day keep the last,
-    so an intraday tail cannot outvote the day's close.
-    """
-    values: Dict[date, Tuple[Any, float]] = {}
-    for row in chart_rows:
-        if not isinstance(row, (list, tuple)) or len(row) < 2:
-            continue
-        day, value = _to_utc_date(row[0]), _num(row[1])
-        if day is None or value is None:
-            continue
-        stamp = _num(row[0]) or 0.0
-        if day not in values or stamp >= values[day][0]:
-            values[day] = (stamp, value)
-
-    pnls: Dict[date, Tuple[str, float]] = {}
-    for point in pl_body.get("result") or []:
-        if not isinstance(point, dict):
-            continue
-        day, pnl = _to_utc_date(point.get("date")), _num(point.get("profitLoss"))
-        if day is None or pnl is None:
-            continue
-        stamp = str(point.get("date"))
-        if day not in pnls or stamp >= pnls[day][0]:
-            pnls[day] = (stamp, pnl)
-
-    days = sorted(set(values) | set(pnls))
+def daily_set(holdings: Iterable[ParsedHolding]) -> Dict[str, Tuple[Optional[str], float]]:
+    """The holdings that go into `crypto_daily_holdings`: coins CoinStats values that are
+    not exchange cash. Spam, unpriced coins and fiat never enter the book's history."""
     return {
-        d: (values[d][1] if d in values else None, pnls[d][1] if d in pnls else None)
-        for d in days
+        h.coin_id: (h.symbol, h.count)
+        for h in holdings
+        if h.status == VALUED and not h.is_fiat and h.count > 0
     }
+
+
+def _day_start_ts(day: date) -> int:
+    return int(datetime.combine(day, time.min, tzinfo=timezone.utc).timestamp())
 
 
 # ──────────────────────────────────────────────────────────────────────── sync
@@ -390,16 +377,44 @@ async def _retry_once_if_locked(operation: Callable[[], Awaitable[Any]]) -> Any:
     except OperationalError as e:
         if "database is locked" not in str(e):
             raise
-        logger.warning("crypto sync: database locked, retrying the write once")
+        logger.warning("crypto: database locked, retrying the write once")
         await asyncio.sleep(2)
         return await operation()
 
 
 def _berlin_day_start_utc(now_utc: datetime) -> datetime:
-    """Midnight today in Berlin, as naive UTC — the unit the history pull is bounded in."""
+    """Midnight today in Berlin, as naive UTC — the unit the FX warm-up is bounded in."""
     berlin_day = now_utc.replace(tzinfo=timezone.utc).astimezone(BERLIN).date()
     start = datetime.combine(berlin_day, time.min, tzinfo=BERLIN)
     return start.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+@dataclass
+class PriceFetch:
+    """What one CoinGecko pass brought back, held in memory until the writes."""
+
+    mapping_rows: List[Dict[str, Any]] = field(default_factory=list)
+    # (coingecko_id, day, price_usd, source)
+    prices: List[Tuple[str, date, float, str]] = field(default_factory=list)
+    # coingecko ids whose closes were asked this pass: stamped `closes_checked_at`.
+    closes_checked: Set[str] = field(default_factory=set)
+    warnings: List[str] = field(default_factory=list)
+    calls: int = 0
+
+
+def resolve_coingecko_id(
+    coin_id: str, symbol: Optional[str], coins: List[Dict[str, str]]
+) -> Tuple[Optional[str], Optional[str]]:
+    """`(coingecko_id, method)`: an exact id match, else a **unique** symbol match, else
+    `(None, None)`. A symbol shared by several CoinGecko coins is not guessed."""
+    ids = {c["id"] for c in coins}
+    if coin_id in ids:
+        return coin_id, "id"
+    if symbol:
+        matches = [c["id"] for c in coins if c["symbol"].lower() == symbol.lower()]
+        if len(matches) == 1:
+            return matches[0], "symbol"
+    return None, None
 
 
 class CryptoSyncService:
@@ -413,10 +428,12 @@ class CryptoSyncService:
         session_factory: Callable[[], Any] = AsyncSessionLocal,
         client_factory: Callable[[], CoinStatsClient] = CoinStatsClient,
         currency_service_factory: Callable[[AsyncSession], Any] = CurrencyService,
+        gecko_factory: Callable[[], CoinGeckoClient] = CoinGeckoClient,
     ):
         self._session_factory = session_factory
         self._client_factory = client_factory
         self._currency_service_factory = currency_service_factory
+        self._gecko_factory = gecko_factory
 
     async def sync(self) -> Optional[Dict[str, Any]]:
         """
@@ -429,9 +446,8 @@ class CryptoSyncService:
             return None
 
         started_at = utcnow()
+        today = started_at.date()
         warnings: List[str] = []
-        history: Optional[Dict[date, Tuple[Optional[float], Optional[float]]]] = None
-        history_status: Optional[str] = None
 
         async with self._client_factory() as client:
             try:
@@ -441,8 +457,7 @@ class CryptoSyncService:
                 return await self._finish(started_at, "error", e.reason, str(e))
             except CoinStatsError as e:
                 # The balance is a guard, not the data: a transient failure of the free
-                # check must not cost the slot its snapshot. The run goes ahead blind to
-                # the balance, and says so.
+                # check must not cost the slot its snapshot.
                 credits = {}
                 warnings.append(
                     f"CoinStats' credit balance could not be read ({e.reason}); the run "
@@ -463,7 +478,6 @@ class CryptoSyncService:
                     f"CoinStats credits are low: {remaining} of {total} left this period."
                 )
 
-            # ── snapshot unit ────────────────────────────────────────────────
             try:
                 value_body = await client.portfolio_value()
                 coin_items = await client.portfolio_coins()
@@ -471,64 +485,46 @@ class CryptoSyncService:
                 return await self._finish(started_at, "skipped", e.reason, str(e))
             except CoinStatsError as e:
                 return await self._finish(started_at, "error", e.reason, str(e))
-
-            summary = parse_value(value_body)
-            holdings, malformed, _closed = parse_coins(coin_items)
-            valued = [h for h in holdings if h.status == VALUED]
-            if not valued and (summary["total_value_usd"] or 0) > 0:
-                # The wipe guard: an empty list beside a positive total is a broken
-                # answer, and storing it would draw every coin as sold.
-                return await self._finish(
-                    started_at, "error", "empty_holdings",
-                    "CoinStats reported a portfolio value but no priced holdings; the "
-                    "previous snapshot is kept.",
-                )
-            coin_pages = client.coin_pages
-            if coin_pages > 1:
-                warnings.append(
-                    f"CoinStats listed holdings over {coin_pages} pages; each sync costs "
-                    f"{CREDIT_COST['coins']} credits per page. Hiding spam tokens in "
-                    f"CoinStats reduces it."
-                )
-            if malformed:
-                warnings.append(f"{malformed} CoinStats holding(s) had no identifier or no "
-                                f"usable quantity and were skipped.")
-
-            # ── history unit (fetched now; written after the snapshot) ─────────
-            if await self._history_due(started_at):
-                balance = (remaining - client.credits_spent) if remaining is not None else None
-                if balance is not None and balance < HISTORY_CREDIT_FLOOR + HISTORY_PULL_COST:
-                    history_status = HISTORY_SKIPPED_CREDITS
-                    warnings.append(
-                        "CoinStats history not refreshed today: credits are below the "
-                        "floor kept for the snapshot."
-                    )
-                else:
-                    try:
-                        chart = await client.portfolio_chart()
-                        pl_body = await client.portfolio_pl_history()
-                        history = parse_history(chart, pl_body)
-                    except CoinStatsError as e:
-                        history_status = HISTORY_FAILED
-                        warnings.append(f"CoinStats history not refreshed ({e.reason}): {e}")
             credits_spent = client.credits_spent
+            coin_pages = client.coin_pages
+
+        summary = parse_value(value_body)
+        holdings, malformed, _closed = parse_coins(coin_items)
+        valued = [h for h in holdings if h.status == VALUED]
+        if not valued and (summary["total_value_usd"] or 0) > 0:
+            # The wipe guard: an empty list beside a positive total is a broken answer,
+            # and storing it would draw every coin as sold.
+            return await self._finish(
+                started_at, "error", "empty_holdings",
+                "CoinStats reported a portfolio value but no priced holdings; the "
+                "previous snapshot is kept.",
+            )
+        if coin_pages > 1:
+            warnings.append(
+                f"CoinStats listed holdings over {coin_pages} pages; each sync costs "
+                f"{CREDIT_COST['coins']} credits per page. Hiding spam tokens in "
+                f"CoinStats reduces it."
+            )
+        if malformed:
+            warnings.append(f"{malformed} CoinStats holding(s) had no identifier or no "
+                            f"usable quantity and were skipped.")
+
+        today_set = daily_set(holdings)
+
+        # ── prices: CoinGecko, still before any write ──
+        fetched = await self.fetch_prices(today, today_set)
+        warnings.extend(fetched.warnings)
 
         # ── writes: no HTTP in flight from here on, except the FX warm-up, which
         #    commits per currency pair and never inside a crypto transaction ──
-        if history is not None:
-            try:
-                history_status, refusal = await _retry_once_if_locked(
-                    lambda: self._write_history(history)
-                )
-                if refusal:
-                    warnings.append(refusal)
-            except Exception as e:  # a history failure never costs the snapshot
-                logger.exception("crypto sync: storing the history failed")
-                history_status = HISTORY_FAILED
-                warnings.append(f"CoinStats history not stored: {type(e).__name__}")
+        try:
+            await _retry_once_if_locked(lambda: self.write_prices(fetched))
+        except Exception as e:  # a price failure never costs the snapshot
+            logger.exception("crypto sync: storing the prices failed")
+            warnings.append(f"CoinGecko prices not stored: {type(e).__name__}")
 
-        if history_status is not None and history_status != HISTORY_SKIPPED_CREDITS:
-            warnings.extend(await self._warm_fx(started_at.date()))
+        if await self._first_snapshot_today(started_at):
+            warnings.extend(await self._warm_fx(today))
 
         snapshot_fields = {
             **summary,
@@ -543,10 +539,12 @@ class CryptoSyncService:
             "credits_plan": str(plan)[:32] if plan else None,
             "credits_spent": credits_spent,
             "warnings": warnings or None,
-            "history_status": history_status,
+            "history_status": None,
         }
         try:
-            await _retry_once_if_locked(lambda: self._write_snapshot(snapshot_fields, holdings))
+            await _retry_once_if_locked(
+                lambda: self._write_snapshot(snapshot_fields, holdings, today, today_set)
+            )
         except Exception as e:
             logger.exception("crypto sync: storing the snapshot failed")
             return await self._finish(
@@ -555,52 +553,213 @@ class CryptoSyncService:
             )
 
         message = "Crypto snapshot stored"
-        if history_status == HISTORY_REFRESHED:
-            message += "; history refreshed"
+        if fetched.prices:
+            message += "; prices refreshed"
         return await self._finish(started_at, "success", None, message, warnings)
 
-    async def _history_due(self, now_utc: datetime) -> bool:
-        """No successful pull yet today (Berlin) and fewer than the allowed attempts."""
-        day_start = _berlin_day_start_utc(now_utc)
-        async with self._session_factory() as db:
-            rows = (await db.execute(
-                select(CryptoSnapshot.history_status).where(
-                    CryptoSnapshot.taken_at >= day_start,
-                    CryptoSnapshot.history_status.in_(_HISTORY_ATTEMPTS),
-                )
-            )).scalars().all()
-        if HISTORY_REFRESHED in rows:
-            return False
-        return len(rows) < HISTORY_ATTEMPTS_PER_DAY
+    # ---------------------------------------------------------------- prices
 
-    async def _write_history(
-        self, points: Dict[date, Tuple[Optional[float], Optional[float]]]
-    ) -> Tuple[str, Optional[str]]:
-        """Replace the stored history, or refuse and say why."""
+    async def fetch_prices(
+        self,
+        today: date,
+        today_set: Optional[Dict[str, Tuple[Optional[str], float]]] = None,
+        extra_sets: Optional[Dict[date, Dict[str, Tuple[Optional[str], float]]]] = None,
+    ) -> PriceFetch:
+        """
+        One CoinGecko pass: database reads, then HTTP, then nothing written — the caller
+        writes `write_prices(result)` once every request is done.
+
+        `today_set` replaces today's stored holdings (the sync has not written it yet);
+        `extra_sets` adds dated sets the rebuild CLI is about to write, so their coins'
+        closes are fetched in the same pass.
+        """
+        result = PriceFetch()
+        if not prices_configured():
+            result.warnings.append(COINGECKO_NOT_CONFIGURED)
+            return result
+
+        now = utcnow()
         async with self._session_factory() as db:
-            stored = (await db.execute(
-                select(func.count()).select_from(CryptoDailyPoint)
-            )).scalar_one()
-            if not points:
-                return HISTORY_REFUSED, (
-                    "CoinStats returned an empty history; the stored one is kept."
+            sets = await _load_sets(db)
+            mapping_rows = {
+                r.coinstats_id: r
+                for r in (await db.execute(select(CryptoCoinId))).scalars().all()
+            }
+            stored_closes = {
+                (gid, d) for gid, d in (await db.execute(
+                    select(CryptoCoinPrice.coingecko_id, CryptoCoinPrice.date).where(
+                        CryptoCoinPrice.source == PRICE_DAILY,
+                        CryptoCoinPrice.date >= CRYPTO_HISTORY_START,
+                    )
+                )).all()
+            }
+        symbols: Dict[str, Optional[str]] = {}
+        quantities: Dict[date, Dict[str, float]] = {}
+        for day, coins in sets.items():
+            quantities[day] = {c: n for c, (_, n) in coins.items()}
+            symbols.update({c: s for c, (s, _) in coins.items() if s})
+        for day, coins in (extra_sets or {}).items():
+            quantities[day] = {c: n for c, (_, n) in coins.items()}
+            symbols.update({c: s for c, (s, _) in coins.items() if s})
+        if today_set is not None:
+            quantities[today] = {c: n for c, (_, n) in today_set.items()}
+            symbols.update({c: s for c, (s, _) in today_set.items() if s})
+        timeline = HoldingsTimeline(quantities)
+        if not timeline:
+            return result
+
+        needed = needed_price_dates(timeline, CRYPTO_HISTORY_START, today)
+        mapping: Dict[str, Optional[str]] = {
+            c: r.coingecko_id for c, r in mapping_rows.items()
+        }
+        reach = today - timedelta(days=HISTORY_LIMIT_DAYS - 1)
+        out_of_reach: Set[str] = set()
+
+        gecko = self._gecko_factory()
+        async with gecko:
+            try:
+                # 1. Which CoinGecko coin each CoinStats id is — asked only for a coin
+                #    never seen, or unmatched and not re-asked for a week.
+                to_map = [
+                    c for c in sorted(needed)
+                    if c not in mapping_rows or (
+                        mapping_rows[c].coingecko_id is None
+                        and now - mapping_rows[c].checked_at
+                        > timedelta(days=MAPPING_RECHECK_DAYS)
+                    )
+                ]
+                if to_map:
+                    listing = await gecko.coins_list()
+                    for coin in to_map:
+                        gid, method = resolve_coingecko_id(coin, symbols.get(coin), listing)
+                        mapping[coin] = gid
+                        result.mapping_rows.append({
+                            "coinstats_id": coin, "coingecko_id": gid,
+                            "symbol": symbols.get(coin), "method": method, "checked_at": now,
+                        })
+
+                # 2. Today's price, one call for every coin held today.
+                held_today = {mapping[c] for c in timeline.qty(today) if mapping.get(c)}
+                if held_today:
+                    spot = await gecko.simple_price(held_today)
+                    result.prices.extend((gid, today, p, PRICE_SPOT) for gid, p in spot.items())
+
+                # 3. The finished days' closes a held coin is still missing.
+                by_gecko: Dict[str, Set[date]] = {}
+                for coin, days in needed.items():
+                    gid = mapping.get(coin)
+                    if gid:
+                        by_gecko.setdefault(gid, set()).update(d for d in days if d < today)
+                checked = {
+                    r.coingecko_id: r.closes_checked_at
+                    for r in mapping_rows.values() if r.coingecko_id
+                }
+                for gid in sorted(by_gecko):
+                    missing = {d for d in by_gecko[gid] if (gid, d) not in stored_closes}
+                    if any(d < reach for d in missing):
+                        out_of_reach.add(gid)
+                    missing = {d for d in missing if d >= reach}
+                    if not missing:
+                        continue
+                    last = checked.get(gid)
+                    if last is not None and now - last < timedelta(hours=CLOSES_RECHECK_HOURS):
+                        continue
+                    points = await gecko.market_chart_range(
+                        gid, _day_start_ts(min(missing)), int(
+                            now.replace(tzinfo=timezone.utc).timestamp()
+                        ),
+                    )
+                    closes = daily_closes(points, today)
+                    result.prices.extend(
+                        (gid, d, p, PRICE_DAILY) for d, p in closes.items()
+                        if CRYPTO_HISTORY_START <= d
+                    )
+                    result.closes_checked.add(gid)
+            except CoinGeckoError as e:
+                result.warnings.append(
+                    f"CoinGecko prices not fully refreshed ({e.reason}): {e}. What was "
+                    f"fetched is kept; the next slot asks again."
                 )
-            if stored and len(points) < stored * HISTORY_SHRINK_REFUSE_FRACTION:
-                return HISTORY_REFUSED, (
-                    f"CoinStats returned {len(points)} days of history against "
-                    f"{stored} stored; refused rather than shrinking it."
-                )
-            fetched_at = utcnow()
-            await db.execute(delete(CryptoDailyPoint))
-            db.add_all(
-                CryptoDailyPoint(date=day, value_usd=value, pnl_usd=pnl, fetched_at=fetched_at)
-                for day, (value, pnl) in points.items()
+            result.calls = gecko.calls
+
+        unmapped = sorted(
+            symbols.get(c) or c for c in needed
+            if not mapping.get(c) and peg_for(c, symbols.get(c)) is None
+        )
+        if unmapped:
+            result.warnings.append(
+                f"No CoinGecko coin found for {', '.join(unmapped)}: their value is "
+                f"unknown on every day they are held."
             )
+        if out_of_reach:
+            result.warnings.append(
+                f"{len(out_of_reach)} coin(s) need prices older than CoinGecko's "
+                f"{HISTORY_LIMIT_DAYS}-day Demo history; those days stay unknown."
+            )
+        return result
+
+    async def write_prices(self, fetched: PriceFetch) -> None:
+        """The mapping and the prices in one transaction. A price row replaces the same
+        coin's row for the same day (a close replaces yesterday's last spot)."""
+        if not (fetched.mapping_rows or fetched.prices or fetched.closes_checked):
+            return
+        now = utcnow()
+        async with self._session_factory() as db:
+            for row in fetched.mapping_rows:
+                await db.merge(CryptoCoinId(**row))
+            await db.flush()
+            for gid in fetched.closes_checked:
+                await db.execute(
+                    CryptoCoinId.__table__.update()
+                    .where(CryptoCoinId.coingecko_id == gid)
+                    .values(closes_checked_at=now)
+                )
+            by_coin: Dict[str, Dict[date, Tuple[float, str]]] = {}
+            for gid, day, price, source in fetched.prices:
+                by_coin.setdefault(gid, {})[day] = (price, source)
+            for gid, days in by_coin.items():
+                ordered = sorted(days)
+                for i in range(0, len(ordered), 500):
+                    await db.execute(delete(CryptoCoinPrice).where(
+                        CryptoCoinPrice.coingecko_id == gid,
+                        CryptoCoinPrice.date.in_(ordered[i:i + 500]),
+                    ))
+                db.add_all(
+                    CryptoCoinPrice(coingecko_id=gid, date=d, price_usd=p, source=s,
+                                    fetched_at=now)
+                    for d, (p, s) in days.items()
+                )
             await db.commit()
-        return HISTORY_REFRESHED, None
+
+    async def refresh_prices(
+        self,
+        today: date,
+        extra_sets: Optional[Dict[date, Dict[str, Tuple[Optional[str], float]]]] = None,
+    ) -> PriceFetch:
+        """Fetch, then write — the rebuild CLI's price fill, the same code as the sync's."""
+        fetched = await self.fetch_prices(today, None, extra_sets)
+        await _retry_once_if_locked(lambda: self.write_prices(fetched))
+        return fetched
+
+    # ---------------------------------------------------------------- writes
+
+    async def _first_snapshot_today(self, now_utc: datetime) -> bool:
+        """True while no snapshot has been stored yet today (Berlin): the FX warm-up is a
+        once-a-day job, not an every-slot one."""
+        async with self._session_factory() as db:
+            count = (await db.execute(
+                select(func.count()).select_from(CryptoSnapshot).where(
+                    CryptoSnapshot.taken_at >= _berlin_day_start_utc(now_utc)
+                )
+            )).scalar_one()
+        return count == 0
 
     async def _write_snapshot(
-        self, fields: Dict[str, Any], holdings: List[ParsedHolding]
+        self,
+        fields: Dict[str, Any],
+        holdings: List[ParsedHolding],
+        today: date,
+        today_set: Dict[str, Tuple[Optional[str], float]],
     ) -> int:
         async with self._session_factory() as db:
             snapshot = CryptoSnapshot(**fields)
@@ -608,32 +767,32 @@ class CryptoSyncService:
             await db.flush()
             db.add_all(CryptoHolding(snapshot_id=snapshot.id, **asdict(h)) for h in holdings)
             await db.flush()
-            # Only the newest snapshot keeps its holdings.
+            # Only the newest snapshot keeps its full holdings rows; the per-day
+            # quantities the book is computed from live in crypto_daily_holdings.
             await db.execute(
                 delete(CryptoHolding).where(CryptoHolding.snapshot_id != snapshot.id)
+            )
+            await db.execute(delete(CryptoDailyHolding).where(CryptoDailyHolding.date == today))
+            db.add_all(
+                CryptoDailyHolding(date=today, coin_id=coin, symbol=symbol, count=count,
+                                   source=HOLDINGS_FROM_SNAPSHOT)
+                for coin, (symbol, count) in today_set.items()
             )
             await db.commit()
             return snapshot.id
 
     async def _warm_fx(self, today: date) -> List[str]:
         """
-        Keep the rates the read path needs in the cache: USD->EUR (the crypto book's own
-        currency — the stock side warms USD only because a security happens to be held in
-        it) and EUR->each non-EUR base, over the crypto window. The whole window is
-        fetched only while the cache does not reach its start; after that, a week keeps
-        the recent end fresh. Each pair commits on its own session, so no write lock is
-        held across the next pair's request. Never raises.
+        Keep the rates the read path needs in the cache, through the existing FX path:
+        USD->EUR (the crypto book's own currency — the stock side warms USD only because a
+        security happens to be held in it) and EUR->each non-EUR base, from
+        `CRYPTO_HISTORY_START`. The whole window is fetched only while the cache does not
+        reach its start; after that, a week keeps the recent end fresh. Each pair commits
+        on its own session, so no write lock is held across the next pair's request.
+        Never raises.
         """
         warnings: List[str] = []
-        async with self._session_factory() as db:
-            first_day = (await db.execute(select(func.min(CryptoDailyPoint.date)))).scalar()
-            if first_day is None:
-                first_day = (await db.execute(
-                    select(func.min(CryptoSnapshot.taken_at))
-                )).scalar()
-                first_day = first_day.date() if first_day else today
-        window_start = first_day - timedelta(days=FX_LOOKBACK_DAYS)
-
+        window_start = CRYPTO_HISTORY_START - timedelta(days=FX_LOOKBACK_DAYS)
         pairs = [("USD", "EUR")] + [("EUR", b) for b in SUPPORTED_BASE_CURRENCIES if b != "EUR"]
         for from_currency, to_currency in pairs:
             try:
@@ -695,6 +854,14 @@ class CryptoSyncService:
         }
 
 
+async def _load_sets(db: AsyncSession) -> Dict[date, Dict[str, Tuple[Optional[str], float]]]:
+    """Every stored daily holdings set, `{day: {coin: (symbol, count)}}`."""
+    sets: Dict[date, Dict[str, Tuple[Optional[str], float]]] = {}
+    for row in (await db.execute(select(CryptoDailyHolding))).scalars().all():
+        sets.setdefault(row.date, {})[row.coin_id] = (row.symbol, row.count)
+    return sets
+
+
 # ──────────────────────────────────────────────────────────────────────── read
 
 
@@ -749,6 +916,41 @@ class _Projector:
         return converted
 
 
+@dataclass
+class _Book:
+    """Everything the two read endpoints compute from, loaded in one go."""
+
+    timeline: HoldingsTimeline
+    prices: PriceBook
+    symbols: Dict[str, Optional[str]]
+    first_snapshot_date: Optional[date]
+    prices_fetched_at: Optional[datetime]
+
+
+def _peg_note(pegged: Dict[str, int], symbols: Dict[str, Optional[str]]) -> Optional[str]:
+    if not pegged:
+        return None
+    parts = ", ".join(
+        f"{symbols.get(c) or c} on {n} day{'s' if n != 1 else ''}"
+        for c, n in sorted(pegged.items())
+    )
+    return (
+        f"Valued at a fixed 1.00 USD peg where CoinGecko has no price — {parts}. A "
+        f"deliberate exception, not a market price."
+    )
+
+
+def _missing_note(missing: Dict[str, int], symbols: Dict[str, Optional[str]]) -> Optional[str]:
+    if not missing:
+        return None
+    names = ", ".join(sorted(symbols.get(c) or c for c in missing))
+    days = max(missing.values())
+    return (
+        f"No price for {names} on up to {days} day(s): those days' value and P&L are "
+        f"unknown, not zero."
+    )
+
+
 class CryptoService:
     """The crypto book as the `/api/crypto` routes serve it. Database only."""
 
@@ -768,9 +970,8 @@ class CryptoService:
 
     async def _projector(self, base: str, start: date, end: date) -> _Projector:
         # BaseFx is loaded from a fortnight before the window so its carry-forward always
-        # has a rate on or before the window's first day: the ECB publishes today's rate
-        # mid-afternoon, and an empty window would send the loader's safety net to
-        # Frankfurter from inside a GET.
+        # has a rate on or before the window's first day, and never backfills from inside
+        # a GET.
         base_fx = await load_base_fx(
             self.db, self.currency_service, base, start - timedelta(days=FX_LOOKBACK_DAYS),
             backfill=False,
@@ -780,41 +981,82 @@ class CryptoService:
         no_base_rates = base not in ("EUR", "USD") and not base_fx.rate_cache
         return _Projector(NativeToBase(PreloadedRates(rates), base_fx), no_base_rates)
 
+    async def _book(self) -> _Book:
+        sets = await _load_sets(self.db)
+        symbols: Dict[str, Optional[str]] = {}
+        for coins in sets.values():
+            symbols.update({c: s for c, (s, _) in coins.items() if s})
+        mapping = {
+            r.coinstats_id: r.coingecko_id
+            for r in (await self.db.execute(select(CryptoCoinId))).scalars().all()
+        }
+        rows = (await self.db.execute(
+            select(CryptoCoinPrice).where(CryptoCoinPrice.date >= CRYPTO_HISTORY_START)
+        )).scalars().all()
+        first_snapshot = (await self.db.execute(
+            select(func.min(CryptoDailyHolding.date)).where(
+                CryptoDailyHolding.source == HOLDINGS_FROM_SNAPSHOT
+            )
+        )).scalar()
+        return _Book(
+            timeline=HoldingsTimeline(
+                {d: {c: n for c, (_, n) in coins.items()} for d, coins in sets.items()}
+            ),
+            prices=PriceBook({(r.coingecko_id, r.date): r.price_usd for r in rows},
+                             mapping, symbols),
+            symbols=symbols,
+            first_snapshot_date=first_snapshot,
+            prices_fetched_at=max((r.fetched_at for r in rows), default=None),
+        )
+
     @staticmethod
-    def _fx_caveat(base: str, day: Optional[date]) -> Optional[str]:
-        if base == "USD" or day is None:
-            return None
-        return FX_CAVEAT.format(day=day.isoformat())
+    def _series(book: _Book, end: date) -> List[DayPoint]:
+        if not book.timeline or end < CRYPTO_HISTORY_START:
+            return []
+        return compute_series(book.timeline, book.prices, CRYPTO_HISTORY_START, end)
+
+    @staticmethod
+    def _notes(series: List[DayPoint], symbols) -> Tuple[Optional[str], Optional[str]]:
+        pegged: Dict[str, int] = {}
+        missing: Dict[str, int] = {}
+        for point in series:
+            for coin in point.pegged:
+                pegged[coin] = pegged.get(coin, 0) + 1
+            for coin in point.missing:
+                missing[coin] = missing.get(coin, 0) + 1
+        return _peg_note(pegged, symbols), _missing_note(missing, symbols)
 
     async def portfolio(self) -> Dict[str, Any]:
-        """The newest snapshot: KPI totals and the holdings table, from ONE snapshot —
-        holdings are read by its id, so a sync committing between this method's queries
-        cannot pair one snapshot's total with another's table."""
+        """
+        The newest snapshot's coins at CoinGecko's price on the snapshot's UTC day: the
+        KPI totals and the holdings table, from ONE snapshot. The P&L since
+        `CRYPTO_HISTORY_START` and today's change come from the same series `history()`
+        serves, so a tile and the chart's last point cannot disagree.
+        """
         base = await self._base_currency()
         snapshot = await self._latest_snapshot()
         result: Dict[str, Any] = {
             "configured": is_configured(),
+            "prices_configured": prices_configured(),
             "base_currency": base,
             "as_of": None,
+            "prices_as_of": None,
             "total_value": None,
-            "itemised_value": None,
-            "unitemised_value": None,
             "defi_value": None,
-            "total_cost": None,
-            "unrealized_pl": None,
-            "unrealized_pl_pct": None,
-            "realized_pl": None,
-            "realized_pl_pct": None,
-            "all_time_pl": None,
-            "all_time_pl_pct": None,
-            "change_24h": None,
-            "change_24h_pct": None,
-            "fx_caveat": None,
+            "cash_value": None,
+            "change_today": None,
+            "change_today_pct": None,
+            "pnl_since_start": None,
+            "start_date": CRYPTO_HISTORY_START.isoformat(),
+            "basket_date": None,
+            "first_snapshot_date": None,
+            "peg_note": None,
             "fx_unavailable": 0,
             "valued_count": 0,
             "spam_count": 0,
             "unpriced_count": 0,
             "unpriced_symbols": [],
+            "no_price_symbols": [],
             "holdings": [],
             "color_order": [],
             "warnings": [],
@@ -825,31 +1067,37 @@ class CryptoService:
         rows = (await self.db.execute(
             select(CryptoHolding).where(CryptoHolding.snapshot_id == snapshot.id)
         )).scalars().all()
-        valued = [r for r in rows if r.status == VALUED]
+        coins = [r for r in rows if r.status == VALUED and not r.is_fiat]
+        fiat = [r for r in rows if r.status == VALUED and r.is_fiat]
         unpriced = [r for r in rows if r.status == UNPRICED]
 
         day = snapshot.taken_at.date()
-        project = await self._projector(base, day, day)
+        book = await self._book()
+        series = self._series(book, day)
+        by_day = {p.day: p for p in series}
+        project = await self._projector(base, CRYPTO_HISTORY_START, day)
 
-        total_usd = snapshot.total_value_usd
-        itemised_usd = _sum_known(r.value_usd for r in valued) if valued else 0.0
-        unitemised_usd = (
-            total_usd - itemised_usd
-            if total_usd is not None and itemised_usd is not None else None
-        )
-        if (
-            unitemised_usd is not None and total_usd
-            and abs(unitemised_usd) <= abs(total_usd) * UNITEMISED_ROUNDING_PCT / 100
-        ):
-            unitemised_usd = 0.0
-        pl_24h = snapshot.pl_24h_usd
-        before_24h = (itemised_usd - pl_24h) if itemised_usd is not None and pl_24h is not None else None
+        priced: List[Tuple[CryptoHolding, Optional[float], Optional[str], Optional[float]]] = []
+        for row in coins:
+            price, source = book.prices.price(row.coin_id, day)
+            if price is None:
+                # The snapshot's own coins may not be in the book yet (an older row);
+                # its symbol still resolves a peg.
+                peg = peg_for(row.coin_id, row.symbol)
+                price, source = (peg, PRICE_PEG) if peg is not None else (None, None)
+            before, _ = book.prices.price(row.coin_id, day - timedelta(days=1))
+            change = (price / before - 1) * 100 if price is not None and before else None
+            priced.append((row, price, source, change))
 
+        total_usd = _sum_known(r.count * p if p is not None else None for r, p, _, _ in priced)
         warnings: List[str] = list(snapshot.warnings or [])
-        if unitemised_usd is not None and unitemised_usd < -0.005 * max(abs(total_usd or 0), 1):
+        no_price = sorted(r.symbol or r.coin_id for r, p, _, _ in priced if p is None)
+        if not result["prices_configured"]:
+            warnings.append(COINGECKO_NOT_CONFIGURED)
+        if no_price:
             warnings.append(
-                "CoinStats' holdings add up to more than its portfolio total; the "
-                "difference is shown, not hidden."
+                f"No CoinGecko price for {', '.join(no_price)} on {day.isoformat()}: the "
+                f"total is unknown rather than understated."
             )
         age_hours = (utcnow() - snapshot.taken_at).total_seconds() / 3600
         if age_hours > STALE_SNAPSHOT_HOURS:
@@ -859,62 +1107,82 @@ class CryptoService:
             )
 
         holdings = []
-        for row in sorted(valued, key=lambda r: -(r.value_usd or 0)) + sorted(
-            unpriced, key=lambda r: (r.symbol or r.coin_id)
-        ):
+        ordered = sorted(priced, key=lambda t: (t[1] is None, -(t[0].count * (t[1] or 0))))
+        for row, price, source, change in ordered:
+            value_usd = row.count * price if price is not None else None
             holdings.append({
                 "coin_id": row.coin_id,
                 "symbol": row.symbol,
                 "name": row.name,
                 "rank": row.rank,
-                "is_fiat": row.is_fiat,
-                "status": row.status,
+                "status": VALUED if price is not None else "no_price",
                 "quantity": row.count,
-                "price": _per_unit(await project(row.price_usd, day)),
-                "value": _amount(await project(row.value_usd, day)),
+                "price": _per_unit(await project(price, day)),
+                "price_source": source,
+                "value": _amount(await project(value_usd, day)),
                 "weight_pct": _pct(
-                    row.value_usd / total_usd * 100
-                    if row.value_usd is not None and total_usd else None
+                    value_usd / total_usd * 100 if value_usd is not None and total_usd else None
                 ),
-                "change_24h_pct": _pct(row.change_24h_pct),
-                "avg_buy": _per_unit(await project(row.avg_buy_usd, day)),
-                "total_cost": _amount(await project(row.total_cost_usd, day)),
-                "unrealized_pl": _amount(await project(row.unrealized_pl_usd, day)),
-                "unrealized_pl_pct": _pct(row.unrealized_pl_pct),
-                "realized_pl": _amount(await project(row.realized_pl_usd, day)),
+                "change_today_pct": _pct(change),
+            })
+        for row in sorted(unpriced, key=lambda r: (r.symbol or r.coin_id)):
+            holdings.append({
+                "coin_id": row.coin_id, "symbol": row.symbol, "name": row.name,
+                "rank": row.rank, "status": UNPRICED, "quantity": row.count, "price": None,
+                "price_source": None, "value": None, "weight_pct": None,
+                "change_today_pct": None,
             })
 
+        # Today's change: yesterday's coins times the move since yesterday's close.
+        today_point = by_day.get(day)
+        yesterday_point = by_day.get(day - timedelta(days=1))
+        change_today = today_point.pnl_usd if today_point else None
+        base_value = yesterday_point.value_usd if yesterday_point else None
+
+        # P&L since the start: the sum of each day's P&L, each converted at its own date
+        # — the same sum the chart's ALL range ends on. One unknown day makes it unknown.
+        pnl_total: Optional[Decimal] = Decimal(0) if len(series) > 1 else None
+        for point in series[1:]:
+            converted = await project(point.pnl_usd, point.day)
+            if converted is None:
+                pnl_total = None
+                break
+            pnl_total += converted
+        peg_note, missing_note = self._notes(series, book.symbols)
+        if missing_note:
+            warnings.append(missing_note)
+
+        cash_usd = _sum_known(r.value_usd for r in fiat) if fiat else None
         result.update({
             "as_of": utc_iso(snapshot.taken_at),
+            "prices_as_of": utc_iso(book.prices_fetched_at),
             "total_value": _amount(await project(total_usd, day)),
-            "itemised_value": _amount(await project(itemised_usd, day)),
-            "unitemised_value": _amount(await project(unitemised_usd, day)),
             "defi_value": _amount(await project(snapshot.defi_value_usd, day)),
-            "total_cost": _amount(await project(snapshot.total_cost_usd, day)),
-            "unrealized_pl": _amount(await project(snapshot.unrealized_pl_usd, day)),
-            "unrealized_pl_pct": _pct(snapshot.unrealized_pl_pct),
-            "realized_pl": _amount(await project(snapshot.realized_pl_usd, day)),
-            "realized_pl_pct": _pct(snapshot.realized_pl_pct),
-            "all_time_pl": _amount(await project(snapshot.all_time_pl_usd, day)),
-            "all_time_pl_pct": _pct(snapshot.all_time_pl_pct),
-            "change_24h": _amount(await project(pl_24h, day)),
-            "change_24h_pct": _pct(
-                pl_24h / before_24h * 100 if before_24h and before_24h > 0 else None
+            "cash_value": _amount(await project(cash_usd, day)),
+            "change_today": _amount(await project(change_today, day)),
+            "change_today_pct": _pct(
+                change_today / base_value * 100
+                if change_today is not None and base_value else None
             ),
-            "fx_caveat": self._fx_caveat(base, day),
-            "valued_count": snapshot.valued_count,
+            "pnl_since_start": _amount(pnl_total),
+            "basket_date": book.timeline.earliest.isoformat() if book.timeline else None,
+            "first_snapshot_date": (
+                book.first_snapshot_date.isoformat() if book.first_snapshot_date else None
+            ),
+            "peg_note": peg_note,
+            "valued_count": len(coins),
             # Counted, never itemised: an airdropped scam token's "symbol" is often a
             # phishing URL, and this is the one place it would otherwise be rendered.
             "spam_count": snapshot.spam_count,
             "unpriced_count": snapshot.unpriced_count,
             "unpriced_symbols": sorted({r.symbol or r.coin_id for r in unpriced}),
+            "no_price_symbols": no_price,
             "holdings": holdings,
-            # Colour identity: valued coins by CoinStats' market-cap rank, which belongs
-            # to the coin and not to its size in this portfolio, so a sync that reorders
-            # the holdings by value cannot repaint the chart.
+            # Colour identity: CoinStats' market-cap rank, which belongs to the coin and
+            # not to its size in this portfolio.
             "color_order": [
                 r.coin_id for r in sorted(
-                    valued, key=lambda r: (r.rank is None, r.rank or 0, r.coin_id)
+                    coins, key=lambda r: (r.rank is None, r.rank or 0, r.coin_id)
                 )
             ],
         })
@@ -928,48 +1196,53 @@ class CryptoService:
         return result
 
     async def history(self) -> Dict[str, Any]:
-        """CoinStats' daily value and P&L history in the base currency, ending at the
-        newest snapshot so the chart is current between daily pulls."""
+        """
+        The book's daily value and P&L from `CRYPTO_HISTORY_START`, computed from the daily
+        holdings and CoinGecko's prices, each point converted at its own date. Points
+        before the first snapshot-sourced holdings day carry `reconstructed: true`.
+        """
         base = await self._base_currency()
-        rows = (await self.db.execute(
-            select(CryptoDailyPoint).order_by(CryptoDailyPoint.date)
-        )).scalars().all()
-        snapshot = await self._latest_snapshot()
-
-        series: Dict[date, List[Optional[float]]] = {
-            r.date: [r.value_usd, r.pnl_usd] for r in rows
-        }
-        if snapshot is not None and snapshot.total_value_usd is not None:
-            as_of_day = snapshot.taken_at.date()
-            if as_of_day in series:
-                series[as_of_day][0] = snapshot.total_value_usd
-            elif not series or as_of_day > max(series):
-                series[as_of_day] = [snapshot.total_value_usd, None]
+        book = await self._book()
+        today = utcnow().date()
+        last_price_day = (await self.db.execute(
+            select(func.max(CryptoCoinPrice.date))
+        )).scalar()
+        candidates = [d for d in (book.timeline.latest, last_price_day) if d is not None]
+        end = min(max(candidates), today) if candidates else None
+        series = self._series(book, end) if end else []
 
         result: Dict[str, Any] = {
             "configured": is_configured(),
+            "prices_configured": prices_configured(),
             "base_currency": base,
             "points": [],
-            "fetched_at": utc_iso(max((r.fetched_at for r in rows), default=None)),
-            "fx_caveat": None,
+            "start_date": CRYPTO_HISTORY_START.isoformat(),
+            "basket_date": book.timeline.earliest.isoformat() if book.timeline else None,
+            "first_snapshot_date": (
+                book.first_snapshot_date.isoformat() if book.first_snapshot_date else None
+            ),
+            "fetched_at": utc_iso(book.prices_fetched_at),
+            "peg_note": None,
             "fx_unavailable": 0,
             "warnings": [],
         }
         if not series:
             return result
 
-        days = sorted(series)
-        project = await self._projector(base, days[0], days[-1])
+        project = await self._projector(base, series[0].day, series[-1].day)
+        first = book.first_snapshot_date
         points = []
-        for day in days:
-            value_usd, pnl_usd = series[day]
+        for point in series:
             points.append({
-                "date": day.isoformat(),
-                "value": _amount(await project(value_usd, day)),
-                "pnl": _amount(await project(pnl_usd, day)),
+                "date": point.day.isoformat(),
+                "value": _amount(await project(point.value_usd, point.day)),
+                "pnl": _amount(await project(point.pnl_usd, point.day)),
+                "reconstructed": first is None or point.day < first,
             })
         result["points"] = points
-        result["fx_caveat"] = self._fx_caveat(base, days[-1])
+        result["peg_note"], missing_note = self._notes(series, book.symbols)
+        if missing_note:
+            result["warnings"].append(missing_note)
         result["fx_unavailable"] = project.unavailable
         if project.unavailable:
             result["warnings"].append(
@@ -986,6 +1259,7 @@ class CryptoService:
         snapshot = await self._latest_snapshot()
         return {
             "configured": is_configured(),
+            "prices_configured": prices_configured(),
             "last_run": None if run is None else {
                 "status": run.status,
                 "reason": (run.details or {}).get("reason") if isinstance(run.details, dict) else None,

@@ -6,8 +6,8 @@
 `API_ADMIN_TOKEN` is configured. The stock book's reads are public; the owner chose not
 to publish crypto balances the same way.
 
-The GETs are database-only: no CoinStats call, no Frankfurter call, no write. Only
-`POST /sync` reaches CoinStats. Every response is marked `Cache-Control: private,
+The GETs are database-only: no CoinStats, CoinGecko or Frankfurter call, no write.
+Only `POST /sync` reaches CoinStats and CoinGecko. Every response is marked `Cache-Control: private,
 no-store`, so no proxy or shared browser cache keeps a copy of a private balance.
 """
 import logging
@@ -51,7 +51,8 @@ async def get_crypto_portfolio(db: AsyncSession = Depends(get_db)):
 
 @router.get("/history", response_model=CryptoHistoryResponse)
 async def get_crypto_history(db: AsyncSession = Depends(get_db)):
-    """CoinStats' daily value and cash-flow-adjusted P&L, ending at the newest snapshot."""
+    """The book's daily value and P&L from 2026-01-01, computed from the daily holdings
+    and CoinGecko's prices."""
     return await CryptoService(db).history()
 
 
@@ -70,8 +71,7 @@ async def get_crypto_status(db: AsyncSession = Depends(get_db)):
 @router.post("/sync", response_model=CryptoSyncResponse)
 async def sync_crypto():
     """
-    Run a crypto sync now: CoinStats' snapshot, plus the day's history pull if it is
-    still due. Synchronous — a pass is a handful of requests.
+    Run a crypto sync now: CoinStats' snapshot and CoinGecko's prices. Synchronous — a pass is a handful of requests.
 
     Configured-ness is checked first, so a misconfigured server answers 409 without
     spending the button's cooldown. A scheduled run already in flight answers 429 the

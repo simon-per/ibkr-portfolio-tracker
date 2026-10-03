@@ -28,7 +28,13 @@ from app.config import settings
 from app.database import Base, get_db
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
-from app.models.crypto import CryptoDailyPoint, CryptoHolding, CryptoSnapshot
+from app.models.crypto import (
+    CryptoCoinId,
+    CryptoCoinPrice,
+    CryptoDailyHolding,
+    CryptoHolding,
+    CryptoSnapshot,
+)
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.dividend_payment import DividendPayment
 from app.models.exchange_rate import ExchangeRate
@@ -216,11 +222,15 @@ async def _seed(session: AsyncSession) -> None:
             status=status, count=count, price_usd=price,
             value_usd=count * price if price else None,
         ))
-    for back in (1, 2, 3):
-        session.add(CryptoDailyPoint(
-            date=TODAY - timedelta(days=back), value_usd=650.0 + back, pnl_usd=150.0,
-            fetched_at=datetime.combine(TODAY, time(6)),
-        ))
+    # Four days of holdings and CoinGecko prices: the book computes its own history.
+    session.add(CryptoCoinId(coinstats_id="bitcoin", coingecko_id="bitcoin", symbol="BTC",
+                             method="id", checked_at=datetime.combine(TODAY, time(6))))
+    for back in (0, 1, 2, 3):
+        session.add(CryptoDailyHolding(date=TODAY - timedelta(days=back), coin_id="bitcoin",
+                                       symbol="BTC", count=0.01, source="snapshot"))
+        session.add(CryptoCoinPrice(coingecko_id="bitcoin", date=TODAY - timedelta(days=back),
+                                    price_usd=60_000.0 - 100 * back, source="daily",
+                                    fetched_at=datetime.combine(TODAY, time(6))))
     await session.flush()
     await session.commit()
 
@@ -300,13 +310,13 @@ def test_the_crypto_book_serializes_in_the_base_currency(client, monkeypatch):
 
     book = client.get("/api/crypto/portfolio", headers=headers).json()
     assert book["base_currency"] == "CHF"
-    assert book["total_value"] == pytest.approx(700 * 0.9 * 0.94, abs=0.01)
-    assert book["itemised_value"] == pytest.approx(655 * 0.9 * 0.94, abs=0.01)
-    assert book["unitemised_value"] == pytest.approx(45 * 0.9 * 0.94, abs=0.01)
-    assert book["fx_caveat"]  # CHF base: cost and P&L are USD at one day's rate
-    assert [h["status"] for h in book["holdings"]] == ["valued", "valued", "unpriced"]
+    # Σ count × CoinGecko price; the exchange's EUR cash beside it, not in it.
+    assert book["total_value"] == pytest.approx(600 * 0.9 * 0.94, abs=0.01)
+    assert book["cash_value"] == pytest.approx(55 * 0.9 * 0.94, abs=0.01)
+    assert book["change_today"] == pytest.approx(1 * 0.9 * 0.94, abs=0.01)
+    assert book["pnl_since_start"] is None  # 1 Jan is far before the fixture's prices
+    assert [h["status"] for h in book["holdings"]] == ["valued", "unpriced"]
     assert book["spam_count"] == 1 and "SCAM.EXAMPLE" not in str(book)
-    assert book["realized_pl"] is None  # unknown stays absent, never 0.00
 
     history = client.get("/api/crypto/history", headers=headers).json()
     assert history["points"][-1]["date"] == TODAY.isoformat()

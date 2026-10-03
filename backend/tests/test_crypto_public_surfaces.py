@@ -18,7 +18,7 @@ from app import rate_limit
 from app.database import Base, get_db
 from app.main import app
 from app.models.sync_run import SyncRun
-from app.services.crypto_service import SYNC_TYPE
+from app.services.crypto_service import REBUILD_SYNC_TYPE, SYNC_TYPE
 from app.services.scheduler_service import SCHEDULED_JOB_TYPES
 
 
@@ -40,6 +40,8 @@ def client():
                     started_at=datetime(2026, 9, 20, 13), finished_at=datetime(2026, 9, 20, 13, 5)),
             SyncRun(sync_type=SYNC_TYPE, status="success", message="Crypto snapshot stored",
                     started_at=datetime(2026, 9, 20, 13), finished_at=datetime(2026, 9, 20, 13, 9)),
+            SyncRun(sync_type=REBUILD_SYNC_TYPE, status="success", message="rebuilt",
+                    started_at=datetime(2026, 9, 20, 14), finished_at=datetime(2026, 9, 20, 14, 9)),
         ])
         await session.commit()
 
@@ -66,5 +68,6 @@ def test_last_sync_is_the_stock_pipelines_even_when_a_crypto_run_is_newer(client
 
 
 def test_the_public_history_leaves_the_crypto_runs_out(client):
+    """The sync's rows and the rebuild CLI's alike."""
     runs = client.get("/api/scheduler/history").json()["runs"]
     assert [r["type"] for r in runs] == ["market_data_only"]
