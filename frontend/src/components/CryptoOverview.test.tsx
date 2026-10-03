@@ -164,10 +164,10 @@ describe('a populated crypto book', () => {
   it('puts every qualifier on the surface, not behind a hover', async () => {
     renderOverview()
     await screen.findByRole('region', { name: 'Crypto totals' })
-    expect(screen.getByText(/prices from CoinGecko/)).toBeTruthy()
-    expect(screen.getByText(/in exchange cash, not in this total/)).toBeTruthy()
-    expect(screen.getByText(/the Aug 23, 2026 coins at each day's price/)).toBeTruthy()
-    expect(screen.getByText(/rebuilt from CoinStats' transactions/)).toBeTruthy()
+    expect(screen.getByText(/exchange cash .* not included/)).toBeTruthy()
+    // The shaded span's note sits under the chart (once, no longer repeated by the tiles).
+    expect(await screen.findByText(/at the Aug 23, 2026 holdings/)).toBeTruthy()
+    expect(screen.getByText(/rebuilt from transactions/)).toBeTruthy()
     expect(screen.getByText(/fixed 1.00 USD peg/)).toBeTruthy()
     expect(screen.getByText(/cannot price, left out of every total rather than valued at zero: MYST/)).toBeTruthy()
     expect(screen.getByText('3 spam tokens hidden.')).toBeTruthy()

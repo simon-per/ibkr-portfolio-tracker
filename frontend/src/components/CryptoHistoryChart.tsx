@@ -37,14 +37,9 @@ const CHART_BOX = 'h-[260px] sm:h-[340px]'
 
 type Metric = 'value' | 'pnl'
 
-const VALUE_CAPTION =
-  "What the holdings were worth each day at CoinGecko's prices. Buying, selling and transfers move this line, so it is not a return."
-
-/** The P&L caption names the day the line starts from, like the stock chart's does. */
-function pnlCaption(firstDate: string | undefined): string {
-  const from = firstDate ? ` from 0 on ${formatDate(firstDate)}` : ''
-  return `What the coins gained or lost over this range${from}: each day, the previous day's ` +
-    'coins times the price move — so buying, selling and transfers are never gains.'
+/** The P&L line starts at 0 on the range's first day; the caption names that day. */
+function pnlCaption(firstDate: string | undefined): string | null {
+  return firstDate ? `From 0 on ${formatDate(firstDate)}` : null
 }
 
 /**
@@ -130,9 +125,9 @@ export function CryptoHistoryChart({
           options={CRYPTO_RANGES.map(r => ({ value: r, label: r }))}
         />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {metric === 'value' ? VALUE_CAPTION : pnlCaption(data[0]?.date)}
-      </p>
+      {metric === 'pnl' && pnlCaption(data[0]?.date) && (
+        <p className="text-xs text-muted-foreground">{pnlCaption(data[0]?.date)}</p>
+      )}
 
       {axis === null ? (
         <div className={`flex w-full ${CHART_BOX} items-center justify-center rounded-lg border border-dashed bg-muted/10 px-4 text-center text-sm text-muted-foreground`}>
@@ -199,8 +194,7 @@ export function CryptoHistoryChart({
       )}
       {excluded.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Left out on days without a price, never counted as zero: {excluded.join(', ')}.
-          Their value is missing from the line on those days, and their moves from the P&amp;L.
+          No price on some days, left out: {excluded.join(', ')}
         </p>
       )}
       {shaded && caption && (

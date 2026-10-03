@@ -57,7 +57,6 @@ export function CryptoDashboard() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader
-        strapline="Your CoinStats portfolio — kept apart from the stock book"
         status={<CryptoStatusLine access={access} status={statusQuery.data} />}
         actions={
           <Button

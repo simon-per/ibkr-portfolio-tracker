@@ -8,7 +8,7 @@ import { ModeToggle } from './ModeToggle'
 
 interface AppHeaderProps {
   /** Under the title from `sm` up; what this view is. */
-  strapline: ReactNode
+  strapline?: ReactNode
   /** Under the title at every width: the view's last/next sync and its warnings. */
   status?: ReactNode
   /** After the shared controls: the view's own sync button. */
@@ -51,7 +51,7 @@ export function AppHeader({ strapline, status, actions, below }: AppHeaderProps)
             <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Portfolio Analyzer</h1>
             {/* Hidden below `sm`: the strapline costs a line of an 844px screen and
                 tells a returning user nothing they do not already know. */}
-            <p className="text-muted-foreground mt-1 hidden sm:block">{strapline}</p>
+            {strapline && <p className="text-muted-foreground mt-1 hidden sm:block">{strapline}</p>}
             {status}
           </div>
           {/* Wraps: at 390px the currency select plus the sync button are wider than

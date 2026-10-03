@@ -12,7 +12,6 @@ import { cryptoHoldingColumns, sortCryptoHoldings, type CryptoSortColumn } from 
 import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
 import { cryptoAccess, retryUnlessRefused } from '@/lib/cryptoAccess'
 import { formatCount, formatCurrency as formatIn, formatDate, formatPrice, formatShortDateTime } from '@/lib/utils'
-import { reconstructedCaption } from '@/lib/cryptoChart'
 
 /**
  * The crypto book (docs/crypto.md): one page, no tab strip — the section strip is the
@@ -173,9 +172,6 @@ function CryptoBook({
   const warnings = [...new Set([...portfolio.warnings, ...historyWarnings])]
   const plural = (n: number, word: string) => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`
   const startLabel = formatDate(portfolio.start_date)
-  const reconstructed = reconstructedCaption(
-    portfolio.start_date, portfolio.basket_date, portfolio.first_snapshot_date, formatDate,
-  )
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -201,7 +197,7 @@ function CryptoBook({
             label="Total value"
             value={money(portfolio.total_value)}
             sub={portfolio.no_price_symbols.length === 0
-              ? 'Coins × CoinGecko price'
+              ? undefined
               : portfolio.total_value == null
                 ? `Unknown: no price for ${portfolio.no_price_symbols.join(', ')}`
                 // Left out, never valued at 0 — and said here, beside the figure.
@@ -219,7 +215,7 @@ function CryptoBook({
             label={`P&L since ${startLabel}`}
             value={signedMoney(portfolio.pnl_since_start)}
             tone={signTone(portfolio.pnl_since_start)}
-            sub="Price moves only — buys, sales and transfers are not gains"
+            sub="Price moves only"
           />
           <KpiCard
             tile
@@ -232,17 +228,14 @@ function CryptoBook({
         {/* The qualifiers, on the surface beside the figures they qualify. */}
         <div className="space-y-1 text-xs text-muted-foreground">
           <p>
-            Holdings as of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : '—'} from
-            CoinStats · prices from CoinGecko
-            {portfolio.prices_as_of ? `, ${formatShortDateTime(portfolio.prices_as_of)}` : ''}
+            As of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : '—'}
             {portfolio.cash_value
-              ? ` · plus ${formatCurrency(portfolio.cash_value)} in exchange cash, not in this total`
+              ? ` · exchange cash ${formatCurrency(portfolio.cash_value)} not included`
               : ''}
             {portfolio.defi_value
-              ? ` · plus ${formatCurrency(portfolio.defi_value)} in DeFi positions, which CoinStats reports separately and are not in this total`
+              ? ` · DeFi ${formatCurrency(portfolio.defi_value)} not included`
               : ''}
           </p>
-          {reconstructed && <p>P&amp;L since {startLabel}: {reconstructed}</p>}
           {portfolio.peg_note && (
             <p className="text-amber-700 dark:text-amber-400">{portfolio.peg_note}</p>
           )}
@@ -262,7 +255,6 @@ function CryptoBook({
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Crypto over time</CardTitle>
-            <CardDescription>Daily, from {startLabel}, in {baseCurrency}</CardDescription>
           </CardHeader>
           <CardContent>
             {historyFailed ? (
@@ -284,7 +276,9 @@ function CryptoBook({
         <Card>
           <CardHeader>
             <CardTitle>Allocation</CardTitle>
-            <CardDescription>Shares of the priced coins&apos; total</CardDescription>
+            {portfolio.no_price_symbols.length > 0 && (
+              <CardDescription>Priced coins only</CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <CryptoAllocationChart portfolio={portfolio} />

@@ -170,12 +170,12 @@ export function reconstructedCaption(
   if (!basketDate || !firstSnapshotDate) return null
   const parts: string[] = []
   if (basketDate > start) {
-    parts.push(`${format(start)} – ${format(dayBefore(basketDate))}: the ${format(basketDate)} coins at each day's price`)
+    parts.push(`${format(start)} – ${format(dayBefore(basketDate))} at the ${format(basketDate)} holdings`)
   }
   if (basketDate < firstSnapshotDate) {
-    parts.push(`${format(basketDate)} – ${format(dayBefore(firstSnapshotDate))}: holdings rebuilt from CoinStats' transactions`)
+    parts.push(`${format(basketDate)} – ${format(dayBefore(firstSnapshotDate))} rebuilt from transactions`)
   }
-  return parts.length ? `Reconstructed (shaded) — ${parts.join('; ')}.` : null
+  return parts.length ? `Shaded: ${parts.join('; ')}` : null
 }
 
 /** Every coin left out of at least one point in the slice, for the line under the chart. */

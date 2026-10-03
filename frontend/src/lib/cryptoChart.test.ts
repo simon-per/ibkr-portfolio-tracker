@@ -147,12 +147,12 @@ describe('the reconstructed span', () => {
   it('names the backfilled and the rebuilt days in one sentence', () => {
     const id = (iso: string) => iso
     expect(reconstructedCaption('2026-01-01', '2026-08-23', '2026-10-02', id)).toBe(
-      "Reconstructed (shaded) — 2026-01-01 – 2026-08-22: the 2026-08-23 coins at each day's " +
-      "price; 2026-08-23 – 2026-10-01: holdings rebuilt from CoinStats' transactions.",
+      'Shaded: 2026-01-01 – 2026-08-22 at the 2026-08-23 holdings; ' +
+      '2026-08-23 – 2026-10-01 rebuilt from transactions',
     )
     // Before the rebuild has run, the first synced day's basket stands in for every day.
     expect(reconstructedCaption('2026-01-01', '2026-10-02', '2026-10-02', id)).toBe(
-      "Reconstructed (shaded) — 2026-01-01 – 2026-10-01: the 2026-10-02 coins at each day's price.",
+      'Shaded: 2026-01-01 – 2026-10-01 at the 2026-10-02 holdings',
     )
     expect(reconstructedCaption('2026-01-01', null, null, id)).toBeNull()
   })
