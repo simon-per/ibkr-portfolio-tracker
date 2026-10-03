@@ -5,7 +5,14 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-03.** Newest, **committed locally, not pushed**: **the crypto book computes
+**Last updated: 2026-10-03.** Newest: **an IBKR accrual is matched to the inference it replaces on
+the ex-date, not the pay date.** With no measured lag an inferred payment is dated on its ex-date,
+and IBKR pays up to a month later (22 and 29 days on held payers), so the pay-date match left the
+guess on the calendar beside IBKR's row — one dividend shown and forecast twice. One helper,
+`_accrual_covers`, now serves the forward/overdue loop and the estimate tail; IBKR's accrual is the
+first source for both dates. Rules in `docs/dividends.md`.
+
+Before that, pushed as `ac23ed5`: **the crypto book computes
 its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
 or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
 holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
@@ -156,7 +163,7 @@ once, the oldest 22 days in, NVDA with another twelve to go on a 21-day lag.
 
 Three sources now date a projection, each named on the wire as `pay_date_source`: an IBKR
 **accrual** (`<OpenDividendAccruals>` — the only record carrying an ex-date and a pay date
-together, free on the statement already pulled, one portal tick away — see *Needs a human*), a
+together, free on the statement already pulled; the portal section was ticked 2026-10-03), a
 **measured lag** per security (`median(pay − ex)` paired out of the raw history by the matcher the
 era splice already runs; every IBKR payment on record paired, and the per-security spread is a day
 or two), or the **ex-date**, now saying that is what it is rather than implying otherwise. A
@@ -503,27 +510,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   slot. The repo-root `.env` also still holds the API key; the app never reads that file (the root
   `.env.example` now says so). The key is on the free plan, and the probe plus two real syncs spent
   about 150 of the month's credits.
-
-- **Tick "Open Dividend Accruals" in the Flex Query, and the dividend calendar stops guessing
-  when the cash arrives.** On query `App_OpenLots` (1389408), add the **Open Dividend Accruals**
-  section. There are no field checkboxes worth fussing over — the parser reads `conid`, `exDate`,
-  `payDate`, `quantity`, `grossAmount`, `tax`, `netAmount` and `currency`, and tolerates any of them
-  missing. Everything else is built and deployed: `extract_dividend_accruals` reads it,
-  `sync_dividend_accruals` replaces the set wholesale, and the calendar prefers an announced pay
-  date over an inferred one the moment rows arrive. No code change, no redeploy.
-
-  **Why it is worth doing.** It is the only record IBKR publishes carrying an ex-date and a pay
-  date on one row, so it is the only way to know when a declared dividend will actually be paid.
-  Without it the calendar adds a lag measured from history, which works for the securities that
-  have already been paid through IBKR and falls back to the ex-date for the rest — about half the
-  ex-dated payers on the day this shipped, and disproportionately the ones sitting in the blind
-  window, because a position that has never been paid has nothing to measure.
-
-  **Why it is not urgent.** The feature works without it and says which date source it used, per
-  payment. An empty table is the supported default.
-
-  Like the Cash Report edit, **the portal edit itself resets the day's Flex generation**, so it
-  buys a free extra sync rather than costing one.
 
 - **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
   owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
@@ -1185,10 +1171,13 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   a shifted date, and the calendar at 390 px — that row gained two inline elements and is the one
   place this change is visible. Everything checked so far was the API.
 
-  **And once the Flex section is ticked** (see *Needs a human*), which nothing has exercised yet:
-  the next successful 18:00 Berlin `full_sync` should report a non-zero `dividend_accruals_seen`,
-  `pay_date_source` should flip to `accrual` for the held payers, and an accrual should vanish
-  within a sync of its cash posting.
+  **The Flex section was ticked on 2026-10-03** (the portal download listed three open accruals),
+  and nothing has exercised it on the server yet. After the next successful 18:00 Berlin
+  `full_sync`: a non-zero `dividend_accruals_seen`; in `/api/dividends/breakdown` `upcoming`, 2330
+  and NXPI paying 8 Oct and HPE 16 Oct, each `pay_date_source: "accrual"` with IBKR's ex-date and
+  **no second row for the same dividend**; Next 12M and the forecast bars moved only by that swap
+  (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
+  cash posting. 005930/000660 are not accrued yet and stay inferred.
 
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
@@ -1670,12 +1659,17 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
+  already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
+  ex-date survived beside an accrual paying a month later. Now matched on ex-date through one
+  helper; four tests including the forecast swap and a later quarter left alone.
+
 - **2026-10-03 (crypto on CoinGecko)** — "prices from CoinGecko, the book from 1 Jan 2026, the
   23 Aug basket carried back, and no Kraken spike": the series is computed from per-coin daily
   holdings × CoinGecko closes, `pnl = yesterday's qty × price move`; CoinStats' history pull
   dropped; a refuse-whole CLI rebuilds 23 Aug → first sync from the transaction list (shape not
   confirmed yet — `--probe` first). USDC pegged at 1.00 by owner decision; 1W/MTD/YTD ranges.
-  Local only; key and rebuild need a human.
+  Pushed as `ac23ed5`; key and rebuild need a human.
 
 - **2026-10-01 (dividend paces)** — "what is +507% MoM?": the average tile's footer was the latest
   month against the month before, which on a quarterly ETF calendar measures the calendar. Replaced,
@@ -1692,13 +1686,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   read low and the benchmark spiked for two days. Deposits and withdrawals are now dated by
   `reportDate`. Three regression tests fail on the old order. Backend suite green apart from one
   dividend smoke assertion that fails before the change too.
-
-- **2026-09-28 (crypto mode)** — "both stocks and crypto inside the tracker, clearly separate": a
-  Stocks | Crypto switch beside the theme toggle, a CoinStats-fed crypto book with its own tables,
-  routes and view, locked behind the admin key and failing closed. Separate by construction rather
-  than by filter — the opposite of 3a — and pinned over the import graph. The design review before
-  it caught four blockers the first plan had: a GET that would have reached Frankfurter and written
-  rows, `Numeric(18,6)` zeroing token prices, the scheduler tests' fixed job count, and an
-  isolation rule the plan itself broke. The first real CoinStats answers then overturned five
-  documented assumptions (see the top of this file). Verified locally on the real portfolio, and
-  pushed together with `7fe0aab` (merged the same day).

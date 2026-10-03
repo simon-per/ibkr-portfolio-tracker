@@ -549,6 +549,13 @@ until 2026-09-19.
   with no cached rate is skipped and warned about rather than stored unconverted.
 - An accrual supersedes the inference it duplicates, within `ACCRUAL_MATCH_DAYS` (15 — under half a
   monthly cycle, so a monthly payer's genuinely separate next payment is never swallowed).
+- **Matched on the ex-date, never the pay date** (`_accrual_covers`, one helper for the forward and
+  overdue loop and the estimate tail). The ex-date is what every source knows; an inferred pay date
+  is a guess, and with no measured lag it *is* the ex-date. IBKR pays up to a month after the
+  ex-date (22 and 29 days on held payers), so the pay-date match it replaced (until 2026-10-03) left
+  the guess beside the accrual — one dividend on the calendar and in the forecast twice. Only an
+  accrual without an ex-date falls back to its pay date. The precedence for **both** dates is
+  therefore accrual > measured_lag > ex_date.
 
 **IBKR does send an ex-date on ordinary dividend cash transactions, and `ibflex` throws it away.**
 `CashTransaction.exDate` is in the list of ~27 attributes the sanitizer drops on every sync

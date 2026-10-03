@@ -954,3 +954,101 @@ async def test_one_dividend_is_on_the_calendar_at_most_once(estimate, accrual, c
             and abs((date.fromisoformat(u["date"]) - VT_DUE).days) <= 7]
     assert len(same) == shown, same
     await engine.dispose()
+
+
+# --- an accrual is matched on the ex-date ----------------------------------------------
+#
+# The inference knows the ex-date; its pay date is a guess, and with no measured lag it is
+# the ex-date itself. IBKR pays up to a month after the ex-date (22 and 29 days measured on
+# held Asian and US payers), so matching the two on pay date left the guess on the
+# calendar beside IBKR's own row — one dividend shown and forecast twice.
+
+def _accrual(ex, pay, net="12.75"):
+    return DividendAccrual(
+        security_id=1, ex_date=ex, pay_date=pay, currency="EUR",
+        net_amount_eur=Decimal(net), last_seen_at=utcnow(),
+    )
+
+
+def _near(data, day, days=45):
+    return [u for u in data["upcoming"] if u["security_id"] == 1
+            and abs((date.fromisoformat(u["date"]) - day).days) <= days]
+
+
+@pytest.mark.asyncio
+async def test_an_accrual_paying_a_month_after_ex_replaces_the_overdue_guess():
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=VT_LAST_EX)   # guessed for VT_DUE, no lag
+    session.add(_accrual(VT_DUE + timedelta(days=1), VT_DUE + timedelta(days=28)))
+    await session.commit()
+
+    data = await _breakdown(session)
+    same = _near(data, VT_DUE)
+    assert len(same) == 1, same
+    assert same[0]["pay_date_source"] == "accrual"
+    assert same[0]["ex_date"] == (VT_DUE + timedelta(days=1)).isoformat()
+    assert same[0]["date"] == (VT_DUE + timedelta(days=28)).isoformat()
+    row = next(r for r in data["securities"] if r["security_id"] == 1)
+    assert row["next_pay_date"] == (VT_DUE + timedelta(days=28)).isoformat()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_accrual_paying_a_month_after_ex_replaces_the_forward_guess():
+    """The forecast counts the dividend once, at IBKR's amount and on IBKR's date."""
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=date(2026, 2, 20))   # next ex 2026-05-20
+    due = date(2026, 5, 20)
+    without = await _breakdown(session)
+    guessed = _near(without, due, days=7)
+    assert [u["pay_date_source"] for u in guessed] == ["ex_date"]
+
+    session.add(_accrual(due + timedelta(days=1), due + timedelta(days=28)))
+    await session.commit()
+    data = await _breakdown(session)
+
+    same = _near(data, due)
+    assert len(same) == 1, same
+    assert same[0]["pay_date_source"] == "accrual"
+    assert same[0]["net_eur"] == 12.75
+    june = next(m for m in data["months"] if m["month"] == "2026-06")
+    may = next(m for m in data["months"] if m["month"] == "2026-05")
+    june_before = next(m for m in without["months"] if m["month"] == "2026-06")
+    may_before = next(m for m in without["months"] if m["month"] == "2026-05")
+    assert may["forecast_total_eur"] == pytest.approx(
+        may_before["forecast_total_eur"] - guessed[0]["net_eur"], abs=0.02)
+    assert june["forecast_total_eur"] == pytest.approx(
+        june_before["forecast_total_eur"] + 12.75, abs=0.02)
+    # Next 12M moves by the swap only: the guess out, IBKR's figure in, nothing else.
+    assert data["growth"]["next_12m_eur"] == pytest.approx(
+        without["growth"]["next_12m_eur"] - guessed[0]["net_eur"] + 12.75, abs=0.02)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_later_quarter_is_not_swallowed_by_this_quarters_accrual():
+    engine, session = await _session()
+    await _seed_ibkr_era(session)
+    await _seed_estimates_only(session, last_ex=date(2026, 2, 20))
+    without = await _breakdown(session)
+    session.add(_accrual(date(2026, 5, 21), date(2026, 6, 17)))
+    await session.commit()
+    data = await _breakdown(session)
+    later = lambda d: [u["date"] for u in d["upcoming"]
+                       if u["security_id"] == 1 and u["date"] >= "2026-08-01"]
+    assert later(data) == later(without) and later(data)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_accrual_without_an_ex_date_still_matches_on_pay_date():
+    engine, session = await _session()
+    await _seed_quarterly(session)   # inferred: ex 2026-05-08, paid 2026-05-22
+    session.add(_accrual(None, date(2026, 5, 18)))
+    await session.commit()
+    data = await _breakdown(session)
+    same = _near(data, date(2026, 5, 18), days=20)
+    assert [u["pay_date_source"] for u in same] == ["accrual"]
+    await engine.dispose()

@@ -1439,6 +1439,30 @@ class DividendService:
             pay_lags = self._measured_pay_lags(raw_payments)
             accruals_by_sec = await self._open_accruals()
 
+            def _accrual_covers(sid: int, ex: date, pay: Optional[date] = None) -> bool:
+                """
+                True when an open accrual records the dividend that went (or goes) ex on
+                ``ex`` — IBKR's announcement outranks every other source for both dates.
+
+                Matched on the EX-date, because that is the date every other source
+                actually knows: an inferred pay date is a guess, and with no measured lag
+                it IS the ex-date. IBKR pays up to a month later (22 and 29 days on held
+                payers), so the old pay-date match let the guess sit beside IBKR's own row
+                — one dividend shown and forecast twice. An accrual without an ex-date
+                falls back to its pay date against ``pay``.
+
+                One rule for the forward loop and the estimate tail, so the two cannot
+                disagree about which dividend an accrual is.
+                """
+                for a in accruals_by_sec.get(sid, ()):
+                    if a["ex_date"] is not None:
+                        if abs((a["ex_date"] - ex).days) <= ACCRUAL_MATCH_DAYS:
+                            return True
+                    elif pay is not None and \
+                            abs((a["pay_date"] - pay).days) <= ACCRUAL_MATCH_DAYS:
+                        return True
+                return False
+
             horizon_start = as_of + timedelta(days=1)
 
             # The CHART's reach is unchanged by that widening: without a selected
@@ -1496,18 +1520,16 @@ class DividendService:
 
                 symbol = _symbol(sid)
                 basis = basis_by_sec.get(sid)
-                # An announced pay date beats an inferred one outright, so an inferred
-                # payment sitting on top of an accrual is the same dividend counted
-                # twice. The accrual itself is emitted below.
-                accrual_pays = [a["pay_date"] for a in accruals_by_sec.get(sid, ())]
-                if accrual_pays:
-                    projected = [
-                        fp for fp in projected
-                        if not any(abs((fp.on_date - ap).days) <= ACCRUAL_MATCH_DAYS
-                                   for ap in accrual_pays)
-                    ]
-                    if not projected:
-                        continue
+                # An announced dividend beats an inferred one outright, so an inferred
+                # payment IBKR has accrued is the same dividend counted twice. The
+                # accrual itself is emitted below. Filtered before the overdue split, so
+                # both the forward and the overdue tails inherit it.
+                projected = [
+                    fp for fp in projected
+                    if not _accrual_covers(sid, fp.on_date - timedelta(days=lag), fp.on_date)
+                ]
+                if not projected:
+                    continue
                 pay_date_source = "measured_lag" if lag else "ex_date"
 
                 # A projection whose own date has gone by is not a forecast any more:
@@ -1657,12 +1679,10 @@ class DividendService:
                     continue
                 if _cash_has_landed(p.security_id, ex):
                     continue
-                accruals = accruals_by_sec.get(p.security_id, ())
-                if any(a["ex_date"] and abs((a["ex_date"] - ex).days) <= ACCRUAL_MATCH_DAYS
-                       for a in accruals):
-                    continue  # IBKR has announced it; the accrual above says it better
                 lag_days, lag_samples = pay_lags.get(p.security_id, (0, 0))
                 expected = ex + timedelta(days=lag_days if lag_samples else 0)
+                if _accrual_covers(p.security_id, ex, expected):
+                    continue  # IBKR has announced it; the accrual above says it better
                 amt = base_fx.convert(
                     _estimated_net_from_gross(self._net_eur(p), net_factor), expected
                 )
