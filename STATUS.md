@@ -895,9 +895,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   negative from 23 Aug — almost certainly Binance trading fees taken in BNB, carried only in each
   trade's `fee` field — and the owner chose the simple path instead: no rebuild. The first synced
   day's basket stands in for every earlier day, and since each day's set is stored, later coins
-  (Revolut X) only ever enter from their own day — the span is never rewritten. If the rebuild is
-  ever wanted, `--fees subtract` is the run to try first, and the CLI should stop paging once it
-  passes the reference date (it reads the whole history today, up to 400 credits a run).
+  (Revolut X) only ever enter from their own day — the span is never rewritten. **Being retried
+  (owner, 2026-10-03):** the CLI now accepts up to 0.05 BNB of fee dust (written as 0, warned)
+  and its refusal prints each coin's lowest amount; next is a `--dry-run --fees subtract` on the
+  server, then the real run on the owner's word; if 23 Aug still refuses, a later start
+  (`--reference 2026-09-01`) is the owner's accepted fallback. The CLI still reads the whole history (up to 400
+  credits a run).
 
 - **Goes away with the CoinGecko book (committed 2026-10-03, not yet deployed — delete once
   verified): crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**

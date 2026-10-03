@@ -338,7 +338,12 @@ through the day before the first synced day:
 **It refuses whole**, writing nothing, on: no snapshot or no synced day yet ("let one crypto
 sync run first"); a page or item it does not recognise (no item list, no date, a leg without a
 coin identifier or count); more pages than the cap; **a negative quantity** of a coin it would
-write (a transaction is missing, or a leg is read with the wrong sign); and **a trusted window
+write (a transaction is missing, or a leg is read with the wrong sign — the refusal names each
+coin's lowest amount and the days it is below zero; anything above −0.000001 is float noise),
+**except fee dust within `DUST_ALLOWANCE_BY_SYMBOL`**: up to 0.05 BNB (owner's decision,
+2026-10-03 — Binance takes its trading fees in BNB, and the first dry run refused on exactly
+that). Dust within the allowance is written as 0 on those days and printed as a warning; beyond
+it the refusal stands; and **a trusted window
 that moved** — the reference day and the two after it must hold one basket within
 `--tolerance-pct` (0.5%), or the run prints the per-coin diff. Coins CoinStats lists as spam,
 unpriced or fiat, legs marked fiat, and `--exclude COIN_ID` are never written.

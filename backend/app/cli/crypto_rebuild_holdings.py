@@ -78,7 +78,13 @@ TOLERANCE_PCT = 0.5
 # A quantity this close to zero is rounding in CoinStats' counts, not a position.
 EPSILON = 1e-9
 # Below this a negative quantity is a refusal: a missing transaction, not float noise.
-NEGATIVE_TOLERANCE = 1e-8
+NEGATIVE_TOLERANCE = 1e-6
+# Fee dust the transaction list does not carry, accepted per symbol up to this many coins
+# (owner's decision, 2026-10-03): Binance takes its trading fees in BNB, and the shortfall
+# that leaves when the walk undoes them is a few euros, not a missing transaction. Within
+# the allowance the coin is written as 0 on those days and the run warns; beyond it, the
+# refusal stands. Add a symbol here only on the owner's word.
+DUST_ALLOWANCE_BY_SYMBOL: Dict[str, float] = {"BNB": 0.05}
 
 # A transfer whose type names an outflow, when CoinStats sends its count unsigned.
 OUT_TYPES = {"sent", "send", "withdraw", "withdrawal", "sell", "out", "outgoing", "fee"}
@@ -257,19 +263,31 @@ def check_rebuild(
     reference: date,
     window_days: int = TRUSTED_WINDOW_DAYS,
     tolerance_pct: float = TOLERANCE_PCT,
-) -> None:
-    """The two refusals: a negative quantity of a coin that would be written, and a
-    trusted window whose baskets disagree."""
+) -> List[str]:
+    """The two refusals: a negative quantity of a coin that would be written, beyond its
+    `DUST_ALLOWANCE_BY_SYMBOL`, and a trusted window whose baskets disagree. Returns a
+    warning per coin accepted within its allowance — those days write it as 0."""
     name = lambda c: symbols.get(c) or c  # noqa: E731
-    negatives = sorted({
-        f"{name(c)} on {d.isoformat()}"
-        for d, qty in days.items() for c, n in qty.items()
-        if c in eligible and n < -NEGATIVE_TOLERANCE
-    })
-    if negatives:
+    lowest: Dict[str, Tuple[float, date, date]] = {}  # coin -> (lowest, first day, last day)
+    for d in sorted(days):
+        for c, n in days[d].items():
+            if c in eligible and n < -NEGATIVE_TOLERANCE:
+                low, first, _ = lowest.get(c, (0.0, d, d))
+                lowest[c] = (min(low, n), first, d)
+    refused: List[str] = []
+    accepted: List[str] = []
+    for c in sorted(lowest, key=name):
+        low, first, last = lowest[c]
+        allowance = DUST_ALLOWANCE_BY_SYMBOL.get((symbols.get(c) or "").upper(), 0.0)
+        line = f"{name(c)} down to {low:.8g} ({first.isoformat()} .. {last.isoformat()})"
+        if -low <= allowance:
+            accepted.append(f"{line}, within the {allowance:g} allowance")
+        else:
+            refused.append(line)
+    if refused:
         raise RebuildRefused(
             "a quantity goes negative — a transaction is missing or a leg is read with the "
-            "wrong sign (try --probe, --legs, --fees): " + "; ".join(negatives[:20])
+            "wrong sign (try --probe, --legs, --fees): " + "; ".join(refused[:20])
         )
     window = [reference + timedelta(days=i) for i in range(window_days)]
     window = [d for d in window if d in days]
@@ -288,6 +306,7 @@ def check_rebuild(
             f"the trusted window ({window[0].isoformat()} .. {window[-1].isoformat()}) does "
             f"not hold one basket within {tolerance_pct}%:\n  " + "\n  ".join(diffs)
         )
+    return [f"fee dust written as 0: {line}" for line in accepted]
 
 
 # ──────────────────────────────────────────────────────────────────── probe
@@ -474,12 +493,14 @@ async def run(
 
         days = rebuild(anchor, snapshot.taken_at, legs, reference, anchor_day)
         eligible = {c for qty in days.values() for c in qty} - excluded
-        check_rebuild(days, eligible, symbols, reference, tolerance_pct=tolerance_pct)
+        dust = check_rebuild(days, eligible, symbols, reference, tolerance_pct=tolerance_pct)
 
         name = lambda c: symbols.get(c) or c  # noqa: E731
         print(f"transactions: {len(items)} over {credits // CREDIT_COST['transactions']} "
               f"page(s), {len(legs)} legs, {empty} without a coin leg; {credits} credits")
         print(f"anchor: the snapshot of {snapshot.taken_at.isoformat()} UTC")
+        for line in dust:
+            print(f"WARNING: {line}")
         print(f"writing {reference} .. {last_day} "
               f"({(last_day - reference).days + 1} days); synced days start {first_snapshot_day}")
         print("reference basket (console only — never paste into a committed file):")

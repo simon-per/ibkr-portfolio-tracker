@@ -64,6 +64,41 @@ def test_a_negative_quantity_refuses_the_whole_rebuild():
         check_rebuild(days, {"solana"}, {"solana": "SOL"}, REF)
 
 
+def test_the_refusal_says_how_far_negative_and_when():
+    days = rebuild({"solana": 1.0}, ANCHOR_AT, [_leg(28, "solana", 4.0)], REF,
+                   date(2026, 8, 31))
+    with pytest.raises(RebuildRefused) as refused:
+        check_rebuild(days, {"solana"}, {"solana": "SOL"}, REF)
+    assert "SOL down to -3 (2026-08-23 .. 2026-08-27)" in str(refused.value)
+
+
+def test_bnb_fee_dust_within_the_allowance_is_a_warning_not_a_refusal():
+    """Binance's fees in BNB leave a shortfall the transaction list does not carry; up to
+    0.05 BNB is accepted (owner's decision), written as 0, and reported."""
+    days = rebuild({"bnb": 0.64}, ANCHOR_AT, [_leg(28, "bnb", 0.68)], REF, date(2026, 8, 31))
+    warnings = check_rebuild(days, {"bnb"}, {"bnb": "BNB"}, REF)
+    assert warnings == [
+        "fee dust written as 0: BNB down to -0.04 (2026-08-23 .. 2026-08-27), "
+        "within the 0.05 allowance"
+    ]
+
+
+def test_bnb_beyond_the_allowance_and_other_coins_still_refuse():
+    days = rebuild({"bnb": 0.64}, ANCHOR_AT, [_leg(28, "bnb", 0.70)], REF, date(2026, 8, 31))
+    with pytest.raises(RebuildRefused, match="BNB down to -0.06"):
+        check_rebuild(days, {"bnb"}, {"bnb": "BNB"}, REF)
+    days = rebuild({"solana": 0.0}, ANCHOR_AT, [_leg(28, "solana", 0.01)], REF,
+                   date(2026, 8, 31))
+    with pytest.raises(RebuildRefused, match="SOL down to -0.01"):
+        check_rebuild(days, {"solana"}, {"solana": "SOL"}, REF)
+
+
+def test_float_noise_below_a_millionth_is_not_a_refusal():
+    days = rebuild({"solana": 1.0}, ANCHOR_AT, [_leg(28, "solana", 1.0000005)], REF,
+                   date(2026, 8, 31))
+    assert check_rebuild(days, {"solana"}, {"solana": "SOL"}, REF) == []
+
+
 def test_a_negative_coin_that_would_not_be_written_is_not_a_refusal():
     days = rebuild({"spam": 0.0}, ANCHOR_AT, [_leg(28, "spam", 1e6)], REF, date(2026, 8, 31))
     check_rebuild(days, set(), {}, REF)
