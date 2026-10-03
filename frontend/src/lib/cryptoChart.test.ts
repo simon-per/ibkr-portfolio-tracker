@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CryptoHistoryPoint, CryptoHoldingItem, CryptoPortfolioResponse } from './api'
 import {
+  excludedInRange,
   allocationSlices,
   CRYPTO_RANGES,
   DONUT_COINS,
@@ -198,5 +199,18 @@ describe('allocationSlices', () => {
       color_order: ['a'],
     }))
     expect(slices.find(s => s.kind === 'other')?.pct).toBeNull()
+  })
+})
+
+describe('excludedInRange', () => {
+  it('lists every coin left out on some day of the slice, once, sorted', () => {
+    const points = [
+      { date: '2026-01-01', value: 1, pnl: null, reconstructed: false, excluded: [] },
+      { date: '2026-01-02', value: 1, pnl: 0, reconstructed: false, excluded: ['SOL', 'BNB'] },
+      { date: '2026-01-03', value: 1, pnl: 0, reconstructed: false, excluded: ['BNB'] },
+      { date: '2026-01-04', value: 1, pnl: 0, reconstructed: false },
+    ]
+    expect(excludedInRange(points)).toEqual(['BNB', 'SOL'])
+    expect(excludedInRange([])).toEqual([])
   })
 })

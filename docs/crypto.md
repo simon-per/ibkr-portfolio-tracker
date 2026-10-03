@@ -89,9 +89,18 @@ is kept (each price row is a fact on its own), and the snapshot is never lost to
 
 **Which CoinGecko coin is it** (`crypto_coin_ids`): CoinStats identifiers are mostly CoinGecko
 slugs (`bitcoin`, `ethereum`), so an exact id match resolves most; a **unique** symbol match is
-the fallback; a symbol two CoinGecko coins share is never guessed. An unmatched coin keeps a row
-with `coingecko_id` NULL, is named in the run's warnings, and reads as unknown on every day it is
-held.
+the fallback. **A symbol several CoinGecko coins share is settled by price, never by guessing**:
+CoinStats prices every coin it lists, so the candidates (up to `MAX_SYMBOL_CANDIDATES`) are quoted
+in one `/simple/price` call and the one trading within `PRICE_MATCH_TOLERANCE` (10%) of CoinStats'
+price is the coin — when exactly one does (`method = "symbol+price"`). Found on BNB, 2026-10-03:
+CoinStats' id is not CoinGecko's `binancecoin` and dozens of tokens use the symbol. **Every new
+match, by id or symbol, is price-checked the same way**: more than `PRICE_SANITY_TOLERANCE` (25%)
+from CoinStats' price and it is refused with a warning, so a coincidental id cannot value the
+position as another token. The same call doubles as today's spot price, so a first sync still costs
+one price call. Without CoinStats' prices (the rebuild CLI's past-only coins) neither check runs. An
+unmatched coin keeps a row with `coingecko_id` NULL, is named in the run's warnings, is left out of
+every figure (below), and is re-asked after `MAPPING_RECHECK_DAYS`. Migration `z9c5e1a3b7d4`
+cleared the unmatched rows once so the price rule applied at once.
 
 **Closes** (`crypto_book.daily_closes`): a CoinGecko point belongs to the UTC day that ends at
 or after it, so the daily point at 00:00 UTC closes the day before; inside a day (hourly data for
@@ -239,9 +248,15 @@ earlier is computed, fetched or drawn.
   basket at each day's price; between it and the first synced day, the quantities the CLI rebuilt
   from transactions. Until the CLI runs, the first synced day's basket stands in for the whole
   year. The chart shades the span and says which is which under it.
-- **Unknown is absent.** A held coin with no price that day makes the day's value unknown, and
-  the P&L that needs it; a sum through an unknown day is unknown (`pnl_since_start`, the chart's
-  running P&L). Never a smaller known number, never a price carried from a neighbouring day.
+- **Left out and counted, never valued at 0.** A held coin with no price that day is left out of
+  that day's value, and out of its P&L whenever either end of its move is unpriced — so a coin
+  gaining or losing its price is never a gain or a loss. It is named on the surface: the Total
+  value tile reads "Excludes BNB — no price", each history point carries `excluded`, the chart's
+  tooltip and a line under it name them, and weights are shares of the priced total. A figure is
+  null only when **no** coin is priced, and a sum through such a day is unknown. Never a price
+  carried from a neighbouring day. This is the stock side's unpriced-holdings convention; until
+  2026-10-03 the book made the whole day unknown instead, and one 0.64-BNB position blanked every
+  total, tile and chart point.
 - **The USDC peg — a deliberate exception** (owner's decision, 2026-10-02). On a day CoinGecko
   has no price for USDC (CoinStats id `usd-coin`, or symbol `USDC`), it is valued at exactly
   **1.00 USD**. The table is `STABLECOIN_PEGS` / `STABLECOIN_PEG_SYMBOLS` in `crypto_book.py`,

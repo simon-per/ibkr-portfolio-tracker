@@ -91,6 +91,9 @@ class CryptoHistoryPoint(BaseModel):
     reconstructed: bool = Field(
         False, description="Before the first snapshot-sourced holdings day."
     )
+    excluded: List[str] = Field(
+        [], description="Coins without a price that day, left out of value and P&L."
+    )
 
 
 class CryptoHistoryResponse(BaseModel):

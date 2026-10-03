@@ -5,7 +5,15 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-03.** Newest: **IBKR's own ex→pay pairs.** The owner ticked four more
+**Last updated: 2026-10-03.** Newest: **the crypto book survives a coin without a price.** With the
+CoinGecko key in, one coin (BNB) went unmatched — CoinStats' id is not CoinGecko's and dozens of
+tokens share the symbol — and the book's "one unknown makes the day unknown" rule blanked every
+total, tile, weight and chart point. Now an ambiguous symbol is matched by CoinStats' own price
+(`pick_by_price`, and every new match is price-checked), migration `z9c5e1a3b7d4` clears the stored
+non-matches once, and a coin without a price is **left out and named** ("Excludes BNB — no price")
+rather than blanking the rest. Rules in `docs/crypto.md`; see *Watch after the next deploy*.
+
+Before that: **IBKR's own ex→pay pairs.** The owner ticked four more
 Flex sections (Change in Dividend Accruals, Equity Summary in Base, Prior Period Positions,
 Financial Instrument Information — all modelled by `ibflex` 0.15; a portal download was parsed
 locally and every existing extractor matched except the two intended differences). The new
@@ -1145,6 +1153,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   **no second row for the same dividend**; Next 12M and the forecast bars moved only by that swap
   (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
   cash posting. 005930/000660 are not accrued yet and stay inferred.
+
+- **Crypto after the BNB fix.** Press **Sync crypto** once deployed: no "No CoinGecko coin found"
+  warning; `crypto_coin_ids` maps BNB with `method = symbol+price`; Total value, Today and P&L
+  since 1 Jan show figures and the chart draws from 1 Jan; the total is within price drift of the
+  CoinStats app. If any coin is still unmatched, the tile reads "Excludes … — no price" instead of
+  "—". Browser pass at 1440 and 390 px.
 
 - **The four Flex sections ticked 2026-10-03, after the next 18:00 Berlin `full_sync`.** The run's
   result carries `dividend_date_pairs_added` > 0 (18 on the first local parse) and

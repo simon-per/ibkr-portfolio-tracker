@@ -410,11 +410,50 @@ def resolve_coingecko_id(
     ids = {c["id"] for c in coins}
     if coin_id in ids:
         return coin_id, "id"
-    if symbol:
-        matches = [c["id"] for c in coins if c["symbol"].lower() == symbol.lower()]
-        if len(matches) == 1:
-            return matches[0], "symbol"
+    matches = symbol_candidates(symbol, coins)
+    if len(matches) == 1:
+        return matches[0], "symbol"
     return None, None
+
+
+# How a CoinStats coin and a CoinGecko coin are proven to be the same one when the id does
+# not say so (owner's BNB, 2026-10-03: CoinStats' id is not CoinGecko's `binancecoin`, and
+# dozens of CoinGecko tokens use the symbol "BNB", so neither rule matched and one 0.64-BNB
+# position left the whole book without a total). CoinStats prices every coin it lists, so
+# the candidate trading at CoinStats' price is the coin — when exactly one does.
+PRICE_MATCH_TOLERANCE = 0.10
+# Every NEW mapping, by id or symbol, is also checked against CoinStats' price: a
+# coincidental id or symbol would otherwise value the position as some other token.
+# Wider than the match tolerance, because two quotes of one coin taken minutes apart from
+# two aggregators drift, and a thin token drifts more.
+PRICE_SANITY_TOLERANCE = 0.25
+# The most candidates one ambiguous symbol may cost in the single price call.
+MAX_SYMBOL_CANDIDATES = 50
+
+
+def symbol_candidates(symbol: Optional[str], coins: List[Dict[str, str]]) -> List[str]:
+    """Every CoinGecko id listed under ``symbol``, case-insensitively."""
+    if not symbol:
+        return []
+    return [c["id"] for c in coins if c["symbol"].lower() == symbol.lower()]
+
+
+def prices_agree(reference: float, other: float, tolerance: float) -> bool:
+    """True when ``other`` is within ``tolerance`` (a fraction) of ``reference``."""
+    return reference > 0 and abs(other - reference) <= tolerance * reference
+
+
+def pick_by_price(
+    reference: Optional[float], candidate_prices: Dict[str, float]
+) -> Optional[str]:
+    """The one candidate trading within `PRICE_MATCH_TOLERANCE` of CoinStats' price, or
+    None when none does or several do — two tokens at one price are not told apart by
+    guessing."""
+    if reference is None:
+        return None
+    close = [gid for gid, p in candidate_prices.items()
+             if prices_agree(reference, p, PRICE_MATCH_TOLERANCE)]
+    return close[0] if len(close) == 1 else None
 
 
 class CryptoSyncService:
@@ -512,7 +551,10 @@ class CryptoSyncService:
         today_set = daily_set(holdings)
 
         # ── prices: CoinGecko, still before any write ──
-        fetched = await self.fetch_prices(today, today_set)
+        fetched = await self.fetch_prices(
+            today, today_set,
+            reference_prices={h.coin_id: h.price_usd for h in valued if h.price_usd},
+        )
         warnings.extend(fetched.warnings)
 
         # ── writes: no HTTP in flight from here on, except the FX warm-up, which
@@ -564,6 +606,7 @@ class CryptoSyncService:
         today: date,
         today_set: Optional[Dict[str, Tuple[Optional[str], float]]] = None,
         extra_sets: Optional[Dict[date, Dict[str, Tuple[Optional[str], float]]]] = None,
+        reference_prices: Optional[Dict[str, float]] = None,
     ) -> PriceFetch:
         """
         One CoinGecko pass: database reads, then HTTP, then nothing written — the caller
@@ -571,7 +614,9 @@ class CryptoSyncService:
 
         `today_set` replaces today's stored holdings (the sync has not written it yet);
         `extra_sets` adds dated sets the rebuild CLI is about to write, so their coins'
-        closes are fetched in the same pass.
+        closes are fetched in the same pass. `reference_prices` is CoinStats' own USD price
+        per coin from the snapshot, which proves a new id mapping (see `pick_by_price`);
+        without it an ambiguous symbol stays unmatched and no mapping is price-checked.
         """
         result = PriceFetch()
         if not prices_configured():
@@ -628,21 +673,72 @@ class CryptoSyncService:
                         > timedelta(days=MAPPING_RECHECK_DAYS)
                     )
                 ]
+                quoted: Dict[str, float] = {}
+                asked: Set[str] = set()
                 if to_map:
                     listing = await gecko.coins_list()
+                    refs = reference_prices or {}
+                    resolved: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+                    ambiguous: Dict[str, List[str]] = {}
                     for coin in to_map:
                         gid, method = resolve_coingecko_id(coin, symbols.get(coin), listing)
+                        resolved[coin] = (gid, method)
+                        if gid is None and refs.get(coin):
+                            cands = symbol_candidates(symbols.get(coin), listing)
+                            if 1 < len(cands) <= MAX_SYMBOL_CANDIDATES:
+                                ambiguous[coin] = cands
+                    # One price call settles both questions: which ambiguous candidate
+                    # trades at CoinStats' price, and whether each new match does.
+                    to_price = {g for g, _ in resolved.values() if g}
+                    to_price |= {g for cands in ambiguous.values() for g in cands}
+                    price_error: Optional[CoinGeckoError] = None
+                    if to_price and refs:
+                        # The same call is today's spot price for the coins already
+                        # mapped, so a first sync still costs one price call, not two.
+                        to_price |= {
+                            mapping[c] for c in timeline.qty(today) if mapping.get(c)
+                        }
+                        try:
+                            quoted = await gecko.simple_price(to_price)
+                            asked = set(to_price)
+                        except CoinGeckoError as e:
+                            # The matches found so far are kept; an ambiguous coin is
+                            # simply not recorded, so the next sync asks it again.
+                            price_error = e
+                    for coin in to_map:
+                        gid, method = resolved[coin]
+                        ref = refs.get(coin)
+                        if price_error is not None and coin in ambiguous:
+                            continue
+                        if gid is None and coin in ambiguous:
+                            gid = pick_by_price(
+                                ref, {g: quoted[g] for g in ambiguous[coin] if g in quoted}
+                            )
+                            method = "symbol+price" if gid else None
+                        elif gid and ref and gid in quoted and not prices_agree(
+                            ref, quoted[gid], PRICE_SANITY_TOLERANCE
+                        ):
+                            result.warnings.append(
+                                f"CoinGecko's '{gid}' trades at {quoted[gid]:.6g} USD but "
+                                f"CoinStats prices {symbols.get(coin) or coin} at "
+                                f"{ref:.6g}: not the same coin, so it is left unmatched."
+                            )
+                            gid, method = None, None
                         mapping[coin] = gid
                         result.mapping_rows.append({
                             "coinstats_id": coin, "coingecko_id": gid,
                             "symbol": symbols.get(coin), "method": method, "checked_at": now,
                         })
+                    if price_error is not None:
+                        raise price_error
 
-                # 2. Today's price, one call for every coin held today.
+                # 2. Today's price, one call for every coin held today — less those the
+                #    mapping check above has already quoted.
                 held_today = {mapping[c] for c in timeline.qty(today) if mapping.get(c)}
-                if held_today:
-                    spot = await gecko.simple_price(held_today)
-                    result.prices.extend((gid, today, p, PRICE_SPOT) for gid, p in spot.items())
+                spot = {g: quoted[g] for g in held_today if g in quoted}
+                if held_today - asked:
+                    spot.update(await gecko.simple_price(held_today - asked))
+                result.prices.extend((gid, today, p, PRICE_SPOT) for gid, p in spot.items())
 
                 # 3. The finished days' closes a held coin is still missing.
                 by_gecko: Dict[str, Set[date]] = {}
@@ -946,8 +1042,8 @@ def _missing_note(missing: Dict[str, int], symbols: Dict[str, Optional[str]]) ->
     names = ", ".join(sorted(symbols.get(c) or c for c in missing))
     days = max(missing.values())
     return (
-        f"No price for {names} on up to {days} day(s): those days' value and P&L are "
-        f"unknown, not zero."
+        f"No price for {names} on up to {days} day(s): left out of those days' value and "
+        f"P&L, which cover the priced coins only — never counted as zero."
     )
 
 
@@ -1089,15 +1185,21 @@ class CryptoService:
             change = (price / before - 1) * 100 if price is not None and before else None
             priced.append((row, price, source, change))
 
-        total_usd = _sum_known(r.count * p if p is not None else None for r, p, _, _ in priced)
+        # The priced coins' total: a coin without a price is left out and named, never
+        # valued at 0 — and never allowed to blank the rest (docs/crypto.md). None only
+        # when there are coins and not one of them is priced.
+        valued_now = [r.count * p for r, p, _, _ in priced if p is not None]
+        total_usd: Optional[float] = (
+            sum(valued_now) if valued_now or not priced else None
+        )
         warnings: List[str] = list(snapshot.warnings or [])
         no_price = sorted(r.symbol or r.coin_id for r, p, _, _ in priced if p is None)
         if not result["prices_configured"]:
             warnings.append(COINGECKO_NOT_CONFIGURED)
         if no_price:
             warnings.append(
-                f"No CoinGecko price for {', '.join(no_price)} on {day.isoformat()}: the "
-                f"total is unknown rather than understated."
+                f"No CoinGecko price for {', '.join(no_price)} on {day.isoformat()}: left "
+                f"out of the total, which covers the priced coins only."
             )
         age_hours = (utcnow() - snapshot.taken_at).total_seconds() / 3600
         if age_hours > STALE_SNAPSHOT_HOURS:
@@ -1238,6 +1340,7 @@ class CryptoService:
                 "value": _amount(await project(point.value_usd, point.day)),
                 "pnl": _amount(await project(point.pnl_usd, point.day)),
                 "reconstructed": first is None or point.day < first,
+                "excluded": sorted(book.symbols.get(c) or c for c in point.missing),
             })
         result["points"] = points
         result["peg_note"], missing_note = self._notes(series, book.symbols)

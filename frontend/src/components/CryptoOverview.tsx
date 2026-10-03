@@ -200,9 +200,12 @@ function CryptoBook({
             hero
             label="Total value"
             value={money(portfolio.total_value)}
-            sub={portfolio.total_value == null && portfolio.no_price_symbols.length > 0
-              ? `Unknown: no price for ${portfolio.no_price_symbols.join(', ')}`
-              : 'Coins × CoinGecko price'}
+            sub={portfolio.no_price_symbols.length === 0
+              ? 'Coins × CoinGecko price'
+              : portfolio.total_value == null
+                ? `Unknown: no price for ${portfolio.no_price_symbols.join(', ')}`
+                // Left out, never valued at 0 — and said here, beside the figure.
+                : `Excludes ${portfolio.no_price_symbols.join(', ')} — no price`}
           />
           <KpiCard
             tile

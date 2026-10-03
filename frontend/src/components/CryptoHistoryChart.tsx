@@ -14,6 +14,7 @@ import type { CryptoHistoryPoint } from '@/lib/api'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   CRYPTO_RANGES,
+  excludedInRange,
   rangePnlSeries,
   reconstructedCaption,
   reconstructedSpan,
@@ -73,8 +74,9 @@ export function CryptoHistoryChart({
     // Daily values, unknown days as gaps — see `valueSeries`; daily P&L summed over what
     // is on screen — see `rangePnlSeries`.
     const ys = metric === 'value' ? valueSeries(visible) : rangePnlSeries(visible)
-    return visible.map((p, i) => ({ date: p.date, y: ys[i] }))
+    return visible.map((p, i) => ({ date: p.date, y: ys[i], excluded: p.excluded ?? [] }))
   }, [visible, metric])
+  const excluded = useMemo(() => excludedInRange(visible), [visible])
   const shaded = useMemo(() => reconstructedSpan(visible), [visible])
   const caption = reconstructedCaption(startDate, basketDate, firstSnapshotDate, formatDate)
 
@@ -173,7 +175,11 @@ export function CryptoHistoryChart({
                 contentStyle={CHART_TOOLTIP_STYLE}
                 itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                 labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                labelFormatter={(label) => (typeof label === 'string' ? formatDate(label) : label)}
+                labelFormatter={(label, payload) => {
+                  const text = typeof label === 'string' ? formatDate(label) : label
+                  const out: string[] = payload?.[0]?.payload?.excluded ?? []
+                  return out.length > 0 ? `${text} · excludes ${out.join(', ')} (no price)` : text
+                }}
                 formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
               />
               <Line
@@ -190,6 +196,12 @@ export function CryptoHistoryChart({
             </LineChart>
           </ResponsiveContainer>
         </div>
+      )}
+      {excluded.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Left out on days without a price, never counted as zero: {excluded.join(', ')}.
+          Their value is missing from the line on those days, and their moves from the P&amp;L.
+        </p>
       )}
       {shaded && caption && (
         <p className="text-xs text-muted-foreground">{caption}</p>

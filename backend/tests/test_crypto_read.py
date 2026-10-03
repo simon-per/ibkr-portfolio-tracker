@@ -185,29 +185,37 @@ async def test_usdc_without_a_price_is_pegged_at_one_dollar_and_says_so(session)
 
 
 @pytest.mark.asyncio
-async def test_any_other_coin_without_a_price_makes_the_total_unknown(session):
+async def test_a_coin_without_a_price_is_left_out_and_named_never_blanking_the_rest(session):
+    """One unpriced coin used to blank the whole book (BNB, 2026-10-03). Now it is left out
+    of the total — never valued at 0 — and named, and the rest still adds up."""
     await _base(session, "USD")
     await _drop_price(session, "ethereum", 4)
     out = await CryptoService(session).portfolio()
-    assert out["total_value"] is None
+    assert out["total_value"] == 1200.0          # BTC 600 + SOL 500 + USDC 100, ETH out
     eth = next(h for h in out["holdings"] if h["coin_id"] == "ethereum")
     assert eth["status"] == "no_price" and eth["price"] is None and eth["value"] is None
     assert eth["weight_pct"] is None
+    btc = next(h for h in out["holdings"] if h["coin_id"] == "bitcoin")
+    assert btc["weight_pct"] == 50.0              # a share of the PRICED total
     assert out["no_price_symbols"] == ["ETH"]
-    assert any("ETH" in w and "unknown" in w for w in out["warnings"])
+    assert any("ETH" in w and "left out" in w for w in out["warnings"])
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_day_is_unknown_and_so_is_every_sum_through_it(session):
+async def test_a_day_without_a_coins_price_leaves_it_out_and_never_books_its_return(session):
     await _base(session, "USD")
     await _drop_price(session, "ethereum", 3)
     history = await CryptoService(session).history()
     values = {p["date"]: (p["value"], p["pnl"]) for p in history["points"]}
-    assert values["2026-01-03"] == (None, 50.0)  # ETH unpriced that day; 01-02's coins are
-    assert values["2026-01-04"] == (4300.0, None)  # the move from an unknown price
-    assert any("ETH" in w for w in history["warnings"])
+    assert values["2026-01-03"] == (1100.0, 50.0)  # ETH left out of that day's value
+    # ETH's move into 01-04 starts from no price, so it is not P&L: BTC and SOL were flat.
+    assert values["2026-01-04"] == (4300.0, 0.0)
+    excluded = {p["date"]: p["excluded"] for p in history["points"]}
+    assert excluded["2026-01-03"] == excluded["2026-01-04"] == ["ETH"]
+    assert excluded["2026-01-02"] == []
+    assert any("ETH" in w and "left out" in w for w in history["warnings"])
     portfolio = await CryptoService(session).portfolio()
-    assert portfolio["pnl_since_start"] is None
+    assert portfolio["pnl_since_start"] == 100.0
 
 
 @pytest.mark.asyncio
@@ -272,11 +280,14 @@ async def test_without_a_coingecko_key_the_page_still_answers_with_unknowns(sess
     await session.commit()
     out = await CryptoService(session).portfolio()
     assert out["prices_configured"] is False  # conftest blanks the key
-    assert out["total_value"] is None and out["pnl_since_start"] is None
+    # USDC's peg is the only priced coin: the total is it alone, every other coin named.
+    assert out["total_value"] == 100.0
+    assert out["no_price_symbols"] == ["BTC", "ETH", "SOL"]
+    assert out["pnl_since_start"] is None
     assert any("COINGECKO_API_KEY" in w for w in out["warnings"])
     history = await CryptoService(session).history()
-    # USDC's peg is the only thing left with a value; every day is unknown.
-    assert all(p["value"] is None for p in history["points"])
+    # Before USDC was held no coin is priced, and a day with nothing priced is unknown.
+    assert [p["value"] for p in history["points"]] == [None, None, None, 100.0]
 
 
 @pytest.mark.asyncio

@@ -404,3 +404,69 @@ async def test_closed_positions_put_nothing_in_warnings(db, monkeypatch):
     result = await _service(db, book).sync()
     assert result["status"] == "success"
     assert not any("skipped" in w for w in result["warnings"])
+
+
+# --- mapping by price: an ambiguous symbol, and a coincidental match ----------------------
+#
+# BNB on 2026-10-03: CoinStats' id was not CoinGecko's, dozens of CoinGecko tokens use the
+# symbol, and the coin went unmatched. CoinStats prices every coin it lists, so the one
+# candidate trading at that price is the coin.
+
+from app.services.crypto_service import pick_by_price, prices_agree  # noqa: E402
+
+_BNB_LISTING = [
+    {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"},
+    {"id": "binancecoin", "symbol": "bnb", "name": "BNB"},
+    {"id": "bnb-meme-copy", "symbol": "bnb", "name": "Not BNB"},
+    {"id": "bridged-bnb", "symbol": "bnb", "name": "Also not BNB"},
+]
+
+
+def test_the_one_candidate_at_coinstats_price_is_the_coin():
+    assert pick_by_price(600.0, {"binancecoin": 610.0, "bnb-meme-copy": 0.002}) == "binancecoin"
+    # Two candidates at the price are not told apart by guessing.
+    assert pick_by_price(600.0, {"binancecoin": 610.0, "bridged-bnb": 598.0}) is None
+    assert pick_by_price(600.0, {"bnb-meme-copy": 0.002}) is None
+    assert pick_by_price(None, {"binancecoin": 600.0}) is None
+    assert prices_agree(100.0, 124.0, 0.25) and not prices_agree(100.0, 126.0, 0.25)
+
+
+@pytest.mark.asyncio
+async def test_an_ambiguous_symbol_is_matched_by_coinstats_price(db, monkeypatch):
+    configure(monkeypatch)
+    configure_gecko(monkeypatch)
+    book = FakeCoinStats(coins=[coin("bitcoin", "BTC", 0.01, 60_000.0, rank=1),
+                                coin("binance-coin", "BNB", 0.5, 600.0, rank=4)],
+                         value=value_body(total=900.0))
+    gecko = FakeCoinGecko(
+        prices={"bitcoin": 60_000.0, "binancecoin": 605.0, "bnb-meme-copy": 0.002,
+                "bridged-bnb": 3.0},
+        listing=_BNB_LISTING,
+    )
+    result = await _service(db, book, gecko).sync()
+    assert not any("No CoinGecko coin found" in w for w in result["warnings"])
+    # One price call served the match and today's spot price.
+    assert gecko.calls.count("/simple/price") == 1
+    async with db() as s:
+        row = (await s.execute(
+            select(CryptoCoinId).where(CryptoCoinId.coinstats_id == "binance-coin")
+        )).scalar_one()
+    assert (row.coingecko_id, row.method) == ("binancecoin", "symbol+price")
+
+
+@pytest.mark.asyncio
+async def test_an_exact_id_at_the_wrong_price_is_refused(db, monkeypatch):
+    configure(monkeypatch)
+    configure_gecko(monkeypatch)
+    book = FakeCoinStats(coins=[coin("bitcoin", "BTC", 0.01, 60_000.0, rank=1),
+                                coin("solana", "SOL", 5.0, 100.0, rank=5)],
+                         value=value_body(total=1100.0))
+    # CoinGecko's "solana" here is some other token at 3 USD: same id, not the same coin.
+    gecko = FakeCoinGecko(prices={"bitcoin": 60_000.0, "solana": 3.0})
+    result = await _service(db, book, gecko).sync()
+    assert any("'solana'" in w and "not the same coin" in w for w in result["warnings"])
+    async with db() as s:
+        row = (await s.execute(
+            select(CryptoCoinId).where(CryptoCoinId.coinstats_id == "solana")
+        )).scalar_one()
+    assert row.coingecko_id is None

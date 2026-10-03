@@ -183,6 +183,15 @@ describe('a populated crypto book', () => {
     expect(within(totals).getByText('Unknown: no price for ETH')).toBeTruthy()
   })
 
+  it('names a coin left out of a known total, beside the figure', async () => {
+    vi.spyOn(api, 'getCryptoPortfolio').mockResolvedValue(book({
+      total_value: 1200, no_price_symbols: ['BNB'],
+    }))
+    renderOverview()
+    const totals = await screen.findByRole('region', { name: 'Crypto totals' })
+    expect(within(totals).getByText('Excludes BNB — no price')).toBeTruthy()
+  })
+
   it('lists holdings with an unpriced coin as a dash and a pegged price badged', async () => {
     renderOverview()
     const table = await screen.findByRole('table')

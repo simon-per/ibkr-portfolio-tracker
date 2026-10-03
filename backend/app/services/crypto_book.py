@@ -13,11 +13,17 @@ Yesterday's coins times today's price move: a buy, a DCA, a transfer between exc
 a staking reward changes a quantity and never the P&L. That is what removes the "Kraken
 transfer as profit" spike CoinStats' own history drew, without rewriting any history.
 
-**Unknown is absent.** A held coin with no price on a day makes that day's value (and the
-P&L that needs it) unknown — never a smaller known number. The one deliberate exception is
-`STABLECOIN_PEGS`: the owner's decision (2026-10-02) to value USDC at exactly 1.00 USD on
-a day CoinGecko has no price for it. It is flagged as a peg wherever it is used, so it can
-never pass for a market price.
+**A coin without a price is left out and counted, never valued at 0.** It drops out of
+that day's value, and out of the day's P&L whenever either end of its move is unpriced —
+so a coin gaining or losing its price is never a gain or a loss. `DayPoint.missing`
+names it, and every surface says the figure excludes it. A figure is None only when NO
+coin is priced. This is the app's convention for unpriced stock holdings; until
+2026-10-03 the book instead made the whole day unknown, and one 0.64-BNB position CoinGecko
+could not identify blanked every total, tile and chart point of the book.
+
+The one valuation exception is `STABLECOIN_PEGS`: the owner's decision (2026-10-02) to
+value USDC at exactly 1.00 USD on a day CoinGecko has no price for it. It is flagged as a
+peg wherever it is used, so it can never pass for a market price.
 """
 import bisect
 from dataclasses import dataclass, field
@@ -109,7 +115,8 @@ class DayPoint:
     day: date
     value_usd: Optional[float]
     pnl_usd: Optional[float]
-    # Coins held (or held the day before, for the P&L) with no price: why a figure is None.
+    # Coins held (or held the day before, for the P&L) with no price: left out of the
+    # day's figures, which cover the priced coins only.
     missing: Set[str] = field(default_factory=set)
     pegged: Set[str] = field(default_factory=set)
 
@@ -134,31 +141,38 @@ def compute_series(
                 pegged.add(coin)
             return price
 
-        value: Optional[float] = 0.0
+        value = 0.0
+        priced_any = not held
         for coin, count in held.items():
             prices[coin] = lookup(coin, day)
             if prices[coin] is None:
                 missing.add(coin)
-                value = None
-            elif value is not None:
+            else:
                 value += count * prices[coin]
+                priced_any = True
 
         pnl: Optional[float] = None
         if day > start:
             before = timeline.qty(day - timedelta(days=1))
             pnl = 0.0
+            moved_any = not before
             for coin, count in before.items():
                 now = prices[coin] if coin in prices else lookup(coin, day)
                 then = previous_prices.get(coin) if coin in previous_prices else lookup(
                     coin, day - timedelta(days=1)
                 )
                 if now is None or then is None:
+                    # Left out, both ends: a coin gaining or losing its price is never a
+                    # gain or a loss.
                     missing.add(coin)
-                    pnl = None
-                elif pnl is not None:
+                else:
                     pnl += count * (now - then)
+                    moved_any = True
+            if not moved_any:
+                pnl = None
+        value_out: Optional[float] = value if priced_any else None
 
-        points.append(DayPoint(day, value, pnl, missing, pegged))
+        points.append(DayPoint(day, value_out, pnl, missing, pegged))
         previous_prices = {**prices}
         day += timedelta(days=1)
     return points

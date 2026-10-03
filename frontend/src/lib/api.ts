@@ -1233,6 +1233,8 @@ export interface CryptoHistoryPoint {
   pnl: number | null;
   /** Before the first synced holdings day: an earlier or rebuilt basket at that day's prices. */
   reconstructed: boolean;
+  /** Coins with no price that day, left out of `value` and `pnl` (never counted as 0). */
+  excluded?: string[];
 }
 
 /** `/api/crypto/history`: the book's daily value and P&L from `start_date`. */

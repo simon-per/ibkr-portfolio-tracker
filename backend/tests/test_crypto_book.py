@@ -54,12 +54,27 @@ def test_before_the_earliest_set_the_earliest_set_is_used():
     assert timeline.qty(D(9)) == {"solana": 4.0}
 
 
-def test_an_unknown_price_makes_the_day_unknown_and_names_the_coin():
+def test_a_coin_without_a_price_is_left_out_and_named():
     timeline = HoldingsTimeline({D(1): {"bitcoin": 1.0, "solana": 2.0}})
     book = _book({"bitcoin": {1: 100.0, 2: 101.0}, "solana": {1: 10.0}})
     points = compute_series(timeline, book, D(1), D(2))
-    assert points[1].value_usd is None and points[1].pnl_usd is None
+    # SOL has no price on day 2: out of the value, and its move is not P&L.
+    assert points[1].value_usd == 101.0 and points[1].pnl_usd == 1.0
     assert points[1].missing == {"solana"}
+
+
+def test_a_coin_gaining_its_price_is_never_a_gain():
+    timeline = HoldingsTimeline({D(1): {"bitcoin": 1.0, "solana": 2.0}})
+    book = _book({"bitcoin": {1: 100.0, 2: 100.0, 3: 100.0}, "solana": {2: 10.0, 3: 12.0}})
+    points = compute_series(timeline, book, D(1), D(3))
+    assert [p.value_usd for p in points] == [100.0, 120.0, 124.0]
+    assert [p.pnl_usd for p in points] == [None, 0.0, 4.0]
+
+
+def test_a_day_with_nothing_priced_is_unknown():
+    timeline = HoldingsTimeline({D(1): {"solana": 2.0}})
+    points = compute_series(timeline, _book({}), D(1), D(2))
+    assert [(p.value_usd, p.pnl_usd) for p in points] == [(None, None), (None, None)]
 
 
 def test_usdc_without_a_price_is_one_dollar_and_flagged_as_a_peg():
