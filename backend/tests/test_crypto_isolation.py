@@ -26,6 +26,9 @@ CRYPTO_MODULES = {
     "app.routers.crypto",
     "app.schemas.crypto",
     "app.cli.coinstats_probe",
+    "app.cli.crypto_rebuild_holdings",
+    "app.services.coingecko_client",
+    "app.services.crypto_book",
 }
 
 # Non-crypto modules allowed to import a crypto module, each for a named reason.
