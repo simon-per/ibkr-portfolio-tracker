@@ -37,6 +37,7 @@ EXTRACTOR_ELEMENT = {
     "extract_corporate_actions": "CorporateAction",
     "extract_cash_transactions": "CashTransaction",
     "extract_dividend_accruals": "OpenDividendAccrual",
+    "extract_dividend_date_pairs": "ChangeInDividendAccrual",
     "extract_cash_flows": "CashTransaction",
     "extract_equity_summary": "EquitySummaryByReportDateInBase",
     "extract_cash_report": "CashReportCurrency",

@@ -699,6 +699,51 @@ class DividendService:
             "message": f"Recorded {saved} open dividend accruals",
         }
 
+    async def sync_dividend_date_pairs(
+        self, pairs: List[Dict], conid_to_security_id: Dict[str, int]
+    ) -> Dict:
+        """
+        Add IBKR's (ex_date, pay_date) pairs to `dividend_date_pairs`. Insert-if-absent,
+        never replace: the table is a log that outlives the statement period (see the
+        model). Does NOT commit; the sync transaction owns that. An empty list — the
+        section not ticked — is a supported no-op.
+        """
+        from app.models.dividend_date_pair import DividendDatePair
+
+        if not pairs:
+            return {"dividend_date_pairs": 0}
+        conid_map = {str(k): v for k, v in conid_to_security_id.items()}
+        existing = {
+            (r.security_id, r.ex_date, r.pay_date)
+            for r in (await self.db.execute(select(DividendDatePair))).scalars().all()
+        }
+        added = 0
+        now = utcnow()
+        for p in pairs:
+            security_id = conid_map.get(str(p["conid"]))
+            if not security_id:
+                continue
+            key = (security_id, p["ex_date"], p["pay_date"])
+            if key in existing:
+                continue
+            existing.add(key)
+            self.db.add(DividendDatePair(
+                security_id=security_id, ex_date=p["ex_date"], pay_date=p["pay_date"],
+                first_seen_at=now,
+            ))
+            added += 1
+        await self.db.flush()
+        return {"dividend_date_pairs": added}
+
+    async def _exact_date_pairs(self) -> Dict[int, List[Tuple[date, date]]]:
+        """``{security_id: [(ex_date, pay_date), ...]}`` from IBKR's accrual log."""
+        from app.models.dividend_date_pair import DividendDatePair
+
+        out: Dict[int, List[Tuple[date, date]]] = defaultdict(list)
+        for r in (await self.db.execute(select(DividendDatePair))).scalars().all():
+            out[r.security_id].append((r.ex_date, r.pay_date))
+        return out
+
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
         ``{security_id: [{ex_date, pay_date, net_eur}, ...]}`` for every open accrual.
@@ -869,7 +914,10 @@ class DividendService:
         return kept, boundary
 
     @staticmethod
-    def _measured_pay_lags(raw_payments: List) -> Dict[int, Tuple[int, int]]:
+    def _measured_pay_lags(
+        raw_payments: List,
+        exact_pairs: Optional[Dict[int, List[Tuple[date, date]]]] = None,
+    ) -> Dict[int, Tuple[int, int]]:
         """
         ``{security_id: (median_lag_days, samples)}`` — how long after its ex-date this
         security's dividend actually reaches the account.
@@ -890,17 +938,26 @@ class DividendService:
         Absent rather than zero for a security that has never been paid through IBKR: a
         0-day lag is a claim that the cash arrives on the ex-date, and the caller needs to
         know it is falling back to the ex-date rather than being told that is the answer.
+
+        **IBKR's own pairs win** (``exact_pairs``, from `dividend_date_pairs`): for a
+        security that has any, the lag is the median of those and the proximity pairing
+        is not consulted. Proximity is an inference bounded by a window; these are the
+        two dates as IBKR booked them, so they need no window at all.
         """
+        exact_pairs = exact_pairs or {}
         estimates = [p for p in raw_payments if p.source != "ibkr"]
         ibkr_rows = [p for p in raw_payments if p.source == "ibkr"]
-        if not ibkr_rows:
-            return {}
         lags: Dict[int, List[int]] = defaultdict(list)
-        for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
-            ex = est.ex_date or est.pay_date
-            pay = row.pay_date or row.ex_date
-            lags[row.security_id].append((pay - ex).days)
-        return {sid: (int(median(v)), len(v)) for sid, v in lags.items()}
+        if ibkr_rows:
+            for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
+                if row.security_id in exact_pairs:
+                    continue
+                ex = est.ex_date or est.pay_date
+                pay = row.pay_date or row.ex_date
+                lags[row.security_id].append((pay - ex).days)
+        for sid, pairs in exact_pairs.items():
+            lags[sid] = [(pay - ex).days for ex, pay in pairs]
+        return {sid: (int(median(v)), len(v)) for sid, v in lags.items() if v}
 
     @staticmethod
     def _pct(current: Decimal, base: Optional[Decimal]) -> Optional[float]:
@@ -1460,7 +1517,7 @@ class DividendService:
 
             # What the ex→pay distance actually measures out at, per security, and the
             # announced pay dates IBKR has published for dividends it has not yet paid.
-            pay_lags = self._measured_pay_lags(raw_payments)
+            pay_lags = self._measured_pay_lags(raw_payments, await self._exact_date_pairs())
             accruals_by_sec = await self._open_accruals()
 
             def _accrual_covers(sid: int, ex: date, pay: Optional[date] = None) -> bool:

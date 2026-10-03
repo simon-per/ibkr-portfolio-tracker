@@ -1117,3 +1117,83 @@ async def test_a_korean_dividend_paid_after_33_days_leaves_pending_and_teaches_t
     assert (nxt["ex_date"], nxt["date"]) == ("2026-11-28", "2026-12-31")
     assert nxt["pay_date_source"] == "measured_lag"
     await engine.dispose()
+
+
+# --- IBKR's own ex/pay pairs (<ChangeInDividendAccruals>) ---------------------------------
+
+def _change(conid, ex, pay, code):
+    from types import SimpleNamespace
+    return SimpleNamespace(conid=conid, exDate=ex, payDate=pay, code=code)
+
+
+@pytest.mark.asyncio
+async def test_both_the_posting_and_the_reversal_give_the_pair_once():
+    from types import SimpleNamespace
+    from app.services.ibkr_service import IBKRService
+    statement = SimpleNamespace(ChangeInDividendAccruals=[
+        _change(100, date(2026, 9, 10), date(2026, 10, 1), "Po"),
+        _change(100, date(2026, 9, 10), date(2026, 10, 1), "Re"),
+        _change(200, date(2026, 8, 28), date(2026, 9, 30), "Re"),   # ex before the period
+        _change(300, None, date(2026, 9, 30), "Po"),                  # no ex-date: no pair
+        _change(400, date(2026, 9, 30), date(2026, 9, 1), "Po"),      # backwards: refused
+    ])
+    pairs = await IBKRService().extract_dividend_date_pairs({"statement": statement})
+    assert sorted((p["conid"], p["ex_date"], p["pay_date"]) for p in pairs) == [
+        ("100", date(2026, 9, 10), date(2026, 10, 1)),
+        ("200", date(2026, 8, 28), date(2026, 9, 30)),
+    ]
+    assert await IBKRService().extract_dividend_date_pairs(
+        {"statement": SimpleNamespace()}) == []
+
+
+@pytest.mark.asyncio
+async def test_the_pair_log_only_grows_and_never_duplicates():
+    from app.models.dividend_date_pair import DividendDatePair
+    engine, session = await _session()
+    svc = DividendService(session)
+    pair = {"conid": "100", "ex_date": date(2026, 8, 28), "pay_date": date(2026, 9, 30)}
+    assert (await svc.sync_dividend_date_pairs([pair], {"100": 1}))["dividend_date_pairs"] == 1
+    assert (await svc.sync_dividend_date_pairs([pair], {"100": 1}))["dividend_date_pairs"] == 0
+    # An unknown conid is skipped; an empty list (section not ticked) is a no-op.
+    unknown = {**pair, "conid": "999"}
+    assert (await svc.sync_dividend_date_pairs([unknown], {"100": 1}))["dividend_date_pairs"] == 0
+    assert (await svc.sync_dividend_date_pairs([], {}))["dividend_date_pairs"] == 0
+    await session.commit()
+    rows = (await session.execute(select(DividendDatePair))).scalars().all()
+    assert [(r.ex_date, r.pay_date) for r in rows] == [(date(2026, 8, 28), date(2026, 9, 30))]
+    await engine.dispose()
+
+
+def test_ibkr_pairs_win_over_proximity_for_that_security_only():
+    rows = [
+        Row(1, "yfinance_estimate", date(2026, 1, 5)),
+        Row(1, "ibkr", date(2026, 1, 12), date(2026, 1, 12)),     # proximity says 7
+        Row(2, "yfinance_estimate", date(2026, 1, 5)),
+        Row(2, "ibkr", date(2026, 2, 2), date(2026, 2, 2)),       # 28, no exact pair
+    ]
+    exact = {1: [(date(2026, 1, 2), date(2026, 1, 12)), (date(2026, 4, 2), date(2026, 4, 14))]}
+    assert DividendService._measured_pay_lags(rows, exact) == {1: (11, 2), 2: (28, 1)}
+    # A pair alone is enough: no IBKR payment row needed at all.
+    assert DividendService._measured_pay_lags([], exact) == {1: (11, 2)}
+
+
+@pytest.mark.asyncio
+async def test_the_forecast_dates_with_ibkrs_own_lag():
+    from app.models.dividend_date_pair import DividendDatePair
+    engine, session = await _session()
+    repo = DividendRepository(session)
+    for ex in (date(2025, 10, 8), date(2026, 1, 8), date(2026, 4, 8)):
+        await repo.upsert_payment({
+            "security_id": 1, "ex_date": ex, "currency": "EUR",
+            "shares_held": Decimal("10"), "amount_per_share": Decimal("1.5"),
+            "gross_amount_eur": Decimal("15"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("15"), "source": "yfinance_estimate",
+        })
+    session.add(DividendDatePair(security_id=1, ex_date=date(2026, 4, 8),
+                                 pay_date=date(2026, 5, 11), first_seen_at=utcnow()))
+    await session.commit()
+    data = await _breakdown(session, as_of=date(2026, 5, 15))
+    nxt = next(u for u in data["upcoming"] if u["security_id"] == 1)
+    assert (nxt["ex_date"], nxt["date"]) == ("2026-07-08", "2026-08-10")
+    assert nxt["pay_date_source"] == "measured_lag"
+    await engine.dispose()

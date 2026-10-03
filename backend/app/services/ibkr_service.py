@@ -169,6 +169,9 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
         "conid", "currency", "exDate", "payDate", "quantity", "grossAmount", "tax",
         "netAmount", "symbol",
     }),
+    # IBKR's posting (on the ex-date) and reversal (on the pay date) of each dividend:
+    # both rows carry both dates, which is all `extract_dividend_date_pairs` reads.
+    "ChangeInDividendAccrual": frozenset({"conid", "exDate", "payDate"}),
     "Transfer": frozenset({
         # `date` is real schema here, not a Python builtin — it is the transfer's own
         # date, which `_transfer_to_flow` prefers over reportDate. A first hand-written
@@ -1007,6 +1010,39 @@ class IBKRService:
 
         logger.info(f"Extracted {len(accruals)} open dividend accrual(s) from Flex")
         return accruals
+
+    async def extract_dividend_date_pairs(self, flex_data: Dict) -> List[Dict]:
+        """
+        IBKR's own ``(ex_date, pay_date)`` per dividend, from ``<ChangeInDividendAccruals>``.
+
+        IBKR posts an accrual (code ``Po``) around the ex-date and reverses it (``Re``) when
+        the cash is paid, and **both rows carry both dates**. Either is enough, and both
+        are read: a dividend that went ex before the statement period shows only its
+        reversal (SK Hynix: ex 2026-08-28, reversed 09-30 on a statement starting 09-03),
+        and one not yet paid shows only its posting. Deduplicated on
+        ``(conid, ex_date, pay_date)``.
+
+        Tolerant: [] when the section is absent, which is the default state.
+        """
+        statement = flex_data['statement']
+        section = getattr(statement, 'ChangeInDividendAccruals', None)
+        if not section:
+            return []
+
+        pairs: Dict[tuple, Dict] = {}
+        for row in section:
+            conid = getattr(row, 'conid', None)
+            ex_date = _as_date(getattr(row, 'exDate', None))
+            pay_date = _as_date(getattr(row, 'payDate', None))
+            # A pair needs both ends, and a pay date before the ex-date is not a dividend
+            # schedule anything should learn from.
+            if not conid or not ex_date or not pay_date or pay_date < ex_date:
+                continue
+            key = (str(conid), ex_date, pay_date)
+            pairs[key] = {'conid': str(conid), 'ex_date': ex_date, 'pay_date': pay_date}
+
+        logger.info(f"Extracted {len(pairs)} dividend date pair(s) from Flex")
+        return list(pairs.values())
 
     async def extract_cash_flows(self, flex_data: Dict) -> List[Dict]:
         """

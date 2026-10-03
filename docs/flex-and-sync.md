@@ -149,8 +149,28 @@ Required sections and the fields the parsers actually read:
 | **Cash Report** *(optional)* | **Base Currency Summary** | `currency`, `toDate`, `endingCash`, `levelOfDetail` |
 | **Equity Summary in Base** *(optional)* | — | `reportDate`, `cash`, `stock`, `total` |
 | **Open Dividend Accruals** *(optional)* | — | `conid`, `symbol`, `exDate`, `payDate`, `quantity`, `grossAmount`, `tax`, `netAmount`, `currency` |
+| **Change in Dividend Accruals** *(optional)* | **Detail** | `conid`, `exDate`, `payDate` |
+| **Prior Period Positions** *(ticked, not read yet)* | — | `conid`, `date`, `price`, `priorMtmPnl` |
+| **Financial Instrument Information** *(optional)* | — | read by `extract_securities` ahead of Open Positions: `conid`, `symbol`, `isin`, `description`, `currency`, `listingExchange`, `assetCategory` |
 
-**The three optional sections are the only ones whose absence is a supported steady state** rather
+**Ticked on 2026-10-03:** Equity Summary in Base, Change in Dividend Accruals, Prior Period
+Positions and Financial Instrument Information, beside the Cash Report and Open Dividend Accruals
+already on. All four are **modelled by `ibflex` 0.15** — that is the test for adding a section. An
+unmodelled *attribute* is dropped by the sanitizer, but an unmodelled *section* makes
+`parser.py`'s `getattr(Types, elem.tag)` raise and the whole statement is refused. IBKR's own limits
+count requests, never sections, so a larger statement costs no rate budget. Before ticking another
+section, run a portal download through `IBKRService.parse_flex_xml` locally and compare every
+extractor's output with and without it — the method used that day, which found the two intended
+differences (23 daily cash rows; MCO from Financial Instrument Information) and nothing else.
+
+**Change in Dividend Accruals is IBKR's ex→pay log.** IBKR posts an accrual (`Po`) around the
+ex-date and reverses it (`Re`) on the pay date, both rows carrying both dates.
+`extract_dividend_date_pairs` keeps one `(conid, exDate, payDate)` per dividend from either code — a
+dividend that went ex before the period shows only its reversal — and `dividend_date_pairs` stores
+them insert-if-absent, a log that outgrows the statement period. The first statement held 18 pairs,
+lags 1–33 days. `DividendService._measured_pay_lags` prefers them over proximity pairing.
+
+**The optional sections are the only ones whose absence is a supported steady state** rather
 than a gap. Without either cash section, `CashService` derives the balance from the trade, deposit
 and dividend ledgers and every surface badges it `derived`; enabling one lets IBKR's own figure take
 over, which is the only way the app can see broker interest, account fees and FX spread.
@@ -168,8 +188,8 @@ the statement saying it was paid. Accruals never enter `dividend_payments`: see 
 
 Note IBKR also sends **`exDate` on ordinary dividend `<CashTransaction>` rows** and the pinned
 `ibflex` 0.15 does not model the field, so the sanitizer drops it on every sync — it is one of the
-~27 cosmetic drops. Reading it would need parsing outside `ibflex` and is backward-looking, so it
-closes nothing the accruals do not; recorded here so it is not rediscovered as a finding.
+~27 cosmetic drops. Reading it would need parsing outside `ibflex`, and Change in Dividend Accruals
+now delivers the same pairs through a modelled element; recorded so it is not rediscovered.
 
 **They are different sections and not interchangeable.** `Cash Report` is per **currency** over the
 whole statement period, so it yields one anchor dated `toDate` per sync; `Equity Summary in Base` is

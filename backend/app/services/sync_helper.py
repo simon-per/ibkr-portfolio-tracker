@@ -117,6 +117,11 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     accrual_result = await DividendService(db).sync_dividend_accruals(
         accruals_data, conid_to_security_id
     )
+    # IBKR's own (ex-date, pay date) per dividend, from <ChangeInDividendAccruals>: a log
+    # that grows, read only to measure each security's ex→pay lag exactly.
+    date_pairs_result = await DividendService(db).sync_dividend_date_pairs(
+        await ibkr_service.extract_dividend_date_pairs(flex_data), conid_to_security_id
+    )
 
     # Deposits/withdrawals from the same section — the only record of external money,
     # since lot cost basis cannot tell new money from redeployed sale proceeds. Transfers
@@ -213,6 +218,7 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         # is: 0 against a non-empty section would say "the portal edit did not take" about
         # an edit that did. 0 with no section is the normal, supported state.
         "dividend_accruals_seen": accrual_result.get("dividend_accruals", 0),
+        "dividend_date_pairs_added": date_pairs_result.get("dividend_date_pairs", 0),
         "cash_flows_seen": flows["cash_flows_seen"],
         "cash_flows_skipped": flows["cash_flows_skipped"],
         "transfers_seen": flows["transfers_seen"],

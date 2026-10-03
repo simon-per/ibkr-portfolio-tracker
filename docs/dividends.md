@@ -430,7 +430,10 @@ ledger or XIRR. Measured on production 2026-09-19: **six held securities at once
   on production: every IBKR payment on record paired, lags 7–29 days, stable per security to a day
   or two (Mastercard 29 both times, ASML/NASDAQ 8 three times; the widest spread was MCO's 11 and
   21). `forecast_lag_days` and `forecast_lag_samples` ride on the row so a thin one declares
-  itself, exactly as `forecast_samples` does for the cadence.
+  itself, exactly as `forecast_samples` does for the cadence. **IBKR's own pairs win**: a security
+  with any row in `dividend_date_pairs` (from `<ChangeInDividendAccruals>`, since 2026-10-03) takes
+  the median of those and is never proximity-paired — no window, no inference. Proximity remains
+  the fallback for history older than the log.
 - **`ex_date`** — nothing could be measured, so the date IS an ex-date and the cash lands some days
   later. **Stated, not implied**, and the lag is absent rather than `0`: a zero would claim
   same-day settlement, which is the stand-in-for-an-unknown this file forbids everywhere else. Half
@@ -567,9 +570,10 @@ until 2026-09-19.
 **IBKR does send an ex-date on ordinary dividend cash transactions, and `ibflex` throws it away.**
 `CashTransaction.exDate` is in the list of ~27 attributes the sanitizer drops on every sync
 (`tests/test_flex_attr_coverage.py` pins it as *not* ingested), because the pinned 0.15 does not
-model the field. Reading it would make the lag exact instead of matched-by-proximity, and would give
-IBKR rows a real ex-date — but it needs parsing outside `ibflex`, and it is backward-looking, so it
-closes nothing the accruals do not. Recorded so nobody rediscovers it as new.
+model the field. Reading it would make the lag exact instead of matched-by-proximity, but it needs
+parsing outside `ibflex` — and `<ChangeInDividendAccruals>` now delivers the same exact pairs through
+a modelled element (`dividend_date_pairs`, see *measured_lag* above). Recorded so nobody
+rediscovers it as new.
 
 ### The forward yield — the portfolio's dividend rate
 

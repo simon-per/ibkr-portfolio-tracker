@@ -14,6 +14,7 @@ from app.models.earnings_event import EarningsEvent
 from app.models.watchlist_item import WatchlistItem
 from app.models.dividend_payment import DividendPayment
 from app.models.dividend_accrual import DividendAccrual
+from app.models.dividend_date_pair import DividendDatePair
 from app.models.app_settings import AppSetting
 from app.models.trade import Trade
 from app.models.corporate_action import CorporateAction
@@ -43,6 +44,7 @@ __all__ = [
     "WatchlistItem",
     "DividendPayment",
     "DividendAccrual",
+    "DividendDatePair",
     "AppSetting",
     "Trade",
     "CorporateAction",

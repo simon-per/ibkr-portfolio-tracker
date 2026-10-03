@@ -5,7 +5,14 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-03.** Newest: **Korean and Taiwanese dividends pair with their cash.**
+**Last updated: 2026-10-03.** Newest: **IBKR's own ex→pay pairs.** The owner ticked four more
+Flex sections (Change in Dividend Accruals, Equity Summary in Base, Prior Period Positions,
+Financial Instrument Information — all modelled by `ibflex` 0.15; a portal download was parsed
+locally and every existing extractor matched except the two intended differences). The new
+`dividend_date_pairs` log (migration `y8b4d0f2a6c3`) keeps IBKR's (ex-date, pay date) per dividend
+and the measured lag prefers it over proximity pairing. See *Watch after the next deploy*.
+
+Before that: **Korean and Taiwanese dividends pair with their cash.**
 Every ex→pay pairing was bounded at 30 days, and SK Hynix paid 33 days after its ex-date, so its
 September cash never paired: the 28 Aug dividend stayed *pending* beside the money that had arrived,
 and no KRW/TWD payer ever got a measured lag. A KRW or TWD payment now gets 75 days through one
@@ -548,51 +555,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
   Then drop `--dry-run`. It replaces the account wholesale and refuses a file shorter than
   what is stored, so a truncated download cannot quietly delete history.
-
-- **Enable the Cash Report section in the Flex Query, and the cash balance stops being ours.**
-  On query `App_OpenLots` (1389408), add the **Cash Report** section and tick **Base Currency
-  Summary** plus the fields `Currency`, `To Date`, `Ending Cash` and `Level of Detail`. Everything
-  else is already built and deployed: `extract_cash_report` reads it, `resolve_cash_balances`
-  normalises it, `cash_balances` stores it, and `CashService._apply_measured` prefers it the moment
-  rows arrive. Nothing needs a code change or a redeploy — the next successful sync picks it up.
-
-  **Base Currency Summary, not Currency Breakout.** The breakout works too, but it emits one row
-  per currency and this account holds five, so the total has to be assembled by converting each at
-  the report date — one missing FX rate and the whole date is discarded. The summary row arrives
-  already summed. Ticking both is harmless: the summary is preferred rather than added to its own
-  breakout.
-
-  There is also an **Equity Summary in Base** section, which is strictly better where it exists —
-  one row per *day* rather than one per statement period — and the code prefers it automatically.
-  Add it too if the section list offers it; Cash Report is the one that is always there.
-
-  **Why it is worth doing.** The derived balance is built from trades, deposits and dividends, so it
-  structurally cannot see broker interest, account fees or the spread on an FX conversion. Measured
-  on production: it agreed with an independent derivation to a tenth of a percent, and it also sat
-  at about **−250 CHF** for months while the account was otherwise fully deployed. That is small
-  (0.36%) and it is one-directional, so it grows. IBKR's own end-of-day figure includes all three.
-
-  **Why it is not urgent.** The feature works without it, and says so — `cash_source` is `derived`
-  and the chart, the hero card and the positions table all print the caveat in prose. The number is
-  right to well under a percent.
-
-  **DONE and live on production, 2026-08-26.** The section was enabled, a statement
-  downloaded and ingested offline, and the row is on the server:
-  `2026-08-25 | CHF | 12,501.583565`. IBKR's figure is **289 CHF above** what the ledger
-  derived (12,212.62) — the accumulated broker interest, fees and FX spread the
-  derivation structurally cannot see, in the direction and roughly the size the design
-  predicted. From 08-25 onward `cash_source` reads `ibkr`; before it, `derived`. Nothing
-  further is needed unless the query is edited again.
-
-  Two things to expect when it is enabled, neither of which is a fault:
-  - **One visible step in the cash line on the first measured day.** That is the accumulated
-    interest/fees/spread being corrected, not a jump in the balance.
-  - **Measured history starts that day and never reaches back.** The Flex window is bounded, so
-    every point before it stays `derived`, and `cash_source` is reported per chart point rather than
-    per response for exactly this reason.
-
-  It is also the one thing that resets the day's Flex generation, so the edit itself buys a free
-  extra sync — see *Sync schedule* in CLAUDE.md.
 
 - **Decide what the Flex Query period should actually be — the portal and this repo disagree.**
   Measured 2026-08-24: the live query is `Last 30 Calendar Days` (the portal download's header says
@@ -1183,6 +1145,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   **no second row for the same dividend**; Next 12M and the forecast bars moved only by that swap
   (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
   cash posting. 005930/000660 are not accrued yet and stay inferred.
+
+- **The four Flex sections ticked 2026-10-03, after the next 18:00 Berlin `full_sync`.** The run's
+  result carries `dividend_date_pairs_added` > 0 (18 on the first local parse) and
+  `cash_balances_seen` ≈ the statement's days (Equity Summary in Base, 23 locally); the Cash tab
+  reads `ibkr` rather than `derived` for those days with no step in Total Value; securities count up
+  by one (MCO, from Financial Instrument Information — an existing conid, a refresh). On
+  `/api/dividends/breakdown`, rows whose lag came from IBKR's pairs (e.g. NVDA 21, VT 4) keep
+  `measured_lag`; their `forecast_lag_samples` may drop to the pair count, which is the point.
 
 
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
