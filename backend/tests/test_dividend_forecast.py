@@ -184,3 +184,190 @@ def test_an_irregular_cadence_still_steps_in_days():
     )
     # median 49 days, and 49 matches no calendar period, so it steps in days
     assert [str(fp.on_date) for fp in out] == ["2026-05-29", "2026-07-17"]
+
+
+# ---- Sizing: "same payment one year later", and the latest for a steady payer ------
+#
+# Until 2026-10-04 every projected payment was one flat median of the last 8, which
+# read low twice over: it averaged away a fund's large December, and it trailed every
+# raise by up to two years (NVDA had raised to 0.25 a quarter and projected ~0.01).
+
+from app.services.dividend_forecast import (  # noqa: E402
+    METHOD_LATEST,
+    METHOD_SAME_PAYMENT,
+    SIZING_MEDIAN8,
+    is_steady,
+    special_payments,
+)
+
+
+def _series(points):
+    return [HistPayment(on_date=d, per_share_eur=Decimal(a)) for d, a in points]
+
+
+def _quarters(years, amounts, day=15):
+    """Quarterly payments in Mar/Jun/Sep/Dec of each year, amounts cycled per year."""
+    out = []
+    for y, row in zip(years, amounts):
+        for m, a in zip((3, 6, 9, 12), row):
+            out.append((date(y, m, day), a))
+    return out
+
+
+SEASONAL = _series(_quarters([2024, 2025], [
+    ["0.40", "0.70", "0.45", "0.90"],
+    ["0.42", "0.72", "0.47", "0.95"],
+]))
+
+
+def test_a_seasonal_fund_keeps_its_large_december():
+    out = project_dividends(SEASONAL, Decimal("1"),
+                            date(2026, 1, 1), date(2026, 12, 31), as_of=date(2026, 1, 1))
+    assert [(fp.on_date.month, fp.net_eur) for fp in out] == [
+        (3, Decimal("0.42")), (6, Decimal("0.72")), (9, Decimal("0.47")), (12, Decimal("0.95")),
+    ]
+    assert {fp.method for fp in out} == {METHOD_SAME_PAYMENT}
+    # The old flat median would have read 0.585 x 4 = 2.34 against 2.56 paid.
+    assert sum(fp.net_eur for fp in out) == Decimal("2.56")
+
+
+def test_the_flat_median_is_still_available_to_the_backtest():
+    out = project_dividends(SEASONAL, Decimal("1"),
+                            date(2026, 1, 1), date(2026, 12, 31), as_of=date(2026, 1, 1),
+                            sizing=SIZING_MEDIAN8)
+    assert {fp.net_eur for fp in out} == {Decimal("0.585")}
+
+
+def test_a_projection_past_a_year_out_repeats_a_real_payment_not_a_projection():
+    """The horizon reaches the end of next year; a slot two years back is a real one."""
+    out = project_dividends(SEASONAL, Decimal("1"),
+                            date(2027, 1, 1), date(2027, 12, 31), as_of=date(2026, 1, 1))
+    assert [fp.net_eur for fp in out] == [
+        Decimal("0.42"), Decimal("0.72"), Decimal("0.47"), Decimal("0.95"),
+    ]
+
+
+def test_a_raise_already_paid_carries_into_every_later_payment():
+    """NVDA: level at 0.01 for years, then 0.25. The new level is the forecast."""
+    history = _series(_quarters([2025, 2026], [
+        ["0.01", "0.01", "0.01", "0.01"],
+        ["0.01", "0.01", "0.25"],
+    ]))
+    assert is_steady(history)
+    out = project_dividends(history, Decimal("8"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert len(out) == 4
+    assert all(fp.net_eur == Decimal("2.00") for fp in out)
+    assert {fp.method for fp in out} == {METHOD_LATEST}
+
+
+def test_a_small_raise_inside_the_tolerance_is_carried_too():
+    history = _series(_quarters([2025, 2026], [
+        ["0.20", "0.20", "0.20", "0.21"],
+        ["0.21", "0.21", "0.22"],
+    ]))
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert {fp.net_eur for fp in out} == {Decimal("0.22")}
+
+
+def test_a_cut_already_paid_is_carried_as_well():
+    """Facts both ways: a company that has cut is forecast at the cut level."""
+    history = _series(_quarters([2025, 2026], [
+        ["1.00", "1.00", "1.00", "1.00"],
+        ["1.00", "1.00", "0.50"],
+    ]))
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert {fp.net_eur for fp in out} == {Decimal("0.50")}
+
+
+def test_a_year_end_payment_that_always_jumps_is_not_a_raise():
+    """
+    SK Hynix's shape: level quarters and a large year-end payment. The latest being
+    the big one must not size every quarter at the big amount — the year before
+    jumped the same way, so the payer is varying and each slot repeats its own.
+    """
+    history = _series(_quarters([2024, 2025], [
+        ["300", "300", "300", "1200"],
+        ["375", "375", "375", "1500"],
+    ]))
+    regular = sorted(history, key=lambda p: p.on_date)
+    assert not is_steady(regular)
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 1, 1), date(2026, 12, 31), as_of=date(2026, 1, 1))
+    assert [fp.net_eur for fp in out] == [
+        Decimal("375"), Decimal("375"), Decimal("375"), Decimal("1500"),
+    ]
+
+
+def test_a_special_is_never_repeated_and_its_slot_falls_back_to_the_regular_level():
+    """
+    Samsung's early-2021 shape: one quarter many times the rest, never again — judged
+    against the same quarter a year earlier, which was ordinary.
+    """
+    history = _series(_quarters([2024, 2025, 2026], [
+        ["354", "354", "354", "354"],
+        ["361", "361", "361", "1932"],
+        ["361", "361", "361"],
+    ]))
+    assert [p.per_share_eur for p in special_payments(history, 91)] == [Decimal("1932")]
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert {fp.net_eur for fp in out} == {Decimal("361")}
+
+
+def test_ibkr_labelling_a_payment_special_is_final():
+    """Even a modest special is excluded when IBKR's cash line says so."""
+    history = _series(_quarters([2025, 2026], [
+        ["1.00", "1.00", "1.00", "1.00"],
+        ["1.00", "1.00"],
+    ])) + [HistPayment(on_date=date(2026, 6, 20), per_share_eur=Decimal("1.50"),
+                       special=True)]
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 7, 1), date(2027, 6, 30), as_of=date(2026, 7, 1))
+    assert {fp.net_eur for fp in out} == {Decimal("1.00")}
+
+
+def test_announced_evidence_sizes_without_bending_the_schedule():
+    """
+    An accrual (cadence=False) a few days after the last Yahoo ex-date is the newest
+    amount, but its date must not halve the inferred cycle.
+    """
+    history = _series(_quarters([2025, 2026], [
+        ["4.50", "4.50", "4.50", "4.50"],
+        ["5.00", "5.00"],
+    ])) + [HistPayment(on_date=date(2026, 9, 16), per_share_eur=Decimal("7.00"),
+                       cadence=False)]
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert [fp.on_date for fp in out] == [
+        date(2026, 12, 15), date(2027, 3, 15), date(2027, 6, 15), date(2027, 9, 15),
+    ]
+    assert {fp.net_eur for fp in out} == {Decimal("7.00")}
+
+
+def test_a_first_large_december_with_no_year_before_it_is_not_called_special():
+    """
+    Without the same payment a year apart there is no telling a special from a
+    seasonal fund's first December — and calling it special reads low on every fund
+    whose history starts in a winter. It stays regular.
+    """
+    history = _series([(date(2025, 12, 15), "0.90"), (date(2026, 3, 15), "0.40"),
+                       (date(2026, 6, 15), "0.70")])
+    assert special_payments(history, 91) == []
+
+
+def test_under_a_year_of_history_uses_the_latest_payment():
+    history = _series([(date(2026, 3, 15), "0.40"), (date(2026, 6, 15), "0.90")])
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 7, 1), date(2026, 12, 31), as_of=date(2026, 7, 1))
+    assert {fp.net_eur for fp in out} == {Decimal("0.90")}
+    assert {fp.method for fp in out} == {METHOD_LATEST}
+
+
+def test_an_unknown_sizing_is_refused_loudly():
+    import pytest
+    with pytest.raises(ValueError):
+        project_dividends(SEASONAL, Decimal("1"), date(2026, 1, 1), date(2026, 12, 31),
+                          sizing="guess")
