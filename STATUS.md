@@ -1332,8 +1332,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
-- **The KPI audit of 2026-10-02 — findings reported, the owner has not chosen fixes yet.** Re-verify
-  each in code before fixing; until today these lived only in a session note.
+- **The KPI audit of 2026-10-02 — low priority by owner decision (2026-10-04):** fine as long as
+  the figures point the right way. Re-verify each in code before fixing; until 2026-10-04 these
+  lived only in a session note.
   - **Monthly-returns heatmap:** month cells drop the move across each month boundary (2026 chained
     to +24.9% against a YTD of +32.2%), and the running month is not marked partial.
   - **Tax tab:** withholding shows 0.00 on estimated rows.
