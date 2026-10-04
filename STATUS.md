@@ -5,8 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** **Deploy hardening, live on `9e57366` since 15:17 Berlin (API-verified: real data, 34
-positions, the 15:00 market-data row written just before the move survived it):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-04.** **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -520,28 +519,11 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **The deploy hardening of 2026-10-04 needs the owner on the VPS around its push.** Three
-  changes ship together: the database moves to a directory mount, the rollback restores the DB
-  snapshot after a migrating failure, and `deploy.sh` re-checks the sync slots right before the
-  restart (docs/deployment.md has all three).
-  - *Status 2026-10-04 15:20 Berlin:* pushed and live. The `/root` refresh was preloaded as a
-    one-shot background job (`/root/finish-hardening.sh`, log `/root/finish-hardening.log`): it
-    refreshes both copies and takes a manual backup only after a new `SUCCESS` line with the
-    link in place. Read that log to close this item; then delete the script.
-  - *Before the push (done; the VPS copy was the 2026-08-19 version, code-identical):* `/root/auto-deploy.sh` must be the copy that fast-forwards before running
-    `deploy.sh` (`sha256sum /root/auto-deploy.sh` against `ops/auto-deploy.sh` at `98bf681`). If
-    it is older, the move deploy fails closed (the guard refuses an empty database) and needs one
-    manual `./deploy.sh`.
-  - *After it deploys:* the log shows `db-layout: moved`, `backend/portfolio.db` is a link to
-    `data/portfolio.db`, `/health` and the dashboard are fine. Then refresh **both**
-    `/root/auto-deploy.sh` and `/root/backup-db.sh` from `ops/` by atomic rename (copy to
-    `.new`, `chmod 755`, `mv -f`) and run `/root/backup-db.sh manual` once. Until the refresh the
-    rollback cannot restore (the old backup copy does not report its snapshot) and the backups go
-    through the link. Optional: `>/dev/null` on the daily crontab line (the script now prints
-    two paths), and `DATABASE_URL` in `backend/.env` set to `sqlite+aiosqlite:////app/data/portfolio.db`
-    (compose already overrides it).
-  - Leave the `backend/portfolio.db` link in place while a rollback past this commit is possible.
-    `/root/ibkr-backups/failed-deploys/` is never pruned; clear it by hand if it ever fills.
+- **Leftovers of the 2026-10-04 database move (optional, harmless).** `rm
+  /root/finish-hardening.sh /root/finish-hardening.log` and the two set-aside sidecars
+  `backend/data/portfolio.db-{wal,shm}.pre-switchover-20261004T131635Z` (the `-wal` was 0 bytes).
+  Keep the `backend/portfolio.db -> data/portfolio.db` link while a rollback past `9e57366` is
+  conceivable. `/root/ibkr-backups/failed-deploys/` is never pruned, should it ever fill.
 
 - **Upload the finpension export when it has new transactions in it — no pricing deadline
   any more.** *Pending as of 2026-10-04:* new transactions exist, but the cash is uninvested until
@@ -1026,15 +1008,13 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The deploy hardening (2026-10-04), from its first deploy on.** The DB move: see *Needs a
-  human* for the checks. The restart re-check: `/root/auto-deploy.log` gains `Clear of every sync
-  slot` or `Holding the restart: …` lines; the first deploy has only the margin check (the old
-  backend lacks `sync_in_progress`), every later one also waits out a running sync. Still to size:
-  whether the 45-minute bound (`DEPLOY_SLOT_WAIT_MAX_MIN`) covers the 18:00 full sync's real
-  runtime in `sync_runs`. The rollback restore only shows when a migrating deploy fails; after the
-  `/root` refresh, every deploy logs `db snapshot of … is …` — a `NOTE: … did not report its
-  snapshot` means `/root/backup-db.sh` is still the old copy. The symlink case of the restore is
-  rehearsed on CI only (Windows here cannot make symlinks).
+- **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
+  re-check waits out a running sync from the second deploy on (the first had only the margin;
+  it logged `Clear of every sync slot`); still to size: whether the 45-minute bound
+  (`DEPLOY_SLOT_WAIT_MAX_MIN`) covers the 18:00 full sync's real runtime in `sync_runs`. The
+  rollback restore shows only when a migrating deploy fails; every deploy should now log `db
+  snapshot of … is …` — a `NOTE: … did not report its snapshot` means `/root/backup-db.sh` went
+  stale again. The symlink case of the restore is rehearsed on CI only.
 
 - **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
   replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on

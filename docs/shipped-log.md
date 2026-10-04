@@ -15,6 +15,22 @@ The 2026-10-03 18:00 Berlin `full_sync` (16:08 UTC, success, no warnings) carrie
 `cash_source: mixed` — IBKR's measured cash beside the derived 3a balance, the documented value —
 and the breakdown's announced payments (2330, NXPI, HPE) carry `pay_date_source: accrual`.
 
+## Shipped 2026-10-04 — the database is a directory mount; rollback restores; restart re-checks slots
+
+Three changes built in parallel worktrees and merged (`4454a53`, CI fix `9e57366`): the DB moved
+to `backend/data/` behind `./data:/app/data` (`ops/db-layout.sh` performs the move inside
+`deploy.sh` and leaves a link at the old path; `app/db_guard.py` refuses a missing or empty
+database), the auto-deploy rollback restores the pre-deploy snapshot when the failed range carried
+a migration that ran, and `deploy.sh` re-checks the sync slots after the build. The first CI run
+failed on a test-only gap: auto-deploy uses `BACKUP_SCRIPT` only when it is executable, git stores
+the repo copy as 100644, and Windows' bash treats every `.sh` as executable — so the rehearsal
+passed locally and not on Linux. **Verified on production:** live 15:17 Berlin; the deploy log reads
+`moved portfolio.db to data/portfolio.db; portfolio.db is now a link to it` and `Clear of every
+sync slot`; the API serves the full book; the 15:00 market-data row written minutes before the move
+survived it. The `/root` copies were refreshed by a preloaded one-shot job (hashes equal to
+`ops/`), and a manual backup through the new path checkpointed `/app/data/portfolio.db` and
+verified.
+
 ## Shipped 2026-10-04 — the Swisscanto 3a funds look through via their own index
 
 Neither tranche publishes a basket; both factsheets name the index (World ex CH: MSCI World ex
