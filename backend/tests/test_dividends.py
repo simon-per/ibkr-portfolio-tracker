@@ -279,3 +279,121 @@ async def test_an_upsert_still_updates_its_own_source_in_place():
     finally:
         await session.close()
         await engine.dispose()
+
+
+# ---- IBKR's stated rate and kind, parsed off the cash line (2026-10-04) -------------
+# Real descriptions from a statement, ISINs replaced.
+
+from app.services.dividend_service import parse_ibkr_dividend_description  # noqa: E402
+
+
+def test_the_rate_currency_and_kind_are_read_off_a_real_cash_line():
+    assert parse_ibkr_dividend_description(
+        "VT(US0000000000) CASH DIVIDEND USD 0.4084 PER SHARE (Ordinary Dividend)"
+    ) == ("USD", Decimal("0.4084"), "ordinary")
+    assert parse_ibkr_dividend_description(
+        "000660.KS(KR0000000000) CASH DIVIDEND KRW 375 PER SHARE (Ordinary Dividend)"
+    ) == ("KRW", Decimal("375"), "ordinary")
+    assert parse_ibkr_dividend_description(
+        "XYZ(US0000000000) CASH DIVIDEND USD 1.50 PER SHARE (Special Dividend)"
+    )[2] == "special"
+    assert parse_ibkr_dividend_description(
+        "XYZ(US0000000000) CASH DIVIDEND USD 0.10 PER SHARE (Return of Capital)"
+    )[2] == "return_of_capital"
+
+
+def test_an_unparseable_description_costs_the_figure_never_the_row():
+    assert parse_ibkr_dividend_description(None) == (None, None, None)
+    assert parse_ibkr_dividend_description("AAA dividend") == (None, None, None)
+    # Rate without a kind label, and the ISIN's parenthesis is never taken for a kind.
+    assert parse_ibkr_dividend_description(
+        "AAA(US0000000000) CASH DIVIDEND EUR 0.25 PER SHARE"
+    ) == ("EUR", Decimal("0.25"), None)
+
+
+def _described(ct_type, amount, description, pay_date=date(2026, 5, 2)):
+    ct = _ct(ct_type, amount, pay_date=pay_date)
+    ct["description"] = description
+    ct["ib_key"] = f"{ct_type}-{amount}-{description}"
+    return ct
+
+
+@pytest.mark.asyncio
+async def test_the_ingest_stores_ibkrs_rate_and_kind_on_the_row():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        line = "AAA(US0000000001) CASH DIVIDEND EUR 0.25 PER SHARE"
+        await svc.sync_dividends_from_cash_transactions([
+            _described("DIVIDEND", 25, line + " (Ordinary Dividend)"),
+            _described("WHTAX", -3.75, line + " - US TAX"),
+        ], {"100": 1})
+        await session.commit()
+        (dp,) = await svc.repo.get_by_security(1)
+        assert dp.per_share_native == Decimal("0.25")
+        assert dp.dividend_kind == "ordinary"
+        assert dp.amount_per_share is None     # never the Yahoo-series marker
+        assert dp.withholding_tax_eur == Decimal("3.75")
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_special_paid_beside_an_ordinary_dividend_keeps_the_ordinary_rate():
+    """Two cash lines, one group: the row's rate is the one the schedule repeats."""
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        await svc.sync_dividends_from_cash_transactions([
+            _described("DIVIDEND", 25,
+                       "AAA(US0000000001) CASH DIVIDEND EUR 0.25 PER SHARE (Ordinary Dividend)"),
+            _described("DIVIDEND", 100,
+                       "AAA(US0000000001) CASH DIVIDEND EUR 1.00 PER SHARE (Special Dividend)"),
+        ], {"100": 1})
+        await session.commit()
+        (dp,) = await svc.repo.get_by_security(1)
+        assert dp.gross_amount_eur == Decimal("125")    # the money is all real
+        assert dp.per_share_native == Decimal("0.25")
+        assert dp.dividend_kind == "ordinary"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_reversal_cancels_its_rate_rather_than_doubling_it():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        line = "AAA(US0000000001) CASH DIVIDEND EUR 0.25 PER SHARE (Ordinary Dividend)"
+        await svc.sync_dividends_from_cash_transactions([
+            _described("DIVIDEND", 25, line),
+            _described("DIVIDEND", -25, line),
+            _described("DIVIDEND", 25, line + " "),
+        ], {"100": 1})
+        await session.commit()
+        (dp,) = await svc.repo.get_by_security(1)
+        assert dp.gross_amount_eur == Decimal("25")
+        assert dp.per_share_native == Decimal("0.25")
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_rate_in_another_currency_than_the_payment_is_dropped():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        await svc.sync_dividends_from_cash_transactions([
+            _described("DIVIDEND", 25,
+                       "AAA(US0000000001) CASH DIVIDEND USD 0.27 PER SHARE (Ordinary Dividend)"),
+        ], {"100": 1})
+        await session.commit()
+        (dp,) = await svc.repo.get_by_security(1)
+        assert dp.per_share_native is None
+        assert dp.dividend_kind == "ordinary"
+    finally:
+        await session.close()
+        await engine.dispose()

@@ -641,7 +641,9 @@ async def _payer_owed_a_dividend(session):
         await _seed_per_share(session, on)
     # One IBKR row, so an era boundary exists and the June estimate is on the far
     # side of it: the splice drops it from income, which is what left it in nothing.
-    await _seed(session, date(2026, 5, 20), "40", source="ibkr")
+    # 15% withheld, as IBKR did on every US payer on this account — since 2026-10-04
+    # the owed payment deducts IBKR's measured rate, not the WHT setting.
+    await _seed(session, date(2026, 5, 20), "34", source="ibkr", gross="40", wht="6")
 
 
 @pytest.mark.asyncio
@@ -666,7 +668,8 @@ async def test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it(
         off = await svc.get_dividend_breakdown(as_of=AS_OF, include_forecast=False)
 
         owed = next(u for u in on["upcoming"] if u["date"] == "2026-06-15")
-        assert owed["pending"] is True and owed["net_eur"] == 85  # gross 100 x 0.85
+        # gross 100 x (1 - 6/40 withheld by IBKR)
+        assert owed["pending"] is True and owed["net_eur"] == 85
 
         on_pt = next(p for p in on["ttm_series"] if p["month"] == "2026-06")
         prev = next(p for p in on["ttm_series"] if p["month"] == "2026-05")

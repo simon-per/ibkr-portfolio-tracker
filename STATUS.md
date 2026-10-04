@@ -5,7 +5,14 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-03.** Newest: **the crypto book survives a coin without a price.** With the
+**Last updated: 2026-10-04.** Newest: **the dividend forecast is IBKR-first and sized per payment**
+(not yet pushed when written — see *Watch after the next deploy*). IBKR's paid amounts never reached the
+forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
+so funds lost their big December and raisers trailed by up to two years (NVDA ~0.01 a quarter against
+0.25 paid). Now IBKR's stated rate (parsed off the cash line), its accruals and its measured
+withholding come first; a steady payer repeats its latest payment, a varying one repeats the same
+payment a year earlier; specials are never repeated; no assumed growth. docs/dividends.md, *Sizing*.
+Before that: **the crypto book survives a coin without a price.** With the
 CoinGecko key in, one coin (BNB) went unmatched — CoinStats' id is not CoinGecko's and dozens of
 tokens share the symbol — and the book's "one unknown makes the day unknown" rule blanked every
 total, tile, weight and chart point. Now an ambiguous symbol is matched by CoinStats' own price
@@ -995,6 +1002,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The IBKR-first dividend forecast** (migration `a1d6f2b4c8e0` adds `per_share_native` and
+  `dividend_kind` to `dividend_payments`). After the deploy and the next full sync, on
+  `/api/dividends/breakdown`: most rows' `forecast_withholding_source` reads `ibkr_measured` or
+  `ibkr_country` (US payers 15%), and `forward_yield.basis` is no longer `gross_estimate`; NVDA
+  projects 0.25 a share a quarter, not ~0.01; TSMC's quarters after its accrual repeat the declared
+  7.00 a share at 21%; VT's projected December is larger than its March (`as last yr`); every
+  `upcoming[]` entry carries `amount_source`. The stored accruals' withholding is negative until the
+  next sync rewrites them (the sign fix) — the ladder reads `abs()`, so the rate is right either way.
+  Then run the replay (*Worth doing next*) and move this to docs/shipped-log.md.
+
 - **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
   BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
   starts on 2026-01-01, `reconstructed` ends on 2026-10-02 (the 3 Oct basket stands in, by owner
@@ -1305,6 +1322,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   on-time sync look early.
 
 ## Worth doing next
+
+- **Run the dividend-forecast replay on production** once the IBKR-first forecast is deployed:
+  `docker exec backend-portfolio-backend-1 python -m app.cli.backtest_dividend_forecast --per-security` (read-only,
+  offline). It scores the new rule (`auto`) against the old flat median (`median8`) and three
+  alternatives on this book's own history, and lists every special dividend it finds. Only the server
+  has the rows; this machine's database has none. If `auto` does not beat `median8` on absolute bias,
+  the steady/varying thresholds in `dividend_forecast.py` are what to revisit. Still unforecast after
+  it: IQQ (one payout on record), and anything EODHD's announced amounts would add.
 
 - **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
   longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
@@ -1641,6 +1666,13 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-04 (dividend forecast reads low)** — "IBKR must be the source of truth; make the
+  forecast better": found IBKR's amounts and withholding never reached the forecast (a skip placed
+  before the branch that read them; its only test used a shape production lacks) and the flat median
+  lost seasonality and raises. Owner chose "same payment one year later", carry paid raises, no
+  assumed growth. Built IBKR-first sizing, a withholding ladder, special detection, a replay CLI;
+  fixed the accrual tax sign. Backend 1767 green, frontend 786 green on Node 22.
+
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
   ex-date survived beside an accrual paying a month later. Now matched on ex-date through one
@@ -1665,8 +1697,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   CHF flow was round-tripped through EUR on a CHF base. Fixed both — `cash_flow_in_base` for
   the four readers, and a published quote now overwrites a stand-in. Verified live on `dd78f97`.
 
-- **2026-10-01 (withdrawal counted twice)** — a withdrawal stored under its settle date was
-  debited a second time after IBKR's measured balance had already taken it out, so Total Value
-  read low and the benchmark spiked for two days. Deposits and withdrawals are now dated by
-  `reportDate`. Three regression tests fail on the old order. Backend suite green apart from one
-  dividend smoke assertion that fails before the change too.

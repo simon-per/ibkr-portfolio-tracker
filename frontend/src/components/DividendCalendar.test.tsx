@@ -29,6 +29,7 @@ function payment(over: Partial<DividendUpcomingPayment> = {}): DividendUpcomingP
     net_eur: 12.5,
     basis: 'net',
     pay_date_source: 'measured_lag',
+    amount_source: 'latest_payment',
     pending: false,
     ...over,
   }

@@ -304,10 +304,16 @@ non-payer, and **only 15 of 36 held securities could be forecast** — TSMC, Sam
 IBKR under its pay date, weeks apart — which halves the apparent gap: ASML's quarterly schedule read as
 74 days, 5 payouts a year instead of 4. Deduplication cannot fix it, because Mastercard's ex-to-pay lag
 of 29 days exceeds a monthly payer's whole cycle. Where yfinance rows exist (`amount_per_share is not
-null`, ≥2 of them) they alone define the schedule; IBKR rows still supply the net amounts.
+null`, ≥2 of them) they alone define the schedule — the **dates**. The **amounts** come from IBKR
+wherever IBKR paid the dividend; see *Sizing* below. Until 2026-10-04 this line said "IBKR rows still
+supply the net amounts" and they did not: `_forecast_inputs` skipped every row without
+`amount_per_share` for such a security *before* the branch that would have read it, so every payer was
+sized from Yahoo's gross × the WHT setting (production: `forward_yield.basis` `gross_estimate` on all
+22 payers, NVDA projected at ~0.01 a quarter after IBKR had paid it 0.25). The only test of the `net`
+branch seeded a security with IBKR rows and no Yahoo series — a shape production never has.
 
-**The cost of that rule, and the guards added 2026-07-30:** the chosen series is trusted absolutely,
-*including over the IBKR rows it then discards*. So two bad estimate rows can define a schedule outright
+**The cost of that rule, and the guards added 2026-07-30:** the chosen series is trusted absolutely
+for the schedule, *including over the IBKR rows that disagree with it*. So two bad estimate rows can define a schedule outright
 — which is exactly what SBI did (see *A wrong mapping poisons dividends too* below). The rule stays,
 because the alternative resurrects the double-count; what changed is that a thin or suspect inference now
 declares itself. `forecast_samples` and `forecast_cadence_days` ride on each breakdown row (badged at
@@ -334,12 +340,12 @@ that must keep reporting full coverage.
 because the distance to a future horizon is a property of the question. Otherwise asking about 2027 made
 every payer look stopped and returned an empty year.
 
-`forecast_basis` reports which amount was used: `net` when a dividend has actually been received (net of
-withholding), `gross_estimate` for estimated net derived from yfinance's gross per-share.
-The latter uses the application setting `dividend_forecast_net_factor`, defaulting to
-`DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`: an assumed 15% deduction, not measured
-withholding. The Dividends tab exposes that assumption as **WHT 15%**, and the response carries
-`forecast_withholding_pct` so every caption states the exact percentage used for its numbers.
+`forecast_basis` reports whether the withholding deducted was **measured** (`net`) or **assumed**
+(`gross_estimate`) — see *The withholding ladder* below. Only the last rung, the application setting
+`dividend_forecast_net_factor` (default `DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`, an assumed
+15%), is `gross_estimate`. The Dividends tab exposes that setting as **WHT 15%**, and the response
+carries `forecast_withholding_pct` (the setting) at the top level and `forecast_withholding_pct` /
+`forecast_withholding_source` on each row (the rate that row actually deducts).
 Changing it recomputes the read-time forecast; it does not rewrite a dividend row or call Yahoo.
 **"Actually received" means an IBKR
 row.** A `yfinance_estimate` row with
@@ -360,9 +366,9 @@ under that preference (their `net_ps` was `None`) and now enter the median at
 on, and a future year is forecast in full rather than from today.
 
 **One gross-to-estimated-net helper, two read paths.** `_estimated_net_from_gross` applies the
-factor passed from the settings repository when `_forecast_inputs` selects its gross fallback and
-when an unpaid Yahoo estimate is
-emitted directly to the calendar. Both apply it before display-currency conversion and rounding;
+security's rate from the withholding ladder (the settings repository's factor only on its `assumed`
+rung, since 2026-10-04) when `_forecast_inputs` turns gross into net and when an unpaid Yahoo
+estimate is emitted directly to the calendar. Both apply it before display-currency conversion and rounding;
 missing per-share inputs stay absent. Stored gross and historical estimates remain unchanged,
 as do shared income readers. Repeated reads always start from the original gross, so the factor
 cannot compound. `GET /api/settings` publishes the percentage and authenticated
@@ -382,12 +388,94 @@ earnings tables carry no dividend fields, and the only announced dividends anywh
 accruals below, which reach one payment ahead and only once the portal section is on.
 `dividend_forecast.py` is a
 pure module (no DB, no network, fast unit tests): cadence is the **median gap** between recent
-payments, the amount the **median** of recent payments scaled to the current holding — median so one
-special dividend doesn't inflate every projection. It refuses rather than guesses: nothing held, fewer
-than two payments, a gap outside 20–400 days, or a payer that has already skipped ~2.5 cycles all
-project nothing. IBKR rows carry no `amount_per_share` and a `0` `shares_held` sentinel, so the
-scaling falls back to shares held at the pay date, then to the unscaled amount.
+ex-dates; the amount is chosen per projected payment by the rules in *Sizing* below, scaled to the
+current holding. It refuses rather than guesses: nothing held, fewer than two payments, a gap outside
+20–400 days, or a payer that has already skipped ~2.5 cycles all project nothing.
 Tests: `tests/test_dividend_forecast.py`, `tests/test_dividend_breakdown.py`.
+
+### Sizing — IBKR first, then the same payment a year later
+
+Until 2026-10-04 every projected payment was **one flat median of the last 8 per-share payments**,
+and that read low twice over: it averaged away a fund's large December (VT, QQQM, SOXQ and GRID —
+about a third of the book — pay their biggest quarter then), and it trailed every raise by up to two
+years (TSMC had declared 7.00 a share and the quarters after it projected the old level; NVDA, paid
+0.25, projected ~0.01). The owner chose the replacement on 2026-10-04.
+
+**IBKR is the source of truth for the amount.** `_forecast_inputs` pairs each IBKR payment with the
+Yahoo row of the same dividend through `match_estimates_to_ibkr` (the splice's and the lag's pairing —
+no third matcher) and sizes that dividend at IBKR's figure:
+
+1. the **stated rate** off the cash line's description, `… CASH DIVIDEND USD 0.25 PER SHARE (Ordinary
+   Dividend)` — `parse_ibkr_dividend_description`, stored as `dividend_payments.per_share_native` with
+   the kind in `dividend_kind` on ingest. Read off a real statement, all 15 dividend lines parse. Rows
+   ingested before then fill in as statements re-deliver them;
+2. else **gross over the shares held on the ex-date** (IBKR's `dividend_date_pairs` gives the ex-date),
+   turned back into the payment's currency at the pay date's cached rate.
+
+Yahoo's `amount_per_share` sizes only what IBKR never paid — the history before the position was held.
+**A split guard:** an IBKR rate more than 1.5× away from Yahoo's for the same dividend keeps Yahoo's,
+because Yahoo restates history for a split and IBKR's cash line keeps the pre-split rate. An **unpaired**
+IBKR payment joins as amount-only evidence (`HistPayment.cadence=False`): it sizes, it never bends
+the schedule. An **open accrual** is the newest amount of all (`gross / quantity`), replacing the Yahoo
+row of the same ex-date or joining as amount-only evidence — so a declared raise carries into every
+later projection the day IBKR lists it. Every amount converts at **one** rate per currency (the newest
+cached), so an exchange-rate move cannot make a level payer look varying.
+
+**Steady or varying, decided from the payments at read time — nothing is stored or hand-classified**
+(`dividend_forecast.is_steady`). Over the last ≤ 8 regular payments within ~2 years: a *drop* is a
+payment more than 10% below the one before it. **Steady** = no drop, or exactly one drop after which
+nothing climbs back above where it fell from (a cut). That is a company's shape — level, a raise now
+and then, rarely a cut. A payer whose payments dip and come back (a fund's small March after its big
+December, SK Hynix's quarters around its year-end, ASML's interims around its final) is **varying**.
+
+- **Steady → `latest_payment`:** every projection is the newest regular payment, which carries a raise
+  (or cut) already paid or declared.
+- **Varying → `same_payment_last_year`:** each projection repeats the payment one year before it (two
+  years for a projection more than a year out, so it lands on a real payment); with no payment there,
+  the newest regular one.
+- **No assumed growth.** Only a raise IBKR has paid or declared moves the amount. An unannounced raise
+  would be money no company has promised.
+
+**Special dividends** (`special_payments`) are never a basis. IBKR's label wins (`special`, `bonus`; a
+return of capital stays regular — funds pay it on schedule). Without one, a payment is special when it
+is > 2× the median of its neighbours within a year, nothing at least half its size sits a year either
+side, AND something shows it was a one-off: it sat off the schedule (within half a cycle of another
+payment), or the same payment a year apart *exists and was small* and the next payment fell back.
+Those last conditions are not decoration: NVDA's step to 0.25 passes the first two tests exactly as a
+special would — only what came after can tell them apart, so the newest on-schedule payment is never
+called special by inference. And without a year-apart payment to compare, a fund's first December in
+the history would look special and read every winter-starting fund low, so it stays regular.
+
+**Each projected payment says how it was sized:** `upcoming[].amount_source` and the row's
+`forecast_method` — `announced` | `latest_payment` | `same_payment_last_year` | `estimate` (Yahoo has
+recorded it, unpaid). The table shows it under the amount (*latest* / *as last yr* / *declared*), with
+the withholding beside it, on the surface.
+
+**The withholding ladder** (`_withholding_rates`) — one rate per security, IBKR first:
+
+1. `accrual` — the open accrual's tax over its gross, the rate IBKR will apply next;
+2. `ibkr_measured` — the median rate on that security's IBKR payments;
+3. `ibkr_country` — the median over IBKR payments from the same domicile (ISIN prefix; every US payer
+   here had exactly 15% withheld);
+4. `assumed` — the WHT setting, labelled `gross_estimate`.
+
+Median on rungs 2–3 because a withholding posted on another day leaves one row at 0%. The same rate
+applies to the forward projections, the overdue inference and the pending-estimate tail, so an
+announced accrual re-prices every later projection of its security — pinned in
+`test_pending_estimate_hands_off_to_accrual_then_actual_cash`.
+
+**`<OpenDividendAccrual>` sends `tax` POSITIVE** (a real statement, 2026-10-04: TSMC gross 259, tax
+54.39, net 204.61). The ingest flipped it negative until then; it now stores `abs(tax)`, and the ladder
+reads `abs()` so rows written before the fix still give the right rate.
+
+**Measure, don't argue: `python -m app.cli.backtest_dividend_forecast [--per-security] [--all]`.**
+Read-only and offline. For every held security with a Yahoo per-share series it replays month-end by
+month-end: the forecaster sees only payments on or before `as_of`, projects 12 months per share under
+every rule in `SIZING_METHODS` (`auto` is production; `median8` is the old rule; `mean4`, `latest`,
+`same_payment_last_year` the alternatives), and is scored against what was actually paid. Prints
+mean/median bias and absolute error per method, and lists every payment the special rule flags. The
+local database has no dividend rows; run it on the VPS or against a snapshot (and delete the snapshot).
+Every method runs through `project_dividends` — the CLI holds no copy of the rules.
 
 **One projection pass, sliced per consumer.** `_forecast_inputs()` assembles the cadence/per-share
 inputs once, and `project_dividends()` then runs a single wide horizon (to the end of *next* calendar

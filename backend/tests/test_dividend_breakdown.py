@@ -41,6 +41,14 @@ async def _make_session():
     return engine, session
 
 
+async def _domicile(session, security_id, isin):
+    """Move a security to another country. The withholding ladder's third rung reads
+    the ISIN prefix, so two `US…` fixtures share a measured rate the moment either is
+    paid through IBKR — which is what a test of the ASSUMED rung must avoid."""
+    (await session.get(Security, security_id)).isin = isin
+    await session.flush()
+
+
 async def _seed_payment(session, security_id, on_date, net, source, gross=None, wht="0"):
     await DividendRepository(session).upsert_payment({
         "security_id": security_id,
@@ -745,9 +753,12 @@ async def test_yield_on_cost_is_not_dragged_down_by_adding_to_a_holding():
     """
     engine, session = await _make_session()
     try:
-        # A tenth of the position for most of the year, the rest bought last month.
+        # A tenth of the position for most of the year, the rest bought last month —
+        # AFTER the April payment. Until 2026-10-04 this lot opened on 04-01, so the
+        # April payment of 10.00 landed on ten shares: a 90% cut, which the old flat
+        # median hid and the steady-payer rule (rightly) carries forward.
         session.add(_lot(1, date(2025, 6, 1), "1"))          # cost 10
-        session.add(_lot(1, date(2026, 4, 1), "9"))          # cost 90 -> 100 total
+        session.add(_lot(1, date(2026, 4, 20), "9"))         # cost 90 -> 100 total
         session.add(_price(1, "20"))
         await session.flush()
         for d in QUARTERLY:
@@ -858,6 +869,8 @@ async def test_the_forward_yield_declares_a_gross_estimate_contribution():
         session.add(_lot(2, date(2026, 4, 20), "100"))     # bought after its history
         session.add(_price(1, "20"))
         session.add(_price(2, "20"))
+        # Domiciled where IBKR has paid nothing, so no rung measures BBB's withholding.
+        await _domicile(session, 2, "JP0000000002")
         await session.flush()
         for d in QUARTERLY:
             await _seed_payment(session, 1, d, "10.00", "ibkr")
@@ -981,6 +994,8 @@ async def test_gross_derived_forecasts_keep_their_provenance_and_ibkr_net_is_unc
         session.add(_lot(2, date(2025, 1, 2), "10"))   # BBB: the broker's own rows
         session.add(_price(1, "20"))                    # priced, so a yield exists
         session.add(_price(2, "20"))
+        # AAA in a country IBKR has paid nothing from: only the assumption is left.
+        await _domicile(session, 1, "JP0000000001")
         await session.flush()
         for d in (date(2025, 7, 15), date(2025, 10, 15),
                   date(2026, 1, 15), date(2026, 4, 15)):
@@ -1005,6 +1020,225 @@ async def test_gross_derived_forecasts_keep_their_provenance_and_ibkr_net_is_unc
         assert rows["BBB"]["forecast_net_eur"] == 4.25 * rows["BBB"]["forecast_payouts"]
         # Equal amounts still carry different provenance.
         assert out["forward_yield"]["basis"] == "mixed"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# IBKR is the source of truth for the forecast's amounts and withholding (2026-10-04).
+# Until then every security with a Yahoo per-share series had its IBKR rows dropped
+# before the line that read them, so all 22 payers on production were sized from
+# Yahoo's gross minus an assumed rate — NVDA, paid at 0.25 a quarter, projected ~0.01.
+# The old tests only ever seeded IBKR rows for a security with NO Yahoo series, a
+# shape production never has; these seed both.
+# ---------------------------------------------------------------------------
+
+
+async def _yahoo_series(session, security_id, dates, per_share):
+    for d in dates:
+        await DividendRepository(session).upsert_payment({
+            "security_id": security_id, "ex_date": d, "pay_date": d, "currency": "EUR",
+            "amount_per_share": Decimal(per_share), "shares_held": Decimal("0"),
+            "gross_amount_eur": Decimal("0"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("0"), "source": "yfinance_estimate",
+        })
+
+
+async def _ibkr_paid(session, security_id, pay, gross, wht, per_share=None, kind=None):
+    await DividendRepository(session).upsert_payment({
+        "security_id": security_id, "ex_date": pay, "pay_date": pay, "currency": "EUR",
+        "shares_held": Decimal("0"), "gross_amount_eur": Decimal(gross),
+        "withholding_tax_eur": Decimal(wht),
+        "net_amount_eur": Decimal(gross) - Decimal(wht), "source": "ibkr",
+        "per_share_native": Decimal(per_share) if per_share is not None else None,
+        "dividend_kind": kind,
+    })
+
+
+@pytest.mark.asyncio
+async def test_a_security_with_both_sources_is_sized_and_taxed_from_ibkr():
+    """
+    Yahoo says 0.50 a share; IBKR paid 0.60 a share (its cash line's own rate) with 15%
+    withheld. The forecast takes IBKR's amount and IBKR's withholding — the real shape
+    of every payer on this account, and the one no test covered.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        # Paid ~3 weeks after each ex-date, 10 shares x 0.60 = 6.00 gross, 0.90 tax.
+        for d in QUARTERLY:
+            await _ibkr_paid(session, 1, d + timedelta(days=20), "6.00", "0.90",
+                             per_share="0.60", kind="ordinary")
+        await session.commit()
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        row = out["securities"][0]
+        assert row["forecast_basis"] == "net"
+        assert row["forecast_withholding_source"] == "ibkr_measured"
+        assert row["forecast_withholding_pct"] == 15.0
+        assert row["forecast_method"] == "latest_payment"
+        # 0.60 x 10 shares x 0.85 per quarter
+        projected = [u for u in out["upcoming"] if not u["pending"]]
+        assert projected and {u["net_eur"] for u in projected} == {5.10}
+        assert {u["amount_source"] for u in projected} == {"latest_payment"}
+        assert out["forward_yield"]["basis"] == "net"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_without_a_stated_rate_ibkr_is_sized_from_what_it_paid_on_the_ex_date_holding():
+    """A row ingested before the description was parsed: gross over the shares held."""
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        for d in QUARTERLY:
+            await _ibkr_paid(session, 1, d + timedelta(days=20), "7.00", "0")
+        await session.commit()
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        projected = [u for u in out["upcoming"] if not u["pending"]]
+        assert {u["net_eur"] for u in projected} == {7.00}     # 0.70 x 10, 0% withheld
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_ibkr_rate_far_from_yahoos_is_a_split_and_yahoo_keeps_the_unit():
+    """
+    Yahoo restates history for a split; IBKR's cash line keeps the rate it paid. A
+    pre-split 5.00 against a post-split 0.50 must not size today's shares ten times
+    over — the money is the same, only the unit differs.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        for d in QUARTERLY:
+            await _ibkr_paid(session, 1, d + timedelta(days=20), "5.00", "0",
+                             per_share="5.00", kind="ordinary")
+        await session.commit()
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        projected = [u for u in out["upcoming"] if not u["pending"]]
+        assert {u["net_eur"] for u in projected} == {5.00}     # 0.50 x 10
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_payer_ibkr_has_not_paid_takes_its_countrys_measured_rate():
+    """
+    BBB has only Yahoo history; AAA, also US-domiciled, was paid through IBKR at 15%.
+    BBB's projection deducts 15% measured, not the WHT setting.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_lot(2, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        session.add(_price(2, "20"))
+        await session.flush()
+        for d in QUARTERLY:
+            await _seed_payment(session, 1, d, "4.25", "ibkr", gross="5.00", wht="0.75")
+        await _yahoo_series(session, 2, QUARTERLY, "1.00")
+        await session.commit()
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        rows = {r["symbol"]: r for r in out["securities"]}
+        assert rows["BBB"]["forecast_withholding_source"] == "ibkr_country"
+        assert rows["BBB"]["forecast_withholding_pct"] == 15.0
+        assert rows["BBB"]["forecast_basis"] == "net"
+        bbb = [u for u in out["upcoming"] if u["symbol"] == "BBB" and not u["pending"]]
+        assert {u["net_eur"] for u in bbb} == {8.50}           # 1.00 x 10 x 0.85
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_open_accrual_sets_the_rate_and_carries_its_raise_forward():
+    """
+    TSMC's shape on 2026-10-04: IBKR accrued 7.00 a share at 21% withholding while the
+    history said less. The accrual itself is the next payment, and every projection
+    after it repeats the declared amount at the declared rate — not the old median.
+    """
+    from app.models.dividend_accrual import DividendAccrual
+
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        session.add(DividendAccrual(
+            security_id=1, ex_date=date(2026, 4, 15), pay_date=date(2026, 5, 10),
+            currency="EUR", quantity=Decimal("10"), gross_amount_eur=Decimal("7.00"),
+            withholding_tax_eur=Decimal("1.47"), net_amount_eur=Decimal("5.53"),
+            last_seen_at=date(2026, 4, 30),
+        ))
+        await session.commit()
+
+        out = await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        )
+        row = out["securities"][0]
+        assert row["forecast_withholding_source"] == "accrual"
+        assert row["forecast_withholding_pct"] == 21.0
+        upcoming = out["upcoming"]
+        announced = [u for u in upcoming if u["amount_source"] == "announced"]
+        assert [u["net_eur"] for u in announced] == [5.53]
+        later = [u for u in upcoming if u["amount_source"] != "announced"]
+        # 0.70 a share x 10 x 0.79, every later quarter
+        assert later and {u["net_eur"] for u in later} == {5.53}
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_accrual_stored_with_the_old_negative_tax_still_reads_its_rate():
+    """Rows written before the sign fix carry a negative withholding; abs() reads them."""
+    from app.models.dividend_accrual import DividendAccrual
+
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        session.add(DividendAccrual(
+            security_id=1, ex_date=date(2026, 4, 15), pay_date=date(2026, 5, 10),
+            currency="EUR", quantity=Decimal("10"), gross_amount_eur=Decimal("5.00"),
+            withholding_tax_eur=Decimal("-0.75"), net_amount_eur=Decimal("4.25"),
+            last_seen_at=date(2026, 4, 30),
+        ))
+        await session.commit()
+
+        row = (await DividendService(session).get_dividend_breakdown(
+            year=2026, include_forecast=True, as_of=AS_OF,
+        ))["securities"][0]
+        assert row["forecast_withholding_pct"] == 15.0
     finally:
         await session.close()
         await engine.dispose()

@@ -291,7 +291,10 @@ async def test_a_dividend_that_has_gone_ex_stays_visible_until_the_cash_arrives(
     entry = next(u for u in data["upcoming"] if u["ex_date"] == recent_ex.isoformat())
     assert entry["date"] == (recent_ex + timedelta(days=LAG)).isoformat()
     assert entry["pending"] is False      # the cash is not due yet
-    assert entry["basis"] == "gross_estimate"
+    # IBKR has paid this security before (2 of 15 withheld), so the owed payment
+    # deducts that measured rate — `net`, not the WHT setting's `gross_estimate`.
+    assert entry["basis"] == "net"
+    assert entry["net_eur"] == pytest.approx(15 * (1 - 2 / 15), abs=0.01)
 
     # Declared, gone ex, cash due inside the next twelve months: the most certain
     # money on the calendar, and until this change the only kind excluded from the
@@ -554,9 +557,15 @@ async def test_one_factor_sizes_both_gross_fallbacks_without_mutating_history(
         if factor is not None:
             await AppSettingsRepository(session).set_dividend_net_factor(factor)
         repo = DividendRepository(session)
-        # Establish the IBKR era without a matching payment for the recent ex-date.
+        # Establish the IBKR era without a matching payment for the recent ex-date —
+        # on an UNRELATED, US-domiciled security. On ASML itself (or any NL payer) the
+        # 9% IBKR withheld would be measured and outrank the setting under test.
+        session.add(Security(id=2, isin="US0378331005", symbol="AAPL", description="Apple",
+                             currency="USD", conid=200, asset_category="STK",
+                             exchange="NASDAQ"))
+        await session.flush()
         await repo.upsert_payment({
-            "security_id": 1, "ex_date": date(2025, 1, 10), "currency": "EUR",
+            "security_id": 2, "ex_date": date(2025, 1, 10), "currency": "EUR",
             "gross_amount_eur": Decimal("100"), "net_amount_eur": Decimal("91"),
             "withholding_tax_eur": Decimal("9"), "source": "ibkr",
         })
@@ -610,7 +619,8 @@ async def test_pending_estimate_hands_off_to_accrual_then_actual_cash(reported_n
         svc = DividendService(session)
         before = await _breakdown(session)
         entry = next(u for u in before["upcoming"] if u["ex_date"] == ex.isoformat())
-        assert (entry["net_eur"], entry["pending"]) == (85, True)
+        # Gross 100 less the 2-of-15 IBKR withheld on this security's earlier payments.
+        assert (entry["net_eur"], entry["pending"]) == (86.67, True)
 
         await svc.sync_dividend_accruals([{
             "conid": 100, "ex_date": ex, "pay_date": pay, "currency": "EUR",
@@ -624,15 +634,26 @@ async def test_pending_estimate_hands_off_to_accrual_then_actual_cash(reported_n
         assert entries[0]["pay_date_source"] == "accrual"
         assert accrued["total_net_eur"] == before["total_net_eur"]
         # The calendar entry is replaced one-for-one, so the bar it sits in moves by
-        # exactly the difference between the two amounts and by nothing else — the
-        # accrual is IBKR's own figure superseding our estimated net, which is the
-        # whole reason it outranks it. Realized income does not move at all.
+        # exactly the difference between the two amounts — the accrual is IBKR's own
+        # figure superseding our estimated net, which is the whole reason it outranks
+        # it. Realized income does not move at all.
+        #
+        # Every OTHER forecast month moves by exactly one thing (since 2026-10-04): the
+        # accrual's withholding (tax / gross) is now the top rung of the ladder, so the
+        # later projections are re-priced from the 2-of-15 IBKR withheld before to the
+        # rate it declared. Nothing else about them changes.
         moved = entries[0]["net_eur"] - entry["net_eur"]
+        rerate = (1 - abs(tax) / 100) / (1 - Decimal(2) / 15)
         for was, now in zip(before["months"], accrued["months"], strict=True):
             assert now["month"] == was["month"]
             assert now["actual"] == was["actual"]
-            delta = pytest.approx(moved if now["month"] == pay.strftime("%Y-%m") else 0)
-            assert now["forecast_total_eur"] - was["forecast_total_eur"] == delta
+            if now["month"] == pay.strftime("%Y-%m"):
+                assert now["forecast_total_eur"] - was["forecast_total_eur"] == \
+                    pytest.approx(moved)
+            else:
+                assert now["forecast_total_eur"] == pytest.approx(
+                    float(Decimal(str(was["forecast_total_eur"])) * rerate), abs=0.02
+                )
         for was, now in zip(before["ttm_series"], accrued["ttm_series"], strict=True):
             assert now["month"] == was["month"] and now["net_eur"] == was["net_eur"]
 

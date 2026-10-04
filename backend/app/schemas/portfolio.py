@@ -575,8 +575,8 @@ class DividendSecurityRow(BaseModel):
     # ex-date. It carried an ex-date under this name until the pay-date shift.
     next_pay_date: Optional[str] = None
     source: Optional[str] = None    # 'ibkr' | 'estimate' | 'mixed'; None = forecast-only
-    # 'net' = sized from dividends actually received; 'gross_estimate' = from
-    # yfinance's gross per-share converted to estimated net with the default factor.
+    # 'net' = the withholding deducted was MEASURED by IBKR (an accrual, this security's
+    # payments, or its country's); 'gross_estimate' = only the WHT setting was left.
     forecast_basis: Optional[str] = None
     # How thin the projection's inference is: how many dated payments defined the
     # schedule, and the median gap it settled on. Two samples is a guess with a
@@ -591,6 +591,21 @@ class DividendSecurityRow(BaseModel):
     # so. Same reason `forecast_samples` rides beside the cadence.
     forecast_lag_days: Optional[int] = None
     forecast_lag_samples: Optional[int] = None
+    # How the projected AMOUNTS were sized (dividend_forecast.py):
+    #   'announced'              — IBKR's open accrual: declared, not inferred.
+    #   'latest_payment'         — a steady payer: its newest regular payment, which
+    #                              carries any raise (or cut) already paid or declared.
+    #   'same_payment_last_year' — a varying payer (a fund's large December, a year-end
+    #                              payment): each payment repeats the one a year before.
+    #   'estimate'               — Yahoo has recorded it and it is not yet paid.
+    # None without a forecast.
+    forecast_method: Optional[str] = None
+    # The withholding the projection deducts, in percent, and where it came from:
+    # 'accrual' | 'ibkr_measured' | 'ibkr_country' | 'assumed' (the WHT setting).
+    # IBKR is the source of truth; only 'assumed' is not a measurement. None without
+    # a forecast.
+    forecast_withholding_pct: Optional[float] = None
+    forecast_withholding_source: Optional[str] = None
 
 
 class DividendDelta(BaseModel):
@@ -710,6 +725,9 @@ class DividendUpcomingPayment(BaseModel):
     #   'ex_date'      — nothing could be measured; this IS the ex-date, so the cash
     #                    lands some days later. Stated rather than implied.
     pay_date_source: str = "ex_date"
+    # How the AMOUNT was chosen, beside how the date was: 'announced' | 'latest_payment'
+    # | 'same_payment_last_year' | 'estimate' — see `forecast_method` on the table row.
+    amount_source: Optional[str] = None
     # The expected pay date has passed and no IBKR cash row has arrived: the dividend has
     # gone ex, the money is owed, and it is in none of the totals yet. Shown on the
     # calendar and deliberately nowhere else — see the service. Before this existed such

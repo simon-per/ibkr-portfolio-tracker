@@ -571,6 +571,19 @@ def test_the_shapes_that_broke_production_serialize(client):
         )
         if row["forecast_payouts"] > 0:
             assert row["forecast_samples"] and row["forecast_samples"] >= 2
+            # How the amount was sized and what withholding it deducts, and from
+            # which source — the reason the forecast can be trusted (or not) per row.
+            assert row["forecast_method"] in {
+                "announced", "latest_payment", "same_payment_last_year", "estimate",
+            }
+            assert row["forecast_withholding_source"] in {
+                "accrual", "ibkr_measured", "ibkr_country", "assumed",
+            }
+            assert isinstance(row["forecast_withholding_pct"], float)
+    for entry in bd["upcoming"]:
+        assert entry["amount_source"] in {
+            "announced", "latest_payment", "same_payment_last_year", "estimate",
+        }, entry
 
     tax = client.get(f"/api/tax/report?year={TODAY.year}").json()
     assert tax["holdings_snapshot_error"] is False

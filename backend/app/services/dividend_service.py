@@ -6,6 +6,7 @@ converts to EUR, and provides monthly summary data.
 import asyncio
 import logging
 import random
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
@@ -157,6 +158,52 @@ def match_estimates_to_ibkr(
                 pairs.append((est, row))
                 break
     return pairs
+
+
+# What IBKR writes on a dividend cash line, e.g.
+#   "VT(US9220427424) CASH DIVIDEND USD 0.4084 PER SHARE (Ordinary Dividend)"
+#   "000660.KS(KR7000660001) CASH DIVIDEND KRW 375 PER SHARE (Ordinary Dividend)"
+# Read off a real statement on 2026-10-04. The withholding line repeats the rate with
+# "- US TAX" instead of the kind, and is never parsed for either.
+_IBKR_PER_SHARE_RE = re.compile(
+    r"\b([A-Z]{3})\s+([0-9]+(?:\.[0-9]+)?)\s+PER\s+SHARE\b", re.IGNORECASE
+)
+_IBKR_KIND_RE = re.compile(r"\(([^()]*)\)\s*$")
+
+# The kinds a forecast must never repeat. A return of capital is left regular on
+# purpose: funds pay it inside their ordinary schedule.
+SPECIAL_DIVIDEND_KINDS = frozenset({"special", "bonus"})
+
+
+def parse_ibkr_dividend_description(
+    description: Optional[str],
+) -> Tuple[Optional[str], Optional[Decimal], Optional[str]]:
+    """
+    ``(currency, gross rate per share, kind)`` from an IBKR dividend cash line.
+
+    Any part that is not there is None — the cash amounts are real either way, so an
+    unparseable description costs only the per-share figure, never the row.
+    """
+    if not description:
+        return None, None, None
+    currency = rate = kind = None
+    m = _IBKR_PER_SHARE_RE.search(description)
+    if m:
+        currency, rate = m.group(1).upper(), Decimal(m.group(2))
+    k = _IBKR_KIND_RE.search(description)
+    if k:
+        text = k.group(1).lower()
+        if "ordinary" in text:
+            kind = "ordinary"
+        elif "special" in text:
+            kind = "special"
+        elif "bonus" in text:
+            kind = "bonus"
+        elif "return of capital" in text:
+            kind = "return_of_capital"
+        else:
+            kind = "other"
+    return currency, rate, kind
 
 
 def _summary_source(payments, ibkr_from) -> str:
@@ -533,7 +580,14 @@ class DividendService:
             return {"ibkr_dividends": 0, "message": "No dividend cash transactions"}
 
         conid_map = {str(k): v for k, v in conid_to_security_id.items()}
-        grouped: Dict = defaultdict(lambda: {"gross": Decimal("0"), "wht": Decimal("0"), "currency": None})
+        grouped: Dict = defaultdict(lambda: {
+            "gross": Decimal("0"), "wht": Decimal("0"), "currency": None,
+            # IBKR's stated gross rate per share, summed per kind, signed by the line —
+            # a reversal posts the same description with a negative amount and must
+            # cancel its rate rather than double it.
+            "rates": defaultdict(Decimal),
+            "rate_currencies": set(),
+        })
 
         for ct in cash_txns:
             security_id = conid_map.get(str(ct["conid"]))
@@ -544,6 +598,10 @@ class DividendService:
             g["currency"] = g["currency"] or ct.get("currency")
             if ct["type"] in ("DIVIDEND", "PAYMENTINLIEU"):
                 g["gross"] += ct["amount"]
+                rate_cur, rate, kind = parse_ibkr_dividend_description(ct.get("description"))
+                if rate is not None and ct["amount"]:
+                    g["rates"][kind] += rate if ct["amount"] > 0 else -rate
+                    g["rate_currencies"].add(rate_cur)
             elif ct["type"] == "WHTAX":
                 g["wht"] += ct["amount"]  # IBKR reports withholding as a negative amount
 
@@ -569,6 +627,17 @@ class DividendService:
                 continue
             net_eur = gross_eur - wht_eur
 
+            # One rate per row. An ordinary dividend and a special paid on the same day
+            # arrive as two cash lines in one group: the row's rate is the ordinary one,
+            # so the forecast repeats the schedule and never the special. A rate in a
+            # currency other than the payment's is not comparable, so it is dropped.
+            rates = {k: v for k, v in g["rates"].items() if v > 0}
+            # The None key is a rate whose line carried no "(… Dividend)" label.
+            kind = "ordinary" if "ordinary" in rates else next(iter(rates), None)
+            per_share_native = rates.get(kind)
+            if g["rate_currencies"] - {currency}:
+                per_share_native = None
+
             await self.repo.upsert_payment({
                 "security_id": security_id,
                 "ex_date": pay_date,     # unique key; pay date is fine for tax-year bucketing
@@ -580,6 +649,8 @@ class DividendService:
                 "withholding_tax_eur": wht_eur,
                 "net_amount_eur": net_eur,
                 "source": "ibkr",
+                "per_share_native": per_share_native,
+                "dividend_kind": kind,
                 "last_computed": now,
             })
             saved += 1
@@ -660,8 +731,11 @@ class DividendService:
                 skipped_currencies[currency] = skipped_currencies.get(currency, 0) + 1
                 continue
             gross = (a.get("gross_amount") or Decimal("0")) * rate
-            # IBKR reports accrued withholding as a negative, like the cash ledger does.
-            wht = -(a.get("tax") or Decimal("0")) * rate
+            # Stored positive. IBKR sends `tax` POSITIVE on <OpenDividendAccrual> (a real
+            # statement, 2026-10-04: TSMC gross 259, tax 54.39, net 204.61), the opposite
+            # of the cash ledger's WHTAX lines; this flipped it negative until then. abs()
+            # rather than trusting either sign, since the net is what matters downstream.
+            wht = abs(a.get("tax") or Decimal("0")) * rate
             net = a.get("net_amount")
             net_eur = net * rate if net is not None else gross - wht
             if net_eur <= 0:
@@ -746,7 +820,8 @@ class DividendService:
 
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
-        ``{security_id: [{ex_date, pay_date, net_eur}, ...]}`` for every open accrual.
+        ``{security_id: [{ex_date, pay_date, net_eur, quantity, gross_eur, wht_eur}, ...]}``
+        for every open accrual.
 
         Empty whenever the Flex section is not enabled, which is the supported default —
         the caller then dates its projections from a measured lag instead and labels them
@@ -773,6 +848,11 @@ class DividendService:
                 "ex_date": r.ex_date,
                 "pay_date": r.pay_date,
                 "net_eur": r.net_amount_eur,
+                # What the forecast sizes from (gross / quantity) and the withholding
+                # ladder's first rung (tax / gross).
+                "quantity": r.quantity,
+                "gross_eur": r.gross_amount_eur,
+                "wht_eur": r.withholding_tax_eur,
             })
         return out
 
@@ -1130,12 +1210,85 @@ class DividendService:
         except ValueError:
             return date(d.year - 1, 2, 28)
 
+    @staticmethod
+    def _withholding_rates(
+        raw_payments: List,
+        securities: Dict[int, Security],
+        accruals_by_sec: Dict[int, List[Dict]],
+        net_factor: Decimal,
+    ) -> Dict[int, Tuple[Decimal, str]]:
+        """
+        ``{security_id: (withholding rate, source)}`` — the share of a gross dividend
+        the forecast expects to lose to tax, and where that number came from.
+
+        IBKR is the source of truth for withholding, so the ladder asks it first and
+        the configured assumption last:
+
+        1. ``accrual`` — the open accrual's own tax over its gross: the rate IBKR will
+           apply to the very next payment.
+        2. ``ibkr_measured`` — the median rate on that security's IBKR payments.
+        3. ``ibkr_country`` — the median over IBKR payments from securities domiciled
+           in the same country, read off the ISIN's first two letters. A payer IBKR
+           has not paid yet usually shares a treaty rate with one it has (every US
+           payer on this account had exactly 15% withheld).
+        4. ``assumed`` — the WHT setting, the only rung that is not a measurement, and
+           the one whose projections stay labelled `gross_estimate`.
+
+        The median rather than the mean on rungs 2–3: a withholding posted on a
+        different day from its dividend leaves one row at 0%, and one such row must
+        not move a rate every other payment agrees on.
+        """
+        def _rate(gross, wht) -> Optional[Decimal]:
+            if gross is None or gross <= 0 or wht is None:
+                return None
+            r = abs(wht) / gross
+            return r if r < 1 else None
+
+        per_sec: Dict[int, List[Decimal]] = defaultdict(list)
+        per_country: Dict[str, List[Decimal]] = defaultdict(list)
+
+        def _country(sid: int) -> Optional[str]:
+            isin = getattr(securities.get(sid), "isin", None)
+            return isin[:2].upper() if isin and len(isin) >= 2 else None
+
+        for p in raw_payments:
+            if p.source != "ibkr":
+                continue
+            r = _rate(p.gross_amount_eur, p.withholding_tax_eur)
+            if r is None:
+                continue
+            per_sec[p.security_id].append(r)
+            country = _country(p.security_id)
+            if country:
+                per_country[country].append(r)
+
+        assumed = Decimal(1) - net_factor
+        out: Dict[int, Tuple[Decimal, str]] = {}
+        for sid in securities:
+            open_rates = [
+                r for a in sorted(accruals_by_sec.get(sid, ()),
+                                  key=lambda a: a["ex_date"] or a["pay_date"], reverse=True)
+                if (r := _rate(a.get("gross_eur"), a.get("wht_eur"))) is not None
+            ]
+            country = _country(sid)
+            if open_rates:
+                out[sid] = (open_rates[0], "accrual")
+            elif per_sec.get(sid):
+                out[sid] = (median(per_sec[sid]), "ibkr_measured")
+            elif country and per_country.get(country):
+                out[sid] = (median(per_country[country]), "ibkr_country")
+            else:
+                out[sid] = (assumed, "assumed")
+        return out
+
     async def _forecast_inputs(
         self,
         raw_payments: List,
         securities: Dict[int, Security],
         as_of: date,
         net_factor: Decimal,
+        accruals_by_sec: Optional[Dict[int, List[Dict]]] = None,
+        date_pairs: Optional[Dict[int, List[Tuple[date, date]]]] = None,
     ) -> tuple:
         """
         Everything ``project_dividends`` needs, assembled once.
@@ -1147,12 +1300,25 @@ class DividendService:
         would be a second copy of these rules free to drift from this one, which
         is the failure mode this codebase keeps hitting.
 
-        Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated)``, where
-        ``ex_dated`` is the set of securities whose cadence came from the yfinance
-        ex-date series. The caller needs it to know what a projected date MEANS: for
-        those securities it is an ex-date and has to be shifted to the expected pay date,
-        and for the rest it is already a pay date and must not be shifted twice.
+        Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated,
+        wht_by_sec)``, where ``ex_dated`` is the set of securities whose cadence came
+        from the yfinance ex-date series. The caller needs it to know what a projected
+        date MEANS: for those securities it is an ex-date and has to be shifted to the
+        expected pay date, and for the rest it is already a pay date and must not be
+        shifted twice. ``wht_by_sec`` is `_withholding_rates`.
+
+        **IBKR is the source of truth for the amounts** (since 2026-10-04). The DATES
+        still come from one series — Yahoo's ex-dates wherever it has two or more, see
+        *Infer cadence from ONE dated series* in docs/dividends.md — but the amount
+        each of those dividends is sized at is IBKR's wherever IBKR paid it, its
+        withholding is IBKR's ladder above, and an open accrual is the newest amount of
+        all. Until then the IBKR rows of every Yahoo-scheduled security were dropped
+        before the line that would have read them: all 22 payers on production were
+        sized from Yahoo's gross, and NVDA, which IBKR had paid at 0.25 a quarter,
+        projected about 0.01.
         """
+        accruals_by_sec = accruals_by_sec or {}
+        date_pairs = date_pairs or {}
         taxlots = list((await self.db.execute(select(TaxLot))).scalars().all())
         lots_by_sec: Dict[int, List[TaxLot]] = defaultdict(list)
         for tl in taxlots:
@@ -1168,13 +1334,25 @@ class DividendService:
                 total += lot.quantity
             return total
 
+        wht_by_sec = self._withholding_rates(
+            raw_payments, securities, accruals_by_sec, net_factor
+        )
+
         # Built from the RAW history, not the era-spliced income: a payout from
         # before we owned the share still evidences the schedule, and its
         # per-share amount still sizes the next one. Keying on realized income
         # left every recently-bought payer — TSMC, Samsung, SK Hynix, HPE, the
         # SOXQ ETF — forecasting nothing.
+        #
+        # Every amount is converted at ONE rate per currency, the newest cached: a
+        # payment that has not happened is best sized at today's rate, and one rate
+        # across the whole history means exchange-rate moves cannot make a level payer
+        # look like a varying one (`dividend_forecast.is_steady`).
+        ibkr_rows = [p for p in raw_payments if p.source == "ibkr" and self._is_income(p)]
         fx_to_eur = await self._latest_fx_to_eur(
-            {s.currency for s in securities.values() if s.currency}, as_of
+            {s.currency for s in securities.values() if s.currency}
+            | {p.currency for p in ibkr_rows if p.currency},
+            as_of,
         )
 
         # Cadence must come from ONE dated series. The same dividend is recorded
@@ -1185,13 +1363,12 @@ class DividendService:
         # longer than a monthly payer's whole cycle. yfinance carries the complete,
         # regular ex-date series, so where it exists it alone defines the schedule.
         #
-        # But note the cost of that rule: the chosen series is trusted absolutely,
-        # including the IBKR rows it then discards. When SBI's two estimate rows
-        # turned out to have come from the wrong ticker, they alone projected a
-        # monthly schedule for a company that does not pay one, and the real
-        # payment was skipped. Hence forecast_samples on the response and the
-        # provenance check in SchedulerService — the rule stays, but a thin or
-        # suspect inference now says so instead of looking like any other.
+        # But note the cost of that rule: the chosen series is trusted absolutely.
+        # When SBI's two estimate rows turned out to have come from the wrong
+        # ticker, they alone projected a monthly schedule for a company that does
+        # not pay one, and the real payment was skipped. Hence forecast_samples on
+        # the response and the provenance check in SchedulerService — the rule
+        # stays, but a thin or suspect inference now says so.
         per_share_rows = defaultdict(list)
         for p in raw_payments:
             if p.amount_per_share is not None:
@@ -1200,75 +1377,154 @@ class DividendService:
             sid: rows for sid, rows in per_share_rows.items() if len(rows) >= 2
         }
 
+        # Which IBKR payment records which Yahoo dividend: the same pairing the era
+        # splice and the measured lag use, so the three cannot disagree about it.
+        paired = match_estimates_to_ibkr(
+            [p for sid, rows in schedule_source.items() for p in rows],
+            [p for p in ibkr_rows if p.security_id in schedule_source],
+        )
+        ibkr_for_estimate = {id(est): row for est, row in paired}
+        paired_ibkr = {id(row) for _, row in paired}
+        ex_for_pay = {
+            (sid, pay): ex for sid, pairs in date_pairs.items() for ex, pay in pairs
+        }
+
+        async def _ibkr_per_share(p, ex: Optional[date]) -> Optional[Decimal]:
+            """IBKR's gross per share in the payment's currency: the rate its cash line
+            states, else what it paid over the shares held on the ex-date."""
+            if p.per_share_native is not None and p.per_share_native > 0:
+                return p.per_share_native
+            pay = p.pay_date or p.ex_date
+            shares = shares_at(p.security_id, ex or pay)
+            if shares <= 0 or not p.gross_amount_eur or not p.currency:
+                return None
+            if p.currency == "EUR":
+                return p.gross_amount_eur / shares
+            # Cache-only, like everything this endpoint reads: the pay date's own
+            # rate turns the stored EUR back into the currency it was paid in.
+            recent = await self.currency_service._get_most_recent_rate(
+                p.currency, pay, "EUR"
+            )
+            if not recent or not recent[0]:
+                return None
+            return p.gross_amount_eur / shares / recent[0]
+
+        def _to_eur_ps(native: Optional[Decimal], currency: Optional[str]) -> Optional[Decimal]:
+            if native is None or native <= 0:
+                return None
+            rate = fx_to_eur.get(currency or "EUR")
+            return native * rate if rate is not None else None
+
         hist_by_sec: Dict[int, List[HistPayment]] = defaultdict(list)
-        basis_by_sec: Dict[int, str] = {}
         for p in raw_payments:
-            scheduled = schedule_source.get(p.security_id)
-            if scheduled is not None and p.amount_per_share is None:
-                continue  # a second record of a dividend already counted
-            on_date = p.pay_date or p.ex_date
-            if on_date is None or on_date > as_of:
-                continue
             sec = securities.get(p.security_id)
             if sec is None:
                 continue
-            # Prefer a net-of-withholding per-share figure derived from what
-            # actually landed; fall back to estimated net from yfinance's gross
-            # per-share. Keep the two provenances separate inside one security;
-            # the shared factor is applied only when selecting the gross fallback.
-            #
-            # Only an IBKR row is "what actually landed". A yfinance_estimate row
-            # with shares held also has gross > 0, but compute_dividend_income writes
-            # its net as gross with zero withholding — so dividing *that* by the
-            # shares gives the gross per-share figure back, and stamping it "net"
-            # labelled a projection that deducts no withholding as one that did.
-            # SK Hynix read `net` with no IBKR payout on record.
-            net_ps = None
-            gross_ps = None
-            if self._is_income(p):
-                # IBKR rows store a 0 sentinel in shares_held, so fall back to
-                # the holding the tax lots show for that date.
-                shares = (p.shares_held if (p.shares_held and p.shares_held > 0)
-                          else shares_at(p.security_id, on_date))
-                if shares > 0:
-                    per_share = self._net_eur(p) / shares
-                    if p.source == "ibkr":
-                        net_ps = per_share
-                    else:
-                        # The same figure the row always contributed — the EUR
-                        # amount converted at its ex-date is a better gross per
-                        # share than amount_per_share × one recent rate — under
-                        # the label it deserves.
-                        gross_ps = per_share
-            if gross_ps is None and p.amount_per_share and p.amount_per_share > 0:
-                rate = fx_to_eur.get(sec.currency or "EUR")
-                if rate is not None:
-                    gross_ps = p.amount_per_share * rate
-            if net_ps is not None:
-                basis_by_sec[p.security_id] = "net"
+            scheduled = p.security_id in schedule_source
+            if scheduled and p.amount_per_share is None:
+                continue    # IBKR's record of a Yahoo dividend: sized through its pair
+            if p.source == "ibkr" and not self._is_income(p):
+                continue
+            on_date = p.pay_date or p.ex_date
+            if on_date is None or on_date > as_of:
+                continue
+
+            special = False
+            if p.source == "ibkr":
+                # An IBKR-only security: its own pay-dated rows are the schedule.
+                gross_ps = _to_eur_ps(await _ibkr_per_share(p, None), p.currency)
+                special = p.dividend_kind in SPECIAL_DIVIDEND_KINDS
+            else:
+                gross_ps = _to_eur_ps(p.amount_per_share, sec.currency)
+                if gross_ps is None and self._is_income(p) \
+                        and p.shares_held and p.shares_held > 0:
+                    # No cached rate for the currency today. A row computed while
+                    # shares were held already carries the EUR amount at its own
+                    # ex-date rate; over the shares, that is the gross per share.
+                    gross_ps = self._net_eur(p) / p.shares_held
+                ibkr = ibkr_for_estimate.get(id(p))
+                if ibkr is not None:
+                    special = ibkr.dividend_kind in SPECIAL_DIVIDEND_KINDS
+                    ibkr_ps = _to_eur_ps(await _ibkr_per_share(ibkr, p.ex_date), ibkr.currency)
+                    # IBKR's figure wins — unless it disagrees with Yahoo's by more
+                    # than half. Yahoo restates history for a split and IBKR's cash
+                    # line keeps the rate it paid, so a pre-split IBKR rate against
+                    # today's post-split share count would size the forecast several
+                    # times too high. The money is identical either way; only the
+                    # per-share unit differs.
+                    if ibkr_ps is not None and (
+                        gross_ps is None
+                        or Decimal("2") / 3 <= ibkr_ps / gross_ps <= Decimal("1.5")
+                    ):
+                        gross_ps = ibkr_ps
+            hist_by_sec[p.security_id].append(
+                HistPayment(on_date=on_date, per_share_eur=gross_ps, special=special)
+            )
+
+        # An IBKR payment no Yahoo row records — Yahoo missed it, or the history is
+        # older than Yahoo's reach. Its amount is evidence; its pay date is not part of
+        # the ex-date series, so it sizes without bending the schedule.
+        for p in ibkr_rows:
+            if p.security_id not in schedule_source or id(p) in paired_ibkr:
+                continue
+            pay = p.pay_date or p.ex_date
+            if pay is None or pay > as_of:
+                continue
+            ex = ex_for_pay.get((p.security_id, pay))
             hist_by_sec[p.security_id].append(HistPayment(
-                on_date=on_date, per_share_eur=(net_ps, gross_ps),
+                on_date=ex or pay,
+                per_share_eur=_to_eur_ps(await _ibkr_per_share(p, ex), p.currency),
+                special=p.dividend_kind in SPECIAL_DIVIDEND_KINDS,
+                cadence=False,
             ))
 
-        # Collapse each security to one basis now that we know whether any
-        # realized figure exists for it.
+        # An open accrual is the newest amount there is: IBKR has declared it. It
+        # replaces the figure of the dividend it records when that is already in the
+        # history (Yahoo writes the ex-date a day after it passes), and otherwise joins
+        # it as amount-only evidence, so a declared raise carries into every later
+        # projection the day IBKR lists it — TSMC's 7.00 a share instead of the 4.78
+        # the old median kept repeating after it.
+        for sid, accruals in accruals_by_sec.items():
+            if sid not in securities:
+                continue
+            for a in accruals:
+                qty, gross = a.get("quantity"), a.get("gross_eur")
+                ex = a.get("ex_date")
+                if ex is None or not qty or qty <= 0 or not gross or gross <= 0:
+                    continue
+                ps = gross / qty     # already EUR at the newest cached rate
+                entries = hist_by_sec[sid]
+                # Only an ex-dated series can hold the same dividend under this date;
+                # an IBKR-only security's entries are pay dates, weeks later.
+                same = next((i for i, e in enumerate(entries)
+                             if abs((e.on_date - ex).days) <= ACCRUAL_MATCH_DAYS), None) \
+                    if sid in schedule_source else None
+                if same is not None:
+                    entries[same] = HistPayment(
+                        on_date=entries[same].on_date, per_share_eur=ps,
+                        special=entries[same].special, cadence=entries[same].cadence,
+                    )
+                else:
+                    entries.append(HistPayment(on_date=ex, per_share_eur=ps, cadence=False))
+
+        # Gross to expected net, one rate per security from the ladder. Applied once
+        # here, so every projection — forward, overdue, two years out — carries the
+        # same withholding as the payment it repeats.
+        basis_by_sec: Dict[int, str] = {}
         for sid, entries in hist_by_sec.items():
-            prefer_net = basis_by_sec.get(sid) == "net"
+            rate, source = wht_by_sec.get(sid, (Decimal(1) - net_factor, "assumed"))
             hist_by_sec[sid] = [
                 HistPayment(
                     on_date=e.on_date,
-                    per_share_eur=(
-                        e.per_share_eur[0]
-                        if prefer_net
-                        else _estimated_net_from_gross(e.per_share_eur[1], net_factor)
-                    ),
+                    per_share_eur=_estimated_net_from_gross(e.per_share_eur, Decimal(1) - rate),
+                    special=e.special, cadence=e.cadence,
                 )
                 for e in entries
             ]
-            if not prefer_net:
-                basis_by_sec[sid] = "gross_estimate"
+            basis_by_sec[sid] = "gross_estimate" if source == "assumed" else "net"
 
-        return hist_by_sec, basis_by_sec, lots_by_sec, shares_at, set(schedule_source)
+        return (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, set(schedule_source),
+                wht_by_sec)
 
     async def get_dividend_summary(self) -> Dict:
         """
@@ -1403,6 +1659,7 @@ class DividendService:
                 "forecast_basis": None,
                 "forecast_samples": None, "forecast_cadence_days": None,
                 "forecast_lag_days": None, "forecast_lag_samples": None,
+                "forecast_method": None,
             }
 
         # A ticker is only a safe chart key while it means one instrument. The same
@@ -1501,6 +1758,9 @@ class DividendService:
         # in August, `forecast_net` covers Aug-Dec and would read 5/12 of the truth.
         next_12m_by_sec: Dict[int, Decimal] = defaultdict(Decimal)
         next_pay: Dict[int, date] = {}
+        # Filled by `_forecast_inputs`; empty without a forecast, which every reader of
+        # it below tolerates.
+        wht_by_sec: Dict[int, Tuple[Decimal, str]] = {}
         next_12m_end = as_of + timedelta(days=365)
         # Far enough to complete next calendar year, so the year comparison never
         # shows a truncated bar; further still if the caller asked for a year
@@ -1510,15 +1770,19 @@ class DividendService:
         horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
-            hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated = \
+            # The announced dividends IBKR has published and not yet paid, and IBKR's own
+            # (ex-date, pay date) pairs. Read first: both size the projections as well as
+            # dating them.
+            accruals_by_sec = await self._open_accruals()
+            exact_pairs = await self._exact_date_pairs()
+            hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec = \
                 await self._forecast_inputs(
-                    raw_payments, securities, as_of, net_factor
+                    raw_payments, securities, as_of, net_factor,
+                    accruals_by_sec=accruals_by_sec, date_pairs=exact_pairs,
                 )
 
-            # What the ex→pay distance actually measures out at, per security, and the
-            # announced pay dates IBKR has published for dividends it has not yet paid.
-            pay_lags = self._measured_pay_lags(raw_payments, await self._exact_date_pairs())
-            accruals_by_sec = await self._open_accruals()
+            # What the ex→pay distance actually measures out at, per security.
+            pay_lags = self._measured_pay_lags(raw_payments, exact_pairs)
 
             def _accrual_covers(sid: int, ex: date, pay: Optional[date] = None) -> bool:
                 """
@@ -1589,7 +1853,7 @@ class DividendService:
                 if lag:
                     projected = [
                         ForecastPayment(on_date=fp.on_date + timedelta(days=lag),
-                                        net_eur=fp.net_eur)
+                                        net_eur=fp.net_eur, method=fp.method)
                         for fp in projected
                     ]
                     # The horizon was applied to the ex-date; re-apply it to the date
@@ -1643,6 +1907,10 @@ class DividendService:
                             "net_eur": round(float(amt), 2),
                             "basis": basis,
                             "pay_date_source": pay_date_source,
+                            # How the AMOUNT was chosen, beside how the date was:
+                            # `latest_payment` (a steady payer's newest, carrying any
+                            # raise) or `same_payment_last_year` (a varying payer).
+                            "amount_source": fp.method,
                             "pending": False,
                         })
 
@@ -1669,6 +1937,7 @@ class DividendService:
                     # the same reason `forecast_samples` rides along beside the cadence.
                     by_sec[sid]["forecast_lag_days"] = lag if lag else None
                     by_sec[sid]["forecast_lag_samples"] = lag_samples or None
+                    by_sec[sid]["forecast_method"] = in_window[0].method
                 for fp in in_window:
                     amt = base_fx.convert(fp.net_eur, fp.on_date)
                     row = by_sec[sid]
@@ -1718,10 +1987,11 @@ class DividendService:
                         # needs no `gross_estimate` caveat the way an inference does.
                         "basis": "net",
                         "pay_date_source": "accrual",
+                        "amount_source": "announced",
                         "pending": a["pay_date"] <= as_of,
                     })
                     calendar_folds.append(
-                        (a["pay_date"], _symbol(sid), sid, amt, "net", False)
+                        (a["pay_date"], _symbol(sid), sid, amt, "net", False, "announced")
                     )
 
             ibkr_pays_by_sec: Dict[int, List[Tuple[date, int]]] = defaultdict(list)
@@ -1766,8 +2036,15 @@ class DividendService:
                 expected = ex + timedelta(days=lag_days if lag_samples else 0)
                 if _accrual_covers(p.security_id, ex, expected):
                     continue  # IBKR has announced it; the accrual above says it better
+                # The stored Yahoo "net" is gross. The security's own withholding
+                # applies — the same ladder rung `_forecast_inputs` sized it with.
+                wht_rate, _ = wht_by_sec.get(
+                    p.security_id, (Decimal(1) - net_factor, "assumed")
+                )
+                est_basis = basis_by_sec.get(p.security_id, "gross_estimate")
                 amt = base_fx.convert(
-                    _estimated_net_from_gross(self._net_eur(p), net_factor), expected
+                    _estimated_net_from_gross(self._net_eur(p), Decimal(1) - wht_rate),
+                    expected,
                 )
                 upcoming.append({
                     "date": expected.isoformat(),
@@ -1775,15 +2052,16 @@ class DividendService:
                     "security_id": p.security_id,
                     "symbol": _symbol(p.security_id),
                     "net_eur": round(float(amt), 2),
-                    # The stored Yahoo "net" is gross. Apply the same estimated-net
-                    # factor as `_forecast_inputs`, retaining the provenance label.
-                    "basis": "gross_estimate",
+                    "basis": est_basis,
                     "pay_date_source": "measured_lag" if lag_samples else "ex_date",
+                    # The real per-share figure on the real share count, not a
+                    # projection: Yahoo has recorded this dividend.
+                    "amount_source": "estimate",
                     "pending": expected <= as_of,
                 })
                 calendar_folds.append(
                     (expected, _symbol(p.security_id), p.security_id, amt,
-                     "gross_estimate", False)
+                     est_basis, False, "estimate")
                 )
 
             # The weakest of the three, and the last resort: NOTHING records this
@@ -1829,9 +2107,12 @@ class DividendService:
                     "net_eur": round(float(amt), 2),
                     "basis": basis,
                     "pay_date_source": source,
+                    "amount_source": fp.method,
                     "pending": True,
                 })
-                calendar_folds.append((fp.on_date, _symbol(sid), sid, amt, basis, True))
+                calendar_folds.append(
+                    (fp.on_date, _symbol(sid), sid, amt, basis, True, fp.method)
+                )
 
             # ---- The calendar IS the forecast ----------------------------------
             # One rule for all four producers of `upcoming`: money this portfolio
@@ -1854,7 +2135,7 @@ class DividendService:
             # of today is inside it and does belong: an estimate row arriving makes
             # the cadence step past that payment, so excluding it silently cost the
             # forward figures one payment per security until the cash landed.
-            for on_date, symbol, sid, amt, basis, inferred in calendar_folds:
+            for on_date, symbol, sid, amt, basis, inferred, method in calendar_folds:
                 annual_forecast[on_date.year] += amt
                 month_forecast_sym_all[on_date.strftime("%Y-%m")][symbol] += amt
                 if on_date > as_of:
@@ -1871,6 +2152,8 @@ class DividendService:
                     # unsettled gross-sized entry must not relabel its whole row.
                     if row["forecast_basis"] is None:
                         row["forecast_basis"] = basis
+                    if row["forecast_method"] is None:
+                        row["forecast_method"] = method
                     # An overdue inference rests on the same history as a forward
                     # projection, so it reports how thin that history is the same way.
                     # Without this a security whose only in-window payment was overdue
@@ -2417,6 +2700,23 @@ class DividendService:
                 # date IS an ex-date — never 0, which would claim same-day settlement.
                 "forecast_lag_days": row["forecast_lag_days"],
                 "forecast_lag_samples": row["forecast_lag_samples"],
+                # How the projected amounts were sized: `announced` (IBKR's open
+                # accrual), `latest_payment` (a steady payer's newest regular payment,
+                # carrying any raise), `same_payment_last_year` (a varying payer), or
+                # `estimate` (Yahoo has recorded it, unpaid). None without a forecast.
+                "forecast_method": row["forecast_method"],
+                # The withholding the projection deducts, and where it came from:
+                # `accrual`, `ibkr_measured`, `ibkr_country`, or `assumed` (the WHT
+                # setting). None without a forecast — a rate nothing is deducted at
+                # is not a claim worth making.
+                "forecast_withholding_pct": (
+                    round(float(wht_by_sec[sid][0] * 100), 2)
+                    if row["forecast_method"] is not None and sid in wht_by_sec else None
+                ),
+                "forecast_withholding_source": (
+                    wht_by_sec[sid][1]
+                    if row["forecast_method"] is not None and sid in wht_by_sec else None
+                ),
             })
         sec_rows.sort(key=lambda r: r["net_eur"] + r["forecast_net_eur"], reverse=True)
 

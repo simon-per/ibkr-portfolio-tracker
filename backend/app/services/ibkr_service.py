@@ -979,9 +979,10 @@ class IBKRService:
         publishes the currently-open accruals rather than a log, so a row disappearing IS
         the signal that it was paid.
 
-        Amounts are signed as IBKR reports them: ``grossAmount``/``netAmount`` positive,
-        ``tax`` negative. The conversion to a positive withholding happens once, in the
-        service, beside the identical rule for cash transactions.
+        Amounts are passed on as IBKR reports them. ``grossAmount``/``netAmount`` are
+        positive, and so is ``tax`` on a real statement (2026-10-04) — this docstring
+        said negative until then, and the service flipped a positive tax negative. The
+        service now stores ``abs(tax)``, so either sign lands right.
         """
         statement = flex_data['statement']
         section = getattr(statement, 'OpenDividendAccruals', None)

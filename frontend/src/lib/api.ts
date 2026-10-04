@@ -807,7 +807,10 @@ export interface DividendSecurityRow {
   /** Earliest projected payment — the date the CASH is expected, not the ex-date. */
   next_pay_date: string | null;
   source: 'ibkr' | 'estimate' | 'mixed' | null; // null = forecast-only row
-  /** 'net' = sized from dividends received; 'gross_estimate' = estimated net derived from gross. */
+  /**
+   * 'net' = the withholding deducted was measured by IBKR (an accrual, this security's
+   * payments, or its country's); 'gross_estimate' = only the WHT setting was left.
+   */
   forecast_basis: 'net' | 'gross_estimate' | null;
   /** How many dated payments defined the schedule. 2 is a guess with a schedule attached. */
   forecast_samples: number | null;
@@ -821,7 +824,30 @@ export interface DividendSecurityRow {
    */
   forecast_lag_days: number | null;
   forecast_lag_samples: number | null;
+  /** How the projected amounts were sized — see {@link DividendForecastMethod}. */
+  forecast_method: DividendForecastMethod | null;
+  /** The withholding the projection deducts, in percent. Null without a forecast. */
+  forecast_withholding_pct: number | null;
+  /**
+   * Where that withholding came from. IBKR is the source of truth; only `assumed` (the
+   * WHT setting) is not a measurement.
+   */
+  forecast_withholding_source: 'accrual' | 'ibkr_measured' | 'ibkr_country' | 'assumed' | null;
 }
+
+/**
+ * How a projected dividend's AMOUNT was chosen (backend `dividend_forecast.py`):
+ * - `announced` — IBKR's open accrual: declared, not inferred.
+ * - `latest_payment` — a steady payer: its newest regular payment, carrying any raise.
+ * - `same_payment_last_year` — a varying payer (a fund's large December): each payment
+ *   repeats the one a year before it.
+ * - `estimate` — Yahoo has recorded the dividend and it is not yet paid.
+ */
+export type DividendForecastMethod =
+  | 'announced'
+  | 'latest_payment'
+  | 'same_payment_last_year'
+  | 'estimate';
 
 /** A figure beside the comparable it is measured against. */
 export interface DividendDelta {
@@ -921,6 +947,8 @@ export interface DividendUpcomingPayment {
    *   some days after it. Stated rather than implied.
    */
   pay_date_source: 'accrual' | 'measured_lag' | 'ex_date';
+  /** How the amount was chosen, beside how the date was. */
+  amount_source: DividendForecastMethod | null;
   /**
    * The expected pay date has passed with no IBKR cash row: the dividend has gone ex,
    * the money is owed, and it is in none of the totals yet. Before this existed such a

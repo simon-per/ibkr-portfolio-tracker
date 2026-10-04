@@ -32,6 +32,18 @@ class DividendPayment(Base):
     net_amount_eur: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     pay_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # 'ibkr' | 'yfinance_estimate'
+    # What IBKR's cash line states about an `ibkr` row, parsed from its description
+    # ("… CASH DIVIDEND USD 0.25 PER SHARE (Ordinary Dividend)"): the gross rate per
+    # share in the payment's own currency, and the kind (ordinary / special / bonus /
+    # return_of_capital / other). NULL on yfinance rows, on IBKR rows ingested before
+    # 2026-10-04 that no statement has re-delivered since, and whenever the
+    # description does not parse — the amounts above are real either way.
+    #
+    # Deliberately NOT `amount_per_share`: a non-NULL `amount_per_share` is what marks
+    # a row as part of the Yahoo ex-date series the forecast reads its schedule from,
+    # and an IBKR row is dated on its pay date.
+    per_share_native: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    dividend_kind: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     last_computed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 

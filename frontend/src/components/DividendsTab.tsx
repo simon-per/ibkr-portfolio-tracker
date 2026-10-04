@@ -18,7 +18,7 @@ import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
 import { cn } from '@/lib/utils'
-import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
+import { forecastMethodLabel, formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
@@ -189,6 +189,18 @@ function dividendColumns(deps: {
             {row.forecast_samples != null && row.forecast_samples <= 2 && (
               <span className="ml-0.5 text-amber-600 dark:text-amber-500">
                 n={row.forecast_samples}
+              </span>
+            )}
+            {(row.forecast_method || row.forecast_withholding_pct != null) && (
+              <span className="block text-[10px] leading-tight">
+                {[
+                  forecastMethodLabel(row.forecast_method),
+                  row.forecast_withholding_pct != null
+                    ? `WHT ${formatDividendWithholdingPct(row.forecast_withholding_pct)}%`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             )}
           </>
@@ -597,6 +609,15 @@ export function DividendsTab() {
                             data.forecast_withholding_pct,
                           )}% assumed withholding;
                           actual net payments may differ
+                        </span>
+                      )}
+                      {securities.some((r) => r.forecast_method) && (
+                        <span>
+                          forecast sized by <b className="font-medium">latest</b> regular
+                          dividend (carries a raise already paid), <b className="font-medium">as
+                          last yr</b> (the same payment a year earlier, for payers whose
+                          amounts vary) or <b className="font-medium">declared</b> by IBKR; WHT
+                          is what IBKR withheld unless marked *
                         </span>
                       )}
                       {securities.some(

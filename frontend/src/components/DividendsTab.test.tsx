@@ -359,6 +359,7 @@ describe('The dividend legend', () => {
       yield_on_cost_pct: null, share_pct: null, next_pay_date: null, source: 'ibkr',
       forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
       forecast_lag_days: null, forecast_lag_samples: null,
+      forecast_method: null, forecast_withholding_pct: null, forecast_withholding_source: null,
     }))
     return data
   }
