@@ -1354,7 +1354,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   alternatives on this book's own history, and lists every special dividend it finds. Only the server
   has the rows; this machine's database has none. If `auto` does not beat `median8` on absolute bias,
   the steady/varying thresholds in `dividend_forecast.py` are what to revisit. Still unforecast after
-  it: IQQ (one payout on record), and anything EODHD's announced amounts would add.
+  it, by the "two payments make a cadence" rule and correctly so until a second one lands: IQQ (a
+  new iShares Nasdaq-100 ETF, one payout of 0.021 USD a share, ~3 a year) and SBI (Serabi Gold, one
+  payout). IFX is the only holding on the `assumed` withholding rung, so at the WHT setting of 0% it
+  reads gross until IBKR pays it (Germany withholds ~26%); it corrects itself in February.
 
 - **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
   longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
