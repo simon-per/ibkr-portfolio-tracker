@@ -5,7 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** Newest: **the dividend forecast is IBKR-first and sized per payment**
+**Last updated: 2026-10-04.** The **Analytics tab is hidden** (owner request; nothing deleted — see
+docs/performance-analytics.md). Newest work: **the dividend forecast is IBKR-first and sized per payment**
 (live on `48b1f9c` — see *Watch after the next deploy*). IBKR's paid amounts never reached the
 forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
 so funds lost their big December and raisers trailed by up to two years (NVDA ~0.01 a quarter against
@@ -1693,7 +1694,9 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   expected, one figure; a DA-1 reminder), live on `882db78`; and the deploy cadence — `*/5` is
   fine, `*/6` is worse, the durable fix is a guard before the restart (both under the headings
   above). The owner switched the cron to `*/5` on the VPS and ran the replay: `auto` beats the old
-  median (error 12.6% vs 18.8%). Called done. Backend 1768, frontend 788 on Node 22.
+  median (error 12.6% vs 18.8%). Called done. Then the Analytics tab hidden at the owner's request
+  (component and endpoints kept; docs/performance-analytics.md says how to restore it). Backend
+  1768, frontend 788 on Node 22.
 
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its

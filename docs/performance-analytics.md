@@ -5,6 +5,13 @@
 > `lib/rollingRisk.ts` and `lib/returnDecomposition.ts`.** Update it in the same change
 > that moves the code it describes.
 
+> **The tab is HIDDEN since 2026-10-04** (owner: not clean enough, low value to him). Nothing was
+> deleted: `AnalyticsTab.tsx`, its tests, `/api/performance/*` and the libs below all stay and stay
+> tested. Restoring it is three lines in `Dashboard.tsx` — the `lazy` import, the
+> `<TabsTrigger value="analytics">` (it sat second, after Performance) and its `<TabsContent>`,
+> which handed over `inception` and the first selected benchmark (never fetch the benchmark from
+> this tab first: a cache miss there reaches Yahoo). Everything below describes the tab as built.
+
 ## What it answers, and from where
 
 Three server-side questions and two client-side ones, all from tables that already exist.

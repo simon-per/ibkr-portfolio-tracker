@@ -37,7 +37,9 @@ const WatchlistTab = lazy(() => import('./WatchlistTab').then(m => ({ default: m
 const TaxTab = lazy(() => import('./TaxTab').then(m => ({ default: m.TaxTab })))
 const DividendsTab = lazy(() => import('./DividendsTab').then(m => ({ default: m.DividendsTab })))
 const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ default: m.LookThroughTab })))
-const AnalyticsTab = lazy(() => import('./AnalyticsTab').then(m => ({ default: m.AnalyticsTab })))
+// AnalyticsTab is hidden (owner, 2026-10-04): not clean enough and low value for him. The
+// component, its tests and /api/performance/* stay, so restoring it is the lazy import, the
+// trigger and the panel — see docs/performance-analytics.md.
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
@@ -479,7 +481,6 @@ export function Dashboard() {
               {/* Most-used first, left to right — the owner's order (2026-09-13). The phone
                   strip scrolls, so what sits leftmost is what is reachable without a swipe. */}
               <TabsTrigger value="performance">Performance</TabsTrigger>
-              <TabsTrigger value="analytics">Analytics</TabsTrigger>
               <TabsTrigger value="dividends">Dividends</TabsTrigger>
               <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
               <TabsTrigger value="allocation">Allocation</TabsTrigger>
@@ -658,24 +659,6 @@ export function Dashboard() {
               // prop's docstring for what dividing by holdings alone did to it.
               cash={summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined}
             />
-          </TabsContent>
-
-          {/* Analytics Tab — where the return came from. Hands over the inception and the
-              first selected benchmark rather than re-reading either: the tab must never be
-              the first to ask the benchmark endpoint, since a cache miss there fetches Yahoo. */}
-          <TabsContent value="analytics">
-            <LazyTabPanel label="Analytics">
-              <AnalyticsTab
-                inception={inception}
-                benchmark={selectedBenchmarks.length > 0
-                  ? {
-                      key: selectedBenchmarks[0],
-                      name: availableBenchmarks?.find((b) => b.key === selectedBenchmarks[0])?.name
-                        ?? selectedBenchmarks[0],
-                    }
-                  : null}
-              />
-            </LazyTabPanel>
           </TabsContent>
 
           {/* Activity Tab — the transaction ledger */}
