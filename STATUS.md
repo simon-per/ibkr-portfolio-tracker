@@ -1187,15 +1187,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   CoinStats app. If any coin is still unmatched, the tile reads "Excludes … — no price" instead of
   "—". Browser pass at 1440 and 390 px.
 
-- **The four Flex sections ticked 2026-10-03, after the next 18:00 Berlin `full_sync`.** The run's
-  result carries `dividend_date_pairs_added` > 0 (18 on the first local parse) and
-  `cash_balances_seen` ≈ the statement's days (Equity Summary in Base, 23 locally); the Cash tab
-  reads `ibkr` rather than `derived` for those days with no step in Total Value; securities count up
-  by one (MCO, from Financial Instrument Information — an existing conid, a refresh). On
-  `/api/dividends/breakdown`, rows whose lag came from IBKR's pairs (e.g. NVDA 21, VT 4) keep
-  `measured_lag`; their `forecast_lag_samples` may drop to the pair count, which is the point.
-
-
 - **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
   CAGR at twelve months of span or more) between the first and last rolling window on screen,
   from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally

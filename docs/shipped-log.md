@@ -7,6 +7,14 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Verified 2026-10-04 — the four Flex sections ticked on 2026-10-03
+
+The 2026-10-03 18:00 Berlin `full_sync` (16:08 UTC, success, no warnings) carried
+`dividend_date_pairs_added` 18, `cash_balances_seen` 23, `dividend_accruals` 3 and 33 securities
+(MCO refreshed from Financial Instrument Information). `/api/portfolio/summary` reads
+`cash_source: mixed` — IBKR's measured cash beside the derived 3a balance, the documented value —
+and the breakdown's announced payments (2330, NXPI, HPE) carry `pay_date_source: accrual`.
+
 ## Shipped 2026-10-04 — the Swisscanto 3a funds look through via their own index
 
 Neither tranche publishes a basket; both factsheets name the index (World ex CH: MSCI World ex
