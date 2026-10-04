@@ -1332,6 +1332,27 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
+- **The KPI audit of 2026-10-02 — findings reported, the owner has not chosen fixes yet.** Re-verify
+  each in code before fixing; until today these lived only in a session note.
+  - **Monthly-returns heatmap:** month cells drop the move across each month boundary (2026 chained
+    to +24.9% against a YTD of +32.2%), and the running month is not marked partial.
+  - **Tax tab:** withholding shows 0.00 on estimated rows.
+  - **Fundamentals:** a negative P/E is coloured green; the market-cap sort mixes currencies.
+  - **Sortino** says "no down days" when there is simply too little history.
+  - **Deposit-driven % read as growth:** the Total Value chip, Period Gain %, the dividend
+    2026 / TTM / Next-12M chips.
+  - **The dividend chart tooltip:** its MoM/YoY chips.
+  - **XIRR** is annualised over short ranges.
+  - **1W risk figures** come from 5 returns, and the risk-free rate is a 3% EUR rate on a CHF base.
+  - **PEG** mixes three methods.
+  - **EPS growth** explodes on a loss-to-profit base.
+  - **Watchlist / Fundamentals:** stale since 2026-08-25, with no as-of date shown.
+  - **Look-through:** "Unresolved" in amber, though it is ~0.3% by value.
+  - **Forecast tab:** monthly compounding overstates the rate, and the default contribution is 1,000.
+  - **Sector "Unknown":** 35% in Analytics against 2% in Allocation — moot while Analytics is hidden.
+  - **"Rose after sale"** counts ETF rotations.
+  - **Two gain figures**, 410 apart; cost basis labelled "total invested".
+
 - **Re-check the sync-slot guard right before the restart, not only at the start of a deploy.**
   `ops/auto-deploy.sh` checks `in_sync_window` once, before `git fetch`; `deploy.sh` then builds
   for minutes while the old containers serve, and only then runs `down`/`up`. A build longer than
