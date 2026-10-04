@@ -16,7 +16,7 @@ from app.services.scheduler_service import (
     STOCK_JOB_GROUP,
     get_scheduler,
 )
-from app.single_flight import SyncBusy, single_flight
+from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 
 logger = logging.getLogger(__name__)
 
@@ -92,11 +92,21 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
     try:
         scheduler = get_scheduler()
 
+        # Whether the stock pipeline's gate (`SYNC_PIPELINE`) is held right now — by a
+        # scheduled job or by a manual POST alike. In-process state, so this endpoint is
+        # the only way to see it from outside: `deploy.sh` reads it to hold a restart
+        # while a sync runs, since a sync killed mid-run re-runs from scratch and at the
+        # IBKR slots that is a second Flex generation. The crypto gate is deliberately not
+        # reported here (its status is admin-gated, docs/crypto.md). Both branches carry
+        # it: a sync started by POST runs whether or not the scheduler is armed.
+        sync_in_progress = is_running(SYNC_PIPELINE)
+
         if scheduler.scheduler is None:
             return {
                 "status": "not_running",
                 "message": "Scheduler is not running",
                 "jobs": [],
+                "sync_in_progress": sync_in_progress,
                 "last_sync": await _last_sync(scheduler, db),
             }
 
@@ -115,6 +125,7 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
         return {
             "status": "running",
             "jobs": jobs,
+            "sync_in_progress": sync_in_progress,
             "last_sync": await _last_sync(scheduler, db),
         }
 
