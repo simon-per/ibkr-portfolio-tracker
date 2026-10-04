@@ -319,6 +319,35 @@ ETF_ALLOCATIONS = {
         },
     },
 
+    # iShares MSCI EM (IEEM) — not held; declared because it is the look-through basket
+    # donor for the Swisscanto EM 3a tranche (app/etf_sources.py). Same split as EMIM and
+    # that tranche: one index, one allocation, whichever wrapper is read.
+    "IEEM": {
+        "isins": ["IE00B0M63177"],
+        "asset_type": "ETF",
+        "geographic": {
+            "China": 30.0,
+            "India": 20.0,
+            "Taiwan": 17.0,
+            "Brazil": 7.0,
+            "Saudi Arabia": 5.0,
+            "South Africa": 4.0,
+            "Other Emerging Markets": 17.0,
+        },
+        "sector": {
+            "Technology": 22.0,
+            "Financial Services": 21.0,
+            "Consumer Cyclical": 14.0,
+            "Communication Services": 10.0,
+            "Energy": 8.0,
+            "Basic Materials": 8.0,
+            "Industrials": 6.0,
+            "Healthcare": 5.0,
+            "Consumer Defensive": 4.0,
+            "Utilities": 2.0,
+        },
+    },
+
     # Vanguard Total World Stock (VT) — bought 2026-08-06.
     # Sector: Yahoo funds_data, 2026-08-06 (Technology carries the +0.01 rounding).
     # Geographic: deliberately identical to VWCE above. VT tracks FTSE Global All Cap and

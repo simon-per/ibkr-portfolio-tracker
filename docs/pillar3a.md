@@ -242,18 +242,29 @@ both directions). Undeclared, a fund takes the `asset_type` column default of `"
 is drawn as a company at a plausible weight while `uncovered_fund_eur` still reads 0.00 —
 the IQQ failure.
 
-The EM tranche borrows **EMIM's** basket: MSCI EM IMI against its MSCI EM, the VWCE/VT shape,
-erring low because the wider index spreads weight thinner.
+**Each tranche borrows the basket of a fund on its own index** (since 2026-10-04). Neither
+publishes a basket anywhere free — factsheets, Yahoo and finpension show a top 10, the annual
+report a full inventory twice a year as a PDF — but both factsheets name the index, and both
+track it to a few names (World ex CH 1,209 of 1,211; EM 1,156 of 1,167). Measured on the
+factsheets' own date, 31.08.2026, with the BlackRock API's `asOfDate`:
 
-The World ex CH tranche is **deliberately un-proxied**, and this is the interesting half.
-IWDA's basket (MSCI World, *with* Switzerland) would put Nestlé, Roche and Novartis into the
-look-through at ~2.5% of the position — three companies the fund exists specifically not to
-hold — while understating every company it does. That is a **mixed** direction, where every
-other proxy here errs low and says so, and a fabricated holding is a different kind of wrong
-from an understated one. It stays an honest `uncovered_fund`. The exact-index donor exists
-and is the follow-up: **iShares World ex Switzerland Equity Index Fund (CH), `CH0244028970`**,
-product id 279894 — a Swiss institutional fund, so its holdings come from a product-page
-`.ajax?fileType=xls` rather than the varnish JSON `parse_ishares` reads.
+- **EM → IEEM** (`IE00B0M63177`, MSCI Emerging Markets): the top 10 within 0.02 pp. Declared in
+  `FUND_SOURCES` and `ETF_ALLOCATIONS` though not held, as the donor. **EMIM** (MSCI EM *IMI*) was
+  the proxy until then and read every company ~11% low (TSMC 13.48% against 15.08%).
+- **World ex CH → IWDA** (MSCI World). Until 2026-10-04 this was deliberately left
+  `uncovered_fund`, because IWDA puts Nestlé, Roche and Novartis into a fund that excludes them.
+  Measured, that is ~2.1% of the position (0.04% of the book) with every other company ~2% low,
+  and the owner chose that close proxy over an uncovered fund: look-through is a rough picture
+  of company exposure, and the fund's value and performance come from its real NAV either way.
+  The proxy reason says so on the surface.
+
+**The exact route, if it ever matters:** MSCI World ex Switzerland *is* MSCI World minus its
+Swiss constituents, so IWDA's basket with the `Switzerland` rows dropped (41 names, 2.12%) and
+the rest rescaled to the equity total reproduces the factsheet's top 10 to ±0.01 pp, 1,210
+constituents against 1,211. It needs a "proxy minus countries" basket kind, and the rescale is
+the index definition rather than the renormalising the conventions forbid — write that down
+beside it. **Not** the iShares World ex Switzerland Equity Index Fund (CH), `CH0244028970`,
+product 279894: it publishes only a top 10, in its xls and its holdings csv alike.
 
 Tests: `tests/test_account_isolation.py`, `tests/test_finpension_parse.py`,
 `tests/test_finpension_import.py`, `tests/test_tax_pillar3a_exclusion.py`,

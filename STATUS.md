@@ -5,7 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** The **Analytics tab is hidden** (owner request; nothing deleted — see
+**Last updated: 2026-10-04.** The **Swisscanto 3a funds now look through** via index proxies, and
+the **Analytics tab is hidden** (owner request; nothing deleted — see
 docs/performance-analytics.md). Newest work: **the dividend forecast is IBKR-first and sized per payment**
 (live on `48b1f9c` — see *Watch after the next deploy*). IBKR's paid amounts never reached the
 forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
@@ -1012,6 +1013,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The Swisscanto 3a funds look through via index proxies** (2026-10-04): EM borrows IEEM
+  (MSCI EM; was EMIM, ~11% low), World ex CH borrows IWDA (was uncovered; ~2% Swiss names it
+  does not hold, accepted by the owner). After the deploy, World ex CH shows companies at once
+  (IWDA's basket is stored); EM is uncovered until the **18:00 full sync** fetches IEEM's basket
+  for the first time — then check `/api/portfolio/lookthrough` shows both funds decomposed and
+  no stale/missing-basket warning for IEEM. docs/pillar3a.md, *Allocation and look-through*,
+  has the measurements and the exact route if it ever matters.
+
 - **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
   replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
   production*)
@@ -1413,25 +1422,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
    (`allocation_service.py`, "leaving it null on failure meant a security Yahoo has no
    `.info` for was re-fetched on every sync forever"): write a row with zero counts and
    `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
-
-0. **Look through both Swisscanto 3a funds exactly — researched and measured 2026-10-04, not built.**
-   The funds' factsheets (finpension, 31.08.2026) name the indices: World ex CH tracks **MSCI World
-   ex Switzerland** (full replication, 1,209 of 1,211 names); EM tracks **MSCI Emerging Markets**
-   (optimised sampling, 1,156 of 1,167). Neither publishes a full basket anywhere free.
-   - **The donor this entry used to name does not work:** iShares World ex Switzerland Equity Index
-     Fund (CH), `CH0244028970`, product 279894, publishes only its **top 10**, in its xls *and* its
-     holdings csv (`1495092304805.ajax`). Don't retry it.
-   - **World ex CH = IWDA's basket minus its Switzerland rows, rescaled.** That is the index's
-     definition, and it measures exact: IWDA fetched with `asOfDate=20260831` (the BlackRock API
-     accepts it), Swiss rows dropped (41, 2.12%), the rest scaled to the equity total, reproduces
-     the factsheet's top 10 to ±0.01 pp on every line and 1,210 constituents against 1,211. No
-     fabricated Nestlé/Roche/Novartis — the objection that kept it uncovered no longer applies.
-     Needs a "derived from proxy minus countries" basket kind; this rescale is the index
-     definition, not the renormalise-to-100 the conventions forbid — say so in the code.
-   - **EM: proxy IEEM (`IE00B0M63177`, BlackRock portfolio id `251857`, en_GB works) instead of
-     EMIM.** Same date, the factsheet's top 10 against IEEM: ±0.02 pp; against EMIM (MSCI EM IMI)
-     every name ~11% low (TSMC 13.48 vs 15.08). A registry entry plus `basket_proxy_isin`.
-   - Worth ~2.3% of the book (World ex CH ~1.7%, EM ~0.6%), all currently `uncovered_fund` or low.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 

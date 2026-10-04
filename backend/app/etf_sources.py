@@ -107,6 +107,16 @@ FUND_SOURCES: Dict[str, FundSource] = {
         adapter="blackrock",
         params={"portfolio_id": "264659"},
     ),
+    # Not held — declared as the basket donor for the Swisscanto EM 3a tranche, which
+    # tracks plain MSCI Emerging Markets. Portfolio id 251857 is also its product id here,
+    # read off the product page and confirmed 2026-10-04: 1,140 equity rows on 31.08.2026,
+    # its top 10 within 0.02 pp of the index weights on the Swisscanto factsheet.
+    "IE00B0M63177": FundSource(
+        symbol="IEEM",
+        name="iShares MSCI EM UCITS ETF USD (Dist)",
+        adapter="blackrock",
+        params={"portfolio_id": "251857"},
+    ),
 
     # The first **US-domiciled** iShares line held here, and the only entry needing a
     # `locale`. The same varnish host serves it, but the locale chooses which catalogue the
@@ -301,45 +311,46 @@ FUND_SOURCES: Dict[str, FundSource] = {
     # at a plausible weight, with `uncovered_fund_eur` still reading 0.00 and coverage
     # still reading high — which is how IQQ sat mis-drawn for three days in August.
 
-    # MSCI Emerging Markets. Proxied to EMIM, which tracks MSCI EM **IMI** — the same
-    # index plus a small-cap tail. That is the VWCE/VT shape and it errs in the same
-    # safe direction: every shared company's weight in the wider IMI index is *lower*
-    # than in the standard one, so each figure this produces is an understatement and
-    # the shortfall lands in the residual.
+    # Both funds' factsheets (finpension, 31.08.2026) name the index, and both track it to
+    # a few names (World ex CH 1,209 of 1,211; EM 1,156 of 1,167), so each borrows the basket
+    # of a fund on the same index. Measured 2026-10-04 on the same date as the factsheets.
+    # The owner chose a close proxy over an exact derivation: look-through is a rough
+    # picture of company exposure, and the funds' value and performance come from their
+    # real NAV either way. STATUS.md / docs/pillar3a.md record the exact route if it
+    # ever matters (World ex CH = IWDA minus Switzerland, rescaled: top 10 within 0.01 pp).
+
+    # MSCI Emerging Markets -> IEEM, the same index: its top 10 sat within 0.02 pp of the
+    # factsheet's. EMIM (MSCI EM IMI) was the proxy until 2026-10-04 and read every
+    # company ~11% low (TSMC 13.48% against 15.08%).
     "CH1529078078": FundSource(
         symbol="CH1529078078",
         name="Swisscanto (CH) Index Equity Fund Emerging Markets NMT CHF",
         adapter="manual",
-        basket_proxy_isin="IE00BKM4GZ66",
+        basket_proxy_isin="IE00B0M63177",
         basket_proxy_reason=(
-            "A pension-only Swisscanto tranche that publishes no basket, so EMIM's is "
-            "used: MSCI EM IMI against this fund's MSCI EM, differing by a small-cap "
-            "tail the wider index spreads weight across. Every company figure for this "
-            "fund is therefore approximate and errs low."
+            "A pension-only Swisscanto tranche that publishes no basket, so IEEM's is used: "
+            "the same MSCI Emerging Markets index (measured within 0.02 pp on the top 10). "
+            "The fund samples the index rather than holding all of it, so its smallest "
+            "positions may differ."
         ),
     ),
 
-    # MSCI World ex Switzerland. **Deliberately un-proxied**, and worth knowing why,
-    # because the obvious proxy is wrong in a way none of the others here are.
-    #
-    # Borrowing IWDA's basket (MSCI World, Switzerland *included*) would put Nestle,
-    # Roche and Novartis into the look-through at about 2.5% of this position — three
-    # companies the fund does not hold — while understating every company it does. That
-    # is a **mixed** direction: every other proxy in this file errs low and says so, and
-    # a fabricated holding is a different kind of wrong from an understated one. So this
-    # stays an honest `uncovered_fund`, which the Coverage card already reports and the
-    # partition identity already accounts for.
-    #
-    # The exact-index donor exists and is the follow-up: **iShares World ex Switzerland
-    # Equity Index Fund (CH), CH0244028970**, MSCI Developed World ex Switzerland, CHF,
-    # BlackRock product id 279894. It is a Swiss institutional index fund rather than a
-    # UCITS ETF, so its holdings come from a product-page `.ajax?fileType=xls` rather
-    # than the varnish JSON API `parse_ishares` reads, and its `portfolio_id` is not the
-    # product id — see the IQQ note above, that coincidence does not generalise.
+    # MSCI World ex Switzerland -> IWDA (MSCI World). Uncovered until 2026-10-04 on the
+    # grounds that IWDA puts Nestle, Roche and Novartis into a fund that excludes them;
+    # measured, that is ~2.1% of this position (0.04% of the book), with every other
+    # company correspondingly ~2% low. The owner accepted that for a rough picture, so the
+    # reason below states it on the surface rather than leaving the fund uncovered.
     "CH0117044948": FundSource(
         symbol="CH0117044948",
         name="Swisscanto (CH) IPF I Index Equity Fund World ex CH NT CHF",
         adapter="manual",
+        basket_proxy_isin="IE00B4L5Y983",
+        basket_proxy_reason=(
+            "A pension-only Swisscanto tranche that publishes no basket, so IWDA's MSCI "
+            "World is used for this fund's MSCI World ex Switzerland. It therefore shows "
+            "Swiss companies (about 2% of this fund) that the fund does not hold, and every "
+            "other company about 2% low."
+        ),
     ),
 }
 
