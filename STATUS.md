@@ -1693,8 +1693,11 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   fine, `*/6` is worse, the durable fix is a guard before the restart (both under the headings
   above). The owner switched the cron to `*/5` on the VPS and ran the replay: `auto` beats the old
   median (error 12.6% vs 18.8%). Called done. Then the Analytics tab hidden at the owner's request
-  (component and endpoints kept; docs/performance-analytics.md says how to restore it). Backend
-  1768, frontend 788 on Node 22.
+  (component and endpoints kept; docs/performance-analytics.md says how to restore it). Then the
+  Swisscanto 3a look-through: EM via IEEM, World ex CH via IWDA, baskets preloaded by hand —
+  coverage 98.9%, nothing uncovered. KPI audit moved into this file, low priority by owner
+  decision. Only the post-18:00 DB check of the forecast item remains. Backend 1778, frontend
+  788 on Node 22.
 
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
