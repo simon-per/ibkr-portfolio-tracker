@@ -29,6 +29,10 @@ Two traps when pointing a browser at a local stack:
   `DATABASE_URL` pointed at it (the local `backend/portfolio.db` predates trades, cash flows and
   the IBKR dividend era, so it exercises none of the interesting shapes). Delete the copy afterwards —
   `*.db` is gitignored, but it is real account data.
+- **Locally the database is still `backend/portfolio.db`** (`config.py`'s default). Only the
+  container uses `backend/data/portfolio.db`, which `docker-compose.yml` sets; running the compose
+  stack locally therefore needs the file there (or `ALLOW_NEW_DATABASE=1` for an empty one), because
+  the container refuses to start on a missing database (`app/db_guard.py`).
 
 `tests/test_api_smoke.py` runs **every read endpoint through the real HTTP stack** against a fixture
 carrying the shapes that actually break: a dual-listed ticker, a closed lot, a dividend row with a NULL
@@ -53,7 +57,7 @@ grep -o '^IBKR_TOKEN=.\{0,4\}' backend/.env
 
 # data snapshot on the VPS
 python3 -c "
-import sqlite3; c=sqlite3.connect('/root/IBKR_investment_tracker/backend/portfolio.db')
+import sqlite3; c=sqlite3.connect('/root/IBKR_investment_tracker/backend/data/portfolio.db')
 c.execute('PRAGMA busy_timeout=30000')
 for q in ['select count(*) from securities','select count(*) from taxlots where is_open=1',
           'select count(*) from trades','select source,count(*) from dividend_payments group by 1']:

@@ -39,7 +39,7 @@ holds it — the index below maps them.
 | [docs/frontend.md](docs/frontend.md) | `frontend/src/lib/` analytics (risk, rebalance, currency exposure, forecast), `DataTable`, the mobile layout |
 | [docs/performance-analytics.md](docs/performance-analytics.md) | `performance_analytics_service`, `/api/performance/*`, `attribution_rows`, the price/FX split, the Analytics tab (hidden since 2026-10-04), `rollingRisk.ts` |
 | [docs/tech-stack.md](docs/tech-stack.md) | versions, the bundle boundaries, `e2e/` |
-| [docs/deployment.md](docs/deployment.md) | `deploy.sh`, auto-deploy, the VPS, `.env`, `/health` |
+| [docs/deployment.md](docs/deployment.md) | `deploy.sh`, auto-deploy, the VPS, `.env`, `/health`, the database directory (`ops/db-layout.sh`, `app/db_guard.py`) |
 | [docs/local-development.md](docs/local-development.md) | running it locally, the smoke test, snapshots, test commands |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | a symptom you are looking at — symptom-indexed table |
 | [docs/history.md](docs/history.md) | the 2026-07-29 correctness sweep and the 2026-07-28 state snapshot |
@@ -237,12 +237,16 @@ Full detail in [docs/deployment.md](docs/deployment.md).
 - **`deploy.sh` builds before it stops anything** (frontend into `dist.next`, then the image), then
   checkpoints SQLite's WAL inside the running container, then `down`, swap `dist`, `up`. Measured
   after the reorder: zero failed health probes across a deploy.
-- **`portfolio.db` is a FILE bind mount, so SQLite's `-wal`/`-shm` live in the container layer and
-  die with `docker compose down`.** Until 2026-09-08 every deploy silently discarded the commits
-  since the last auto-checkpoint (~4 MB) and every host backup lacked the same tail. Three
-  checkpoints now cover it — app shutdown (`checkpoint_and_dispose_engine`), `deploy.sh` before
-  `down`, `ops/backup-db.sh` before the copy — and `tests/test_wal_checkpoint_on_shutdown.py`
-  pins all three. **The durable fix is mounting the directory** (STATUS.md, *Worth doing next*).
+- **The database is `backend/data/portfolio.db` behind a DIRECTORY bind mount** (`./data:/app/data`,
+  with `DATABASE_URL` pinned in compose's `environment:` so the host `.env` cannot override it), so
+  SQLite's `-wal`/`-shm` land on the host. It was a FILE mount (`./portfolio.db`) until 2026-10-04,
+  whose sidecars lived in the container layer and died with `docker compose down` — every deploy
+  discarded the commits since the last auto-checkpoint. `deploy.sh` moves a legacy
+  `backend/portfolio.db` into `data/` once (`ops/db-layout.sh`: idempotent, refuses any layout it
+  does not recognise) and leaves a symlink at the old path for older scripts and rollbacks. **The
+  container refuses to start on a missing or empty database** (`app/db_guard.py`, before alembic);
+  only a genuine fresh install sets `ALLOW_NEW_DATABASE=1`. The three WAL checkpoints stay
+  (`tests/test_wal_checkpoint_on_shutdown.py`); `tests/test_db_directory_mount.py` pins the rest.
   Anything that writes to production by hand and then stops the container must checkpoint first.
 - **Changing `backend/.env` needs `docker compose up -d`, never `restart`** (compose reads
   `env_file` only when it creates a container), **with `GIT_COMMIT=$(git rev-parse HEAD)`

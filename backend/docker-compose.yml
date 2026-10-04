@@ -4,7 +4,14 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./portfolio.db:/app/portfolio.db
+      # The database's DIRECTORY, not the file. Until 2026-10-04 this read
+      # `./portfolio.db:/app/portfolio.db`, and a file bind mount carries only the file:
+      # SQLite's -wal and -shm sidecars were created beside it inside the container's
+      # writable layer, so every `docker compose down` destroyed every commit since the
+      # last auto-checkpoint (docs/deployment.md has the measurement). Mounted as a
+      # directory they land on the host with the database. deploy.sh moves an existing
+      # backend/portfolio.db here once (ops/db-layout.sh) and leaves a symlink behind.
+      - ./data:/app/data
       # APScheduler's job store. A separate file from portfolio.db because the store is
       # synchronous SQLAlchemy while the app is aiosqlite in WAL mode, and pointing both
       # at one file invites lock contention on the database holding the actual portfolio.
@@ -24,6 +31,14 @@ services:
     env_file:
       - .env
     environment:
+      # Set HERE rather than left to `.env`, because `environment:` overrides `env_file:`
+      # and the host's .env predates the move — it may still name ./portfolio.db, and a
+      # container reading that would never see the file in /app/data. Absolute (four
+      # slashes) so the working directory cannot change which file it is.
+      DATABASE_URL: sqlite+aiosqlite:////app/data/portfolio.db
+      # app/db_guard.py refuses to start on a missing or empty database unless this is 1.
+      # Only a genuinely fresh install sets it: `ALLOW_NEW_DATABASE=1 ./deploy.sh`.
+      ALLOW_NEW_DATABASE: ${ALLOW_NEW_DATABASE:-0}
       # Reported by /health and shown in the app footer. deploy.sh exports it from the
       # deployed sha; "unknown" locally, where there is nothing to identify.
       GIT_COMMIT: ${GIT_COMMIT:-unknown}
