@@ -514,6 +514,15 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
+- **Optional: auto-deploy every 5 minutes instead of 10** (discussed 2026-10-04; owner may already
+  have done it — check `crontab -l | grep auto-deploy` on the VPS). Back up with
+  `crontab -l > /root/crontab.bak.$(date +%F)`, then
+  `crontab -l | sed 's#^\*/10 \(.*auto-deploy\.sh.*\)#*/5 \1#' | crontab -`. Not `*/6`: the guard
+  skips ticks within 10 minutes of a slot, so the last tick allowed to deploy before a slot is
+  :40 at `*/10`, :45 at `*/5` and :48 at `*/6` — 6 leaves the least room. Once it is `*/5`, the
+  "within 10 minutes" wording in CLAUDE.md, docs/deployment.md and both `ops/` scripts' comments
+  must follow, and *Worth doing next* has the guard that makes long builds safe at any cadence.
+
 - **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
   owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
   "$LOCAL"` and re-runs `deploy.sh`; it never restores the snapshot `backup-db.sh` just took
@@ -1328,6 +1337,17 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
+- **Re-check the sync-slot guard right before the restart, not only at the start of a deploy.**
+  `ops/auto-deploy.sh` checks `in_sync_window` once, before `git fetch`; `deploy.sh` then builds
+  for minutes while the old containers serve, and only then runs `down`/`up`. A build longer than
+  the gap to the next slot restarts the app on top of the sync — harmless if the slot had not
+  fired yet (the persistent job store re-runs a misfire up to 30 min late), but a sync killed
+  mid-run is re-run from scratch, which for the 18:00/00:00 IBKR slots is a second Flex
+  generation (rule 2's territory). The fix: in `deploy.sh`, after the build and before `down`,
+  wait while within the margin of a slot (sharing `SYNC_HOURS` with the guard, already pinned by
+  `tests/test_deploy_guard_hours.py`). Then build time stops mattering and a `*/5` cadence needs
+  no wider `SLOT_MARGIN_MIN`. Size the wait from the 18:00 full sync's real runtime in `sync_runs`.
+
 - **Run the dividend-forecast replay on production** once the IBKR-first forecast is deployed:
   `docker exec backend-portfolio-backend-1 python -m app.cli.backtest_dividend_forecast --per-security` (read-only,
   offline). It scores the new rule (`auto`) against the old flat median (`median8`) and three
@@ -1676,7 +1696,10 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   before the branch that read them; its only test used a shape production lacks) and the flat median
   lost seasonality and raises. Owner chose "same payment one year later", carry paid raises, no
   assumed growth. Built IBKR-first sizing, a withholding ladder, special detection, a replay CLI;
-  fixed the accrual tax sign. Backend 1767 green, frontend 786 green on Node 22.
+  fixed the accrual tax sign. Live on `48b1f9c`. Then a small grey per-year "WHT" line (received +
+  expected, one figure; a DA-1 reminder), live on `882db78`; and the deploy cadence — `*/5` is
+  fine, `*/6` is worse, the durable fix is a guard before the restart (both under the headings
+  above). Backend 1768, frontend 788 on Node 22.
 
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
