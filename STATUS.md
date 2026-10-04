@@ -530,7 +530,8 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   "restore the newest `/root/ibkr-backups/<date>/` snapshot by hand, then redeploy".
 
 - **Upload the finpension export when it has new transactions in it — no pricing deadline
-  any more.** Since 2026-09-12 neither 3a fund depends on the upload for its price:
+  any more.** *Pending as of 2026-10-04:* new transactions exist, but the cash is uninvested until
+  finpension's Tuesday investment run, so the owner uploads next week, after it. Since 2026-09-12 neither 3a fund depends on the upload for its price:
   `CH0117044948` prices from Yahoo directly and `CH1529078078` from its sibling share class
   (`0P0000S0OE.SW`, statement NAV × the sibling's moves — `docs/pillar3a.md`, *Prices*). The
   40-day "upload a newer statement" warning and the day-59 drop-out applied to a `manual`
