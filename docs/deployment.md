@@ -80,6 +80,34 @@ the pulled file but not in the executing one. Expect this for any future `deploy
 not a failure, and it self-corrects. Anything asserting "the deploy landed" must therefore not key
 solely on the commit sha (`ops/finish-deploy.*` also accept the `write_auth_enabled` marker).
 
+**The sync-slot guard is checked twice: before the deploy starts and again right before the
+restart.** `ops/auto-deploy.sh` refuses to *start* within `SLOT_MARGIN_MIN` (10) of a Berlin slot,
+checked once, before `git fetch`. `deploy.sh` then builds for minutes while the old containers
+serve, so a long build used to restart the app on top of the sync. A sync killed mid-run re-runs
+from scratch, and at the 18:00/00:00 IBKR slots that is a second Flex generation (rule 2). Since
+2026-10-04 `deploy.sh` runs `wait_for_sync_slot_clear` after the build and before the WAL checkpoint
+and `down`. It waits while within the margin of a slot, then while the running backend reports
+`"sync_in_progress": true` on `/api/scheduler/status`. That field is the in-process
+`SYNC_PIPELINE` gate, held by scheduled jobs and manual POSTs alike. The crypto gate is not in it.
+The rules:
+
+- **No copy of the hours.** `SYNC_HOURS`, `SLOT_MARGIN_MIN` and `in_sync_window()` are read out of
+  the checkout's `ops/auto-deploy.sh` (always the commit being deployed). `tests/test_deploy_guard_hours.py`
+  fails on any script that reasons about Berlin time without being pinned to `ALL_SYNC_HOURS`, and
+  `tests/test_deploy_restart_slot_wait.py` runs the function under bash with a faked clock.
+- **Bounded, then it restarts anyway** (`DEPLOY_SLOT_WAIT_MAX_MIN`, default 45; the margin alone
+  holds at most 21). It does not abort, because neither way out is safe under auto-deploy. A
+  non-zero exit reads as a broken build, so auto-deploy rolls back and quarantines a good commit.
+  Exiting 0 without restarting gets logged SUCCESS with the checkout already advanced, and that
+  commit then never deploys. Unknowns fail open for the same reason: an unreachable endpoint, or a
+  backend from before the field, counts as "no sync running". The margin still applies.
+- **Waiting is harmless to the cron.** The old containers keep serving. auto-deploy holds its
+  `flock` throughout, so the ticks that fire in the meantime exit at the lock. Nothing times out
+  `deploy.sh`, and `health_ok` runs only after it returns. The wait is logged to
+  `/root/auto-deploy.log` as `Holding the restart: …`.
+- **`DEPLOY_IGNORE_SLOTS=1 ./deploy.sh`** skips the check for a manual deploy that must go now. A
+  plain manual `./deploy.sh` waits like the unattended one.
+
 A **cloud routine** `ibkr-sync-validator` (claude.ai/code/routines) runs daily at 07:45 UTC to validate
 the morning sync via the public API + the IBKR MCP connector. It **cannot SSH**, so it opens PRs rather
 than pushing to `main`.

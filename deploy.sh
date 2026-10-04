@@ -86,6 +86,81 @@ echo "Deploying commit: $GIT_COMMIT"
 # the window that loses a scheduled sync — when the swap itself takes seconds.
 docker compose build --no-cache
 
+# --- Sync-slot re-check, right before the restart --------------------------------------
+# ops/auto-deploy.sh refuses to START a deploy within SLOT_MARGIN_MIN of a Berlin sync slot,
+# but it checks once, before `git fetch`, and the build above then runs for minutes while
+# the old containers serve. A build that ran past the margin restarted the app on top of
+# the sync. Harmless if the slot had not fired yet (the persistent job store re-runs a
+# misfire), but a sync killed mid-run is re-run from scratch, and at the 18:00/00:00 IBKR
+# slots that is a second Flex generation — CLAUDE.md rule 2. So the restart itself waits:
+# while within the margin of a slot, and then while the running backend reports a sync in
+# flight (`sync_in_progress` on /api/scheduler/status, the in-process SYNC_PIPELINE gate).
+# Waiting here is free: the old containers keep serving, and the cron ticks that fire
+# meanwhile exit at auto-deploy's flock.
+#
+# The hours, the margin and in_sync_window() are READ from the checkout's
+# ops/auto-deploy.sh, never copied: that is the file tests/test_deploy_guard_hours.py pins
+# against the scheduler's ALL_SYNC_HOURS, and a copy of the hours nothing read is how they
+# drifted before. The checkout is the commit being deployed, so the two always agree.
+#
+# Bounded by DEPLOY_SLOT_WAIT_MAX_MIN (default 45: the margin alone holds at most 21, the
+# rest is for a long 18:00 full sync), after which it restarts ANYWAY rather than abort.
+# Aborting is worse under auto-deploy: a non-zero exit reads as a broken build (rollback,
+# and the good commit quarantined), while exiting 0 without restarting would be logged
+# SUCCESS with the checkout already at the new commit, so nothing would ever deploy it.
+# Unknowns fail open for the same reason: an unreachable status endpoint, or a backend
+# that predates the field, counts as "no sync running" — the margin still applies.
+# DEPLOY_IGNORE_SLOTS=1 skips the whole check, for a manual deploy that must go now.
+wait_for_sync_slot_clear() {
+    if [ "${DEPLOY_IGNORE_SLOTS:-0}" = "1" ]; then
+        echo "--- Sync-slot re-check skipped (DEPLOY_IGNORE_SLOTS=1) ---"
+        return 0
+    fi
+    local guard="$REPO_DIR/ops/auto-deploy.sh"
+    local SYNC_HOURS="" SLOT_MARGIN_MIN=""
+    eval "$(grep -E '^(SYNC_HOURS|SLOT_MARGIN_MIN)=' "$guard" 2>/dev/null)"
+    eval "$(sed -n '/^in_sync_window() {$/,/^}$/p' "$guard" 2>/dev/null)"
+    if ! [[ "$SYNC_HOURS" =~ ^[0-9\ ]+$ && "$SLOT_MARGIN_MIN" =~ ^[0-9]+$ ]] \
+        || ! declare -F in_sync_window >/dev/null; then
+        echo "WARNING: could not read the sync slots from $guard; restarting without the re-check"
+        return 0
+    fi
+    local max_min="${DEPLOY_SLOT_WAIT_MAX_MIN:-45}"
+    [[ "$max_min" =~ ^[0-9]+$ ]] || max_min=45
+    local poll=30 waited=0 slot reason last_reason=""
+    echo ""
+    echo "--- Sync-slot re-check before the restart ---"
+    while :; do
+        reason=""
+        if slot=$(in_sync_window); then
+            reason="within ${SLOT_MARGIN_MIN} min of the ${slot}:00 Europe/Berlin sync slot"
+        elif curl -s --max-time 5 "http://127.0.0.1:8000/api/scheduler/status" 2>/dev/null \
+                | grep -Eq '"sync_in_progress"[[:space:]]*:[[:space:]]*true'; then
+            reason="the running backend reports a sync in progress"
+        fi
+        if [ -z "$reason" ]; then
+            break
+        fi
+        if [ "$waited" -ge $(( max_min * 60 )) ]; then
+            echo "WARNING: still ${reason} after ${max_min} min (DEPLOY_SLOT_WAIT_MAX_MIN); restarting anyway"
+            return 0
+        fi
+        if [ "$reason" != "$last_reason" ]; then
+            echo "Holding the restart: ${reason} (Berlin $(TZ=Europe/Berlin date '+%H:%M')). The old containers keep serving; DEPLOY_IGNORE_SLOTS=1 skips this."
+            last_reason="$reason"
+        fi
+        sleep "$poll"
+        waited=$(( waited + poll ))
+    done
+    if [ "$waited" -gt 0 ]; then
+        echo "Clear after $(( waited / 60 ))m$(( waited % 60 ))s of waiting (Berlin $(TZ=Europe/Berlin date '+%H:%M')); restarting"
+    else
+        echo "Clear of every sync slot (Berlin $(TZ=Europe/Berlin date '+%H:%M')); restarting"
+    fi
+}
+wait_for_sync_slot_clear
+# --- end of the sync-slot re-check -----------------------------------------------------
+
 # Fold SQLite's write-ahead log into portfolio.db BEFORE the container goes. `./portfolio.db`
 # is a FILE bind mount, so the -wal/-shm sidecars SQLite writes beside it live in the
 # container's writable layer and vanish with `down` — taking every commit since the last

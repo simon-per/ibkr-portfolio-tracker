@@ -28,6 +28,7 @@ come from that constant. Importing it starts nothing.
 Offline: filesystem plus one import, no scheduler started, no network.
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -120,6 +121,80 @@ def test_both_finish_deploy_twins_warn_about_exactly_the_scheduled_slots(path, p
         f"runs at {sorted(scheduled)}:00. Missing slots let a push land on a sync; "
         f"extra ones train the operator to click through the warning."
     )
+
+
+DEPLOY_SH = REPO_ROOT / "deploy.sh"
+
+# Every script that knows when the syncs run, and how it is held to ALL_SYNC_HOURS. A new
+# one must be added here, with a test, or `test_every_script_that_tells_berlin_time_is_pinned`
+# fails — the family test, so the next copy is caught the way these four were not.
+_PINNED_SLOT_SCRIPTS = {
+    "ops/auto-deploy.sh": "declares SYNC_HOURS (test_deploy_guard_covers_exactly_the_scheduled_slots)",
+    "ops/finish-deploy.sh": "its own minute list (test_both_finish_deploy_twins_...)",
+    "ops/finish-deploy.ps1": "its own minute list (test_both_finish_deploy_twins_...)",
+    "deploy.sh": "reads auto-deploy.sh's (test_deploy_sh_reads_the_slots_rather_than_copying_them, "
+                 "and test_deploy_restart_slot_wait.py runs it)",
+}
+_SKIP_DIRS = {".git", ".claude", "node_modules", "venv", ".venv", "__pycache__", "dist",
+              "dist.next", "dist.old"}
+
+
+def _code_lines(path: Path) -> str:
+    """Comment lines dropped (`#` in both bash and PowerShell): a script that only
+    *mentions* Berlin in prose computes nothing from it."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
+def _scripts():
+    for root, dirs, files in os.walk(REPO_ROOT):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        for name in files:
+            if name.endswith((".sh", ".ps1", ".bash")):
+                yield Path(root) / name
+
+
+def test_every_script_that_tells_berlin_time_is_pinned():
+    """
+    A shell script has no way to know the sync hours except to carry them or read them,
+    and the only reason to ask for Europe/Berlin time is to compare it with them. So any
+    script that does is a member of this family, and must be one the tests above hold to
+    the scheduler. `deploy.sh` joined it on 2026-10-04, when it gained the re-check before
+    the restart — and did so by reading auto-deploy.sh's list rather than adding a copy.
+    """
+    found = set()
+    for path in _scripts():
+        code = _code_lines(path)
+        if re.search(r"Europe/Berlin|SYNC_HOURS|SLOT_MARGIN_MIN|in_sync_window", code):
+            found.add(path.relative_to(REPO_ROOT).as_posix())
+    unpinned = found - set(_PINNED_SLOT_SCRIPTS)
+    assert not unpinned, (
+        f"{sorted(unpinned)} reason about Berlin sync slots but nothing holds them to "
+        f"ALL_SYNC_HOURS. Read the hours from ops/auto-deploy.sh as deploy.sh does, and "
+        f"add the script to _PINNED_SLOT_SCRIPTS with a test."
+    )
+    gone = {p for p in _PINNED_SLOT_SCRIPTS if not (REPO_ROOT / p).exists()}
+    assert found >= set(_PINNED_SLOT_SCRIPTS) - gone, (
+        f"{sorted(set(_PINNED_SLOT_SCRIPTS) - gone - found)} no longer look like slot "
+        f"guards — the pattern above has gone stale, so it may be missing new ones too."
+    )
+
+
+@pytest.mark.skipif(not DEPLOY_SH.exists(), reason="deploy.sh not present")
+def test_deploy_sh_reads_the_slots_rather_than_copying_them():
+    """
+    deploy.sh's re-check before the restart takes SYNC_HOURS, SLOT_MARGIN_MIN and
+    in_sync_window() from the checkout's ops/auto-deploy.sh. A literal list of its own
+    would be the fifth copy of the hours, and the first one written after the lesson.
+    """
+    code = _code_lines(DEPLOY_SH)
+    assert not re.search(r"SYNC_HOURS=\"?[\d ]", code), "deploy.sh carries its own SYNC_HOURS"
+    assert not re.search(r"SLOT_MARGIN_MIN=\d", code), "deploy.sh carries its own margin"
+    assert not re.search(r"for \w+ in [\d ]{3,}", code), "deploy.sh loops over literal hours"
+    assert not re.search(r"^in_sync_window\(\)", code, re.M), (
+        "deploy.sh defines its own in_sync_window instead of reading auto-deploy.sh's"
+    )
+    assert "ops/auto-deploy.sh" in code and "in_sync_window" in code
 
 
 @pytest.mark.skipif(not AUTO_DEPLOY.exists(), reason="ops/auto-deploy.sh not present")
