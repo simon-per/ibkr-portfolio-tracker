@@ -614,6 +614,44 @@ def test_a_migrating_failure_is_restored_and_the_rollback_comes_up(tmp_path):
     assert _git(r.repo, "rev-parse", "HEAD") == r.good
 
 
+def _can_symlink(tmp: Path) -> bool:
+    try:
+        (tmp / "link-probe").symlink_to(tmp)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+@rehearsal
+def test_a_restore_follows_the_legacy_link_into_the_data_directory(tmp_path):
+    """
+    Since 2026-10-04 ops/db-layout.sh leaves backend/portfolio.db as a symlink to
+    backend/data/portfolio.db. A backup that reported the link (the old /root copy, or a
+    snapshot taken before the deploy that performed the move) must restore INTO the file
+    it points at: replacing the link with a regular file leaves two databases, which the
+    next preflight refuses, and restores into the copy the new layout never reads.
+    """
+    if not _can_symlink(tmp_path):
+        pytest.skip("this machine cannot create symlinks (runs on CI)")
+    r = _Rehearsal(tmp_path, migration=True, bad_marker="BROKEN")
+    data = r.db.parent / "data"
+    data.mkdir()
+    real = data / "portfolio.db"
+    r.db.rename(real)
+    r.db.symlink_to(Path("data") / "portfolio.db")
+
+    log = r.run()
+
+    assert "ROLLED BACK to" in log and "CRITICAL" not in log, log
+    assert "restoring into that file" in log, log
+    assert r.db.is_symlink(), "the legacy path must stay a link"
+    assert real.is_file() and not real.is_symlink()
+    assert _revision(real) == "a1"
+    assert _notes(real) == ["before the deploy"]
+    aside = r.aside()
+    assert len(aside) == 1 and _revision(aside[0]) == "b2", aside
+
+
 @rehearsal
 def test_a_failure_without_a_migration_is_not_restored(tmp_path):
     """No migration in the range: the plain redeploy suffices, and a restore would only

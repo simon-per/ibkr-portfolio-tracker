@@ -1,5 +1,5 @@
 #!/bin/bash
-# Snapshot backend/portfolio.db, verify the snapshot, and prune old ones.
+# Snapshot backend/data/portfolio.db, verify the snapshot, and prune old ones.
 #
 # Lives here rather than only on the VPS, for the reason ops/auto-deploy.sh's own
 # header gives: a file that governs the data's only safety net should be readable by
@@ -47,7 +47,15 @@
 set -uo pipefail
 
 REPO_DIR="${REPO_DIR:-/root/IBKR_investment_tracker}"
-DB="${DB:-$REPO_DIR/backend/portfolio.db}"
+# The database's home since the 2026-10-04 directory mount (ops/db-layout.sh). Until the deploy that
+# performs that move, the live file is still the legacy backend/portfolio.db, so an unset
+# DB falls back to it only while data/ holds nothing — a copy of this script installed
+# early must not fail every backup, and with it every auto-deploy. After the move the
+# legacy path is a symlink to this file, so both names read the one database.
+if [ -z "${DB:-}" ]; then
+    DB="$REPO_DIR/backend/data/portfolio.db"
+    [ -e "$DB" ] || [ ! -f "$REPO_DIR/backend/portfolio.db" ] || DB="$REPO_DIR/backend/portfolio.db"
+fi
 BACKUP_ROOT="${BACKUP_ROOT:-/root/ibkr-backups}"
 LOG="${BACKUP_LOG:-/root/backup-db.log}"
 
@@ -80,12 +88,15 @@ DEST="$DEST_DIR/portfolio.db.$TAG-$(date -u +%H%M%S)"
 # `docker compose down`. sqlite's backup API takes only a read lock either way, and
 # `timeout=30` matches the app's own busy_timeout so a checkpoint in flight is waited
 # out rather than raising.
-# The host can see portfolio.db but NOT its write-ahead log: the container bind-mounts the
-# FILE, so the -wal sidecar lives in the container's writable layer. A host-side backup
-# therefore misses every commit since the last checkpoint unless the running container
-# folds them in first. Best effort — a stopped container has an empty WAL by definition.
+# Under the old FILE bind mount (`./portfolio.db`, until 2026-10-04) the host could
+# see the database but NOT its write-ahead log, which lived in the container's writable
+# layer, so a host-side backup missed every commit since the last checkpoint unless the
+# running container folded them in first. The directory mount puts the -wal on the host,
+# where the backup API reads it; the checkpoint stays for a container still on the file
+# mount. The path comes from the container's own settings, and `mode=rw` makes a wrong one
+# fail rather than create an empty file. Best effort — a stopped container has an empty WAL.
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'backend-portfolio-backend-1'; then
-    docker exec backend-portfolio-backend-1 python -c "import sqlite3; c = sqlite3.connect('/app/portfolio.db'); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint (busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" >>"$LOG" 2>&1 \
+    docker exec backend-portfolio-backend-1 python -c "import sqlite3; from sqlalchemy.engine import make_url; from app.config import settings; p = make_url(settings.database_url).database; c = sqlite3.connect('file:' + p + '?mode=rw', uri=True); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint of', p, '(busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" >>"$LOG" 2>&1 \
         || log "WARN: WAL checkpoint in the container failed; this backup may lack the newest commits"
 fi
 

@@ -63,9 +63,10 @@ MIGRATIONS_DIR="backend/alembic/versions"
 #
 # The cadence and the margin interact: the last tick allowed to START a deploy before a
 # slot is the last one more than SLOT_MARGIN_MIN away — :45 at */5 (15 minutes of room),
-# :40 at */10, but :48 at */6 (12). The guard is checked once, at the start; a build
-# longer than that room would restart the app on top of the sync (STATUS.md, "Re-check
-# the sync-slot guard right before the restart").
+# :40 at */10, but :48 at */6 (12). This guard is checked at the start; since 2026-10-04
+# deploy.sh checks again after the build, right before the restart, reading SYNC_HOURS,
+# SLOT_MARGIN_MIN and in_sync_window() from THIS file (keep their shapes greppable), so a
+# build longer than that room waits instead of restarting the app on top of the sync.
 #
 # 06:00 left on 2026-08-08, when the IBKR slots became 18:00 (primary) and 00:00
 # (recovery) — note 18 was already guarded as a market-data hour, so only 6 dropped.
@@ -406,6 +407,21 @@ restore_db_if_migrated() {
     if ! snap_rev=$(db_probe "$SNAPSHOT" verify); then
         log "WARN: snapshot $SNAPSHOT is missing, empty or failed its integrity check — NOT restoring it; redeploying as-is. If this ends in CRITICAL, restore an older snapshot by hand."
         return 0
+    fi
+    # Restore into the FILE, never over a link. The database moved into backend/data/ on
+    # 2026-10-04 and ops/db-layout.sh leaves backend/portfolio.db as a symlink to it, so the
+    # path the backup reported can be that link — or become it during this very deploy, when
+    # the deploy is the one that performs the move. Replacing the link with a regular file
+    # would leave two databases (the next preflight refuses that) and restore into the copy
+    # the new layout does not read. Resolved here, after the failed deploy, not at backup time.
+    if [ -L "$LIVE_DB" ]; then
+        local resolved
+        if ! resolved=$(readlink -f "$LIVE_DB") || [ ! -f "$resolved" ]; then
+            log "WARN: $LIVE_DB is a link that does not resolve to a file — NOT restoring; redeploying as-is"
+            return 0
+        fi
+        log "rollback: $LIVE_DB links to $resolved; restoring into that file"
+        LIVE_DB="$resolved"
     fi
     # Nothing may hold the live file open while it is replaced. deploy.sh downs the
     # containers again later; that second `down` is a no-op.

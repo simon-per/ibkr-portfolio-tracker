@@ -5,7 +5,10 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** The **Swisscanto 3a funds now look through** via index proxies
+**Last updated: 2026-10-04.** **Deploy hardening, merged locally and awaiting its push with the owner
+present:** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
+re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
 the **Analytics tab is hidden** (owner request; nothing deleted — see
 docs/performance-analytics.md). Newest work: **the dividend forecast is IBKR-first and sized per payment**
@@ -517,19 +520,24 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **The auto-deploy rollback cannot undo a deploy that ran a migration — deferred 2026-09-12,
-  owner present for the fix.** `ops/auto-deploy.sh`'s failure branch does `git reset --hard
-  "$LOCAL"` and re-runs `deploy.sh`; it never restores the snapshot `backup-db.sh` just took
-  (its path only goes to the log). A failed deploy that had already run `alembic upgrade head`
-  leaves `alembic_version` at a revision the reverted tree no longer has, the container's
-  `alembic upgrade head && uvicorn` short-circuits, `restart: unless-stopped` crash-loops, and
-  the script logs `CRITICAL: rollback also failed` — on exactly the class of deploy the rollback
-  exists for. The fix: `backup-db.sh` prints `$DEST` on stdout, auto-deploy captures it, and the
-  rollback branch restores it over `backend/portfolio.db` after `reset --hard` and before
-  `deploy.sh`; rehearse in `tests/test_deploy_rollback.py`; then refresh `/root/backup-db.sh`
-  and `/root/auto-deploy.sh` on the VPS by **atomic rename** (see the deploy-guard entry under
-  *Watching* for why not `install`). Until then, treat any `CRITICAL: rollback also failed` as
-  "restore the newest `/root/ibkr-backups/<date>/` snapshot by hand, then redeploy".
+- **The deploy hardening of 2026-10-04 needs the owner on the VPS around its push.** Three
+  changes ship together: the database moves to a directory mount, the rollback restores the DB
+  snapshot after a migrating failure, and `deploy.sh` re-checks the sync slots right before the
+  restart (docs/deployment.md has all three).
+  - *Before the push:* `/root/auto-deploy.sh` must be the copy that fast-forwards before running
+    `deploy.sh` (`sha256sum /root/auto-deploy.sh` against `ops/auto-deploy.sh` at `98bf681`). If
+    it is older, the move deploy fails closed (the guard refuses an empty database) and needs one
+    manual `./deploy.sh`.
+  - *After it deploys:* the log shows `db-layout: moved`, `backend/portfolio.db` is a link to
+    `data/portfolio.db`, `/health` and the dashboard are fine. Then refresh **both**
+    `/root/auto-deploy.sh` and `/root/backup-db.sh` from `ops/` by atomic rename (copy to
+    `.new`, `chmod 755`, `mv -f`) and run `/root/backup-db.sh manual` once. Until the refresh the
+    rollback cannot restore (the old backup copy does not report its snapshot) and the backups go
+    through the link. Optional: `>/dev/null` on the daily crontab line (the script now prints
+    two paths), and `DATABASE_URL` in `backend/.env` set to `sqlite+aiosqlite:////app/data/portfolio.db`
+    (compose already overrides it).
+  - Leave the `backend/portfolio.db` link in place while a rollback past this commit is possible.
+    `/root/ibkr-backups/failed-deploys/` is never pruned; clear it by hand if it ever fills.
 
 - **Upload the finpension export when it has new transactions in it — no pricing deadline
   any more.** *Pending as of 2026-10-04:* new transactions exist, but the cash is uninvested until
@@ -1014,6 +1022,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The deploy hardening (2026-10-04), from its first deploy on.** The DB move: see *Needs a
+  human* for the checks. The restart re-check: `/root/auto-deploy.log` gains `Clear of every sync
+  slot` or `Holding the restart: …` lines; the first deploy has only the margin check (the old
+  backend lacks `sync_in_progress`), every later one also waits out a running sync. Still to size:
+  whether the 45-minute bound (`DEPLOY_SLOT_WAIT_MAX_MIN`) covers the 18:00 full sync's real
+  runtime in `sync_runs`. The rollback restore only shows when a migrating deploy fails; after the
+  `/root` refresh, every deploy logs `db snapshot of … is …` — a `NOTE: … did not report its
+  snapshot` means `/root/backup-db.sh` is still the old copy. The symlink case of the restore is
+  rehearsed on CI only (Windows here cannot make symlinks).
+
 - **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
   replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
   production*)
@@ -1354,18 +1372,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   - **"Rose after sale"** counts ETF rotations.
   - **Two gain figures**, 410 apart; cost basis labelled "total invested".
 
-- **Re-check the sync-slot guard right before the restart, not only at the start of a deploy.**
-  `ops/auto-deploy.sh` checks `in_sync_window` once, before `git fetch`; `deploy.sh` then builds
-  for minutes while the old containers serve, and only then runs `down`/`up`. A build longer than
-  the gap to the next slot restarts the app on top of the sync — harmless if the slot had not
-  fired yet (the persistent job store re-runs a misfire up to 30 min late), but a sync killed
-  mid-run is re-run from scratch, which for the 18:00/00:00 IBKR slots is a second Flex
-  generation (rule 2's territory). The fix: in `deploy.sh`, after the build and before `down`,
-  wait while within the margin of a slot (sharing `SYNC_HOURS` with the guard, already pinned by
-  `tests/test_deploy_guard_hours.py`). Then build time stops mattering. The cron has been `*/5`
-  since 2026-10-04 (owner, on the VPS; backup `/root/crontab.bak.2026-10-04`), which leaves
-  15 minutes between the last allowed start and a slot — fine for today's 2–5 minute builds. Size the wait from the 18:00 full sync's real runtime in `sync_runs`.
-
 - **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
   longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
   and the probe's mention. Also worth having then: a way to set a CoinStats→CoinGecko mapping by
@@ -1399,23 +1405,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
    fetchers already know how to store) plus one price series per sector ETF, or a factor
    provider. Budget it against rule 1 before building. Design is in
    `docs/performance-analytics.md`, *What is deliberately not here*.
-
-0. **Mount the database's directory, not the file — the WAL-on-deploy data loss is
-   mitigated, not fixed.** Found 2026-09-08 while verifying the basket refresh: a run's
-   commits vanished in the next deploy. `./portfolio.db:/app/portfolio.db` bind-mounts a
-   FILE, so SQLite's `-wal`/`-shm` sidecars live in the container layer and go with
-   `docker compose down`; every deploy discarded the commits since the last auto-checkpoint
-   (~4 MB), and every host-side backup lacked the same tail. Three checkpoints now cover
-   the deploy path (app shutdown, `deploy.sh` before `down`, `backup-db.sh` before the
-   copy), but a killed container never reaches its shutdown hook and the deploy that
-   ships a `deploy.sh` change runs the old copy — so the sidecars have to land on the host.
-   The job store already does this (`scheduler-data/`). Plan, in one deploy with the
-   container down: `mkdir backend/data && mv backend/portfolio.db backend/data/`, compose
-   `- ./data:/app/data`, `DATABASE_URL=sqlite+aiosqlite:///./data/portfolio.db` in the host
-   `.env` (`up -d`, never `restart`), `deploy.sh`'s `touch portfolio.db` guard, `backup-db.sh`'s
-   `DB` default, the `sqlite3.connect` snippets in CLAUDE.md, and `/root/backup-db.sh` on the
-   VPS, which is a *copy* of the repo script and does not update itself (auto-deploy prefers
-   it when present). Checkpoint by hand before the `mv`. Do it with the owner present.
 
 0. **Stamp the attempt when Yahoo has no analyst rating or no fundamentals for a security**
    — found 2026-09-12, medium-low. `AnalystRatingService.sync_stale_ratings` and the
@@ -1683,6 +1672,12 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-04 (deploy hardening)** — "is everything good for daily use?": yes; the remaining
+  risks were operational. Three parallel agents in worktrees built the DB directory mount (with a
+  self-performing, refusing switchover and a start guard), the migration-aware rollback restore, and
+  the pre-restart slot re-check; merged here with one integration fix (the restore follows the new
+  symlink). Push and the `/root` refresh need the owner.
+
 - **2026-10-04 (dividend forecast reads low)** — "IBKR must be the source of truth; make the
   forecast better": found IBKR's amounts and withholding never reached the forecast (a skip placed
   before the branch that read them; its only test used a shape production lacks) and the flat median
@@ -1717,9 +1712,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   month against the month before, which on a quarterly ETF calendar measures the calendar. Replaced,
   after two iterations with the owner, by two per-month paces over finished months (YTD vs last year
   ÷ 12; last three months vs the three before). Day-based windows were weighed and rejected.
-
-- **2026-10-01 (CHF 4,517.50 for a CHF 4,500 withdrawal)** — the extra 17.50 was ours: a
-  fallback rate stored before the ECB published was carried forward and never replaced, and a
-  CHF flow was round-tripped through EUR on a CHF base. Fixed both — `cash_flow_in_base` for
-  the four readers, and a published quote now overwrites a stand-in. Verified live on `dd78f97`.
-

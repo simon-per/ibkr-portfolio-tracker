@@ -74,7 +74,7 @@ slot_guard() {
   local now_min berlin
   if ! berlin="$(berlin_hhmm)"; then
     warn "Could not determine Berlin time (no usable python), so the sync-slot check"
-    warn "was skipped. Slots are on the hour at 00/06/08/11/13/15/18/20/22 Berlin."
+    warn "was skipped. Slots are on the hour at 00/08/11/13/15/18/20/22 Berlin."
     ask "Continue anyway?" || die "Stopped."
     return
   fi
@@ -197,7 +197,7 @@ fi
 say "Step 3/3 — install the sync-slot-guarded auto-deploy script"
 if ask "Install ops/auto-deploy.sh to /root/auto-deploy.sh?"; then
   scp -i "$SSH_KEY" ops/auto-deploy.sh "${REMOTE}:/tmp/auto-deploy.sh"
-  "${SSH[@]}" 'install -m 755 /tmp/auto-deploy.sh /root/auto-deploy.sh && rm -f /tmp/auto-deploy.sh'
+  "${SSH[@]}" 'cp /tmp/auto-deploy.sh /root/auto-deploy.sh.new && chmod 755 /root/auto-deploy.sh.new && mv -f /root/auto-deploy.sh.new /root/auto-deploy.sh && rm -f /tmp/auto-deploy.sh'
   echo "Installed. Watch /root/auto-deploy.log for a 'SKIP: within 10min' line near a slot."
 else
   warn "Skipped. Deploys can still land inside a sync slot; the job store recovers a"

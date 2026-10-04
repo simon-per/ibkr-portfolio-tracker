@@ -66,10 +66,13 @@ echo ""
 echo "--- Rebuilding Docker containers ---"
 cd "$REPO_DIR/backend"
 
-# Ensure portfolio.db exists as a FILE before the bind mount — otherwise Docker
-# creates a directory at ./portfolio.db and SQLite cannot open it. On a fresh install
-# the app auto-creates the schema; to keep your data, restore the backup db here first.
-[ -f portfolio.db ] || touch portfolio.db
+# The database lives in backend/data/ (a DIRECTORY bind mount, so SQLite's -wal lands on
+# the host); deploy.sh moves a legacy backend/portfolio.db there once, after `down` below.
+# This read-only check runs first, while the old containers still serve, and refuses any
+# layout it does not recognise — including no database at all, which used to be met with
+# `touch portfolio.db` and an app that started on an empty file. A genuinely fresh
+# install runs `ALLOW_NEW_DATABASE=1 ./deploy.sh`. See ops/db-layout.sh.
+bash "$REPO_DIR/ops/db-layout.sh" preflight
 
 # Same trap for the scheduler's job store, which is bind-mounted so persisted jobs
 # survive the rebuild — the whole point of persisting them.
@@ -161,17 +164,31 @@ wait_for_sync_slot_clear() {
 wait_for_sync_slot_clear
 # --- end of the sync-slot re-check -----------------------------------------------------
 
-# Fold SQLite's write-ahead log into portfolio.db BEFORE the container goes. `./portfolio.db`
-# is a FILE bind mount, so the -wal/-shm sidecars SQLite writes beside it live in the
-# container's writable layer and vanish with `down` — taking every commit since the last
-# auto-checkpoint (up to ~4 MB) with them. Measured 2026-09-08: a sync_runs row written at
-# 18:23 UTC was gone after the 18:30 deploy while one from 18:07 survived, and the container
-# held a 2.7 MB WAL against a 0-byte one on the host. The app also checkpoints on a clean
+# Fold SQLite's write-ahead log into the database BEFORE the container goes. Under the old
+# FILE bind mount (`./portfolio.db`, until 2026-10-04) the -wal/-shm sidecars lived in the
+# container's writable layer and vanished with `down` — taking every commit since the last
+# auto-checkpoint (up to ~4 MB) with them; the directory mount puts them on the host, and
+# this stays because the deploy that performs that move stops a container still on the
+# file mount, as does a rollback to an older commit. The path comes from the running
+# container's own settings, so it is right on either side of the move; `mode=rw` so a
+# wrong path fails instead of creating an empty file. Measured 2026-09-08: a sync_runs row
+# written at 18:23 UTC was gone after the 18:30 deploy while one from 18:07 survived, and the
+# container held a 2.7 MB WAL against a 0-byte one on the host. The app also checkpoints on a clean
 # shutdown; this covers a stop that is not clean. A container that is not running has
 # nothing to lose, hence the fallback message rather than a failure.
-docker compose exec -T portfolio-backend python -c "import sqlite3; c = sqlite3.connect('/app/portfolio.db'); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint (busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" \
+docker compose exec -T portfolio-backend python -c "import sqlite3; from sqlalchemy.engine import make_url; from app.config import settings; p = make_url(settings.database_url).database; c = sqlite3.connect('file:' + p + '?mode=rw', uri=True); c.execute('PRAGMA busy_timeout=30000'); print('WAL checkpoint of', p, '(busy, frames, done):', c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()); c.close()" \
     || echo "WAL checkpoint skipped (backend container not running)"
 docker compose down
+
+# --- Database directory switchover (ops/db-layout.sh) -------------------------
+# One-time and idempotent: moves backend/portfolio.db into backend/data/ and leaves a
+# symlink at the old path, or does nothing when that has already happened. Here, between
+# `down` and `up`, because the file must not move under a running container. A refusal
+# leaves the layout untouched and exits with the containers down: auto-deploy's rollback
+# brings the previous build back up on the old path; by hand, fix what it names and re-run.
+bash "$REPO_DIR/ops/db-layout.sh" switch
+# --- end database directory switchover ---------------------------------------
+
 cd "$REPO_DIR/frontend"
 rm -rf dist.old
 [ -d dist ] && mv dist dist.old

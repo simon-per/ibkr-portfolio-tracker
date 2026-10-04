@@ -22,7 +22,7 @@ and for wiping / rebuilding it without losing data.
 
 | Path on server | Contents | Notes |
 |---|---|---|
-| `backend/portfolio.db` | All portfolio data (securities, tax lots, prices, FX, dividends, fundamentals, etc.) | SQLite, **WAL mode** — never plain-`cp` it while the backend runs; use `/root/backup-db.sh` or stop the backend first |
+| `backend/data/portfolio.db` | All portfolio data (securities, tax lots, prices, FX, dividends, fundamentals, etc.) | SQLite, **WAL mode** — never plain-`cp` it while the backend runs; use `/root/backup-db.sh` or stop the backend first. Until 2026-10-04 it was `backend/portfolio.db`, which is now a symlink to it ([docs/deployment.md](docs/deployment.md), *The database directory*) |
 | `backend/.env` | Secrets: `IBKR_TOKEN`, `IBKR_QUERY_ID`, etc. | Can also be rebuilt from `backend/.env.example` |
 | `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; the vhost itself is hand-written and **not** in git |
 | `/root/auto-deploy.sh`, `/root/backup-db.sh` | The deploy and backup jobs | Both are in git under `ops/` — reinstall from there rather than restoring the copies |
@@ -67,14 +67,14 @@ Run from your local machine (PowerShell). Stopping the backend first lets SQLite
 checkpoint the WAL into the main `.db` file so the copy is consistent.
 
 ```powershell
-# a) Stop the backend on the VPS (checkpoints WAL → portfolio.db)
+# a) Stop the backend on the VPS (checkpoints WAL → data/portfolio.db)
 ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud `
   "cd /root/IBKR_investment_tracker/backend && docker compose stop portfolio-backend"
 
 # b) Pull the database and secrets into a local backup folder
 mkdir -Force "$HOME\ibkr-backups"
 scp -i ~/.ssh/id_ed25519_hostinger `
-  root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/portfolio.db `
+  root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/data/portfolio.db `
   "$HOME\ibkr-backups\portfolio.db"
 scp -i ~/.ssh/id_ed25519_hostinger `
   root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/.env `
@@ -88,7 +88,7 @@ Get-Item "$HOME\ibkr-backups\portfolio.db" | Select-Object Length
 ```
 
 > Optional, no shutdown needed: an online snapshot instead of stopping the backend —
-> `ssh ... "cd /root/IBKR_investment_tracker/backend && docker compose exec -T portfolio-backend python -c \"import sqlite3; sqlite3.connect('portfolio.db').backup(sqlite3.connect('portfolio.backup.db'))\""` then scp `portfolio.backup.db`.
+> `ssh ... "cd /root/IBKR_investment_tracker/backend && docker compose exec -T portfolio-backend python -c \"import sqlite3; sqlite3.connect('/app/data/portfolio.db').backup(sqlite3.connect('/app/data/portfolio.backup.db'))\""` then scp `backend/data/portfolio.backup.db` (and delete it there afterwards).
 
 ---
 
@@ -127,9 +127,11 @@ Push the backups from your machine up to the new server **before** the first `do
 scp -i ~/.ssh/id_ed25519_hostinger "$HOME\ibkr-backups\backend.env" `
   root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/.env
 
-# database (must be a FILE at this exact path before containers start)
+# database (must be a FILE at this exact path before containers start; no -wal/-shm beside it)
+ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud `
+  "mkdir -p /root/IBKR_investment_tracker/backend/data"
 scp -i ~/.ssh/id_ed25519_hostinger "$HOME\ibkr-backups\portfolio.db" `
-  root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/portfolio.db
+  root@portfolio.srv1211053.hstgr.cloud:/root/IBKR_investment_tracker/backend/data/portfolio.db
 ```
 
 Then on the server:
@@ -140,14 +142,14 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-`deploy.sh` builds the frontend, ensures `portfolio.db`
-exists as a file, builds the frontend, then builds and starts all containers and runs a
-health check.
+`deploy.sh` checks that `backend/data/portfolio.db` is there (`ops/db-layout.sh preflight`),
+builds the frontend and the image, then starts all containers and runs a health check.
 
-> Starting fresh with **no** backup? Skip the DB copy — `deploy.sh` creates an empty
-> `portfolio.db` and the app auto-creates the schema on startup (`init_db` →
-> `alembic upgrade head`, run by the container CMD). Then use **Sync IBKR Data** +
-> market-data sync to repopulate.
+> Starting fresh with **no** backup? Skip the DB copy and run `ALLOW_NEW_DATABASE=1 ./deploy.sh`
+> once. Without the flag `deploy.sh` refuses, and the container refuses to start
+> (`app/db_guard.py`), because an app on a new, empty database looks exactly like one that lost
+> everything. With it, `alembic upgrade head` (the container CMD) creates the schema. Then use
+> **Sync IBKR Data** + market-data sync to repopulate.
 
 ---
 
@@ -160,7 +162,7 @@ written outside `/tmp`, so it is safe at any hour.
 ```bash
 ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud 'python3 - <<PY
 import glob, os, shutil, sqlite3
-live = "/root/IBKR_investment_tracker/backend/portfolio.db"
+live = "/root/IBKR_investment_tracker/backend/data/portfolio.db"
 newest = max(glob.glob("/root/ibkr-backups/*/portfolio.db.*-*"), key=os.path.getmtime)
 target = "/tmp/restore-rehearsal.db"; shutil.copyfile(newest, target)
 r = sqlite3.connect(target)
@@ -202,16 +204,17 @@ succeeds (retries transient 1001s), and the **Dividend Income** card populates.
 
 - **WAL mode:** never copy `portfolio.db` from a running backend without also copying
   `-wal`/`-shm`, or just stop the backend first (as above).
-- **Bind mount needs a file:** if `backend/portfolio.db` is missing, Docker creates a
-  *directory* and SQLite fails. `deploy.sh` now `touch`es it; for a restore, place the
-  real file there first.
+- **The database lives in `backend/data/`**, a directory bind mount, so its `-wal`/`-shm` sit
+  on the host beside it. A missing file is **refused**, not created: `deploy.sh` stops before
+  building and the container will not start, unless `ALLOW_NEW_DATABASE=1` says this is a fresh
+  install. For a restore, place the real file at `backend/data/portfolio.db` first.
 - **The host nginx owns ports 80/443**, not the compose stack — both containers bind
   to `127.0.0.1` only. The same nginx also serves an unrelated `n8n` vhost, so do not
   assume this host is single-purpose when editing its config or reloading it.
 - **DNS before TLS:** the domain must resolve to the server before `./deploy.sh`, or the
   Let's Encrypt TLS challenge fails and HTTPS won't come up.
 - **Migrations run on every boot:** the container CMD is
-  `alembic upgrade head && uvicorn ...`, so a restored database is migrated forward
+  `python -m app.db_guard && alembic upgrade head && uvicorn ...`, so a restored database is migrated forward
   automatically — and if the migration fails, the `&&` means uvicorn never starts and
   the container is simply down. Nothing calls `Base.metadata.create_all()` in
   production any more; `tests/test_migrations.py` is what keeps that safe.

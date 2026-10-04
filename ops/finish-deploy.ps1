@@ -207,7 +207,7 @@ Say 'Step 3/3 - install the sync-slot-guarded auto-deploy script'
 if (Ask 'Install ops/auto-deploy.sh to /root/auto-deploy.sh?') {
     scp -i $SshKey ops/auto-deploy.sh "${Remote}:/tmp/auto-deploy.sh"
     if ($LASTEXITCODE -ne 0) { Die 'scp failed.' }
-    ssh -i $SshKey $Remote 'install -m 755 /tmp/auto-deploy.sh /root/auto-deploy.sh && rm -f /tmp/auto-deploy.sh'
+    ssh -i $SshKey $Remote 'cp /tmp/auto-deploy.sh /root/auto-deploy.sh.new && chmod 755 /root/auto-deploy.sh.new && mv -f /root/auto-deploy.sh.new /root/auto-deploy.sh && rm -f /tmp/auto-deploy.sh'
     if ($LASTEXITCODE -ne 0) { Die 'install failed.' }
     Write-Host "Installed. Watch /root/auto-deploy.log for a 'SKIP: within 10min' line near a slot."
 } else {

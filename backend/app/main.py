@@ -143,19 +143,19 @@ async def lifespan(app: FastAPI):
 
 async def checkpoint_and_dispose_engine() -> None:
     """
-    Fold SQLite's write-ahead log into portfolio.db and close every pooled connection.
+    Fold SQLite's write-ahead log into the database and close every pooled connection.
 
-    `docker-compose.yml` bind-mounts `./portfolio.db` as a FILE, so the `-wal` and `-shm`
-    sidecars SQLite writes beside it live in the container's writable layer and are
-    destroyed with the container. Every commit since the last auto-checkpoint — up to
-    `wal_autocheckpoint` pages, ~4 MB — went with them on every `docker compose down`,
-    which is every deploy. Measured 2026-09-08: a `sync_runs` row written at 18:23 UTC was
-    gone after the 18:30 deploy while one from 18:07 survived, and the container held a
-    2.7 MB WAL against a 0-byte one on the host. A process that is killed rather than
-    stopped never gets here, so `deploy.sh` also checkpoints from outside before `down`;
-    this is the half that covers a plain `docker stop`. The durable fix is to mount the
-    directory rather than the file, as the scheduler's job store already does — see
-    STATUS.md, *Worth doing next*.
+    Until 2026-10-04 `docker-compose.yml` bind-mounted `./portfolio.db` as a FILE, so the
+    `-wal` and `-shm` sidecars SQLite writes beside it lived in the container's writable
+    layer and were destroyed with the container. Every commit since the last
+    auto-checkpoint — up to `wal_autocheckpoint` pages, ~4 MB — went with them on every
+    `docker compose down`, which is every deploy. Measured 2026-09-08: a `sync_runs` row
+    written at 18:23 UTC was gone after the 18:30 deploy while one from 18:07 survived, and
+    the container held a 2.7 MB WAL against a 0-byte one on the host. The durable fix has
+    since landed — compose mounts the directory `./data`, so the sidecars live on the host
+    (`ops/db-layout.sh` moved the file) — and this stays as the cheap half that still
+    matters for a build rolled back onto the old file mount, and that leaves a host
+    snapshot of `data/` self-contained.
 
     Best effort on the checkpoint: another connection holding a read transaction makes
     TRUNCATE partial rather than failing, and `dispose()` then closes the last connection,

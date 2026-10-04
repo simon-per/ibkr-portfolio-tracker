@@ -11,6 +11,11 @@ Three places now checkpoint, and each is pinned here because each covers a case 
 cannot: the app on a clean shutdown (a plain `docker stop`), `deploy.sh` from outside the
 container before `down` (a shutdown that never runs the lifespan), and `backup-db.sh` before
 the host-side copy (the host cannot see the container's WAL at all).
+
+Since 2026-10-04 compose mounts the database's directory instead (`./data:/app/data`), so the
+sidecars land on the host — `test_db_directory_mount.py` pins that and the one-time move. The
+checkpoints stay: the deploy performing the move stops a container still on the file mount, and
+so does any rollback to an older commit.
 """
 import re
 from pathlib import Path
