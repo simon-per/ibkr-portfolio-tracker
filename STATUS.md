@@ -1414,17 +1414,24 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
    `.info` for was re-fetched on every sync forever"): write a row with zero counts and
    `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
 
-0. **Decompose the World ex CH tranche from the fund that tracks its actual index.** It is
-   ~1.9% of the book sitting in `uncovered_fund`, and the donor exists: **iShares World ex
-   Switzerland Equity Index Fund (CH), `CH0244028970`**, MSCI Developed World ex
-   Switzerland, CHF, BlackRock product id **279894**. Two things make it more than a
-   one-line `basket_proxy_isin`: it is a Swiss institutional index fund rather than a UCITS
-   ETF, so holdings come from a product-page `.ajax?fileType=xls` rather than the varnish
-   JSON `parse_ishares` reads, and its `portfolio_id` is **not** the product id (the IQQ
-   coincidence does not generalise — read it from the sitemap and confirm by row count).
-   Deliberately not proxied to IWDA meanwhile: that would put Nestlé, Roche and Novartis
-   into the look-through at ~2.5% of the position, which is a *fabricated* holding rather
-   than the understatement every other proxy here errs toward.
+0. **Look through both Swisscanto 3a funds exactly — researched and measured 2026-10-04, not built.**
+   The funds' factsheets (finpension, 31.08.2026) name the indices: World ex CH tracks **MSCI World
+   ex Switzerland** (full replication, 1,209 of 1,211 names); EM tracks **MSCI Emerging Markets**
+   (optimised sampling, 1,156 of 1,167). Neither publishes a full basket anywhere free.
+   - **The donor this entry used to name does not work:** iShares World ex Switzerland Equity Index
+     Fund (CH), `CH0244028970`, product 279894, publishes only its **top 10**, in its xls *and* its
+     holdings csv (`1495092304805.ajax`). Don't retry it.
+   - **World ex CH = IWDA's basket minus its Switzerland rows, rescaled.** That is the index's
+     definition, and it measures exact: IWDA fetched with `asOfDate=20260831` (the BlackRock API
+     accepts it), Swiss rows dropped (41, 2.12%), the rest scaled to the equity total, reproduces
+     the factsheet's top 10 to ±0.01 pp on every line and 1,210 constituents against 1,211. No
+     fabricated Nestlé/Roche/Novartis — the objection that kept it uncovered no longer applies.
+     Needs a "derived from proxy minus countries" basket kind; this rescale is the index
+     definition, not the renormalise-to-100 the conventions forbid — say so in the code.
+   - **EM: proxy IEEM (`IE00B0M63177`, BlackRock portfolio id `251857`, en_GB works) instead of
+     EMIM.** Same date, the factsheet's top 10 against IEEM: ±0.02 pp; against EMIM (MSCI EM IMI)
+     every name ~11% low (TSMC 13.48 vs 15.08). A registry entry plus `basket_proxy_isin`.
+   - Worth ~2.3% of the book (World ex CH ~1.7%, EM ~0.6%), all currently `uncovered_fund` or low.
 
 Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
 
