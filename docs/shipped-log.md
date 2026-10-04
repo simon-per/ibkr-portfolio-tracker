@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-04 — the Swisscanto 3a funds look through via their own index
+
+Neither tranche publishes a basket; both factsheets name the index (World ex CH: MSCI World ex
+Switzerland; EM: MSCI Emerging Markets). EM moved from EMIM (MSCI EM IMI, every company ~11% low)
+to IEEM (the same index, top 10 within 0.02 pp); World ex CH, uncovered until then, borrows IWDA
+(~2% Swiss names it does not hold, owner-accepted). `7dc0428`. The baskets were preloaded by hand
+rather than waiting for 18:00 (`fetch_etf_baskets IWDA IEEM` + `import_etf_basket`; IWDA's stored
+basket was 52 days old because it had never been held). **Verified on production:** coverage
+98.35% → **98.9%**, `uncovered_fund_eur` **0.00**, both funds `looked_through` on 2026-10-01
+baskets, not stale. A first import attempt failed because a docs push redeployed between fetch
+and import and took the container's `/tmp` with it — now a local-development trap in STATUS.md.
+
 ## Shipped 2026-10-03 — Korean and Taiwanese dividends pair with their cash
 
 Every ex→pay pairing was bounded at 30 days; SK Hynix went ex 2026-08-28 and paid 09-30 (33 days),

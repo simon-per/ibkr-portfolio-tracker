@@ -5,7 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** The **Swisscanto 3a funds now look through** via index proxies, and
+**Last updated: 2026-10-04.** The **Swisscanto 3a funds now look through** via index proxies
+(verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
 the **Analytics tab is hidden** (owner request; nothing deleted — see
 docs/performance-analytics.md). Newest work: **the dividend forecast is IBKR-first and sized per payment**
 (live on `48b1f9c` — see *Watch after the next deploy*). IBKR's paid amounts never reached the
@@ -1013,18 +1014,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The Swisscanto 3a funds look through via index proxies** (2026-10-04): EM borrows IEEM
-  (MSCI EM; was EMIM, ~11% low), World ex CH borrows IWDA (was uncovered; ~2% Swiss names it
-  does not hold, accepted by the owner). After the deploy, World ex CH shows companies at once
-  (IWDA's basket is stored); EM is uncovered until the **18:00 full sync** fetches IEEM's basket
-  for the first time — then check `/api/portfolio/lookthrough` shows both funds decomposed and
-  no stale/missing-basket warning for IEEM. **Live 2026-10-04 13:37 Berlin:** coverage 98.35%,
-  World ex CH decomposed via IWDA, EM uncovered as expected — and one warning: the stored IWDA
-  basket is from 2026-08-13 (52 days, against blackrock's 7), because IWDA was never held and so
-  never refreshed. The same 18:00 run refreshes it (the stale verdict follows the proxy); confirm
-  the warning is gone. docs/pillar3a.md, *Allocation and look-through*,
-  has the measurements and the exact route if it ever matters.
-
 - **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
   replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
   production*)
@@ -1564,6 +1553,12 @@ Rough priority. The auto-deploy install moved to *Needs a human* — it is the l
 ## Local development traps
 
 Each of these cost real time at least once.
+
+- **A file under the container's `/tmp` does not survive a deploy.** `fetch_etf_baskets --out
+  /tmp/baskets` then `import_etf_basket` in a second step lost both files on 2026-10-04: a push
+  auto-deployed in between (`*/5`), `down`/`up` recreated the container, and the import said
+  "No such file(s)" (nothing was written — it refuses first). Run fetch and import back to back
+  in one paste, and don't push while someone is mid-way through a manual CLI sequence on the VPS.
 
 - **Node 26 breaks every frontend test that touches `localStorage`** (60 failures in 5 files,
   seen 2026-09-27 and again 2026-09-28: `Cannot read properties of undefined (reading 'clear')`).
