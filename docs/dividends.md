@@ -464,6 +464,16 @@ applies to the forward projections, the overdue inference and the pending-estima
 announced accrual re-prices every later projection of its security — pinned in
 `test_pending_estimate_hands_off_to_accrual_then_actual_cash`.
 
+**The per-year WHT figure** (2026-10-04, owner request). Each `growth.annual[]` row carries
+`withholding_eur` (received: IBKR's own withholding; estimate-era income, which recorded none, at
+the security's ladder rate) and `forecast_withholding_eur` (each projection's `net × r / (1 − r)` at
+the rate that took it from gross). *Per year* shows their sum as one small grey "WHT" line under
+the amount — deliberately not split, a quiet reminder of the DA-1 threshold rather than a tax
+figure; with Forecast off, `realizedOnlyYears` zeroes the projected half. The received half does
+not move with the toggle (the ladder is built even when no forecast is). It is raw withholding,
+not the DA-1-creditable part: a 22% Korean rate counts in full here though only the 15% treaty
+rate is creditable. The Tax tab's per-country DA-1 figures are the filing source.
+
 **`<OpenDividendAccrual>` sends `tax` POSITIVE** (a real statement, 2026-10-04: TSMC gross 259, tax
 54.39, net 204.61). The ingest flipped it negative until then; it now stores `abs(tax)`, and the ladder
 reads `abs()` so rows written before the fix still give the right rate.

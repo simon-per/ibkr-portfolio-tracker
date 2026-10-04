@@ -863,6 +863,13 @@ export interface DividendAnnualRow {
   forecast_net_eur: number;
   /** net + forecast — what the bar length shows, and what yoy_pct compares. */
   total_eur: number;
+  /**
+   * Tax withheld at source on the received part — IBKR's figure, estimated at the
+   * security's rate for estimate-era income — and on the projected part. Shown as one
+   * small reminder beside the year (the DA-1 threshold), never split.
+   */
+  withholding_eur: number;
+  forecast_withholding_eur: number;
   yoy_pct: number | null;
   /** This row or its comparable contains projection, so the chip is forward-looking. */
   yoy_includes_forecast: boolean;

@@ -623,6 +623,11 @@ class DividendAnnualRow(BaseModel):
     net_eur: float                  # actually received
     forecast_net_eur: float         # projected inside this year
     total_eur: float                # net + forecast — what the bar length shows
+    # Tax withheld at source on the received part (IBKR's figure; estimated at the
+    # security's withholding rate for estimate-era income) and on the projected part.
+    # A reminder of the DA-1 threshold beside each year, not a tax-report figure.
+    withholding_eur: float = 0.0
+    forecast_withholding_eur: float = 0.0
 
     # yoy_pct compares total_eur against the previous row's total_eur: one rule for
     # every row, degrading to plain actual-vs-actual for two complete past years.

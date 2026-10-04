@@ -1242,3 +1242,43 @@ async def test_an_accrual_stored_with_the_old_negative_tax_still_reads_its_rate(
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_each_year_carries_its_withholding_received_and_expected():
+    """
+    The small WHT figure beside each year (a DA-1 reminder): what IBKR withheld on the
+    received part, plus what the forecast expects withheld on the projected part — the
+    same ladder rate that took each projection from gross to net. The received part
+    does not move with the Forecast toggle.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(_lot(1, date(2025, 1, 2), "10"))
+        session.add(_price(1, "20"))
+        await session.flush()
+        await _yahoo_series(session, 1, QUARTERLY, "0.50")
+        for d in QUARTERLY:
+            await _ibkr_paid(session, 1, d + timedelta(days=20), "5.00", "0.75",
+                             per_share="0.50", kind="ordinary")
+        await session.commit()
+
+        svc = DividendService(session)
+        on = await svc.get_dividend_breakdown(include_forecast=True, as_of=AS_OF)
+        off = await svc.get_dividend_breakdown(include_forecast=False, as_of=AS_OF)
+        rows = {r["year"]: r for r in on["growth"]["annual"]}
+        # 2025: one IBKR payment (Nov), 0.75 withheld. 2026: Feb and May received...
+        assert rows[2025]["withholding_eur"] == 0.75
+        received_2026 = sum(1 for d in QUARTERLY if (d + timedelta(days=20)).year == 2026)
+        assert rows[2026]["withholding_eur"] == pytest.approx(0.75 * received_2026)
+        # ...and each projected 4.25 net carries 0.75 expected at the measured 15%.
+        projected_2026 = rows[2026]["forecast_net_eur"]
+        assert rows[2026]["forecast_withholding_eur"] == pytest.approx(
+            projected_2026 * 0.15 / 0.85, abs=0.02
+        )
+        off_rows = {r["year"]: r for r in off["growth"]["annual"]}
+        assert off_rows[2026]["withholding_eur"] == rows[2026]["withholding_eur"]
+        assert off_rows[2026]["forecast_withholding_eur"] == 0
+    finally:
+        await session.close()
+        await engine.dispose()

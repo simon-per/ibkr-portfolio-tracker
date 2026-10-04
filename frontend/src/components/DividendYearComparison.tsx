@@ -22,6 +22,8 @@ export function DividendYearComparison({
   if (annual.length === 0) return null
 
   const max = Math.max(...annual.map(a => a.total_eur), 0.01)
+  const withholding = (row: DividendAnnualRow) =>
+    (row.withholding_eur ?? 0) + (row.forecast_withholding_eur ?? 0)
   // Cents matter at this scale — the earliest year here is under 2 units, which
   // whole-number rounding would flatten to "2" beside a 116.
   const amount = (v: number) => v.toLocaleString('en-US', {
@@ -89,6 +91,13 @@ export function DividendYearComparison({
                 {curSym}{amount(row.total_eur)}
                 {row.partial && (
                   <span className="text-muted-foreground" title="Incomplete year">*</span>
+                )}
+                {/* Withheld at source — received plus expected, one figure. A quiet
+                    reminder of the DA-1 threshold, not a tax figure. */}
+                {withholding(row) > 0 && (
+                  <span className="block text-[10px] font-normal leading-tight text-muted-foreground">
+                    WHT {curSym}{amount(withholding(row))}
+                  </span>
                 )}
               </span>
 

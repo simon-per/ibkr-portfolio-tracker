@@ -7,6 +7,8 @@ function row(part: Partial<DividendAnnualRow> & { year: number }): DividendAnnua
     net_eur: 0,
     forecast_net_eur: 0,
     total_eur: 0,
+    withholding_eur: 0,
+    forecast_withholding_eur: 0,
     yoy_pct: null,
     yoy_includes_forecast: false,
     yoy_vs_partial: false,
@@ -74,5 +76,16 @@ describe('realizedOnlyYears', () => {
 
   it('handles an empty list', () => {
     expect(realizedOnlyYears([])).toEqual([])
+  })
+})
+
+describe('realizedOnlyYears and withholding', () => {
+  it('keeps the withholding received and drops the withholding projected', () => {
+    const [out] = realizedOnlyYears([
+      row({ year: 2026, net_eur: 100, forecast_net_eur: 50, total_eur: 150,
+        withholding_eur: 15, forecast_withholding_eur: 9 }),
+    ])
+    expect(out.withholding_eur).toBe(15)
+    expect(out.forecast_withholding_eur).toBe(0)
   })
 })

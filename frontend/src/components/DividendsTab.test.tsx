@@ -64,6 +64,7 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
       ytd_pace: null,
       recent_pace: null,
       annual: [{ year: 2025, net_eur: 100, forecast_net_eur: 0, total_eur: 100,
+        withholding_eur: 15, forecast_withholding_eur: 0,
         yoy_pct: null, yoy_includes_forecast: false, yoy_vs_partial: false, partial: false }],
     },
   }
@@ -266,6 +267,16 @@ describe('Dividend chart controls', () => {
     await screen.findByText(/Received.*30/)
     expect(request).toHaveBeenLastCalledWith(2025, undefined)
     expect(screen.getByRole('button', { name: 'TTM' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('shows the withholding of each year as one small figure, received plus expected', async () => {
+    const data = response(2026)
+    const growth = data.growth!
+    growth.annual = [{ ...growth.annual[0], withholding_eur: 12, forecast_withholding_eur: 3 }]
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
+    mount()
+    const annual = (await screen.findByText('Per year')).parentElement!
+    expect(within(annual).getByText(/WHT .*15\.00/)).toBeTruthy()
   })
 
   it('shows unavailable TTM rather than zero for short or future history', async () => {

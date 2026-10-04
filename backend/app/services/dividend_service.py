@@ -1695,6 +1695,13 @@ class DividendService:
         # showing it. Keeping the era splice and the per-date FX projection in one
         # place beats growing a second implementation to drift.
         annual_actual: Dict[int, Decimal] = defaultdict(Decimal)
+        # Withholding per calendar year, for the small "WHT" figure beside each year —
+        # a reminder of the DA-1 threshold, not a tax figure. IBKR's rows carry what was
+        # withheld; an estimate-era row recorded none, so its gross is kept here and
+        # sized with the security's ladder rate once that is known (below).
+        annual_wht_actual: Dict[int, Decimal] = defaultdict(Decimal)
+        annual_wht_forecast: Dict[int, Decimal] = defaultdict(Decimal)
+        estimate_gross_by_year: Dict[Tuple[int, int], Decimal] = defaultdict(Decimal)
         month_actual_all: Dict[str, Decimal] = defaultdict(Decimal)
         month_sources_all: Dict[str, set] = defaultdict(set)
         month_actual_sym_all: Dict[str, Dict[str, Decimal]] = defaultdict(
@@ -1712,6 +1719,12 @@ class DividendService:
             # `test_calendar_ttm_uses_history_outside_each_display_window` and
             # `test_growth_is_identical_whichever_year_is_selected` pin it.
             annual_actual[on_date.year] += net
+            if p.source == "ibkr":
+                annual_wht_actual[on_date.year] += base_fx.convert(
+                    abs(p.withholding_tax_eur or Decimal("0")), on_date
+                )
+            else:
+                estimate_gross_by_year[(on_date.year, p.security_id)] += net
             month_actual_all[mk] += net
             month_actual_sym_all[mk][symbol] += net
             month_sources_all[mk].add(p.source)
@@ -1783,6 +1796,12 @@ class DividendService:
 
             # What the ex→pay distance actually measures out at, per security.
             pay_lags = self._measured_pay_lags(raw_payments, exact_pairs)
+
+            def _expected_wht(net: Decimal, sid: int) -> Decimal:
+                """The withholding behind a projected net amount: net x r / (1 - r) at
+                the security's ladder rate — the same rate that took it from gross."""
+                rate, _ = wht_by_sec.get(sid, (Decimal(1) - net_factor, "assumed"))
+                return net * rate / (Decimal(1) - rate) if rate < 1 else Decimal("0")
 
             def _accrual_covers(sid: int, ex: date, pay: Optional[date] = None) -> bool:
                 """
@@ -1895,6 +1914,7 @@ class DividendService:
                 for fp in projected:
                     amt = base_fx.convert(fp.net_eur, fp.on_date)
                     annual_forecast[fp.on_date.year] += amt
+                    annual_wht_forecast[fp.on_date.year] += _expected_wht(amt, sid)
                     month_forecast_sym_all[fp.on_date.strftime("%Y-%m")][symbol] += amt
                     if fp.on_date <= next_12m_end:
                         next_12m += amt
@@ -2137,6 +2157,7 @@ class DividendService:
             # forward figures one payment per security until the cash landed.
             for on_date, symbol, sid, amt, basis, inferred, method in calendar_folds:
                 annual_forecast[on_date.year] += amt
+                annual_wht_forecast[on_date.year] += _expected_wht(amt, sid)
                 month_forecast_sym_all[on_date.strftime("%Y-%m")][symbol] += amt
                 if on_date > as_of:
                     next_pay[sid] = min(on_date, next_pay.get(sid, date.max))
@@ -2209,6 +2230,17 @@ class DividendService:
             ((p.pay_date or p.ex_date) for p in all_payments), default=None
         )
 
+        # Estimate-era income recorded no withholding; size it at the security's ladder
+        # rate. Without a forecast the ladder was never built, so build it here — it is
+        # pure DB, and the figure must not change with the Forecast toggle.
+        if estimate_gross_by_year:
+            rates = wht_by_sec or self._withholding_rates(
+                raw_payments, securities, await self._open_accruals(), net_factor
+            )
+            for (y, sid), gross in estimate_gross_by_year.items():
+                rate, _ = rates.get(sid, (Decimal(1) - net_factor, "assumed"))
+                annual_wht_actual[y] += gross * rate
+
         annual_rows: List[Dict] = []
         prev_row: Optional[Dict] = None
         for y in sorted(set(annual_actual) | set(annual_forecast)):
@@ -2229,6 +2261,13 @@ class DividendService:
                 "net_eur": round(float(actual_y), 2),
                 "forecast_net_eur": round(float(forecast_y), 2),
                 "total_eur": round(float(total_y), 2),
+                # Withholding on the received part (IBKR's own figure; estimated at the
+                # ladder rate for estimate-era income) and on the projected part. The
+                # client shows their sum, or only the first with Forecast off.
+                "withholding_eur": round(float(annual_wht_actual.get(y, Decimal("0"))), 2),
+                "forecast_withholding_eur": round(
+                    float(annual_wht_forecast.get(y, Decimal("0"))), 2
+                ),
                 "yoy_pct": None,
                 "yoy_includes_forecast": False,
                 "yoy_vs_partial": False,

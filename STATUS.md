@@ -1010,7 +1010,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   share a quarter; TSMC repeats its declared amount after the accrual; VT, GRID, QTUM, SOXQ, SK
   Hynix and ASML are `same_payment_last_year` with their large slots intact. Next-12M read LOWER
   than before (312 vs 322) because it is now net of IBKR's real ~15% where the WHT setting was 0%
-  — gross-equivalent it rose. **Still to check after the 18:00 full sync:** IBKR rows gain
+  — gross-equivalent it rose. *Per year* now shows a small grey "WHT" line (received + expected
+  withholding, one figure; docs/dividends.md, *The per-year WHT figure*) — check it renders on the
+  live page. **Still to check after the 18:00 full sync:** IBKR rows gain
   `per_share_native`/`dividend_kind` (the statement re-delivers them), and the stored accruals'
   withholding turns positive (the sign fix). Then run the replay (*Worth doing next*) and move this
   to docs/shipped-log.md.

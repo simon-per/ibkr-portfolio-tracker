@@ -23,6 +23,7 @@ export function realizedOnlyYears(annual: DividendAnnualRow[]): DividendAnnualRo
     return {
       ...row,
       forecast_net_eur: 0,
+      forecast_withholding_eur: 0,
       total_eur: row.net_eur,
       yoy_pct: adjacent && prev!.net_eur > 0
         ? Math.round(((row.net_eur - prev!.net_eur) / prev!.net_eur) * 1000) / 10
