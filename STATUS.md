@@ -1018,7 +1018,11 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   does not hold, accepted by the owner). After the deploy, World ex CH shows companies at once
   (IWDA's basket is stored); EM is uncovered until the **18:00 full sync** fetches IEEM's basket
   for the first time — then check `/api/portfolio/lookthrough` shows both funds decomposed and
-  no stale/missing-basket warning for IEEM. docs/pillar3a.md, *Allocation and look-through*,
+  no stale/missing-basket warning for IEEM. **Live 2026-10-04 13:37 Berlin:** coverage 98.35%,
+  World ex CH decomposed via IWDA, EM uncovered as expected — and one warning: the stored IWDA
+  basket is from 2026-08-13 (52 days, against blackrock's 7), because IWDA was never held and so
+  never refreshed. The same 18:00 run refreshes it (the stale verdict follows the proxy); confirm
+  the warning is gone. docs/pillar3a.md, *Allocation and look-through*,
   has the measurements and the exact route if it ever matters.
 
 - **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
