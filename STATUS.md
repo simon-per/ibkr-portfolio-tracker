@@ -1028,9 +1028,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   than before (312 vs 322) because it is now net of IBKR's real ~15% where the WHT setting was 0%
   — gross-equivalent it rose. *Per year* now shows a small grey "WHT" line (received + expected
   withholding, one figure; docs/dividends.md, *The per-year WHT figure*) — check it renders on the
-  live page. **Still to check after the 18:00 full sync:** IBKR rows gain
-  `per_share_native`/`dividend_kind` (the statement re-delivers them), and the stored accruals'
-  withholding turns positive (the sign fix). Then move this to docs/shipped-log.md.
+  live page. **Still to check after the next SUCCESSFUL IBKR sync** — the
+  2026-10-04 18:00 `full_sync` got `Code=1001` from IBKR (statement not generated; failed fast by
+  design, nothing ingested), so the owner's check that evening still read 0 rates and 3 negative
+  accrual taxes, the pre-fix state: IBKR rows gain `per_share_native`/`dividend_kind` (the statement
+  re-delivers them), and the stored accruals' withholding turns positive (the sign fix). The DB path
+  for the check is now `/app/data/portfolio.db`. Then move this to docs/shipped-log.md.
 
 - **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
   BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
