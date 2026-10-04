@@ -3,14 +3,21 @@
 #
 # Lives here rather than only on the VPS, for the reason ops/auto-deploy.sh's own
 # header gives: a file that governs the data's only safety net should be readable by
-# anyone reading the repo. Install with:
+# anyone reading the repo. Install by atomic rename, never `install`/`cp` onto the live
+# file (auto-deploy may be running it; see ops/auto-deploy.sh's header):
 #
-#     install -m 755 ops/backup-db.sh /root/backup-db.sh
+#     cp ops/backup-db.sh /root/backup-db.sh.new && chmod 755 /root/backup-db.sh.new \
+#         && mv -f /root/backup-db.sh.new /root/backup-db.sh
 #
 # and run it daily from root's crontab at an hour clear of every Europe/Berlin sync
 # slot (cron on the VPS runs in UTC; 03:17 UTC = 05:17 Berlin, which no slot uses):
 #
-#     17 3 * * * /root/backup-db.sh daily
+#     17 3 * * * /root/backup-db.sh daily >/dev/null
+#
+# Stdout carries exactly two lines, at the end: the database copied, then the snapshot
+# written — ops/auto-deploy.sh's rollback may restore the second over the first.
+# Everything else goes to the log, hence the redirect above: cron would otherwise mail
+# two paths a day.
 #
 # Two reasons this exists as its own script rather than three lines inside
 # auto-deploy.sh:
@@ -129,5 +136,11 @@ fi
 
 # Empty dated directories left behind by pruning; harmless but they accumulate forever.
 find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null
+
+# The contract with ops/auto-deploy.sh, printed last so nothing can follow it: the live
+# database this run copied, then the verified snapshot. A rollback that finds the failed
+# deploy migrated the database restores the second over the first. The prune above
+# cannot have removed it: it is the newest snapshot, and MIN_KEEP of the newest survive.
+printf '%s\n' "$DB" "$DEST"
 
 exit 0
