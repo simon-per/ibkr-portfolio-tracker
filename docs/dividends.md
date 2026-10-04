@@ -487,6 +487,21 @@ mean/median bias and absolute error per method, and lists every payment the spec
 local database has no dividend rows; run it on the VPS or against a snapshot (and delete the snapshot).
 Every method runs through `project_dividends` — the CLI holds no copy of the rules.
 
+**Measured on production, 2026-10-04** (21 held payers, per share, gross): `auto` had the lowest
+absolute error of the five (12.6%, against 18.8% for the old `median8`) and roughly halved its bias
+(−10.0% against −18.6%). `latest` alone had slightly less bias (−8.9%) but more error (15.6%),
+because it mis-sizes the seasonal funds (GRID +64%, VT +27%) — which is why the steady/varying split
+exists. The remaining low bias is raises no rule can see ahead (NVDA, QTUM, IBKR, TSMC read low
+under every method); live, an open accrual catches a declared raise the day IBKR lists it. Two
+findings, deliberately left as they are:
+
+- **SK Hynix sometimes classifies steady** (`auto` 56% error vs 37% for `same_payment_last_year`):
+  with one year-end payment in the window, peak-then-drop reads as a single *cut*. The fix if it
+  ever matters: a drop that only returns to the level before the rise is a peak, not a cut (a real
+  cut lands below it). Production classifies it `same_payment_last_year` today, so no live effect.
+- **The one "special" flagged** is ASML's 3.898 of 2022-05-03 — its old annual final dividend before
+  the quarterly scheme, a regime change rather than a special. Four years back; no effect.
+
 **One projection pass, sliced per consumer.** `_forecast_inputs()` assembles the cadence/per-share
 inputs once, and `project_dividends()` then runs a single wide horizon (to the end of *next* calendar
 year) which each reader filters: the chart, the rolling next-12-months figure, and the per-year

@@ -896,6 +896,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Known rough edges (accepted, not bugs)
 
+- **A few holdings the dividend forecast cannot see yet — accepted by the owner 2026-10-04.** IQQ (a
+  new iShares Nasdaq-100 ETF) and SBI (Serabi Gold) have one payout each, and two make a cadence, so
+  they project nothing until their second lands. IFX is the only holding on the `assumed`
+  withholding rung, so at the WHT setting of 0% it reads gross (~1 CHF high; Germany withholds
+  ~26%) until IBKR pays it in February. Together ~1–2% of the yearly forecast. The replay
+  (docs/dividends.md, *Measured on production*) also showed SK Hynix sometimes classifying steady in
+  history; no live effect, fix described there, left as is by owner decision.
+
 - **The crypto history before 3 Oct 2026 is the 3 Oct basket at each day's price** (owner's
   decision, 2026-10-03). The rebuild CLI was meant to reconstruct the real quantities back to
   23 Aug from CoinStats' transactions; its first dry run (fees ignored) refused with BNB going
@@ -1002,7 +1010,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin
+- **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
+  replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
+  production*)
   (migration `a1d6f2b4c8e0`). **Verified on production right after the deploy:** every
   `upcoming[]` entry carries `amount_source`; withholding reads `ibkr_measured` (~15% on US
   payers), `accrual` (2330 21%, NXPI, HPE) or `ibkr_country` (Samsung 22%), with only IFX
@@ -1014,8 +1024,7 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   withholding, one figure; docs/dividends.md, *The per-year WHT figure*) — check it renders on the
   live page. **Still to check after the 18:00 full sync:** IBKR rows gain
   `per_share_native`/`dividend_kind` (the statement re-delivers them), and the stored accruals'
-  withholding turns positive (the sign fix). Then run the replay (*Worth doing next*) and move this
-  to docs/shipped-log.md.
+  withholding turns positive (the sign fix). Then move this to docs/shipped-log.md.
 
 - **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
   BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
@@ -1339,17 +1348,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   `tests/test_deploy_guard_hours.py`). Then build time stops mattering. The cron has been `*/5`
   since 2026-10-04 (owner, on the VPS; backup `/root/crontab.bak.2026-10-04`), which leaves
   15 minutes between the last allowed start and a slot — fine for today's 2–5 minute builds. Size the wait from the 18:00 full sync's real runtime in `sync_runs`.
-
-- **Run the dividend-forecast replay on production** once the IBKR-first forecast is deployed:
-  `docker exec backend-portfolio-backend-1 python -m app.cli.backtest_dividend_forecast --per-security` (read-only,
-  offline). It scores the new rule (`auto`) against the old flat median (`median8`) and three
-  alternatives on this book's own history, and lists every special dividend it finds. Only the server
-  has the rows; this machine's database has none. If `auto` does not beat `median8` on absolute bias,
-  the steady/varying thresholds in `dividend_forecast.py` are what to revisit. Still unforecast after
-  it, by the "two payments make a cadence" rule and correctly so until a second one lands: IQQ (a
-  new iShares Nasdaq-100 ETF, one payout of 0.021 USD a share, ~3 a year) and SBI (Serabi Gold, one
-  payout). IFX is the only holding on the `assumed` withholding rung, so at the WHT setting of 0% it
-  reads gross until IBKR pays it (Germany withholds ~26%); it corrects itself in February.
 
 - **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
   longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
@@ -1694,7 +1692,8 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   fixed the accrual tax sign. Live on `48b1f9c`. Then a small grey per-year "WHT" line (received +
   expected, one figure; a DA-1 reminder), live on `882db78`; and the deploy cadence — `*/5` is
   fine, `*/6` is worse, the durable fix is a guard before the restart (both under the headings
-  above). The owner switched the cron to `*/5` on the VPS. Backend 1768, frontend 788 on Node 22.
+  above). The owner switched the cron to `*/5` on the VPS and ran the replay: `auto` beats the old
+  median (error 12.6% vs 18.8%). Called done. Backend 1768, frontend 788 on Node 22.
 
 - **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
   already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
