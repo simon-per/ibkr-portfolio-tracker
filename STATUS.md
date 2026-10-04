@@ -1373,18 +1373,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
    would let the locked state show locally without the Vite proxy (production is same-origin and
    unaffected).
 
-0. **Measure withholding per country instead of relying on one global manual assumption.** The
-   setting now defaults to 15% and is adjustable from the Dividends tab, but one percentage still
-   applies to every gross-sized forecast. The default is the US/Dutch treaty rate; German (26.375%),
-   Korean and Taiwanese payers withhold materially more. The measured figure is already in the database:
-   `withholding_tax_eur / gross_amount_eur` on the IBKR rows. It cannot be measured *per security*
-   where it is needed — a security with IBKR payments already takes the `net` branch and never
-   touches the factor — but it can be measured **per country**, off the ISIN prefix the DA-1
-   report already groups by, and applied to an unpaid holding in the same jurisdiction. That is
-   the same shape as the ex→pay lag: derive it from matched history, report the sample count, and
-   fall back to the user-controlled global setting when a country has none. Until then every affected
-   caption gives the exact assumed percentage, which is why this remains an enhancement rather than a defect.
-
 0. **Brinson allocation / selection attribution against the benchmark — needs data first.**
    The Analytics tab (2026-09-13) shows each sector's *weight at start* beside its *share of
    gain*, which is the portfolio-only half of the question. The other half — "did I beat the
