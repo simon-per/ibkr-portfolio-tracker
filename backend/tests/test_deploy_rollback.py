@@ -24,9 +24,16 @@ These are source assertions rather than behavioural ones for the same reason
 `test_deploy_guard_hours.py`'s are: the file under test is a shell script that runs as
 root on another machine, on a path no test can reach. What a test *can* do is refuse to
 let the two halves of the contract drift apart again.
+
+The exception is the database restore at the end of this file, which is rehearsed for
+real: both ops scripts run under bash against a throwaway repository, with only docker,
+curl, flock, sleep and the clock stubbed.
 """
 
+import os
 import re
+import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -311,3 +318,366 @@ def test_a_red_commit_is_refused_and_a_pending_one_only_deferred():
     assert none_arm.count("exit 0") <= 1, (
         "the `none` arm must not unconditionally end the tick"
     )
+
+
+# --- The database restore, rehearsed --------------------------------------------------
+#
+# Everything above reads the script. What follows RUNS it: the real ops/auto-deploy.sh
+# and the real ops/backup-db.sh, under bash, against a throwaway git repository with an
+# `origin`, and a fake deploy.sh that does what the container does on start — run
+# "alembic upgrade head" and refuse to start on a revision its tree does not know. Only
+# the things that would leave the machine are stubbed: docker, curl, flock, sleep, and
+# the clock the sync-slot guard reads.
+#
+# The control, run by hand before the fix (2026-10-04): the pre-fix auto-deploy against
+# `test_a_migrating_failure_is_restored_and_the_rollback_comes_up` ends in
+# `CRITICAL: rollback also failed`, which is the production failure STATUS.md described.
+
+
+def _find_bash() -> str | None:
+    """Git Bash on Windows, never System32's bash.exe (that one is WSL)."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    roots = []
+    git = shutil.which("git")
+    if git:
+        roots.append(Path(git).resolve().parents[1])
+    roots.append(Path(r"C:\Program Files\Git"))
+    for root in roots:
+        candidate = root / "bin" / "bash.exe"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+BASH = _find_bash()
+BACKUP_DB = REPO_ROOT / "ops" / "backup-db.sh"
+
+rehearsal = pytest.mark.skipif(
+    BASH is None or shutil.which("git") is None or not BACKUP_DB.exists(),
+    reason="the rollback rehearsal needs bash, git and ops/backup-db.sh",
+)
+
+_STUBS = {
+    # The guard reads `TZ=Europe/Berlin date '+%-H'` / `'+%-M'`; 03:30 is no sync slot.
+    "date": """#!/bin/bash
+case "$1" in '+%-H') echo 3; exit 0 ;; '+%-M') echo 30; exit 0 ;; esac
+exec /usr/bin/date "$@"
+""",
+    "flock": "#!/bin/bash\nexit 0\n",
+    # health_ok sleeps 5s twelve times on a failing build.
+    "sleep": "#!/bin/bash\nexit 0\n",
+    # The CI gate gets a green check run; the health gate reads the fake app's state.
+    "curl": """#!/bin/bash
+for a in "$@"; do
+    case "$a" in *check-runs*)
+        echo '{"check_runs":[{"name":"backend","status":"completed","conclusion":"success"}]}'
+        exit 0 ;;
+    esac
+done
+if [ -f "$STATE/healthy" ]; then printf 200; else printf 503; fi
+""",
+    "docker": """#!/bin/bash
+echo "docker $*" >> "$STATE/docker.log"
+exit 0
+""",
+}
+
+# The container's start command, reduced to the part that matters here.
+_FAKE_ALEMBIC = '''
+import os, sqlite3, sys
+db, versions = sys.argv[1], sys.argv[2]
+revs = sorted(f.split("_")[0] for f in os.listdir(versions) if f.endswith(".py"))
+con = sqlite3.connect(db)
+row = con.execute("SELECT version_num FROM alembic_version").fetchone()
+current = row[0] if row else None
+if current is not None and current not in revs:
+    sys.exit(f"Can't locate revision identified by {current!r}")
+pending = revs[revs.index(current) + 1:] if current else revs
+for rev in pending:
+    con.execute(f"ALTER TABLE trades ADD COLUMN col_{rev} TEXT")
+    con.execute("UPDATE alembic_version SET version_num = ?", (rev,))
+    con.execute("INSERT INTO trades (note) VALUES (?)", (f"written after migrating to {rev}",))
+con.commit()
+con.close()
+'''
+
+# deploy.sh as the container behaves: a build that fails stops before anything touches
+# the database; otherwise the container starts, migrates, and then either serves or —
+# on the marked commit — does not. A container whose alembic refuses never serves.
+_FAKE_DEPLOY = """#!/bin/bash
+cd "$REPO_DIR"
+echo "deploy $(git rev-parse --short HEAD)" >> "$STATE/deploys.log"
+rm -f "$STATE/healthy"
+[ -f BUILD_FAILS ] && exit 1
+if [ -n "${SABOTAGE_SNAPSHOT:-}" ] && [ -f BROKEN ]; then
+    for f in "$BACKUP_ROOT"/*/portfolio.db.autodeploy-*; do
+        case "$SABOTAGE_SNAPSHOT" in
+            missing)    rm -f "$f" ;;
+            not-sqlite) printf 'this is not a database' > "$f" ;;
+            malformed)  { printf 'SQLite format 3\\000'; head -c 8192 /dev/urandom; } > "$f" ;;
+        esac
+    done
+fi
+python3 "$STATE/fake_alembic.py" "$DB" backend/alembic/versions || exit 0
+if [ -f BROKEN ]; then
+    # What a live container leaves beside a FILE-mounted database once it is moved.
+    printf 'stale wal' > "$DB-wal"
+    printf 'stale shm' > "$DB-shm"
+    exit 0
+fi
+touch "$STATE/healthy"
+"""
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def _write(path: Path, text: str, executable: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    if executable:
+        path.chmod(0o755)
+
+
+def _revision(db: Path) -> str:
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    finally:
+        con.close()
+
+
+def _notes(db: Path) -> list[str]:
+    con = sqlite3.connect(db)
+    try:
+        return [r[0] for r in con.execute("SELECT note FROM trades ORDER BY id")]
+    finally:
+        con.close()
+
+
+class _Rehearsal:
+    """A production-shaped checkout one bad commit behind origin/main."""
+
+    def __init__(self, tmp: Path, *, migration: bool, bad_marker: str):
+        self.tmp = tmp
+        self.state = tmp / "state"
+        self.stubs = tmp / "bin"
+        self.repo = tmp / "repo"
+        self.backups = tmp / "backups"
+        self.log = tmp / "auto-deploy.log"
+        self.quarantine = tmp / "quarantine"
+        self.state.mkdir()
+        self.backups.mkdir()
+        for name, body in _STUBS.items():
+            _write(self.stubs / name, body, executable=True)
+        python = Path(sys.executable).as_posix()
+        _write(self.stubs / "python3", f'#!/bin/bash\nexec "{python}" "$@"\n', executable=True)
+        _write(self.state / "fake_alembic.py", _FAKE_ALEMBIC)
+
+        origin = tmp / "origin.git"
+        _git(tmp, "init", "--bare", "-b", "main", origin.as_posix())
+        _git(tmp, "init", "-b", "main", self.repo.as_posix())
+        for key, value in (("user.email", "t@example.com"), ("user.name", "t"),
+                           ("core.autocrlf", "false")):
+            _git(self.repo, "config", key, value)
+        _git(self.repo, "remote", "add", "origin", origin.as_posix())
+        _write(self.repo / "deploy.sh", _FAKE_DEPLOY, executable=True)
+        _write(self.repo / "backend" / "alembic" / "versions" / "a1_base.py", "# a1\n")
+        _write(self.repo / ".gitignore", "backend/portfolio.db*\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "good")
+        self.good = _git(self.repo, "rev-parse", "HEAD")
+
+        if migration:
+            _write(self.repo / "backend" / "alembic" / "versions" / "b2_new.py", "# b2\n")
+        _write(self.repo / bad_marker, "x\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "bad")
+        self.bad = _git(self.repo, "rev-parse", "HEAD")
+        _git(self.repo, "push", "-q", "origin", "main")
+        _git(self.repo, "reset", "-q", "--hard", self.good)
+
+        # The live database, at the good tree's revision, as production has it.
+        self.db = self.repo / "backend" / "portfolio.db"
+        con = sqlite3.connect(self.db)
+        con.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        con.execute("INSERT INTO alembic_version VALUES ('a1')")
+        con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY, note TEXT)")
+        con.execute("INSERT INTO trades (note) VALUES ('before the deploy')")
+        con.commit()
+        con.close()
+
+    def run(self, backup_script: Path = BACKUP_DB, **extra: str) -> str:
+        env = {
+            **os.environ,
+            "STUBS": self.stubs.as_posix(),
+            "AUTO": AUTO_DEPLOY.as_posix(),
+            "STATE": self.state.as_posix(),
+            "REPO_DIR": self.repo.as_posix(),
+            "DB": self.db.as_posix(),
+            "LOG": self.log.as_posix(),
+            "BACKUP_LOG": (self.tmp / "backup-db.log").as_posix(),
+            "BACKUP_ROOT": self.backups.as_posix(),
+            "BACKUP_SCRIPT": backup_script.as_posix(),
+            "LOCKFILE": (self.tmp / "lock").as_posix(),
+            "QUARANTINE": self.quarantine.as_posix(),
+            **extra,
+        }
+        # Prepend the stubs from INSIDE bash: Git Bash's launcher puts /usr/bin first,
+        # which would shadow them, and PATH there is colon-separated POSIX paths.
+        boot = ('s="$STUBS"; command -v cygpath >/dev/null && s=$(cygpath -u "$s"); '
+                'export PATH="$s:$PATH"; exec bash "$AUTO"')
+        subprocess.run([BASH, "-c", boot], env=env, check=False, timeout=180,
+                       capture_output=True)
+        return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
+
+    def snapshots(self) -> list[Path]:
+        return sorted(self.backups.glob("*/portfolio.db.autodeploy-*"))
+
+    def aside(self) -> list[Path]:
+        return sorted((self.backups / "failed-deploys").glob("failed-*.db"))
+
+    def strays(self) -> list[Path]:
+        """Anything the restore left beside the live database or in the backup root."""
+        beside = [p for p in self.db.parent.iterdir()
+                  if p.name.startswith("portfolio.db") and p.name != "portfolio.db"]
+        hidden = [p for p in self.backups.iterdir() if p.name.startswith(".")]
+        return beside + hidden
+
+
+@rehearsal
+def test_backup_db_reports_the_source_and_the_snapshot_last(tmp_path):
+    """The two-line stdout contract the rollback parses, run rather than read."""
+    db = tmp_path / "live.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE t (x)")
+    con.commit()
+    con.close()
+    stubs = tmp_path / "bin"
+    _write(stubs / "docker", "#!/bin/bash\nexit 0\n", executable=True)
+    python = Path(sys.executable).as_posix()
+    _write(stubs / "python3", f'#!/bin/bash\nexec "{python}" "$@"\n', executable=True)
+    env = {**os.environ, "STUBS": stubs.as_posix(), "SCRIPT": BACKUP_DB.as_posix(),
+           "DB": db.as_posix(), "BACKUP_ROOT": (tmp_path / "b").as_posix(),
+           "BACKUP_LOG": (tmp_path / "log").as_posix()}
+    boot = ('s="$STUBS"; command -v cygpath >/dev/null && s=$(cygpath -u "$s"); '
+            'export PATH="$s:$PATH"; exec bash "$SCRIPT" autodeploy')
+    out = subprocess.run([BASH, "-c", boot], env=env, capture_output=True, text=True,
+                         timeout=60)
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.splitlines()
+    assert len(lines) == 2, f"stdout must be exactly the two paths, got {lines!r}"
+    assert lines[0] == db.as_posix()
+    assert Path(lines[1]).is_file() and ".autodeploy-" in lines[1]
+
+
+@rehearsal
+def test_a_migrating_failure_is_restored_and_the_rollback_comes_up(tmp_path):
+    """
+    The case STATUS.md described: the bad commit carries a migration, its container
+    ran it and then failed health. Without the restore the reverted tree's alembic
+    cannot find revision b2 and the rollback ends in CRITICAL.
+    """
+    r = _Rehearsal(tmp_path, migration=True, bad_marker="BROKEN")
+    log = r.run()
+
+    assert "ROLLED BACK to" in log and "CRITICAL" not in log, log
+    assert "RESTORED " in log, log
+    # The live database is the snapshot again: old revision, none of the failed
+    # deploy's writes.
+    assert _revision(r.db) == "a1"
+    assert _notes(r.db) == ["before the deploy"]
+    # The failed state is kept, never deleted — with the write made after the snapshot.
+    aside = r.aside()
+    assert len(aside) == 1, aside
+    # The sidecars went with it rather than staying to be replayed onto the snapshot —
+    # and went untouched. Checked BEFORE anything opens the aside file: SQLite acts on a
+    # -wal beside any database it opens, which is why auto-deploy probes a copy.
+    assert not Path(f"{r.db}-wal").exists() and not Path(f"{r.db}-shm").exists()
+    assert Path(f"{aside[0]}-wal").read_text() == "stale wal"
+    assert Path(f"{aside[0]}-shm").read_text() == "stale shm"
+    assert _revision(aside[0]) == "b2"
+    assert "written after migrating to b2" in _notes(aside[0])
+    # Nothing left in the checkout (a public repo, and the docker build context) or in
+    # the backup root: no probe copy, no half-placed restore.
+    assert r.strays() == [], r.strays()
+    # And the backup's own pruning can never take the failed state for a snapshot.
+    assert not aside[0].name.startswith("portfolio.db.")
+    # Containers were down before the file was replaced, and the rollback redeployed.
+    assert "compose down" in (r.state / "docker.log").read_text()
+    assert (r.state / "deploys.log").read_text().count("deploy ") == 2
+    assert r.quarantine.read_text().strip() == r.bad
+    assert _git(r.repo, "rev-parse", "HEAD") == r.good
+
+
+@rehearsal
+def test_a_failure_without_a_migration_is_not_restored(tmp_path):
+    """No migration in the range: the plain redeploy suffices, and a restore would only
+    throw away the writes made since the snapshot. Nor is the app stopped early."""
+    r = _Rehearsal(tmp_path, migration=False, bad_marker="BROKEN")
+    log = r.run()
+
+    assert "ROLLED BACK to" in log and "CRITICAL" not in log, log
+    assert "no migration in" in log, log
+    assert "RESTORED " not in log
+    assert r.aside() == []
+    docker = r.state / "docker.log"
+    assert not docker.exists() or "compose down" not in docker.read_text(), (
+        "the rollback must not `down` the app early when no restore can be needed"
+    )
+
+
+@rehearsal
+def test_a_migration_that_never_ran_is_not_restored(tmp_path):
+    """A migration in the range is necessary, not sufficient: here the build failed
+    before any container started, so the revision is unchanged and nothing is lost by
+    keeping the live file."""
+    r = _Rehearsal(tmp_path, migration=True, bad_marker="BUILD_FAILS")
+    log = r.run()
+
+    assert "ROLLED BACK to" in log and "CRITICAL" not in log, log
+    assert "did not migrate; no restore" in log, log
+    assert "RESTORED " not in log
+    assert r.aside() == []
+    assert r.strays() == [], "the probe's copy must be cleaned up"
+    assert _notes(r.db) == ["before the deploy"]
+
+
+@rehearsal
+def test_an_old_backup_script_that_prints_nothing_means_no_restore(tmp_path):
+    """/root/backup-db.sh predates the stdout contract until it is refreshed. The
+    rollback must not guess a snapshot or a target; it says so, loudly, twice, and
+    behaves exactly as it did before the fix — which for a migrating failure is
+    CRITICAL, the state the NOTE tells a human how to fix."""
+    old = tmp_path / "old-backup-db.sh"
+    _write(old, f'#!/bin/bash\nbash "{BACKUP_DB.as_posix()}" "$@" >/dev/null\n',
+           executable=True)
+    r = _Rehearsal(tmp_path, migration=True, bad_marker="BROKEN")
+    log = r.run(backup_script=old)
+
+    assert "did not report its snapshot" in log, log
+    assert "NO usable snapshot" in log, log
+    assert "RESTORED " not in log
+    assert r.aside() == []
+    assert len(r.snapshots()) == 1, "the backup itself still ran"
+    assert "CRITICAL" in log
+    assert _revision(r.db) == "b2", "the live database must be left as it was"
+
+
+@rehearsal
+@pytest.mark.parametrize("sabotage", ["missing", "not-sqlite", "malformed"])
+def test_an_unusable_snapshot_is_never_restored(tmp_path, sabotage):
+    """A snapshot that vanished or no longer verifies between the backup and the
+    rollback must not be written over the live database."""
+    r = _Rehearsal(tmp_path, migration=True, bad_marker="BROKEN")
+    log = r.run(SABOTAGE_SNAPSHOT=sabotage)
+
+    assert "missing, empty or failed its integrity check" in log, log
+    assert "RESTORED " not in log
+    assert r.aside() == []
+    assert _revision(r.db) == "b2", "the live database must be left as it was"
+    assert "CRITICAL" in log

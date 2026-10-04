@@ -3,9 +3,13 @@
 #
 # Lives here rather than only on the VPS. It governs every deploy, and for months
 # the only copy was /root/auto-deploy.sh — unversioned, unreviewed, and invisible
-# to anyone reading the repo. Install with:
+# to anyone reading the repo. Install by ATOMIC RENAME, never `install` or `cp` onto the
+# live file — those truncate it in place, and a run in flight (cron fires every 5
+# minutes) would read garbage from its current byte offset. A rename leaves that run on
+# the old inode:
 #
-#     install -m 755 ops/auto-deploy.sh /root/auto-deploy.sh
+#     cp ops/auto-deploy.sh /root/auto-deploy.sh.new && chmod 755 /root/auto-deploy.sh.new \
+#         && mv -f /root/auto-deploy.sh.new /root/auto-deploy.sh
 #
 # Runs from root's crontab every 5 minutes (`*/5`; every 10 until 2026-10-04).
 # A tick that finds a deploy still running exits at the `flock` below, so a build
@@ -18,7 +22,8 @@
 # Deploys unattended, so it also: refuses to start inside a sync window (below),
 # backs up the DB first (the container CMD runs `alembic upgrade head`),
 # health-checks afterwards, and ROLLS BACK to the previous commit if the app
-# doesn't come up.
+# doesn't come up — restoring that backup first when the failed deploy migrated the
+# database (see restore_db_if_migrated).
 
 set -uo pipefail
 
@@ -38,6 +43,10 @@ SMOKE_URL="${SMOKE_URL:-http://127.0.0.1:8000/api/portfolio/summary}"
 GITHUB_REPO="${GITHUB_REPO:-simon-per/ibkr-portfolio-tracker}"
 # Records a commit whose deploy was rolled back — see the quarantine guard.
 QUARANTINE="${QUARANTINE:-/root/.auto-deploy-quarantine}"
+# The installed copy is preferred; see the backup step for why, and for the fallback.
+BACKUP_SCRIPT="${BACKUP_SCRIPT:-/root/backup-db.sh}"
+# Where the rollback's database restore looks for migrations in the pushed range.
+MIGRATIONS_DIR="backend/alembic/versions"
 
 # Europe/Berlin hours at which APScheduler runs a sync. This list is a COPY of the
 # CronTriggers in backend/app/services/scheduler_service.py, so it can drift — and it
@@ -229,7 +238,6 @@ log "change detected: ${LOCAL:0:7} -> ${REMOTE:0:7}, deploying"
 #
 # Prefer the installed copy: on the tick that first deploys this change the working
 # tree is still at the previous commit, where ops/backup-db.sh does not exist yet.
-BACKUP_SCRIPT="/root/backup-db.sh"
 [ -x "$BACKUP_SCRIPT" ] || BACKUP_SCRIPT="$REPO_DIR/ops/backup-db.sh"
 
 # A failed backup now ABORTS the deploy instead of warning and continuing. The next
@@ -238,11 +246,37 @@ BACKUP_SCRIPT="/root/backup-db.sh"
 # urgent — the next tick is minutes away. Continuing was defensible while the
 # backup was a `cp` nobody trusted; it is not defensible now that a failure means the
 # snapshot genuinely could not be taken or did not verify.
-if BACKUP_ROOT="$BACKUP_ROOT" REPO_DIR="$REPO_DIR" bash "$BACKUP_SCRIPT" autodeploy; then
+if BACKUP_OUT=$(BACKUP_ROOT="$BACKUP_ROOT" REPO_DIR="$REPO_DIR" bash "$BACKUP_SCRIPT" autodeploy); then
     log "db snapshot taken and verified"
 else
     log "ABORT: db snapshot failed or did not verify; refusing to deploy ${REMOTE:0:7} this tick"
     exit 1
+fi
+
+# Remember WHICH snapshot, and of WHICH file, so a rollback can put it back.
+#
+# backup-db.sh ends its stdout with two lines: the live database it copied, then the
+# snapshot it wrote. Both come from the script rather than from a path written here, for
+# two reasons. The database's location is defined once, in backup-db.sh's `DB=`, and has
+# moved before. And the file the snapshot was taken FROM is exactly the file a rollback
+# must restore TO: the snapshot predates the deploy, so it was taken from wherever the
+# previous — the rolled-back-to — build kept its database, even if the failed commit
+# moved it.
+#
+# A copy of backup-db.sh older than 2026-10-04 prints nothing on stdout. That is
+# handled as "no snapshot", deliberately not by guessing: a restore overwrites the live
+# database, so it acts only on paths the backup itself vouched for in this run, never on
+# "the newest file in the backup directory" plus a target path assumed here. The NOTE
+# below says what to refresh.
+SNAPSHOT=$(printf '%s\n' "$BACKUP_OUT" | tail -n 1)
+LIVE_DB=$(printf '%s\n' "$BACKUP_OUT" | tail -n 2 | head -n 1)
+if [ -n "$SNAPSHOT" ] && [ -n "$LIVE_DB" ] && [ "$SNAPSHOT" != "$LIVE_DB" ] \
+        && [ -f "$SNAPSHOT" ] && [ -f "$LIVE_DB" ]; then
+    log "db snapshot of $LIVE_DB is $SNAPSHOT"
+else
+    log "NOTE: $BACKUP_SCRIPT did not report its snapshot and source paths (a copy older than ops/backup-db.sh?) — a rollback of this deploy CANNOT restore the database. Refresh /root/backup-db.sh from ops/."
+    SNAPSHOT=""
+    LIVE_DB=""
 fi
 
 # Liveness AND one real query. /health deliberately touches no database and no router
@@ -268,6 +302,180 @@ health_ok() {
     return 1
 }
 
+# --- Rollback database restore ------------------------------------------------
+# Why: the container CMD is `alembic upgrade head && uvicorn`. A failed deploy that got
+# as far as starting its container has already migrated the database, so `alembic_version`
+# names a revision the rolled-back tree does not have. The rollback's own container then
+# fails `alembic upgrade head` ("Can't locate revision"), `restart: unless-stopped`
+# crash-loops it, and the rollback logs CRITICAL — on exactly the deploys a rollback
+# exists for. Until 2026-10-04 the snapshot taken above was never used for anything.
+#
+# When: only when the pushed range LOCAL..REMOTE touched a migration AND the live
+# database's alembic revision, read after the containers are down, differs from the
+# snapshot's. That second test is the precise predicate — it is what the next
+# container's alembic will see — and it keeps the restore from firing when the deploy
+# failed before any migration ran (a broken build, a migration that raised and rolled
+# back). Restoring then would only throw away the writes made since the snapshot. The
+# first test is there so the common rollback (no migration anywhere near it) never
+# stops the running app early: deploy.sh builds while the old container serves, and a
+# `down` issued here would turn that into minutes offline. The price is paid only by the
+# rare failure that carried a migration but never ran it (a broken build): its rollback
+# rebuilds with the app down. Accepted — the revision can only be read safely once
+# nothing holds the file, and guessing wrong the other way is the crash loop.
+#
+# What a restore loses: the writes between the snapshot and the failure — minutes, but
+# a scheduled sync can land in them. Nothing is deleted: the failed-state database and
+# any -wal/-shm/-journal beside it are moved to $FAILED_DIR, so those rows can be
+# recovered by hand. Moving the sidecars is not tidiness: a -wal left beside the restored
+# file would be replayed by SQLite onto it — pages of the newer schema written into the
+# older database. $FAILED_DIR sits under the backup root and outside the checkout on
+# purpose: the repository is public and its .gitignore does not match a name like
+# portfolio.db.failed-*, and a file in backend/ also rides along in every docker build
+# context. Its names do not match backup-db.sh's prune glob, so nothing ever expires
+# them — delete them by hand once the rows in them are accounted for.
+#
+# The probe prints `rev:<revision>[,<revision>]` (empty after the colon when the file has
+# no alembic_version table) and exits non-zero if the file is not a sound SQLite
+# database; `verify` adds a full integrity_check. Opened read-write on purpose, for the
+# reason backup-db.sh gives: a read-only connection to a WAL database fails when the
+# -shm does not exist yet. Kept as its own value so tests/test_deploy_rollback.py can
+# run it.
+read -r -d '' DB_PROBE_PY <<'PYEOF'
+import sqlite3, sys
+path, verify = sys.argv[1], sys.argv[2] == "verify"
+try:
+    con = sqlite3.connect(path, timeout=30)
+    try:
+        if verify:
+            verdict = con.execute("PRAGMA integrity_check").fetchone()[0]
+            if verdict != "ok":
+                sys.exit(f"integrity_check returned {verdict!r}")
+        has = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND name='alembic_version'").fetchone()
+        revs = sorted(r[0] for r in con.execute(
+            "SELECT version_num FROM alembic_version")) if has else []
+    finally:
+        con.close()
+except sqlite3.Error as exc:
+    sys.exit(f"not a usable sqlite database: {exc}")
+print("rev:" + ",".join(revs))
+PYEOF
+
+db_probe() {   # db_probe <file> verify|read
+    [ -s "$1" ] || return 1
+    # The cheap check first: a SQLite file starts with "SQLite format 3" and a NUL.
+    [ "$(head -c 15 "$1" 2>/dev/null)" = "SQLite format 3" ] || return 1
+    python3 -c "$DB_PROBE_PY" "$1" "$2" 2>>"$LOG"
+}
+
+# The live database is probed through a COPY. Opening it in place would let SQLite act
+# on its sidecars — a -wal beside a database is opened and checkpointed into it (or, if
+# unreadable, discarded) whatever the header says — and the failed state is supposed to
+# be kept exactly as the failure left it. The copy goes under the backup root, not
+# /tmp and not the checkout (see FAILED_DIR for why not there).
+probe_live_db() {
+    local dir out rc s
+    dir=$(mktemp -d "$BACKUP_ROOT/.probe-XXXXXX" 2>>"$LOG") || return 1
+    if cp "$LIVE_DB" "$dir/db" 2>>"$LOG"; then
+        for s in -wal -shm -journal; do
+            [ -e "$LIVE_DB$s" ] && cp "$LIVE_DB$s" "$dir/db$s" 2>>"$LOG"
+        done
+        out=$(db_probe "$dir/db" read); rc=$?
+    else
+        rc=1
+    fi
+    rm -rf "$dir"
+    [ "$rc" -eq 0 ] && printf '%s\n' "$out"
+    return "$rc"
+}
+
+RESTORED_ASIDE=""
+FAILED_DIR="$BACKUP_ROOT/failed-deploys"
+
+restore_db_if_migrated() {
+    local migrations snap_rev live_rev ts aside tmp s t
+    migrations=$(git diff --name-only "$LOCAL" "$REMOTE" -- "$MIGRATIONS_DIR" 2>>"$LOG")
+    if [ -z "$migrations" ]; then
+        log "rollback: no migration in ${LOCAL:0:7}..${REMOTE:0:7}; redeploying without a database restore"
+        return 0
+    fi
+    if [ -z "$SNAPSHOT" ]; then
+        log "WARN: ${LOCAL:0:7}..${REMOTE:0:7} carries a migration but there is NO usable snapshot to restore; redeploying as-is. If this ends in CRITICAL, restore the newest $BACKUP_ROOT/<date>/ snapshot by hand."
+        return 0
+    fi
+    if ! snap_rev=$(db_probe "$SNAPSHOT" verify); then
+        log "WARN: snapshot $SNAPSHOT is missing, empty or failed its integrity check — NOT restoring it; redeploying as-is. If this ends in CRITICAL, restore an older snapshot by hand."
+        return 0
+    fi
+    # Nothing may hold the live file open while it is replaced. deploy.sh downs the
+    # containers again later; that second `down` is a no-op.
+    if ! (cd "$REPO_DIR/backend" && docker compose down) >>"$LOG" 2>&1; then
+        log "WARN: docker compose down failed — not touching $LIVE_DB while a container may hold it open; redeploying as-is"
+        return 0
+    fi
+    if live_rev=$(probe_live_db); then
+        if [ "$live_rev" = "$snap_rev" ]; then
+            log "rollback: alembic revision unchanged (${snap_rev#rev:}) — the failed deploy did not migrate; no restore"
+            return 0
+        fi
+        log "rollback: the failed deploy migrated ${snap_rev#rev:} -> ${live_rev#rev:}; restoring the pre-deploy snapshot"
+    else
+        # Unreadable is not "unchanged". The failed-state file is kept either way.
+        log "rollback: cannot read the alembic revision of $LIVE_DB; restoring the pre-deploy snapshot"
+    fi
+
+    ts=$(date -u '+%Y%m%dT%H%M%SZ')
+    # Not named portfolio.db.*-*, which is backup-db.sh's prune glob.
+    aside="$FAILED_DIR/failed-$ts-${REMOTE:0:7}.db"
+    # Gitignored by `*.db.bak*`, should a killed run ever leave it behind.
+    tmp="$LIVE_DB.bak-restoring-$ts"
+    if ! mkdir -p "$FAILED_DIR" 2>>"$LOG"; then
+        log "ERROR: cannot create $FAILED_DIR; NOT restoring, since the failed state could not be kept"
+        return 1
+    fi
+    # Copy beside the target first, so a short write (a full disk) fails here, before
+    # the live file has been touched, and the final step is a same-directory rename.
+    if ! cp "$SNAPSHOT" "$tmp" 2>>"$LOG"; then
+        rm -f "$tmp"
+        log "ERROR: could not copy $SNAPSHOT next to $LIVE_DB; redeploying without a restore"
+        return 1
+    fi
+    if ! mv -f "$LIVE_DB" "$aside" 2>>"$LOG"; then
+        rm -f "$tmp"
+        log "ERROR: could not move $LIVE_DB aside; NOT restoring"
+        return 1
+    fi
+    for s in -wal -shm -journal; do
+        if [ -e "$LIVE_DB$s" ] && ! mv -f "$LIVE_DB$s" "$aside$s" 2>>"$LOG"; then
+            # A sidecar that stays would be replayed onto the snapshot, so put the failed
+            # state back together exactly as it was and leave the restore undone.
+            for t in -wal -shm -journal; do
+                [ -e "$aside$t" ] && mv -f "$aside$t" "$LIVE_DB$t" 2>>"$LOG"
+            done
+            mv -f "$aside" "$LIVE_DB" 2>>"$LOG"
+            rm -f "$tmp"
+            log "ERROR: could not move $LIVE_DB$s aside; NOT restoring (it would be replayed onto the snapshot)"
+            return 1
+        fi
+    done
+    # The snapshot was written by whoever ran the backup; the app expects the live file's
+    # owner and mode. Best effort — GNU coreutils on the VPS.
+    chown --reference="$aside" "$tmp" 2>/dev/null || true
+    chmod --reference="$aside" "$tmp" 2>/dev/null || true
+    if ! mv -f "$tmp" "$LIVE_DB" 2>>"$LOG"; then
+        for s in -wal -shm -journal; do
+            [ -e "$aside$s" ] && mv -f "$aside$s" "$LIVE_DB$s" 2>>"$LOG"
+        done
+        mv -f "$aside" "$LIVE_DB" 2>>"$LOG"
+        rm -f "$tmp"
+        log "ERROR: could not move the restored copy into place; put the failed-state database back"
+        return 1
+    fi
+    RESTORED_ASIDE="$aside"
+    log "RESTORED $LIVE_DB from $SNAPSHOT; the failed-state database is kept as $aside"
+    return 0
+}
+
 # Advance the checkout HERE rather than letting deploy.sh's `git pull` do it, and pass
 # DEPLOY_NO_PULL=1 to both invocations below. That is what makes the rollback real: it
 # does `git reset --hard "$LOCAL"`, and a deploy.sh that pulls would fast-forward
@@ -287,10 +495,14 @@ else
     log "FAILURE: deploy or health check failed — ROLLING BACK to ${LOCAL:0:7}"
     echo "$REMOTE" > "$QUARANTINE"
     git reset --hard "$LOCAL" >>"$LOG" 2>&1
+    restore_db_if_migrated
     if DEPLOY_NO_PULL=1 bash "$REPO_DIR/deploy.sh" >>"$LOG" 2>&1 && health_ok; then
         log "ROLLED BACK to ${LOCAL:0:7}, health 200. origin/main ${REMOTE:0:7} is BROKEN — fix it before it redeploys."
     else
         log "CRITICAL: rollback also failed, app may be DOWN. Manual intervention required."
+    fi
+    if [ -n "$RESTORED_ASIDE" ]; then
+        log "NOTE: the database was restored to the pre-deploy snapshot; writes made after it are only in $RESTORED_ASIDE"
     fi
 fi
 
