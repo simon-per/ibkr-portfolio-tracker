@@ -5,8 +5,8 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** **Deploy hardening, merged locally and awaiting its push with the owner
-present:** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-04.** **Deploy hardening, live on `9e57366` since 15:17 Berlin (API-verified: real data, 34
+positions, the 15:00 market-data row written just before the move survived it):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -524,7 +524,11 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   changes ship together: the database moves to a directory mount, the rollback restores the DB
   snapshot after a migrating failure, and `deploy.sh` re-checks the sync slots right before the
   restart (docs/deployment.md has all three).
-  - *Before the push:* `/root/auto-deploy.sh` must be the copy that fast-forwards before running
+  - *Status 2026-10-04 15:20 Berlin:* pushed and live. The `/root` refresh was preloaded as a
+    one-shot background job (`/root/finish-hardening.sh`, log `/root/finish-hardening.log`): it
+    refreshes both copies and takes a manual backup only after a new `SUCCESS` line with the
+    link in place. Read that log to close this item; then delete the script.
+  - *Before the push (done; the VPS copy was the 2026-08-19 version, code-identical):* `/root/auto-deploy.sh` must be the copy that fast-forwards before running
     `deploy.sh` (`sha256sum /root/auto-deploy.sh` against `ops/auto-deploy.sh` at `98bf681`). If
     it is older, the move deploy fails closed (the guard refuses an empty database) and needs one
     manual `./deploy.sh`.
