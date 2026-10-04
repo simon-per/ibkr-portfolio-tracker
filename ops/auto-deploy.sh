@@ -7,7 +7,9 @@
 #
 #     install -m 755 ops/auto-deploy.sh /root/auto-deploy.sh
 #
-# Runs from root's crontab every 10 minutes. deploy.sh is expensive (docker
+# Runs from root's crontab every 5 minutes (`*/5`; every 10 until 2026-10-04).
+# A tick that finds a deploy still running exits at the `flock` below, so a build
+# longer than the cadence neither overlaps nor queues. deploy.sh is expensive (docker
 # compose down + build --no-cache + npm ci), so this only invokes it when
 # origin/main is genuinely AHEAD of the checkout — never on an unchanged tick,
 # and never when the VPS is ahead (which happens legitimately after a local
@@ -48,7 +50,13 @@ QUARANTINE="${QUARANTINE:-/root/.auto-deploy-quarantine}"
 # 18 and 0 are the IBKR slots; the rest are MARKET_DATA_HOURS, widened on 2026-08-04
 # from 15/22 so the portfolio reprices through both sessions instead of only after each
 # close. Eight guarded slots defer at most ~3h of the day in 21-minute bands, and
-# auto-deploy ticks every 10 minutes, so a push still lands promptly.
+# auto-deploy ticks every 5 minutes, so a push still lands promptly.
+#
+# The cadence and the margin interact: the last tick allowed to START a deploy before a
+# slot is the last one more than SLOT_MARGIN_MIN away — :45 at */5 (15 minutes of room),
+# :40 at */10, but :48 at */6 (12). The guard is checked once, at the start; a build
+# longer than that room would restart the app on top of the sync (STATUS.md, "Re-check
+# the sync-slot guard right before the restart").
 #
 # 06:00 left on 2026-08-08, when the IBKR slots became 18:00 (primary) and 00:00
 # (recovery) — note 18 was already guarded as a market-data hour, so only 6 dropped.
@@ -70,7 +78,7 @@ flock -n 9 || exit 0
 # On 2026-07-30 a push landed at 06:00 UTC — exactly the 08:00 Berlin slot — and
 # that day's full_sync never ran: no row in sync_runs, no 730-day price refresh,
 # no dividend sync, and both IBKR retry slots happened to fail. A deploy is never
-# urgent; the next tick is ten minutes away. So skip rather than race.
+# urgent; the next tick is minutes away. So skip rather than race.
 #
 # Deliberately checked before `git fetch`: nothing here should touch the network
 # on a tick that cannot deploy anyway.
@@ -95,7 +103,7 @@ in_sync_window() {
 
 if slot=$(in_sync_window); then
     # Only worth a log line when there is actually something waiting to deploy,
-    # or this writes a skip every ten minutes forever.
+    # or this writes a skip on every tick forever.
     cd "$REPO_DIR" 2>/dev/null && \
         if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main 2>/dev/null)" ]; then
             log "SKIP: within ${SLOT_MARGIN_MIN}min of the ${slot}:00 Europe/Berlin sync slot; deferring to the next tick"
@@ -122,7 +130,7 @@ fi
 # A rollback that WORKS creates a problem the broken one never had: the checkout is
 # back at the last good commit while origin/main still holds the bad one, so the very
 # next tick sees "behind origin/main", passes the ancestor check, and redeploys the
-# commit that just failed — every ten minutes, each time with a full --no-cache rebuild
+# commit that just failed — on every tick, each time with a full --no-cache rebuild
 # and an outage. (The old rollback avoided this only by accident: its `git pull` left
 # HEAD at the broken commit, so the next tick saw nothing to do.)
 #
@@ -148,7 +156,7 @@ fi
 #
 # The three answers are deliberately NOT symmetric, because the failure directions are
 # not either. A red commit must never deploy. A pending one is just early — the suites
-# take a few minutes and the next tick is ten away. But "no checks found" and "GitHub
+# take a few minutes and the next tick is minutes away. But "no checks found" and "GitHub
 # unreachable" must FAIL OPEN and deploy: a gate that can brick every future deploy
 # because an unrelated service is down, or because the commit predates the workflow, is
 # a worse failure than the one it prevents. Same reasoning as the sync-slot guard
@@ -227,7 +235,7 @@ BACKUP_SCRIPT="/root/backup-db.sh"
 # A failed backup now ABORTS the deploy instead of warning and continuing. The next
 # step runs `alembic upgrade head` unattended against the account's only copy of data
 # that cannot be re-fetched from IBKR (the Flex window is bounded), and a deploy is never
-# urgent — the next tick is ten minutes away. Continuing was defensible while the
+# urgent — the next tick is minutes away. Continuing was defensible while the
 # backup was a `cp` nobody trusted; it is not defensible now that a failure means the
 # snapshot genuinely could not be taken or did not verify.
 if BACKUP_ROOT="$BACKUP_ROOT" REPO_DIR="$REPO_DIR" bash "$BACKUP_SCRIPT" autodeploy; then

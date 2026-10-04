@@ -26,7 +26,7 @@ and for wiping / rebuilding it without losing data.
 | `backend/.env` | Secrets: `IBKR_TOKEN`, `IBKR_QUERY_ID`, etc. | Can also be rebuilt from `backend/.env.example` |
 | `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; the vhost itself is hand-written and **not** in git |
 | `/root/auto-deploy.sh`, `/root/backup-db.sh` | The deploy and backup jobs | Both are in git under `ops/` — reinstall from there rather than restoring the copies |
-| root's crontab | `auto-deploy` every 10 min, `backup-db daily` at 03:17 UTC | Two lines; recreate by hand |
+| root's crontab | `auto-deploy` every 5 min (`*/5`, since 2026-10-04), `backup-db daily` at 03:17 UTC | Two lines; recreate by hand |
 
 ---
 

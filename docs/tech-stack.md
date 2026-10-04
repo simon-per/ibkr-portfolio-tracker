@@ -20,7 +20,7 @@ panel is not mounted until selected). **Recharts stays eager** — `PortfolioVal
 `PerformanceAttribution` and `MonthlyDeploymentCard` are all on the default Performance tab, so
 deferring it would only move the wait; don't "optimise" it into a lazy chunk. `manualChunks` in
 `vite.config.ts` splits `react` / `charts` / `query` mainly for **caching**: the VPS redeploys within
-10 minutes of any push and nginx serves `/assets/` `immutable`, so keeping vendor code out of the
+minutes of any push and nginx serves `/assets/` `immutable`, so keeping vendor code out of the
 app chunk took the per-deploy re-download from 264 kB gzipped to ~52 kB. List chunk members by the
 specifier that actually appears in the graph (`react-dom/client`, `react/jsx-runtime`) — naming the
 bare packages emits a 0-byte chunk and leaves React in the app bundle.

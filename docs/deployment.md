@@ -7,8 +7,8 @@
 
 ## Deployment
 
-**Push to `main` → deployed automatically within 10 minutes.** `/root/auto-deploy.sh` on the VPS (root
-crontab, `*/10 * * * *`) does: `flock` → `git fetch` → deploy **only if strictly behind** `origin/main`
+**Push to `main` → deployed automatically within 5 minutes** (once CI is green).
+`/root/auto-deploy.sh` on the VPS (root crontab, `*/5 * * * *` — `*/10` until 2026-10-04) does: `flock` → `git fetch` → deploy **only if strictly behind** `origin/main`
 (`merge-base --is-ancestor`; it will refuse and log if the VPS has diverged) → back up `portfolio.db` →
 `deploy.sh` → health check → **roll back to the previous commit if health fails**. Log:
 `/root/auto-deploy.log`.

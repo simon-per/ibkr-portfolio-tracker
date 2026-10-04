@@ -229,10 +229,11 @@ Playwright package that the deploy never installs; its scripts have per-script p
 
 Full detail in [docs/deployment.md](docs/deployment.md).
 
-- **Push to `main` → deployed automatically within 10 minutes.** `/root/auto-deploy.sh` (root
-  crontab, `*/10`) resets the checkout, backs up the DB, runs `deploy.sh`, health-checks, and rolls
-  back on failure. It defers a deploy that would land inside a sync slot; don't push within ~10
-  minutes of one (`ALL_SYNC_HOURS` in `scheduler_service.py`; `ops/finish-deploy.*` checks).
+- **Push to `main` → deployed automatically within 5 minutes** (once CI is green).
+  `/root/auto-deploy.sh` (root crontab, `*/5` since 2026-10-04) resets the checkout, backs up the
+  DB, runs `deploy.sh`, health-checks, and rolls back on failure. It defers a deploy that would land
+  inside a sync slot; don't push within ~10 minutes of one (`ALL_SYNC_HOURS` in
+  `scheduler_service.py`; `ops/finish-deploy.*` checks).
 - **`deploy.sh` builds before it stops anything** (frontend into `dist.next`, then the image), then
   checkpoints SQLite's WAL inside the running container, then `down`, swap `dist`, `up`. Measured
   after the reorder: zero failed health probes across a deploy.

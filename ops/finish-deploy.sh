@@ -5,7 +5,7 @@
 # The three remaining steps have a hard dependency that is easy to get wrong and
 # unpleasant to undo:
 #
-#   1. push            -> the VPS auto-deploys within 10 minutes
+#   1. push            -> the VPS auto-deploys within 5 minutes of a green CI
 #   2. API_ADMIN_TOKEN -> ONLY once the new frontend is actually live
 #   3. auto-deploy.sh  -> any time after
 #
@@ -110,12 +110,12 @@ if [ "$ahead" -gt 0 ]; then
   git --no-pager log --oneline origin/main..main | sed 's/^/    /'
   ask "Push these?" || die "Stopped before pushing."
   git push origin main
-  echo "Pushed. The VPS cron picks it up within 10 minutes."
+  echo "Pushed. The VPS cron picks it up within 5 minutes of a green CI."
 fi
 
 # --- step 2 gate: the deploy must actually be live -------------------------
 say "Waiting for ${target:0:7} to go live at ${HEALTH}"
-echo "Auto-deploy runs every 10 min and the rebuild takes ~90s, so allow ~12 min."
+echo "Auto-deploy runs every 5 min once CI is green, and the rebuild takes a few minutes, so allow ~10 min."
 echo "(Ctrl-C is safe — the deploy continues; re-run this script to pick up here.)"
 
 # Two accepted signals, because an exact sha match is not always available:
