@@ -512,6 +512,13 @@ class _Rehearsal:
         con.close()
 
     def run(self, backup_script: Path = BACKUP_DB, **extra: str) -> str:
+        if backup_script == BACKUP_DB:
+            # auto-deploy uses BACKUP_SCRIPT only when it is executable (`[ -x ]`), as the
+            # installed /root copy is, and git stores ops/backup-db.sh as 100644. Windows'
+            # bash calls any *.sh executable, so passing the repo file worked there and on
+            # Linux CI fell through to a REPO_DIR/ops/backup-db.sh the fake repo lacks.
+            backup_script = self.tmp / "installed-backup-db.sh"
+            _write(backup_script, BACKUP_DB.read_text(encoding="utf-8"), executable=True)
         env = {
             **os.environ,
             "STUBS": self.stubs.as_posix(),
