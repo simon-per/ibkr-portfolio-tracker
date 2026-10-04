@@ -6,7 +6,7 @@
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
 **Last updated: 2026-10-04.** Newest: **the dividend forecast is IBKR-first and sized per payment**
-(not yet pushed when written — see *Watch after the next deploy*). IBKR's paid amounts never reached the
+(live on `48b1f9c` — see *Watch after the next deploy*). IBKR's paid amounts never reached the
 forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
 so funds lost their big December and raisers trailed by up to two years (NVDA ~0.01 a quarter against
 0.25 paid). Now IBKR's stated rate (parsed off the cash line), its accruals and its measured
@@ -1002,15 +1002,18 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The IBKR-first dividend forecast** (migration `a1d6f2b4c8e0` adds `per_share_native` and
-  `dividend_kind` to `dividend_payments`). After the deploy and the next full sync, on
-  `/api/dividends/breakdown`: most rows' `forecast_withholding_source` reads `ibkr_measured` or
-  `ibkr_country` (US payers 15%), and `forward_yield.basis` is no longer `gross_estimate`; NVDA
-  projects 0.25 a share a quarter, not ~0.01; TSMC's quarters after its accrual repeat the declared
-  7.00 a share at 21%; VT's projected December is larger than its March (`as last yr`); every
-  `upcoming[]` entry carries `amount_source`. The stored accruals' withholding is negative until the
-  next sync rewrites them (the sign fix) — the ladder reads `abs()`, so the rate is right either way.
-  Then run the replay (*Worth doing next*) and move this to docs/shipped-log.md.
+- **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin
+  (migration `a1d6f2b4c8e0`). **Verified on production right after the deploy:** every
+  `upcoming[]` entry carries `amount_source`; withholding reads `ibkr_measured` (~15% on US
+  payers), `accrual` (2330 21%, NXPI, HPE) or `ibkr_country` (Samsung 22%), with only IFX
+  `assumed`; `forward_yield.basis` is `mixed` with 3.73 assumed (IFX); NVDA projects 0.25 USD a
+  share a quarter; TSMC repeats its declared amount after the accrual; VT, GRID, QTUM, SOXQ, SK
+  Hynix and ASML are `same_payment_last_year` with their large slots intact. Next-12M read LOWER
+  than before (312 vs 322) because it is now net of IBKR's real ~15% where the WHT setting was 0%
+  — gross-equivalent it rose. **Still to check after the 18:00 full sync:** IBKR rows gain
+  `per_share_native`/`dividend_kind` (the statement re-delivers them), and the stored accruals'
+  withholding turns positive (the sign fix). Then run the replay (*Worth doing next*) and move this
+  to docs/shipped-log.md.
 
 - **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
   BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
