@@ -7,6 +7,16 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-07 — the dividend forecast keeps a daily history
+
+`000aae4`: `dividend_forecast_snapshots` (migration `b2e7a3c5d9f1`), written by the
+`full_sync` and `market_data_only` jobs, read by `GET /api/dividends/forecast-history`; no
+frontend, no backfill, by the owner's choice. Rules in `docs/dividends.md`, *The forecast's
+history*. **Verified on production** the same evening: `/health` on `000aae4`; the day's
+market-data runs and the 18:00 Berlin `full_sync` each carry
+`dividend_forecast_result.status: success` and no warning; the endpoint returns one point for
+the day, and its `next_12m_eur` equals `growth.next_12m_eur` on `/api/dividends/breakdown`.
+
 ## Verified 2026-10-04 — the four Flex sections ticked on 2026-10-03
 
 The 2026-10-03 18:00 Berlin `full_sync` (16:08 UTC, success, no warnings) carried

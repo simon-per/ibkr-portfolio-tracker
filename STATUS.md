@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-07.** **The dividend forecast now keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*); see *Watch after the next deploy*. **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-07.** **The dividend forecast now keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*), live and verified on `000aae4` (docs/shipped-log.md). **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -1013,12 +1013,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
 ## Watch after the next deploy
-
-- **The dividend forecast history (2026-10-07) — the first row.** The deploy carries a
-  migration (`b2e7a3c5d9f1`). After the next repricing slot,
-  `GET /api/dividends/forecast-history` should return one point whose `next_12m_eur` equals
-  `growth.next_12m_eur` on `/api/dividends/breakdown`, and the job's `sync_runs` row should
-  carry no "snapshot was not recorded" warning. One point per UTC date from then on.
 
 - **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
   re-check waits out a running sync from the second deploy on (the first had only the margin;
