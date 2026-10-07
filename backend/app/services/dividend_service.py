@@ -21,8 +21,12 @@ from app.clock import utcnow
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
+from app.repositories.dividend_forecast_snapshot_repository import (
+    DividendForecastSnapshotRepository,
+)
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
+from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
 from app.services.dividend_forecast import (
     ForecastPayment,
@@ -1597,16 +1601,81 @@ class DividendService:
             "base_currency": base_fx.base_currency,
         }
 
+    async def record_forecast_snapshot(self, as_of: date) -> Optional[Dict]:
+        """
+        Store what the forecast says on ``as_of``: the next twelve months and the
+        trailing twelve, in EUR. Returns the stored figures, or None when there is
+        nothing to record.
+
+        The figures are `get_dividend_breakdown`'s own `growth` block, asked for in EUR
+        through an identity `BaseFx` — never a second sum over the same rows, which
+        would be a copy of the forecast waiting to disagree with the tile it records.
+
+        A book with no dividend history at all writes no row: both figures would be
+        zero, and a stored zero reads afterwards as "the forecast was nil that day"
+        rather than "there was nothing to forecast from". The caller commits.
+        """
+        breakdown = await self.get_dividend_breakdown(
+            as_of=as_of, base_fx=BaseFx("EUR", {})
+        )
+        growth = breakdown["growth"]
+        next_12m = Decimal(str(growth["next_12m_eur"]))
+        ttm_net = Decimal(str(growth["ttm"]["net_eur"]))
+        if not next_12m and not ttm_net:
+            return None
+        await DividendForecastSnapshotRepository(self.db).upsert({
+            "snapshot_date": as_of,
+            "next_12m_eur": next_12m,
+            "ttm_net_eur": ttm_net,
+        })
+        return {
+            "snapshot_date": as_of.isoformat(),
+            "next_12m_eur": float(next_12m),
+            "ttm_net_eur": float(ttm_net),
+        }
+
+    async def get_forecast_history(self) -> Dict:
+        """
+        Every recorded forecast snapshot, oldest first, in the base currency.
+
+        Each day is projected at that day's own EUR->base rate. `next_12m_eur` then
+        matches what the tile showed that day; `ttm_net_eur` can differ from it
+        slightly, because the tile converts each past payment at its own pay date and
+        a stored EUR total can only be converted once.
+        """
+        from app.services.portfolio_service import PortfolioService
+        base_fx = await PortfolioService(self.db)._load_base_fx()
+        rows = await DividendForecastSnapshotRepository(self.db).get_all()
+        return {
+            "base_currency": base_fx.base_currency,
+            "points": [
+                {
+                    "date": r.snapshot_date.isoformat(),
+                    "next_12m_eur": round(
+                        float(base_fx.convert(r.next_12m_eur, r.snapshot_date)), 2
+                    ),
+                    "ttm_net_eur": round(
+                        float(base_fx.convert(r.ttm_net_eur, r.snapshot_date)), 2
+                    ),
+                }
+                for r in rows
+            ],
+        }
+
     async def get_dividend_breakdown(
         self,
         year: Optional[int] = None,
         include_forecast: bool = True,
         as_of: Optional[date] = None,
         period: Optional[Literal["24m"]] = None,
+        base_fx: Optional[BaseFx] = None,
     ) -> Dict:
         """
         Dividends grouped by month × symbol plus per-security totals, optionally
         with forecast projections for the months after ``as_of``.
+
+        ``base_fx`` overrides the configured base currency's projection; only
+        `record_forecast_snapshot` passes one, to read the same figures in EUR.
 
         Reads only cached data — dividend_payments, taxlots, market_prices and
         exchange_rates — never Yahoo or IBKR. The history is era-spliced like the
@@ -1633,7 +1702,7 @@ class DividendService:
 
         from app.services.portfolio_service import PortfolioService
         portfolio = PortfolioService(self.db)
-        base_fx = await portfolio._load_base_fx()
+        base_fx = base_fx or await portfolio._load_base_fx()
 
         # Future years are selectable: a full year of projections is the point of
         # having a cadence at all, and the next year is the one being planned.

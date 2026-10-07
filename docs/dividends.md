@@ -862,3 +862,31 @@ Tests: `src/lib/dividendPace.test.ts` carries the arithmetic, including the one 
 rewrite exists for — one series sliced two ways must give two answers.
 
 ---
+
+### The forecast's history — `dividend_forecast_snapshots`
+
+*Next 12 months* is recomputed on every read, so until 2026-10-07 its past was unknowable
+and "is the forward income growing?" had no answer. Now every job that reprices
+(`full_sync`, `market_data_only`) ends by calling `SchedulerService.record_dividend_forecast`,
+which stores one row per **UTC date** — the next twelve months and the trailing twelve — and
+`GET /api/dividends/forecast-history` returns the series. No frontend reads it yet, by the
+owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
+
+- **One implementation.** `record_forecast_snapshot` stores `get_dividend_breakdown`'s own
+  `growth` block, asked for in EUR through an identity `BaseFx` (the `base_fx` parameter exists
+  only for this). A second sum over the same rows would be a copy of the forecast.
+- **EUR on write, base currency on read**, each day at its own rate. `next_12m_eur` then matches
+  what the tile showed that day; `ttm_net_eur` can differ slightly, because the tile converts each
+  past payment at its pay date and a stored total can only be converted once.
+- **Last write of the day wins** (seven a day), so one missed slot loses nothing. The 00:00
+  Berlin IBKR-only job does not write: it falls on the previous UTC date.
+- **A log of what was said, never restated.** A change to the forecast's rules shows as a step
+  in the series. There is no backfill for the same reason — it would show what today's rules
+  say about the past, which nobody ever saw.
+- **No row for a book with no dividend history** (both figures zero), and a failed write is the
+  step's warning, never the job's status.
+
+Tests: `tests/test_dividend_forecast_snapshot.py`, plus the wiring cases at the end of
+`tests/test_scheduler_jobs.py`.
+
+---

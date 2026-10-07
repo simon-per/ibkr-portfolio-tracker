@@ -97,6 +97,8 @@ def spy(monkeypatch):
                         s.make('benchmarks', {"status": "success"}))
     monkeypatch.setattr(svc, 'refresh_lookthrough_data',
                         s.make('lookthrough', {"status": "success"}))
+    monkeypatch.setattr(svc, 'record_dividend_forecast',
+                        s.make('dividend_forecast', {"status": "success"}))
     return svc, s
 
 
@@ -1258,3 +1260,56 @@ async def test_the_crypto_job_never_touches_the_stock_last_sync(monkeypatch):
     assert (await svc.crypto_sync_job())["type"] == "crypto_sync"
     assert ran == [True]
     assert svc.last_sync_result == {"type": "market_data_only", "status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_the_repricing_jobs_record_the_dividend_forecast(spy, monkeypatch):
+    """Every job that reprices writes the day's row, so one missed slot loses nothing."""
+    svc, s = spy
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.full_sync_job()
+    assert s.called.index('dividend_forecast') > s.called.index('dividends')
+    # ...and before the look-through upkeep, which can sit on an issuer's timeout.
+    assert s.called.index('dividend_forecast') < s.called.index('lookthrough')
+
+    s.called.clear()
+    await svc.market_data_only_sync_job()
+    assert 'dividend_forecast' in s.called
+
+
+@pytest.mark.asyncio
+async def test_the_ibkr_only_job_does_not_record_the_dividend_forecast(spy, monkeypatch):
+    """00:00 Berlin is the previous UTC date: it would rewrite yesterday's row."""
+    svc, s = spy
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+
+    await svc.ibkr_only_sync_job()
+
+    assert 'dividend_forecast' not in s.called
+
+
+@pytest.mark.asyncio
+async def test_a_failed_forecast_snapshot_is_a_warning_never_the_jobs_status(monkeypatch):
+    svc = SchedulerService()
+
+    class _Broken:
+        async def __aenter__(self):
+            raise RuntimeError("database is locked")
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        'app.services.scheduler_service.AsyncSessionLocal', lambda: _Broken()
+    )
+
+    result = await svc.record_dividend_forecast()
+
+    assert result["status"] == "error"
+    assert result["warnings"] == [
+        "The dividend forecast snapshot was not recorded for today: RuntimeError"
+    ]
+    job = {"status": "success"}
+    _collect_warnings(job, result)
+    assert job["status"] == "success" and job["warnings"] == result["warnings"]

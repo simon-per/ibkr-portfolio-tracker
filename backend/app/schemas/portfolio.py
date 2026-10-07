@@ -779,6 +779,17 @@ class DividendForwardYield(BaseModel):
     basis: str                              # 'net' | 'mixed' | 'gross_estimate'
 
 
+class DividendForecastHistoryPoint(BaseModel):
+    date: str                       # the UTC date the snapshot was taken, "YYYY-MM-DD"
+    next_12m_eur: float             # base currency, at that date's rate
+    ttm_net_eur: float              # base currency, at that date's rate
+
+
+class DividendForecastHistoryResponse(BaseModel):
+    base_currency: str
+    points: List[DividendForecastHistoryPoint]
+
+
 class DividendBreakdownResponse(BaseModel):
     years: List[int]
     year: Optional[int] = None      # None = all time, unless period is set

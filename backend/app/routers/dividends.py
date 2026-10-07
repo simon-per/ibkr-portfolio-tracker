@@ -7,7 +7,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
-from app.schemas.portfolio import DividendBreakdownResponse, DividendSummaryResponse
+from app.schemas.portfolio import (
+    DividendBreakdownResponse,
+    DividendForecastHistoryResponse,
+    DividendSummaryResponse,
+)
 from app.services.dividend_service import DividendService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, cooldown_remaining, single_flight
 
@@ -117,6 +121,16 @@ async def get_dividend_breakdown(
     return await DividendService(db).get_dividend_breakdown(
         year=year, include_forecast=forecast, period=period
     )
+
+
+@router.get("/forecast-history", response_model=DividendForecastHistoryResponse)
+async def get_dividend_forecast_history(db: AsyncSession = Depends(get_db)):
+    """
+    The recorded daily history of the next-twelve-months forecast and the trailing
+    twelve months beside it, oldest first. Reads one table and the cached exchange
+    rates — like /breakdown it never enqueues a sync, so it can never touch Yahoo.
+    """
+    return await DividendService(db).get_forecast_history()
 
 
 @router.post("/sync")

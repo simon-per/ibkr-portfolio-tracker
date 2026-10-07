@@ -79,6 +79,7 @@ READ_ENDPOINTS = [
     f"/api/dividends/breakdown?year={TODAY.year + 1}",   # a future year
     "/api/dividends/breakdown?forecast=false",
     "/api/dividends/breakdown?period=24m",
+    "/api/dividends/forecast-history",
     f"/api/tax/report?year={TODAY.year}",
     f"/api/tax/report.csv?year={TODAY.year}",
     "/api/portfolio/lookthrough",

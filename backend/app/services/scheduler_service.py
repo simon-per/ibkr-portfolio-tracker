@@ -1152,6 +1152,35 @@ class SchedulerService:
                     "timestamp": utc_iso(utcnow())
                 }
 
+    async def record_dividend_forecast(self) -> dict:
+        """
+        Record today's dividend forecast figures (docs/dividends.md, *The forecast's
+        history*). Pure DB — no Yahoo, no IBKR.
+
+        Called by every job that reprices, so one missed slot does not lose the day;
+        the row is keyed on the UTC date and the last write wins. Best-effort like
+        `_record_run`: a failure is this step's warning and never the job's status.
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                # Imported here to avoid any import cycle at module load
+                from app.services.dividend_service import DividendService
+
+                snapshot = await DividendService(db).record_forecast_snapshot(
+                    utcnow().date()
+                )
+                await db.commit()
+            return {"status": "success", "snapshot": snapshot}
+        except Exception as e:
+            logger.warning(f"Could not record the dividend forecast snapshot: {e}")
+            return {
+                "status": "error",
+                "warnings": [
+                    "The dividend forecast snapshot was not recorded for today: "
+                    f"{type(e).__name__}"
+                ],
+            }
+
     async def _gated_job(self, job_type: str, run) -> Optional[dict]:
         """
         Run one pipeline job under the shared sync-pipeline gate.
@@ -1246,6 +1275,9 @@ class SchedulerService:
         div_result = await self.sync_dividends()
         logger.info(f"Dividend Sync Result: {div_result}")
 
+        # Before the look-through upkeep, which can sit on an issuer's timeout.
+        forecast_result = await self.record_dividend_forecast()
+
         # Step 5: Look-through upkeep — stale issuer baskets, then pending identities.
         # Issuer sites and OpenFIGI/GLEIF only, no Yahoo and no IBKR, and not gated on
         # either. Last, so an issuer hanging on its 60 s timeout delays nothing the
@@ -1265,6 +1297,7 @@ class SchedulerService:
             "market_result": market_result,
             "dividend_result": div_result,
             "lookthrough_result": lookthrough_result,
+            "dividend_forecast_result": forecast_result,
             "status": ibkr_result.get("status", "error"),
         }
         # A skip is only useful in the history if it says which kind it was; `status`
@@ -1273,7 +1306,7 @@ class SchedulerService:
             self.last_sync_result["reason"] = ibkr_result["reason"]
         _collect_warnings(
             self.last_sync_result, ibkr_result, market_result, div_result,
-            lookthrough_result,
+            lookthrough_result, forecast_result,
         )
         await self._record_run(self.last_sync_result, started_at)
 
@@ -1311,6 +1344,8 @@ class SchedulerService:
         bench_result = await self.sync_benchmark_prices()
         logger.info(f"Benchmark Price Sync Result: {bench_result}")
 
+        forecast_result = await self.record_dividend_forecast()
+
         # Track result
         self.last_sync_result = {
             "type": "market_data_only",
@@ -1318,9 +1353,12 @@ class SchedulerService:
             "fx_result": fx_result,
             "market_result": market_result,
             "benchmark_result": bench_result,
+            "dividend_forecast_result": forecast_result,
             "status": market_result.get("status", "error"),
         }
-        _collect_warnings(self.last_sync_result, market_result, bench_result)
+        _collect_warnings(
+            self.last_sync_result, market_result, bench_result, forecast_result
+        )
         await self._record_run(self.last_sync_result, started_at)
 
         logger.info("=" * 80)

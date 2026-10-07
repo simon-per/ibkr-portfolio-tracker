@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-07.** **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-07.** **The dividend forecast now keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*); see *Watch after the next deploy*. **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -1014,6 +1014,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The dividend forecast history (2026-10-07) — the first row.** The deploy carries a
+  migration (`b2e7a3c5d9f1`). After the next repricing slot,
+  `GET /api/dividends/forecast-history` should return one point whose `next_12m_eur` equals
+  `growth.next_12m_eur` on `/api/dividends/breakdown`, and the job's `sync_runs` row should
+  carry no "snapshot was not recorded" warning. One point per UTC date from then on.
+
 - **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
   re-check waits out a running sync from the second deploy on (the first had only the margin;
   it logged `Clear of every sync slot`); still to size: whether the 45-minute bound
@@ -1665,6 +1671,10 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-07 (dividend forecast history)** — "can I track how the next-12-months figure
+  changes?": one row a day from the repricing jobs, EUR on write, one read endpoint; owner
+  chose no backfill and no frontend.
+
 - **2026-10-07 (pillar 3a upload)** — finpension export imported with the two 10-06 buys
   appended as estimates (quantities real, values from 99% of uninvested cash) at the owner's
   request; DB backed up first, dry run clean, 12 rows / 6 lots on production. Real export still
@@ -1698,10 +1708,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   helper; four tests including the forecast swap and a later quarter left alone. Then "why do
   the Korean stocks misbehave": SK Hynix paid 33 days after ex, past the 30-day pairing window, so
   KRW/TWD get 75. Flex sections reviewed: four `ibflex`-modelled ones recommended for ticking.
-
-- **2026-10-03 (crypto on CoinGecko)** — "prices from CoinGecko, the book from 1 Jan 2026, the
-  23 Aug basket carried back, and no Kraken spike": the series is computed from per-coin daily
-  holdings × CoinGecko closes, `pnl = yesterday's qty × price move`; CoinStats' history pull
-  dropped; a refuse-whole CLI rebuilds 23 Aug → first sync from the transaction list (shape not
-  confirmed yet — `--probe` first). USDC pegged at 1.00 by owner decision; 1W/MTD/YTD ranges.
-  Pushed as `ac23ed5`; key and rebuild need a human.
