@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-04.** **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-07.** **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -526,8 +526,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   conceivable. `/root/ibkr-backups/failed-deploys/` is never pruned, should it ever fill.
 
 - **Upload the finpension export when it has new transactions in it — no pricing deadline
-  any more.** *Pending as of 2026-10-04:* new transactions exist, but the cash is uninvested until
-  finpension's Tuesday investment run, so the owner uploads next week, after it. Since 2026-09-12 neither 3a fund depends on the upload for its price:
+  any more.** *Pending as of 2026-10-07:* **the two 2026-10-06 buys on production are
+  estimates and want replacing by the real export.** finpension's export still ended at the
+  10-01 deposit, so at the owner's request the two rows were appended by hand: the share counts
+  are finpension's, the cash flows are not — the uninvested balance split by the owner's
+  allocation (25% EM, 74% World ex CH, 1% cash). The cost basis, the closing cash and the two 10-06
+  `finpension_statement` NAVs are therefore approximate, and the EM tranche's sibling prices
+  anchor to an estimated NAV until then. Upload the real export once it carries those buys: the
+  ingest replaces wholesale, so nothing needs undoing (expect `rows_restated` > 0). Since 2026-09-12 neither 3a fund depends on the upload for its price:
   `CH0117044948` prices from Yahoo directly and `CH1529078078` from its sibling share class
   (`0P0000S0OE.SW`, statement NAV × the sibling's moves — `docs/pillar3a.md`, *Prices*). The
   40-day "upload a newer statement" warning and the day-59 drop-out applied to a `manual`
@@ -1659,6 +1665,11 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-07 (pillar 3a upload)** — finpension export imported with the two 10-06 buys
+  appended as estimates (quantities real, values from 99% of uninvested cash) at the owner's
+  request; DB backed up first, dry run clean, 12 rows / 6 lots on production. Real export still
+  owed.
+
 - **2026-10-04 (deploy hardening)** — "is everything good for daily use?": yes; the remaining
   risks were operational. Three parallel agents in worktrees built the DB directory mount (with a
   self-performing, refusing switchover and a start guard), the migration-aware rollback restore, and
@@ -1694,8 +1705,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   dropped; a refuse-whole CLI rebuilds 23 Aug → first sync from the transaction list (shape not
   confirmed yet — `--probe` first). USDC pegged at 1.00 by owner decision; 1W/MTD/YTD ranges.
   Pushed as `ac23ed5`; key and rebuild need a human.
-
-- **2026-10-01 (dividend paces)** — "what is +507% MoM?": the average tile's footer was the latest
-  month against the month before, which on a quarterly ETF calendar measures the calendar. Replaced,
-  after two iterations with the owner, by two per-month paces over finished months (YTD vs last year
-  ÷ 12; last three months vs the three before). Day-based windows were weighed and rejected.
