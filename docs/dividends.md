@@ -892,7 +892,8 @@ owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
   figures. It exists because the book changed shape: the Irish accumulating ETFs were sold on
   2026-08-21 and US distributing ones bought through 08-28, which multiplied the forecast
   several times over without one dividend having grown — a year-to-date across that reports
-  the swap. The owner set it to 2026-09-01.
+  the swap. The owner set it to 2026-08-28, the day of the last purchase of the switch:
+  that day's figure is the first one the growth is measured from.
 - **Last write of the day wins** (seven a day), so one missed slot loses nothing. The 00:00
   Berlin IBKR-only job does not write: it falls on the previous UTC date.
 - **A log of what was said, never restated.** A change to the forecast's rules shows as a step
