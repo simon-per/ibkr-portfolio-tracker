@@ -23,6 +23,13 @@ rates and payments of that day, under today's rules.
 
     python -m app.cli.backfill_dividend_forecast --from 2026-06-01 --dry-run
     python -m app.cli.backfill_dividend_forecast --from 2026-06-01
+
+`--growth-from` sets the first day the history's growth percentages are measured from
+(`dividend_forecast_growth_from`), alone or with a replay. It is the owner's statement
+that the book changed shape there; nothing is deleted, and the days before it keep
+their figures.
+
+    python -m app.cli.backfill_dividend_forecast --growth-from 2026-09-01
 """
 import argparse
 import asyncio
@@ -30,10 +37,11 @@ import logging
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
 )
@@ -124,15 +132,24 @@ def _print_report(result: Dict) -> None:
                   f"{_gap_pct(o['recorded'], o['replayed']):>7}")
 
 
-async def run(start: date, dry_run: bool) -> int:
+async def run(start: Optional[date], dry_run: bool,
+              growth_from: Optional[date] = None) -> int:
     started_at = utcnow()
     async with AsyncSessionLocal() as db:
         try:
-            result = await backfill(db, start, dry_run=dry_run)
-            _print_report(result)
+            result = {"rows": [], "skipped": 0, "through": None}
+            if start is not None:
+                result = await backfill(db, start, dry_run=dry_run)
+                _print_report(result)
+            if growth_from is not None:
+                print(f"Growth is measured from {growth_from}.")
             if dry_run:
                 print("\nDRY RUN - nothing was written.")
                 return 0
+            if growth_from is not None:
+                await AppSettingsRepository(db).set_dividend_forecast_growth_from(
+                    growth_from
+                )
             await db.commit()
         except BackfillError as e:
             print(f"REFUSED - nothing was written: {e}", file=sys.stderr)
@@ -152,14 +169,16 @@ async def run(start: date, dry_run: bool) -> int:
             status="success",
             message=f"Replayed the dividend forecast for {len(rows)} day(s)",
             details={
-                "from": start.isoformat(),
-                "through": result["through"].isoformat(),
+                "from": start.isoformat() if start else None,
+                "through": result["through"].isoformat() if result["through"] else None,
                 "rows": len(rows),
                 "skipped": result["skipped"],
+                "growth_from": growth_from.isoformat() if growth_from else None,
             },
             started_at=started_at,
         )
-        print(f"\nStored {len(rows)} reconstructed snapshot(s).")
+        if start is not None:
+            print(f"\nStored {len(rows)} reconstructed snapshot(s).")
         return 0
 
 
@@ -168,12 +187,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--from", dest="start", type=date.fromisoformat, required=True,
+    parser.add_argument("--from", dest="start", type=date.fromisoformat, default=None,
                         help="First day to replay, YYYY-MM-DD")
+    parser.add_argument("--growth-from", type=date.fromisoformat, default=None,
+                        help="First day growth percentages are measured from")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute and print, write nothing")
     args = parser.parse_args()
-    return asyncio.run(run(args.start, args.dry_run))
+    if args.start is None and args.growth_from is None:
+        parser.error("give --from, --growth-from, or both")
+    return asyncio.run(run(args.start, args.dry_run, args.growth_from))
 
 
 if __name__ == "__main__":

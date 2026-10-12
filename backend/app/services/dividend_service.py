@@ -1683,10 +1683,17 @@ class DividendService:
         when the series does not reach back that far, from its first snapshot inside
         the period instead — which is why `mtd_from`/`ytd_from` name the day used. A
         day that is its own starting point has nothing to grow from: None, not 0.0.
+
+        `growth_from` (an app setting, absent by default) is the first day growth is
+        measured at all: no percentage reaches back across it, and the days before
+        it carry none. They keep their figures — the level is still what it was.
         """
         from app.services.portfolio_service import PortfolioService
         base_fx = await PortfolioService(self.db)._load_base_fx()
         rows = await DividendForecastSnapshotRepository(self.db).get_all()
+        growth_from = await AppSettingsRepository(
+            self.db
+        ).get_dividend_forecast_growth_from()
 
         points: List[Dict] = []
         previous = None       # (date, next_12m) of the row before this one
@@ -1696,19 +1703,34 @@ class DividendService:
             day = r.snapshot_date
             next_12m = base_fx.convert(r.next_12m_eur, day)
             current = (day, next_12m)
+            if growth_from is not None and day < growth_from:
+                points.append({
+                    "date": day.isoformat(),
+                    "next_12m_eur": round(float(next_12m), 2),
+                    "ttm_net_eur": round(
+                        float(base_fx.convert(r.ttm_net_eur, day)), 2
+                    ),
+                    "next_12m_change_pct": None,
+                    "next_12m_mtd_pct": None,
+                    "next_12m_ytd_pct": None,
+                    "mtd_from": None,
+                    "ytd_from": None,
+                    "reconstructed": bool(r.reconstructed),
+                })
+                continue    # `previous` stays None: the series starts at growth_from
             if previous is None or previous[0].year != day.year:
                 year_anchor = previous or current
             if previous is None or (previous[0].year, previous[0].month) != (day.year, day.month):
                 month_anchor = previous or current
 
-            def growth_from(anchor):
+            def growth_since(anchor):
                 if anchor is None or anchor[0] == day:
                     return None, None
                 return self._pct(next_12m, anchor[1], digits=2), anchor[0].isoformat()
 
-            change_pct, _ = growth_from(previous)
-            mtd_pct, mtd_from = growth_from(month_anchor)
-            ytd_pct, ytd_from = growth_from(year_anchor)
+            change_pct, _ = growth_since(previous)
+            mtd_pct, mtd_from = growth_since(month_anchor)
+            ytd_pct, ytd_from = growth_since(year_anchor)
             points.append({
                 "date": day.isoformat(),
                 "next_12m_eur": round(float(next_12m), 2),
@@ -1723,7 +1745,11 @@ class DividendService:
                 "reconstructed": bool(r.reconstructed),
             })
             previous = current
-        return {"base_currency": base_fx.base_currency, "points": points}
+        return {
+            "base_currency": base_fx.base_currency,
+            "growth_from": growth_from.isoformat() if growth_from else None,
+            "points": points,
+        }
 
     async def get_dividend_breakdown(
         self,

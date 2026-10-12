@@ -799,6 +799,9 @@ class DividendForecastHistoryPoint(BaseModel):
 
 class DividendForecastHistoryResponse(BaseModel):
     base_currency: str
+    # The first day growth is measured from, when the owner has set one; the points
+    # before it carry figures and no percentages.
+    growth_from: Optional[str]
     points: List[DividendForecastHistoryPoint]
 
 

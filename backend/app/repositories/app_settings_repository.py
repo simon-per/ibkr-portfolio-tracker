@@ -39,6 +39,13 @@ LAST_IBKR_SYNC_TO_DATE_KEY = "last_ibkr_sync_to_date"
 # week's purchases to the lot side and double-count them against its deposits.
 CASH_FLOWS_COVERED_FROM_KEY = "cash_flows_covered_from"
 
+# The first day the dividend forecast history's growth percentages are measured from
+# (docs/dividends.md, *The forecast's history*). Set by the owner when the book changed
+# shape — swapping accumulating funds for distributing ones multiplies the forecast
+# without any dividend having grown, and a percentage across that day reports the swap.
+# Unset means the whole series is measured.
+DIVIDEND_FORECAST_GROWTH_FROM_KEY = "dividend_forecast_growth_from"
+
 
 class AppSettingsRepository:
     """Repository for the app_settings key/value table."""
@@ -120,6 +127,18 @@ class AppSettingsRepository:
     async def set_last_sync_to_date(self, to_date: date) -> None:
         if to_date is not None:
             await self.set(LAST_IBKR_SYNC_TO_DATE_KEY, to_date.isoformat())
+
+    async def get_dividend_forecast_growth_from(self) -> Optional[date]:
+        val = await self.get(DIVIDEND_FORECAST_GROWTH_FROM_KEY)
+        if not val:
+            return None
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            return None
+
+    async def set_dividend_forecast_growth_from(self, from_date: date) -> None:
+        await self.set(DIVIDEND_FORECAST_GROWTH_FROM_KEY, from_date.isoformat())
 
     async def get_cash_flows_covered_from(self) -> Optional[date]:
         val = await self.get(CASH_FLOWS_COVERED_FROM_KEY)

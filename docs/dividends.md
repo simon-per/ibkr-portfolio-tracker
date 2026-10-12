@@ -885,6 +885,14 @@ owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
   last snapshot before it started; while the series is younger than that (it begins 2026-10-07)
   from its first snapshot inside the period, and `mtd_from`/`ytd_from` name the day used. A day
   that is its own start is `null`, not `0.0`. Same `_pct` as the breakdown's growth block.
+- **`growth_from` is where growth starts being measured** (app setting
+  `dividend_forecast_growth_from`, unset by default; set with
+  `backfill_dividend_forecast --growth-from YYYY-MM-DD`, returned at the top of the response).
+  No percentage reaches back across it and the days before it carry none, while keeping their
+  figures. It exists because the book changed shape: the Irish accumulating ETFs were sold on
+  2026-08-21 and US distributing ones bought through 08-28, which multiplied the forecast
+  several times over without one dividend having grown — a year-to-date across that reports
+  the swap. The owner set it to 2026-09-01.
 - **Last write of the day wins** (seven a day), so one missed slot loses nothing. The 00:00
   Berlin IBKR-only job does not write: it falls on the previous UTC date.
 - **A log of what was said, never restated.** A change to the forecast's rules shows as a step

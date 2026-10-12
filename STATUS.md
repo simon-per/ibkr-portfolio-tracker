@@ -1681,7 +1681,8 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   1 June": a `replay` mode on the forecast, a `reconstructed` flag on the rows (migration
   `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; the replay sat within 0.1% of the
   six recorded days, and production (`35e430b`) now has a point for every day from 2026-06-01,
-  128 of them reconstructed. Found on the way: the upload left the EM fund unpriced for nine
+  128 of them reconstructed. Growth is measured from 2026-09-01 at the owner's request
+  (`growth_from`): before it the Irish-to-US ETF switch is what the percentages showed. Found on the way: the upload left the EM fund unpriced for nine
   September days (*Worth doing next*).
 
 - **2026-10-07 (dividend forecast history)** — "can I track how the next-12-months figure

@@ -21,6 +21,7 @@ import app.models  # noqa: F401
 from app.models.dividend_accrual import DividendAccrual
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
 )
@@ -170,6 +171,7 @@ async def test_history_projects_each_day_at_its_own_rate(monkeypatch):
 
         assert history == {
             "base_currency": "CHF",
+            "growth_from": None,
             "points": [
                 {"date": "2026-07-29", "next_12m_eur": 90.0, "ttm_net_eur": 45.0,
                  "next_12m_change_pct": None, "next_12m_mtd_pct": None,
@@ -331,6 +333,51 @@ async def test_the_backfill_stops_before_the_first_recorded_day():
 
         with pytest.raises(BackfillError):
             await backfill(session, AS_OF)
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_no_percentage_reaches_back_across_growth_from():
+    """
+    The owner names the day the book changed shape. The days before it keep their
+    figures and carry no growth; the first day from it on starts the series, so its
+    month- and year-to-date cannot report the change itself.
+    """
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+        for day, value in [
+            (date(2026, 8, 30), "50.00"), (date(2026, 8, 31), "60.00"),
+            (date(2026, 9, 1), "300.00"), (date(2026, 9, 2), "330.00"),
+            (date(2026, 10, 1), "363.00"),
+        ]:
+            await repo.upsert({
+                "snapshot_date": day, "next_12m_eur": Decimal(value),
+                "ttm_net_eur": Decimal("50.00"),
+            })
+        await AppSettingsRepository(session).set_dividend_forecast_growth_from(
+            date(2026, 9, 1)
+        )
+
+        history = await DividendService(session).get_forecast_history()
+
+        assert history["growth_from"] == "2026-09-01"
+        assert [p["next_12m_eur"] for p in history["points"]] == [
+            50.0, 60.0, 300.0, 330.0, 363.0,
+        ]
+        assert [
+            (p["next_12m_change_pct"], p["next_12m_mtd_pct"], p["mtd_from"],
+             p["next_12m_ytd_pct"], p["ytd_from"])
+            for p in history["points"]
+        ] == [
+            (None, None, None, None, None),
+            (None, None, None, None, None),
+            (None, None, None, None, None),
+            (10.0, 10.0, "2026-09-01", 10.0, "2026-09-01"),
+            (10.0, 10.0, "2026-09-02", 21.0, "2026-09-01"),
+        ]
     finally:
         await session.close()
         await engine.dispose()
