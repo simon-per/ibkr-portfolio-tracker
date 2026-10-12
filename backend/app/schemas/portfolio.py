@@ -783,6 +783,15 @@ class DividendForecastHistoryPoint(BaseModel):
     date: str                       # the UTC date the snapshot was taken, "YYYY-MM-DD"
     next_12m_eur: float             # base currency, at that date's rate
     ttm_net_eur: float              # base currency, at that date's rate
+    # Growth of `next_12m_eur` as projected above, in percent. None where there is
+    # nothing to grow from — the first recorded day, or a day that is its own start.
+    next_12m_change_pct: Optional[float]    # over the previous recorded day
+    next_12m_mtd_pct: Optional[float]       # since `mtd_from`
+    next_12m_ytd_pct: Optional[float]       # since `ytd_from`
+    # The day each period is measured from: the last snapshot before the period
+    # began, or the first one inside it when the series starts later than that.
+    mtd_from: Optional[str]
+    ytd_from: Optional[str]
 
 
 class DividendForecastHistoryResponse(BaseModel):

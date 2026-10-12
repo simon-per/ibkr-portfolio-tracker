@@ -1044,7 +1044,9 @@ class DividendService:
         return {sid: (int(median(v)), len(v)) for sid, v in lags.items() if v}
 
     @staticmethod
-    def _pct(current: Decimal, base: Optional[Decimal]) -> Optional[float]:
+    def _pct(
+        current: Decimal, base: Optional[Decimal], digits: int = 1
+    ) -> Optional[float]:
         """
         Growth of ``current`` over ``base``, or None when there is nothing to grow
         from.
@@ -1057,7 +1059,7 @@ class DividendService:
         """
         if base is None or base <= 0:
             return None
-        return round(float((current - base) / base * 100), 1)
+        return round(float((current - base) / base * 100), digits)
 
     @staticmethod
     def _shift_month(month_key: str, months_back: int) -> str:
@@ -1642,25 +1644,54 @@ class DividendService:
         matches what the tile showed that day; `ttm_net_eur` can differ from it
         slightly, because the tile converts each past payment at its own pay date and
         a stored EUR total can only be converted once.
+
+        The three percentages are the growth of `next_12m_eur` as projected here, so
+        they agree with the figures beside them (and carry the base currency's own
+        move): over the previous recorded day, since the month began and since the
+        year began. A period is measured from the last snapshot before it started;
+        when the series does not reach back that far, from its first snapshot inside
+        the period instead — which is why `mtd_from`/`ytd_from` name the day used. A
+        day that is its own starting point has nothing to grow from: None, not 0.0.
         """
         from app.services.portfolio_service import PortfolioService
         base_fx = await PortfolioService(self.db)._load_base_fx()
         rows = await DividendForecastSnapshotRepository(self.db).get_all()
-        return {
-            "base_currency": base_fx.base_currency,
-            "points": [
-                {
-                    "date": r.snapshot_date.isoformat(),
-                    "next_12m_eur": round(
-                        float(base_fx.convert(r.next_12m_eur, r.snapshot_date)), 2
-                    ),
-                    "ttm_net_eur": round(
-                        float(base_fx.convert(r.ttm_net_eur, r.snapshot_date)), 2
-                    ),
-                }
-                for r in rows
-            ],
-        }
+
+        points: List[Dict] = []
+        previous = None       # (date, next_12m) of the row before this one
+        month_anchor = None   # (date, next_12m) the current month is measured from
+        year_anchor = None
+        for r in rows:
+            day = r.snapshot_date
+            next_12m = base_fx.convert(r.next_12m_eur, day)
+            current = (day, next_12m)
+            if previous is None or previous[0].year != day.year:
+                year_anchor = previous or current
+            if previous is None or (previous[0].year, previous[0].month) != (day.year, day.month):
+                month_anchor = previous or current
+
+            def growth_from(anchor):
+                if anchor is None or anchor[0] == day:
+                    return None, None
+                return self._pct(next_12m, anchor[1], digits=2), anchor[0].isoformat()
+
+            change_pct, _ = growth_from(previous)
+            mtd_pct, mtd_from = growth_from(month_anchor)
+            ytd_pct, ytd_from = growth_from(year_anchor)
+            points.append({
+                "date": day.isoformat(),
+                "next_12m_eur": round(float(next_12m), 2),
+                "ttm_net_eur": round(
+                    float(base_fx.convert(r.ttm_net_eur, day)), 2
+                ),
+                "next_12m_change_pct": change_pct,
+                "next_12m_mtd_pct": mtd_pct,
+                "next_12m_ytd_pct": ytd_pct,
+                "mtd_from": mtd_from,
+                "ytd_from": ytd_from,
+            })
+            previous = current
+        return {"base_currency": base_fx.base_currency, "points": points}
 
     async def get_dividend_breakdown(
         self,

@@ -878,6 +878,13 @@ owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
 - **EUR on write, base currency on read**, each day at its own rate. `next_12m_eur` then matches
   what the tile showed that day; `ttm_net_eur` can differ slightly, because the tile converts each
   past payment at its pay date and a stored total can only be converted once.
+- **Three growth percentages ride on each point, computed on read** (since 2026-10-12):
+  `next_12m_change_pct` over the previous recorded day, `next_12m_mtd_pct` and
+  `next_12m_ytd_pct` since the month and the year began. They are growth of the *projected*
+  figure beside them, so the base currency's own move is in them. A period is measured from the
+  last snapshot before it started; while the series is younger than that (it begins 2026-10-07)
+  from its first snapshot inside the period, and `mtd_from`/`ytd_from` name the day used. A day
+  that is its own start is `null`, not `0.0`. Same `_pct` as the breakdown's growth block.
 - **Last write of the day wins** (seven a day), so one missed slot loses nothing. The 00:00
   Berlin IBKR-only job does not write: it falls on the previous UTC date.
 - **A log of what was said, never restated.** A change to the forecast's rules shows as a step

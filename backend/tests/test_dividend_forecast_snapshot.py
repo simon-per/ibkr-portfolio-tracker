@@ -169,10 +169,55 @@ async def test_history_projects_each_day_at_its_own_rate(monkeypatch):
         assert history == {
             "base_currency": "CHF",
             "points": [
-                {"date": "2026-07-29", "next_12m_eur": 90.0, "ttm_net_eur": 45.0},
-                {"date": "2026-07-30", "next_12m_eur": 80.0, "ttm_net_eur": 40.0},
+                {"date": "2026-07-29", "next_12m_eur": 90.0, "ttm_net_eur": 45.0,
+                 "next_12m_change_pct": None, "next_12m_mtd_pct": None,
+                 "next_12m_ytd_pct": None, "mtd_from": None, "ytd_from": None},
+                # The percentages are of the projected figures, so the rate's move
+                # is in them: the stored EUR did not change at all.
+                {"date": "2026-07-30", "next_12m_eur": 80.0, "ttm_net_eur": 40.0,
+                 "next_12m_change_pct": -11.11, "next_12m_mtd_pct": -11.11,
+                 "next_12m_ytd_pct": -11.11, "mtd_from": "2026-07-29",
+                 "ytd_from": "2026-07-29"},
             ],
         }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_growth_is_measured_from_the_close_before_the_period():
+    """
+    Month- and year-to-date start at the last snapshot before the period, and only
+    fall back to the first one inside it while the series is younger than that. The
+    day a period is measured from is named, and a day that is its own start has no
+    growth rather than a 0.0 that would read as "flat".
+    """
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+        for day, value in [
+            (date(2026, 12, 30), "100.00"), (date(2026, 12, 31), "110.00"),
+            (date(2027, 1, 4), "121.00"), (date(2027, 2, 1), "133.10"),
+        ]:
+            await repo.upsert({
+                "snapshot_date": day, "next_12m_eur": Decimal(value),
+                "ttm_net_eur": Decimal("50.00"),
+            })
+
+        points = (await DividendService(session).get_forecast_history())["points"]
+
+        growth = [
+            (p["next_12m_change_pct"], p["next_12m_mtd_pct"], p["mtd_from"],
+             p["next_12m_ytd_pct"], p["ytd_from"])
+            for p in points
+        ]
+        assert growth == [
+            (None, None, None, None, None),
+            (10.0, 10.0, "2026-12-30", 10.0, "2026-12-30"),
+            (10.0, 10.0, "2026-12-31", 10.0, "2026-12-31"),
+            (10.0, 10.0, "2027-01-04", 21.0, "2026-12-31"),
+        ]
     finally:
         await session.close()
         await engine.dispose()
