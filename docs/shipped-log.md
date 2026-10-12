@@ -7,6 +7,28 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-12 — the forecast history gains growth, a replayed past and a start date
+
+Three commits, all backend, rules in `docs/dividends.md`, *The forecast's history*.
+`eaccb7b`: each point of `GET /api/dividends/forecast-history` carries day-over-day,
+month-to-date and year-to-date growth of the next-12-months figure, with `mtd_from`/`ytd_from`
+naming the day each is measured from. `35e430b`: `get_dividend_breakdown(replay=True)`,
+`dividend_forecast_snapshots.reconstructed` (migration `c3f8b4d6e0a2`) and
+`app.cli.backfill_dividend_forecast`. `5bc4228`: the app setting
+`dividend_forecast_growth_from`, set through the same CLI. **Verified on production**: the
+dry run's replay of the six recorded days sat within 0.1% of each; after the run the endpoint
+returns a point for every day from 2026-06-01 (128 `reconstructed`, 6 recorded, none missing)
+and `growth_from: 2026-08-28` — set by the owner to the last purchase of the Irish-to-US ETF
+switch (sold 08-21, bought 08-24 to 08-28) — with no percentage on or before that day and
+`ytd_from` reading 2026-08-28 on every later one.
+
+## Ran on production 2026-10-12 — the real finpension export replaces the 10-06 estimates
+
+`import_finpension_csv` after a manual backup and a clean dry run: 12 rows, 6 trades, 6 lots,
+`rows_restated` 2 (the two hand-estimated buys). Both funds valued afterwards and
+`unpriced_holdings` 0 on `/summary`. The upload also left the EM fund without a price for nine
+September days of the value chart — open, STATUS.md *Worth doing next*.
+
 ## Shipped 2026-10-07 — the dividend forecast keeps a daily history
 
 `000aae4`: `dividend_forecast_snapshots` (migration `b2e7a3c5d9f1`), written by the
