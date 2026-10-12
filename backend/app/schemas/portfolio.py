@@ -792,6 +792,9 @@ class DividendForecastHistoryPoint(BaseModel):
     # began, or the first one inside it when the series starts later than that.
     mtd_from: Optional[str]
     ytd_from: Optional[str]
+    # True for a day replayed after the fact (app.cli.backfill_dividend_forecast):
+    # today's rules over what was known then, not what the application showed.
+    reconstructed: bool
 
 
 class DividendForecastHistoryResponse(BaseModel):

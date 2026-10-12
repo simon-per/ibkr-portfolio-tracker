@@ -888,8 +888,22 @@ owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
 - **Last write of the day wins** (seven a day), so one missed slot loses nothing. The 00:00
   Berlin IBKR-only job does not write: it falls on the previous UTC date.
 - **A log of what was said, never restated.** A change to the forecast's rules shows as a step
-  in the series. There is no backfill for the same reason — it would show what today's rules
-  say about the past, which nobody ever saw.
+  in the series.
+- **The days before 2026-10-07 are replayed, and flagged** (since 2026-10-12, the owner's call —
+  the original decision was no backfill, because it shows what today's rules say about the past,
+  which nobody ever saw; the flag is what makes that honest).
+  `python -m app.cli.backfill_dividend_forecast --from YYYY-MM-DD [--dry-run]` asks
+  `forecast_figures(day, replay=True)` for each day up to the one before the first recorded row
+  and stores it with `reconstructed = true`, which every point of the response carries.
+  `replay` withholds what the database learned after the day: payments not yet made
+  (`_known_by` — an IBKR row by its pay date, a Yahoo row by its ex-date), ex/pay pairs not yet
+  observed, and the open accruals, which are today's. Share counts, exchange rates and the
+  sizing history already stopped at `as_of`. Two things it cannot restore: the rules of the day,
+  and a dividend IBKR had announced by then (inferred from the cadence instead). The CLI replays
+  the first recorded days too and prints both figures — measured on production data at the
+  first run, within 0.1%. `upsert_reconstructed` never replaces a recorded row and the daily
+  `upsert` replaces a replayed one; re-running the backfill replaces only its own rows, which is
+  the way to restate them after a change to the forecast.
 - **No row for a book with no dividend history** (both figures zero), and a failed write is the
   step's warning, never the job's status.
 

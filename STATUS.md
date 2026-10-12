@@ -1664,7 +1664,10 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   `rows_restated` 2 (the two estimates replaced), both funds priced, nothing unpriced. Then
   "add percentages to the forecast history": day-over-day, month- and year-to-date growth on
   `GET /api/dividends/forecast-history`, each naming the day it is measured from
-  (docs/dividends.md); backend only, live and verified on `eaccb7b`.
+  (docs/dividends.md); backend only, live and verified on `eaccb7b`. Then "backfill it to
+  1 June": a `replay` mode on the forecast, a `reconstructed` flag on the rows (migration
+  `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; on a production snapshot the
+  replay sat within 0.1% of the six recorded days.
 
 - **2026-10-07 (dividend forecast history)** — "can I track how the next-12-months figure
   changes?": one row a day from the repricing jobs, EUR on write, one read endpoint; owner

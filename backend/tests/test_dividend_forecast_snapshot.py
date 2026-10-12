@@ -8,15 +8,17 @@ here: a second sum over the forecast that drifts from the tile it records, a sto
 figure in whatever base currency happened to be selected, and a zero standing in for
 "there was nothing to forecast from".
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.cli.backfill_dividend_forecast import BackfillError, backfill
 from app.database import Base
 import app.models  # noqa: F401
+from app.models.dividend_accrual import DividendAccrual
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.dividend_forecast_snapshot_repository import (
@@ -171,13 +173,14 @@ async def test_history_projects_each_day_at_its_own_rate(monkeypatch):
             "points": [
                 {"date": "2026-07-29", "next_12m_eur": 90.0, "ttm_net_eur": 45.0,
                  "next_12m_change_pct": None, "next_12m_mtd_pct": None,
-                 "next_12m_ytd_pct": None, "mtd_from": None, "ytd_from": None},
+                 "next_12m_ytd_pct": None, "mtd_from": None, "ytd_from": None,
+                 "reconstructed": False},
                 # The percentages are of the projected figures, so the rate's move
                 # is in them: the stored EUR did not change at all.
                 {"date": "2026-07-30", "next_12m_eur": 80.0, "ttm_net_eur": 40.0,
                  "next_12m_change_pct": -11.11, "next_12m_mtd_pct": -11.11,
                  "next_12m_ytd_pct": -11.11, "mtd_from": "2026-07-29",
-                 "ytd_from": "2026-07-29"},
+                 "ytd_from": "2026-07-29", "reconstructed": False},
             ],
         }
     finally:
@@ -234,6 +237,100 @@ async def test_the_response_model_and_the_service_agree_in_both_directions():
 
         assert set(history) == set(DividendForecastHistoryResponse.model_fields)
         assert set(history["points"][0]) == set(DividendForecastHistoryPoint.model_fields)
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+# ---- Replayed days (app.cli.backfill_dividend_forecast) -------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_replay_withholds_what_was_learned_after_the_day():
+    """
+    A past day must not see a payment made after it or an accrual open today — and
+    the unreplayed read of the same day does see the accrual, which is what makes
+    this a test of the cut rather than of two equal numbers.
+    """
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        before = await svc.forecast_figures(AS_OF, replay=True)
+
+        await DividendRepository(session).upsert_payment({
+            "security_id": 1, "ex_date": date(2026, 8, 15), "pay_date": date(2026, 8, 15),
+            "currency": "EUR", "amount_per_share": Decimal("3.00"),
+            "shares_held": Decimal("100"), "gross_amount_eur": Decimal("300"),
+            "withholding_tax_eur": Decimal("0"), "net_amount_eur": Decimal("300"),
+            "source": "yfinance_estimate",
+        })
+        session.add(DividendAccrual(
+            security_id=1, ex_date=date(2026, 8, 10), pay_date=date(2026, 8, 20),
+            currency="EUR", quantity=Decimal("100"), gross_amount_eur=Decimal("900"),
+            withholding_tax_eur=Decimal("0"), net_amount_eur=Decimal("900"),
+            last_seen_at=datetime(2026, 8, 12),
+        ))
+        await session.flush()
+
+        assert await svc.forecast_figures(AS_OF, replay=True) == before
+        assert await svc.forecast_figures(AS_OF) != before
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_row_never_replaces_a_recorded_one():
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+
+        def figures(value):
+            return {"snapshot_date": AS_OF, "next_12m_eur": Decimal(value),
+                    "ttm_net_eur": Decimal("50.00")}
+
+        async def stored():
+            (row,) = await repo.get_all()
+            await session.refresh(row)
+            return float(row.next_12m_eur), row.reconstructed
+
+        await repo.upsert_reconstructed(figures("100.00"))
+        await repo.upsert_reconstructed(figures("110.00"))
+        assert await stored() == (110.0, True)      # a replay replaces a replay
+
+        await repo.upsert(figures("120.00"))
+        assert await stored() == (120.0, False)     # the day's own figure outranks it
+
+        await repo.upsert_reconstructed(figures("130.00"))
+        assert await stored() == (120.0, False)     # and is never replayed over
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_backfill_stops_before_the_first_recorded_day():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        await svc.record_forecast_snapshot(AS_OF)
+        start = date(2026, 7, 27)
+
+        dry = await backfill(session, start, dry_run=True)
+        assert [r["snapshot_date"] for r in dry["rows"]] == [start, date(2026, 7, 28)]
+        assert len(await DividendForecastSnapshotRepository(session).get_all()) == 1
+
+        result = await backfill(session, start)
+        points = (await svc.get_forecast_history())["points"]
+        assert [(p["date"], p["reconstructed"]) for p in points] == [
+            ("2026-07-27", True), ("2026-07-28", True), ("2026-07-29", False),
+        ]
+        # The replay of a recorded day is reported beside it, never written over it.
+        assert [o["date"] for o in result["overlap"]] == [AS_OF]
+        assert result["overlap"][0]["replayed"] == result["overlap"][0]["recorded"]
+
+        with pytest.raises(BackfillError):
+            await backfill(session, AS_OF)
     finally:
         await session.close()
         await engine.dispose()

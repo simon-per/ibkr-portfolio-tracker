@@ -926,6 +926,23 @@ class DividendService:
         return p.gross_amount_eur or Decimal("0")
 
     @staticmethod
+    def _known_by(p, as_of: date) -> bool:
+        """
+        True when the row could have been in the table on ``as_of`` — the cut a
+        replay of a past day makes (`get_dividend_breakdown`).
+
+        Each source by the date it is filed under: IBKR records a dividend when the
+        cash lands, Yahoo once it has gone ex. Cutting an IBKR row at its ex-date
+        instead would hand a past day the amount and the withholding of a payment
+        that had not been made.
+        """
+        if p.source == "ibkr":
+            known = p.pay_date or p.ex_date
+        else:
+            known = p.ex_date or p.pay_date
+        return known is not None and known <= as_of
+
+    @staticmethod
     def _is_income(p) -> bool:
         """
         True when a row represents money actually received.
@@ -1617,23 +1634,37 @@ class DividendService:
         zero, and a stored zero reads afterwards as "the forecast was nil that day"
         rather than "there was nothing to forecast from". The caller commits.
         """
+        figures = await self.forecast_figures(as_of)
+        if figures is None:
+            return None
+        await DividendForecastSnapshotRepository(self.db).upsert(figures)
+        return {
+            "snapshot_date": as_of.isoformat(),
+            "next_12m_eur": float(figures["next_12m_eur"]),
+            "ttm_net_eur": float(figures["ttm_net_eur"]),
+        }
+
+    async def forecast_figures(self, as_of: date, replay: bool = False) -> Optional[Dict]:
+        """
+        The snapshot row for ``as_of`` — ``{snapshot_date, next_12m_eur, ttm_net_eur}``
+        in EUR — or None when there is nothing to forecast from. Writes nothing.
+
+        One implementation for the daily recorder and the backfill
+        (`app.cli.backfill_dividend_forecast`), which passes ``replay=True`` for a
+        past day: see `get_dividend_breakdown`.
+        """
         breakdown = await self.get_dividend_breakdown(
-            as_of=as_of, base_fx=BaseFx("EUR", {})
+            as_of=as_of, base_fx=BaseFx("EUR", {}), replay=replay
         )
         growth = breakdown["growth"]
         next_12m = Decimal(str(growth["next_12m_eur"]))
         ttm_net = Decimal(str(growth["ttm"]["net_eur"]))
         if not next_12m and not ttm_net:
             return None
-        await DividendForecastSnapshotRepository(self.db).upsert({
+        return {
             "snapshot_date": as_of,
             "next_12m_eur": next_12m,
             "ttm_net_eur": ttm_net,
-        })
-        return {
-            "snapshot_date": as_of.isoformat(),
-            "next_12m_eur": float(next_12m),
-            "ttm_net_eur": float(ttm_net),
         }
 
     async def get_forecast_history(self) -> Dict:
@@ -1689,6 +1720,7 @@ class DividendService:
                 "next_12m_ytd_pct": ytd_pct,
                 "mtd_from": mtd_from,
                 "ytd_from": ytd_from,
+                "reconstructed": bool(r.reconstructed),
             })
             previous = current
         return {"base_currency": base_fx.base_currency, "points": points}
@@ -1700,13 +1732,23 @@ class DividendService:
         as_of: Optional[date] = None,
         period: Optional[Literal["24m"]] = None,
         base_fx: Optional[BaseFx] = None,
+        replay: bool = False,
     ) -> Dict:
         """
         Dividends grouped by month × symbol plus per-security totals, optionally
         with forecast projections for the months after ``as_of``.
 
         ``base_fx`` overrides the configured base currency's projection; only
-        `record_forecast_snapshot` passes one, to read the same figures in EUR.
+        `forecast_figures` passes one, to read the same figures in EUR.
+
+        ``replay`` answers "what would this have said on ``as_of``" for a PAST day, by
+        withholding what the database only learned afterwards: payments not yet made
+        (`_known_by`), IBKR's ex/pay pairs not yet observed, and the open accruals,
+        which are today's and were never kept per day. Share counts, exchange rates
+        and the sizing history already stop at ``as_of`` without it. Today's rules
+        and today's withholding setting still apply, and a dividend IBKR had
+        announced by then is inferred from the cadence instead — a replay is a
+        reconstruction, which is why its rows are stored flagged.
 
         Reads only cached data — dividend_payments, taxlots, market_prices and
         exchange_rates — never Yahoo or IBKR. The history is era-spliced like the
@@ -1724,6 +1766,8 @@ class DividendService:
         # ex-date", which says nothing about whether the company pays — and its date
         # is evidence of the schedule. Only the realized figures are filtered.
         raw_payments = await self.repo.get_computed_dividends()
+        if replay:
+            raw_payments = [p for p in raw_payments if self._known_by(p, as_of)]
         all_payments, ibkr_from = self._splice_by_era(raw_payments)
         all_payments = [p for p in all_payments if self._is_income(p)]
 
@@ -1886,8 +1930,13 @@ class DividendService:
             # The announced dividends IBKR has published and not yet paid, and IBKR's own
             # (ex-date, pay date) pairs. Read first: both size the projections as well as
             # dating them.
-            accruals_by_sec = await self._open_accruals()
+            accruals_by_sec = {} if replay else await self._open_accruals()
             exact_pairs = await self._exact_date_pairs()
+            if replay:
+                exact_pairs = {
+                    sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
+                    for sid, pairs in exact_pairs.items()
+                }
             hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec = \
                 await self._forecast_inputs(
                     raw_payments, securities, as_of, net_factor,

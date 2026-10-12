@@ -1,4 +1,4 @@
-from sqlalchemy import Date, DateTime, Numeric
+from sqlalchemy import Boolean, Date, DateTime, Numeric, false
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import date, datetime
 from decimal import Decimal
@@ -21,6 +21,12 @@ class DividendForecastSnapshot(Base):
     shows as a step in the series rather than being restated — the series records what
     the application said, which is the only thing it can know about a past day.
 
+    **`reconstructed` rows are the exception, and say so.** The days before recording
+    began (2026-10-07) can only be replayed: today's rules over what the database says
+    was known that day (`app.cli.backfill_dividend_forecast`). That is not what the
+    application showed then, so the flag travels with the row to the response, a
+    replayed figure never replaces a recorded one, and a recorded one replaces it.
+
     **EUR, like every other amount**, taken from `get_dividend_breakdown` run with an
     identity `BaseFx`, and projected into the base currency on read at the snapshot
     date's rate. One row per UTC date; a later write the same day replaces the earlier.
@@ -32,6 +38,9 @@ class DividendForecastSnapshot(Base):
     next_12m_eur: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     ttm_net_eur: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    reconstructed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     def __repr__(self) -> str:
         return (
