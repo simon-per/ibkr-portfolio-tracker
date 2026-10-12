@@ -1337,6 +1337,19 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
+- **A pillar 3a upload leaves the EM fund unpriced for part of its history — found 2026-10-12,
+  open.** The importer deletes every `sibling_scaled` row of `CH1529078078` so the next sync
+  re-anchors them, and the 20:00 sync that followed (success, no error) wrote back only three
+  recent days: the value chart reports 9 days, 2026-09-16 to 09-28, as not fully valued. Before
+  the upload 19 derived rows covered 09-07 to 10-08 (`/root/ibkr-backups/2026-10-12/
+  portfolio.db.manual-165141` still has them). One cause is certain: `get_missing_dates` reads
+  the days between two statement NAVs as interior holes, and one older than
+  `HOLIDAY_GRACE_DAYS` is a "holiday" that is never asked for again. Why the days inside the
+  grace window were not refilled is not known — the container's log went with the next deploy,
+  and finding out costs a Yahoo request, which needs the owner's permission. A fix that needs no
+  Yahoo: rescale the derived rows on import by `new NAV / the row derived for that day` instead
+  of deleting them.
+
 - **The KPI audit of 2026-10-02 — low priority by owner decision (2026-10-04):** fine as long as
   the figures point the right way. Re-verify each in code before fixing; until 2026-10-04 these
   lived only in a session note.
@@ -1666,8 +1679,10 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   `GET /api/dividends/forecast-history`, each naming the day it is measured from
   (docs/dividends.md); backend only, live and verified on `eaccb7b`. Then "backfill it to
   1 June": a `replay` mode on the forecast, a `reconstructed` flag on the rows (migration
-  `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; on a production snapshot the
-  replay sat within 0.1% of the six recorded days.
+  `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; the replay sat within 0.1% of the
+  six recorded days, and production (`35e430b`) now has a point for every day from 2026-06-01,
+  128 of them reconstructed. Found on the way: the upload left the EM fund unpriced for nine
+  September days (*Worth doing next*).
 
 - **2026-10-07 (dividend forecast history)** — "can I track how the next-12-months figure
   changes?": one row a day from the repricing jobs, EUR on write, one read endpoint; owner
