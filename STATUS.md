@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-07.** **The dividend forecast now keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*), live and verified on `000aae4` (docs/shipped-log.md). **The 2026-10-06 pillar 3a buys are on production as ESTIMATES** — see *Needs a human*. **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-12.** **The dividend forecast now keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*), live and verified on `000aae4` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -526,14 +526,8 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   conceivable. `/root/ibkr-backups/failed-deploys/` is never pruned, should it ever fill.
 
 - **Upload the finpension export when it has new transactions in it — no pricing deadline
-  any more.** *Pending as of 2026-10-07:* **the two 2026-10-06 buys on production are
-  estimates and want replacing by the real export.** finpension's export still ended at the
-  10-01 deposit, so at the owner's request the two rows were appended by hand: the share counts
-  are finpension's, the cash flows are not — the uninvested balance split by the owner's
-  allocation (25% EM, 74% World ex CH, 1% cash). The cost basis, the closing cash and the two 10-06
-  `finpension_statement` NAVs are therefore approximate, and the EM tranche's sibling prices
-  anchor to an estimated NAV until then. Upload the real export once it carries those buys: the
-  ingest replaces wholesale, so nothing needs undoing (expect `rows_restated` > 0). Since 2026-09-12 neither 3a fund depends on the upload for its price:
+  any more.** Production is current through the 2026-10-06 buys (real export imported
+  2026-10-12; it replaced the two hand-estimated rows). Since 2026-09-12 neither 3a fund depends on the upload for its price:
   `CH0117044948` prices from Yahoo directly and `CH1529078078` from its sibling share class
   (`0P0000S0OE.SW`, statement NAV × the sibling's moves — `docs/pillar3a.md`, *Prices*). The
   40-day "upload a newer statement" warning and the day-59 drop-out applied to a `manual`
@@ -1665,6 +1659,10 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-12 (pillar 3a upload)** — the real finpension export carrying the 10-06 buys
+  imported on production: DB backed up first, dry run clean, 12 rows / 6 lots,
+  `rows_restated` 2 (the two estimates replaced), both funds priced, nothing unpriced.
+
 - **2026-10-07 (dividend forecast history)** — "can I track how the next-12-months figure
   changes?": one row a day from the repricing jobs, EUR on write, one read endpoint; owner
   chose no backfill and no frontend.
@@ -1695,10 +1693,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   coverage 98.9%, nothing uncovered. KPI audit moved into this file, low priority by owner
   decision. Only the post-18:00 DB check of the forecast item remains. Backend 1778, frontend
   788 on Node 22.
-
-- **2026-10-03 (IBKR accruals first)** — "make IBKR open dividends the preferred source": it
-  already outranked the inference, but matched it on pay date, so a no-lag guess dated on its
-  ex-date survived beside an accrual paying a month later. Now matched on ex-date through one
-  helper; four tests including the forecast swap and a later quarter left alone. Then "why do
-  the Korean stocks misbehave": SK Hynix paid 33 days after ex, past the 30-day pairing window, so
-  KRW/TWD get 75. Flex sections reviewed: four `ibflex`-modelled ones recommended for ticking.
