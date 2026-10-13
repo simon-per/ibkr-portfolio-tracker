@@ -28,6 +28,9 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
+from app.services.dividend_forecast_attribution import (
+    PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
+)
 from app.services.dividend_forecast import (
     ForecastPayment,
     HistPayment,
@@ -1703,18 +1706,37 @@ class DividendService:
         `growth_from` (an app setting, absent by default) is the first day growth is
         measured at all: no percentage reaches back across it, and the days before
         it carry none. They keep their figures — the level is still what it was.
+
+        `next_12m_since_start_pct` is the growth since the first measured day — the
+        `growth_from` day when one is set — and `breakdown` says what that growth was
+        made of: shares bought, payout per share, holdings newly forecast and currency
+        (`dividend_forecast_attribution`), accumulated day to day over the
+        per-security lines and in the base currency. Its `since` names the day it
+        starts on, which is later than the first measured day only while the earlier
+        days have no lines. What the lines do not account for is `unattributed`,
+        reported and never spread over the parts: a recorded day whose lines had to be
+        replayed sits a fraction of a percent off its own total.
         """
         from app.services.portfolio_service import PortfolioService
         base_fx = await PortfolioService(self.db)._load_base_fx()
-        rows = await DividendForecastSnapshotRepository(self.db).get_all()
+        repo = DividendForecastSnapshotRepository(self.db)
+        rows = await repo.get_all()
         growth_from = await AppSettingsRepository(
             self.db
         ).get_dividend_forecast_growth_from()
+        lines_by_day = await repo.get_lines(since=growth_from)
 
         points: List[Dict] = []
         previous = None       # (date, next_12m) of the row before this one
         month_anchor = None   # (date, next_12m) the current month is measured from
         year_anchor = None
+        start = None          # (date, next_12m) of the first measured day
+        # The breakdown's own chain: the last day that had lines, and the parts
+        # accumulated since the first one that did.
+        chain_holdings: Optional[Dict[int, Holding]] = None
+        chain_rate = Decimal("1")
+        chain_start = None    # (date, next_12m) of the first day with lines
+        parts = {part: Decimal("0") for part in FORECAST_CHANGE_PARTS}
         for r in rows:
             day = r.snapshot_date
             next_12m = base_fx.convert(r.next_12m_eur, day)
@@ -1731,6 +1753,8 @@ class DividendService:
                     "next_12m_ytd_pct": None,
                     "mtd_from": None,
                     "ytd_from": None,
+                    "next_12m_since_start_pct": None,
+                    "breakdown": None,
                     "reconstructed": bool(r.reconstructed),
                 })
                 continue    # `previous` stays None: the series starts at growth_from
@@ -1747,6 +1771,32 @@ class DividendService:
             change_pct, _ = growth_since(previous)
             mtd_pct, mtd_from = growth_since(month_anchor)
             ytd_pct, ytd_from = growth_since(year_anchor)
+            start = start or current
+            since_start_pct, _ = growth_since(start)
+
+            breakdown = None
+            day_lines = lines_by_day.get(day)
+            if day_lines:
+                holdings = {
+                    ln.security_id: Holding(ln.shares, ln.next_12m_eur, ln.fx_to_eur)
+                    for ln in day_lines
+                }
+                rate = base_fx.convert(Decimal("1"), day)
+                if chain_holdings is None:
+                    chain_start = current
+                else:
+                    step = attribute_change(chain_holdings, holdings, chain_rate, rate)
+                    for part in FORECAST_CHANGE_PARTS:
+                        parts[part] += step[part]
+                    breakdown = {
+                        "since": chain_start[0].isoformat(),
+                        **{part: round(float(parts[part]), 2)
+                           for part in FORECAST_CHANGE_PARTS},
+                        "unattributed": round(float(
+                            next_12m - chain_start[1] - sum(parts.values(), Decimal("0"))
+                        ), 2),
+                    }
+                chain_holdings, chain_rate = holdings, rate
             points.append({
                 "date": day.isoformat(),
                 "next_12m_eur": round(float(next_12m), 2),
@@ -1758,6 +1808,8 @@ class DividendService:
                 "next_12m_ytd_pct": ytd_pct,
                 "mtd_from": mtd_from,
                 "ytd_from": ytd_from,
+                "next_12m_since_start_pct": since_start_pct,
+                "breakdown": breakdown,
                 "reconstructed": bool(r.reconstructed),
             })
             previous = current

@@ -36,6 +36,10 @@ from app.models.crypto import (
     CryptoSnapshot,
 )
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
+from app.models.dividend_forecast_snapshot import (
+    DividendForecastSnapshot,
+    DividendForecastSnapshotLine,
+)
 from app.models.dividend_payment import DividendPayment
 from app.models.exchange_rate import ExchangeRate
 from app.models.market_price import MarketPrice
@@ -232,6 +236,18 @@ async def _seed(session: AsyncSession) -> None:
         session.add(CryptoCoinPrice(coingecko_id="bitcoin", date=TODAY - timedelta(days=back),
                                     price_usd=60_000.0 - 100 * back, source="daily",
                                     fetched_at=datetime.combine(TODAY, time(6))))
+    # Two days of the dividend forecast with their per-security lines: two more ASML
+    # shares bought in between, at an unchanged payout.
+    for back, shares, total in ((1, "8", "32.00"), (0, "10", "40.00")):
+        day = TODAY - timedelta(days=back)
+        session.add(DividendForecastSnapshot(
+            snapshot_date=day, next_12m_eur=Decimal(total), ttm_net_eur=Decimal("20.00"),
+            recorded_at=datetime.combine(day, time(18)),
+        ))
+        session.add(DividendForecastSnapshotLine(
+            snapshot_date=day, security_id=1, shares=Decimal(shares),
+            next_12m_eur=Decimal(total), currency="EUR", fx_to_eur=Decimal("1"),
+        ))
     await session.flush()
     await session.commit()
 
@@ -646,6 +662,30 @@ def test_the_shapes_that_broke_production_serialize(client):
     csv_text = client.get("/api/portfolio/activity.csv").text
     assert csv_text.splitlines()[0].startswith("date,kind,subtype")
     assert "amount_chf" in csv_text.splitlines()[0]
+
+
+def test_the_forecast_history_serves_its_breakdown(client):
+    """
+    The since-start growth and the breakdown reach the wire, in the base currency —
+    a nested model the response_model would drop whole if it were not declared.
+    """
+    history = client.get("/api/dividends/forecast-history").json()
+    first, last = history["points"]
+    assert first["breakdown"] is None and first["next_12m_since_start_pct"] is None
+    assert last["next_12m_since_start_pct"] == 25.0
+    assert last["breakdown"] == {
+        "since": first["date"],
+        "shares": 7.52,             # 2 shares x 4.00 EUR x 0.94 CHF
+        "payout": 0.0, "newly_forecast": 0.0, "fx": 0.0, "unattributed": 0.0,
+    }
+
+    # And the figures the recorder stores are on the breakdown, one per holding held.
+    lines = client.get("/api/dividends/breakdown").json()["forecast_by_security"]
+    assert {ln["security_id"] for ln in lines} == {1, 2, 4}     # AAPL was sold
+    assert all(
+        set(ln) == {"security_id", "shares", "next_12m_eur", "currency", "fx_to_eur"}
+        for ln in lines
+    )
 
 
 def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
