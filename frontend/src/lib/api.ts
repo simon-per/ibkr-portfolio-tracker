@@ -787,6 +787,13 @@ export interface DividendSecurityRow {
    */
   forward_yield_pct: number | null;
   /**
+   * The payer's own dividend growth: its newest regular payment per share against the
+   * same payment a year earlier, in percent. Independent of how many shares are held
+   * and of exchange rates. Null without a year of history to compare across — unknown,
+   * not 0%. Optional so an older backend payload still parses.
+   */
+  per_share_growth_pct?: number | null;
+  /**
    * True when the position wasn't held for the whole trailing year, so the yield
    * divides a partial year's income by a full position value and reads low.
    * Deliberately not annualized — that would invent income.
@@ -928,6 +935,70 @@ export interface DividendGrowth {
   latest_month: DividendLatestMonth | null;
   ytd_pace: DividendYtdPace | null;
   recent_pace: DividendRecentPace | null;
+  /** Null when no projection ran or no payer has a year to compare across. */
+  per_share?: DividendPerShareGrowth | null;
+}
+
+/**
+ * The payers' own growth for the whole book: each holding's `per_share_growth_pct`
+ * weighted by its share of the next twelve months — the growth that needs no purchase.
+ */
+export interface DividendPerShareGrowth {
+  pct: number;
+  /** Share of the next-12-month forecast the figure is measured over, in percent.
+   *  The rest have under a year of history and are left out, not counted as 0%. */
+  covered_pct: number;
+  payers: number;
+}
+
+/** One held security's part of `DividendGrowth.next_12m_eur`. */
+export interface DividendForecastLine {
+  security_id: number;
+  shares: number;
+  next_12m_eur: number;
+  currency: string | null;
+  fx_to_eur: number | null;
+}
+
+/**
+ * What the growth of the next-12-month forecast since `since` was made of, in the base
+ * currency. The five figures sum to the change.
+ */
+export interface DividendForecastChange {
+  since: string;
+  /** Shares bought or sold, positions opened or closed. */
+  shares: number;
+  /** Payout per share — and payments entering or leaving the 365-day window. */
+  payout: number;
+  /** A holding kept throughout whose forecast appeared or went. */
+  newly_forecast: number;
+  /** The securities' currencies against the base currency. */
+  fx: number;
+  /** What the per-security lines do not account for. Near zero normally. */
+  unattributed: number;
+}
+
+export interface DividendForecastHistoryPoint {
+  date: string;
+  next_12m_eur: number;
+  ttm_net_eur: number;
+  next_12m_change_pct: number | null;
+  next_12m_mtd_pct: number | null;
+  next_12m_ytd_pct: number | null;
+  mtd_from: string | null;
+  ytd_from: string | null;
+  /** Growth since the first measured day. Null on that day and before it. */
+  next_12m_since_start_pct: number | null;
+  breakdown: DividendForecastChange | null;
+  /** Replayed after the fact under today's rules, not what the app showed that day. */
+  reconstructed: boolean;
+}
+
+export interface DividendForecastHistoryResponse {
+  base_currency: string;
+  /** The first day growth is measured from, when the owner has set one. */
+  growth_from: string | null;
+  points: DividendForecastHistoryPoint[];
 }
 
 /**
@@ -1063,6 +1134,8 @@ export interface DividendBreakdownResponse {
   /** null = no projection, nothing priced, or nothing projecting. Never a zeroed object. */
   forward_yield?: DividendForwardYield | null;
   upcoming?: DividendUpcomingPayment[];
+  /** Every security held today with its share of the next-12-month forecast. */
+  forecast_by_security?: DividendForecastLine[];
 }
 
 export interface TaxDividendRow {
@@ -1678,6 +1751,11 @@ class ApiClient {
     if (period !== undefined) params.set('period', period);
     const qs = params.toString();
     return this.request<DividendBreakdownResponse>(`/api/dividends/breakdown${qs ? `?${qs}` : ''}`);
+  }
+
+  /** The recorded daily history of the next-12-month forecast. Pure DB on the server. */
+  async getDividendForecastHistory(): Promise<DividendForecastHistoryResponse> {
+    return this.request<DividendForecastHistoryResponse>('/api/dividends/forecast-history');
   }
 
   // Tax endpoints
