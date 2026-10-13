@@ -19,6 +19,7 @@ from app.cli.backfill_dividend_forecast import BackfillError, backfill
 from app.database import Base
 import app.models  # noqa: F401
 from app.models.dividend_accrual import DividendAccrual
+from app.models.dividend_forecast_snapshot import DividendForecastSnapshotLine
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
@@ -378,6 +379,170 @@ async def test_no_percentage_reaches_back_across_growth_from():
             (10.0, 10.0, "2026-09-01", 10.0, "2026-09-01"),
             (10.0, 10.0, "2026-09-02", 21.0, "2026-09-01"),
         ]
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+# ---- Per-security lines (dividend_forecast_snapshot_lines) ----------------------
+
+
+async def _add_non_payer(session) -> None:
+    """A second holding with no dividend history at all — an accumulating fund."""
+    session.add(Security(id=2, isin="IE0000000002", symbol="ACC", description="Acc Fund",
+                         currency="USD", conid=200, asset_category="ETF", exchange="LSE"))
+    session.add(TaxLot(
+        security_id=2, open_date=date(2024, 1, 1), quantity=Decimal("7"),
+        cost_basis=Decimal("700"), cost_basis_eur=Decimal("700"),
+        price_per_unit=Decimal("100"), currency="USD", is_open=True,
+    ))
+    await session.flush()
+
+
+async def _lines(session, day):
+    rows = await DividendForecastSnapshotRepository(session).get_lines()
+    return rows.get(day, [])
+
+
+@pytest.mark.asyncio
+async def test_the_lines_are_the_breakdowns_own_and_sum_to_the_stored_total():
+    """
+    One implementation again: the lines are `forecast_by_security`, not a second walk
+    over the forecast, and on a day recorded with them they add up to the total.
+    """
+    engine, session = await _make_session()
+    try:
+        await _add_non_payer(session)
+        svc = DividendService(session)
+        served = (await svc.get_dividend_breakdown(as_of=AS_OF))["forecast_by_security"]
+
+        await svc.record_forecast_snapshot(AS_OF)
+
+        (row,) = await DividendForecastSnapshotRepository(session).get_all()
+        lines = await _lines(session, AS_OF)
+        assert [
+            (ln.security_id, float(ln.shares), float(ln.next_12m_eur), ln.reconstructed)
+            for ln in lines
+        ] == [(s["security_id"], s["shares"], s["next_12m_eur"], False) for s in served]
+        assert round(sum(ln.next_12m_eur for ln in lines), 2) == row.next_12m_eur
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_holding_that_pays_nothing_still_gets_a_line():
+    """
+    Held and forecasting nothing is a zero line, never an absent one: the split has to
+    tell a holding whose first forecast appears from a position that was bought.
+    """
+    engine, session = await _make_session()
+    try:
+        await _add_non_payer(session)
+        await DividendService(session).record_forecast_snapshot(AS_OF)
+
+        by_sec = {ln.security_id: ln for ln in await _lines(session, AS_OF)}
+        assert set(by_sec) == {1, 2}
+        assert by_sec[2].shares == Decimal("7") and by_sec[2].next_12m_eur == 0
+        assert by_sec[1].fx_to_eur == Decimal("1")      # a EUR security
+        assert by_sec[2].fx_to_eur is None              # no USD rate is cached here
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_second_write_the_same_day_replaces_the_lines_with_the_total():
+    engine, session = await _make_session()
+    try:
+        svc = DividendService(session)
+        await svc.record_forecast_snapshot(AS_OF)
+        session.add(TaxLot(
+            security_id=1, open_date=date(2026, 7, 1), quantity=Decimal("50"),
+            cost_basis=Decimal("500"), cost_basis_eur=Decimal("500"),
+            price_per_unit=Decimal("10"), currency="EUR", is_open=True,
+        ))
+        await session.flush()
+        await svc.record_forecast_snapshot(AS_OF)
+
+        (row,) = await DividendForecastSnapshotRepository(session).get_all()
+        (line,) = await _lines(session, AS_OF)
+        assert line.shares == Decimal("150")
+        assert round(line.next_12m_eur, 2) == row.next_12m_eur
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_replayed_lines_never_replace_recorded_ones_and_fill_a_day_without_any():
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+
+        def line(value):
+            return [{"security_id": 1, "shares": Decimal("100"),
+                     "next_12m_eur": Decimal(value), "currency": "EUR",
+                     "fx_to_eur": Decimal("1")}]
+
+        async def stored():
+            (ln,) = await _lines(session, AS_OF)
+            await session.refresh(ln)
+            return float(ln.next_12m_eur), ln.reconstructed
+
+        # A day recorded before the lines table existed: a total and nothing behind it.
+        await repo.upsert({"snapshot_date": AS_OF, "next_12m_eur": Decimal("400.00"),
+                           "ttm_net_eur": Decimal("50.00")})
+        assert await _lines(session, AS_OF) == []
+
+        assert await repo.fill_lines(AS_OF, line("399.50")) is True
+        assert await stored() == (399.5, True)
+        assert await repo.fill_lines(AS_OF, line("399.80")) is True
+        assert await stored() == (399.8, True)          # a replay replaces a replay
+        (row,) = await repo.get_all()
+        assert (row.next_12m_eur, row.reconstructed) == (Decimal("400.00"), False)
+
+        await repo.upsert({"snapshot_date": AS_OF, "next_12m_eur": Decimal("410.00"),
+                           "ttm_net_eur": Decimal("50.00")}, lines=line("410.00"))
+        assert await stored() == (410.0, False)         # the day's own lines outrank it
+
+        assert await repo.fill_lines(AS_OF, line("1.00")) is False
+        assert await stored() == (410.0, False)         # and are never replayed over
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_backfill_gives_a_recorded_day_its_missing_lines_and_keeps_its_total():
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+        # Recorded the old way: no lines.
+        await repo.upsert({"snapshot_date": AS_OF, "next_12m_eur": Decimal("123.45"),
+                           "ttm_net_eur": Decimal("50.00")})
+        start = date(2026, 7, 28)
+
+        dry = await backfill(session, start, dry_run=True)
+        assert dry["lines_filled"] == [AS_OF]
+        assert await repo.get_lines() == {}
+
+        result = await backfill(session, start)
+
+        assert result["lines_filled"] == [AS_OF]
+        lines = await repo.get_lines()
+        assert set(lines) == {start, AS_OF}
+        assert all(ln.reconstructed for day in lines.values() for ln in day)
+        recorded = [r for r in await repo.get_all() if not r.reconstructed]
+        assert [(r.snapshot_date, r.next_12m_eur) for r in recorded] == [
+            (AS_OF, Decimal("123.45")),
+        ]
+
+        # A second run has nothing left to fill on a day that now has lines.
+        assert (await backfill(session, start))["lines_filled"] == []
+        assert (
+            await session.get(DividendForecastSnapshotLine, lines[AS_OF][0].id)
+        ) is not None
     finally:
         await session.close()
         await engine.dispose()

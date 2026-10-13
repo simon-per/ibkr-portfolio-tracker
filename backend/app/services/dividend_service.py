@@ -1324,11 +1324,12 @@ class DividendService:
         is the failure mode this codebase keeps hitting.
 
         Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated,
-        wht_by_sec)``, where ``ex_dated`` is the set of securities whose cadence came
-        from the yfinance ex-date series. The caller needs it to know what a projected
-        date MEANS: for those securities it is an ex-date and has to be shifted to the
-        expected pay date, and for the rest it is already a pay date and must not be
-        shifted twice. ``wht_by_sec`` is `_withholding_rates`.
+        wht_by_sec, fx_to_eur)``, where ``ex_dated`` is the set of securities whose
+        cadence came from the yfinance ex-date series. The caller needs it to know what
+        a projected date MEANS: for those securities it is an ex-date and has to be
+        shifted to the expected pay date, and for the rest it is already a pay date and
+        must not be shifted twice. ``wht_by_sec`` is `_withholding_rates`, and
+        ``fx_to_eur`` the one rate per currency every amount below was sized at.
 
         **IBKR is the source of truth for the amounts** (since 2026-10-04). The DATES
         still come from one series — Yahoo's ex-dates wherever it has two or more, see
@@ -1547,7 +1548,7 @@ class DividendService:
             basis_by_sec[sid] = "gross_estimate" if source == "assumed" else "net"
 
         return (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, set(schedule_source),
-                wht_by_sec)
+                wht_by_sec, fx_to_eur)
 
     async def get_dividend_summary(self) -> Dict:
         """
@@ -1637,7 +1638,8 @@ class DividendService:
         figures = await self.forecast_figures(as_of)
         if figures is None:
             return None
-        await DividendForecastSnapshotRepository(self.db).upsert(figures)
+        lines = figures.pop("lines")
+        await DividendForecastSnapshotRepository(self.db).upsert(figures, lines=lines)
         return {
             "snapshot_date": as_of.isoformat(),
             "next_12m_eur": float(figures["next_12m_eur"]),
@@ -1647,7 +1649,8 @@ class DividendService:
     async def forecast_figures(self, as_of: date, replay: bool = False) -> Optional[Dict]:
         """
         The snapshot row for ``as_of`` — ``{snapshot_date, next_12m_eur, ttm_net_eur}``
-        in EUR — or None when there is nothing to forecast from. Writes nothing.
+        in EUR, plus the per-security ``lines`` behind the first — or None when there
+        is nothing to forecast from. Writes nothing.
 
         One implementation for the daily recorder and the backfill
         (`app.cli.backfill_dividend_forecast`), which passes ``replay=True`` for a
@@ -1665,6 +1668,19 @@ class DividendService:
             "snapshot_date": as_of,
             "next_12m_eur": next_12m,
             "ttm_net_eur": ttm_net,
+            "lines": [
+                {
+                    "security_id": line["security_id"],
+                    "shares": Decimal(str(line["shares"])),
+                    "next_12m_eur": Decimal(str(line["next_12m_eur"])),
+                    "currency": line["currency"],
+                    "fx_to_eur": (
+                        Decimal(str(line["fx_to_eur"]))
+                        if line["fx_to_eur"] is not None else None
+                    ),
+                }
+                for line in breakdown["forecast_by_security"]
+            ],
         }
 
     async def get_forecast_history(self) -> Dict:
@@ -1944,6 +1960,10 @@ class DividendService:
         # Filled by `_forecast_inputs`; empty without a forecast, which every reader of
         # it below tolerates.
         wht_by_sec: Dict[int, Tuple[Decimal, str]] = {}
+        # Every security held on `as_of` and the rate its currency was sized at, for
+        # `forecast_by_security` below. Empty without a forecast, like the rest.
+        held_shares: Dict[int, Decimal] = {}
+        sizing_fx: Dict[str, Decimal] = {}
         next_12m_end = as_of + timedelta(days=365)
         # Far enough to complete next calendar year, so the year comparison never
         # shows a truncated bar; further still if the caller asked for a year
@@ -1963,11 +1983,15 @@ class DividendService:
                     sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
                     for sid, pairs in exact_pairs.items()
                 }
-            hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec = \
-                await self._forecast_inputs(
-                    raw_payments, securities, as_of, net_factor,
-                    accruals_by_sec=accruals_by_sec, date_pairs=exact_pairs,
-                )
+            (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec,
+             sizing_fx) = await self._forecast_inputs(
+                raw_payments, securities, as_of, net_factor,
+                accruals_by_sec=accruals_by_sec, date_pairs=exact_pairs,
+            )
+            held_shares = {
+                sid: qty for sid in lots_by_sec
+                if sid in securities and (qty := shares_at(sid, as_of)) > 0
+            }
 
             # What the ex→pay distance actually measures out at, per security.
             pay_lags = self._measured_pay_lags(raw_payments, exact_pairs)
@@ -2953,4 +2977,23 @@ class DividendService:
             "growth": growth,
             "forward_yield": forward_yield,
             "upcoming": upcoming,
+            # `growth.next_12m_eur` split by holding, with the share count and the rate
+            # behind each part: what `dividend_forecast_snapshot_lines` stores, so the
+            # recorder has no sum of its own. Every security HELD, payer or not — a
+            # holding that forecasts nothing is a zero here, never an absent row.
+            "forecast_by_security": [
+                {
+                    "security_id": sid,
+                    "shares": float(qty),
+                    "next_12m_eur": round(
+                        float(next_12m_by_sec.get(sid, Decimal("0"))), 6
+                    ),
+                    "currency": securities[sid].currency,
+                    "fx_to_eur": (
+                        float(sizing_fx[securities[sid].currency or "EUR"])
+                        if (securities[sid].currency or "EUR") in sizing_fx else None
+                    ),
+                }
+                for sid, qty in sorted(held_shares.items())
+            ],
         }

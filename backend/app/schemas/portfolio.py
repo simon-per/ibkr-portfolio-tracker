@@ -779,6 +779,17 @@ class DividendForwardYield(BaseModel):
     basis: str                              # 'net' | 'mixed' | 'gross_estimate'
 
 
+class DividendForecastLine(BaseModel):
+    """One held security's part of `DividendGrowth.next_12m_eur`."""
+    security_id: int
+    shares: float
+    next_12m_eur: float             # base currency; 0.0 for a holding that pays nothing
+    currency: Optional[str] = None  # the security's own
+    # The newest cached <currency>→EUR rate the forecast sized this security at.
+    # None when none is cached.
+    fx_to_eur: Optional[float] = None
+
+
 class DividendForecastHistoryPoint(BaseModel):
     date: str                       # the UTC date the snapshot was taken, "YYYY-MM-DD"
     next_12m_eur: float             # base currency, at that date's rate
@@ -845,6 +856,9 @@ class DividendBreakdownResponse(BaseModel):
     # None = no projection was run, or nothing held is priced. Never a zeroed object.
     forward_yield: Optional[DividendForwardYield] = None
     upcoming: List[DividendUpcomingPayment] = []
+    # Every security held today with its share of `growth.next_12m_eur`. Empty when
+    # no projection was run. This is what the daily forecast snapshot stores.
+    forecast_by_security: List[DividendForecastLine] = []
 
 
 class ContributionWindow(BaseModel):
