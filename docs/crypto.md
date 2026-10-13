@@ -181,8 +181,10 @@ CoinStats errors are typed and never retried inside a run — the next slot is t
 
 ## Scheduling and gates
 
-Eight jobs `crypto_sync_1…8` at `CRYPTO_SYNC_HOURS = ALL_SYNC_HOURS`, **derived, not copied**, so
-the deploy guard already covers every crypto run. Registered through `_add_or_keep` in their own
+Eight jobs `crypto_sync_1…8` at `CRYPTO_SYNC_HOURS = PORTFOLIO_SYNC_HOURS`, **derived, not
+copied**, so the deploy guard (checked against `ALL_SYNC_HOURS`, a superset) already covers every
+crypto run. Not `ALL_SYNC_HOURS` itself: that also holds the watchlist's 04:00 slot, and a ninth
+run a day is credits. Registered through `_add_or_keep` in their own
 **job group**. They run concurrently with the stock job at the same slot on purpose: the
 upstreams are CoinStats and CoinGecko, and they hold none of the stock gates.
 

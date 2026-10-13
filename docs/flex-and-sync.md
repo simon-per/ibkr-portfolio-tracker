@@ -406,9 +406,24 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
+| 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
 
-**The crypto sync rides every one of these slots, and adds none.** `CRYPTO_SYNC_HOURS` is
-*derived* from `ALL_SYNC_HOURS`, so the deploy guard already covers it; it runs under its own
+**The watchlist has a slot of its own, away from the portfolio's** (2026-10-13, at the owner's
+request — nothing scheduled it before, so it aged until someone pressed *Refresh All*). It is the
+most expensive Yahoo loop per row, five endpoints an item (`WatchlistService._fetch_ticker_data`),
+so it rides no repricing pass: 04:00 leaves six hours after the 22:00 touch and four before 08:00.
+Tuesday to Saturday is once after each US close. The job is `WatchlistService.sync_all` under
+`SYNC_PIPELINE` — the loop's own pacing and its abandon-on-429 latch, no second implementation —
+and it records a `watchlist_refresh` row in `sync_runs`; a ticker Yahoo cannot serve is a warning
+on that row, never its status. It sits in the `upkeep` job group and outside
+`SCHEDULED_JOB_TYPES`, so the public `/api/scheduler/status` list, the dashboard's "Next:" and
+"last sync" are the portfolio's alone. The Fundamentals tab and the analyst ratings are still
+unscheduled.
+
+**The crypto sync rides every one of the portfolio's slots, and adds none.** `CRYPTO_SYNC_HOURS`
+is *derived* from `PORTFOLIO_SYNC_HOURS` — not from `ALL_SYNC_HOURS`, which since the watchlist
+slot is a superset, and a slot added for other upkeep must not become one more CoinStats run a
+day — so the deploy guard already covers it; it runs under its own
 `crypto-sync` gate (never `SYNC_PIPELINE`), in its own job group — which is what keeps it out of
 the public `/api/scheduler/status` list and "last sync" — and never touches `last_sync_result`.
 
@@ -442,8 +457,8 @@ Three details are load-bearing:
   `SyncBusy` → 429 on any `skipped` status, which had only ever meant a pipeline collision, so it
   now keys on `reason == "pipeline_busy"`. A day with nothing left to sync is finished, not busy.
 
-**The hours live in one place** — `IBKR_ONLY_HOURS` / `FULL_SYNC_HOUR` / `MARKET_DATA_HOURS`, and
-`ALL_SYNC_HOURS` over them — because three other files carry a copy: `ops/auto-deploy.sh` defers a
+**The hours live in one place** — `IBKR_ONLY_HOURS` / `FULL_SYNC_HOUR` / `MARKET_DATA_HOURS` /
+`WATCHLIST_REFRESH_HOUR`, and `ALL_SYNC_HOURS` over them — because three other files carry a copy: `ops/auto-deploy.sh` defers a
 deploy that would land in a slot, and both `ops/finish-deploy.*` twins warn a human before pushing.
 All three had drifted by 2026-08-04, the finish-deploy pair for four days, in the direction that
 *permits* a collision: they warned about the retired 13:00/20:00 and never mentioned the live

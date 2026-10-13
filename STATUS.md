@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-13.** **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-13.** **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Not deployed yet; see *Needs a human* and *Watch after the next deploy*. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -184,7 +184,9 @@ captions say "assumed withholding" rather than "runs a little high".
 US and Dutch treaty rate; German, Korean and Taiwanese payers withhold materially more, so those
 projections still read high, just less so. A *measured* rate is derivable from data already stored —
 `withholding_tax_eur / gross_amount_eur` on IBKR rows, grouped by the ISIN-prefix country the DA-1
-report already groups by — and that is the honest version of this. Not built: see *Worth doing next*.
+report already groups by — and that is the honest version of this. **Built 2026-10-04** as the
+withholding ladder's `ibkr_measured` and `ibkr_country` rungs (docs/dividends.md, *Sizing*); the
+setting is only the last rung now.
 
 Previously, live on `c791fd9` and verified against the API: **a dividend
 is now dated when the cash is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
@@ -518,6 +520,12 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 ---
 
 ## Needs a human
+
+- **Refresh `/root/auto-deploy.sh` once the watchlist slot is deployed.** `ops/auto-deploy.sh`
+  gained 04:00 in `SYNC_HOURS` on 2026-10-13 and the installed copy is what cron runs. By atomic
+  rename, as in docs/deployment.md. Until then a deploy can land on the 04:00 watchlist refresh
+  unguarded, which costs at most that night's refresh (the misfire grace or the next night
+  recovers it) — no portfolio slot is affected.
 
 - **Leftovers of the 2026-10-04 database move (optional, harmless).** `rm
   /root/finish-hardening.sh /root/finish-hardening.log` and the two set-aside sidecars
@@ -1008,6 +1016,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The first scheduled watchlist refresh (04:00 Berlin, Tue–Sat).** Expect a `watchlist_refresh`
+  row in `/api/scheduler/history` with no rate-limit warning, the Watchlist tab's as-of line
+  reading that morning, and a clean 08:00 market-data run after it. `/api/scheduler/status` must
+  list the same stock jobs as before (the new job is in the `upkeep` group). If the daily
+  validator flags the new `sync_type` in the history, that is its expectation to update, not a
+  fault. Do not press *Refresh All* to hurry it. `last_synced` on `/api/watchlist` now carries
+  `+00:00`.
+
 - **The rescale of the EM fund's derived prices (`CH1529078078`, `d2411b5`) first runs on the
   next finpension upload.** Expect no "could not be moved" warning and the `sibling_scaled`
   row count unchanged but for the new NAV days. (The days the 2026-10-12 upload lost are
@@ -1357,7 +1373,9 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   - **1W risk figures** come from 5 returns, and the risk-free rate is a 3% EUR rate on a CHF base.
   - **PEG** mixes three methods.
   - **EPS growth** explodes on a loss-to-profit base.
-  - **Watchlist / Fundamentals:** stale since 2026-08-25, with no as-of date shown.
+  - **Fundamentals:** stale since 2026-08-25, with no as-of date shown (the Watchlist half was
+    fixed 2026-10-13: a scheduled refresh and an as-of line; this tab and the analyst ratings
+    still refresh only on a click).
   - **Look-through:** "Unresolved" in amber, though it is ~0.3% by value.
   - **Forecast tab:** monthly compounding overstates the rate, and the default contribution is 1,000.
   - **Sector "Unknown":** 35% in Analytics against 2% in Allocation — moot while Analytics is hidden.
@@ -1664,6 +1682,11 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-13 (watchlist freshness)** — a brainstorm of open points, of which the owner gave
+  this session the watchlist (another session took the heatmap and the forecast-history chart).
+  A nightly refresh on its own slot, the deploy guard taught the hour, crypto hours re-derived
+  so they did not grow, and an as-of line on the tab. On branch `feat/watchlist-nightly-refresh`.
+
 - **2026-10-13 (the EM fund's price gap)** — "resume": nothing was in flight, so the one open
   item. The unknown half needed no Yahoo request — every slot but 18:00 syncs 7 days, so a
   deleted history could not come back that evening. The importer now rescales the derived rows
@@ -1692,9 +1715,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   appended as estimates (quantities real, values from 99% of uninvested cash) at the owner's
   request; DB backed up first, dry run clean, 12 rows / 6 lots on production. Real export still
   owed.
-
-- **2026-10-04 (deploy hardening)** — "is everything good for daily use?": yes; the remaining
-  risks were operational. Three parallel agents in worktrees built the DB directory mount (with a
-  self-performing, refusing switchover and a start guard), the migration-aware rollback restore, and
-  the pre-restart slot re-check; merged here with one integration fix (the restore follows the new
-  symlink). Push and the `/root` refresh need the owner.
