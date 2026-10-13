@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-13.** **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days already missing on production come back with the next 18:00 full sync — see *Watch after the next deploy*. **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-13.** **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -1008,15 +1008,10 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The EM fund's missing September prices (`CH1529078078`) — refilled by the first 18:00
-  `full_sync` on `d2411b5` or later, not by the deploy.** The fix stops an upload from losing
-  them; the rows the 2026-10-12 upload already deleted are re-derived only by the 730-day pass
-  (every other slot syncs 7 days), which since this change asks for every weekday after the
-  first NAV that has no derived row. Check after it: the value chart reports no day as not
-  fully valued from 2026-09-07 on, and `market_prices` holds a `sibling_scaled` row for each
-  weekday the sibling has a close. If the sibling fetch is rate-limited that evening it is the
-  next day's 18:00 run. The rescale itself first runs on the next finpension upload: expect no
-  "could not be moved" warning and the derived row count unchanged but for the new NAV days.
+- **The rescale of the EM fund's derived prices (`CH1529078078`, `d2411b5`) first runs on the
+  next finpension upload.** Expect no "could not be moved" warning and the `sibling_scaled`
+  row count unchanged but for the new NAV days. (The days the 2026-10-12 upload lost are
+  already back — docs/shipped-log.md.)
 
 - **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
   re-check waits out a running sync from the second deploy on (the first had only the margin;
@@ -1673,7 +1668,8 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   item. The unknown half needed no Yahoo request — every slot but 18:00 syncs 7 days, so a
   deleted history could not come back that evening. The importer now rescales the derived rows
   onto the new NAV instead of deleting them, and the holiday rule counts only derived rows for
-  a sibling fund (`d2411b5`). The production refill waits for the 18:00 full sync.
+  a sibling fund (`d2411b5`). The lost days were then refilled on production by one run of
+  `sync_sibling_prices`, at the owner's request, rather than waiting for the 18:00 full sync.
 
 - **2026-10-12 (pillar 3a upload)** — the real finpension export carrying the 10-06 buys
   imported on production: DB backed up first, dry run clean, 12 rows / 6 lots,

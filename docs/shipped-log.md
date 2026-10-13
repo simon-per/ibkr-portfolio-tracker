@@ -15,9 +15,16 @@
 days, and `get_missing_dates` would have read the older days between two statement NAVs as
 holidays for good. Now `_reanchor_sibling_prices` multiplies the rows by `new NAV / the stored
 price for the new NAV's day` in place, and `sync_sibling_prices` counts only derived rows as
-cached. Five tests, each failing on the old code; the backend suite passes. **Not yet verified
-on production** — the refill of the days already lost needs an 18:00 full sync (STATUS.md,
-*Watch after the next deploy*).
+cached. Five tests, each failing on the old code; the backend suite passes. **Verified on
+production the same morning, for the second half**: at the owner's request the days already
+lost were refilled without waiting for the 18:00 full sync — one run of
+`sync_sibling_prices(days_back=730)` for this fund inside the container, a single Yahoo
+request, recorded as a `manual_prices` run. It wrote a row for every weekday from 09-02 to
+10-02 the sibling has a close for, days the old holiday rule would never have asked for, and
+`GET /api/portfolio/value-over-time` reports no unvalued day from 2026-08-25 on. The sibling
+has no bar for 09-08, 09-25 and 09-28, nor yet for 10-09 and 10-12; those days are valued from
+the prior price. The rescale on upload is still unexercised (STATUS.md, *Watch after the next
+deploy*).
 
 ## Shipped 2026-10-12 — the forecast history gains growth, a replayed past and a start date
 
