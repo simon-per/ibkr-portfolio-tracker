@@ -43,14 +43,19 @@ from app.services.scheduler_service import (
     IBKR_ONLY_HOURS,
     MARKET_DATA_HOURS,
     MISFIRE_GRACE_SECONDS,
+    PORTFOLIO_SYNC_HOURS,
     STALE_PRICE_DAYS,
     STOCK_JOB_GROUP,
+    UPKEEP_JOB_GROUP,
+    WATCHLIST_REFRESH_DAYS,
+    WATCHLIST_REFRESH_HOUR,
     SchedulerService,
     _collect_warnings,
     crypto_sync_job_entry,
     full_sync_job_entry,
     ibkr_only_sync_job_entry,
     market_data_only_sync_job_entry,
+    watchlist_refresh_job_entry,
 )
 from app.services.scheduler_service import MANUAL_PRICE_STALE_DAYS
 from app.models.security import PRICE_SOURCE_MANUAL
@@ -61,9 +66,10 @@ from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 
 # One stock job per declared hour — test_scheduler_registers_every_declared_job asserts
 # no two of the three stock groups share one — plus one crypto job at each of those same
-# hours. The crypto group shares every slot deliberately (CRYPTO_SYNC_HOURS is derived
-# from ALL_SYNC_HOURS): its only upstream is CoinStats and it holds none of the stock
-# gates. Counted from the declared ids rather than restated.
+# hours. The crypto group shares every one of those slots deliberately (CRYPTO_SYNC_HOURS
+# is derived from PORTFOLIO_SYNC_HOURS): its only upstream is CoinStats and it holds none
+# of the stock gates. The watchlist refresh is one more job on a slot of its own. Counted
+# from the declared ids rather than restated.
 def _expected_job_count() -> int:
     return len(_declared_job_ids())
 
@@ -508,6 +514,7 @@ def _declared_job_ids() -> set:
         *(f'ibkr_retry_{i}' for i in range(1, len(IBKR_ONLY_HOURS) + 1)),
         *(f'market_sync_{i}' for i in range(1, len(MARKET_DATA_HOURS) + 1)),
         *(f'crypto_sync_{i}' for i in range(1, len(CRYPTO_SYNC_HOURS) + 1)),
+        'watchlist_refresh',
     }
 
 
@@ -808,6 +815,7 @@ async def test_jobs_are_serializable_into_the_persistent_store(jobstore_url):
         assert funcs['ibkr_retry_1'] is ibkr_only_sync_job_entry
         assert funcs['market_sync_1'] is market_data_only_sync_job_entry
         assert funcs['crypto_sync_1'] is crypto_sync_job_entry
+        assert funcs['watchlist_refresh'] is watchlist_refresh_job_entry
     finally:
         second.shutdown()
 
@@ -1213,11 +1221,14 @@ async def test_a_complete_benchmark_warmup_is_not_flagged(monkeypatch):
 @pytest.mark.asyncio
 async def test_crypto_jobs_ride_the_stock_slots_in_their_own_group(jobstore_url):
     """
-    The crypto sync runs at exactly the stock slots — derived, not copied, so the deploy
-    guard (checked against ALL_SYNC_HOURS) covers it with no ops change — and sits in its
-    own group, which is what keeps it out of the public `/api/scheduler/status` list.
+    The crypto sync runs at exactly the portfolio's slots — derived, not copied, so the
+    deploy guard (checked against ALL_SYNC_HOURS, a superset) covers it with no ops change
+    — and sits in its own group, which is what keeps it out of the public
+    `/api/scheduler/status` list. Not at the watchlist's slot: that would be a ninth
+    CoinStats run a day.
     """
-    assert CRYPTO_SYNC_HOURS == ALL_SYNC_HOURS
+    assert CRYPTO_SYNC_HOURS == PORTFOLIO_SYNC_HOURS
+    assert WATCHLIST_REFRESH_HOUR not in CRYPTO_SYNC_HOURS
     svc = SchedulerService()
     try:
         svc.start()
@@ -1228,7 +1239,8 @@ async def test_crypto_jobs_ride_the_stock_slots_in_their_own_group(jobstore_url)
         }
         assert sorted(_trigger_hour(j) for j in crypto) == sorted(CRYPTO_SYNC_HOURS)
         assert not any(j.id.startswith('crypto_sync_') for j in stock)
-        assert len(stock) + len(crypto) == _expected_job_count()
+        upkeep = svc.jobs_in_group(UPKEEP_JOB_GROUP)
+        assert len(stock) + len(crypto) + len(upkeep) == _expected_job_count()
         assert svc.next_run_time(CRYPTO_JOB_GROUP) == min(j.next_run_time for j in crypto)
     finally:
         svc.shutdown()
@@ -1313,3 +1325,145 @@ async def test_a_failed_forecast_snapshot_is_a_warning_never_the_jobs_status(mon
     job = {"status": "success"}
     _collect_warnings(job, result)
     assert job["status"] == "success" and job["warnings"] == result["warnings"]
+
+
+# --- the watchlist's own slot ------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_watchlist_refresh_has_a_slot_of_its_own(jobstore_url):
+    """
+    Away from every slot that already reaches Yahoo — that is the owner's condition for
+    scheduling it at all — and outside the stock group, so the public
+    `/api/scheduler/status` list, the dashboard's "Next:" and the validator's job count
+    do not move.
+    """
+    assert WATCHLIST_REFRESH_HOUR not in PORTFOLIO_SYNC_HOURS
+    assert WATCHLIST_REFRESH_HOUR in ALL_SYNC_HOURS   # so the deploy guard learns it
+    yahoo_hours = {FULL_SYNC_HOUR, *MARKET_DATA_HOURS}
+    assert min(
+        min((WATCHLIST_REFRESH_HOUR - h) % 24, (h - WATCHLIST_REFRESH_HOUR) % 24)
+        for h in yahoo_hours
+    ) >= 3, "the watchlist refresh sits within three hours of another Yahoo pass"
+
+    svc = SchedulerService()
+    try:
+        svc.start()
+        upkeep = svc.jobs_in_group(UPKEEP_JOB_GROUP)
+        assert [j.id for j in upkeep] == ['watchlist_refresh']
+        assert _trigger_hour(upkeep[0]) == WATCHLIST_REFRESH_HOUR
+        assert f"day_of_week='{WATCHLIST_REFRESH_DAYS}'" in str(upkeep[0].trigger)
+        assert 'watchlist_refresh' not in {j.id for j in svc.jobs_in_group(STOCK_JOB_GROUP)}
+    finally:
+        svc.shutdown()
+
+
+class _WatchlistSession:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _fake_watchlist(monkeypatch, outcome):
+    """Stand `outcome` in for `WatchlistService.sync_all`; returns the recorded calls."""
+    calls = []
+
+    class FakeWatchlistService:
+        def __init__(self, db):
+            pass
+
+        async def sync_all(self, force=False):
+            calls.append(force)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return dict(outcome)
+
+    import app.services.watchlist_service as watchlist_service
+    monkeypatch.setattr(watchlist_service, "WatchlistService", FakeWatchlistService)
+    monkeypatch.setattr(
+        'app.services.scheduler_service.AsyncSessionLocal', lambda: _WatchlistSession()
+    )
+    return calls
+
+
+def _record_into(svc, monkeypatch):
+    recorded = []
+
+    async def record(result, started_at):
+        recorded.append(result)
+
+    monkeypatch.setattr(svc, '_record_run', record)
+    return recorded
+
+
+@pytest.mark.asyncio
+async def test_the_watchlist_job_runs_the_one_loop_and_is_never_the_last_sync(monkeypatch):
+    """`sync_all` unforced — its own cache and pacing — recorded as its own run type, and
+    never `last_sync_result`, which is the portfolio's "last sync"."""
+    svc = SchedulerService()
+    svc.last_sync_result = {"type": "market_data_only", "status": "success"}
+    calls = _fake_watchlist(monkeypatch, {
+        "synced": 3, "errors": 0, "rate_limited": False,
+        "message": "Synced 3/3 watchlist items",
+    })
+    recorded = _record_into(svc, monkeypatch)
+
+    result = await svc.watchlist_refresh_job()
+
+    assert calls == [False]
+    assert result["type"] == "watchlist_refresh"
+    assert result["status"] == "success"
+    assert "warnings" not in result
+    assert recorded == [result]
+    assert svc.last_sync_result == {"type": "market_data_only", "status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_watchlist_pass_surfaces_its_warning(monkeypatch):
+    """The loop already abandoned the pass; the job's part is to make that visible."""
+    svc = SchedulerService()
+    _fake_watchlist(monkeypatch, {
+        "synced": 1, "errors": 1, "rate_limited": True,
+        "message": "Synced 1/4 watchlist items",
+        "warnings": ["Yahoo Finance rate limit reached; the rest of this pass was abandoned."],
+    })
+    _record_into(svc, monkeypatch)
+
+    result = await svc.watchlist_refresh_job()
+
+    assert result["status"] == "success"
+    assert result["warnings"] == [
+        "Yahoo Finance rate limit reached; the rest of this pass was abandoned."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_ticker_yahoo_cannot_serve_is_a_warning_never_the_jobs_status(monkeypatch):
+    svc = SchedulerService()
+    _fake_watchlist(monkeypatch, {
+        "synced": 2, "errors": 1, "rate_limited": False,
+        "message": "Synced 2/3 watchlist items",
+    })
+    _record_into(svc, monkeypatch)
+
+    result = await svc.watchlist_refresh_job()
+
+    assert result["status"] == "success"
+    assert result["warnings"] == [
+        "1 watchlist item(s) could not be refreshed and keep their previous data."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_crashed_watchlist_refresh_is_recorded_as_an_error(monkeypatch):
+    svc = SchedulerService()
+    _fake_watchlist(monkeypatch, RuntimeError("database is locked"))
+    recorded = _record_into(svc, monkeypatch)
+
+    result = await svc.watchlist_refresh_job()
+
+    assert result["status"] == "error"
+    assert "RuntimeError" in result["message"]
+    assert recorded == [result]

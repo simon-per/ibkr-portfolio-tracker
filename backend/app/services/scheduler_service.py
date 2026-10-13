@@ -178,7 +178,7 @@ MISFIRE_GRACE_SECONDS = 30 * 60
 
 # ── The schedule, in Europe/Berlin hours ──────────────────────────────────────
 #
-# These four constants are the single source of truth for when anything runs. They
+# The constants below are the single source of truth for when anything runs. They
 # exist as constants rather than as literals inside the `CronTrigger` calls because
 # `ops/auto-deploy.sh` carries its own copy of the same hours — it defers a deploy
 # that would land in a slot — and that copy has already drifted once, in the worst
@@ -224,20 +224,46 @@ FULL_SYNC_HOUR = 18
 # by the IBKR move — only which job performs the 08:00 and 18:00 touches changed, so
 # 08:00 is now a plain 7-day pass and the 730-day one rides with the 18:00 full sync.
 MARKET_DATA_HOURS = (8, 11, 13, 15, 20, 22)
-ALL_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_DATA_HOURS}))
+# The slots the portfolio itself is synced at: IBKR, FX, prices.
+PORTFOLIO_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_DATA_HOURS}))
 
-# The crypto sync (docs/crypto.md) rides the same eight slots **by derivation, not by
-# copy**, so the deploy guard — which is checked against ALL_SYNC_HOURS — already covers
-# every crypto run and no ops script needs to learn a new hour. It shares minute :00 with
-# the stock jobs on purpose: its only upstream is CoinStats, it holds no gate the stock
-# jobs use, and it never opens a write transaction during an HTTP call.
-CRYPTO_SYNC_HOURS = ALL_SYNC_HOURS
+# ── The watchlist's own slot ──────────────────────────────────────────────────
+#
+# Nothing scheduled the watchlist until 2026-10-13: it refreshed when someone pressed
+# *Refresh All* and aged silently otherwise. The owner asked for a scheduled refresh
+# **away from the portfolio slots**, because it is the most expensive Yahoo loop per
+# row — five endpoints an item (`WatchlistService._fetch_ticker_data`) — and stacking
+# it on a repricing pass is how an IP-based rate limit gets spent.
+#
+# 04:00 Berlin: Yahoo's last scheduled touch is 22:00 and the next 08:00 (00:00 is
+# IBKR-only), so this leaves six quiet hours before it and four after. Tuesday to
+# Saturday, i.e. once after each US close and never on a day no market moved.
+WATCHLIST_REFRESH_HOUR = 4
+WATCHLIST_REFRESH_DAYS = 'tue-sat'
+
+# Every hour at which anything is registered, and so what the deploy guard is checked
+# against. Not the same thing as PORTFOLIO_SYNC_HOURS since the watchlist slot exists.
+ALL_SYNC_HOURS = tuple(sorted({*PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR}))
+
+# The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
+# not by copy**, so the deploy guard — which is checked against ALL_SYNC_HOURS, a
+# superset — already covers every crypto run and no ops script needs to learn a new
+# hour. Derived from PORTFOLIO_SYNC_HOURS rather than ALL_SYNC_HOURS on purpose: a slot
+# added for some other upkeep must not become one more CoinStats run a day, which is
+# credits (`tests/test_crypto_budget.py`). It shares minute :00 with the stock jobs on
+# purpose: its only upstream is CoinStats, it holds no gate the stock jobs use, and it
+# never opens a write transaction during an HTTP call.
+CRYPTO_SYNC_HOURS = PORTFOLIO_SYNC_HOURS
 
 # Which pipeline a registered job belongs to. The public `/api/scheduler/status` lists
 # the stock group only — the dashboard reads `jobs[0]` as its "Next:" and the daily
-# validator counts the jobs — while `/api/crypto/status` reads the crypto group.
+# validator counts the jobs — while `/api/crypto/status` reads the crypto group. The
+# upkeep group is the watchlist refresh: it is not a sync of the portfolio, so it is in
+# neither list and never becomes "the last sync" (it is absent from SCHEDULED_JOB_TYPES
+# and never sets `last_sync_result`).
 STOCK_JOB_GROUP = "stock"
 CRYPTO_JOB_GROUP = "crypto"
+UPKEEP_JOB_GROUP = "upkeep"
 
 # The `sync_runs.sync_type` values the stock scheduler's own jobs record — the
 # `_gated_job` names below and the `type` of each job's result. The status endpoint's
@@ -1366,6 +1392,55 @@ class SchedulerService:
         logger.info("=" * 80)
         return self.last_sync_result
 
+    async def watchlist_refresh_job(self) -> Optional[dict]:
+        """
+        The watchlist's scheduled refresh, at WATCHLIST_REFRESH_HOUR (Europe/Berlin).
+
+        Under the same `SYNC_PIPELINE` gate as every other Yahoo job and the manual
+        *Refresh All*, so it can never run beside one. The loop is
+        `WatchlistService.sync_all` — its pacing, its per-item cache and its
+        abandon-the-pass-on-429 latch — and nothing here re-implements any of it.
+        """
+        return await self._gated_job("watchlist_refresh", self._watchlist_refresh_locked)
+
+    async def _watchlist_refresh_locked(self) -> dict:
+        started_at = utcnow()
+        result = {"type": "watchlist_refresh", "timestamp": utc_iso(started_at)}
+        try:
+            async with AsyncSessionLocal() as db:
+                # Imported here to avoid any import cycle at module load
+                from app.services.watchlist_service import WatchlistService
+
+                watchlist_result = await WatchlistService(db).sync_all(force=False)
+        except Exception as e:
+            logger.error(f"Watchlist refresh failed: {e}", exc_info=True)
+            result.update(
+                status="error",
+                message=f"Watchlist refresh failed: {type(e).__name__}: {e}",
+            )
+        else:
+            failed = watchlist_result.get("errors", 0)
+            # A ticker Yahoo could not serve is that row's warning, never the job's
+            # status — and it has to be said, because the row keeps its old
+            # `last_synced` and nothing else would report why. The rate-limit case
+            # already carries its own warning from `sync_all`.
+            if failed and not watchlist_result.get("rate_limited"):
+                watchlist_result.setdefault("warnings", []).append(
+                    f"{failed} watchlist item(s) could not be refreshed and keep "
+                    f"their previous data."
+                )
+            result.update(
+                status="success",
+                message=watchlist_result.get("message"),
+                watchlist_result=watchlist_result,
+            )
+            _collect_warnings(result, watchlist_result)
+
+        # Deliberately not `self.last_sync_result`: that is the portfolio's "last sync".
+        await self._record_run(result, started_at)
+        logger.info(f"Watchlist refresh: {result.get('status')} — {result.get('message')}")
+        return result
+
     async def _record_run(self, result: dict, started_at: datetime) -> None:
         """
         Persist a job's outcome to sync_runs.
@@ -1547,7 +1622,8 @@ class SchedulerService:
         - MARKET_DATA_HOURS: market data only (7 days), through both sessions
 
         plus the crypto sync at the same eight slots (CRYPTO_SYNC_HOURS), in its own
-        job group.
+        job group, and the watchlist refresh on a slot of its own
+        (WATCHLIST_REFRESH_HOUR, Tuesday to Saturday), in a third.
 
         Jobs are persisted to `settings.scheduler_jobstore_url` so a restart that
         overlaps a slot recovers it instead of losing it — see MISFIRE_GRACE_SECONDS.
@@ -1695,6 +1771,18 @@ class SchedulerService:
                 group=CRYPTO_JOB_GROUP,
             )
 
+        # The watchlist, on its own slot and in its own group — see
+        # WATCHLIST_REFRESH_HOUR for why it rides none of the slots above.
+        self._add_or_keep(
+            'watchlist_refresh', watchlist_refresh_job_entry,
+            CronTrigger(
+                day_of_week=WATCHLIST_REFRESH_DAYS, hour=WATCHLIST_REFRESH_HOUR,
+                minute=0, timezone='Europe/Berlin',
+            ),
+            f'Watchlist Refresh ({WATCHLIST_REFRESH_HOUR:02d}:00 Europe/Berlin)',
+            group=UPKEEP_JOB_GROUP,
+        )
+
         self._prune_unknown_jobs()
         self.scheduler.resume()
 
@@ -1814,3 +1902,7 @@ async def market_data_only_sync_job_entry() -> dict:
 
 async def crypto_sync_job_entry() -> Optional[dict]:
     return await get_scheduler().crypto_sync_job()
+
+
+async def watchlist_refresh_job_entry() -> Optional[dict]:
+    return await get_scheduler().watchlist_refresh_job()

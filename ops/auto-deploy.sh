@@ -70,7 +70,10 @@ MIGRATIONS_DIR="backend/alembic/versions"
 #
 # 06:00 left on 2026-08-08, when the IBKR slots became 18:00 (primary) and 00:00
 # (recovery) — note 18 was already guarded as a market-data hour, so only 6 dropped.
-SYNC_HOURS="0 8 11 13 15 18 20 22"
+#
+# 04:00 joined on 2026-10-13: the watchlist's own Yahoo refresh (Tuesday to Saturday;
+# guarded every day, because this guard reasons in hours and a deferred deploy is cheap).
+SYNC_HOURS="0 4 8 11 13 15 18 20 22"
 # Minutes either side of a slot to stay clear of. A rebuild takes ~2-5 minutes and
 # APScheduler is in-process, so a deploy overlapping a slot loses that run. The
 # persistent job store (2026-08-01) recovers a misfire up to 30 minutes late, so this
