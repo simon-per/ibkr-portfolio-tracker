@@ -6,6 +6,7 @@ from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float
 from app.services.watchlist_service import WatchlistService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.repositories.sync_run_repository import utc_iso
 from app.repositories.watchlist_repository import WatchlistRepository
 from app.schemas.portfolio import (
     WatchlistItemResponse,
@@ -185,6 +186,8 @@ def _item_to_response(item) -> WatchlistItemResponse:
         analyst_rating=item.analyst_rating,
         analyst_count=item.analyst_count,
         buy_score=item.buy_score,
-        last_synced=item.last_synced.isoformat() if item.last_synced else None,
+        # Through `utc_iso`, not a bare `isoformat()`: the tab prints this as the data's
+        # as-of time, and a naive string is read by the browser as local time.
+        last_synced=utc_iso(item.last_synced),
         created_at=item.created_at.isoformat() if item.created_at else None,
     )

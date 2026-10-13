@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { getRatingScore } from '@/lib/analystRating'
+import { cn, formatShortDateTime } from '@/lib/utils'
+import { watchlistFreshness } from '@/lib/watchlistFreshness'
 import { DataTable } from '@/components/ui/DataTable'
 import { watchlistColumns, type WatchlistSortColumn } from './watchlistColumns'
 import type { WatchlistItem } from '@/lib/api'
@@ -31,11 +33,18 @@ export function WatchlistTab() {
   // this rule as spanning every panel: `undefined` means *not loaded*, an empty array
   // means *nothing held*, and collapsing the two lets a panel build an answer out of a
   // failure. `FundamentalsTab` one tab over captures it on all three of its queries.
-  const { data: items, isLoading, isError } = useQuery({
+  const { data: items, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => api.getWatchlist(),
     staleTime: 5 * 60 * 1000,
   })
+
+  // `dataUpdatedAt` as the clock: it moves with every fetch, so the age is judged at
+  // the moment the rows were read rather than at an impure `Date.now()` during render.
+  const freshness = useMemo(
+    () => (items ? watchlistFreshness(items, new Date(dataUpdatedAt)) : null),
+    [items, dataUpdatedAt],
+  )
 
   const addMutation = useMutation({
     mutationFn: (ticker: string) => api.addToWatchlist(ticker),
@@ -219,7 +228,27 @@ export function WatchlistTab() {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Watchlist</CardTitle>
+            <div>
+              <CardTitle>Watchlist</CardTitle>
+              {/* On the surface, beside the title: prices and scores with no date read
+                  as today's, and these sat seven weeks old without saying so. */}
+              {freshness && (
+                <p
+                  className={cn(
+                    'mt-1 text-xs',
+                    freshness.stale ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
+                  )}
+                >
+                  {freshness.oldest === null
+                    ? 'No data yet'
+                    : freshness.mixed
+                      ? `Oldest data from ${formatShortDateTime(freshness.oldest)}, newest ${formatShortDateTime(freshness.newest!)}`
+                      : `Data as of ${formatShortDateTime(freshness.oldest)}`}
+                  {freshness.neverSynced > 0 && freshness.oldest !== null &&
+                    ` · ${freshness.neverSynced} never synced`}
+                </p>
+              )}
+            </div>
             <Button
               variant="outline"
               size="sm"
