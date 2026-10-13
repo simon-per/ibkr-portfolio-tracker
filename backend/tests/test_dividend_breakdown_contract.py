@@ -44,6 +44,7 @@ from app.schemas.portfolio import (
     DividendRecentPace,
     DividendYtdPace,
     DividendMonthBar,
+    DividendPerShareGrowth,
     DividendSecurityRow,
     DividendTtmPoint,
     DividendUpcomingPayment,
@@ -136,6 +137,7 @@ def _pairs(payload):
         ("DividendLatestMonth", growth["latest_month"], DividendLatestMonth),
         ("DividendYtdPace", growth["ytd_pace"], DividendYtdPace),
         ("DividendRecentPace", growth["recent_pace"], DividendRecentPace),
+        ("DividendPerShareGrowth", growth["per_share"], DividendPerShareGrowth),
     ]
     for key in ("ttm", "ytd", "avg_month"):
         out.append((f"DividendDelta ({key})", growth[key], DividendDelta))

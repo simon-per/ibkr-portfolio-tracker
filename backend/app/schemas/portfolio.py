@@ -555,6 +555,11 @@ class DividendSecurityRow(BaseModel):
     # `DividendForwardYield.pct`, which is what makes that headline auditable.
     # Deliberately unwindowed, unlike `forecast_net_eur` above — see the service.
     forward_yield_pct: Optional[float] = None
+    # The payer's own dividend growth: its newest regular payment per share against
+    # the same payment a year earlier, in percent. Independent of how many shares are
+    # held and of exchange rates. None without a year of history to compare across,
+    # or without a live projection.
+    per_share_growth_pct: Optional[float] = None
     # True when the position wasn't held for the whole trailing year, so the yield
     # above divides a partial year's income by a full position value and reads low.
     # Not annualized: scaling up would invent income the schedule may not support.
@@ -681,6 +686,18 @@ class DividendRecentPace(BaseModel):
     prev_end: str
 
 
+class DividendPerShareGrowth(BaseModel):
+    """
+    The payers' own growth for the whole book: each `per_share_growth_pct` weighted by
+    its share of the next twelve months — the growth that needs no purchase.
+    """
+    pct: float
+    # How much of `next_12m_eur` comes from the payers `pct` is measured over. The
+    # rest have under a year of history; they are left out, not counted as 0%.
+    covered_pct: float
+    payers: int
+
+
 class DividendGrowth(BaseModel):
     """
     Growth of dividend income, computed over the FULL history regardless of the
@@ -705,6 +722,8 @@ class DividendGrowth(BaseModel):
     latest_month: Optional[DividendLatestMonth] = None
     ytd_pace: Optional[DividendYtdPace] = None
     recent_pace: Optional[DividendRecentPace] = None
+    # None when no projection was run or no payer has a year to compare across.
+    per_share: Optional[DividendPerShareGrowth] = None
 
 
 class DividendUpcomingPayment(BaseModel):

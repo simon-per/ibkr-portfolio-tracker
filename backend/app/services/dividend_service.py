@@ -35,6 +35,7 @@ from app.services.dividend_forecast import (
     ForecastPayment,
     HistPayment,
     infer_gap_days,
+    per_share_growth,
     project_dividends,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
@@ -1624,6 +1625,39 @@ class DividendService:
             "base_currency": base_fx.base_currency,
         }
 
+    @staticmethod
+    def _book_per_share_growth(
+        ps_growth: Dict[int, Decimal],
+        next_12m_by_sec: Dict[int, Decimal],
+        next_12m: Decimal,
+    ) -> Optional[Dict]:
+        """
+        The payers' own growth, for the book: each one's `per_share_growth` weighted by
+        its share of the next twelve months. It answers "how much would this income
+        grow if nothing more were bought", which the totals cannot — on a book still
+        being funded they grow mostly by purchases.
+
+        Over the payers that HAVE a figure, with the share of the forecast they cover
+        beside it: a payer held under a year has none, and counting it as 0% would
+        report its missing history as a dividend that did not grow. None when no
+        payer is measurable.
+        """
+        covered = {
+            sid: income for sid in ps_growth
+            if (income := next_12m_by_sec.get(sid, Decimal("0"))) > 0
+        }
+        covered_income = sum(covered.values(), Decimal("0"))
+        if covered_income <= 0 or next_12m <= 0:
+            return None
+        weighted = sum(
+            (income * ps_growth[sid] for sid, income in covered.items()), Decimal("0")
+        )
+        return {
+            "pct": round(float(weighted / covered_income * 100), 2),
+            "covered_pct": round(float(covered_income / next_12m * 100), 1),
+            "payers": len(covered),
+        }
+
     async def record_forecast_snapshot(self, as_of: date) -> Optional[Dict]:
         """
         Store what the forecast says on ``as_of``: the next twelve months and the
@@ -2016,6 +2050,8 @@ class DividendService:
         # `forecast_by_security` below. Empty without a forecast, like the rest.
         held_shares: Dict[int, Decimal] = {}
         sizing_fx: Dict[str, Decimal] = {}
+        # `per_share_growth` of each held payer that has a year to compare across.
+        ps_growth: Dict[int, Decimal] = {}
         next_12m_end = as_of + timedelta(days=365)
         # Far enough to complete next calendar year, so the year comparison never
         # shows a truncated bar; further still if the caller asked for a year
@@ -2043,6 +2079,10 @@ class DividendService:
             held_shares = {
                 sid: qty for sid in lots_by_sec
                 if sid in securities and (qty := shares_at(sid, as_of)) > 0
+            }
+            ps_growth = {
+                sid: g for sid in held_shares
+                if (g := per_share_growth(hist_by_sec.get(sid, []))) is not None
             }
 
             # What the ex→pay distance actually measures out at, per security.
@@ -2642,6 +2682,7 @@ class DividendService:
             "latest_month": latest_month,
             "ytd_pace": ytd_pace,
             "recent_pace": recent_pace,
+            "per_share": self._book_per_share_growth(ps_growth, next_12m_by_sec, next_12m),
         }
 
         # Trailing-12-month yield: spliced net over the current market value.
@@ -2929,6 +2970,15 @@ class DividendService:
                 "forward_yield_pct": (
                     round(float(next_12m_by_sec.get(sid, Decimal("0")) / mv * 100), 2)
                     if mv and mv > 0 and next_12m_by_sec.get(sid, Decimal("0")) > 0
+                    else None
+                ),
+                # The payer's own growth: its newest regular payment per share against
+                # the same one a year earlier. Unwindowed like the yield above, and
+                # only beside a live projection — a payer that stopped has a last
+                # raise and no next payment for it to describe.
+                "per_share_growth_pct": (
+                    round(float(ps_growth[sid] * 100), 2)
+                    if sid in ps_growth and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
                 # True when the position wasn't held for the whole trailing year, so
