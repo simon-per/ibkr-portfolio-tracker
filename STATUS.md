@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-12.** **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Open: a 3a upload leaves the EM fund unpriced for part of its history** — see *Worth doing next*. **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-13.** **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days already missing on production come back with the next 18:00 full sync — see *Watch after the next deploy*. **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history`, no frontend — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -1008,6 +1008,16 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
+- **The EM fund's missing September prices (`CH1529078078`) — refilled by the first 18:00
+  `full_sync` on `d2411b5` or later, not by the deploy.** The fix stops an upload from losing
+  them; the rows the 2026-10-12 upload already deleted are re-derived only by the 730-day pass
+  (every other slot syncs 7 days), which since this change asks for every weekday after the
+  first NAV that has no derived row. Check after it: the value chart reports no day as not
+  fully valued from 2026-09-07 on, and `market_prices` holds a `sibling_scaled` row for each
+  weekday the sibling has a close. If the sibling fetch is rate-limited that evening it is the
+  next day's 18:00 run. The rescale itself first runs on the next finpension upload: expect no
+  "could not be moved" warning and the derived row count unchanged but for the new NAV days.
+
 - **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
   re-check waits out a running sync from the second deploy on (the first had only the margin;
   it logged `Clear of every sync slot`); still to size: whether the 45-minute bound
@@ -1337,19 +1347,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Worth doing next
 
-- **A pillar 3a upload leaves the EM fund unpriced for part of its history — found 2026-10-12,
-  open.** The importer deletes every `sibling_scaled` row of `CH1529078078` so the next sync
-  re-anchors them, and the 20:00 sync that followed (success, no error) wrote back only three
-  recent days: the value chart reports 9 days, 2026-09-16 to 09-28, as not fully valued. Before
-  the upload 19 derived rows covered 09-07 to 10-08 (`/root/ibkr-backups/2026-10-12/
-  portfolio.db.manual-165141` still has them). One cause is certain: `get_missing_dates` reads
-  the days between two statement NAVs as interior holes, and one older than
-  `HOLIDAY_GRACE_DAYS` is a "holiday" that is never asked for again. Why the days inside the
-  grace window were not refilled is not known — the container's log went with the next deploy,
-  and finding out costs a Yahoo request, which needs the owner's permission. A fix that needs no
-  Yahoo: rescale the derived rows on import by `new NAV / the row derived for that day` instead
-  of deleting them.
-
 - **The KPI audit of 2026-10-02 — low priority by owner decision (2026-10-04):** fine as long as
   the figures point the right way. Re-verify each in code before fixing; until 2026-10-04 these
   lived only in a session note.
@@ -1672,6 +1669,12 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-13 (the EM fund's price gap)** — "resume": nothing was in flight, so the one open
+  item. The unknown half needed no Yahoo request — every slot but 18:00 syncs 7 days, so a
+  deleted history could not come back that evening. The importer now rescales the derived rows
+  onto the new NAV instead of deleting them, and the holiday rule counts only derived rows for
+  a sibling fund (`d2411b5`). The production refill waits for the 18:00 full sync.
+
 - **2026-10-12 (pillar 3a upload)** — the real finpension export carrying the 10-06 buys
   imported on production: DB backed up first, dry run clean, 12 rows / 6 lots,
   `rows_restated` 2 (the two estimates replaced), both funds priced, nothing unpriced. Then
@@ -1699,19 +1702,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   self-performing, refusing switchover and a start guard), the migration-aware rollback restore, and
   the pre-restart slot re-check; merged here with one integration fix (the restore follows the new
   symlink). Push and the `/root` refresh need the owner.
-
-- **2026-10-04 (dividend forecast reads low)** — "IBKR must be the source of truth; make the
-  forecast better": found IBKR's amounts and withholding never reached the forecast (a skip placed
-  before the branch that read them; its only test used a shape production lacks) and the flat median
-  lost seasonality and raises. Owner chose "same payment one year later", carry paid raises, no
-  assumed growth. Built IBKR-first sizing, a withholding ladder, special detection, a replay CLI;
-  fixed the accrual tax sign. Live on `48b1f9c`. Then a small grey per-year "WHT" line (received +
-  expected, one figure; a DA-1 reminder), live on `882db78`; and the deploy cadence — `*/5` is
-  fine, `*/6` is worse, the durable fix is a guard before the restart (both under the headings
-  above). The owner switched the cron to `*/5` on the VPS and ran the replay: `auto` beats the old
-  median (error 12.6% vs 18.8%). Called done. Then the Analytics tab hidden at the owner's request
-  (component and endpoints kept; docs/performance-analytics.md says how to restore it). Then the
-  Swisscanto 3a look-through: EM via IEEM, World ex CH via IWDA, baskets preloaded by hand —
-  coverage 98.9%, nothing uncovered. KPI audit moved into this file, low priority by owner
-  decision. Only the post-18:00 DB check of the forecast item remains. Backend 1778, frontend
-  788 on Node 22.

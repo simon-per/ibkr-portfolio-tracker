@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-13 — a pillar 3a upload keeps the sibling-derived prices
+
+`d2411b5`, backend only, rules in `docs/pillar3a.md`, *Prices*. The importer deleted every
+`sibling_scaled` row of a sibling-priced fund for the next sync to re-derive; after the
+2026-10-12 upload the 20:00 slot (a 7-day window, like every slot but 18:00) wrote back three
+days, and `get_missing_dates` would have read the older days between two statement NAVs as
+holidays for good. Now `_reanchor_sibling_prices` multiplies the rows by `new NAV / the stored
+price for the new NAV's day` in place, and `sync_sibling_prices` counts only derived rows as
+cached. Five tests, each failing on the old code; the backend suite passes. **Not yet verified
+on production** — the refill of the days already lost needs an 18:00 full sync (STATUS.md,
+*Watch after the next deploy*).
+
 ## Shipped 2026-10-12 — the forecast history gains growth, a replayed past and a start date
 
 Three commits, all backend, rules in `docs/dividends.md`, *The forecast's history*.
