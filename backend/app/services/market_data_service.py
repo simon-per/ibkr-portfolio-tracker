@@ -706,8 +706,8 @@ class MarketDataService:
 
         where the anchor is the newest `finpension_statement` row. The level comes
         from the provider, every daily move from the sibling; the two classes differ
-        only by fee, ~0.1%/yr. The importer deletes the derived rows on every upload so
-        they re-anchor to the newest NAV, and warns when a new NAV disagrees with the
+        only by fee, ~0.1%/yr. The importer rescales the derived rows onto the newest
+        NAV on every upload, and warns when a new NAV disagrees with the
         row derived for that day — the tracking check, since a 49% level gap between
         classes is exactly what this must never mistake for a price.
 
@@ -754,9 +754,12 @@ class MarketDataService:
         # Never derive before the first observed NAV: nothing was held, and a price
         # there would be an extrapolation the read path never needs.
         start_date = max(statement_rows[0].date, end_date - timedelta(days=days_back))
+        # Only the derived rows say what the sibling has already been asked for; a
+        # statement NAV is an anchor, not a fetch (see `get_missing_dates`).
         missing = [
             d for d in await self.market_price_repo.get_missing_dates(
-                security.id, start_date, end_date
+                security.id, start_date, end_date,
+                sources=[PRICE_ROW_SOURCE_SIBLING_SCALED],
             )
             if d not in statement_dates
         ]

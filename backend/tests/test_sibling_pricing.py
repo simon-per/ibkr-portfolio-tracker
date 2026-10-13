@@ -188,6 +188,32 @@ async def test_a_second_run_writes_only_what_is_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_old_days_between_two_statement_navs_are_still_asked_for(monkeypatch):
+    """
+    A statement NAV is an anchor, not evidence of a fetch. Counted as "cached data on
+    both sides", two NAVs weeks apart turned every day between them into a market
+    holiday once it was HOLIDAY_GRACE_DAYS old, and those days were never derived.
+    """
+    engine, session = await _session()
+    try:
+        first_nav = _weekday(70)
+        security = await _fund(session, navs=[(first_nav, Decimal("118")), (ANCHOR, NAV)])
+        service = MarketDataService(session)
+        closes = _sibling_closes(first_nav - timedelta(days=10), date.today())
+        _stub_fetch(monkeypatch, service, closes)
+
+        await service.sync_sibling_prices(security, days_back=730)
+
+        derived = {r.date for r in await _rows(session, PRICE_ROW_SOURCE_SIBLING_SCALED)}
+        expected = {r["date"] for r in closes if r["date"] > first_nav and r["date"] != ANCHOR}
+        assert _weekday(50) in expected
+        assert derived == expected
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_a_sibling_in_another_currency_is_refused_whole(monkeypatch):
     """An FX move would ride into the ratio and be read as the fund moving."""
     engine, session = await _session()

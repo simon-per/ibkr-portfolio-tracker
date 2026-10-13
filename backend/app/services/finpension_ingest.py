@@ -214,6 +214,82 @@ async def _sibling_tracking_warnings(db, report, security_ids: Dict[str, int]) -
     return warnings
 
 
+async def _reanchor_sibling_prices(
+    db, report, security_ids: Dict[str, int]
+) -> Tuple[set, List[str]]:
+    """
+    Move a sibling-priced fund's derived rows onto the newest NAV in this file, in
+    place. Returns the security ids whose rows were kept, and any warnings.
+
+    The derived rows are `NAV(old anchor) × sibling(t) / sibling(old anchor)`, and the
+    next sync would write `NAV(new anchor) × sibling(t) / sibling(new anchor)`. Those
+    differ by one constant, and it needs no sibling close to compute:
+
+        factor = NAV(new anchor) / the stored price for the new anchor's day
+
+    where the stored price is the row derived for that day, or the previous anchor
+    itself when the file brings no newer NAV (factor 1, or the correction when an
+    estimated NAV is replaced by the real one).
+
+    The rows used to be deleted here for the next sync to re-derive, and that lost
+    history twice over (found 2026-10-12, nine September days unvalued): every slot but
+    the 18:00 one syncs a 7-day window, so only the last few days came back, and
+    `get_missing_dates` read the days between two statement NAVs as market holidays
+    once they were 30 days old. Rescaling keeps every day and asks Yahoo nothing.
+
+    Without a stored price on the new anchor's day there is no factor, so that fund's
+    rows are deleted as before and the upload says so. Must run before the wholesale
+    replace: it reads the statement row the replace deletes.
+    """
+    kept: set = set()
+    warnings: List[str] = []
+    for isin, security_id in security_ids.items():
+        security = await db.get(Security, security_id)
+        if security is None or security.price_source != PRICE_SOURCE_SIBLING:
+            continue
+        navs = {row.row_date: row.price_chf for row in report.rows
+                if row.kind == TRADE and row.isin == isin}
+        derived = list((await db.execute(
+            select(MarketPrice).where(
+                MarketPrice.security_id == security_id,
+                MarketPrice.source == PRICE_ROW_SOURCE_SIBLING_SCALED,
+            )
+        )).scalars().all())
+        if not navs or not derived:
+            continue
+
+        anchor_date = max(navs)
+        old_anchor = (await db.execute(
+            select(MarketPrice).where(
+                MarketPrice.security_id == security_id,
+                MarketPrice.source == PRICE_SOURCE_STATEMENT,
+            ).order_by(MarketPrice.date.desc()).limit(1)
+        )).scalar_one_or_none()
+        reference = next((row.close_price for row in derived if row.date == anchor_date), None)
+        if reference is None and old_anchor is not None and old_anchor.date == anchor_date:
+            reference = old_anchor.close_price
+        if not reference:
+            warnings.append(
+                f"{isin}: no stored price on {anchor_date}, the day of the newest NAV, "
+                f"so its {len(derived)} sibling-derived price(s) could not be moved onto "
+                f"that NAV and were removed. The 18:00 sync re-derives them; until then "
+                f"days between the statement NAVs may read as unpriced."
+            )
+            continue
+
+        factor = navs[anchor_date] / reference
+        first_nav = min(navs)
+        for row in derived:
+            # A NAV day belongs to the statement row, and nothing is derived before
+            # the first NAV — the two rules `sync_sibling_prices` writes under.
+            if row.date in navs or row.date < first_nav:
+                await db.delete(row)
+            elif factor != 1:
+                row.close_price = (row.close_price * factor).quantize(Decimal("0.000001"))
+        kept.add(security_id)
+    return kept, warnings
+
+
 async def _last_parsed_row_count(db, account: str) -> Optional[int]:
     """
     How many rows the previous successful import of this account *parsed*.
@@ -339,6 +415,8 @@ async def ingest_finpension_report(
 
     # --- Sibling tracking check, before the replace removes the evidence ------------
     warnings.extend(await _sibling_tracking_warnings(db, report, security_ids))
+    reanchored, reanchor_warnings = await _reanchor_sibling_prices(db, report, security_ids)
+    warnings.extend(reanchor_warnings)
 
     # --- Wholesale replace -------------------------------------------------------
     ids = list(security_ids.values())
@@ -346,14 +424,19 @@ async def ingest_finpension_report(
         await db.execute(delete(TaxLot).where(TaxLot.security_id.in_(ids)))
         # Only our own price rows. A fund later validated onto Yahoo keeps its Yahoo
         # bars, which are better than anything this file can supply. Sibling-derived
-        # rows are ours too: they were scaled to the *previous* newest NAV, and the next
-        # market-data sync re-derives them from whatever this file makes the newest.
+        # rows are ours too: they were scaled to the *previous* newest NAV, so they
+        # were just moved onto the one this file makes the newest — and where that
+        # was not possible they go, for the next full sync to re-derive.
         await db.execute(delete(MarketPrice).where(
             MarketPrice.security_id.in_(ids),
-            MarketPrice.source.in_([
-                PRICE_SOURCE_STATEMENT, PRICE_SOURCE_CARRY, PRICE_ROW_SOURCE_SIBLING_SCALED,
-            ]),
+            MarketPrice.source.in_([PRICE_SOURCE_STATEMENT, PRICE_SOURCE_CARRY]),
         ))
+        stale = [sid for sid in ids if sid not in reanchored]
+        if stale:
+            await db.execute(delete(MarketPrice).where(
+                MarketPrice.security_id.in_(stale),
+                MarketPrice.source == PRICE_ROW_SOURCE_SIBLING_SCALED,
+            ))
     await db.execute(delete(Trade).where(Trade.account == account))
     await db.execute(delete(CashFlow).where(CashFlow.account == account))
     await db.flush()

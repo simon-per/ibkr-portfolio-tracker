@@ -597,32 +597,125 @@ from app.models.security import PRICE_SOURCE_SIBLING
 from app.services.finpension_ingest import purge_carried_prices
 
 
-@pytest.mark.asyncio
-async def test_a_sibling_priced_fund_gets_no_carry_and_its_derived_rows_are_reanchored(db):
-    """
-    The derived rows were scaled to the *previous* newest NAV. An upload that brings a
-    newer one makes them stale by construction, so the replace drops them and the next
-    market-data sync re-derives from the new anchor; the statement rows it keeps are
-    those anchors. And no carry: the sibling supplies every day, bounded by nothing.
-    """
+_WITH_A_SECOND_EM_BUY = (
+    ("2026-08-25", "Deposit", "256.000000", "256.000000", {}),
+    ("2026-08-26", "Deposit", "1002.000000", "1258.000000", {}),
+    ("2026-08-28", "Deposit", "500.000000", "1758.000000", {}),
+    ("2026-09-01", "Buy", "-438.141980", "1319.858020",
+     dict(name="Swisscanto EM", isin=EM, shares="3.615000", price="121.201101")),
+    ("2026-09-01", "Buy", "-1299.834434", "20.023586",
+     dict(name="Swisscanto World ex CH", isin=WORLD, shares="2.898000", price="448.528100")),
+    ("2026-09-04", "Deposit", "500.000000", "520.023586", {}),
+    ("2026-09-05", "Buy", "-500.000000", "20.023586",
+     dict(name="Swisscanto EM", isin=EM, shares="4.000000", price="125.000000")),
+)
+
+
+def _second_em_buy_file():
+    return _file(*(_row(*args, **kwargs) for *args, kwargs in _WITH_A_SECOND_EM_BUY))
+
+
+async def _sibling_em(db, derived):
+    """REAL_SHAPE imported, the EM fund switched to sibling pricing, `derived` rows stored."""
     await _apply(db, REAL_SHAPE)
     await db.commit()
     em = (await _rows(db, Security, isin=EM))[0]
     em.price_source = PRICE_SOURCE_SIBLING
     await purge_carried_prices(db, em.id)      # what `manage_mappings set --sibling` does
-    db.add(MarketPrice(security_id=em.id, date=date(2026, 9, 3), close_price=Decimal("122.10"),
-                       currency="CHF", source=PRICE_ROW_SOURCE_SIBLING_SCALED))
+    for when, price in derived:
+        db.add(MarketPrice(security_id=em.id, date=when, close_price=Decimal(price),
+                           currency="CHF", source=PRICE_ROW_SOURCE_SIBLING_SCALED))
     await db.commit()
+    return em
 
-    await _apply(db, REAL_SHAPE)
+
+@pytest.mark.asyncio
+async def test_a_sibling_priced_fund_gets_no_carry_and_keeps_its_derived_rows(db):
+    """
+    An upload that brings no newer NAV leaves the derived rows exactly as they are —
+    they are already scaled to the anchor this file restates. They used to be deleted
+    for the next sync to re-derive, and every slot but one syncs a 7-day window. And no
+    carry: the sibling supplies every day, bounded by nothing.
+    """
+    em = await _sibling_em(db, [(date(2026, 9, 3), "122.100000")])
+
+    result = await _apply(db, REAL_SHAPE)
     await db.commit()
 
     prices = await _rows(db, MarketPrice, security_id=em.id)
-    sources = {p.source for p in prices}
-    assert PRICE_SOURCE_STATEMENT in sources
-    assert PRICE_ROW_SOURCE_SIBLING_SCALED not in sources, "stale derived rows must go"
-    assert PRICE_SOURCE_CARRY not in sources, "a sibling-priced fund is never carried"
+    assert {(p.date, p.source, p.close_price) for p in prices} == {
+        (date(2026, 9, 1), PRICE_SOURCE_STATEMENT, Decimal("121.201101")),
+        (date(2026, 9, 3), PRICE_ROW_SOURCE_SIBLING_SCALED, Decimal("122.100000")),
+    }
+    assert not [w for w in result["warnings"] if "sibling" in w]
     assert (await db.get(Security, em.id)).price_source == PRICE_SOURCE_SIBLING  # never unpinned
+
+
+@pytest.mark.asyncio
+async def test_a_newer_nav_moves_every_derived_row_onto_it(db):
+    """
+    Re-deriving from the new anchor multiplies every derived row by one constant:
+    the new NAV over the price derived for its day. So the importer applies it, and
+    the days between the NAVs stay priced without a Yahoo request. The NAV day itself
+    becomes the statement row.
+    """
+    em = await _sibling_em(db, [
+        (date(2026, 9, 3), "122.000000"),
+        (date(2026, 9, 5), "124.400000"),     # 0.48% under the NAV this file brings
+        (date(2026, 9, 8), "126.000000"),
+    ])
+
+    result = await _apply(db, _second_em_buy_file())
+    await db.commit()
+
+    factor = Decimal("125.000000") / Decimal("124.400000")
+    prices = {p.date: (p.source, p.close_price)
+              for p in await _rows(db, MarketPrice, security_id=em.id)}
+    assert prices == {
+        date(2026, 9, 1): (PRICE_SOURCE_STATEMENT, Decimal("121.201101")),
+        date(2026, 9, 3): (PRICE_ROW_SOURCE_SIBLING_SCALED,
+                           (Decimal("122") * factor).quantize(Decimal("0.000001"))),
+        date(2026, 9, 5): (PRICE_SOURCE_STATEMENT, Decimal("125.000000")),
+        date(2026, 9, 8): (PRICE_ROW_SOURCE_SIBLING_SCALED,
+                           (Decimal("126") * factor).quantize(Decimal("0.000001"))),
+    }
+    assert not [w for w in result["warnings"] if "sibling" in w]
+
+
+@pytest.mark.asyncio
+async def test_a_restated_anchor_nav_rescales_by_the_correction(db):
+    """An estimated NAV replaced by the real one, same day: factor = real / estimate."""
+    em = await _sibling_em(db, [(date(2026, 9, 3), "122.000000")])
+
+    rows = [list(r) for r in _WITH_A_SECOND_EM_BUY[:6]]
+    rows[3][4] = dict(rows[3][4], price="120.000000")
+    await _apply(db, _file(*(_row(*args, **kwargs) for *args, kwargs in rows)))
+    await db.commit()
+
+    derived = [p for p in await _rows(db, MarketPrice, security_id=em.id)
+               if p.source == PRICE_ROW_SOURCE_SIBLING_SCALED]
+    assert [(p.date, p.close_price) for p in derived] == [(
+        date(2026, 9, 3),
+        (Decimal("122") * Decimal("120") / Decimal("121.201101")).quantize(Decimal("0.000001")),
+    )]
+
+
+@pytest.mark.asyncio
+async def test_derived_rows_with_no_price_on_the_new_anchor_day_are_removed_and_said_so(db):
+    """
+    No stored price on the newest NAV's day means no factor. A row left on the old
+    scale would be a wrong price that looks like a right one, so the rows go — and
+    the upload names it, because days will read as unpriced until the next full sync.
+    """
+    em = await _sibling_em(db, [(date(2026, 9, 3), "122.000000")])
+
+    result = await _apply(db, _second_em_buy_file())
+    await db.commit()
+
+    prices = await _rows(db, MarketPrice, security_id=em.id)
+    assert all(p.source != PRICE_ROW_SOURCE_SIBLING_SCALED for p in prices)
+    said = [w for w in result["warnings"] if "could not be moved" in w]
+    assert len(said) == 1 and EM in said[0] and "2026-09-05" in said[0]
 
 
 @pytest.mark.asyncio

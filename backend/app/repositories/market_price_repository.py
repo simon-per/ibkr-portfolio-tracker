@@ -2,7 +2,7 @@
 MarketPrice Repository
 Handles database operations for historical market prices.
 """
-from typing import List, Optional
+from typing import Collection, List, Optional
 from datetime import date, timedelta
 from sqlalchemy import select, and_, delete, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -91,6 +91,7 @@ class MarketPriceRepository:
     async def get_missing_dates(
         self, security_id: int, start_date: date, end_date: date,
         as_of: Optional[date] = None,
+        sources: Optional[Collection[str]] = None,
     ) -> List[date]:
         """
         Dates in range that need fetching: no cached price, or a provisional one.
@@ -107,6 +108,12 @@ class MarketPriceRepository:
         price rather than a close. The two rules cannot collide: the holiday rule
         needs a date older than 30 days and this one needs it newer than 3.
 
+        ``sources`` narrows which rows count as cached, for a security whose rows
+        do not all come from the feed being asked. A sibling-priced fund's statement
+        NAVs sit weeks apart, and counted as "cached data on both sides" they turned
+        every day between two of them into a holiday after 30 days — days no fetch
+        had ever been tried for, never asked for again (found 2026-10-12).
+
         ``as_of`` is injectable purely for tests.
         """
         as_of = as_of or date.today()
@@ -118,7 +125,8 @@ class MarketPriceRepository:
                 and_(
                     MarketPrice.security_id == security_id,
                     MarketPrice.date >= start_date,
-                    MarketPrice.date <= end_date
+                    MarketPrice.date <= end_date,
+                    *([MarketPrice.source.in_(sources)] if sources is not None else []),
                 )
             )
         )

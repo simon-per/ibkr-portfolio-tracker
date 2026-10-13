@@ -188,9 +188,21 @@ before the first NAV; never writes over a statement row. Rows are tagged
 `sibling_scaled`. **No carry** for such a fund — the sibling supplies every day — and no
 horizon, so an upload is needed only for the *transactions* it brings.
 
-Two guards keep it honest. The importer **deletes the derived rows on every upload** (they
-were scaled to the previous newest NAV; the next sync re-derives from the new one) and
-**checks the tracking first**: for each new transaction NAV that has a derived row on the
+Two guards keep it honest. The importer **moves the derived rows onto the newest NAV on every
+upload** (`_reanchor_sibling_prices`) and **checks the tracking first**. The rows were scaled to
+the previous newest NAV, and re-deriving them from the new one multiplies each by a single
+constant — `new NAV / the stored price for the new NAV's day` (the row derived for that day, or
+the previous anchor when the file brings no newer NAV) — so the importer applies it in place: no
+Yahoo request, and no day loses its price. Until 2026-10-13 it deleted them for the next sync to
+re-derive, which left nine September days unvalued after the 2026-10-12 upload, for two reasons
+that are both still worth knowing: **every slot but the 18:00 `full_sync` syncs a 7-day window**,
+so only the last few days came back that evening; and `get_missing_dates` counted the statement
+NAVs as cached data on both sides, so a day between two of them became a "holiday" at
+`HOLIDAY_GRACE_DAYS` and was never asked for at all. The second is fixed at its root —
+`sync_sibling_prices` passes `sources=[sibling_scaled]`, so only derived rows say what the
+sibling has been asked for. With no stored price on the new NAV's day there is no factor: that
+fund's derived rows are deleted, the upload warns, and the next `full_sync` re-derives them.
+The tracking check: for each new transaction NAV that has a derived row on the
 same day, a gap past `NAV_TOLERANCE_PCT` is a warning naming the size — the sibling stopped
 moving like the fund, or the mapping points at the wrong class — while the import still
 lands, because re-anchoring is the repair. And `manage_mappings set … --sibling` is the only
