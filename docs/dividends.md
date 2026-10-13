@@ -869,8 +869,8 @@ rewrite exists for — one series sliced two ways must give two answers.
 and "is the forward income growing?" had no answer. Now every job that reprices
 (`full_sync`, `market_data_only`) ends by calling `SchedulerService.record_dividend_forecast`,
 which stores one row per **UTC date** — the next twelve months and the trailing twelve — and
-`GET /api/dividends/forecast-history` returns the series. No frontend reads it yet, by the
-owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
+`GET /api/dividends/forecast-history` returns the series, and the Dividends tab draws it
+(`DividendForecastTrend`, since 2026-10-13). Pure DB on both sides: no Yahoo, no IBKR.
 
 - **One implementation.** `record_forecast_snapshot` stores `get_dividend_breakdown`'s own
   `growth` block, asked for in EUR through an identity `BaseFx` (the `base_fx` parameter exists
@@ -918,5 +918,71 @@ owner's choice. Pure DB on both sides: no Yahoo, no IBKR.
 
 Tests: `tests/test_dividend_forecast_snapshot.py`, plus the wiring cases at the end of
 `tests/test_scheduler_jobs.py`.
+
+### What the forecast's growth was made of — `dividend_forecast_snapshot_lines`
+
+Since 2026-10-13. Two totals a day cannot say why the figure moved, and on a book still
+being funded the answer is nearly always "shares were bought" — which is why `growth_from`
+had to exist at all. The owner's brief: track the forecast from a reliable baseline, see
+that it keeps growing, and have the breakdown available without it being the loud part.
+
+- **One line per security HELD that day**, payer or not: `shares`, its part of
+  `next_12m_eur`, its `currency` and the `fx_to_eur` rate it was sized at. They are
+  `get_dividend_breakdown`'s own `forecast_by_security` (served on the breakdown for that
+  reason), written in the same transaction as the total, so there is still one sum. A holding
+  that forecasts nothing is a zero line, never an absent one: the split has to tell "held,
+  and its first forecast appeared" from "bought".
+- **The split is arithmetic** (`app/services/dividend_forecast_attribution.py`). Per
+  holding, with `q` shares, `n` the next twelve months per share in its own currency and `g`
+  that currency in the base currency: `shares = (q1-q0)·n0·g0`, `payout = q1·(n1-n0)·g0`,
+  `fx = q1·n1·(g1-g0)`. A position opened or closed is `shares` whole; a holding kept
+  throughout whose forecast appears or goes is `newly_forecast`; a share count that jumps
+  while the holding's forecast in its own currency does not is a split and is neither.
+- **Chained day to day and accumulated from `growth_from`**, so shares are valued at the
+  payout of the day they were bought. Each point of the history carries
+  `next_12m_since_start_pct` and `breakdown` (`since`, the four parts, `unattributed`), in
+  the base currency. `since` is later than the start only while earlier days have no lines.
+- **`unattributed` is reported, never spread.** It is the change minus the four parts. On
+  a day recorded with its lines it is rounding; the days recorded between 2026-10-07 and
+  this change have a recorded total and replayed lines, and carry the gap there.
+- **`payout` is per share AND timing.** `n` is whatever falls inside the 365-day window, so
+  a payment entering or leaving it, or one that drops out of the forecast while overdue,
+  moves `n` with no company having changed its dividend. It can be negative on a book
+  whose payers all raised. The measure of raises is the per-share figure below.
+- **Lines follow the parent's replay rule on their own** (`fill_lines`): replayed lines
+  never replace recorded ones, and they are the only lines a day recorded before the table
+  existed will ever get. The backfill writes them without touching that day's total.
+- **The surface is one line and a sentence** (`lib/dividendForecastTrend.ts`). Nothing
+  before `growth_from` is drawn; a part under half a unit of the base currency is not
+  printed, the residual included; replayed days are shaded and named under the chart.
+
+Tests: `tests/test_dividend_forecast_attribution.py`, the lines and breakdown cases in
+`tests/test_dividend_forecast_snapshot.py`, `lib/dividendForecastTrend.test.ts`.
+
+### Per-share growth — the payer's own
+
+Since 2026-10-13. `per_share_growth_pct` on each row of the per-holding table and
+`growth.per_share` for the book: the only growth figures on the tab that do not move when
+shares are bought, and (one rate converts a security's whole history) not with exchange
+rates either. `dividend_forecast.per_share_growth`, over the same regular payments the
+projection is sized from (`regular_payments`, one preparation for both).
+
+- **Two shapes, the two the sizing already tells apart.** A steady payer (`is_steady`):
+  its newest regular payment against the same payment a year earlier. A varying payer: its
+  trailing year against the year before, each payment matched to its own slot. Measured on
+  production before shipping: VT's newest distribution against the same one a year earlier
+  read -14.6% while its four distributions together had grown 3.4%; one payment against one
+  is noise on a fund.
+- **Unknown, not 0%**: no cadence, or a payment with nothing a year back. A varying payer
+  therefore needs two years of history. Specials are on neither side; a declared, unpaid
+  dividend counts as the newest payment.
+- **The book figure is not an average of the rates.** It is today's forecast over what the
+  same shares would have paid at each payer's level a year earlier
+  (`_book_per_share_growth`). The income-weighted mean weights a rate by the income AFTER
+  the raise: NVDA's 0.01 to 0.25 a share, about a hundredth of the income, made that mean
+  read 45% on production. `covered_pct` says how much of the forecast the figure is
+  measured over; the rest is left out, not counted as 0%.
+
+Tests: `tests/test_dividend_per_share_growth.py`.
 
 ---
