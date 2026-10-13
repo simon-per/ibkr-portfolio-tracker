@@ -1632,10 +1632,16 @@ class DividendService:
         next_12m: Decimal,
     ) -> Optional[Dict]:
         """
-        The payers' own growth, for the book: each one's `per_share_growth` weighted by
-        its share of the next twelve months. It answers "how much would this income
-        grow if nothing more were bought", which the totals cannot — on a book still
-        being funded they grow mostly by purchases.
+        The payers' own growth, for the book: what today's shares are forecast to pay
+        over what the same shares would have paid at each payer's level a year earlier.
+        It answers "how much did this income grow without a purchase", which the
+        totals cannot — on a book still being funded they grow mostly by purchases.
+
+        NOT the average of the payers' rates weighted by income. That weights a rate by
+        the income AFTER the raise, so one small payer with an enormous rate carries
+        the figure: measured on production, NVDA's step from 0.01 to 0.25 a share
+        (+2400%, about a hundredth of the income) made that average read 45%. Dividing
+        each payer's income back by its own growth weights it by what it paid before.
 
         Over the payers that HAVE a figure, with the share of the forecast they cover
         beside it: a payer held under a year has none, and counting it as 0% would
@@ -1649,11 +1655,12 @@ class DividendService:
         covered_income = sum(covered.values(), Decimal("0"))
         if covered_income <= 0 or next_12m <= 0:
             return None
-        weighted = sum(
-            (income * ps_growth[sid] for sid, income in covered.items()), Decimal("0")
+        year_ago = sum(
+            (income / (1 + ps_growth[sid]) for sid, income in covered.items()),
+            Decimal("0"),
         )
         return {
-            "pct": round(float(weighted / covered_income * 100), 2),
+            "pct": round(float((covered_income / year_ago - 1) * 100), 2),
             "covered_pct": round(float(covered_income / next_12m * 100), 1),
             "payers": len(covered),
         }

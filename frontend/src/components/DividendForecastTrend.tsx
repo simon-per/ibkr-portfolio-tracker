@@ -102,10 +102,12 @@ export function DividendForecastTrend({ perShare }: DividendForecastTrendProps) 
             <YAxis
               className="text-xs"
               tick={{ fill: 'hsl(var(--muted-foreground))' }}
-              tickFormatter={(value: number) => `${curSym}${Math.round(value)}`}
+              // The headline carries the currency; on a phone the axis has no room to repeat it.
+              tickFormatter={(value: number) =>
+                isCompact ? String(Math.round(value)) : `${curSym}${Math.round(value)}`}
               domain={axis.domain}
               ticks={axis.ticks}
-              width={isCompact ? 44 : 56}
+              width={isCompact ? 40 : 72}
             />
             {trend.replayed && (
               <ReferenceArea
@@ -158,7 +160,7 @@ export function DividendForecastTrend({ perShare }: DividendForecastTrendProps) 
             <span className="tabular-nums">
               {perShare.pct > 0 ? '+' : ''}{perShare.pct.toFixed(1)}%
             </span>
-            {' '}(covers {perShare.covered_pct.toFixed(0)}% of the forecast).
+            {' '}(covers {Math.floor(perShare.covered_pct)}% of the forecast).
           </p>
         )}
         {trend.replayed && (

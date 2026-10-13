@@ -2,10 +2,11 @@
 The payer's own dividend growth (docs/dividends.md, *Per-share growth*).
 
 Every other growth figure on the Dividends tab moves when shares are bought, and on a
-book still being funded that is most of the movement. This one is per share: the newest
-regular payment against the same payment a year earlier. The ways it could lie are a
-seasonal fund read as a cut, a special read as a raise, and a payer with no year of
-history reported as 0%.
+book still being funded that is most of the movement. This one is per share: a steady
+payer's newest regular payment against the same payment a year earlier, a varying
+payer's trailing year against the year before. The ways it could lie are one noisy
+fund distribution read as a cut, a special read as a raise, and a payer with too
+little history reported as 0%.
 """
 from datetime import date
 from decimal import Decimal
@@ -46,13 +47,34 @@ def test_a_raise_is_measured_against_the_same_payment_a_year_earlier():
     assert per_share_growth(history) == Decimal("0.10")
 
 
-def test_a_seasonal_funds_small_quarter_is_not_a_cut():
-    """March after a large December: compared with last March, it grew."""
+def test_a_varying_payer_is_measured_over_its_whole_year():
+    """
+    VT's shape: the newest distribution is 15% below the same one a year earlier, and
+    the four together grew. One payment against one would report the noise.
+    """
+    history = _series(_quarters([2024, 2025], [
+        ["0.30", "0.45", "0.36", "0.67"],
+        ["0.25", "0.43", "0.31", "0.85"],
+    ]))
+    growth = per_share_growth(history)
+    assert round(growth, 4) == Decimal("0.0337")       # 1.84 / 1.78
+    # The payments wobble by days from year to year and still find their slot.
+    wobbled = _series([
+        (date(2024, 3, 22), "0.30"), (date(2024, 6, 20), "0.45"),
+        (date(2024, 9, 20), "0.36"), (date(2024, 12, 27), "0.67"),
+        (date(2025, 3, 21), "0.25"), (date(2025, 6, 18), "0.43"),
+        (date(2025, 9, 18), "0.31"), (date(2025, 12, 12), "0.85"),
+    ])
+    assert per_share_growth(wobbled) == growth
+
+
+def test_a_varying_payer_without_two_years_is_unknown():
+    """Five payments: the trailing year has no full year before it to stand against."""
     history = _series(_quarters([2025, 2026], [
         ["0.40", "0.70", "0.45", "0.90"],
         ["0.42"],
     ]))
-    assert per_share_growth(history) == Decimal("0.05")
+    assert per_share_growth(history) is None
 
 
 def test_a_cut_is_negative():
@@ -174,3 +196,23 @@ async def test_without_a_projection_there_is_no_growth_figure():
     finally:
         await session.close()
         await engine.dispose()
+
+
+def test_one_enormous_rate_on_a_small_payer_does_not_carry_the_book():
+    """
+    NVDA's shape: 0.01 to 0.25 a share is +2400% on about 2% of the income. Averaging
+    the rates by income reads 56.7% here; the income of today's shares over what they
+    paid a year earlier is 12.1%.
+    """
+    growth = {1: Decimal("0.10"), 2: Decimal("24")}
+    income = {1: Decimal("100"), 2: Decimal("2")}
+    figure = DividendService._book_per_share_growth(growth, income, Decimal("102"))
+    assert figure == {"pct": 12.1, "covered_pct": 100.0, "payers": 2}
+
+
+def test_a_payer_without_a_forecast_is_not_in_the_book_figure():
+    growth = {1: Decimal("0.10"), 2: Decimal("0.50")}
+    income = {1: Decimal("100")}
+    figure = DividendService._book_per_share_growth(growth, income, Decimal("125"))
+    assert figure == {"pct": 10.0, "covered_pct": 80.0, "payers": 1}
+    assert DividendService._book_per_share_growth({}, income, Decimal("125")) is None

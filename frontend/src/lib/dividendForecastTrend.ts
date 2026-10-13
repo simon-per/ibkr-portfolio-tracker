@@ -26,7 +26,7 @@ export type ForecastPartKey = Exclude<keyof DividendForecastChange, 'since'>
 /** Display order: the cause that dominates first, the residual last. */
 const PART_LABELS: [ForecastPartKey, string][] = [
   ['shares', 'shares bought'],
-  ['payout', 'payout per share'],
+  ['payout', 'payouts and timing'],
   ['newly_forecast', 'newly forecast'],
   ['fx', 'currency'],
   ['unattributed', 'unexplained'],

@@ -77,7 +77,7 @@ describe('DividendForecastTrend', () => {
     expect(section.textContent).toContain('since Aug 28')
     expect(section.textContent).toContain('+20%')
     // The parts that round to nothing are not printed, the residual among them.
-    expect(section.textContent).toMatch(/Of the change:.*shares bought.*payout per share.*currency/)
+    expect(section.textContent).toMatch(/Of the change:.*shares bought.*payouts and timing.*currency/)
     expect(section.textContent).not.toContain('newly forecast')
     expect(section.textContent).not.toContain('unexplained')
     expect(section.textContent).toContain('+6.3% (covers 81% of the forecast)')

@@ -289,16 +289,24 @@ def regular_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayme
 
 def per_share_growth(history: Sequence[HistPayment]) -> Optional[Decimal]:
     """
-    How much the payout per share grew over a year, as a fraction (0.10 = +10%): the
-    newest regular payment against the same payment a year earlier.
+    How much the payout per share grew over a year, as a fraction (0.10 = +10%).
 
-    The same slot rather than the payment before, for the reason `_size_for` repeats
-    last year's: a fund's small March after its large December is its shape, not a
-    cut. Specials are on neither side. A declared and unpaid dividend counts as the
-    newest payment, since the history carries it — a raise shows the day IBKR lists it.
+    Two shapes, the same two the sizing tells apart (`is_steady`):
 
-    None when there is no cadence, or no payment a year back to compare with: under a
-    year of history is "not known yet", never 0%.
+    - **A steady payer** — level payments and the occasional raise or cut: its newest
+      regular payment against the same payment a year earlier. The level is the
+      news, and one payment carries it.
+    - **A varying payer** — a fund, a company with interims around a final: its
+      trailing year of payments against the year before, each payment matched to its
+      own slot a year back. One payment against one is mostly noise there: measured
+      on production, VT's September distribution read -14.6% against the September
+      before while its four distributions together had grown 3.4%.
+
+    Specials are on neither side. A declared and unpaid dividend counts as the newest
+    payment, since the history carries it — a raise shows the day IBKR lists it.
+
+    None when there is no cadence, or a payment with nothing a year back to compare
+    with: too little history is "not known yet", never 0%.
 
     Currency-neutral so long as the history was converted at one rate, which is how
     `DividendService._forecast_inputs` builds it.
@@ -310,12 +318,23 @@ def per_share_growth(history: Sequence[HistPayment]) -> Optional[Decimal]:
     if not regular:
         return None
     latest = regular[-1]
-    year_ago = _nearest(
-        regular, _one_year_back(latest.on_date), _slot_tolerance(gap), exclude=latest
-    )
-    if year_ago is None:
+    tol = _slot_tolerance(gap)
+    if is_steady(regular):
+        recent = [latest]
+    else:
+        # Everything after the slot a year back from the newest payment: one cycle.
+        cutoff = _one_year_back(latest.on_date) + timedelta(days=tol)
+        recent = [p for p in regular if p.on_date > cutoff]
+    before = [
+        _nearest(regular, _one_year_back(p.on_date), tol, exclude=p) for p in recent
+    ]
+    if any(p is None for p in before):
         return None
-    return latest.per_share_eur / year_ago.per_share_eur - 1
+    return (
+        sum((p.per_share_eur for p in recent), Decimal("0"))
+        / sum((p.per_share_eur for p in before), Decimal("0"))
+        - 1
+    )
 
 
 def _size_for(d: date, regular: Sequence[HistPayment], gap: int, sizing: str,

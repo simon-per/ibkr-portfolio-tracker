@@ -688,8 +688,9 @@ class DividendRecentPace(BaseModel):
 
 class DividendPerShareGrowth(BaseModel):
     """
-    The payers' own growth for the whole book: each `per_share_growth_pct` weighted by
-    its share of the next twelve months — the growth that needs no purchase.
+    The payers' own growth for the whole book: what today's shares are forecast to pay
+    over what they would have paid at each payer's level a year earlier — the growth
+    that needs no purchase. Not an income-weighted mean of the rates; see the service.
     """
     pct: float
     # How much of `next_12m_eur` comes from the payers `pct` is measured over. The

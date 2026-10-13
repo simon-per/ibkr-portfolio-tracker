@@ -940,8 +940,9 @@ export interface DividendGrowth {
 }
 
 /**
- * The payers' own growth for the whole book: each holding's `per_share_growth_pct`
- * weighted by its share of the next twelve months — the growth that needs no purchase.
+ * The payers' own growth for the whole book: what today's shares are forecast to pay
+ * over what they would have paid at each payer's level a year earlier — the growth that
+ * needs no purchase.
  */
 export interface DividendPerShareGrowth {
   pct: number;
