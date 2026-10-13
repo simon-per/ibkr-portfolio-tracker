@@ -15,6 +15,11 @@ rates and payments of that day, under today's rules.
 - **Never over a recorded day.** It stops the day before the first recorded snapshot,
   and the repository refuses to replace a recorded row regardless. Re-running it
   replaces its own earlier rows, which is the point after a change to the forecast.
+- **A recorded day without per-security lines gets replayed ones.** The lines table
+  (`dividend_forecast_snapshot_lines`) is younger than the recorder, so the days
+  recorded in between have a total and nothing behind it. Their lines are replayed and
+  flagged; the recorded total is not touched, and the history serves whatever
+  separates the two as `unattributed`.
 - **It measures itself.** The first recorded days are replayed too and printed beside
   what was recorded: that gap is how far a replay sits from the real thing.
 - **Whole or nothing.** Every day is computed before the first is written, in one
@@ -65,8 +70,10 @@ async def backfill(db, start: date, dry_run: bool = False) -> Dict:
     Replay ``start`` up to the day before the first recorded snapshot and store the
     result (unless ``dry_run``). The caller commits.
 
-    Returns ``{"rows": [...], "skipped": n, "overlap": [...], "through": date}``,
-    where ``overlap`` pairs a replay with the figure recorded on the same day.
+    Returns ``{"rows": [...], "skipped": n, "overlap": [...], "through": date,
+    "lines_filled": [...]}``, where ``overlap`` pairs a replay with the figure
+    recorded on the same day and ``lines_filled`` names the recorded days whose
+    missing lines were replayed.
     """
     repo = DividendForecastSnapshotRepository(db)
     recorded = [r for r in await repo.get_all() if not r.reconstructed]
@@ -90,19 +97,33 @@ async def backfill(db, start: date, dry_run: bool = False) -> Dict:
             rows.append(figures)
         day += timedelta(days=1)
 
+    # Replays of recorded days: the first few for the comparison, and every one that
+    # has no lines yet. One replay per day serves both.
+    with_lines = await repo.dates_with_lines()
+    unlined = [r.snapshot_date for r in recorded if r.snapshot_date not in with_lines]
+    replays: Dict[date, Optional[Dict]] = {}
+    for day in [r.snapshot_date for r in recorded[:OVERLAP_DAYS]] + unlined:
+        if day not in replays:
+            replays[day] = await service.forecast_figures(day, replay=True)
+
     overlap: List[Dict] = []
     for r in recorded[:OVERLAP_DAYS]:
-        figures = await service.forecast_figures(r.snapshot_date, replay=True)
+        figures = replays[r.snapshot_date]
         overlap.append({
             "date": r.snapshot_date,
             "recorded": r.next_12m_eur,
             "replayed": figures["next_12m_eur"] if figures else None,
         })
+    lines_filled = [day for day in unlined if replays[day] is not None]
 
     if not dry_run:
         for figures in rows:
-            await repo.upsert_reconstructed(figures)
-    return {"rows": rows, "skipped": skipped, "overlap": overlap, "through": through}
+            totals = {k: v for k, v in figures.items() if k != "lines"}
+            await repo.upsert_reconstructed(totals, lines=figures["lines"])
+        for day in lines_filled:
+            await repo.fill_lines(day, replays[day]["lines"])
+    return {"rows": rows, "skipped": skipped, "overlap": overlap, "through": through,
+            "lines_filled": lines_filled}
 
 
 def _gap_pct(recorded: Decimal, replayed) -> str:
@@ -130,6 +151,10 @@ def _print_report(result: Dict) -> None:
             replayed = "—" if o["replayed"] is None else f"{o['replayed']:.2f}"
             print(f"  {str(o['date']):<12} {o['recorded']:>10.2f} {replayed:>10} "
                   f"{_gap_pct(o['recorded'], o['replayed']):>7}")
+    if result["lines_filled"]:
+        filled = result["lines_filled"]
+        print(f"\nReplayed the per-security lines of {len(filled)} recorded day(s), "
+              f"{filled[0]} .. {filled[-1]}; their totals are unchanged.")
 
 
 async def run(start: Optional[date], dry_run: bool,
@@ -137,7 +162,7 @@ async def run(start: Optional[date], dry_run: bool,
     started_at = utcnow()
     async with AsyncSessionLocal() as db:
         try:
-            result = {"rows": [], "skipped": 0, "through": None}
+            result = {"rows": [], "skipped": 0, "through": None, "lines_filled": []}
             if start is not None:
                 result = await backfill(db, start, dry_run=dry_run)
                 _print_report(result)
@@ -173,6 +198,7 @@ async def run(start: Optional[date], dry_run: bool,
                 "through": result["through"].isoformat() if result["through"] else None,
                 "rows": len(rows),
                 "skipped": result["skipped"],
+                "lines_filled": len(result["lines_filled"]),
                 "growth_from": growth_from.isoformat() if growth_from else None,
             },
             started_at=started_at,

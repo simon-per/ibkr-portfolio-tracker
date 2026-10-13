@@ -1,7 +1,10 @@
-from sqlalchemy import Boolean, Date, DateTime, Numeric, false
+from sqlalchemy import (
+    Boolean, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Optional
 
 from app.database import Base
 
@@ -46,4 +49,57 @@ class DividendForecastSnapshot(Base):
         return (
             f"<DividendForecastSnapshot({self.snapshot_date}: "
             f"next_12m={self.next_12m_eur} ttm={self.ttm_net_eur})>"
+        )
+
+
+class DividendForecastSnapshotLine(Base):
+    """
+    One held security's part of a day's *Next 12 months* figure.
+
+    **Why it exists.** Two totals a day cannot say why the forecast moved, and on this
+    book the answer is nearly always "more shares were bought" — which is not the same
+    news as a payer raising its dividend. With the share count, the security's part of
+    the forecast and the exchange rate it was sized at, the change between two days
+    splits into shares, payout per share and currency by arithmetic
+    (`app.services.dividend_forecast_attribution`).
+
+    **One line per security HELD that day, payer or not.** A holding that forecasts
+    nothing is stored with a zero, because the split has to tell "held, and its first
+    forecast appeared" from "bought".
+
+    **The same source and the same rules as the parent row**: the lines are
+    `get_dividend_breakdown`'s own per-security figures, in EUR, written in the same
+    transaction. They sum to the parent's `next_12m_eur` to the cent on a day recorded
+    with them. `reconstructed` is per line because a day recorded before this table
+    existed can only have its lines replayed: the parent stays what was said that day,
+    and whatever separates the two is served as `unattributed`, never spread around.
+
+    `fx_to_eur` is the newest cached rate of the security's currency on the day — the
+    one rate the forecast sized every payment of that security at — or NULL when none
+    was cached.
+    """
+    __tablename__ = "dividend_forecast_snapshot_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_date", "security_id", name="uix_dividend_forecast_snapshot_line"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    shares: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    next_12m_eur: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    fx_to_eur: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    reconstructed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<DividendForecastSnapshotLine({self.snapshot_date} #{self.security_id}: "
+            f"{self.shares} sh, next_12m={self.next_12m_eur})>"
         )

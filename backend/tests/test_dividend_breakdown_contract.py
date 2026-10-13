@@ -37,12 +37,14 @@ from app.schemas.portfolio import (
     DividendAnnualRow,
     DividendBreakdownResponse,
     DividendDelta,
+    DividendForecastLine,
     DividendForwardYield,
     DividendGrowth,
     DividendLatestMonth,
     DividendRecentPace,
     DividendYtdPace,
     DividendMonthBar,
+    DividendPerShareGrowth,
     DividendSecurityRow,
     DividendTtmPoint,
     DividendUpcomingPayment,
@@ -135,6 +137,7 @@ def _pairs(payload):
         ("DividendLatestMonth", growth["latest_month"], DividendLatestMonth),
         ("DividendYtdPace", growth["ytd_pace"], DividendYtdPace),
         ("DividendRecentPace", growth["recent_pace"], DividendRecentPace),
+        ("DividendPerShareGrowth", growth["per_share"], DividendPerShareGrowth),
     ]
     for key in ("ttm", "ytd", "avg_month"):
         out.append((f"DividendDelta ({key})", growth[key], DividendDelta))
@@ -146,6 +149,7 @@ def _pairs(payload):
         ("DividendTtmPoint", payload["ttm_series"], DividendTtmPoint),
         ("DividendSecurityRow", payload["securities"], DividendSecurityRow),
         ("DividendUpcomingPayment", payload["upcoming"], DividendUpcomingPayment),
+        ("DividendForecastLine", payload["forecast_by_security"], DividendForecastLine),
         ("DividendAnnualRow", growth["annual"], DividendAnnualRow),
     ):
         for i, row in enumerate(rows):
@@ -174,6 +178,7 @@ async def test_the_fixture_populates_every_nested_model():
         assert payload["ttm_coverage_start"] == payload["ttm_series"][0]["month"]
         assert payload["securities"], "no security rows"
         assert payload["upcoming"], "no projected payments"
+        assert payload["forecast_by_security"], "no per-security forecast lines"
         # One of each provenance, or the splice is not being exercised.
         assert payload["ibkr_from"] is not None
         assert len(_pairs(payload)) >= 12

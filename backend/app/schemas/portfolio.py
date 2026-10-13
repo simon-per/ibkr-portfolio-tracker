@@ -555,6 +555,11 @@ class DividendSecurityRow(BaseModel):
     # `DividendForwardYield.pct`, which is what makes that headline auditable.
     # Deliberately unwindowed, unlike `forecast_net_eur` above — see the service.
     forward_yield_pct: Optional[float] = None
+    # The payer's own dividend growth: its newest regular payment per share against
+    # the same payment a year earlier, in percent. Independent of how many shares are
+    # held and of exchange rates. None without a year of history to compare across,
+    # or without a live projection.
+    per_share_growth_pct: Optional[float] = None
     # True when the position wasn't held for the whole trailing year, so the yield
     # above divides a partial year's income by a full position value and reads low.
     # Not annualized: scaling up would invent income the schedule may not support.
@@ -681,6 +686,19 @@ class DividendRecentPace(BaseModel):
     prev_end: str
 
 
+class DividendPerShareGrowth(BaseModel):
+    """
+    The payers' own growth for the whole book: what today's shares are forecast to pay
+    over what they would have paid at each payer's level a year earlier — the growth
+    that needs no purchase. Not an income-weighted mean of the rates; see the service.
+    """
+    pct: float
+    # How much of `next_12m_eur` comes from the payers `pct` is measured over. The
+    # rest have under a year of history; they are left out, not counted as 0%.
+    covered_pct: float
+    payers: int
+
+
 class DividendGrowth(BaseModel):
     """
     Growth of dividend income, computed over the FULL history regardless of the
@@ -705,6 +723,8 @@ class DividendGrowth(BaseModel):
     latest_month: Optional[DividendLatestMonth] = None
     ytd_pace: Optional[DividendYtdPace] = None
     recent_pace: Optional[DividendRecentPace] = None
+    # None when no projection was run or no payer has a year to compare across.
+    per_share: Optional[DividendPerShareGrowth] = None
 
 
 class DividendUpcomingPayment(BaseModel):
@@ -779,6 +799,32 @@ class DividendForwardYield(BaseModel):
     basis: str                              # 'net' | 'mixed' | 'gross_estimate'
 
 
+class DividendForecastLine(BaseModel):
+    """One held security's part of `DividendGrowth.next_12m_eur`."""
+    security_id: int
+    shares: float
+    next_12m_eur: float             # base currency; 0.0 for a holding that pays nothing
+    currency: Optional[str] = None  # the security's own
+    # The newest cached <currency>→EUR rate the forecast sized this security at.
+    # None when none is cached.
+    fx_to_eur: Optional[float] = None
+
+
+class DividendForecastChange(BaseModel):
+    """
+    What the growth of `next_12m_eur` since `since` was made of, in the base currency
+    (`app.services.dividend_forecast_attribution`). The five figures sum to the change.
+    """
+    since: str                      # the first day with per-security lines, "YYYY-MM-DD"
+    shares: float                   # shares bought or sold, positions opened or closed
+    payout: float                   # payout per share, and payments entering/leaving the window
+    newly_forecast: float           # a holding kept throughout whose forecast appeared or went
+    fx: float                       # the security's currency against the base currency
+    # The part of the change the lines do not account for. Near zero on days recorded
+    # with their lines; a recorded day whose lines were replayed carries the gap here.
+    unattributed: float
+
+
 class DividendForecastHistoryPoint(BaseModel):
     date: str                       # the UTC date the snapshot was taken, "YYYY-MM-DD"
     next_12m_eur: float             # base currency, at that date's rate
@@ -792,6 +838,12 @@ class DividendForecastHistoryPoint(BaseModel):
     # began, or the first one inside it when the series starts later than that.
     mtd_from: Optional[str]
     ytd_from: Optional[str]
+    # Growth since the first measured day — `growth_from` when one is set, else the
+    # first snapshot. None on that day itself and before it.
+    next_12m_since_start_pct: Optional[float]
+    # None before the first day with per-security lines, on that day, and on a day
+    # that has none.
+    breakdown: Optional[DividendForecastChange]
     # True for a day replayed after the fact (app.cli.backfill_dividend_forecast):
     # today's rules over what was known then, not what the application showed.
     reconstructed: bool
@@ -845,6 +897,9 @@ class DividendBreakdownResponse(BaseModel):
     # None = no projection was run, or nothing held is priced. Never a zeroed object.
     forward_yield: Optional[DividendForwardYield] = None
     upcoming: List[DividendUpcomingPayment] = []
+    # Every security held today with its share of `growth.next_12m_eur`. Empty when
+    # no projection was run. This is what the daily forecast snapshot stores.
+    forecast_by_security: List[DividendForecastLine] = []
 
 
 class ContributionWindow(BaseModel):

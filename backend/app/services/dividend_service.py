@@ -28,10 +28,14 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
+from app.services.dividend_forecast_attribution import (
+    PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
+)
 from app.services.dividend_forecast import (
     ForecastPayment,
     HistPayment,
     infer_gap_days,
+    per_share_growth,
     project_dividends,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
@@ -1324,11 +1328,12 @@ class DividendService:
         is the failure mode this codebase keeps hitting.
 
         Returns ``(hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated,
-        wht_by_sec)``, where ``ex_dated`` is the set of securities whose cadence came
-        from the yfinance ex-date series. The caller needs it to know what a projected
-        date MEANS: for those securities it is an ex-date and has to be shifted to the
-        expected pay date, and for the rest it is already a pay date and must not be
-        shifted twice. ``wht_by_sec`` is `_withholding_rates`.
+        wht_by_sec, fx_to_eur)``, where ``ex_dated`` is the set of securities whose
+        cadence came from the yfinance ex-date series. The caller needs it to know what
+        a projected date MEANS: for those securities it is an ex-date and has to be
+        shifted to the expected pay date, and for the rest it is already a pay date and
+        must not be shifted twice. ``wht_by_sec`` is `_withholding_rates`, and
+        ``fx_to_eur`` the one rate per currency every amount below was sized at.
 
         **IBKR is the source of truth for the amounts** (since 2026-10-04). The DATES
         still come from one series — Yahoo's ex-dates wherever it has two or more, see
@@ -1547,7 +1552,7 @@ class DividendService:
             basis_by_sec[sid] = "gross_estimate" if source == "assumed" else "net"
 
         return (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, set(schedule_source),
-                wht_by_sec)
+                wht_by_sec, fx_to_eur)
 
     async def get_dividend_summary(self) -> Dict:
         """
@@ -1620,6 +1625,46 @@ class DividendService:
             "base_currency": base_fx.base_currency,
         }
 
+    @staticmethod
+    def _book_per_share_growth(
+        ps_growth: Dict[int, Decimal],
+        next_12m_by_sec: Dict[int, Decimal],
+        next_12m: Decimal,
+    ) -> Optional[Dict]:
+        """
+        The payers' own growth, for the book: what today's shares are forecast to pay
+        over what the same shares would have paid at each payer's level a year earlier.
+        It answers "how much did this income grow without a purchase", which the
+        totals cannot — on a book still being funded they grow mostly by purchases.
+
+        NOT the average of the payers' rates weighted by income. That weights a rate by
+        the income AFTER the raise, so one small payer with an enormous rate carries
+        the figure: measured on production, NVDA's step from 0.01 to 0.25 a share
+        (+2400%, about a hundredth of the income) made that average read 45%. Dividing
+        each payer's income back by its own growth weights it by what it paid before.
+
+        Over the payers that HAVE a figure, with the share of the forecast they cover
+        beside it: a payer held under a year has none, and counting it as 0% would
+        report its missing history as a dividend that did not grow. None when no
+        payer is measurable.
+        """
+        covered = {
+            sid: income for sid in ps_growth
+            if (income := next_12m_by_sec.get(sid, Decimal("0"))) > 0
+        }
+        covered_income = sum(covered.values(), Decimal("0"))
+        if covered_income <= 0 or next_12m <= 0:
+            return None
+        year_ago = sum(
+            (income / (1 + ps_growth[sid]) for sid, income in covered.items()),
+            Decimal("0"),
+        )
+        return {
+            "pct": round(float((covered_income / year_ago - 1) * 100), 2),
+            "covered_pct": round(float(covered_income / next_12m * 100), 1),
+            "payers": len(covered),
+        }
+
     async def record_forecast_snapshot(self, as_of: date) -> Optional[Dict]:
         """
         Store what the forecast says on ``as_of``: the next twelve months and the
@@ -1637,7 +1682,8 @@ class DividendService:
         figures = await self.forecast_figures(as_of)
         if figures is None:
             return None
-        await DividendForecastSnapshotRepository(self.db).upsert(figures)
+        lines = figures.pop("lines")
+        await DividendForecastSnapshotRepository(self.db).upsert(figures, lines=lines)
         return {
             "snapshot_date": as_of.isoformat(),
             "next_12m_eur": float(figures["next_12m_eur"]),
@@ -1647,7 +1693,8 @@ class DividendService:
     async def forecast_figures(self, as_of: date, replay: bool = False) -> Optional[Dict]:
         """
         The snapshot row for ``as_of`` — ``{snapshot_date, next_12m_eur, ttm_net_eur}``
-        in EUR — or None when there is nothing to forecast from. Writes nothing.
+        in EUR, plus the per-security ``lines`` behind the first — or None when there
+        is nothing to forecast from. Writes nothing.
 
         One implementation for the daily recorder and the backfill
         (`app.cli.backfill_dividend_forecast`), which passes ``replay=True`` for a
@@ -1665,6 +1712,19 @@ class DividendService:
             "snapshot_date": as_of,
             "next_12m_eur": next_12m,
             "ttm_net_eur": ttm_net,
+            "lines": [
+                {
+                    "security_id": line["security_id"],
+                    "shares": Decimal(str(line["shares"])),
+                    "next_12m_eur": Decimal(str(line["next_12m_eur"])),
+                    "currency": line["currency"],
+                    "fx_to_eur": (
+                        Decimal(str(line["fx_to_eur"]))
+                        if line["fx_to_eur"] is not None else None
+                    ),
+                }
+                for line in breakdown["forecast_by_security"]
+            ],
         }
 
     async def get_forecast_history(self) -> Dict:
@@ -1687,18 +1747,37 @@ class DividendService:
         `growth_from` (an app setting, absent by default) is the first day growth is
         measured at all: no percentage reaches back across it, and the days before
         it carry none. They keep their figures — the level is still what it was.
+
+        `next_12m_since_start_pct` is the growth since the first measured day — the
+        `growth_from` day when one is set — and `breakdown` says what that growth was
+        made of: shares bought, payout per share, holdings newly forecast and currency
+        (`dividend_forecast_attribution`), accumulated day to day over the
+        per-security lines and in the base currency. Its `since` names the day it
+        starts on, which is later than the first measured day only while the earlier
+        days have no lines. What the lines do not account for is `unattributed`,
+        reported and never spread over the parts: a recorded day whose lines had to be
+        replayed sits a fraction of a percent off its own total.
         """
         from app.services.portfolio_service import PortfolioService
         base_fx = await PortfolioService(self.db)._load_base_fx()
-        rows = await DividendForecastSnapshotRepository(self.db).get_all()
+        repo = DividendForecastSnapshotRepository(self.db)
+        rows = await repo.get_all()
         growth_from = await AppSettingsRepository(
             self.db
         ).get_dividend_forecast_growth_from()
+        lines_by_day = await repo.get_lines(since=growth_from)
 
         points: List[Dict] = []
         previous = None       # (date, next_12m) of the row before this one
         month_anchor = None   # (date, next_12m) the current month is measured from
         year_anchor = None
+        start = None          # (date, next_12m) of the first measured day
+        # The breakdown's own chain: the last day that had lines, and the parts
+        # accumulated since the first one that did.
+        chain_holdings: Optional[Dict[int, Holding]] = None
+        chain_rate = Decimal("1")
+        chain_start = None    # (date, next_12m) of the first day with lines
+        parts = {part: Decimal("0") for part in FORECAST_CHANGE_PARTS}
         for r in rows:
             day = r.snapshot_date
             next_12m = base_fx.convert(r.next_12m_eur, day)
@@ -1715,6 +1794,8 @@ class DividendService:
                     "next_12m_ytd_pct": None,
                     "mtd_from": None,
                     "ytd_from": None,
+                    "next_12m_since_start_pct": None,
+                    "breakdown": None,
                     "reconstructed": bool(r.reconstructed),
                 })
                 continue    # `previous` stays None: the series starts at growth_from
@@ -1731,6 +1812,32 @@ class DividendService:
             change_pct, _ = growth_since(previous)
             mtd_pct, mtd_from = growth_since(month_anchor)
             ytd_pct, ytd_from = growth_since(year_anchor)
+            start = start or current
+            since_start_pct, _ = growth_since(start)
+
+            breakdown = None
+            day_lines = lines_by_day.get(day)
+            if day_lines:
+                holdings = {
+                    ln.security_id: Holding(ln.shares, ln.next_12m_eur, ln.fx_to_eur)
+                    for ln in day_lines
+                }
+                rate = base_fx.convert(Decimal("1"), day)
+                if chain_holdings is None:
+                    chain_start = current
+                else:
+                    step = attribute_change(chain_holdings, holdings, chain_rate, rate)
+                    for part in FORECAST_CHANGE_PARTS:
+                        parts[part] += step[part]
+                    breakdown = {
+                        "since": chain_start[0].isoformat(),
+                        **{part: round(float(parts[part]), 2)
+                           for part in FORECAST_CHANGE_PARTS},
+                        "unattributed": round(float(
+                            next_12m - chain_start[1] - sum(parts.values(), Decimal("0"))
+                        ), 2),
+                    }
+                chain_holdings, chain_rate = holdings, rate
             points.append({
                 "date": day.isoformat(),
                 "next_12m_eur": round(float(next_12m), 2),
@@ -1742,6 +1849,8 @@ class DividendService:
                 "next_12m_ytd_pct": ytd_pct,
                 "mtd_from": mtd_from,
                 "ytd_from": ytd_from,
+                "next_12m_since_start_pct": since_start_pct,
+                "breakdown": breakdown,
                 "reconstructed": bool(r.reconstructed),
             })
             previous = current
@@ -1944,6 +2053,12 @@ class DividendService:
         # Filled by `_forecast_inputs`; empty without a forecast, which every reader of
         # it below tolerates.
         wht_by_sec: Dict[int, Tuple[Decimal, str]] = {}
+        # Every security held on `as_of` and the rate its currency was sized at, for
+        # `forecast_by_security` below. Empty without a forecast, like the rest.
+        held_shares: Dict[int, Decimal] = {}
+        sizing_fx: Dict[str, Decimal] = {}
+        # `per_share_growth` of each held payer that has a year to compare across.
+        ps_growth: Dict[int, Decimal] = {}
         next_12m_end = as_of + timedelta(days=365)
         # Far enough to complete next calendar year, so the year comparison never
         # shows a truncated bar; further still if the caller asked for a year
@@ -1963,11 +2078,19 @@ class DividendService:
                     sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
                     for sid, pairs in exact_pairs.items()
                 }
-            hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec = \
-                await self._forecast_inputs(
-                    raw_payments, securities, as_of, net_factor,
-                    accruals_by_sec=accruals_by_sec, date_pairs=exact_pairs,
-                )
+            (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec,
+             sizing_fx) = await self._forecast_inputs(
+                raw_payments, securities, as_of, net_factor,
+                accruals_by_sec=accruals_by_sec, date_pairs=exact_pairs,
+            )
+            held_shares = {
+                sid: qty for sid in lots_by_sec
+                if sid in securities and (qty := shares_at(sid, as_of)) > 0
+            }
+            ps_growth = {
+                sid: g for sid in held_shares
+                if (g := per_share_growth(hist_by_sec.get(sid, []))) is not None
+            }
 
             # What the ex→pay distance actually measures out at, per security.
             pay_lags = self._measured_pay_lags(raw_payments, exact_pairs)
@@ -2566,6 +2689,7 @@ class DividendService:
             "latest_month": latest_month,
             "ytd_pace": ytd_pace,
             "recent_pace": recent_pace,
+            "per_share": self._book_per_share_growth(ps_growth, next_12m_by_sec, next_12m),
         }
 
         # Trailing-12-month yield: spliced net over the current market value.
@@ -2855,6 +2979,15 @@ class DividendService:
                     if mv and mv > 0 and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
+                # The payer's own growth: its newest regular payment per share against
+                # the same one a year earlier. Unwindowed like the yield above, and
+                # only beside a live projection — a payer that stopped has a last
+                # raise and no next payment for it to describe.
+                "per_share_growth_pct": (
+                    round(float(ps_growth[sid] * 100), 2)
+                    if sid in ps_growth and next_12m_by_sec.get(sid, Decimal("0")) > 0
+                    else None
+                ),
                 # True when the position wasn't held for the whole trailing year, so
                 # a partial year's income is being divided by a full position value
                 # and the yield reads low. Badged, not silently annualized: scaling
@@ -2953,4 +3086,23 @@ class DividendService:
             "growth": growth,
             "forward_yield": forward_yield,
             "upcoming": upcoming,
+            # `growth.next_12m_eur` split by holding, with the share count and the rate
+            # behind each part: what `dividend_forecast_snapshot_lines` stores, so the
+            # recorder has no sum of its own. Every security HELD, payer or not — a
+            # holding that forecasts nothing is a zero here, never an absent row.
+            "forecast_by_security": [
+                {
+                    "security_id": sid,
+                    "shares": float(qty),
+                    "next_12m_eur": round(
+                        float(next_12m_by_sec.get(sid, Decimal("0"))), 6
+                    ),
+                    "currency": securities[sid].currency,
+                    "fx_to_eur": (
+                        float(sizing_fx[securities[sid].currency or "EUR"])
+                        if (securities[sid].currency or "EUR") in sizing_fx else None
+                    ),
+                }
+                for sid, qty in sorted(held_shares.items())
+            ],
         }

@@ -275,6 +275,68 @@ def is_steady(regular: Sequence[HistPayment]) -> bool:
     return all(a <= fell_from for a in amounts[drops[0]:])
 
 
+def regular_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayment]:
+    """The priced payments that are part of the payer's schedule — no specials —
+    oldest first. What a projection is sized from and what growth is measured over."""
+    specials = {id(p) for p in special_payments(history, gap)}
+    return sorted(
+        (p for p in history
+         if p.per_share_eur is not None and p.per_share_eur > 0
+         and id(p) not in specials),
+        key=lambda p: p.on_date,
+    )
+
+
+def per_share_growth(history: Sequence[HistPayment]) -> Optional[Decimal]:
+    """
+    How much the payout per share grew over a year, as a fraction (0.10 = +10%).
+
+    Two shapes, the same two the sizing tells apart (`is_steady`):
+
+    - **A steady payer** — level payments and the occasional raise or cut: its newest
+      regular payment against the same payment a year earlier. The level is the
+      news, and one payment carries it.
+    - **A varying payer** — a fund, a company with interims around a final: its
+      trailing year of payments against the year before, each payment matched to its
+      own slot a year back. One payment against one is mostly noise there: measured
+      on production, VT's September distribution read -14.6% against the September
+      before while its four distributions together had grown 3.4%.
+
+    Specials are on neither side. A declared and unpaid dividend counts as the newest
+    payment, since the history carries it — a raise shows the day IBKR lists it.
+
+    None when there is no cadence, or a payment with nothing a year back to compare
+    with: too little history is "not known yet", never 0%.
+
+    Currency-neutral so long as the history was converted at one rate, which is how
+    `DividendService._forecast_inputs` builds it.
+    """
+    gap = infer_gap_days([p.on_date for p in history if p.cadence])
+    if gap is None:
+        return None
+    regular = regular_payments(history, gap)
+    if not regular:
+        return None
+    latest = regular[-1]
+    tol = _slot_tolerance(gap)
+    if is_steady(regular):
+        recent = [latest]
+    else:
+        # Everything after the slot a year back from the newest payment: one cycle.
+        cutoff = _one_year_back(latest.on_date) + timedelta(days=tol)
+        recent = [p for p in regular if p.on_date > cutoff]
+    before = [
+        _nearest(regular, _one_year_back(p.on_date), tol, exclude=p) for p in recent
+    ]
+    if any(p is None for p in before):
+        return None
+    return (
+        sum((p.per_share_eur for p in recent), Decimal("0"))
+        / sum((p.per_share_eur for p in before), Decimal("0"))
+        - 1
+    )
+
+
 def _size_for(d: date, regular: Sequence[HistPayment], gap: int, sizing: str,
               steady: bool, last_seen: date) -> tuple:
     """``(per_share, method)`` for the payment projected on ``d``."""
@@ -349,13 +411,7 @@ def project_dividends(
         steady = True
     else:
         flat = None
-        specials = {id(p) for p in special_payments(history, gap)}
-        regular = sorted(
-            (p for p in history
-             if p.per_share_eur is not None and p.per_share_eur > 0
-             and id(p) not in specials),
-            key=lambda p: p.on_date,
-        )
+        regular = regular_payments(history, gap)
         if not regular:
             return []
         steady = is_steady(regular)

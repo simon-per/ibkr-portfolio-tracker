@@ -11,6 +11,7 @@ import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { dividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
+import { DividendForecastTrend } from './DividendForecastTrend'
 import { DividendGrowthPace } from './DividendGrowthPace'
 import { DividendKpiCards } from './DividendKpiCards'
 import { DividendYearComparison } from './DividendYearComparison'
@@ -216,6 +217,24 @@ function dividendColumns(deps: {
       cellClassName: 'text-muted-foreground',
       cell: (row) =>
         showForecast && row.next_pay_date ? monthLabel(row.next_pay_date.slice(0, 7), true) : '—',
+    },
+    {
+      key: 'growth',
+      header: 'Growth',
+      shortHeader: 'Payout growth',
+      align: 'right',
+      cellClassName: 'text-muted-foreground',
+      hint: {
+        description:
+          "The payer's own dividend growth: its newest regular payment per share against " +
+          'the same payment a year earlier. It does not move when you buy or sell shares, ' +
+          'or with exchange rates. A dash means there is no payment a year back to compare ' +
+          'with yet, not that the dividend stood still.',
+      },
+      cell: (row) =>
+        row.per_share_growth_pct != null
+          ? `${row.per_share_growth_pct > 0 ? '+' : ''}${row.per_share_growth_pct.toFixed(1)}%`
+          : '—',
     },
     {
       key: 'yoc',
@@ -498,6 +517,9 @@ export function DividendsTab() {
                 year: the pace is measured over the whole history, and a year with
                 no income is exactly when the trend is worth knowing. */}
             <DividendGrowthPace pace={pace} />
+
+            {/* The forecast's own history. A projection, so it goes with the toggle. */}
+            {showForecast && <DividendForecastTrend perShare={data?.growth?.per_share} />}
 
             {isLoading ? (
               <div className={cn(DIVIDEND_CHART_BOX, 'animate-pulse rounded bg-muted')} />
