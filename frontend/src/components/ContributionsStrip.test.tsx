@@ -71,7 +71,15 @@ describe('ContributionsStrip', () => {
     const { container } = render(<ContributionsStrip data={data([win()])} />)
     const titles = Array.from(container.querySelectorAll('[title]'))
       .map(el => el.getAttribute('title') ?? '')
-    expect(titles.some(t => /deployed into positions/.test(t))).toBe(true)
+    expect(titles.some(t => /deployed/.test(t))).toBe(true)
+  })
+
+  it('keeps hover titles to a few words naming the figures', () => {
+    const { container } = render(<ContributionsStrip data={data([win(), win({ label: '12m', months: 12 })])} />)
+    const titles = Array.from(container.querySelectorAll('[title]'))
+      .map(el => el.getAttribute('title') ?? '')
+    expect(titles.length).toBeGreaterThan(0)
+    for (const t of titles) expect(t.split(/\s+/).length).toBeLessThanOrEqual(8)
   })
 
   it('still says unavailable rather than vanishing on a failed fetch', () => {

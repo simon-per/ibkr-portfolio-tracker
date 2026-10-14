@@ -72,19 +72,7 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
 
   if (!data || data.windows.length === 0) return null
 
-  const baseline = data.windows.find(w => w.label === 'all')?.avg_money_in_per_month_eur ?? 0
-
-  const labelTitle = data.coverage_from
-    ? `Real deposits from ${data.coverage_from} onward; before that, the cost basis of `
-      + `the lots bought each month — which covers the pre-IBKR years because the `
-      + `holdings transferred in`
-      + (data.transfer_in_date ? ` on ${data.transfer_in_date}` : '')
-      + ` kept their original purchase dates. Deposits take over where they exist `
-      + `because selling one holding to buy another would otherwise count the same `
-      + `money twice. Broker transfers are never counted as money in.`
-    : `Cost basis of the lots bought in each period, at the exchange rate on each `
-      + `purchase date. Enable 'Deposits & Withdrawals' on the Flex Query to measure `
-      + `real deposits instead, which a position switch cannot inflate.`
+  const baseline = data.windows.find(w => w.label === 'all')?.avg_money_in_per_month_eur ?? null
 
   return (
     // `ml-auto` only from `sm`: below it the strip is the sole item on its own wrapped
@@ -92,7 +80,7 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
     <div className="ml-0 flex flex-wrap items-end gap-x-5 gap-y-2 sm:ml-auto">
       <div
         className="flex items-center gap-1.5 pb-0.5 text-xs text-muted-foreground"
-        title={labelTitle}
+        title="Average money in per month"
       >
         <PiggyBank className="h-3.5 w-3.5" />
         {/* "in", because the figure beside it is money *in* and the card a few hundred
@@ -107,27 +95,16 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
       </div>
 
       {data.windows.map(w => {
-        const delta = w.label !== 'all' && baseline !== 0
+        const delta = w.label !== 'all' && baseline !== null && baseline !== 0
           ? ((w.avg_money_in_per_month_eur - baseline) / Math.abs(baseline)) * 100
           : null
 
-        const source = {
-          deposits: 'real deposits',
-          spliced: `purchases up to ${data.coverage_from}, then real deposits`,
-          deployed: 'cost basis of purchases (no deposit ledger yet)',
-        }[w.money_in_method]
-
-        const title = [
-          `${WINDOW_LABELS[w.label]}: ${formatCurrency(w.money_in_eur)} in over ${w.months.toFixed(1)} months, from ${source}`,
-          `${formatCurrency(w.avg_money_in_per_month_eur)} per month`,
-          w.money_in_method !== 'deployed'
-            ? `${formatCurrency(w.deposits_eur)} of that is deposits`
-            : null,
-          `${formatCurrency(w.deployed_eur)} deployed into positions over the same period`
-            + (w.deployed_eur > w.money_in_eur
-              ? ' — the excess is capital rotated between holdings, not new money'
-              : ''),
-        ].filter(Boolean).join(' · ')
+        // Figures only. Deployed stays as the independent cross-check on money in
+        // (docs/cash-contributions-benchmark.md): a transfer booked as a deposit inflates
+        // money in and nothing else on screen can disagree.
+        const title =
+          `${WINDOW_LABELS[w.label]}: ${formatCurrency(w.money_in_eur)} in`
+          + ` · ${formatCurrency(w.deployed_eur)} deployed`
 
         return (
           <div key={w.label} title={title}>
@@ -144,7 +121,7 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
                 <DeltaChip
                   pct={delta}
                   className="text-[11px]"
-                  title={`vs the all-time average of ${formatCurrency(baseline)}/month`}
+                  title="vs all-time average"
                 />
               )}
             </div>
