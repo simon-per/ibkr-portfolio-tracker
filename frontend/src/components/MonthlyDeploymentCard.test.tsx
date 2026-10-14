@@ -143,63 +143,12 @@ describe('the headline figure is money in, not gross deployment', () => {
   })
 })
 
-describe('a rotation is named rather than left to be inferred', () => {
-  it('names the largest month and what of it was already-invested capital', () => {
-    render(
-      <MonthlyDeploymentCard
-        data={data({
-          monthly: [
-            month('2026-06', 1000, 1000),
-            month('2026-08', 31400, 1240),
-            month('2026-09', 3639, 3639),
-          ],
-        })}
-        isLoading={false}
-      />,
-    )
-    expand()
-    // The note carries the whole rotation now that no deployed bar is drawn beside it:
-    // what went into positions, how much of that was new, and the difference.
-    const note = screen.getByText(/rotated between holdings/)
-    expect(note.textContent).toMatch(/Aug 26/)
-    expect(note.textContent).toMatch(/31,400/)   // deployed
-    expect(note.textContent).toMatch(/1,240/)    // of which new money
-    expect(note.textContent).toMatch(/30,160/)   // 31,400 - 1,240
-  })
-
-  it('names the largest month even when a later one is quiet', () => {
-    // The latest month would have been the cheap choice, and the note would then
-    // disappear while the spike it explains is still the tallest bar on the chart.
+describe('a rotation month', () => {
+  it('is drawn without a note explaining it', () => {
+    // The owner's call, 2026-10-14.
     render(
       <MonthlyDeploymentCard
         data={data({ monthly: [month('2026-08', 31400, 1240), month('2026-09', 500, 500)] })}
-        isLoading={false}
-      />,
-    )
-    expand()
-    expect(screen.getByText(/rotated between holdings/).textContent).toMatch(/Aug 26/)
-  })
-
-  it('says nothing when every month deployed only what came in', () => {
-    render(
-      <MonthlyDeploymentCard
-        data={data({ monthly: [month('2026-06', 1000), month('2026-07', 2000)] })}
-        isLoading={false}
-      />,
-    )
-    expand()
-    expect(screen.queryByText(/rotated between holdings/)).toBeNull()
-  })
-
-  it('says nothing when there is no deposit ledger, where money in IS deployment', () => {
-    // Under the 'deployed' method the two series are the same number by construction,
-    // so a note about the gap would be describing a gap that cannot exist.
-    render(
-      <MonthlyDeploymentCard
-        data={data({
-          windows: [win({ money_in_method: 'deployed' })],
-          monthly: [month('2026-08', 31400, 31400)],
-        })}
         isLoading={false}
       />,
     )

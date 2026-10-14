@@ -43,12 +43,12 @@ function cellTitle(label: string, m: MonthReturn, curSym: string): string {
     // the reader no way to tell a lost day from a lost half-year. And names the cause,
     // because a stalled sync and the 1Y button produce the same dagger.
     ...(m.measured
-      ? [`† measured ${m.measured.from} → ${m.measured.to}; ${shortenedReason(m)}`]
+      ? [`measured ${m.measured.from} → ${m.measured.to}; ${shortenedReason(m)}`]
       : []),
   ].join(' · ')
 }
 
-/** Why a cell's window is shorter than its label, in the words the footnote uses. */
+/** Why a cell's window is shorter than its label. */
 function shortenedReason(m: MonthReturn): string {
   const causes: string[] = []
   if (m.shortenedBy?.range) causes.push('the selected range starts inside this period')
@@ -132,21 +132,6 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
     return rows
   }, [data, rangeStart])
 
-  const cells = yearRows.flatMap(row => [row.ytd, ...row.months])
-  const hasPartial = cells.some(m => m?.partial)
-  // Which causes the footnote has to explain — only the ones on the page, so a reader
-  // is not sent looking for a stalled sync when the 1Y button is the whole story.
-  const shortenedByRange = cells.some(m => m?.shortenedBy?.range)
-  const shortenedByUnpriced = cells.some(m => m?.shortenedBy?.unpriced)
-  const footnoteCauses = [
-    shortenedByRange ? 'the selected range starts inside it' : null,
-    shortenedByUnpriced
-      ? 'some days could not be fully valued, so they are excluded rather than counted at zero (a stalled market-data sync is the usual cause)'
-      : null,
-  ]
-    .filter((s): s is string => s !== null)
-    .join(', or ')
-
   // Summary text for collapsed state
   let summaryText: React.ReactNode = 'Monthly return percentages by year'
   if (isError) {
@@ -170,7 +155,6 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
           <span className={m.returnPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
             {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
           </span>
-          {m.partial && <span aria-hidden="true">†</span>}
         </span>
       )
     }
@@ -181,24 +165,11 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
           <span className={topRow.ytd.returnPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
             {topRow.ytd.returnPercent >= 0 ? '+' : ''}{topRow.ytd.returnPercent.toFixed(1)}%
           </span>
-          {topRow.ytd.partial && <span aria-hidden="true">†</span>}
         </span>
       )
     }
-    // The card is COLLAPSED by default, so this line is the only thing most readers see —
-    // and it carried the figure with no marker at all while the table below badged it. A
-    // trimmed "YTD" measuring six weeks of a year is exactly the plausible-looking number
-    // this codebase keeps being bitten by, so the caveat has to survive the collapse. The
-    // legend is spelled out inline rather than left to the dagger, because the footnote
-    // explaining it lives inside the body that is not rendered yet.
-    const summaryPartial = topRow.ytd?.partial || (lastMonthIdx >= 0 && topRow.months[lastMonthIdx]!.partial)
-    if (summaryPartial) {
-      parts.push(
-        <span key="note" className="text-muted-foreground">
-          {' · '}<span aria-hidden="true">† </span>part of the period only
-        </span>
-      )
-    }
+    // A month or YTD measured over part of its period is not marked on the surface —
+    // the owner's call (2026-10-14); the cell tooltip still names the days it covers.
     if (parts.length > 0) summaryText = <>{parts}</>
   }
 
@@ -257,7 +228,6 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
                               title={cellTitle(`${MONTH_LABELS[i]} ${row.year}`, m, curSym)}
                             >
                               {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
-                              {m.partial && <span aria-hidden="true">†</span>}
                             </div>
                           ) : (
                             <div className="text-center text-xs text-muted-foreground py-1">–</div>
@@ -274,8 +244,7 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
                             title={cellTitle(`YTD ${row.year}`, row.ytd, curSym)}
                           >
                             {row.ytd.returnPercent >= 0 ? '+' : ''}{row.ytd.returnPercent.toFixed(1)}%
-                            {row.ytd.partial && <span aria-hidden="true">†</span>}
-                          </div>
+                            </div>
                         ) : (
                           <div className="text-center text-xs text-muted-foreground py-1">–</div>
                         )}
@@ -285,15 +254,6 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
                 </tbody>
               </table>
             </ScrollableTable>
-          )}
-          {/* The dagger has to be explained somewhere reachable without a pointer —
-              a caveat that only exists in a `title` attribute does not exist on a
-              phone, which this codebase has already learned once. */}
-          {hasPartial && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              † Measured over part of the period: {footnoteCauses}. Hover a cell for the days
-              it does cover, which can be much shorter than the column it sits in.
-            </p>
           )}
         </CardContent>
       )}

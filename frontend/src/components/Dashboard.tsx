@@ -3,7 +3,7 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { api } from '@/lib/api'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LazyTabPanel } from '@/components/ui/LazyTabPanel'
 import { PortfolioValueChart } from './PortfolioValueChart'
@@ -40,13 +40,12 @@ const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ defaul
 // AnalyticsTab is hidden (owner, 2026-10-04): not clean enough and low value for him. The
 // component, its tests and /api/performance/* stay, so restoring it is the lazy import, the
 // trigger and the panel — see docs/performance-analytics.md.
-import { cashIsTracked } from '@/lib/portfolioCash'
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { SyncStatusMessage } from './SyncStatusMessage'
 import { BenchmarkPicker } from './BenchmarkPicker'
 import { benchmarkColor } from '@/lib/benchmarkColors'
-import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import {
   MIN_PAIRED_RETURNS,
   annualizedVolatilityPct,
@@ -96,9 +95,7 @@ export function readSelectedBenchmarks(): string[] {
 
 export function Dashboard() {
   const queryClient = useQueryClient()
-  // The currency controls themselves live in the shared AppHeader; this view only needs
-  // the code for its own captions.
-  const { baseCurrency } = useBaseCurrency()
+  // The currency controls themselves live in the shared AppHeader.
   const curSym = useCurrencySymbol()
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
@@ -182,9 +179,7 @@ export function Dashboard() {
           name: query.data.benchmark_name,
           color: benchmarkColor(key, availableBenchmarks),
           data: query.data.data,
-          // Window-anchored since 2026-09-07. Both null/0 from an older backend, and the
-          // chart then draws the line without the prose that would misdescribe it.
-          anchorDate: query.data.anchor_date ?? null,
+          // 0 from a backend older than 2026-09-07.
           anchorUnpriced: query.data.anchor_unpriced_holdings ?? 0,
         }
       })
@@ -362,7 +357,6 @@ export function Dashboard() {
     <div className="min-h-screen bg-background">
       {/* Header — shared with the crypto view; this view fills its three slots. */}
       <AppHeader
-        strapline="Track your IBKR portfolio with cost basis and market value"
         status={
           <>
             {schedulerStatus && schedulerStatus.status === 'running' && (
@@ -517,7 +511,6 @@ export function Dashboard() {
             <RiskMetricsCards
               metrics={riskMetrics}
               dividend={dividendBreakdown?.forward_yield}
-              dividendWithholdingPct={dividendBreakdown?.forecast_withholding_pct}
               dividendError={dividendBreakdownError}
               isLoading={chartLoading || positionsLoading}
               isError={chartError || positionsError}
@@ -532,11 +525,6 @@ export function Dashboard() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <div className="min-w-0">
                     <CardTitle>Portfolio Value Over Time</CardTitle>
-                    <CardDescription>
-                      {cashIsTracked(valueOverTime?.[valueOverTime.length - 1])
-                        ? `Money in (contributed) vs Total value (holdings + cash) in ${baseCurrency}`
-                        : `Cost basis (invested) vs Market value (current worth) in ${baseCurrency}`}
-                    </CardDescription>
                   </div>
                   <div className="flex min-w-0 items-center gap-2">
                     {/* `min-w-0` is load-bearing: without it this flex child refuses to

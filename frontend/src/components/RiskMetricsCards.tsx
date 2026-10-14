@@ -3,7 +3,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
-import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 
 /**
  * Beta needs a benchmark, and there are three separate reasons it can be
@@ -47,8 +46,6 @@ interface RiskMetricsCardsProps {
    * Those are different things and the footnote says which.
   */
   dividend?: DividendForwardYield | null
-  /** Exact assumption used by the same breakdown response as `dividend`. */
-  dividendWithholdingPct?: number
   /** Its query failed. Absent data must be a stated failure, not a confident dash. */
   dividendError?: boolean
   isLoading?: boolean
@@ -77,7 +74,7 @@ function shortDate(iso: string): string {
 }
 
 export function RiskMetricsCards({
-  metrics, dividend, dividendWithholdingPct, dividendError, isLoading, isError,
+  metrics, dividend, dividendError, isLoading, isError,
 }: RiskMetricsCardsProps) {
   const formatCurrency = useFormatCurrency()
 
@@ -129,14 +126,6 @@ export function RiskMetricsCards({
       ? 'No projected dividends'
       : [
           `${formatCurrency(dividend.annual_eur)}/yr`,
-          // Gross-derived amounts use assumed withholding, not broker-reported tax.
-          dividend.basis === 'net'
-            ? 'projected'
-            : `projected net, ${
-                dividendWithholdingPct == null
-                  ? 'assumed withholding'
-                  : `${formatDividendWithholdingPct(dividendWithholdingPct)}% assumed withholding`
-              }`,
           `${dividend.paying_holdings} of ${dividend.priced_holdings} pay`,
           ...(dividend.unpriced_holdings > 0
             ? [`${dividend.unpriced_holdings} unpriced`]
@@ -162,9 +151,7 @@ export function RiskMetricsCards({
         label="Volatility"
         icon={<Activity className="h-4 w-4 text-muted-foreground" />}
         value={metrics.volatilityPct !== null ? `${metrics.volatilityPct.toFixed(1)}%` : null}
-        sub={metrics.volatilityPct !== null
-          ? 'Annualised, the risk Sharpe divides by'
-          : 'Not enough history in this range'}
+        sub={metrics.volatilityPct !== null ? undefined : 'Not enough history in this range'}
       />
 
       <KpiCard
@@ -176,9 +163,7 @@ export function RiskMetricsCards({
           : metrics.sortino >= 1 ? 'positive'
           : metrics.sortino >= 0 ? 'warning'
           : 'negative'}
-        sub={metrics.sortino !== null
-          ? 'Return per unit of downside only'
-          : 'No down days to measure against'}
+        sub={metrics.sortino !== null ? undefined : 'No down days to measure against'}
       />
 
       {/* Beta vs the primary benchmark. Three distinct reasons it can be absent, and the
@@ -189,7 +174,7 @@ export function RiskMetricsCards({
         icon={<Scale className="h-4 w-4 text-muted-foreground" />}
         value={beta?.beta != null ? beta.beta.toFixed(2) : null}
         sub={beta === null
-          ? 'Pick a benchmark to compare against'
+          ? 'No benchmark selected'
           : beta.beta === null
             ? `Needs ${beta.minSampleDays} flow-free days (${beta.sampleDays} so far)`
             : `vs ${beta.benchmarkName}${
@@ -256,7 +241,7 @@ export function RiskMetricsCards({
             ? 'Loading…'
             : dividend?.on_cost_pct == null
               ? 'No projected dividends'
-              : 'Same income over what it cost'}
+              : undefined}
       />
     </KpiPanel>
   )

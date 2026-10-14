@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cashCaveat, cashIsTracked } from './portfolioCash'
+import { cashIsTracked } from './portfolioCash'
 
 /**
  * `cashIsTracked` decides whether four surfaces may present a cash balance as one —
@@ -30,27 +30,5 @@ describe('cashIsTracked', () => {
     // must not be shown. No ledger holds a row, so the zero is the absence of a
     // measurement rather than a measurement of absence.
     expect(cashIsTracked({ cash_source: 'unknown' })).toBe(false)
-  })
-})
-
-describe('cashCaveat', () => {
-  it('qualifies a derived balance, because it is ours rather than the broker\'s', () => {
-    const caveat = cashCaveat('derived')
-    expect(caveat).toBeTruthy()
-    // The three things the derivation structurally cannot see are what the sentence is
-    // for; a caveat that does not say what is missing is decoration.
-    expect(caveat).toMatch(/interest/)
-  })
-
-  it('leaves a measured balance unqualified', () => {
-    // IBKR's own end-of-day figure already includes the fees and interest, so a
-    // qualifier here would tell the reader to distrust the authoritative number.
-    expect(cashCaveat('ibkr')).toBeNull()
-  })
-
-  it('leaves an untracked balance unqualified', () => {
-    // Nothing is on screen to qualify — `cashIsTracked` has already refused it.
-    expect(cashCaveat('unknown')).toBeNull()
-    expect(cashCaveat(undefined)).toBeNull()
   })
 })

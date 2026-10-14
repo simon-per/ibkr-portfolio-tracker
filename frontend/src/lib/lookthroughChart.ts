@@ -162,8 +162,6 @@ export function allTiles(groups: ExposureGroup[]): ExposureTile[] {
 export interface PartitionSegment {
   key: 'direct' | 'via_funds' | 'unattributed'
   label: string
-  /** Why this slice is what it is, for the legend. */
-  hint: string
   value: number
   pct: number
 }
@@ -185,23 +183,18 @@ export function buildPartition(data: LookthroughResponse): PartitionSegment[] {
     {
       key: 'direct',
       label: 'Held directly',
-      hint: 'Positions in the company itself, across every listing and share class.',
       value: data.direct_equity_eur,
       pct: (data.direct_equity_eur / total) * 100,
     },
     {
       key: 'via_funds',
       label: 'Through funds',
-      hint: 'Company exposure found inside the funds whose baskets could be decomposed.',
       value: data.looked_through_equity_eur,
       pct: (data.looked_through_equity_eur / total) * 100,
     },
     {
       key: 'unattributed',
       label: 'Not attributed',
-      hint:
-        'Funds with no usable basket, plus the cash, derivatives and issuer rounding left ' +
-        'over inside the funds that were decomposed.',
       value: unattributedValue(data),
       pct: (unattributedValue(data) / total) * 100,
     },

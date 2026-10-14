@@ -142,11 +142,6 @@ export function CurrencyExposureCard({
                   </tbody>
                 </table>
               </ScrollableTable>
-              <p className="text-xs text-muted-foreground">
-                Grouped by the currency each listing trades in, valued in {baseCurrency} at each
-                position's own date. This is quote currency, not a hedging position — for a direct
-                holding the two coincide, for a fund they need not.
-              </p>
             </>
           )}
         </CardContent>

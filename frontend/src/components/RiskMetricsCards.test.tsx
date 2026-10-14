@@ -44,7 +44,6 @@ function renderWith(
   overrides: Partial<RiskMetrics> = {},
   props: {
     dividend?: DividendForwardYield | null
-    dividendWithholdingPct?: number
     dividendError?: boolean
   } = {},
 ) {
@@ -80,7 +79,7 @@ describe('RiskMetricsCards', () => {
 
   it('asks for a benchmark when none is selected', () => {
     renderWith({ beta: null })
-    expect(screen.getByText('Pick a benchmark to compare against')).toBeTruthy()
+    expect(screen.getByText('No benchmark selected')).toBeTruthy()
   })
 
   it('names the sample shortfall rather than showing a thin beta', () => {
@@ -146,7 +145,6 @@ describe('the dividend rate cards', () => {
   it('states the annual amount and the coverage beside the rate', () => {
     renderWith({}, { dividend })
     expect(screen.getByText(/19 of 36 pay/)).toBeTruthy()
-    expect(screen.getByText('Same income over what it cost')).toBeTruthy()
   })
 
   it('keeps rendering the other four metrics when the dividend query is still out', () => {
@@ -175,15 +173,6 @@ describe('the dividend rate cards', () => {
   it('never renders an absent rate as a zero', () => {
     renderWith({}, { dividend: null })
     expect(screen.queryByText('0.00%')).toBeNull()
-  })
-
-  it('marks a rate whose projected net uses assumed withholding', () => {
-    // Keep the assumed withholding visible in the footnote, including on phones.
-    renderWith({}, {
-      dividend: { ...dividend, basis: 'mixed', gross_estimate_eur: 6.61 },
-      dividendWithholdingPct: 26.375,
-    })
-    expect(screen.getByText(/projected net, 26.375% assumed withholding/)).toBeTruthy()
   })
 
   it('names unpriced holdings, which are excluded from both sides', () => {

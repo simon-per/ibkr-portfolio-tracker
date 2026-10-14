@@ -3,11 +3,6 @@ import { dividendMonthLabel } from '@/lib/dividendChart'
 import type { DividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 
-const RAMP_CAVEAT =
-  'Measured from the earliest twelve-month window on record. The portfolio was '
-  + 'still being funded inside it, so the rate reflects money going in as much as '
-  + 'dividends going up. Narrow the range for a like-for-like read.'
-
 interface DividendGrowthPaceProps {
   /** null whenever the selected range has no two windows to compare. */
   pace: DividendPace | null
@@ -29,8 +24,6 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
   const formatCurrency = useFormatCurrency()
   if (!pace) return null
 
-  const caveat = pace.coverage_limited ? RAMP_CAVEAT : undefined
-
   return (
     <section
       aria-label="Dividend income growth"
@@ -48,7 +41,6 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
           label="/mo"
           flatBand={0}
           projected={pace.includes_forecast}
-          caveat={caveat}
           className="text-sm"
           title={`Compound monthly growth rate over ${pace.months} months.`}
         />
@@ -61,22 +53,17 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
             label="/yr"
             flatBand={0}
             projected={pace.includes_forecast}
-            caveat={caveat}
             className="text-sm"
             title="The monthly rate compounded over twelve months, not multiplied by twelve."
           />
         </span>
       )}
       {/* The two windows it is measured between, so the figure can be checked
-          against the first and last bar of the chart below — and, when the base is
-          the earliest window there is, four words saying so. The dagger carries the
-          full reason, but a marker whose meaning lives only in a hover is one the
-          reader on a phone never gets. */}
+          against the first and last bar of the chart below. */}
       <span className="text-xs text-muted-foreground">
         {dividendMonthLabel(pace.from_month, true)} → {dividendMonthLabel(pace.to_month, true)}
         {' · '}
         {formatCurrency(pace.from_eur)} → {formatCurrency(pace.to_eur)}
-        {pace.coverage_limited && ' · from the first window on record'}
       </span>
     </section>
   )

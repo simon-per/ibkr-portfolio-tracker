@@ -38,12 +38,12 @@ describe('PerformanceMetricsCards', () => {
   it('footnotes the effective holdings beside the concentration it qualifies', () => {
     renderWith()
     expect(screen.getByText('63.4%')).toBeTruthy()
-    expect(screen.getByText('Concentration risk · 12.3 effective')).toBeTruthy()
+    expect(screen.getByText('12.3 effective holdings')).toBeTruthy()
   })
 
   it('drops the count rather than printing an absent one', () => {
     renderWith({ effectiveHoldings: null })
-    expect(screen.getByText('Concentration risk')).toBeTruthy()
+    expect(screen.getByText('63.4%')).toBeTruthy()
     expect(screen.queryByText(/effective/)).toBeNull()
   })
 
@@ -55,7 +55,7 @@ describe('PerformanceMetricsCards', () => {
     renderWith({ top5Weight: null, effectiveHoldings: null })
     expect(screen.getByText('No priced positions')).toBeTruthy()
     expect(screen.queryByText('0.0%')).toBeNull()
-    expect(screen.queryByText(/Concentration risk/)).toBeNull()
+    expect(screen.queryByText(/effective/)).toBeNull()
   })
 
   it('labels a short window a period return instead of annualizing it', () => {

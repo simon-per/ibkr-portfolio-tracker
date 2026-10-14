@@ -1,13 +1,11 @@
 import { useMemo } from 'react'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendUpcomingPayment } from '@/lib/api'
-import { formatDividendWithholdingPct } from '@/lib/dividendWithholding'
 
 interface DividendCalendarProps {
   upcoming: DividendUpcomingPayment[]
   /** Colour per stack symbol, shared with the chart so the two agree. */
   colorOf: (symbol: string) => string
-  withholdingPct: number
 }
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -39,7 +37,7 @@ function monthHeading(iso: string): string {
  * totals. It is badged **on the surface** rather than in a `title=`, which a touch
  * device cannot reach — the lesson this tab already learned once.
  */
-export function DividendCalendar({ upcoming, colorOf, withholdingPct }: DividendCalendarProps) {
+export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   const groups = useMemo(() => {
     const byMonth = new Map<string, DividendUpcomingPayment[]>()
     for (const p of upcoming) {
@@ -53,24 +51,9 @@ export function DividendCalendar({ upcoming, colorOf, withholdingPct }: Dividend
 
   if (upcoming.length === 0) return null
 
-  const anyEstimate = upcoming.some(p => p.basis === 'gross_estimate')
-  const anyPending = upcoming.some(p => p.pending)
-  // An announced pay date is IBKR's own; an inferred one is not. Saying "not an
-  // announced schedule" over rows that ARE announced would understate them, and saying
-  // nothing over rows that are not would overstate them — so the caption follows the
-  // weakest provenance actually on screen.
-  const allAnnounced = upcoming.every(p => p.pay_date_source === 'accrual')
-
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-sm font-medium">Expected next</span>
-        <span className="text-xs text-muted-foreground">
-          {allAnnounced
-            ? 'pay dates as announced by IBKR'
-            : "dated when the cash is expected — projected from each holding's payout cadence"}
-        </span>
-      </div>
+      <div className="text-sm font-medium">Expected next</div>
 
       {/* Bounded height: 12 months of a 20-payer portfolio is ~60 rows, which
           would otherwise push the position table off the page. */}
@@ -123,11 +106,7 @@ export function DividendCalendar({ upcoming, colorOf, withholdingPct }: Dividend
                         </span>
                       )}
                     </span>
-                    <Amount
-                      value={p.net_eur}
-                      estimate={p.basis === 'gross_estimate'}
-                      withholdingPct={withholdingPct}
-                    />
+                    <Amount value={p.net_eur} />
                   </li>
                 ))}
               </ul>
@@ -136,24 +115,6 @@ export function DividendCalendar({ upcoming, colorOf, withholdingPct }: Dividend
         })}
       </div>
 
-      {anyPending && (
-        <div className="text-xs text-muted-foreground">
-          <span className="font-medium text-amber-700 dark:text-amber-300">
-            payment pending
-          </span>{' '}
-          — the dividend has gone ex and the cash has not reached the account yet, so it
-          is not counted in any total on this tab until it does
-        </div>
-      )}
-
-      {anyEstimate && (
-        <div className="text-xs text-muted-foreground">
-          <span className="text-amber-600 dark:text-amber-500">*</span>{' '}
-          estimated net from published gross dividends using {formatDividendWithholdingPct(
-            withholdingPct,
-          )}% assumed withholding; actual net payments may differ
-        </div>
-      )}
     </div>
   )
 }
@@ -167,27 +128,7 @@ function MonthTotal({ total }: { total: number }) {
   )
 }
 
-function Amount({
-  value,
-  estimate,
-  withholdingPct,
-}: {
-  value: number
-  estimate: boolean
-  withholdingPct: number
-}) {
+function Amount({ value }: { value: number }) {
   const formatCurrency = useFormatCurrency()
-  return (
-    <span className="shrink-0 tabular-nums">
-      {formatCurrency(value)}
-      {estimate && (
-        <span
-          className="ml-0.5 text-amber-600 dark:text-amber-500"
-          title={`Estimated net from gross — ${formatDividendWithholdingPct(withholdingPct)}% assumed withholding`}
-        >
-          *
-        </span>
-      )}
-    </span>
-  )
+  return <span className="shrink-0 tabular-nums">{formatCurrency(value)}</span>
 }

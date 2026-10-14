@@ -40,11 +40,6 @@ export function DividendYearComparison({
           const forecastPct = (row.forecast_net_eur / max) * 100
           const isSelected = selectedYear === row.year
 
-          const caveat = row.yoy_vs_partial
-            ? 'The year it is compared against does not cover twelve full months, '
-              + 'so this overstates the growth.'
-            : undefined
-
           return (
             <button
               key={row.year}
@@ -89,9 +84,6 @@ export function DividendYearComparison({
 
               <span className="flex-1 text-right text-sm font-medium tabular-nums sm:w-24 sm:flex-none">
                 {curSym}{amount(row.total_eur)}
-                {row.partial && (
-                  <span className="text-muted-foreground" title="Incomplete year">*</span>
-                )}
                 {/* Withheld at source — received plus expected, one figure. A quiet
                     reminder of the DA-1 threshold, not a tax figure. */}
                 {withholding(row) > 0 && (
@@ -105,7 +97,6 @@ export function DividendYearComparison({
                 <DeltaChip
                   pct={row.yoy_pct}
                   projected={row.yoy_includes_forecast}
-                  caveat={caveat}
                   title={
                     row.yoy_pct == null
                       ? 'No comparable preceding year'
@@ -117,17 +108,6 @@ export function DividendYearComparison({
           )
         })}
       </div>
-      {annual.some(a => a.partial) && (
-        <div className="text-xs text-muted-foreground">
-          * incomplete year — still running, or the dividend history begins inside it
-        </div>
-      )}
-      {annual.some(a => a.yoy_vs_partial && a.yoy_pct != null) && (
-        <div className="text-xs text-muted-foreground">
-          <span className="text-amber-600 dark:text-amber-500">†</span> compared against
-          an incomplete year, so the percentage overstates the growth
-        </div>
-      )}
     </div>
   )
 }

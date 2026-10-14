@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { formatMarketCap } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -635,9 +635,6 @@ export function FundamentalsTab() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-2xl">Growth Metrics</CardTitle>
-              <CardDescription>
-                Valuation ratios, growth rates, and margins for all holdings
-              </CardDescription>
             </div>
             {!needsSync && (
               <Button
@@ -688,7 +685,6 @@ export function FundamentalsTab() {
         <Card ref={leftCardRef} className="flex flex-col">
           <CardHeader>
             <CardTitle>Upcoming Earnings</CardTitle>
-            <CardDescription>Next 90 days of earnings reports</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
             {earningsLoading ? (
@@ -707,7 +703,6 @@ export function FundamentalsTab() {
         <Card className="flex flex-col">
           <CardHeader ref={rightHeaderRef}>
             <CardTitle>Earnings Surprise History</CardTitle>
-            <CardDescription>Past year of earnings beats and misses</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
             {historyLoading ? (

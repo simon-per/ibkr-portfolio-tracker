@@ -125,7 +125,6 @@ export function PerformanceMetricsCards({
           ? `${isPositiveXIRR ? '+' : ''}${metrics.xirr.toFixed(2)}%`
           : null}
         tone={metrics.xirr === null ? 'muted' : isPositiveXIRR ? 'positive' : 'negative'}
-        sub="Money-weighted, adjusted for deposits"
       />
 
       <KpiCard
@@ -136,9 +135,7 @@ export function PerformanceMetricsCards({
         tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
         // Not "no decline": with nothing measurable in the range there is no decline to
         // measure, and the two must not share a rendering.
-        sub={metrics.maxDrawdown !== null
-          ? 'Largest peak-to-trough decline'
-          : 'Not enough history in this range'}
+        sub={metrics.maxDrawdown !== null ? undefined : 'Not enough history in this range'}
       />
 
       <KpiCard
@@ -149,9 +146,7 @@ export function PerformanceMetricsCards({
         tone={metrics.sharpeRatio === null ? 'muted' : isPositiveSharpe ? 'positive' : 'negative'}
         // Says which of the two absences it is, the way the Volatility and Sortino
         // cards do — the range is too short far more often than the market is flat.
-        sub={metrics.sharpeRatio !== null
-          ? 'Risk-adjusted return'
-          : 'Not enough history in this range'}
+        sub={metrics.sharpeRatio !== null ? undefined : 'Not enough history in this range'}
       />
 
       <KpiCard
@@ -177,7 +172,6 @@ export function PerformanceMetricsCards({
           : metrics.calmarRatio >= 1 ? 'positive'
           : metrics.calmarRatio >= 0 ? 'warning'
           : 'negative'}
-        sub="Return / drawdown"
       />
 
       <KpiCard
@@ -194,8 +188,8 @@ export function PerformanceMetricsCards({
           // rather than leaving a bare "Concentration risk" under a dash.
           ? 'No priced positions'
           : metrics.effectiveHoldings !== null
-            ? `Concentration risk · ${metrics.effectiveHoldings.toFixed(1)} effective`
-            : 'Concentration risk'}
+            ? `${metrics.effectiveHoldings.toFixed(1)} effective holdings`
+            : undefined}
       />
     </KpiPanel>
   )

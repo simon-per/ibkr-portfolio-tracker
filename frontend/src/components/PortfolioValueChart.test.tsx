@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { PortfolioValueChart } from './PortfolioValueChart'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import type { PortfolioValuePoint } from '@/lib/api'
@@ -47,7 +47,7 @@ const HEALTHY = [
   point('2026-03-04', 1020),
 ]
 
-function benchmark(anchorDate: string | null, anchorUnpriced = 0, name = 'S&P 500'): BenchmarkDataset {
+function benchmark(anchorUnpriced = 0, name = 'S&P 500'): BenchmarkDataset {
   return {
     key: name.toLowerCase().replace(/\W+/g, ''),
     name,
@@ -56,7 +56,6 @@ function benchmark(anchorDate: string | null, anchorUnpriced = 0, name = 'S&P 50
       date: p.date, benchmark_value_eur: p.market_value_eur, cost_basis_eur: 1000,
       gain_loss_eur: 0, gain_loss_percent: 0,
     })),
-    anchorDate,
     anchorUnpriced,
   }
 }
@@ -102,48 +101,12 @@ describe('the incomplete-valuation notice', () => {
   })
 })
 
-/**
- * A benchmark line that starts at the portfolio's own value reads as the since-inception
- * comparison it replaced unless the chart says what it is. The sentence is prose rather
- * than a tooltip because a tooltip does not exist on a phone.
- */
-describe('the benchmark anchor note', () => {
-  it('says where the benchmark line starts, and what it means', async () => {
-    render(<PortfolioValueChart data={HEALTHY} benchmarks={[benchmark('2026-03-02')]} />)
-    const note = await screen.findByText(/start at your portfolio's value on Mar 2, 2026/)
-    expect(note.textContent).toMatch(/moved everything into that index that day/)
-    expect(note.textContent).toMatch(/same contributions since/)
-  })
-
-  it('is absent when no benchmark is drawn', () => {
-    render(<PortfolioValueChart data={HEALTHY} />)
-    expect(screen.queryByText(/start at your portfolio's value/)).toBeNull()
-  })
-
-  it('is absent for a backend that sends no anchor, rather than rendered wrong', async () => {
-    // Older than 2026-09-07 the series is since-inception, and describing it as seeded
-    // from the portfolio's value would be the exact misreading the sentence exists to stop.
-    render(<PortfolioValueChart data={HEALTHY} benchmarks={[benchmark(null)]} />)
-    await screen.findByRole('button', { name: /S&P 500/ })
-    expect(screen.queryByText(/start at your portfolio's value/)).toBeNull()
-  })
-
-  it('names each benchmark when they anchor on different days', async () => {
-    render(
-      <PortfolioValueChart
-        data={HEALTHY}
-        benchmarks={[benchmark('2026-03-02'), benchmark('2026-03-03', 0, 'DAX')]}
-      />,
-    )
-    const note = await screen.findByText(/S&P 500 from Mar 2, 2026, DAX from Mar 3, 2026/)
-    expect(note.textContent).toMatch(/first day each index could be priced/)
-  })
-
+describe('the benchmark anchor', () => {
   it('says the line is understated when the anchor day could not be fully valued', async () => {
     render(
       <PortfolioValueChart
         data={[point('2026-03-02', 600, 2), ...HEALTHY.slice(1)]}
-        benchmarks={[benchmark('2026-03-02', 2)]}
+        benchmarks={[benchmark(2)]}
       />,
     )
     const alert = await screen.findByRole('alert')
@@ -155,24 +118,7 @@ describe('the benchmark anchor note', () => {
   })
 })
 
-/**
- * The profit line starts at 0 on the range's first point. Without a sentence saying so, a
- * line at 0 reads as an account that has made nothing — the misreading the benchmark note
- * exists to stop, the other way round.
- */
-describe('the profit anchor note', () => {
-  it('says the line starts at 0 on the first day of the range', () => {
-    render(<PortfolioValueChart data={HEALTHY} />)
-    const note = screen.getByText(/starts at 0 on Mar 2, 2026/)
-    expect(note.textContent).toMatch(/over this range, contributions\s+excluded/)
-  })
-
-  it('disappears with the line it describes', () => {
-    render(<PortfolioValueChart data={HEALTHY} />)
-    fireEvent.click(screen.getByRole('button', { name: /Profit\/Loss/ }))
-    expect(screen.queryByText(/starts at 0 on/)).toBeNull()
-  })
-
+describe('the profit anchor', () => {
   it('says the line is overstated when the first day could not be fully valued', () => {
     render(<PortfolioValueChart data={[point('2026-03-02', 600, 2), ...HEALTHY.slice(1)]} />)
     const alert = screen.getByRole('alert')

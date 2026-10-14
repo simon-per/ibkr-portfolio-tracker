@@ -165,9 +165,8 @@ describe('a populated crypto book', () => {
     renderOverview()
     await screen.findByRole('region', { name: 'Crypto totals' })
     expect(screen.getByText(/exchange cash .* not included/)).toBeTruthy()
-    // The shaded span's note sits under the chart (once, no longer repeated by the tiles).
-    expect(await screen.findByText(/at the Aug 23, 2026 holdings/)).toBeTruthy()
-    expect(screen.getByText(/rebuilt from transactions/)).toBeTruthy()
+    // The replayed days are no longer shaded or captioned (owner, 2026-10-14).
+    expect(screen.queryByText(/rebuilt from transactions/)).toBeNull()
     expect(screen.getByText(/fixed 1.00 USD peg/)).toBeTruthy()
     expect(screen.getByText(/cannot price, left out of every total rather than valued at zero: MYST/)).toBeTruthy()
     expect(screen.getByText('3 spam tokens hidden.')).toBeTruthy()

@@ -41,7 +41,7 @@ function point(date: string, mv: number, unpriced = 0): PortfolioValuePoint {
 }
 
 describe('MonthlyReturnsHeatmap', () => {
-  it('carries the partial marker into the collapsed summary', () => {
+  it('keeps the collapsed summary to the figures, even over part of a period', () => {
     // February is fine; March's last day cannot be valued, so the YTD figure and the
     // March figure both stop short of the period they are labelled with.
     render(
@@ -56,10 +56,10 @@ describe('MonthlyReturnsHeatmap', () => {
         ]}
       />
     )
-    // Still collapsed: no table yet, so the footnote explaining the dagger is not rendered
-    // either — which is why the summary spells the caveat out in words.
+    // The owner's call (2026-10-14): no qualifier on the surface.
     expect(screen.queryByRole('table')).toBeNull()
-    expect(screen.getByText(/part of the period only/)).toBeTruthy()
+    expect(screen.getByText(/Mar:/)).toBeTruthy()
+    expect(screen.queryByText(/part of the period only|†/)).toBeNull()
   })
 
   it('leaves the summary unqualified when every period is complete', () => {
@@ -86,8 +86,8 @@ describe('a range that begins inside a period', () => {
   /**
    * On 1Y today the range starts 2025-09-12, so last year's row is built from Sep 12 →
    * Dec 31 and labelled "YTD", and its September cell from Sep 12 → 30 and labelled
-   * "Sep". Every point is complete, so the unpriced trim saw nothing and neither figure
-   * carried the dagger. `rangeStart` is what lets the component tell.
+   * "Sep". Every point is complete, so the unpriced trim saw nothing. `rangeStart` is
+   * what lets the component tell; the cell tooltip names the days it covers.
    */
   const oneYearFromSeptember = [
     point('2025-09-12', 1000), point('2025-09-30', 1010),
@@ -99,22 +99,23 @@ describe('a range that begins inside a period', () => {
   const open = () => fireEvent.click(screen.getByRole('button', { name: /Monthly Returns/ }))
   const cell = (label: RegExp) => screen.getByTitle(label)
 
-  it("badges last year's YTD and first month, and not the periods the range covers whole", () => {
+  it("names the measured days on last year's YTD and first month, and not on whole periods", () => {
     render(<MonthlyReturnsHeatmap isLoading={false} data={oneYearFromSeptember} rangeStart="2025-09-12" />)
     open()
-    expect(cell(/^YTD 2025:/).textContent).toContain('†')
-    expect(cell(/^Sep 2025:/).textContent).toContain('†')
-    expect(cell(/^Oct 2025:/).textContent).not.toContain('†')
-    expect(cell(/^YTD 2026:/).textContent).not.toContain('†')
-    expect(cell(/^Jan 2026:/).textContent).not.toContain('†')
+    expect(cell(/^YTD 2025:/).getAttribute('title')).toContain('measured')
+    expect(cell(/^Sep 2025:/).getAttribute('title')).toContain('measured')
+    expect(cell(/^Oct 2025:/).getAttribute('title')).not.toContain('measured')
+    expect(cell(/^YTD 2026:/).getAttribute('title')).not.toContain('measured')
+    expect(cell(/^Jan 2026:/).getAttribute('title')).not.toContain('measured')
+    expect(screen.queryByText(/†/)).toBeNull()
   })
 
-  it('names the range as the cause, in the tooltip and the footnote, not a stalled sync', () => {
+  it('names the range as the cause in the tooltip, not a stalled sync', () => {
     render(<MonthlyReturnsHeatmap isLoading={false} data={oneYearFromSeptember} rangeStart="2025-09-12" />)
     open()
-    expect(cell(/^YTD 2025:/).getAttribute('title')).toMatch(/measured 2025-09-12 → 2025-12-31; the selected range starts inside this period/)
-    expect(screen.getByText(/the selected range starts inside it/)).toBeTruthy()
-    expect(screen.queryByText(/stalled market-data sync/)).toBeNull()
+    const title = cell(/^YTD 2025:/).getAttribute('title')
+    expect(title).toMatch(/measured 2025-09-12 → 2025-12-31; the selected range starts inside this period/)
+    expect(title).not.toMatch(/could not be fully valued/)
   })
 
   it('does not badge a YTD range that begins on 1 January, whatever day trading resumed', () => {
@@ -126,14 +127,13 @@ describe('a range that begins inside a period', () => {
       />,
     )
     open()
-    expect(cell(/^YTD 2026:/).textContent).not.toContain('†')
-    expect(cell(/^Jan 2026:/).textContent).not.toContain('†')
-    expect(screen.queryByText(/Measured over part of the period/)).toBeNull()
+    expect(cell(/^YTD 2026:/).getAttribute('title')).not.toContain('measured')
+    expect(cell(/^Jan 2026:/).getAttribute('title')).not.toContain('measured')
   })
 
   it('flags nothing on the range\'s account when the caller passes no range start', () => {
     render(<MonthlyReturnsHeatmap isLoading={false} data={oneYearFromSeptember} />)
     open()
-    expect(cell(/^YTD 2025:/).textContent).not.toContain('†')
+    expect(cell(/^YTD 2025:/).getAttribute('title')).not.toContain('measured')
   })
 })

@@ -326,11 +326,6 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
                 label="Target allocation and drift by position"
                 density="normal"
               />
-              <p className="text-xs text-muted-foreground">
-                Drift is in percentage points of the whole portfolio. A blank target means the
-                position is unmanaged and is never advised on — it is not read as a target of
-                zero. Targets are stored in this browser only.
-              </p>
             </>
           )}
         </CardContent>

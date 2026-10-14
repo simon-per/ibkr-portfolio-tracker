@@ -108,7 +108,6 @@ export function CompositionBar({
             </dt>
             <dd className="mt-0.5 pl-4 text-muted-foreground">
               <span className="tabular-nums">{formatCurrency(segment.value)}</span>
-              <span className="block">{segment.hint}</span>
             </dd>
           </div>
         ))}

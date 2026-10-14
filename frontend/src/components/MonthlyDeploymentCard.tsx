@@ -85,32 +85,17 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // deployment-only chart is honest; drawing a row of zeros would not be.
   const hasMoneyIn = monthly.length > 0 && monthly.every(m => typeof m.money_in_eur === 'number')
 
-  // Whether a deposit ledger exists at all. Under the 'deployed' method money in IS
-  // deployment, so there is no gap to explain and the note below would describe nothing.
-  const hasLedger = data?.windows.some(w => w.money_in_method !== 'deployed') ?? false
-
   // Deployed is drawn ONLY as the legacy fallback, when the backend publishes no money
   // in. It was a second bar beside money in until 2026-09-07, and the account owner
   // asked for it out: the two series are the *identical* number in 20 of this account's
   // 29 months (every month before `coverage_from`, where money in IS lot cost basis) and
   // differ trivially in five more, so it was redundant ink in 25 of 29 — earning its
-  // place only in the two rotation months, which the note below now carries in prose.
+  // place only in the two rotation months.
   // It survives in the tooltip, which is the point: money in comes from the deposit
   // ledger and deployed from tax lots, so deployed is the one independent check on the
   // failure this feature fears most — a transfer booked as a deposit, which inflates
   // money in with nothing beside it to disagree.
   const showDeployed = !hasMoneyIn
-
-  // The largest month where deployment exceeded money in, named below the chart. The
-  // largest rather than the latest, so the note cannot vanish while the spike it
-  // explains is still on screen, and so it points at the bar being looked at.
-  let rotation: { row: ChartRow; gap: number } | null = null
-  if (hasMoneyIn && hasLedger) {
-    for (const row of chartData) {
-      const gap = row.deployed_eur - (row.money_in_eur ?? 0)
-      if (gap > 0.005 && (rotation === null || gap > rotation.gap)) rotation = { row, gap }
-    }
-  }
 
   // Collapsed summary: last month + the 12M average.
   //
@@ -218,21 +203,6 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              {/* Inside the collapsible body deliberately. The MonthlyReturnsHeatmap rule —
-                  a caveat only reachable by expanding is as good as absent — bites when the
-                  COLLAPSED SUMMARY publishes the qualified figure. This summary publishes
-                  money in, which needs no qualification; the note explains the second bar,
-                  so it belongs beside it. */}
-              {rotation && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  These bars count new money only. {rotation.row.label} is where that
-                  matters most: {curSym}{whole(rotation.row.deployed_eur)} went into new
-                  positions that month but only {curSym}
-                  {whole(rotation.row.money_in_eur ?? 0)} of it was new money — the other{' '}
-                  {curSym}{whole(rotation.gap)} was capital rotated between holdings,
-                  which puts the same money to work twice.
-                </p>
-              )}
             </>
           )}
         </CardContent>

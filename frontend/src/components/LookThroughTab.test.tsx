@@ -252,12 +252,12 @@ describe('LookThroughTab', () => {
     expect(screen.getByText(/A further 38 companies hold/)).toBeTruthy()
   })
 
-  it('explains the dagger inline when a row was folded on an ISIN alone', async () => {
+  it('does not footnote a row folded on an ISIN alone (owner, 2026-10-14)', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
     await screen.findByText('ALPHABET INC.')
-    expect(screen.getByText(/folded on an ISIN alone/)).toBeTruthy()
+    expect(screen.queryByText(/folded on an ISIN alone/)).toBeNull()
   })
 
   it('states the value attributed to no company at all', async () => {

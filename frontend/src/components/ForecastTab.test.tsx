@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ForecastTab } from './ForecastTab'
 import { CurrencyProvider } from '@/lib/CurrencyContext'
@@ -106,15 +106,10 @@ describe('ForecastTab', () => {
     mockApi()
     renderTab()
 
-    // The table renders before either query answers, so wait for the sentence that can
-    // only exist once the baseline has loaded.
-    const note = await screen.findByText(/paid in so far/)
-    expect(note.textContent).toMatch(/55,000/)
-    expect(note.textContent).toMatch(/gain or loss already made/)
-
     // Column order: horizon, value, gains, money in. One year of 1,000/month on 55,000.
+    // The table renders before either query answers, so wait for the baseline.
+    await waitFor(async () => expect(amount((await oneYearRow())[3])).toBe(67_000))
     const [, value, gains, moneyIn] = await oneYearRow()
-    expect(amount(moneyIn)).toBe(67_000)
     // The old seed would have read 72,000 + 12,000 here.
     expect(amount(moneyIn)).not.toBe(84_000)
     expect(amount(value)).toBe(amount(moneyIn) + amount(gains))
@@ -136,7 +131,6 @@ describe('ForecastTab', () => {
     expect(moneyIn.textContent).toBe('—')
     // Portfolio Value never needed the baseline.
     expect(amount(value)).toBeGreaterThan(72_000)
-    expect(screen.queryByText(/paid in so far/)).toBeNull()
   })
 
   it('shows Total Value on the Current button when cash is tracked, whichever start is selected', async () => {
@@ -150,10 +144,9 @@ describe('ForecastTab', () => {
     const zero = screen.getAllByRole('button').find((b) => /^\D*0$/.test(b.textContent ?? ''))!
     fireEvent.click(zero)
     expect(screen.getByRole('button', { name: /Current/ }).textContent).toMatch(/72,000/)
-    expect(await screen.findByText(/Starting from zero/)).toBeTruthy()
 
+    await waitFor(async () => expect(amount((await oneYearRow())[3])).toBe(12_000))
     const [, value, gains, moneyIn] = await oneYearRow()
-    expect(amount(moneyIn)).toBe(12_000)
     expect(amount(value)).toBe(amount(moneyIn) + amount(gains))
   })
 

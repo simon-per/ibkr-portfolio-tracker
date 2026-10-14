@@ -7,8 +7,6 @@ import {
   DONUT_COINS,
   rangePnlSeries,
   rangeStart,
-  reconstructedCaption,
-  reconstructedSpan,
   sliceRange,
   valueSeries,
 } from './cryptoChart'
@@ -132,29 +130,6 @@ describe('rangePnlSeries', () => {
 
   it('is empty for an empty range', () => {
     expect(rangePnlSeries([])).toEqual([])
-  })
-})
-
-describe('the reconstructed span', () => {
-  it('is the first and last reconstructed day inside the slice', () => {
-    const points = daily('2026-08-20', '2026-08-26').map(p => ({
-      ...p, reconstructed: p.date < '2026-08-24',
-    }))
-    expect(reconstructedSpan(points)).toEqual({ from: '2026-08-20', to: '2026-08-23' })
-    expect(reconstructedSpan(points.slice(4))).toBeNull()
-  })
-
-  it('names the backfilled and the rebuilt days in one sentence', () => {
-    const id = (iso: string) => iso
-    expect(reconstructedCaption('2026-01-01', '2026-08-23', '2026-10-02', id)).toBe(
-      'Shaded: 2026-01-01 – 2026-08-22 at the 2026-08-23 holdings; ' +
-      '2026-08-23 – 2026-10-01 rebuilt from transactions',
-    )
-    // Before the rebuild has run, the first synced day's basket stands in for every day.
-    expect(reconstructedCaption('2026-01-01', '2026-10-02', '2026-10-02', id)).toBe(
-      'Shaded: 2026-01-01 – 2026-10-01 at the 2026-10-02 holdings',
-    )
-    expect(reconstructedCaption('2026-01-01', null, null, id)).toBeNull()
   })
 })
 

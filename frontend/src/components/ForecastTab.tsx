@@ -224,7 +224,6 @@ export function ForecastTab() {
       <Card>
         <CardHeader>
           <CardTitle>Forecast Parameters</CardTitle>
-          <CardDescription>Adjust your assumptions to see projected portfolio growth</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -388,23 +387,9 @@ export function ForecastTab() {
             </AreaChart>
           </ResponsiveContainer>
           </div>
-          {/* Prose, not a tooltip: a caveat reachable only by hovering does not exist on a
-              phone. Which sentence depends on what the grey band is built from. Nothing is
-              said while the baseline is still loading — the refusal is for a load that
-              failed, and flashing it on every visit would teach the reader to skip it. */}
-          {startFromZero ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Starting from zero: <span className="font-medium text-foreground">Money In</span> is your
-              monthly contributions alone, so Investment Gains is only what the projection adds.
-            </p>
-          ) : moneyInToDate !== null ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Money In</span> starts at what you have paid
-              in so far ({curSym}{formatCount(Math.round(moneyInToDate))}) and grows by your monthly
-              contribution. The gap to <span className="font-medium text-foreground">Portfolio Value</span>{' '}
-              at year 0 is the gain or loss already made.
-            </p>
-          ) : contributionsPending ? null : (
+          {/* Said only when the load failed: flashing it while the baseline is still
+              loading would teach the reader to skip it. */}
+          {startFromZero || moneyInToDate !== null || contributionsPending ? null : (
             <p
               role="alert"
               className="mt-3 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
@@ -420,9 +405,6 @@ export function ForecastTab() {
       <Card>
         <CardHeader>
           <CardTitle>Future Value Projections</CardTitle>
-          <CardDescription>
-            Portfolio growth milestones. At every horizon, Portfolio Value is Money In plus Investment Gains.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -439,7 +421,6 @@ export function ForecastTab() {
       <Card>
         <CardHeader>
           <CardTitle>Scenario Comparison ({forecastYears}-Year Outlook)</CardTitle>
-          <CardDescription>Different return rate scenarios</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">

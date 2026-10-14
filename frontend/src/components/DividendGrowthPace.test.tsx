@@ -40,18 +40,8 @@ describe('the dividend income growth strip', () => {
     expect(strip().textContent).not.toContain('CAGR')
   })
 
-  it('marks a base the account was still being funded inside, on the surface', () => {
+  it('does not mark a base the account was still being funded inside (owner, 2026-10-14)', () => {
     render(<DividendGrowthPace pace={pace({ coverage_limited: true })} />)
-    // The dagger carries the full reason in its title, but a marker whose meaning
-    // exists only in a hover is one a touch device never reaches — so the short
-    // form is visible text.
-    expect(strip().textContent).toContain('†')
-    expect(strip().textContent).toContain('from the first window on record')
-    expect(strip().querySelector('[aria-label*="still being funded"]')).toBeTruthy()
-  })
-
-  it('does not mark a rate whose base is a full window', () => {
-    render(<DividendGrowthPace pace={pace()} />)
     expect(strip().textContent).not.toContain('†')
     expect(strip().textContent).not.toContain('first window on record')
   })

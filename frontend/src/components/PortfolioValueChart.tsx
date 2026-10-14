@@ -13,7 +13,7 @@ import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
-import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import { rangeProfitAnchorUnpriced, rangeProfitSeries } from '@/lib/rangeProfit'
 import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 
@@ -44,12 +44,6 @@ export interface BenchmarkDataset {
   name: string
   color: string
   key: string
-  /**
-   * The day the hypothetical was seeded from the portfolio's own value — `null` when the
-   * backend served the since-inception series (older than 2026-09-07, or asked for it),
-   * in which case the anchor prose is not rendered rather than rendered wrong.
-   */
-  anchorDate?: string | null
   /** Holdings the anchor value could not price. Above 0 the whole benchmark line is understated. */
   anchorUnpriced?: number
 }
@@ -94,10 +88,6 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
 
   /** Whether to draw the cash-inclusive pair; see `cashIsTracked` for the refusals. */
   const cashTracked = useMemo(() => cashIsTracked(data?.[data.length - 1]), [data])
-  const caveat = useMemo(
-    () => cashCaveat(data?.[data.length - 1]?.cash_source),
-    [data]
-  )
 
   /**
    * The lines, and what each one means in this mode.
@@ -195,47 +185,23 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
 
   const availableBenchmarks = benchmarks.filter(b => b.data.length > 0)
 
-  /**
-   * What the benchmark lines MEAN, said in prose. Each is seeded with the portfolio's own
-   * Total Value on the first priced day of the range and fed only the contributions after
-   * it — so the two lines start at one point and the gap is what happened in the window,
-   * not two years of history the range does not draw. Without this sentence a line that
-   * starts at the portfolio's value reads as the since-inception comparison it replaced.
-   *
-   * One sentence when every drawn benchmark shares an anchor (the normal case: the anchor
-   * is the range start), one clause per benchmark when an index had no price on that day
-   * and anchored later. Prose rather than a tooltip, because a tooltip does not exist on a
-   * phone — the rule that put the dividend basis in a footnote.
-   */
   const drawnBenchmarks = availableBenchmarks.filter(b => visibleBenchmarks.has(b.key))
-  const anchored = drawnBenchmarks.filter(b => b.anchorDate)
-  const anchorDates = Array.from(new Set(anchored.map(b => b.anchorDate as string)))
-  // Reduced to a STRING and a NUMBER here, ahead of the axis memo below, so the JSX touches
-  // nothing derived from `availableBenchmarks`: the React Compiler treats a method call on an
-  // array aliased from that memo's dependency — even `.join()` on a mapped copy — as a
-  // possible later mutation, and refuses to preserve the memo
-  // (`react-hooks/preserve-manual-memoization`). Bisected, not guessed.
-  const anchorPhrase =
-    anchorDates.length === 0
-      ? null
-      : anchorDates.length === 1
-        ? formatDate(anchorDates[0])
-        : `the first day each index could be priced (${anchored
-            .map(b => `${b.name} from ${formatDate(b.anchorDate as string)}`)
-            .join(', ')})`
   // A seed the backend could not fully price understates every point after it. Folded into
-  // the incomplete-valuation notice rather than left to the line's shape.
+  // the incomplete-valuation notice rather than left to the line's shape. Reduced to a
+  // STRING and a NUMBER here, ahead of the axis memo below, so the JSX touches nothing
+  // derived from `availableBenchmarks`: the React Compiler treats a method call on an array
+  // aliased from that memo's dependency — even `.join()` on a mapped copy — as a possible
+  // later mutation, and refuses to preserve the memo
+  // (`react-hooks/preserve-manual-memoization`). Bisected, not guessed.
   const understatedNames = drawnBenchmarks
     .filter(b => (b.anchorUnpriced ?? 0) > 0)
     .map(b => b.name)
   const understatedCount = understatedNames.length
   const understatedText = understatedNames.join(' and ')
 
-  // The profit line is rebased to 0 on the first point, so it needs the same sentence the
-  // benchmarks get — without it a line starting at 0 reads as an account that has made
-  // nothing. Only while the line is drawn. An unpriced first day shifts every later point
-  // UP (the anchor's value is short), so it joins the notice with its own direction.
-  const profitStart = showProfit && data?.[0] ? formatDate(data[0].date) : null
+  // The profit line is rebased to 0 on the first point. An unpriced first day shifts every
+  // later point UP (the anchor's value is short), so it joins the notice with its own
+  // direction. Only while the line is drawn.
   const profitAnchorUnpriced = showProfit ? rangeProfitAnchorUnpriced(data ?? []) > 0 : false
 
   /**
@@ -408,31 +374,6 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             </>
           )}
         </div>
-      )}
-
-      {cashTracked && caveat && (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Total Value</span> is holdings plus
-          uninvested cash, and <span className="font-medium text-foreground">Money In</span> is
-          what you contributed — so a sale moves value between the lines instead of off the
-          chart, and the gap between them is total profit. Cash is {caveat}.
-        </p>
-      )}
-
-      {profitStart && (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Profit/Loss</span> starts at 0 on{' '}
-          {profitStart} — what the account gained or lost over this range, contributions
-          excluded, rather than since you started.
-        </p>
-      )}
-
-      {anchorPhrase && (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Benchmarks</span> start at your
-          portfolio's value on {anchorPhrase} — what you would have if you had moved everything
-          into that index that day and made the same contributions since.
-        </p>
       )}
 
       {/* Toggle Buttons. Already wrapping; the min-height is the touch target. */}

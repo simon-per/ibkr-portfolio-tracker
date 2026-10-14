@@ -162,8 +162,6 @@ describe('Dividend chart controls', () => {
     expect(open.textContent).toContain('Mar 25 – Feb 26')
     expect(open.textContent).toContain('incl. €50.00 projected')
     expect(open.textContent).toContain('est.')
-    expect(screen.getByText(/Earlier history includes estimated gross/)).toBeTruthy()
-    expect(screen.getByText(/Some comparisons span the switch/)).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
     // Forecast off: the open window goes, leaving the last fully elapsed one —
@@ -239,17 +237,6 @@ describe('Dividend chart controls', () => {
     await user.click(screen.getByRole('button', { name: 'TTM' }))
     expect(screen.getByText('AAA')).toBeTruthy()
     expect(screen.getByText('translucent = forecast')).toBeTruthy()
-  })
-
-  it('tells the reader which windows it is showing, and changes that with the toggle', async () => {
-    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
-    const user = userEvent.setup()
-    mount()
-    await screen.findByText(/Received/)
-    await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByText(/include projected payments/)).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
-    expect(screen.getByText(/Only fully elapsed windows are shown/)).toBeTruthy()
   })
 
   it('requests 24 months and allows an annual row to restore a calendar year without changing mode', async () => {

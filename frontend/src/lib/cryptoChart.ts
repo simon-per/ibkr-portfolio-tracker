@@ -83,16 +83,6 @@ export function rangePnlSeries(points: readonly CryptoHistoryPoint[]): (number |
   })
 }
 
-/** The reconstructed days inside a slice — before the first synced holdings day — as the
- * first and last date, for the chart's shading; null when the slice has none. */
-export function reconstructedSpan(
-  points: readonly CryptoHistoryPoint[],
-): { from: string; to: string } | null {
-  const days = points.filter(point => point.reconstructed)
-  if (days.length === 0) return null
-  return { from: days[0].date, to: days[days.length - 1].date }
-}
-
 export interface AllocationSlice {
   key: string
   label: string
@@ -148,34 +138,6 @@ export function allocationSlices(portfolio: CryptoPortfolioResponse): Allocation
     })
   }
   return slices
-}
-
-function dayBefore(iso: string): string {
-  const d = parseLocalDate(iso)
-  return toLocalISODate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1))
-}
-
-/**
- * The sentence under the chart that says which days are not measured holdings:
- * before the earliest basket, that basket at each day's price; between it and the first
- * synced day, the basket rebuilt from CoinStats' transactions. Null when every day is
- * synced. `format` renders a date (the view's `formatDate`).
- */
-export function reconstructedCaption(
-  start: string,
-  basketDate: string | null,
-  firstSnapshotDate: string | null,
-  format: (iso: string) => string,
-): string | null {
-  if (!basketDate || !firstSnapshotDate) return null
-  const parts: string[] = []
-  if (basketDate > start) {
-    parts.push(`${format(start)} – ${format(dayBefore(basketDate))} at the ${format(basketDate)} holdings`)
-  }
-  if (basketDate < firstSnapshotDate) {
-    parts.push(`${format(basketDate)} – ${format(dayBefore(firstSnapshotDate))} rebuilt from transactions`)
-  }
-  return parts.length ? `Shaded: ${parts.join('; ')}` : null
 }
 
 /** Every coin left out of at least one point in the slice, for the line under the chart. */

@@ -55,13 +55,7 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 space-y-3" align="end">
-        <div>
-          <div className="text-sm font-medium">Forecast withholding</div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Applied only when a forecast comes from published gross dividends. Actual
-            IBKR net payments and realized history never change.
-          </p>
-        </div>
+        <div className="text-sm font-medium">Forecast withholding</div>
         <form className="space-y-3" onSubmit={save}>
           <label className="block text-xs font-medium" htmlFor="dividend-withholding-pct">
             Withholding percentage

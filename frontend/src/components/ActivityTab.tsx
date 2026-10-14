@@ -269,10 +269,9 @@ export function ActivityTab() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <CardTitle>Activity</CardTitle>
-              <CardDescription>
-                Every trade, dividend, deposit and corporate action, newest first
-                {data ? ` · ${data.total.toLocaleString('en-US')} events` : ''}
-              </CardDescription>
+              {data && (
+                <CardDescription>{data.total.toLocaleString('en-US')} events</CardDescription>
+              )}
             </div>
             <a
               href={api.getActivityCsvUrl({ ...params, limit: undefined, offset: undefined })}
@@ -419,12 +418,6 @@ export function ActivityTab() {
                 </div>
               )}
 
-              <p className="mt-4 text-xs text-muted-foreground">
-                Amounts are in {data.base_currency}, each converted at its own date. Broker
-                transfers are shown but never counted as money added — the capital was
-                saved elsewhere and the transferred lots already carry their original
-                purchase dates.
-              </p>
             </>
           )}
         </CardContent>

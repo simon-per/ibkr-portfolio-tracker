@@ -362,13 +362,9 @@ class TaxService:
                 base_fx, as_of, only_accounts=exempt_accounts
             ):
                 exempt_holdings_total += row["market_value"]
-            warnings.append(
-                "Pillar 3a is excluded from the wealth-tax base, the DA-1 reclaim "
-                "and realized gains above, because 3a capital is not taxed as "
-                "wealth and its income is not taxable income — it is taxed on "
-                "withdrawal, at a separate reduced rate. Its contributions are "
-                "reported separately below, being deductible."
-            )
+            # The why lives in `pillar3a.note` (and the CSV), not in `warnings`: it
+            # held on every report with a 3a account, and a warning that is always
+            # present teaches the reader to skip the banner (owner, 2026-10-14).
 
         # The label reflects what actually contributed inside the year window:
         # "mixed" is the boundary year, where estimates cover the weeks before the
@@ -387,10 +383,7 @@ class TaxService:
             "dividend_ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "dividend_income": dividend_income,
             "dividend_by_country": dividend_by_country,
-            "dividend_country_note": (
-                "Country derived from the ISIN prefix (issuer domicile) — a good proxy for the "
-                "DA-1 source country, but verify ADRs and funds, whose withholding country can differ."
-            ),
+            "dividend_country_note": "Country from the ISIN prefix — verify ADRs and funds.",
             "dividend_totals": {
                 "gross": round(float(div_gross), 2),
                 "withholding": round(float(div_wht), 2),

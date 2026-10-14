@@ -264,12 +264,7 @@ function CryptoBook({
             ) : historyLoading ? (
               <div className="h-[260px] animate-pulse rounded-md bg-muted sm:h-[340px]" />
             ) : (
-              <CryptoHistoryChart
-                points={history}
-                startDate={portfolio.start_date}
-                basketDate={portfolio.basket_date}
-                firstSnapshotDate={portfolio.first_snapshot_date}
-              />
+              <CryptoHistoryChart points={history} />
             )}
           </CardContent>
         </Card>

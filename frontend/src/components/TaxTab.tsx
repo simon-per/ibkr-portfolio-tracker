@@ -259,11 +259,6 @@ export function TaxTab() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>Tax Report</CardTitle>
-              <CardDescription>
-                Swiss filing aid — dividend income &amp; foreign withholding (DA-1), realized
-                gains, and year-end holdings (wealth tax). Amounts in{' '}
-                {data?.base_currency ?? 'base currency'}.
-              </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="tax-year" className="text-sm text-muted-foreground">
@@ -293,11 +288,6 @@ export function TaxTab() {
               </a>
             </div>
           </div>
-          {data && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Not tax advice — an aid for filing, not an official form.
-            </p>
-          )}
         </CardHeader>
       </Card>
 
@@ -325,30 +315,21 @@ export function TaxTab() {
             </Card>
           )}
 
-          {/* --- Pillar 3a ---
-              Leads, because it explains what is *absent* from every section below it.
-              A reader reconciling the Steuerwert against a statement needs that before
-              the numbers, not in a footnote after them — the same rule that moved the
-              look-through coverage notice outside its collapsible. */}
+          {/* --- Pillar 3a --- Leads: it is what is *absent* from every section below. */}
           {data.pillar3a && (
             <Card>
               <CardHeader>
                 <CardTitle>Pillar 3a</CardTitle>
-                <CardDescription>
-                  Excluded from every section below. 3a capital is not part of the
-                  Steuerwert and its income is not taxable — both are taxed on
-                  withdrawal, at a separate reduced rate.
-                </CardDescription>
+                <CardDescription>Excluded from every section below.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <div className="text-2xl font-semibold tabular-nums">
                       {money(data.pillar3a.contributions)}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      Contributions in {data.year} —{' '}
-                      <span className="font-medium">deductible from taxable income</span>
+                      Contributions in {data.year} · deductible
                     </div>
                   </div>
                   <div>
@@ -356,17 +337,10 @@ export function TaxTab() {
                       {money(data.pillar3a.holdings_value)}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      Assets held — <span className="font-medium">not</span> part of the
-                      Steuerwert
+                      Assets held · not in the Steuerwert
                     </div>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Check this year&rsquo;s federal cap: it differs depending on whether you
-                  are affiliated to a pension fund. Transfers of vested benefits are
-                  excluded from the figure above — that capital was deducted in the year
-                  it was originally paid in.
-                </p>
               </CardContent>
             </Card>
           )}
@@ -375,13 +349,7 @@ export function TaxTab() {
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
-                  <CardDescription>
-                    Taxable dividend income. Foreign withholding tax is reclaimable via the DA-1
-                    form.
-                  </CardDescription>
-                </div>
+                <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
                 <span
                   className={cn(
                     'rounded-full px-2.5 py-1 text-xs font-medium',
@@ -460,13 +428,7 @@ export function TaxTab() {
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <CardTitle>Realized capital gains</CardTitle>
-                  <CardDescription>
-                    Switzerland does not tax private capital gains — shown for completeness and
-                    other regimes.
-                  </CardDescription>
-                </div>
+                <CardTitle>Realized capital gains</CardTitle>
                 <span
                   className={cn(
                     'rounded-full px-2.5 py-1 text-xs font-medium',
@@ -517,10 +479,7 @@ export function TaxTab() {
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <CardTitle>Holdings snapshot (wealth tax / Steuerwert)</CardTitle>
-                  <CardDescription>{data.holdings_snapshot_note}</CardDescription>
-                </div>
+                <CardTitle>Holdings snapshot (wealth tax / Steuerwert)</CardTitle>
                 <span
                   className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
                   title="Swiss wealth tax is assessed on the 31 December value"

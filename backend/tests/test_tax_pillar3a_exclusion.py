@@ -220,10 +220,11 @@ async def test_the_exclusion_says_why_rather_than_merely_that():
         await _seed(session)
         report = await TaxService(session).get_tax_report(YEAR)
 
-        note = " ".join(report["warnings"])
-        assert "Pillar 3a" in note
+        note = report["pillar3a"]["note"]
         assert "withdrawal" in note        # the reason, not just the fact
-        assert "deductible" in report["pillar3a"]["note"]
+        assert "deductible" in note
+        # Not a banner: it would be on every report with a 3a account.
+        assert not any("Pillar 3a" in w for w in report["warnings"])
 
         csv = TaxService(session).to_csv(report)
         assert "Pillar 3a" in csv

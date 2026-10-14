@@ -309,13 +309,11 @@ function DrillDownPanel({
 // Treemap section component
 function AllocationTreemap({
   title,
-  description,
   allocation,
   colorFor,
   isLoading,
 }: {
   title: string
-  description: string
   allocation: Record<string, AllocationCategory>
   colorFor: (name: string) => SectorPaint
   isLoading: boolean
@@ -332,7 +330,6 @@ function AllocationTreemap({
       <Card>
         <CardHeader>
           <CardTitle className="text-2xl">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center h-80 text-muted-foreground">Loading...</div>
@@ -346,7 +343,6 @@ function AllocationTreemap({
       <Card>
         <CardHeader>
           <CardTitle className="text-2xl">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center h-80 text-muted-foreground">
@@ -370,7 +366,6 @@ function AllocationTreemap({
     <Card>
       <CardHeader>
         <CardTitle className="text-2xl">{title}</CardTitle>
-        <CardDescription>{description} · Click a section to see positions</CardDescription>
       </CardHeader>
       <CardContent>
         {/* Stacks below `sm`. Side by side, the 200px legend leaves the treemap ~86px
@@ -627,7 +622,6 @@ export function AllocationTab() {
       {/* Sector Breakdown - Full Width Treemap */}
       <AllocationTreemap
         title="Sector Breakdown"
-        description="Portfolio allocation by sector"
         allocation={sectorAllocation}
         colorFor={allocationSectorPaint}
         isLoading={isLoading}
@@ -641,7 +635,6 @@ export function AllocationTab() {
       <div className="grid gap-6 [&>*]:min-w-0 lg:grid-cols-2">
         <AllocationTreemap
           title="Geographic Breakdown"
-          description="Portfolio allocation by region"
           allocation={geoAllocation}
           colorFor={mappedColor(REGION_COLORS)}
           isLoading={isLoading}
@@ -649,7 +642,6 @@ export function AllocationTab() {
 
         <AllocationTreemap
           title="Asset Type"
-          description="Stocks vs ETFs"
           allocation={assetAllocation}
           colorFor={mappedColor(ASSET_TYPE_COLORS)}
           isLoading={isLoading}

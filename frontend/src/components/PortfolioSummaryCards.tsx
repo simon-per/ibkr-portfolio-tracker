@@ -123,14 +123,13 @@ export function PortfolioSummaryCards({
         // so the period chip is not displaced.
         sub={hasCash
           ? `${formatCurrency(summary.total_market_value_eur)} in holdings + ${formatCurrency(cash)} cash`
-          : periodChangePct != null ? undefined : 'Current portfolio value'}
+          : undefined}
       />
 
       <KpiCard
         label="Cost Basis"
         icon={<Target className="h-4 w-4 text-muted-foreground" />}
         value={formatCurrency(summary.total_cost_basis_eur)}
-        sub="Total amount invested"
       />
 
       <KpiCard
@@ -158,7 +157,6 @@ export function PortfolioSummaryCards({
       <KpiCard
         label="Positions"
         value={summary.num_positions}
-        sub="Unique securities held"
       />
     </div>
   )

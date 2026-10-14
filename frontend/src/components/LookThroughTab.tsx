@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { api } from '@/lib/api'
@@ -163,7 +163,6 @@ export function lookthroughColumns(deps: {
               : row.key_type === 'isin'
                 ? 'ISIN'
                 : 'none'}
-          {row.partially_resolved ? ' †' : ''}
         </span>
       ),
     },
@@ -567,11 +566,6 @@ export function LookThroughTab() {
             <Card>
               <CardHeader>
                 <CardTitle>Where the value sits</CardTitle>
-                <CardDescription>
-                  Every {data.base_currency} in the portfolio, by how the look-through reaches
-                  it. The three shares are of the whole book and always sum to it — nothing is
-                  rescaled onto the part that could be decomposed.
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 <CompositionBar segments={partition} formatCurrency={formatCurrency} />
@@ -581,14 +575,7 @@ export function LookThroughTab() {
 
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>Company exposure</CardTitle>
-                <CardDescription>
-                  Direct holdings and fund constituents combined, with share classes and
-                  multiple listings folded into one row. Percentages are of the whole
-                  portfolio and are not rescaled.
-                </CardDescription>
-              </div>
+              <CardTitle>Company exposure</CardTitle>
               <SegmentedControl<LimitOption>
                 label="How many companies to show"
                 variant="buttons"
@@ -648,12 +635,6 @@ export function LookThroughTab() {
                       shown.
                     </p>
                   )}
-                  {data.companies.some((r) => r.partially_resolved) && (
-                    <p className="text-xs text-muted-foreground">
-                      † folded on an ISIN alone, so a listing under a different ISIN would
-                      not have joined that row.
-                    </p>
-                  )}
                 </>
               )}
             </CardContent>
@@ -687,11 +668,6 @@ export function LookThroughTab() {
                   )}
                   {data.funds.length > 0 && (
                     <>
-                      <p className="text-xs text-muted-foreground">
-                        Which held funds could be decomposed, and why the others could not. A
-                        fund with no basket contributes nothing to the company table — its
-                        value is counted in the portfolio but attributed to no company.
-                      </p>
                       <DataTable
                         rows={data.funds}
                         columns={coverageColumns}
