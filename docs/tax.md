@@ -67,4 +67,13 @@ block. Tests: `tests/test_tax_service.py`, plus the shape assertions in `tests/t
 
 Frontend: `TaxTab.tsx`. It's a filing aid, not tax advice.
 
+**An estimated row's withholding is absent, not 0.00** (2026-10-14). A yfinance estimate carries a
+guessed gross and no withholding on record, so its `0` means "not known" — and on a DA-1 aid a
+`0.00` reads as "nothing was withheld", a claim against the reclaim. The tab reads each row's
+`source`: an estimate's cell is `—`; the withholding total is `—` when every row is an estimate and
+otherwise carries `excl. N est.`; the by-country column (whose rows do not say which payments were
+estimates) is `—` in an estimate-only year and tagged `excl. est.` in the boundary year. The CSV
+still writes the estimate's `0` (`to_csv()`), and `dividend_country_note` is still served but no
+longer rendered.
+
 ---
