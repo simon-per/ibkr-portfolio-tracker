@@ -2,8 +2,8 @@ import { useState, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { cn } from '@/lib/utils'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
-import { computeModifiedDietzReturn, type MonthReturn } from '@/lib/monthlyReturns'
+import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { monthlyReturnRows, type MonthReturn } from '@/lib/monthlyReturns'
 import type { PortfolioValuePoint } from '@/lib/api'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
 
@@ -11,29 +11,33 @@ interface MonthlyReturnsHeatmapProps {
   data: PortfolioValuePoint[] | undefined
   /**
    * The first day the chart's range asked for (`dateRange.start`). What lets a year or
-   * month the range only partly covers carry the dagger — see `computeModifiedDietzReturn`.
+   * month the range only partly covers name its days in the tooltip — see
+   * `computeModifiedDietzReturn`.
    * Optional: without it no period is flagged on the range's account.
    */
   rangeStart?: string
   isLoading: boolean
   isError?: boolean
-}
-
-interface YearRow {
-  year: number
-  months: (MonthReturn | null)[]
-  ytd: MonthReturn | null
+  /**
+   * The calendar month still running, `YYYY-MM`; its cell is tagged `MTD`. Defaults to
+   * the viewer's local month. A prop so a test can pin it.
+   */
+  runningMonth?: string
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function localMonth(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
 
 /**
  * One tooltip builder for both the month cells and the YTD column — they carried
  * two copies of the same template string, so the partial note would have had to be
  * added twice, and the YTD one is the likelier to be forgotten.
  */
-function cellTitle(label: string, m: MonthReturn, curSym: string): string {
-  const money = (n: number) => `${curSym}${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+function cellTitle(label: string, m: MonthReturn, money: (n: number) => string): string {
   const sign = m.returnPercent >= 0 ? '+' : ''
   return [
     `${label}: ${sign}${m.returnPercent.toFixed(2)}% (${money(m.startValue)} → ${money(m.endValue)})`,
@@ -78,59 +82,21 @@ function getReturnColor(pct: number): string {
   }
 }
 
-export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: MonthlyReturnsHeatmapProps) {
-  const curSym = useCurrencySymbol()
+export function MonthlyReturnsHeatmap({
+  data, rangeStart, isLoading, isError, runningMonth = localMonth(),
+}: MonthlyReturnsHeatmapProps) {
+  const money = useFormatCurrency()
   const [open, setOpen] = useState(false)
 
-  const yearRows = useMemo(() => {
-    if (!data || data.length < 2) return []
-
-    // Group data points by YYYY-MM
-    const monthGroups = new Map<string, PortfolioValuePoint[]>()
-    for (const point of data) {
-      const key = point.date.substring(0, 7) // "YYYY-MM"
-      const group = monthGroups.get(key)
-      if (group) {
-        group.push(point)
-      } else {
-        monthGroups.set(key, [point])
-      }
-    }
-
-    // Compute Modified Dietz return per month. `periodStart` is the month's first
-    // calendar day, so a month the range began inside carries the dagger.
-    const monthReturns = new Map<string, MonthReturn>()
-    for (const [key, points] of monthGroups) {
-      const result = computeModifiedDietzReturn(points, { periodStart: `${key}-01`, rangeStart })
-      if (result) monthReturns.set(key, result)
-    }
-
-    // Organize into year rows
-    const yearMap = new Map<number, (MonthReturn | null)[]>()
-    for (const [key] of monthReturns) {
-      const year = parseInt(key.substring(0, 4))
-      if (!yearMap.has(year)) {
-        yearMap.set(year, new Array(12).fill(null))
-      }
-      const monthIndex = parseInt(key.substring(5, 7)) - 1
-      yearMap.get(year)![monthIndex] = monthReturns.get(key)!
-    }
-
-    // Compute YTD for each year using Modified Dietz. `yearPoints` is whatever the
-    // selected RANGE holds for that year, so on 1Y last year's "YTD" runs from today's
-    // date to 31 December — `periodStart` is what gets that badged.
-    const rows: YearRow[] = []
-    for (const [year, months] of yearMap) {
-      const yearPrefix = String(year)
-      const yearPoints = data.filter(p => p.date.startsWith(yearPrefix))
-      const ytd = computeModifiedDietzReturn(yearPoints, { periodStart: `${yearPrefix}-01-01`, rangeStart })
-      rows.push({ year, months, ytd })
-    }
-
-    // Sort descending (most recent on top)
-    rows.sort((a, b) => b.year - a.year)
-    return rows
-  }, [data, rangeStart])
+  // Each month runs from the previous month's last point, and YTD is the months
+  // compounded — see `monthlyReturnRows`. A year without a single month return has
+  // nothing to show and no row.
+  const yearRows = useMemo(
+    () => (data ? monthlyReturnRows(data, rangeStart).filter((r) => r.months.some((m) => m !== null)) : []),
+    [data, rangeStart],
+  )
+  const isRunning = (year: number, monthIndex: number) =>
+    runningMonth === `${year}-${String(monthIndex + 1).padStart(2, '0')}`
 
   // Summary text for collapsed state
   let summaryText: React.ReactNode = 'Monthly return percentages by year'
@@ -151,7 +117,8 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
       const m = topRow.months[lastMonthIdx]!
       parts.push(
         <span key="month">
-          {MONTH_LABELS[lastMonthIdx]}:{' '}
+          {MONTH_LABELS[lastMonthIdx]}
+          {isRunning(topRow.year, lastMonthIdx) ? ' MTD' : ''}:{' '}
           <span className={m.returnPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
             {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
           </span>
@@ -225,12 +192,15 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
                                 'rounded px-1.5 py-1 text-center text-xs font-medium',
                                 getReturnColor(m.returnPercent)
                               )}
-                              title={cellTitle(`${MONTH_LABELS[i]} ${row.year}`, m, curSym)}
+                              title={cellTitle(`${MONTH_LABELS[i]} ${row.year}`, m, money)}
                             >
                               {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
+                              {isRunning(row.year, i) && (
+                                <div className="text-[9px] font-normal leading-none opacity-80">MTD</div>
+                              )}
                             </div>
                           ) : (
-                            <div className="text-center text-xs text-muted-foreground py-1">–</div>
+                            <div className="text-center text-xs text-muted-foreground py-1">—</div>
                           )}
                         </td>
                       ))}
@@ -241,12 +211,12 @@ export function MonthlyReturnsHeatmap({ data, rangeStart, isLoading, isError }: 
                               'rounded px-1.5 py-1 text-center text-xs font-medium',
                               getReturnColor(row.ytd.returnPercent)
                             )}
-                            title={cellTitle(`YTD ${row.year}`, row.ytd, curSym)}
+                            title={cellTitle(`YTD ${row.year}`, row.ytd, money)}
                           >
                             {row.ytd.returnPercent >= 0 ? '+' : ''}{row.ytd.returnPercent.toFixed(1)}%
-                            </div>
+                          </div>
                         ) : (
-                          <div className="text-center text-xs text-muted-foreground py-1">–</div>
+                          <div className="text-center text-xs text-muted-foreground py-1">—</div>
                         )}
                       </td>
                     </tr>

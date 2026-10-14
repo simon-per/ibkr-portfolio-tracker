@@ -239,6 +239,27 @@ every metric is `null` below its sample floor, never `0`. The Analytics tab neve
 benchmark endpoint unless the Performance tab has a benchmark selected — a cache miss there
 is a Yahoo request, and it is handed the selection as a prop rather than re-reading storage.
 
+### Monthly returns (`monthlyReturns.ts`, `MonthlyReturnsHeatmap`)
+
+**`∏(1 + month) = 1 + YTD` is an identity, pinned in `monthlyReturns.test.ts`** (2026-10-14).
+Each month used to start at its own first point, so the move from one month's last close to
+the next month's first belonged to no month — a dozen trading days a year — and the YTD
+column, a separate Modified Dietz over the year, did not equal the months beside it (2026
+chained to about 25% against a YTD of 32%). `monthlyReturnRows` now measures each month from
+the **previous month's last point** (flows weighted as before), and YTD is the months linked
+geometrically. A year-long Modified Dietz could not keep the identity: its flow weighting is
+an approximation that drifts furthest over long windows with large contributions.
+
+- A month-end that held nothing is not an anchor: the inception month starts at its own first
+  point, as before (the move from nothing to the first lot is inception).
+- Leading months with no return sit outside the chain and the YTD is `partial`; a month with
+  data but an undefined return **inside** the chain makes the YTD `null`. A month with no
+  point at all is not a hole — the next month is measured across it.
+- The running month is tagged `MTD` (cell and collapsed summary).
+
+The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, described in
+[flex-and-sync.md](flex-and-sync.md).
+
 ---
 
 ## Visual hierarchy and KPI panels
