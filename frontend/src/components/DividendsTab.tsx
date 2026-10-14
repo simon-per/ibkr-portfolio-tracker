@@ -388,10 +388,7 @@ export function DividendsTab() {
   // windows dropped when Forecast is off — so the rate answers the range the
   // reader selected, and "which windows are showing" is stated once rather than
   // recomputed here or restated on the server.
-  const pace = useMemo(
-    () => dividendPace(ttmPoints, data?.ttm_coverage_start),
-    [ttmPoints, data],
-  )
+  const pace = useMemo(() => dividendPace(ttmPoints), [ttmPoints])
 
   return (
     <Card>

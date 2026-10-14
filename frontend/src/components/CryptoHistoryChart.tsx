@@ -13,7 +13,6 @@ import type { CryptoHistoryPoint } from '@/lib/api'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   CRYPTO_RANGES,
-  excludedInRange,
   rangePnlSeries,
   sliceRange,
   valueSeries,
@@ -55,7 +54,6 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
     const ys = metric === 'value' ? valueSeries(visible) : rangePnlSeries(visible)
     return visible.map((p, i) => ({ date: p.date, y: ys[i], excluded: p.excluded ?? [] }))
   }, [visible, metric])
-  const excluded = useMemo(() => excludedInRange(visible), [visible])
 
   const axis = useMemo(() => {
     const values = data.map(d => d.y).filter((v): v is number => v != null)
@@ -161,11 +159,6 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
             </LineChart>
           </ResponsiveContainer>
         </div>
-      )}
-      {excluded.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          No price on some days, left out: {excluded.join(', ')}
-        </p>
       )}
     </div>
   )

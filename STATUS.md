@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-14.** **The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`. The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (23/23 synced); see *Needs a human* and *Watch after the next deploy*. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, backfill still owed** (see *Needs a human*): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history` — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-14.** **The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`; the API still serves every flag (docs/dividends.md, *Data-quality notes are not rendered*). The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (23/23 synced); see *Needs a human* and *Watch after the next deploy*. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, backfill still owed** (see *Needs a human*): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history` — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -907,7 +907,7 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   YTD export simply fills whatever the 30-day window missed. Real recovery, not a theoretical one,
   which is why a 30-day window is a comfortable choice rather than a tight one.
 - **MCO and MRVL each forecast off only 2 samples.** Surfaced by the new `forecast_samples` field the
-  day it shipped, and badged `n=2` in the dividends table. Not known-wrong — both are real payers with
+  day it shipped (the table's `n=2` badge went on 2026-10-14; the field is still served). Not known-wrong — both are real payers with
   plausible schedules — but two samples is the exact shape that let SBI project a fake monthly cadence,
   so those projections deserve one look before being trusted. Check `manage_mappings list` for a
   `DIVIDENDS PREDATE MAPPING` flag (which would mean the rows came from an older ticker) rather than
@@ -1085,7 +1085,7 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   before; `/api/scheduler/history` still has no `crypto_*` rows. A run's warnings should not
   name an unmatched coin — if one does, its days read unknown and the total is blank until a
   mapping exists (no CLI for a manual mapping yet). Then a browser pass at 1440 and 390 px: the
-  four tiles, the shaded reconstructed span and its sentence, 1W/MTD/YTD, the *peg* badge if USDC
+  four tiles, 1W/MTD/YTD, the *peg* badge if USDC
   is held. `crypto_daily` is no longer written; compare it with the new series once, then drop it
   (*Worth doing next*).
 
@@ -1314,8 +1314,7 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
     NAV runs out (last NAV 2026-09-01, the day-40 warning fires ~10-11).
   - Frontend, in a browser: on a range starting before inception (none of the buttons reach it
     on this account today — the general case is younger accounts and backfills), Max/Current
-    Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the value chart shows
-    the "partly IBKR's own figure" cash caveat it was dropping; the Look-through tab shows an
+    Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the Look-through tab shows an
     alert naming any unvaluable position above its KPIs; the watchlist's Analyst sort puts
     `strong_buy` first descending; EPS figures carry no `$`.
 
@@ -1705,7 +1704,9 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 - **2026-10-14 (push, then strip the text)** — pushed and deployed `4c1d654`; the forecast
   backfill dry-run clean, the real run refused by the permission classifier (owed). Then, at
   the owner's word, the forecast card made collapsible and every tab's explanatory text
-  stripped, the convention in CLAUDE.md rewritten so it is not repaired back.
+  stripped, the convention in CLAUDE.md rewritten so it is not repaired back. Then merged the
+  parallel `simon-per/strip-comments` session (data-quality notes, the USDC peg note, the
+  contributions strip's `~`/`*`, dead `coverage_limited`) and removed its worktree and branch.
 
 - **2026-10-13 (watchlist freshness)** — a brainstorm of open points, of which the owner gave
   this session the watchlist (another session took the heatmap and the forecast-history chart).
@@ -1726,16 +1727,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   onto the new NAV instead of deleting them, and the holiday rule counts only derived rows for
   a sibling fund (`d2411b5`). The lost days were then refilled on production by one run of
   `sync_sibling_prices`, at the owner's request, rather than waiting for the 18:00 full sync.
-
-- **2026-10-12 (pillar 3a upload)** — the real finpension export carrying the 10-06 buys
-  imported on production: DB backed up first, dry run clean, 12 rows / 6 lots,
-  `rows_restated` 2 (the two estimates replaced), both funds priced, nothing unpriced. Then
-  "add percentages to the forecast history": day-over-day, month- and year-to-date growth on
-  `GET /api/dividends/forecast-history`, each naming the day it is measured from
-  (docs/dividends.md); backend only, live and verified on `eaccb7b`. Then "backfill it to
-  1 June": a `replay` mode on the forecast, a `reconstructed` flag on the rows (migration
-  `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; the replay sat within 0.1% of the
-  six recorded days, and production (`35e430b`) now has a point for every day from 2026-06-01,
-  128 of them reconstructed. Growth is measured from 2026-08-28 at the owner's request
-  (`growth_from`): before it the Irish-to-US ETF switch is what the percentages showed. Found on the way: the upload left the EM fund unpriced for nine
-  September days (*Worth doing next*).

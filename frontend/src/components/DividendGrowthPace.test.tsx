@@ -10,7 +10,7 @@ function pace(over: Partial<DividendPace> = {}): DividendPace {
   return {
     cmgr_pct: 18.33, cagr_pct: 653.5, from_month: '2026-01', to_month: '2026-12',
     from_eur: 23.22, to_eur: 147.86, months: 11,
-    includes_forecast: false, coverage_limited: false,
+    includes_forecast: false,
     ...over,
   }
 }
@@ -40,12 +40,6 @@ describe('the dividend income growth strip', () => {
     expect(strip().textContent).not.toContain('CAGR')
   })
 
-  it('does not mark a base the account was still being funded inside (owner, 2026-10-14)', () => {
-    render(<DividendGrowthPace pace={pace({ coverage_limited: true })} />)
-    expect(strip().textContent).not.toContain('†')
-    expect(strip().textContent).not.toContain('first window on record')
-  })
-
   it('marks a rate resting on projected windows, and only then', () => {
     render(<DividendGrowthPace pace={pace({ includes_forecast: true })} />)
     expect(strip().textContent).toContain('est.')
@@ -55,12 +49,12 @@ describe('the dividend income growth strip', () => {
   })
 
   it('stays two lines of figures, with no explanatory prose', () => {
-    // The first version carried two paragraphs and the owner asked for KPIs. The
-    // qualifiers live on the chips as `est.` and `†` instead, so this pins that
-    // the prose does not creep back.
-    render(<DividendGrowthPace pace={pace({ includes_forecast: true, coverage_limited: true })} />)
+    // The first version carried two paragraphs and the owner asked for KPIs; the
+    // data-quality dagger went on 2026-10-14. This pins that neither creeps back.
+    render(<DividendGrowthPace pace={pace({ includes_forecast: true })} />)
     expect(strip().textContent!.length).toBeLessThan(170)
     expect(strip().querySelectorAll('p')).toHaveLength(0)
+    expect(strip().textContent).not.toContain('†')
   })
 
   it('renders nothing rather than a dash when the range has no pace', () => {

@@ -108,9 +108,9 @@ served that exact shape once, as `next_12m_vs_ttm_pct: -100.0`.
 `source` is the provenance of money **received** (`ibkr` / `mixed` / `yfinance_estimate`), and is
 null for a window that is entirely projection — stamping the estimate's provenance there would claim
 income arrived from a guess. `mom_crosses_era` flags a comparison whose two windows jointly contain
-both sources. The latest point's amount, window and change are shown directly, with `incl. … projected`
-on the amount itself rather than only `est.` on the chip. `source` and `mom_crosses_era` are no longer
-rendered (owner, 2026-10-14: no provenance notes on screen).
+both sources; the UI no longer renders it (see *Data-quality notes are not rendered* below). The
+latest point's amount, window and change are shown directly, with `incl. … projected` on the amount
+itself rather than only `est.` on the chip.
 
 **One identity ties the new series to the old figures**: a window ending in December *is* that
 calendar year, so it must equal `growth.annual[year].total_eur` to the cent. The two are accumulated
@@ -750,7 +750,7 @@ Pinned equal on a single-security book by `test_the_row_and_the_card_agree_on_yi
 `gross_estimate_eur` quantifies the **estimated-net** contribution derived from gross, after the
 shared configured factor. It is not the unreduced gross amount. The card shows *projected net,
 assumed withholding* and the exact percentage whenever this contribution exists; the Dividends tab
-uses the same response value in its captions. Broker-derived net keeps its existing basis and amount.
+no longer marks or captions it. Broker-derived net keeps its existing basis and amount.
 
 Note the deliberate asymmetry on a row: `forward_yield_pct` always covers the next twelve months while
 `forecast_net_eur` beside it is bounded by the selected window, so a row can show **no forecast and a
@@ -789,16 +789,25 @@ Each of these was a wrong number before it was a rule:
    counterpart, so `_same_day_last_year()` falls back to the 28th.
 2. **The first year of income is coverage-limited.** It starts whenever the first dividend landed, not
    in January — seven months here — so its successor's percentage overstates growth and carries
-   `yoy_vs_partial` (badged `†`). The first year itself gets no percentage.
+   `yoy_vs_partial`. The first year itself gets no percentage.
 3. **The TTM comparison straddles the era splice.** The current 12 months are IBKR actuals while the
    prior 12 are yfinance estimates: comparable in size, not in provenance. `ttm_crosses_era` says so
-   rather than presenting a change of source as growth.
+   in the payload.
 4. **Forecast is never silently compared against measured.** `next_12m_vs_ttm_pct` and any annual row
    containing projection are marked `est.`.
 5. **A zero base yields `null`, never a percentage.** Growth against zero is undefined, not large, and
    a quarterly payer produces zero months constantly. `_pct()` returns None and the UI renders a dash.
    Per-month growth is realized-only for the same reason — a projected month's "change" would be an
    artifact of the forecast's own flat median.
+
+**Data-quality notes are not rendered** (owner's call, 2026-10-14: "a lot of bloat, which is not
+relevant data"). The API still carries every flag — `yoy_vs_partial`, `prev_year_partial`,
+`ttm_crosses_era`, `mom_crosses_era`, `partial` on a year, `trailing_yield_partial`,
+`forecast_samples`, `basis: gross_estimate`, `source`, `ttm_coverage_start` — but the tab draws no
+dagger, asterisk, `n=` badge, era note or provenance line for them, and `DeltaChip` has no
+`caveat` prop any more. What stays is what changes how a figure is read today: `est.` on anything
+projected, `incl. … projected` on an open window, and *payment pending* on an overdue payment. Don't
+add a flag's marker back without the owner asking for it.
 
 The per-year panel is the one surface that mixes measured and projected into a single bar, so with the
 Forecast toggle **off** it rebuilds from realized income alone (`lib/dividendGrowth.ts`), which is the
@@ -835,19 +844,11 @@ that array means "which windows are showing" is stated once. Doing it server-sid
 would need the same rule restated in Python and two pre-computed variants for the
 toggle, which is this repo's dominant failure mode with extra steps.
 
-The server supplies exactly one thing it cannot: **`ttm_coverage_start`**, the
-earliest window over the whole history. A windowed response cannot say whether an
-earlier window exists, and that is what decides the marker below.
+**Two markers, no prose.** The owner's correction to the first version was that
+two explanatory paragraphs is not a KPI. A third, `†` for a base that is the
+earliest window on record (read off the server's `ttm_coverage_start`), went with
+the other data-quality notes on 2026-10-14:
 
-**Three markers, no prose.** The owner's correction to the first version was that
-two explanatory paragraphs is not a KPI:
-
-- **`†`** — the base is the earliest window on record, so the portfolio was still
-  being funded inside it. On this account every range reaching back that far starts
-  at CHF 3.77 and reports +15% to +28% a month, arithmetically true and nearly
-  meaningless. It is the `yoy_vs_partial` shape and carries the same marker, plus
-  four words of visible text (`from the first window on record`) so the dagger means
-  something on a touch device.
 - **`est.`** — an anchor window carries projection. Read off `forecast_net_eur` on
   the anchors, never off the toggle: with projections shown and nothing projected,
   the anchors are measured and must not be badged.

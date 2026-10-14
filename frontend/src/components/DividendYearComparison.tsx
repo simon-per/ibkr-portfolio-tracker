@@ -55,9 +55,6 @@ export function DividendYearComparison({
                 + (row.forecast_net_eur > 0
                   ? ` plus ${formatCurrency(row.forecast_net_eur)} projected`
                   : '')
-                + (row.partial
-                  ? ' — this year is not complete, so the figure covers part of it only'
-                  : '')
                 + '. Click to filter the chart to this year.'
               }
             >

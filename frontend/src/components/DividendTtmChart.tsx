@@ -94,19 +94,12 @@ export function DividendTtmChart({
             const p = byMonth.get(month)
             if (!p) return null
             return (
-              <>
-                <DeltaChip
-                  pct={p.mom_pct}
-                  label="vs previous window"
-                  flatBand={0}
-                  projected={p.mom_includes_forecast}
-                />
-                {p.source && p.source !== 'ibkr' && (
-                  <span className="text-xs text-muted-foreground">
-                    includes estimated gross
-                  </span>
-                )}
-              </>
+              <DeltaChip
+                pct={p.mom_pct}
+                label="vs previous window"
+                flatBand={0}
+                projected={p.mom_includes_forecast}
+              />
             )
           }}
         />

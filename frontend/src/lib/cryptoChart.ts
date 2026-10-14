@@ -139,10 +139,3 @@ export function allocationSlices(portfolio: CryptoPortfolioResponse): Allocation
   }
   return slices
 }
-
-/** Every coin left out of at least one point in the slice, for the line under the chart. */
-export function excludedInRange(points: readonly CryptoHistoryPoint[]): string[] {
-  const names = new Set<string>()
-  for (const point of points) for (const coin of point.excluded ?? []) names.add(coin)
-  return [...names].sort()
-}

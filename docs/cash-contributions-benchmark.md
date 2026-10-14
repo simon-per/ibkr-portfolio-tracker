@@ -194,6 +194,7 @@ a literal.** Until 2026-09-12 the timeline stamped `"ibkr"` on every point after
 measured balance while `cash_source()` — read by the summary card and the allocation tab — said
 `mixed`, because the pillar-3a account's cash is derived and IBKR never saw it. Live: 14 tail
 points `ibkr`, the card `mixed`, and the chart's caveat gone, since it reads the last point.
+(No surface renders a cash-provenance caveat at all since 2026-10-14 — `cashCaveat` is gone.)
 `_calculate_timeline_swept` takes the label as `cash_measured_source`; pinned in
 `tests/test_cash_balance.py`.
 

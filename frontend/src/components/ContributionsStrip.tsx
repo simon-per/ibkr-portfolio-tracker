@@ -127,7 +127,6 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
             + (w.deployed_eur > w.money_in_eur
               ? ' — the excess is capital rotated between holdings, not new money'
               : ''),
-          w.partial ? `* only ${w.months.toFixed(1)} months of history available` : null,
         ].filter(Boolean).join(' · ')
 
         return (
@@ -136,9 +135,6 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
                 keeps this to two lines inside an already-busy card header. */}
             <div className="flex items-center gap-1 text-[11px] leading-tight text-muted-foreground">
               <span>{WINDOW_LABELS[w.label]}</span>
-              {w.money_in_method === 'spliced' && (
-                <span className="opacity-60" title="part purchases, part deposits">~</span>
-              )}
               {/* DeltaChip rather than a second hand-rolled percentage: this file
                   owned the original colour rule that lib/delta.ts was extracted
                   from, and then kept a competing renderer beside it — `+7%` here
@@ -154,7 +150,6 @@ export function ContributionsStrip({ data, isLoading, isError }: ContributionsSt
             </div>
             <div className="text-sm font-semibold leading-tight tabular-nums">
               {curSym}{round(w.avg_money_in_per_month_eur)}
-              {w.partial && <span className="text-muted-foreground">*</span>}
               {/* The `/deployed` suffix that used to sit here came out on 2026-09-07: this
                   strip is read as a contribution rate, and a second figure sharing the
                   slash with it — one that a rotation can quadruple — is not one. It is

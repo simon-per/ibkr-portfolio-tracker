@@ -20,8 +20,8 @@ import { formatCount, formatCurrency as formatIn, formatDate, formatPrice, forma
  * Every figure arrives in the base currency from `/api/crypto/*`: CoinStats' holdings at
  * CoinGecko's prices, computed by the backend; nothing is recomputed here. What this page
  * adds is the reading of it — and that means the qualifiers sit on the surface beside the
- * figures they qualify: when the snapshot was taken, which days of the P&L are
- * reconstructed, which coins could not be priced, and what sits beside the total.
+ * figures they qualify: when the snapshot was taken, which coins could not be priced, and
+ * what sits beside the total.
  */
 
 function Notice({
@@ -236,9 +236,6 @@ function CryptoBook({
               ? ` · DeFi ${formatCurrency(portfolio.defi_value)} not included`
               : ''}
           </p>
-          {portfolio.peg_note && (
-            <p className="text-amber-700 dark:text-amber-400">{portfolio.peg_note}</p>
-          )}
           {portfolio.unpriced_count > 0 && (
             <p className="text-amber-700 dark:text-amber-400">
               {plural(portfolio.unpriced_count, 'coin')} CoinStats cannot price, left out of every

@@ -127,8 +127,7 @@ export function DividendKpiCards({ growth, isLoading }: DividendKpiCardsProps) {
         title={
           `${formatCurrency(growth.next_12m_eur)} projected over the next 365 days,`
           + ` inferred from each holding's own payout cadence and recent per-share`
-          + ` amounts. Nothing forward-looking is published anywhere, so this is an`
-          + ` inference — not an announced schedule.`
+          + ` amounts.`
         }
       >
         <DeltaChip pct={growth.next_12m_vs_ttm_pct} label="vs last 12M" projected />

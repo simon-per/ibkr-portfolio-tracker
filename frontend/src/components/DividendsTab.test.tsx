@@ -162,6 +162,9 @@ describe('Dividend chart controls', () => {
     expect(open.textContent).toContain('Mar 25 – Feb 26')
     expect(open.textContent).toContain('incl. €50.00 projected')
     expect(open.textContent).toContain('est.')
+    // The data-source history is not a qualifier on any figure (2026-10-14).
+    expect(screen.queryByText(/Earlier history includes estimated gross/)).toBeNull()
+    expect(screen.queryByText(/Some comparisons span the switch/)).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
     // Forecast off: the open window goes, leaving the last fully elapsed one —
