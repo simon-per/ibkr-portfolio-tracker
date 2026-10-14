@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { FundamentalsTab } from './FundamentalsTab'
 import { api } from '@/lib/api'
-import type { FundamentalsStatus } from '@/lib/api'
+import type { FundamentalMetrics, FundamentalsStatus } from '@/lib/api'
 
 /**
  * EPS figures carried a hardcoded `$` in three places. EPS is reported in the issuer's own
@@ -68,5 +68,77 @@ describe('FundamentalsTab EPS figures', () => {
     expect(screen.getByText('2.50')).toBeTruthy()
     // And nothing on the tab claims a dollar figure anywhere.
     expect(document.body.textContent).not.toMatch(/\$\s?\d/)
+  })
+})
+
+const NOW = Date.parse('2026-10-14T10:00:00Z')
+
+function metrics(over: Partial<FundamentalMetrics>): FundamentalMetrics {
+  return {
+    security_id: 1, symbol: 'AAA', description: 'A', exchange: 'NASDAQ', currency: 'USD',
+    quote_type: 'EQUITY', trailing_pe: null, forward_pe: null, peg_ratio: null,
+    price_to_sales: null, price_to_book: null, revenue_growth: null, earnings_growth: null,
+    fwd_revenue_growth: null, fwd_eps_growth: null, profit_margins: null, gross_margins: null,
+    operating_margins: null, market_cap: null, market_cap_base: null, number_of_analysts: null,
+    target_mean_price: null, target_high_price: null, target_low_price: null,
+    data_currency: 'USD', last_updated: '2026-10-11T02:05:00+00:00',
+    ...over,
+  }
+}
+
+function renderWith(rows: FundamentalMetrics[]) {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW)
+  vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue(rows)
+  vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([])
+  vi.spyOn(api, 'getEarningsHistory').mockResolvedValue([])
+  vi.spyOn(api, 'getFundamentalsStatus').mockResolvedValue(STATUS)
+  return withProviders(<FundamentalsTab />)
+}
+
+function bodySymbols(): string[] {
+  const table = screen.getAllByRole('table')[0]
+  return within(table)
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => row.querySelector('td div')?.textContent ?? '')
+}
+
+describe('FundamentalsTab figures', () => {
+  it('colours a negative P/E as a loss, never as cheap', async () => {
+    renderWith([metrics({ trailing_pe: -8.2 }), metrics({ security_id: 2, symbol: 'BBB', trailing_pe: 9 })])
+    const negative = await screen.findByText('-8.2')
+    expect(negative.closest('td')?.className).toContain('text-red-600')
+    expect(screen.getByText('9.0').closest('td')?.className).toContain('text-green-600')
+  })
+
+  it('prints an absent figure as an em dash', async () => {
+    renderWith([metrics({})])
+    await screen.findAllByText('AAA')
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(within(screen.getAllByRole('table')[0]).queryByText('-')).toBeNull()
+  })
+
+  it('sorts market cap on the base-currency figure, not the mixed raw numbers', async () => {
+    renderWith([
+      // 1 trillion TWD is the largest raw number and the smallest company.
+      metrics({ security_id: 1, symbol: 'TWN', market_cap: 1e12, data_currency: 'TWD', market_cap_base: 2.6e10 }),
+      metrics({ security_id: 2, symbol: 'USA', market_cap: 5e11, data_currency: 'USD', market_cap_base: 4.2e11 }),
+      metrics({ security_id: 3, symbol: 'GBX', market_cap: 9e11, data_currency: 'GBp', market_cap_base: null }),
+    ])
+    await screen.findAllByText('TWN')
+    fireEvent.click(screen.getAllByRole('button', { name: /Mkt Cap/ })[0])
+    // Descending on the converted figure, the unconvertible one last.
+    expect(bodySymbols()).toEqual(['USA', 'TWN', 'GBX'])
+  })
+
+  it('states how old the data is, and turns amber once a weekly pass was missed', async () => {
+    renderWith([metrics({}), metrics({ security_id: 2, symbol: 'BBB', last_updated: null })])
+    const line = await screen.findByText(/^Data as of /)
+    expect(line.className).not.toContain('text-amber')
+
+    cleanup()
+    vi.restoreAllMocks()
+    renderWith([metrics({ last_updated: '2026-09-30T02:05:00+00:00' })])
+    expect((await screen.findByText(/^Data as of /)).className).toContain('text-amber')
   })
 })

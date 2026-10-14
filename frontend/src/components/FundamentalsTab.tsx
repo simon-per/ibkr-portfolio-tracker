@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { formatMarketCap } from '@/lib/utils'
+import { cn, formatMarketCap, formatShortDateTime } from '@/lib/utils'
+import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
 import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -13,19 +14,31 @@ type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
 type SortDir = 'asc' | 'desc'
 
+/** What an absent figure prints as, everywhere on this tab. */
+const ABSENT = '—'
+
+/**
+ * Past this the as-of line turns amber. Eight days: the scheduled refresh is weekly
+ * (`FUNDAMENTALS_REFRESH_DAYS` in `scheduler_service.py`), so a week-old row is on time
+ * and one that missed a whole pass is not.
+ */
+const FUNDAMENTALS_STALE_AFTER_DAYS = 8
+
 function formatPct(value: number | null): string {
-  if (value === null) return '-'
+  if (value === null) return ABSENT
   return `${(value * 100).toFixed(1)}%`
 }
 
 function formatRatio(value: number | null): string {
-  if (value === null) return '-'
+  if (value === null) return ABSENT
   return value.toFixed(1)
 }
 
 // Color coding helpers
 function peColor(value: number | null): string {
   if (value === null) return ''
+  // A negative P/E is a loss, not a bargain — the `< 15` branch painted it green.
+  if (value <= 0) return 'text-red-600 dark:text-red-400'
   if (value < 15) return 'text-green-600 dark:text-green-400'
   if (value < 25) return 'text-yellow-600 dark:text-yellow-400'
   return 'text-red-600 dark:text-red-400'
@@ -74,7 +87,7 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
   return (
     <div className="mt-6 pt-4 border-t">
       <h3 className="text-sm font-medium text-muted-foreground mb-3">
-        ETF Holdings ({etfs.length}) — fundamental metrics not applicable
+        ETF Holdings ({etfs.length})
       </h3>
       <div className="flex flex-wrap gap-2">
         {etfs.map((etf) => (
@@ -143,16 +156,19 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'market_cap',
       align: 'right',
       mobile: 'value',
-      cell: (row) => (
-        <>
-          {formatMarketCap(row.market_cap)}
-          {row.data_currency ? (
-            <span className="text-muted-foreground text-xs ml-1">{row.data_currency}</span>
-          ) : (
-            ''
-          )}
-        </>
-      ),
+      cell: (row) =>
+        row.market_cap === null ? (
+          ABSENT
+        ) : (
+          <>
+            {formatMarketCap(row.market_cap)}
+            {row.data_currency ? (
+              <span className="text-muted-foreground text-xs ml-1">{row.data_currency}</span>
+            ) : (
+              ''
+            )}
+          </>
+        ),
     },
     {
       key: 'trailing_pe',
@@ -179,10 +195,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'peg_ratio',
       align: 'right',
       tone: (row) => pegColor(peg(row)),
-      hint: {
-        description:
-          'P/E divided by forward EPS growth rate (analyst consensus next-12M estimate). Below 1 = potentially undervalued.',
-      },
+      hint: { description: 'P/E ÷ forward EPS growth.' },
       cell: (row) => formatRatio(peg(row)),
     },
     {
@@ -200,10 +213,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'revenue_growth',
       align: 'right',
       tone: (row) => growthColor(row.revenue_growth),
-      hint: {
-        description:
-          'TTM (trailing twelve months) revenue growth: sum of 4 most recent quarters vs prior 4 quarters. Falls back to Yahoo Finance revenueGrowth if fewer than 8 quarters available.',
-      },
+      hint: { description: 'Last 4 quarters vs the 4 before.' },
       cell: (row) => formatPct(row.revenue_growth),
     },
     {
@@ -213,10 +223,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'earnings_growth',
       align: 'right',
       tone: (row) => growthColor(row.earnings_growth),
-      hint: {
-        description:
-          "TTM (trailing twelve months) EPS growth: sum of 4 most recent quarters vs prior 4 quarters. Falls back to Yahoo Finance earningsGrowth if fewer than 8 quarters available. Note: PEG uses Yahoo's separate 5-year analyst estimate, not this figure.",
-      },
+      hint: { description: 'Last 4 quarters vs the 4 before.' },
       cell: (row) => formatPct(row.earnings_growth),
     },
     {
@@ -226,7 +233,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'fwd_revenue_growth',
       align: 'right',
       tone: (row) => growthColor(row.fwd_revenue_growth),
-      hint: { description: 'Next fiscal year revenue growth analyst consensus estimate.' },
+      hint: { description: 'Next fiscal year, consensus.' },
       cell: (row) => formatPct(row.fwd_revenue_growth),
     },
     {
@@ -236,7 +243,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'fwd_eps_growth',
       align: 'right',
       tone: (row) => growthColor(row.fwd_eps_growth),
-      hint: { description: 'Next fiscal year EPS growth analyst consensus estimate.' },
+      hint: { description: 'Next fiscal year, consensus.' },
       cell: (row) => formatPct(row.fwd_eps_growth),
     },
     {
@@ -268,7 +275,11 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
   }
 
   const sorted = useMemo(() => {
-    return [...stocks].sort((a, b) => compareValues(a[sortKey], b[sortKey], sortDir))
+    // Market cap sorts on the base-currency figure: the displayed one is in each
+    // listing's own currency, and ranking raw USD against TWD ranks nothing.
+    const sortValue = (row: FundamentalMetrics) =>
+      sortKey === 'market_cap' ? row.market_cap_base : row[sortKey]
+    return [...stocks].sort((a, b) => compareValues(sortValue(a), sortValue(b), sortDir))
   }, [stocks, sortKey, sortDir])
 
   const columns = useMemo(() => metricsColumns(), [])
@@ -400,7 +411,7 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     shortHeader: 'Surprise',
     align: 'right',
     mobile: 'value',
-    cell: (row) => (row.surprise_percent !== null ? `${row.surprise_percent.toFixed(1)}%` : '-'),
+    cell: (row) => (row.surprise_percent !== null ? `${row.surprise_percent.toFixed(1)}%` : ABSENT),
   },
   {
     key: 'result',
@@ -422,14 +433,14 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     header: 'EPS Est.',
     shortHeader: 'EPS Est.',
     align: 'right',
-    cell: (row) => (row.eps_estimate !== null ? row.eps_estimate.toFixed(2) : '-'),
+    cell: (row) => (row.eps_estimate !== null ? row.eps_estimate.toFixed(2) : ABSENT),
   },
   {
     key: 'reported_eps',
     header: 'Reported',
     shortHeader: 'Reported',
     align: 'right',
-    cell: (row) => (row.reported_eps !== null ? row.reported_eps.toFixed(2) : '-'),
+    cell: (row) => (row.reported_eps !== null ? row.reported_eps.toFixed(2) : ABSENT),
   },
 ]
 
@@ -482,10 +493,27 @@ export function FundamentalsTab() {
   // data yet — click Sync Now", which is a statement about the *portfolio*. When the
   // backend is down it is a statement about the backend, and telling a user to trigger
   // a sync that cannot succeed is worse than saying nothing.
-  const { data: fundamentals, isLoading: metricsLoading, isError: metricsError } = useQuery({
+  const {
+    data: fundamentals, isLoading: metricsLoading, isError: metricsError, dataUpdatedAt,
+  } = useQuery({
     queryKey: ['fundamentals', 'portfolio'],
     queryFn: () => api.getPortfolioFundamentals(),
   })
+
+  // The as-of line. Only rows that have ever been fetched: a security Yahoo is never
+  // asked about (`price_source`) has no timestamp to report and would otherwise keep the
+  // line amber for good. `dataUpdatedAt` as the clock, as on the Watchlist tab.
+  const freshness = useMemo(
+    () =>
+      fundamentals
+        ? syncFreshness(
+            fundamentals.map((r) => r.last_updated).filter((t): t is string => t !== null),
+            new Date(dataUpdatedAt),
+            FUNDAMENTALS_STALE_AFTER_DAYS,
+          )
+        : null,
+    [fundamentals, dataUpdatedAt],
+  )
 
   const { data: upcomingEarnings, isLoading: earningsLoading, isError: earningsError } = useQuery({
     queryKey: ['fundamentals', 'earnings', 'upcoming'],
@@ -635,6 +663,18 @@ export function FundamentalsTab() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-2xl">Growth Metrics</CardTitle>
+              {freshness?.oldest && (
+                <p
+                  className={cn(
+                    'mt-1 text-xs',
+                    freshness.stale ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
+                  )}
+                >
+                  {freshness.mixed
+                    ? `Oldest data from ${formatShortDateTime(freshness.oldest)}, newest ${formatShortDateTime(freshness.newest!)}`
+                    : `Data as of ${formatShortDateTime(freshness.oldest)}`}
+                </p>
+              )}
             </div>
             {!needsSync && (
               <Button
