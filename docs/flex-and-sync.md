@@ -646,14 +646,15 @@ toward `Code=1025`. **Skipping them costs no data:** the window ends at the last
 day before the generation day (*Also note the window ends at the last completed trading day*,
 above), so a Sunday or Monday statement reaches the same Friday Saturday's did. Friday's trades
 arrive with Saturday's generation, Monday's with Tuesday's, and anything booked late over the
-weekend is re-delivered by Tuesday's statement while the window is wider than four days — 30 as
+weekend is re-delivered by Tuesday's statement while the window is at least four days — 30 as
 measured.
 
 **What it does cost is margin under a narrow window.** A trade on day T is reachable from T+1…T+N.
 At N=3 a Friday trade used to have Saturday, Sunday and Monday; now it has Saturday's two slots
 only. That is why the gap alarm counts the way it does (below): a Friday success with a failed
 Saturday warns on Sunday morning at N=3, while the manual Sync is still there to recover it. At the
-live 30 it is three or four fewer attempt days out of thirty.
+live 30 a trade loses eight or nine of its thirty attempt days (the Sundays and Mondays among them)
+and keeps twenty-one or more.
 
 **US market holidays are not handled.** A generation the day after a US holiday is still attempted,
 which is the behaviour from before; `is_trading_day` is Monday to Friday and nothing more.

@@ -519,9 +519,12 @@ async def test_a_narrow_window_keeps_the_threshold_it_had(db):
 @pytest.mark.asyncio
 async def test_the_floor_stops_a_one_day_window_warning_every_weekend(db):
     """
-    At a threshold of 1, one failed day would warn. `max(floor, N-1)` is what keeps a
-    pathologically narrow period off a hair trigger. (The ordinary weekend is handled by
-    counting from the oldest unfetched trading day — tests/test_flex_no_new_trading_day.py.)
+    At a threshold of 1 every weekday morning would warn with nothing wrong: the
+    market-data checks before 12:00 ET see yesterday's success as one day old, which is
+    this fixture (Friday's success read at 08:00 ET on Saturday). `max(floor, N-1)` is what
+    keeps a pathologically narrow period off that hair trigger. (The ordinary weekend is
+    handled by counting from the oldest unfetched trading day —
+    tests/test_flex_no_new_trading_day.py.)
     """
     await _run(db, "full_sync", "success", NOW - timedelta(days=1), details=_span(1))
 
