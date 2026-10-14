@@ -26,6 +26,15 @@ from app import rate_limit
 from app.config import settings
 
 
+def pytest_configure(config):
+    # Registered here because there is deliberately no pytest.ini (.github/workflows/ci.yml).
+    config.addinivalue_line(
+        "markers",
+        "deploy_scripts: runs deploy.sh / ops/*.sh under bash. Seconds each under Git Bash, "
+        "so the documented local command deselects it; CI runs it and gates the deploy.",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
