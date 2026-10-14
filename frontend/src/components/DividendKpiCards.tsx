@@ -1,24 +1,11 @@
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { DeltaChip } from './DeltaChip'
 import type { DividendGrowth } from '@/lib/api'
+import { dividendAmount } from '@/lib/dividendFormat'
 
 interface DividendKpiCardsProps {
   growth: DividendGrowth | null | undefined
   isLoading?: boolean
-}
-
-/**
- * Cents matter here and whole units do not, until the figure gets large.
- *
- * This portfolio earns single-digit amounts a month, so rounding 47.50 to "48"
- * throws away a meaningful part of the number. Above 1000 the cents are the
- * noise instead, and the tooltip carries the exact figure either way.
- */
-function amount(value: number): string {
-  const decimals = Math.abs(value) < 1000 ? 2 : 0
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: decimals, maximumFractionDigits: decimals,
-  })
 }
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -90,86 +77,62 @@ export function DividendKpiCards({ growth, isLoading }: DividendKpiCardsProps) {
   const { ttm, ytd, avg_month: avgMonth, ytd_pace: ytdPace, recent_pace: recent } = growth
   const thisYear = new Date().getFullYear()
 
+  // A comparison needs something to compare against: with no prior period there is
+  // no chip and no "against 0.00" in the title, which would read as a measured zero.
+  const prior = (value: number | null) => (value != null ? ` · prior: ${formatCurrency(value)}` : '')
 
   return (
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <Tile
         label={`${thisYear} so far`}
-        value={`${curSym}${amount(ytd.net_eur)}`}
-        title={
-          `${formatCurrency(ytd.net_eur)} received between 1 January and today.`
-          + (ytd.prev_net_eur != null
-            ? ` Over the same period last year: ${formatCurrency(ytd.prev_net_eur)}.`
-              + ` Compared day-for-day — measuring a part year against a whole one`
-              + ` would not be growth.`
-            : ' No comparable period last year.')
-        }
+        value={dividendAmount(ytd.net_eur, curSym)}
+        title={`Net received this year${prior(ytd.prev_net_eur)}`}
       >
-        <DeltaChip pct={ytd.pct} label={`vs ${thisYear - 1} to date`} />
+        {ytd.prev_net_eur != null && (
+          <DeltaChip pct={ytd.pct} label={`vs ${thisYear - 1} to date`} />
+        )}
       </Tile>
 
       <Tile
         label="Last 12 months"
-        value={`${curSym}${amount(ttm.net_eur)}`}
-        title={
-          `${formatCurrency(ttm.net_eur)} received over the last 365 days,`
-          + ` against ${formatCurrency(ttm.prev_net_eur ?? 0)} in the 365 before that.`
-          + ` A rolling window rather than month-over-month, because a quarterly`
-          + ` payer leaves most months at zero.`
-        }
+        value={dividendAmount(ttm.net_eur, curSym)}
+        title={`Net received, last 365 days${prior(ttm.prev_net_eur)}`}
       >
-        <DeltaChip pct={ttm.pct} label="vs prior 12M" />
+        {ttm.prev_net_eur != null && <DeltaChip pct={ttm.pct} label="vs prior 12M" />}
       </Tile>
 
       <Tile
         label="Next 12 months"
-        value={`${curSym}${amount(growth.next_12m_eur)}`}
-        title={
-          `${formatCurrency(growth.next_12m_eur)} projected over the next 365 days,`
-          + ` inferred from each holding's own payout cadence and recent per-share`
-          + ` amounts.`
-        }
+        value={dividendAmount(growth.next_12m_eur, curSym)}
+        title="Projected net, next 365 days"
       >
         <DeltaChip pct={growth.next_12m_vs_ttm_pct} label="vs last 12M" projected />
       </Tile>
 
       <Tile
         label="Average per month"
-        value={`${curSym}${amount(avgMonth.net_eur)}`}
-        title={
-          `Last 12 months divided by 12: ${formatCurrency(avgMonth.net_eur)} a month,`
-          + ` against ${formatCurrency(avgMonth.prev_net_eur ?? 0)} over the prior year.`
-          + ` Below it, two reference paces over finished months: this year's average`
-          + ` against last year's, and the last three months against the three before.`
-          + ` A single month's change is not shown: on a quarterly schedule it measures`
-          + ` which month a payer pays in.`
-        }
+        value={dividendAmount(avgMonth.net_eur, curSym)}
+        title={`Last 12 months ÷ 12${prior(avgMonth.prev_net_eur)}`}
       >
         {ytdPace ? (
           <DeltaChip
             pct={ytdPace.pct}
             label={`${thisYear} vs ${ytdPace.prev_year}`}
             title={
-              `${thisYear} so far: ${formatCurrency(ytdPace.net_eur)} a month`
-              + ` (${ytdPace.months} finished month${ytdPace.months === 1 ? '' : 's'}),`
-              + ` against ${formatCurrency(ytdPace.prev_net_eur)} a month in`
-              + ` ${ytdPace.prev_year} (the year ÷ 12). Finished months only, so it moves`
-              + ` on the 1st.`
+              `${thisYear}: ${formatCurrency(ytdPace.net_eur)}/mo · `
+              + `${ytdPace.prev_year}: ${formatCurrency(ytdPace.prev_net_eur)}/mo`
             }
           />
-        ) : (
+        ) : avgMonth.prev_net_eur != null ? (
           <DeltaChip pct={avgMonth.pct} label="vs prior 12M" />
-        )}
+        ) : null}
         {recent && (
           <DeltaChip
             pct={recent.pct}
             label={`${span(recent.start, recent.end)} vs ${span(recent.prev_start, recent.prev_end)}`}
             title={
-              `${span(recent.start, recent.end, true)}: ${formatCurrency(recent.net_eur)} a month,`
-              + ` against ${formatCurrency(recent.prev_net_eur)} in`
-              + ` ${span(recent.prev_start, recent.prev_end, true)}. Three finished months`
-              + ` against the three before — any three months in a row hold exactly one of`
-              + ` the core ETFs' Mar/Jun/Sep/Dec payouts, so the spikes do not skew it.`
+              `${span(recent.start, recent.end, true)}: ${formatCurrency(recent.net_eur)}/mo · `
+              + `${span(recent.prev_start, recent.prev_end, true)}: ${formatCurrency(recent.prev_net_eur)}/mo`
             }
           />
         )}

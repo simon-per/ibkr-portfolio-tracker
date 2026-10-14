@@ -8,6 +8,11 @@ import {
   buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, legendEntries, OTHER,
 } from '@/lib/dividendChart'
 import { dividendColor, hasIdentity } from '@/lib/dividendColors'
+import type { LiveForecast } from '@/lib/dividendForecastTrend'
+import { payoutChanges } from '@/lib/dividendGrowth'
+import {
+  DEFAULT_DIVIDEND_SORT, initialDirection, sortDividendRows, type DividendSortKey,
+} from '@/lib/dividendTable'
 import { dividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
@@ -27,7 +32,7 @@ function SourceBadge({ row }: { row: DividendSecurityRow }) {
     return (
       <span
         className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-200"
-        title="No payment received in this period yet — projected from the payout cadence"
+        title="Projected only"
       >
         Forecast
       </span>
@@ -37,7 +42,7 @@ function SourceBadge({ row }: { row: DividendSecurityRow }) {
     return (
       <span
         className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800 dark:bg-teal-950/60 dark:text-teal-200"
-        title="Actual figures from IBKR cash transactions"
+        title="IBKR cash"
       >
         IBKR
       </span>
@@ -46,11 +51,7 @@ function SourceBadge({ row }: { row: DividendSecurityRow }) {
   return (
     <span
       className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200"
-      title={
-        row.source === 'mixed'
-          ? 'Mix of IBKR actuals and Yahoo Finance estimates'
-          : 'Estimated gross from Yahoo Finance — withholding not reflected'
-      }
+      title={row.source === 'mixed' ? 'IBKR and Yahoo' : 'Yahoo estimate'}
     >
       {row.source === 'mixed' ? 'Mixed' : 'Est.'}
     </span>
@@ -69,11 +70,12 @@ function dividendColumns(deps: {
   formatCurrency: (v: number) => string
   duplicated: Set<string>
   showForecast: boolean
-}): Column<DividendSecurityRow>[] {
+}): Column<DividendSecurityRow, DividendSortKey>[] {
   const { formatCurrency, duplicated, showForecast } = deps
   return [
     {
       key: 'symbol',
+      sortKey: 'symbol',
       header: 'Symbol',
       shortHeader: 'Symbol',
       mobile: 'title',
@@ -104,6 +106,7 @@ function dividendColumns(deps: {
     },
     {
       key: 'net',
+      sortKey: 'net',
       header: 'Net',
       shortHeader: 'Net',
       align: 'right',
@@ -112,13 +115,12 @@ function dividendColumns(deps: {
     },
     {
       key: 'yield',
+      sortKey: 'yield',
       header: 'Yield',
       shortHeader: 'Yield',
       align: 'right',
       mobile: 'delta',
-      hint: {
-        description: "Trailing 12-month net over the position's current market value.",
-      },
+      hint: { description: 'Trailing 12M net ÷ market value' },
       cell: (row, view) =>
         row.trailing_yield_pct != null ? (
           `${row.trailing_yield_pct.toFixed(2)}%`
@@ -128,18 +130,12 @@ function dividendColumns(deps: {
     },
     {
       key: 'fwdYield',
+      sortKey: 'fwdYield',
       header: 'Fwd yield',
       shortHeader: 'Fwd yield',
       align: 'right',
       mobile: 'delta',
-      hint: {
-        description:
-          "Projected next-12-month income over the position's current market value. " +
-          'Weight these by market value and they average to the portfolio yield on the ' +
-          'Performance tab — this column is that figure’s audit. Unlike Forecast beside ' +
-          'it, this always covers the next twelve months rather than the selected year, ' +
-          'so a row can show no forecast here and still carry a yield.',
-      },
+      hint: { description: 'Next 12M forecast ÷ market value' },
       cell: (row, view) =>
         row.forward_yield_pct != null
           ? `${row.forward_yield_pct.toFixed(2)}%`
@@ -149,6 +145,7 @@ function dividendColumns(deps: {
     },
     {
       key: 'payouts',
+      sortKey: 'payouts',
       header: 'Payouts',
       shortHeader: 'Payouts',
       align: 'right',
@@ -163,15 +160,17 @@ function dividendColumns(deps: {
     },
     {
       key: 'share',
+      sortKey: 'share',
       header: 'Share',
       shortHeader: 'Share',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      hint: { description: "Share of this period's dividend income, including projections." },
+      hint: { description: "Share of this period's income" },
       cell: (row) => (row.share_pct != null ? `${row.share_pct.toFixed(1)}%` : '—'),
     },
     {
       key: 'forecast',
+      sortKey: 'forecast',
       header: 'Forecast',
       shortHeader: 'Forecast',
       align: 'right',
@@ -185,6 +184,7 @@ function dividendColumns(deps: {
     },
     {
       key: 'next',
+      sortKey: 'next',
       header: 'Next',
       shortHeader: 'Next',
       align: 'right',
@@ -194,17 +194,12 @@ function dividendColumns(deps: {
     },
     {
       key: 'growth',
+      sortKey: 'growth',
       header: 'Growth',
       shortHeader: 'Payout growth',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      hint: {
-        description:
-          "The payer's own dividend growth: its newest regular payment per share against " +
-          'the same payment a year earlier. It does not move when you buy or sell shares, ' +
-          'or with exchange rates. A dash means there is no payment a year back to compare ' +
-          'with yet, not that the dividend stood still.',
-      },
+      hint: { description: 'Payout per share vs a year earlier' },
       cell: (row) =>
         row.per_share_growth_pct != null
           ? `${row.per_share_growth_pct > 0 ? '+' : ''}${row.per_share_growth_pct.toFixed(1)}%`
@@ -212,19 +207,12 @@ function dividendColumns(deps: {
     },
     {
       key: 'yoc',
+      sortKey: 'yoc',
       header: 'YoC',
       shortHeader: 'Yield on cost',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      hint: {
-        description:
-          'Yield on cost: the projected next-12-month income over what the position cost — ' +
-          'higher than Fwd yield on a holding that has appreciated, and the same figure the ' +
-          'Performance tab shows for the whole portfolio. It uses the projection rather than ' +
-          'income already received because those describe different positions once you add to ' +
-          'a holding or sell and rebuy it: the income was earned on shares you no longer hold ' +
-          'at that cost.',
-      },
+      hint: { description: 'Next 12M forecast ÷ cost' },
       cell: (row) =>
         row.yield_on_cost_pct != null ? `${row.yield_on_cost_pct.toFixed(2)}%` : '—',
     },
@@ -260,6 +248,16 @@ export function DividendsTab() {
   const [hovered, setHovered] = useState<string | null>(null)
   const [pinned, setPinned] = useState<string | null>(null)
   const [otherOpen, setOtherOpen] = useState(false)
+  const [sortColumn, setSortColumn] = useState<DividendSortKey>(DEFAULT_DIVIDEND_SORT.column)
+  const [sortDirection, setSortDirection] = useState(DEFAULT_DIVIDEND_SORT.direction)
+  const handleSort = (column: DividendSortKey) => {
+    if (column === sortColumn) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortColumn(column)
+      setSortDirection(initialDirection(column))
+    }
+  }
   const formatCurrency = useFormatCurrency()
 
   const { data, isLoading, isError } = useQuery({
@@ -331,6 +329,23 @@ export function DividendsTab() {
     // Without the forecast the forecast-only rows are pure noise.
     return showForecast ? rows : rows.filter((r) => r.payouts > 0)
   }, [data, showForecast])
+
+  const sortedSecurities = useMemo(
+    () => sortDividendRows(securities, sortColumn, sortDirection, showForecast),
+    [securities, sortColumn, sortDirection, showForecast],
+  )
+  // Counted over the rows the table shows, so the line can be checked against its
+  // Growth column.
+  const changes = useMemo(() => payoutChanges(securities), [securities])
+
+  // Today's figures for the forecast card, so it and the KPI tile print one
+  // "Next 12 months" (lib/dividendForecastTrend.ts, rule 3).
+  const live = useMemo<LiveForecast | null>(
+    () => (data?.growth
+      ? { next12m: data.growth.next_12m_eur, ttm: data.growth.ttm.net_eur, currency: data.base_currency }
+      : null),
+    [data],
+  )
 
   // A ticker listed on two venues is two securities and two rows; only the table
   // needs the venue, and only where it actually disambiguates.
@@ -452,7 +467,7 @@ export function DividendsTab() {
                   ? 'border-transparent bg-primary text-primary-foreground'
                   : 'border-input bg-background hover:bg-accent hover:text-accent-foreground'
               )}
-              title="Overlay projected payments inferred from each stock's payout cadence"
+              title="Show projected payments"
               aria-label="Toggle forecast overlay"
               aria-pressed={showForecast}
             >
@@ -481,7 +496,7 @@ export function DividendsTab() {
             <DividendGrowthPace pace={pace} />
 
             {/* The forecast's own history. A projection, so it goes with the toggle. */}
-            {showForecast && <DividendForecastTrend />}
+            {showForecast && <DividendForecastTrend live={live} />}
 
             {isLoading ? (
               <div className={cn(DIVIDEND_CHART_BOX, 'animate-pulse rounded bg-muted')} />
@@ -615,14 +630,22 @@ export function DividendsTab() {
                   />
                 </div>
 
-                <DataTable
-                  rows={securities}
-                  columns={columns}
-                  getRowKey={(row) => row.security_id}
-                  label="Per-position dividend table"
-                  density="compact"
-                  className="border-t border-border pt-5"
-                />
+                <div className="space-y-2 border-t border-border pt-5">
+                  {changes && (
+                    <p aria-label="Payout changes" className="text-xs tabular-nums text-muted-foreground">
+                      <span className="font-medium">Payouts</span>
+                      {' · '}{changes.raised} raised · {changes.cut} cut
+                    </p>
+                  )}
+                  <DataTable
+                    rows={sortedSecurities}
+                    columns={columns}
+                    getRowKey={(row) => row.security_id}
+                    label="Per-position dividend table"
+                    density="compact"
+                    sort={{ column: sortColumn, direction: sortDirection, onSort: handleSort }}
+                  />
+                </div>
               </>
             )}
           </>

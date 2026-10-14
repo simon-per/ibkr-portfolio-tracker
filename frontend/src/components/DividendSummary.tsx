@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatCount } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import type { DividendSummaryResponse } from '@/lib/api'
@@ -168,7 +168,7 @@ export function DividendSummary() {
                                 )}
                                 title={`${MONTH_LABELS[i]} ${row.year}: ${curSym}${formatEur(amount)}`}
                               >
-                                {curSym}{amount < 10 ? amount.toFixed(2) : amount.toFixed(0)}
+                                {curSym}{amount < 10 ? formatEur(amount) : formatCount(Math.round(amount))}
                               </div>
                             ) : (
                               <div className="text-center text-xs text-muted-foreground py-1">{'\u2013'}</div>

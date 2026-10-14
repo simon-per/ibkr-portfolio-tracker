@@ -82,10 +82,20 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                       style={{ backgroundColor: colorOf(p.symbol) }}
                       aria-hidden="true"
                     />
-                    <span className="min-w-0 flex-1 truncate">
-                      {p.symbol}
+                    {/* Wraps rather than truncates as a whole: at 390px the notes
+                        and the badge did not fit beside the symbol, and one `truncate`
+                        over all of them clipped "payment pending" — the one live
+                        warning on the row — first. Only the symbol truncates now; the
+                        badge sits right after it and the notes wrap under. */}
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                      <span className="min-w-0 max-w-full truncate">{p.symbol}</span>
+                      {p.pending && (
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                          payment pending
+                        </span>
+                      )}
                       {p.ex_date && p.ex_date !== p.date && (
-                        <span className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground">
+                        <span className="whitespace-nowrap text-xs text-muted-foreground">
                           ex {dayLabel(p.ex_date)}
                         </span>
                       )}
@@ -94,15 +104,10 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                           Said on the surface, or it reads as the day the cash lands. */}
                       {p.pay_date_source === 'ex_date' && (
                         <span
-                          className="ml-1.5 whitespace-nowrap text-xs text-muted-foreground"
-                          title="No pay date is known for this holding yet: IBKR has not announced it and it has never paid through IBKR, so there is no lag to measure. The cash lands some days to weeks after the ex-date shown."
+                          className="whitespace-nowrap text-xs text-muted-foreground"
+                          title="Pay date not yet known"
                         >
                           ex-date · pay date unknown
-                        </span>
-                      )}
-                      {p.pending && (
-                        <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
-                          payment pending
                         </span>
                       )}
                     </span>

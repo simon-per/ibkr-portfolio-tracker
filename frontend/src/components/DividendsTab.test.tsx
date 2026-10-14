@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { api, type DividendBreakdownResponse } from '@/lib/api'
+import {
+  api,
+  type DividendBreakdownResponse,
+  type DividendForecastHistoryPoint,
+  type DividendSecurityRow,
+} from '@/lib/api'
 import { DividendsTab } from './DividendsTab'
 
 // jsdom cannot measure charts. Keep all controls, data transforms and captions real.
@@ -426,5 +431,98 @@ describe('The dividend legend', () => {
     expect(within(list).getByText('S13')).toBeTruthy()
     expect(within(list).getByText('S15')).toBeTruthy()
     expect(within(list).queryByText('S00')).toBeNull()
+  })
+})
+
+describe('One "Next 12 months" figure', () => {
+  function snapshot(date: string, value: number, since: number | null): DividendForecastHistoryPoint {
+    return {
+      date, next_12m_eur: value, ttm_net_eur: 100, next_12m_change_pct: null,
+      next_12m_mtd_pct: null, next_12m_ytd_pct: null, mtd_from: null, ytd_from: null,
+      next_12m_since_start_pct: since, breakdown: null, reconstructed: false,
+    }
+  }
+
+  it('prints the live breakdown figure on the tile and on the forecast card alike', async () => {
+    // The newest snapshot (150) is behind the live forecast (160): the case where the
+    // two surfaces used to print two values under one label.
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue({
+      base_currency: 'EUR', growth_from: '2026-08-28',
+      points: [snapshot('2026-08-28', 120, null), snapshot('2026-10-13', 150, 25)],
+    })
+    mount()
+    await screen.findByRole('region', { name: 'Dividend forecast over time' })
+    const surfaces = screen.getAllByText('Next 12 months').map((label) => label.parentElement!)
+    expect(surfaces).toHaveLength(2)
+    for (const surface of surfaces) {
+      expect(surface.textContent).toContain('€160.00')
+      expect(surface.textContent).not.toContain('€150.00')
+    }
+  })
+})
+
+describe('The per-position table', () => {
+  function security(id: number, symbol: string, growth: number | null, net: number): DividendSecurityRow {
+    return {
+      security_id: id, symbol, exchange: null, description: symbol,
+      payouts: 1, gross_eur: net, withholding_eur: 0, net_eur: net,
+      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
+      forward_yield_pct: null, per_share_growth_pct: growth, trailing_yield_partial: false,
+      days_held_in_ttm: 365, yield_on_cost_pct: null, share_pct: net, next_pay_date: null,
+      source: 'ibkr', forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
+      forecast_lag_days: null, forecast_lag_samples: null, forecast_method: null,
+      forecast_withholding_pct: null, forecast_withholding_source: null,
+    }
+  }
+
+  function withSecurities(): DividendBreakdownResponse {
+    const data = response(2026)
+    data.securities = [
+      security(1, 'AAA', 6, 40),
+      security(2, 'BBB', null, 30),
+      security(3, 'CCC', -4, 20),
+      security(4, 'DDD', 0.5, 10),
+    ]
+    return data
+  }
+
+  const bodyOrder = () => {
+    const table = screen.getByRole('table')
+    return within(table).getAllByRole('row').slice(1)
+      .map((r) => within(r).getAllByRole('cell')[0].textContent)
+  }
+
+  it('sorts by a column, with a payer that has no growth last either way', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    // Server order to start with: received plus projected, biggest first.
+    expect(bodyOrder()).toEqual(['AAA', 'BBB', 'CCC', 'DDD'])
+
+    const growth = screen.getByRole('columnheader', { name: /Growth/ })
+    await user.click(within(growth).getByRole('button'))
+    expect(growth.getAttribute('aria-sort')).toBe('descending')
+    expect(bodyOrder()).toEqual(['AAA', 'DDD', 'CCC', 'BBB'])
+    await user.click(within(growth).getByRole('button'))
+    expect(bodyOrder()).toEqual(['CCC', 'DDD', 'AAA', 'BBB'])
+  })
+
+  it('counts raises and cuts over the payers it lists', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
+    mount()
+    await screen.findByText(/Received/)
+    // DDD's +0.5% is inside the band; BBB has no year to compare and is not "flat".
+    expect(screen.getByLabelText('Payout changes').textContent).toBe('Payouts · 1 raised · 1 cut')
+  })
+
+  it('says nothing about raises when no payer can be measured', async () => {
+    const data = withSecurities()
+    data.securities = data.securities.map((r) => ({ ...r, per_share_growth_pct: null }))
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
+    mount()
+    await screen.findByText(/Received/)
+    expect(screen.queryByLabelText('Payout changes')).toBeNull()
   })
 })

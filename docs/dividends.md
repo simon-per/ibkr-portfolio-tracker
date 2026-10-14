@@ -810,9 +810,12 @@ projected, `incl. … projected` on an open window, and *payment pending* on an 
 add a flag's marker back without the owner asking for it.
 
 The per-year panel is the one surface that mixes measured and projected into a single bar, so with the
-Forecast toggle **off** it rebuilds from realized income alone (`lib/dividendGrowth.ts`), which is the
-only client-side growth arithmetic and copies the server's two rules exactly: adjacent years only,
-never divide by zero. Tests: `tests/test_dividend_growth.py`, `src/lib/dividendGrowth.test.ts`,
+Forecast toggle **off** it rebuilds from realized income alone (`lib/dividendGrowth.ts`), copying
+the server's rules exactly: adjacent years only, never divide by zero. The percentage itself is
+`growthPct` there — the client's **one** copy of `DividendService._pct` (a non-positive base is
+null; rounded to the digits asked for), shared by `realizedOnlyYears`, `withoutForecast` in
+`dividendChart.ts` and the forecast card's live restatement. Two inline copies of it existed before
+2026-10-14; a fourth caller goes through the helper. Tests: `tests/test_dividend_growth.py`, `src/lib/dividendGrowth.test.ts`,
 `src/lib/delta.test.ts`.
 
 ### Growth pace — CMGR and CAGR across the selected range
@@ -952,14 +955,29 @@ that it keeps growing, and have the breakdown available without it being the lou
 - **Lines follow the parent's replay rule on their own** (`fill_lines`): replayed lines
   never replace recorded ones, and they are the only lines a day recorded before the table
   existed will ever get. The backfill writes them without touching that day's total.
-- **The surface is one line and a sentence** (`lib/dividendForecastTrend.ts`). Nothing
+- **The surface is two lines and a sentence** (`lib/dividendForecastTrend.ts`). Nothing
   before `growth_from` is drawn; a part under half a unit of the base currency is not
   printed, the residual included. The card starts collapsed: its header row (figure,
-  growth since the start, "est.") is the toggle, and the chart and the sentence open
-  under it. Replayed days are drawn like recorded ones and the book's per-share growth
-  is not repeated there (it is the table's Growth column per payer) — the owner's call
-  on 2026-10-14, the whole line being an estimate; `reconstructed` and
-  `growth.per_share` are still served.
+  growth since the start with "est.", `MTD`/`YTD` chips when the server has them, and
+  `+X from buys` — `breakdown.shares`, the lever the owner controls) is the toggle, and
+  the chart and the sentence of the other parts open under it. Under the forecast a
+  muted *Received* line draws `ttm_net_eur`, so income actually paid can be watched
+  climbing toward the forecast. Replayed days are drawn like recorded ones and the
+  book's per-share growth is not repeated there (it is the table's Growth column per
+  payer) — the owner's call on 2026-10-14, the whole line being an estimate;
+  `reconstructed` and `growth.per_share` are still served.
+- **Today is the breakdown's live figure, not the newest snapshot** (since 2026-10-14).
+  The KPI tile shows `growth.next_12m_eur`, recomputed on every read; the card showed the
+  last stored row under the same label, so the two disagreed whenever the forecast had
+  moved since (a WHT change, a new UTC day, a stopped scheduler). The card now takes the
+  live `next_12m_eur` and `ttm.net_eur` as today's point: it **replaces** the newest row
+  when that row is today's UTC date (the next write would), and is **appended** otherwise.
+  Its percentages are re-applied to the live figure from the anchors the server named —
+  the start day, `mtd_from`, `ytd_from` — and from the newest row when today opens a new
+  month or year (it is then the last snapshot before the period began), which is the
+  server's anchor rule for one more day. A live figure in another base currency than the
+  history is ignored. Both surfaces print through `lib/dividendFormat.ts`;
+  `DividendsTab.test.tsx` pins them equal on a history that lags the breakdown.
 
 Tests: `tests/test_dividend_forecast_attribution.py`, the lines and breakdown cases in
 `tests/test_dividend_forecast_snapshot.py`, `lib/dividendForecastTrend.test.ts`.
@@ -987,7 +1005,15 @@ projection is sized from (`regular_payments`, one preparation for both).
   the raise: NVDA's 0.01 to 0.25 a share, about a hundredth of the income, made that mean
   read 45% on production. `covered_pct` says how much of the forecast the figure is
   measured over; the rest is left out, not counted as 0%.
+- **"N raised · M cut" above the table** (`payoutChanges` in `lib/dividendGrowth.ts`,
+  since 2026-10-14) counts the table's rows by their Growth figure: above
+  `RAISE_BAND_PCT` (+1%) is a raise, below −1% a cut, the band's edge included in it as
+  neither. One percent because the rates are restated per-share figures, where a
+  0.24 → 0.2401 is not a raise. A row with no figure is **left out, not flat** — it has no
+  year to compare, which says nothing about whether the dividend moved — and with no
+  measured row the line is absent rather than "0 raised · 0 cut". It counts the rows on
+  screen, so it moves with the range exactly as the table does.
 
-Tests: `tests/test_dividend_per_share_growth.py`.
+Tests: `tests/test_dividend_per_share_growth.py`, `src/lib/dividendGrowth.test.ts`.
 
 ---

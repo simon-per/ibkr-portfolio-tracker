@@ -42,7 +42,7 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
           flatBand={0}
           projected={pace.includes_forecast}
           className="text-sm"
-          title={`Compound monthly growth rate over ${pace.months} months.`}
+          title={`Compound monthly growth, ${pace.months} months`}
         />
       </span>
       {pace.cagr_pct != null && (
@@ -54,7 +54,7 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
             flatBand={0}
             projected={pace.includes_forecast}
             className="text-sm"
-            title="The monthly rate compounded over twelve months, not multiplied by twelve."
+            title="Compound annual growth"
           />
         </span>
       )}
