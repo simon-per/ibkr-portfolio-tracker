@@ -15,8 +15,16 @@ history and says what its growth was made of (back-filled 2026-10-14); pillar 3a
 finpension export through the 2026-10-06 buys, with both funds priced without an upload deadline
 and both looked through by index proxy; the database sits behind a directory mount with a
 migration-aware rollback; the crypto book computes its own history on CoinGecko prices; the
-Analytics tab is hidden (nothing deleted — docs/performance-analytics.md). What is owed: the
-browser sweep and the read-only checks under *Watch after the next deploy*.
+Analytics tab is hidden (nothing deleted — docs/performance-analytics.md). **Merged the same
+evening from an agent-team wave, unverified on production** (see *Watch after the next deploy*):
+the scheduled IBKR generation skips ET Sunday and Monday (`no_new_trading_day`,
+docs/flex-and-sync.md); a weekly fundamentals and analyst-ratings refresh, Sunday 04:00 Berlin;
+the Dividends tab shows one Next-12M figure with MTD/YTD growth, "from buys", a received-income
+line, payout raises/cuts and a sortable table; the Forecast tab projects at the owner's real
+12-month pace with the entered rate as the effective annual rate; the KPI fixes (tax withholding
+absent on estimates, Sortino, the heatmap chained to YTD, look-through Unresolved threshold, loss
+P/E, market-cap sort in base currency, EPS growth on a loss base). What is owed: the browser
+sweep and the read-only checks under *Watch after the next deploy*.
 
 ---
 
@@ -73,7 +81,9 @@ browser sweep and the read-only checks under *Watch after the next deploy*.
 
 - **The IBKR primary slot is 18:00 Berlin (12:00 ET), with 00:00 Berlin as the recovery.** A
   normal day reads a `full_sync` success at 18:00 and `ibkr_retry_1` `skipped` /
-  `already_generated_today` at 00:00; an `error` at 00:00 means both failed. Measurements and the
+  `already_generated_today` at 00:00; an `error` at 00:00 means both failed. On ET Sunday and
+  Monday both read `skipped` / `no_new_trading_day` (since 2026-10-14): those statements reach
+  the same Friday Saturday's did, and they held ~90% of every failed generation. Measurements and the
   fallback are in docs/flex-and-sync.md, *The 18:00 Berlin slot*; recovery from a missed window
   is a Client Portal download through `app/cli/ingest_flex_xml.py`, which spends no token budget.
 
@@ -187,6 +197,13 @@ browser sweep and the read-only checks under *Watch after the next deploy*.
   would multiply its burst for a value no one read — and the chart's own lazy fetch refreshes the
   benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
 
+- **US market holidays are not modelled** by the ET Sunday/Monday IBKR skip: the day after one is
+  still attempted, as before.
+- **`market_cap_base` is null for minor-unit quotes** (GBp/ZAc/ILA) until Yahoo's `marketCap`
+  scale for them is verified, so those rows sort last on the Fundamentals tab.
+- **The monthly heatmap's YTD changed method on 2026-10-14**: it is now the months compounded,
+  each measured from the previous month-end, so it differs from earlier reads by design.
+
 ## Watch after the next deploy
 
 Only what is still unverified. The verified halves of every entry that used to sit here are in
@@ -210,8 +227,16 @@ docs/shipped-log.md under the change that shipped them.
     the API (`ttm_coverage_start` `2025-05` in every range), and whether the All-time figure is
     worth keeping once seen (dropping CAGR on coverage-limited ranges is a two-line change). The
     *Average per month* chips wrap rather than scroll. The forecast trend card: its breakdown and
-    its collapse.
-  - **Performance** — on 3M/1Y the Profit/Loss line starts at 0 on the day the benchmark lines
+    its collapse; its header and the KPI tile print the same Next-12M (also right after a WHT
+    change), the MTD/YTD chips, "+X from buys", the muted received line; "Payouts · N raised ·
+    M cut" above the table; every figure column sorts, unknowns last.
+  - **Forecast** — opens at the 12-month pace, not 1000, in a browser holding the old
+    auto-written value; a value typed earlier survives; *My pace* follows the pace. The
+    *Money In per Month* card reads "so far · 12M avg · YTD".
+  - **Tax** — "—" withholding on estimated rows, the total "—" or "excl. N est.".
+  - **Fundamentals** — the as-of line (amber past 8 days), a loss P/E in red, market-cap sort.
+  - **Performance** — the heatmap's `MTD` tag; Sortino reads "Not enough history" on a thin
+    range. On 3M/1Y the Profit/Loss line starts at 0 on the day the benchmark lines
     start and ends at the change in Total Value minus the change in Money In; no 09-28 → 09-30
     hump in the benchmark lines; the visual hierarchy refresh (`4bd3f7f`: content shell, KPI
     panels, hero grids) has never had a browser pass.
@@ -245,6 +270,15 @@ docs/shipped-log.md under the change that shipped them.
   upload.** Expect no "could not be moved" warning and the `sibling_scaled` row count unchanged
   but for the new NAV days.
 
+- **The ET Sunday/Monday IBKR skip (`b88faa9`).** Berlin Sunday 18:00, Monday 00:00 and 18:00,
+  Tuesday 00:00 read `skipped` / `no_new_trading_day` with no Flex request; the 18:00 runs still
+  carry `market_result`; Tuesday 18:00 generates normally. The daily validator will see no IBKR
+  success from Saturday to Tuesday ET — its expectation to update, not a fault.
+
+- **The first `fundamentals_refresh` (Sunday 04:00 Berlin).** A success row in
+  `/api/scheduler/history`, no rate-limit warning, and the Fundamentals tab's as-of within a
+  week. The validator may flag the new `sync_type`.
+
 - **The watchlist slot's neighbours.** A clean 08:00 market-data run after the 04:00 refresh. If
   the daily validator flags the new `sync_type` in the history, that is its expectation to
   update, not a fault.
@@ -257,23 +291,12 @@ docs/shipped-log.md under the change that shipped them.
 - **The KPI audit of 2026-10-02 — low priority by owner decision (2026-10-04):** fine as long as
   the figures point the right way. Re-verify each in code before fixing; until 2026-10-04 these
   lived only in a session note.
-  - **Monthly-returns heatmap:** month cells drop the move across each month boundary (2026 chained
-    to +24.9% against a YTD of +32.2%), and the running month is not marked partial.
-  - **Tax tab:** withholding shows 0.00 on estimated rows.
-  - **Fundamentals:** a negative P/E is coloured green; the market-cap sort mixes currencies.
-  - **Sortino** says "no down days" when there is simply too little history.
   - **Deposit-driven % read as growth:** the Total Value chip, Period Gain %, the dividend
     2026 / TTM / Next-12M chips.
   - **The dividend chart tooltip:** its MoM/YoY chips.
   - **XIRR** is annualised over short ranges.
   - **1W risk figures** come from 5 returns, and the risk-free rate is a 3% EUR rate on a CHF base.
   - **PEG** mixes three methods.
-  - **EPS growth** explodes on a loss-to-profit base.
-  - **Fundamentals:** stale since 2026-08-25, with no as-of date shown (the Watchlist half was
-    fixed 2026-10-13: a scheduled refresh and an as-of line; this tab and the analyst ratings
-    still refresh only on a click).
-  - **Look-through:** "Unresolved" in amber, though it is ~0.3% by value.
-  - **Forecast tab:** monthly compounding overstates the rate, and the default contribution is 1,000.
   - **Sector "Unknown":** 35% in Analytics against 2% in Allocation — moot while Analytics is hidden.
   - **"Rose after sale"** counts ETF rotations.
   - **Two gain figures**, 410 apart; cost basis labelled "total invested".
@@ -296,28 +319,29 @@ Rough priority from here.
    swallows errors); a fourth inline FX path with a `"USD"` placeholder
    (`dividend_service.py:471`); the CLI "resolve a security by symbol and exchange" three times,
    and **`manage_mappings.py:79-83` takes `.first()` without refusing ambiguity**, so a mapping
-   could land on the wrong security; the fundamentals/watchlist `_fetch` closures and
-   forward-estimate parsing; `_pct` drifted (`lookthrough_service.py:808` returns 0.0,
+   could land on the wrong security; `_pct` drifted (`lookthrough_service.py:808` returns 0.0,
    `performance_analytics_service.py:77` None); the two crypto clients' `_pace`/`_get`. Extract,
    and test the family.
 4. **`BaseFx.convert` returns the EUR amount when no rate exists** (`base_fx.py:58-60`) — a
    stand-in that claims a value, under ~57 call sites; only crypto guards it (`backfill=False`).
-5. **Stamp the attempt when Yahoo has no analyst rating or no fundamentals** — every ETF is
-   re-queued on each `sync-stale` pass (a real request plus pacing) for an answer already known.
-   Copy `AllocationService`'s stamp on the *attempt* (`allocation_service.py`): a row with zero
-   counts and `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
+5. **The tax report's estimated rows, backend half.** The tab shows an estimate's withholding as
+   "—" since 2026-10-14, but `dividend_by_country` carries no per-country estimate count (so a
+   country is tagged by the year's era), `to_csv()` still writes an estimate's withholding as 0,
+   and in a mixed year the net total includes estimates with nothing withheld (`tax_service`).
 6. **Drop `crypto_daily`** once compared on production (no longer written or read): a migration
    plus the model, the smoke fixture's import and the probe's mention. With it, a CLI to set a
    CoinStats→CoinGecko mapping by hand for a coin `/coins/list` cannot match.
-7. **Owner's call: are hover texts "on the surface"?** ~25 methodology `title=` tooltips (KPI
-   cards, risk cards, contributions strip, tax tab) and the column-glossary hints (the YoC hint is
-   six sentences; "Note: PEG uses…" appears twice) survived the 2026-10-14 strip.
+7. **Four nulls-last sort comparators** — `FundamentalsTab.compareValues`,
+   `cryptoColumns.sortCryptoHoldings`, `WatchlistTab` and `lib/dividendTable.ts` — and `ABSENT`
+   defined in both `lib/utils.ts` and `ui/KpiCard.tsx`. Extract each into one `lib/` helper with a
+   family test.
 8. **Tooling.** ESLint is red (19 problems) and ruff has no config (3 dead assignments, 1 bare
    `except`); neither runs in CI. `alembic check` fails on naming drift only (the unnamed
    `ticker_mappings` unique constraint, `ix_corp_actions_*`, `index=True` on primary keys), so it
    cannot guard a forgotten migration until one reconciliation pass makes it green. The
    `ResizeObserver` stub is copied into 17 test files and belongs in a vitest `setupFiles`. CI
-   pins Node 20, which is end-of-life.
+   pins Node 20, which is end-of-life. `FundamentalsTab.tsx` carries four pre-existing
+   setState-in-effect lint errors.
 9. **`coverage_pct` reads 0.0 on an empty book** (`lookthrough_service.py:853`) — an unknown
    served as a figure.
 10. **Project the benchmark's baseline the way the portfolio's is projected.**
@@ -490,11 +514,12 @@ Each of these cost real time at least once.
 One line each, newest first. **Drop the oldest rather than growing this list** — `git log` holds the
 detail; this exists so the next session knows what just moved without reading it.
 
-- **2026-10-14 (agent wave, track 4: docs truth)** — STATUS.md pruned from a 1,738-line log to a
-  snapshot: the "Before that" recaps and every verified *Watch* entry moved to
-  `docs/shipped-log.md`, stale entries deleted, the browser checks grouped by tab, the catalogue's
-  unfixed items folded into *Worth doing next*; troubleshooting, pillar3a, data-model, deployment,
-  performance-analytics, DEPLOY.md, README and both `.env.example` files corrected.
+- **2026-10-14 (agent-team wave)** — an open-points catalogue; the owner picked growth and
+  forecast first, then six tracks ran in parallel worktrees and were merged after review: the
+  Dividends growth pack, the Forecast at the real pace, the KPI fixes, the ET Sunday/Monday IBKR
+  skip (production `sync_runs`: Sun/Mon 12:00 ET failed 15 of 20 since 08-08, Tue–Sat 1 of 48),
+  the weekly fundamentals refresh, and this file pruned from a 1,738-line log to a snapshot.
+  Hover texts: the owner chose "shorten", done in every track.
 
 - **2026-10-14 (test speed)** — "make the suite quicker", local runs being what the owner
   waits on: the backend runs under `pytest-xdist` (`-n auto --dist worksteal`), and the local
