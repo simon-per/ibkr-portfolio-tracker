@@ -1,564 +1,54 @@
 # Working state
 
-> Since 2026-09-08 the *Shipped …* write-ups this file cites live in
-> [docs/shipped-log.md](docs/shipped-log.md), and the CLAUDE.md sections it cites by name live in
-> `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
-> human, what is being watched, what is accepted, what is next, and the local-dev traps.
+> The perishable half of the project guide: what needs a human, what is being watched, what is
+> accepted, what is next, and the local-dev traps. CLAUDE.md is the index and its *Keeping
+> STATUS.md current* says when and how to edit this file; the reasoning behind each subsystem is
+> in `docs/<topic>.md`, and every *Shipped* write-up, with what was verified on production, is in
+> [docs/shipped-log.md](docs/shipped-log.md), newest first.
 
-**Last updated: 2026-10-14.** **The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`; the API still serves every flag (docs/dividends.md, *Data-quality notes are not rendered*). The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (23/23 synced); see *Needs a human* and *Watch after the next deploy*. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, backfill still owed** (see *Needs a human*): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history` — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
-the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
-re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
-(verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
-the **Analytics tab is hidden** (owner request; nothing deleted — see
-docs/performance-analytics.md). Newest work: **the dividend forecast is IBKR-first and sized per payment**
-(live on `48b1f9c` — see *Watch after the next deploy*). IBKR's paid amounts never reached the
-forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
-so funds lost their big December and raisers trailed by up to two years (NVDA ~0.01 a quarter against
-0.25 paid). Now IBKR's stated rate (parsed off the cash line), its accruals and its measured
-withholding come first; a steady payer repeats its latest payment, a varying one repeats the same
-payment a year earlier; specials are never repeated; no assumed growth. docs/dividends.md, *Sizing*.
-Before that: **the crypto book survives a coin without a price.** With the
-CoinGecko key in, one coin (BNB) went unmatched — CoinStats' id is not CoinGecko's and dozens of
-tokens share the symbol — and the book's "one unknown makes the day unknown" rule blanked every
-total, tile, weight and chart point. Now an ambiguous symbol is matched by CoinStats' own price
-(`pick_by_price`, and every new match is price-checked), migration `z9c5e1a3b7d4` clears the stored
-non-matches once, and a coin without a price is **left out and named** ("Excludes BNB — no price")
-rather than blanking the rest. Rules in `docs/crypto.md`; see *Watch after the next deploy*.
-
-Before that: **IBKR's own ex→pay pairs.** The owner ticked four more
-Flex sections (Change in Dividend Accruals, Equity Summary in Base, Prior Period Positions,
-Financial Instrument Information — all modelled by `ibflex` 0.15; a portal download was parsed
-locally and every existing extractor matched except the two intended differences). The new
-`dividend_date_pairs` log (migration `y8b4d0f2a6c3`) keeps IBKR's (ex-date, pay date) per dividend
-and the measured lag prefers it over proximity pairing. See *Watch after the next deploy*.
-
-Before that: **Korean and Taiwanese dividends pair with their cash.**
-Every ex→pay pairing was bounded at 30 days, and SK Hynix paid 33 days after its ex-date, so its
-September cash never paired: the 28 Aug dividend stayed *pending* beside the money that had arrived,
-and no KRW/TWD payer ever got a measured lag. A KRW or TWD payment now gets 75 days through one
-helper, `max_pay_lag_days(currency)`; everything else keeps 30. Verified live on `ca83856`
-(`docs/shipped-log.md`).
-
-Before that, pushed as `7d1cb99`: **an IBKR accrual is matched to the inference it replaces on
-the ex-date, not the pay date.** With no measured lag an inferred payment is dated on its ex-date,
-and IBKR pays up to a month later (22 and 29 days on held payers), so the pay-date match left the
-guess on the calendar beside IBKR's row — one dividend shown and forecast twice. One helper,
-`_accrual_covers`, now serves the forward/overdue loop and the estimate tail; IBKR's accrual is the
-first source for both dates. Rules in `docs/dividends.md`.
-
-Before that, deployed with it (`ac23ed5`): **the crypto book computes
-its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
-or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
-holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
-CoinStats history pull is gone (−35 credits a day); the one-off rebuild CLI exists but was not
-run (owner's decision — the 3 Oct basket stands in for earlier days, see *Known rough edges*). The KPI tiles are Total value, Today, P&L since 1 Jan 2026
-and Coins; the chart gains 1W · MTD · YTD. USDC without a price is valued at its 1.00 USD peg,
-flagged as one (owner's decision). Migration `x7a3c9e1f5b2d`. Everything is in
-[docs/crypto.md](docs/crypto.md); see *Watch after the next deploy*.
-
-Before that, pushed as `abef3ae`: **the Dividends tab's *Average per
-month* tile carries two reference paces instead of the latest month's MoM/YoY**, which under the
-average read as the average's own growth (one large September showed +507% / +1484%). Both are per
-month over finished months only: this year so far against last year ÷ 12, and the last three months
-against the three before (any three months hold exactly one Mar/Jun/Sep/Dec ETF payout). New
-`growth.ytd_pace` / `growth.recent_pace`; rules in `docs/dividends.md`. See *Watch after the next
-deploy*.
-
-Before that, verified on production on `dd78f97`: a deposit or withdrawal is dated when IBKR books it
-into cash, not when it settles, and a CHF withdrawal on a CHF base reads its CHF amount — the 09-28
-disbursement reads −4,500.00 on 09-28. Written up in `docs/shipped-log.md`.
-
-Before that, pushed on 2026-09-28, deployed with its CoinStats keys, awaiting the first production crypto sync (see
-*Watch after the next deploy*): **a separate
-Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
-the whole page. The crypto book has its own tables (`crypto_*`, migration `w6f3b0c7d1e2`), service,
-routes and view and shares no figure with the stocks — pinned both ways over the import graph by
-`tests/test_crypto_isolation.py`. `/api/crypto/*` needs the admin key **for reads too** and fails
-closed without one. Eight crypto jobs ride the existing slots under their own gate; the public
-`/api/scheduler/*` endpoints stay stock-only. Everything is in [docs/crypto.md](docs/crypto.md).
-Stock-side code it touched, all behaviour-preserving: the FX preload and `BaseFx` loader extracted
-into `fx_preload.py` / `base_fx.py`, the header and footer moved out of `Dashboard.tsx`, and the six
-hand-rolled toggle groups moved onto `ui/SegmentedControl.tsx`. Verified locally — the full backend
-suite, 762 frontend tests, the build, headless-browser passes of both modes at 1440 and 390 in both
-themes, and **two real syncs of the owner's CoinStats portfolio** after the shape probe. The real
-answers changed five things the documentation had implied, each now in `docs/crypto.md`: the real
-rate limit is tighter than documented (2 s between calls now), DeFi is reported beside the total
-rather than in it, the P&L history is one day's amount per point (summed over the range, from 0),
-the value history is sampled every three days, and sold coins come back at quantity 0 (skipped
-without a warning). The same push carries `7fe0aab`, merged the same day: **the value chart's
-Profit/Loss line starts at 0 on the first day of the range**, like the benchmarks do since
-2026-09-07.
-
-Before that, live on `26576f8` and API-verified: **a holding on the
-Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
-range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
-measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
-slots, while the calendar turned every upcoming payment grey in a past-year view. The order is now
-`stack_order` on the response, computed once over the whole history and **identical in every
-range**; the client's own ranking is deleted rather than duplicated, and with it the widest-window
-rule that only existed because the client ranked from a slice. Thirteen holdings get an identity
-(eight hues, then five muted steps) and the rest fold into Other, which is 2.6–12.6% of a range on
-this book against ~22% before. The palette moved into `index.css` as `--viz-series-*` and was
-re-stepped for the **all-pairs** list that identity assignment implies: four slots are the
-untouched `--viz-sector-*` hues, the other four plus the Other grey moved by ΔE 2–7, and the light
-green that measured **1.5 from the Other grey** under red-green CVD — wrong on the shipped chart —
-is gone. `lib/dividendColors.test.ts` now reads the hexes back out of `index.css` and measures
-them, surfaces included. The legend became a control: ordered by what the range paid, hover or
-focus to dim the rest, click to pin, and Other opens to name the holdings inside it.
-
-Verified on production after the deploy: `/health` reports the commit, and **the six ranges return
-one byte-identical `stack_order`** (28 payers, `VT, QQQM, ASML (NASDAQ), SPGI, META, 2330, GOOGL,
-SOXQ` hued and `GRID, MA, GOOG, NXPI, AVGO` muted), which is the whole claim. The deployed
-stylesheet carries both themes' `--viz-series-*` sets at the measured hexes and none of the four
-replaced ones. Before the push: one production snapshot run through the real service, agreeing on
-both forecast settings, plus 1,575 backend and 704 frontend tests, TypeScript, build and
-touched-file lint. **The browser pass has not run** — see *Watch after the next deploy*.
-
-Deployed alongside it on `4bd3f7f`, and carried in the working tree from an earlier session: the
-frontend visual hierarchy refresh gives the dashboard a centred 1,400 px content shell, separates canvas and card
-surfaces in both themes, aligns the chart and semantic colour palette, and combines the two dense
-Performance metric rows into shared KPI panels. The hero-card grids count occupied tracks so their
-two-column hero plus detail cards fill the desktop row. It was verified locally when it was
-written; this session only carried it, and it has had no browser pass either.
-
-The dividend controls remain live on `a719644` and API-verified: the gross-derived dividend
-forecast assumption is adjustable on the Dividends tab as **WHT 15%**. It persists in `app_settings`,
-accepts 0–100%, refetches every active dividend breakdown after saving, and reports the exact applied
-percentage in the response and visible caveats. The setting still touches only the two gross-derived
-forecast paths; actual IBKR net, accruals, realized history and stored rows remain unchanged. A live
-`15 → 26.375 → 15%` round trip changed the forecast fingerprint, left the realized fingerprint
-identical, and restored the original response exactly. Turning Forecast off now stops the monthly
-axis at the current month, removes future-year options, and returns a selected planning year to the
-current year. CI is green; full verification is 1,573 backend tests, 682 frontend tests and the
-production build. `/health` reports the exact commit, scheduler persistence and write auth enabled;
-the deployed chunk carries the new controls. The browser pass could not run because this Codex
-session had no browser runtime.
-
-Earlier production behavior on `9e808fe` remains API-verified (the browser half is
-still open — see *Watch after the next deploy*): **the calendar is the forecast.** The two
-pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
-that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
-actually gone ex is the *most* certain entry on the calendar, and it was the only kind absent from
-every chart and every total — the VT payment showed as *payment pending* under a September bar whose
-translucent segment did not contain it. One rule now covers all four producers of `upcoming`: money
-expected and not received goes in the forecast buckets, dated where the calendar dates it. Never the
-realized side, and never `next_12m_eur`/`forward_yield` for a payment already due — a backlog entry
-sits *before* that window. One dated ahead of today is inside it and now counts, which also closes a
-quiet understatement: the cadence steps past a recorded ex-date, so from the moment yfinance wrote
-the row until the cash landed, the forward figures were short one payment per security.
-
-The load-bearing consequence is that **`partial` and "carries projection" have come apart.** A
-closed rolling window can now hold an unsettled payment, so the Forecast toggle **strips** it from
-the point rather than dropping the point — dropping would make twelve months of measured income
-vanish over one late payment. `withoutForecast` in `lib/dividendChart.ts`, the sibling of
-`realizedOnlyYears`. `_rolling_twelve_months` now takes `has_forward_projection` so an overdue
-payment cannot stretch the series into next year.
-
-Previously today, live on `ec35713` and verified: **a projected dividend survives its own date.**
-The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues the ones
-it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between the
-projection being deleted on its own date and that row arriving, the payment was in nothing — which
-is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the date
-correctly a quarter earlier. A projection whose date has passed is kept, badged `pending`, emitted
-only when nothing else records the dividend: no estimate row, no accrual, no cash inside the lag
-window, and shares actually held on the ex-date. It expires at `PENDING_MAX_AGE_DAYS`, because an
-inference nothing ever confirms has to stop claiming. **An accrual does not** — `_open_accruals` had
-been ageing those out at the same 90 days against its own docstring, hiding a liability IBKR was
-still asserting.
-
-Also live on `bb2bb48` and verified: **a forecast sized from
-Yahoo's gross per-share now deducts an assumed withholding of 15%**
-(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`; this is now the user-adjustable default).
-Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
-overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
-high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
-applied at the two read paths that select the gross fallback (`_forecast_inputs`, and an unpaid Yahoo
-estimate emitted straight to the calendar), before currency conversion and rounding. **Stored history,
-broker-reported net, accrual `netAmount`, actual cash and every shared income reader are untouched**,
-and because each read starts from the stored gross the factor cannot compound — both pinned, the
-second by re-reading and comparing. The `net` | `mixed` | `gross_estimate` wire values are unchanged
-for compatibility, but `gross_estimate` now means *estimated net derived from gross*, and the
-captions say "assumed withholding" rather than "runs a little high".
-
-**The factor is a single global assumption, and this book is not single-jurisdiction.** 15% is the
-US and Dutch treaty rate; German, Korean and Taiwanese payers withhold materially more, so those
-projections still read high, just less so. A *measured* rate is derivable from data already stored —
-`withholding_tax_eur / gross_amount_eur` on IBKR rows, grouped by the ISIN-prefix country the DA-1
-report already groups by — and that is the honest version of this. **Built 2026-10-04** as the
-withholding ladder's `ibkr_measured` and `ibkr_country` rungs (docs/dividends.md, *Sizing*); the
-setting is only the last rung now.
-
-Previously, live on `c791fd9` and verified against the API: **a dividend
-is now dated when the cash is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
-the cadence comes from yfinance's ex-date series and nothing shifted it — while `upcoming[].date`
-and `next_pay_date` were named as pay dates and the calendar headed *Expected next*. Combined with
-`horizon_start = as_of + 1` (a projection is deleted on its own date) and the era splice (which
-drops the estimate recording that same payment), a dividend that had gone ex was in **no figure at
-all** until IBKR posted the cash. Measured on production before the fix: six held securities at
-once, the oldest 22 days in, NVDA with another twelve to go on a 21-day lag.
-
-Three sources now date a projection, each named on the wire as `pay_date_source`: an IBKR
-**accrual** (`<OpenDividendAccruals>` — the only record carrying an ex-date and a pay date
-together, free on the statement already pulled; the portal section was ticked 2026-10-03), a
-**measured lag** per security (`median(pay − ex)` paired out of the raw history by the matcher the
-era splice already runs; every IBKR payment on record paired, and the per-security spread is a day
-or two), or the **ex-date**, now saying that is what it is rather than implying otherwise. A
-payment that has gone ex and not been paid is badged *payment pending* on the calendar and
-deliberately in no total — the cash has not arrived, so counting it would credit the account with
-money it has not been paid. `months[]`, `ttm_series`, `growth` and the toggle's closed-prefix
-guarantee are untouched in shape; the figures move because the dates are now pay dates, which is
-the fix. Accruals live in their own table and never reach `dividend_payments`. Rules in
-`docs/dividends.md`; what to check live is in *Watch after the next deploy*.
-
-Two things the work turned up. **`match_estimates_to_ibkr` is one function now** — the splice wants
-the matched estimates to drop and the lag wants their distances kept, off the identical pairing, and
-a second copy is the file's own opening warning. And **IBKR does send `exDate` on ordinary dividend
-cash transactions; `ibflex` 0.15 does not model it, so the sanitizer has been dropping it on every
-sync** — reading it would make the lag exact, but it needs parsing outside `ibflex` and is
-backward-looking, so it closes nothing the accruals do not (recorded in `docs/flex-and-sync.md` so
-it is not rediscovered as new). `test_flex_attr_coverage.py` also had a hole the work walked into:
-its extractor map was hand-kept, so a new extractor was not merely unchecked but *invisibly*
-unchecked — there is a family test for that now, and three extractors that were never covered are.
-
-1,546 backend and 673 frontend tests pass, plus TypeScript, build and lint (the 16 lint errors are
-pre-existing and in files this did not touch). **The accrual path has still never seen a real
-statement** — it is exercised by fixtures only and the Flex section is off, so every live date
-currently comes from a measured lag or the ex-date.
-
-Before that, and live since `c791fd9`: **the Dividends growth figure now
-answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
-six-month rate anchored at the projection horizon, so it read `Jan 27 – Dec 27` while the reader
-was looking at 2026 — the owner's verdict was "not really usable", and he was right: a rate that
-ignores the filter above it is not a rate for anything on screen. It is now **CMGR** between the
-first and last rolling window actually displayed, plus **CAGR** when that span reaches twelve
-months, in one strip with the two endpoint totals beside it and no prose. Computed client-side in
-`lib/dividendPace.ts` from `ttmPoints` — that array already *is* the displayed set, range-sliced by
-the server and stripped of open windows when Forecast is off, so "which windows are showing" stays
-stated once instead of being restated in Python. The server keeps one new field,
-`ttm_coverage_start`, which is the only thing a windowed response cannot work out for itself.
-`DividendTtmPace` and the two `ttm_pace_*` fields are gone.
-
-On this book every range reaching back to the first covered window starts at CHF 3.77 — the account
-mid-funding — and reports +15% to +28% a month. That is arithmetically true and nearly meaningless,
-so it carries `†` plus four words of visible text; narrowing the range gives the clean read (2026
-+18.3%/mo with the forecast, +14.5% without). Rules in `docs/dividends.md`; what to check live is in
-*Watch after the next deploy*.
-
-Live on `d4640d4` (which still carries the unwindowed pace this replaces): **the Dividends TTM
-view is a stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
-rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
-it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
-The rolling series moved off `months[]` onto its own `ttm_series`, because on All time it runs to
-the projection horizon while `months[]` must keep its narrower cap — the one that exists because
-coupling them once tripled the all-time forecast total. Both charts now come out of one
-`DividendStackChart` and one ranking, so a symbol cannot change colour between views. Rules in
-`docs/dividends.md`; what to check live is in *Watch after the next deploy*.
-
-Three things the work turned up that are worth knowing. **Ranking over summed rolling windows would
-have ordered symbols by *when* they paid, not how much** — a January payment falls in twelve windows
-and a December one in one, a 12× swing that would have quietly reordered the existing monthly chart;
-the fix is to score a symbol by its widest single window. **Extending the series on the forecast
-*flag* rather than on a projection existing** would have drawn a decline to zero that never happened,
-the same shape this service once served as `next_12m_vs_ttm_pct: -100.0`. And **ending the series at
-the last projected payment** put All time in October while `year=` for the same year ran to December;
-it ends at the horizon now, so every range builds one identical series and only the slice differs.
-
-The stacked TTM was verified on production after deploy (see *Watch after the next deploy*); the
-growth figure has not been. Locally: 1,522 backend and 665 frontend tests pass, plus TypeScript,
-build and lint. The backend count FELL by eight against `d4640d4` and that is the whole pace
-removal — nine tests plus the auto-generated `DividendTtmPace` contract-drift case, against two
-added for `ttm_coverage_start`; the collected-id diff was checked rather than the totals.
-Browser checks at 1440px and 390px plus dark, replaying the five live `d4640d4` payloads so every
-range was verified against real figures — no overflow, no console errors, no network.
-Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
-`AGENTS.md` is an exact copy of the root `CLAUDE.md`. Unrelated UI restyle changes already in the
-working tree were preserved and remain uncommitted.
-
-Previously shipped: **an Analytics tab — where the return came from.** The
-change in Total Value split into money paid in, price, FX, dividends, fees/interest and a named
-remainder (waterfall for the range, stacked bars per year, legs summing exactly to end − start);
-the same gains folded onto sectors and countries through the look-through; 12-month rolling
-Sharpe/volatility/beta and a drawdown ledger; closed positions with IBKR's realized figure and the
-quote's move since the sale. Three pure-database routes under `/api/performance`, no new upstream
-call. `PortfolioService.attribution_rows` is now the single per-security window loop the
-Performance tab's attribution chart and this tab both read. Rules in
-`docs/performance-analytics.md`; what to check live is in *Watch after the next deploy*.
-Brinson allocation/selection is deliberately not built — it needs per-sector benchmark data the
-database does not hold (*Worth doing next*). Morning health check: nothing unpushed, both suites
-green, production on the latest commit. Previous latest: **a bug sweep with three parallel read-only hunts
-(backend valuation, frontend, sync/ops) found 32 verified defects; 25 shipped, the rest are
-recorded below rather than fixed.** Production was healthy throughout and every sum identity
-the public API exposes held — the defects were in the paths today's data does not exercise
-and in the codebase's own conventions. **The most serious arrived last, as a retraction**:
-the sync/ops hunt had listed "no path can issue two SendRequests for one slot" as verified,
-then read the installed `ibflex` source and withdrew it — `client.request_statement` re-sends
-the same GET up to three times on a 5 s timeout, each a new statement generation, so with the
-outer retry budget one scheduled slot could issue twelve. `send_flex_request` now issues one
-GET with a (connect, read) timeout pair and a read timeout fails fast like a `1001` (rule 2 in
-CLAUDE.md carries it). **Its first live SendRequest is still to come: the 09-12 18:00 slot was `skipped` because an earlier sync that morning had already spent the day's generation, so the 2026-09-13 18:00 Berlin `full_sync` is the first real test.**
-Afternoon, a design change at the owner's request: **the 3a Emerging Markets fund prices from
-its sibling share class** (`price_source = sibling`: statement NAV × the NT class's daily
-moves), so the monthly upload stopped being a pricing deadline — see *Needs a human* and the
-activation step under *Watch after the next deploy*. The
-ones that were live: the timeline stamped
-`cash_source: ibkr` on its tail while the summary said `mixed`, so the chart dropped its caveat
-(fixed: the label is the service's verdict); the dividend forecast labelled yfinance gross
-estimates `net` (fixed: `net` only from IBKR rows — expect `forward_yield.basis` to move
-toward `gross_estimate`); the dividend fetch and the benchmark warm-up recorded a Yahoo 429
-as `status: success` with no warning and were never passed to `_collect_warnings`; the
-scheduled CINS/SEDOL identity pass ran unbounded against its own docstring; `POST
-/api/dividends/sync` had no cooldown; the Alpha Vantage fallback fired on a rate limit; a
-non-ASCII `X-API-Key` was a 500; the tax router froze its year ceiling at process start; and
-the finpension re-import would have crashed on a Yahoo bar within about two uploads. Frontend:
-drawdowns and the Dashboard's period percentages read `0` on a pre-inception range, the chart
-tooltip printed `0.00` for a missing benchmark point, the look-through never rendered
-`unvaluable_positions`, and eight smaller ones. Details in *Shipped 2026-09-12* in
-`docs/shipped-log.md`; what to watch is in *Watch after the next deploy*. **Two owner decisions
-from the session are now rules**: FX drifts under 0.3% are accepted, not bugs (closes the old
-*Worth doing next* item 0 — see *Known rough edges*); and the auto-deploy rollback's inability
-to undo a migration-bearing deploy is deferred to *Needs a human*.
-
-Before that (2026-09-08, night): **the look-through keeps itself current, the
-benchmark cache is gone, a deploy no longer takes the site down for the build, and the
-backend's January-2024 dependency pins are current.** An audit found seven stale-basket
-warnings on every market-data run for two weeks, `starlette 0.35` with 14 advisories behind a
-public `/api/`, `deploy.sh` running `down` before `build --no-cache`, and a
-`benchmark_timeline_cache` nothing read. All four shipped together; details in *Shipped
-2026-09-08 (late)*, and what to watch after the deploy is in *Watch after the next deploy*.
-**Verifying them then found a fifth, older problem: every deploy had been discarding the
-un-checkpointed tail of the database** — `portfolio.db` is a file bind mount, so SQLite's WAL
-lives in the container layer and dies with `docker compose down`. Mitigated the same night
-with checkpoints on shutdown, before `down`, and before backups; the durable fix (mount the
-directory) is *Worth doing next* item 0 and needs the owner present.
-
-Earlier the same day: **the Forecast tab's Money In starts at what was paid
-in, not at what the book is worth.** The grey "Total Contributions" band was seeded with the
-holdings' market value — every gain ever made, presented as contributed — while the table column
-of the same name carried no seed at all, so one name meant two numbers on one tab and the
-columns did not sum. Both are **Money In** now, read from the contributions endpoint's all-time
-figure; `Portfolio Value = Money In + Investment Gains` on every row and point; the seed is
-Total Value where cash is tracked; and a baseline that fails to load is refused rather than
-drawn as zero. The tab had no tests and has 22. Details in *Shipped 2026-09-08*. **Verified live
-on `1cc84b5`** at 1280 and 390: the year-0 tooltip reads the money-in and Total Value figures the
-API serves, the table rows sum, and the bands run the full horizon once the draw animation settles.
-
-Same evening: **the Look-through tab's warning block is collapsed and last on the page.** Ten
-near-identical "basket is N days old" sentences sat in an amber block directly under the KPI
-cards and took half the screen above the company table. At the owner's request the itemised
-notes now live inside the *Fund coverage* card at the bottom, collapsed by default with a
-one-line count in its header; the Coverage KPI keeps the qualifier and names every condition
-present rather than only the most severe. The module docstring records why this does not
-break the "caveat outside every collapsible" rule.
-
-Before that (2026-09-07, evening): **the benchmark line starts where the portfolio line does,
-on every range.** Both were absolute and inception-based, so on 3M the
-benchmark's first point carried two years of relative performance while the portfolio's was its
-own value that day, and most of the visible gap was history the chart did not draw. The chart
-now asks for `anchor=window`: the hypothetical is seeded with the portfolio's Total Value on the
-first day of the range and fed only the contributions after it — a seeded walk, not a scale or a
-shift, so a deposit inside the window still buys index shares. Verified in a browser against a
-snapshot at 1440 and 390: the two lines start at the same pixel on 3M, 1Y and ALL, the API first
-points agree to a fraction of a cent, and on ALL the window series ends within 0.0011% of the
-inception one. Beta is unchanged on flow-free days by construction; the same change fixed a
-pre-existing contamination where deposit-only days counted as benchmark returns (three in the
-current 3M window, one a +1.7% jump). Details in *Shipped 2026-09-07*.
-
-Before that, the same day: **the contribution surfaces publish one figure —
-money in — and nothing else.** The chart shows money in; it did not until 09-06, because
-`monthly[]` carried only gross deployment, which counts a rotation twice by design — so
-the Ireland→US ETF switch drew **30,617 CHF "deployed" in August against 7,211 actually
-paid in**, and September read **3,639 against zero**. Both were correct and neither
-answered the question the card asks. Deployed then shipped as a *second bar*, plus the
-strip's `/suffix`, and came out again on 09-07 at the owner's request: they read these two
-surfaces for their contribution rate, and the second figure was answering a question they
-were not asking. The data agreed — the two series are the **identical number in 20 of 29
-months**, and differ trivially in five more. Deployed, released and net are all still in
-the tooltip, which matters: money in comes from the deposit ledger and deployed from tax
-lots, so deployed is the only independent check on a transfer misbooked as a deposit.
-A second bug fell out of the 09-06 work: the series was keyed on months with *tax-lot*
-activity, so a month with a deposit and no purchase had **no row at all** — live since the
-3a deposits landed a week before their purchases. Details in *Shipped 2026-09-06 (late)*.
-
-Before that, the same day: **the portfolio holds a second account, live on
-production.** A Swiss Pillar 3a with finpension is ingested from a transaction CSV and
-folded into the same tables — same charts, totals, allocation, look-through, contributions
-and returns, no second tab. Deployed 17:00 UTC, imported 17:05, verified end to end.
-Money in went **53,829.74 → 55,587.74 CHF** (+1,758.00, exactly the deposits) and the book
-**70,853 → 72,613 CHF**.
-
-Three things about it are worth knowing before reading further.
-
-**It was a precondition before it was a feature.** `reconcile_taxlots` deleted *every*
-open tax lot not in the statement it was holding, so the first IBKR sync after a 3a lot
-existed would have deleted it and booked a fictitious disposal. Two sibling paths had the
-same shape. That scoping shipped alone, as a no-op on an IBKR-only database.
-
-**The finpension `Balance` column is an oracle, and it earned its keep twice.** Replaying
-our own bookings against it per row makes a silently dropped category structurally
-impossible; the derived cash came to **20.023586 CHF**, finpension's own closing balance to
-the cent. And the *statement NAVs* are a second oracle: asked to price the EM holding, the
-obvious Yahoo candidate is a perfect name match, the wrong share class, and **+49%** — the
-SBI failure, caught only because the provider had published what the shares were worth.
-
-**An end-to-end run found a latent bug that was never 3a-specific.** Every contributions
-window was clamped to the first *tax lot*, so a deposit before the first purchase read as
-0.00 money in. Invisible with one account, because in-kind transferred lots predate every
-deposit by years; a retirement account is the opposite and commoner shape.
-
-Before that (2026-08-26): **the app tracks uninvested cash, so a restructuring is no
-longer drawn as a collapse.** Selling 25,136 CHF of positions on 08-21 and redeploying 12,682 on
-08-24 took holdings 68,342 → 43,631 → 56,161, and the value chart drew a 36% cliff over a period in
-which the account lost nothing. The headline card reported **56,708 CHF for an account worth
-68,921** — an 18% understatement — because ~12,229 CHF was sitting in cash and nothing recorded it.
-The chart now pairs **Total Value** (holdings + cash) with **Money In**, and neither line steps on a
-trade. Details in *Shipped 2026-08-26*.
-
-Two things about it worth knowing before reading further. **The risk metrics were never wrong** —
-`dailyReturnSeries` nets the flow out, so 08-21 reads +0.76% and the year's flow-adjusted max
-drawdown is −11.49% from March. Only the picture and the totals were. And the balance is **derived**
-until someone ticks one box in the Flex portal — see *Needs a human*, which is the one open item
-from this session.
-
-Before that (2026-08-24, late): **the Positions table published a fabricated −100%
-loss, on the one screen you open to find out which holding.** An unvaluable position is valued at
-0.00, so its gain is `−cost` — printed in red at `0.00%` weight with no marker, forty pixels below
-KPI cards already saying *"N unpriced, not judged"*. Last member of the `unpriced_holdings` family,
-and the one it should have started with. Shipped with `formatMarketCap`, which existed
-byte-identically in two files. Details in *Shipped 2026-08-24 (late)*.
-
-Before that, the same day: **the Flex Query period is not what this repo said
-it was, and a threshold derived from the wrong number cried wolf.** The live query is
-`Last 30 Calendar Days`; CLAUDE.md recorded `N=3` and `FLEX_GENERATION_GAP_WARN_DAYS` was the 2 that
-implies, so a routine two-day gap produced a banner saying trades were "about to become unreachable"
-with ~28 days of slack in hand. The threshold is now measured off the statement IBKR actually
-served. Same session: the 08-21 rotation's two replacement funds were **undeclared**, so a
-Nasdaq-100 ETF was being drawn as a company. Details in *Shipped 2026-08-24*.
-
-Before that: **the Allocation tab carried both of this codebase's
-signature bugs at once** — it answered "is this a fund?" by ticker while the Look-through tab
-answered by ISIN, and its three charts silently dropped a holding they could not value while every
-slice claimed to be a "% of portfolio". Details in *Shipped 2026-08-17 (night, second pass)*.
-
-Before that, the same evening: **a bug sweep found four more members of the
-`unpriced_holdings` family and the look-through's baskets finally have an alarm.** The four are all
-the same shape this file keeps rediscovering — a figure computed from an incomplete valuation and
-served as a measurement — and the worst of them rendered a *green* reassurance: with a stalled feed
-covering the whole selected range, Current Drawdown read `0.00%` captioned "Never below its opening
-value". Details in *Shipped 2026-08-17 (night)*. Nothing here needs an operational step; it is code
-plus tests.
-
-Before that, the same day: **every held fund decomposes — coverage 98.97%,
-`uncovered_fund_eur` 0.00**, and `OPENFIGI_API_KEY` is live on the VPS. Two funds get there by proxy: VWCE via VT and DBPG via VOO, both at the
-owner's instruction and both badged. DBPG's 2x leverage is *stated* rather than scaled, since
-scaling a bucket would break the partition. Before that, the same day: **VWCE borrows VT's basket** — and the ~8% a broad fund's weights fall short by is explained on
-screen as the rounding it is. Measured on a snapshot of production: coverage goes **78.6% → 87.0%**
-from the proxy alone, before the four new baskets are even imported, and the partition still closes
-to the cent. The proxy is stated everywhere the real thing would be (amber *Via VT* badge, a
-`warnings[]` line, the Coverage card staying amber), because "every fund decomposed" over a borrowed
-basket would be a reassuring zero. `OPENFIGI_API_KEY` is now set locally and verified against the
-live API; **it still has to go on the VPS** — see *Needs a human*.
-
-Before that (2026-08-16, evening): **the look-through treemap clusters by sector, and
-four more funds have an automated basket route.** SOXQ, GRID, QTUM and SMH were listed here as
-needing a hand download; all four turned out to have keyless, login-free routes. Watch for one thing
-on prod: three of the four US issuers publish a **CINS or a SEDOL instead of an ISIN**, which fold
-only after `resolve_identities --constituents` runs. Details in *Shipped 2026-08-16 (evening)*.
-
-Before that, the same day: **the Look-through tab got its two charts** — a treemap of company
-exposure and a composition bar showing how much of the book the look-through can attribute at all.
-Both refuse to renormalise: the treemap carries the truncated tail and the unattributed remainder as
-tiles, so a tile's area really is its share of the whole. Details in *Shipped 2026-08-16*.
-
-Before that (2026-08-14): **a Look-through tab — company-level exposure, with ETFs
-decomposed into their constituents and one company rendered as one row.** Three of the four largest
-true positions were previously invisible *as positions*, because one company occupies several rows:
-against a snapshot of production it read ASML, Alphabet (across three listings and five funds),
-Amazon, Meta and Nvidia as the top five. Nothing is renormalised, so the coverage gap is stated on
-screen rather than hidden. Details in *Shipped 2026-08-14*.
-
-Before that (2026-08-08): **the Flex sync no longer asks IBKR for a statement it has
-already made today**, which is what "it always errors out" was. IBKR issues about one generation per
-US-Eastern day, so two of three slots plus every manual Sync press failed by construction — and each
-failure spent `Code=1025` lockout budget. The guard skips instead, and the **primary IBKR slot moved
-to 18:00 Berlin at the owner's request** (see *Shipped 2026-08-08*, including why that is against the
-evidence and what to watch). Yahoo repricing hours are untouched.
-
-Before that (2026-08-07): the Monthly Returns table was blank from December 2025 to May 2026 and its
-"YTD" covered six weeks, because **MBGL's tax lots predate the spinoff that created it** — one 0.2%
-holding made 166 days unvaluable. Also: the two "avg monthly" contributions figures were asked about
-and **reconcile exactly** — only their labels were ambiguous (see *Shipped 2026-08-07 (evening)*);
-and `full_sync`'s 730-day market-data pass no longer sits behind its IBKR half, which had silently
-stopped it running since 08-03. `git log --oneline origin/main..main` is the only trustworthy count
-of what is unpushed, and it is the reason that phrase is not a number.
-
-Before that, the /loop audit's batch was pushed and deployed.
-Newest first: VT, GRID and QTUM are mapped in the ETF look-through table ahead of the statement that
-created them; a backend outage no longer
-deletes the twelve
-Performance-tab metrics from the page instead of reporting that it failed; the Activity ledger no
-longer lists every
-dividend twice (it was the one reader missing the era splice, overstating dividend income 72%); yield on
-cost is a Positions column; the permanent 27-attribute sync banner is gone; yield on cost no longer
-falls when you add to a holding; Beta shows a value for the first time (β 1.03 / r 0.74 vs S&P 500 — it
-was refused by an FX artefact, never by a thin window); the Performance tab reports the portfolio's
-dividend rate (*Dividend Yield* and *Yield on Cost*, replacing *Effective Holdings*, which moved into
-the *Top 5 Weight* footnote); the breakdown endpoint has the contract test its eight nested models never
-had; market data reprices seven times a day; the chart's negative axis is clamped; the app's own INFO
-logging reaches the container log; the sixteen KPI cards are one component; and the deploy guard covers
-every slot.
-
-`CLAUDE.md` is the durable guide — architecture, invariants, and the rules that were each a bug
-first. **This file is the perishable half**: where the work actually stands, what is known-broken,
-and what is worth doing next. Read both before you start; **leave this one accurate before you stop**
-— CLAUDE.md's *Keeping STATUS.md current* says exactly when and what.
-
-Rules for keeping it useful: **delete entries once they stop being true** rather than accumulating
-history, and **describe figures rather than publishing them** (the repo is public, the base currency
-is user-switchable, and a pasted total goes stale silently — check the API or the DB instead).
-*Recent sessions* at the bottom is the single exception to the first rule, and it is capped at five.
+**Last updated: 2026-10-14.** Production was healthy on `978e65e` that day, with no
+`warnings[]` in three days. Live and verified:
+the UI carries figures, not explanations (every tab stripped of footnotes, markers and provenance
+notes on 2026-10-14; the API still serves every flag); the watchlist refreshes itself on its own
+04:00 Berlin slot, Tuesday to Saturday; the dividend forecast is IBKR-first, keeps a daily
+history and says what its growth was made of (back-filled 2026-10-14); pillar 3a is the real
+finpension export through the 2026-10-06 buys, with both funds priced without an upload deadline
+and both looked through by index proxy; the database sits behind a directory mount with a
+migration-aware rollback; the crypto book computes its own history on CoinGecko prices; the
+Analytics tab is hidden (nothing deleted — docs/performance-analytics.md). What is owed: the
+browser sweep and the read-only checks under *Watch after the next deploy*.
 
 ---
 
 ## Needs a human
 
-- **Refresh `/root/auto-deploy.sh` once the watchlist slot is deployed.** `ops/auto-deploy.sh`
-  gained 04:00 in `SYNC_HOURS` on 2026-10-13 and the installed copy is what cron runs. By atomic
-  rename, as in docs/deployment.md. Until then a deploy can land on the 04:00 watchlist refresh
-  unguarded, which costs at most that night's refresh (the misfire grace or the next night
-  recovers it) — no portfolio slot is affected.
+- **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
+  Today the 3 Oct basket stands in for every earlier day at each day's price (owner's decision,
+  2026-10-03; docs/crypto.md, *The reconstructed span*). The rebuild CLI would reconstruct the
+  real quantities back to 23 Aug from CoinStats' transactions; its first dry run refused on BNB
+  going negative (Binance's trading fees, taken in BNB), and the owner then asked for a retry:
+  the CLI now accepts up to 0.05 BNB of fee dust and its refusal prints each coin's lowest
+  amount. Next is `crypto_rebuild_holdings --dry-run --fees subtract` on the server, then the
+  real run on the owner's word; if 23 Aug still refuses, `--reference 2026-09-01` is the
+  accepted fallback. A run reads the whole transaction history (up to 400 CoinStats credits).
+  **The deadline:** CoinGecko's Demo plan serves 365 days of history, so 1 January 2026 prices
+  are out of reach after the end of 2026 (docs/crypto.md, *CoinGecko*); after that the rebuild
+  can no longer price its days, and the stand-in becomes permanent.
 
-- **Run the forecast-breakdown backfill once on production.** Deployed on `4c1d654`
-  (2026-10-14, migration `d4a9c5e7f1b3` at head). A backup was taken
-  (`/root/ibkr-backups/2026-10-14/portfolio.db.manual-042835`) and the dry run was clean: lines
-  for 7 recorded days (2026-10-07..13), replay within 0.3% of the recorded total except
-  2026-10-12 (+1.6%, the pillar 3a import day). The write itself was refused by the session's
-  permission classifier, so it is the owner's to run:
+- **The Flex Query period: confirm "keep 30" (nothing to do in the portal).** The live query is
+  `Last 30 Calendar Days` (measured 2026-08-24 from the portal download's header and from
+  `data_from`/`data_to` on every successful sync since 07-01); an older revision of the docs
+  recorded an owner decision to narrow it to 3 that the account never ran. Nothing is broken
+  either way — `flex_window_days()` measures the window, so the alarms are right at any N — and
+  30 is the safer setting (weeks of margin rather than two failed days). Re-narrowing to 3 would
+  need a portal edit, which also resets the day's generation. Whichever is chosen, never
+  re-introduce a hardcoded threshold.
 
-  ```bash
-  docker exec backend-portfolio-backend-1 python -m app.cli.backfill_dividend_forecast --from 2026-06-01
-  ```
-
-  It rewrites only the replayed days and gives the days recorded
-  since 2026-10-07 their missing lines, leaving their totals alone (it prints how many). Until
-  it has run, the card shows the line and the since-start percentage and no breakdown, because
-  only days recorded after the deploy have lines.
-
-- **Leftovers of the 2026-10-04 database move (optional, harmless).** `rm
-  /root/finish-hardening.sh /root/finish-hardening.log` and the two set-aside sidecars
-  `backend/data/portfolio.db-{wal,shm}.pre-switchover-20261004T131635Z` (the `-wal` was 0 bytes).
-  Keep the `backend/portfolio.db -> data/portfolio.db` link while a rollback past `9e57366` is
-  conceivable. `/root/ibkr-backups/failed-deploys/` is never pruned, should it ever fill.
-
-- **Upload the finpension export when it has new transactions in it — no pricing deadline
-  any more.** Production is current through the 2026-10-06 buys (real export imported
-  2026-10-12; it replaced the two hand-estimated rows). Since 2026-09-12 neither 3a fund depends on the upload for its price:
-  `CH0117044948` prices from Yahoo directly and `CH1529078078` from its sibling share class
-  (`0P0000S0OE.SW`, statement NAV × the sibling's moves — `docs/pillar3a.md`, *Prices*). The
-  40-day "upload a newer statement" warning and the day-59 drop-out applied to a `manual`
-  fund, and there is none left once the sibling mapping is set on production (see *Watch
-  after the next deploy*). What an upload still brings is the *transactions*: each buy is a
-  new NAV that re-anchors the derived prices and checks the sibling still tracks (a warning
-  names the gap if not). The run is three commands:
+- **Upload the finpension export when it has new transactions in it — no pricing deadline.**
+  Neither 3a fund depends on the upload for its price (`CH0117044948` from Yahoo,
+  `CH1529078078` from its sibling share class — docs/pillar3a.md, *Prices*). An upload brings
+  the transactions, and each buy's NAV re-anchors the derived prices. Three commands; then drop
+  `--dry-run`. It replaces the account wholesale and refuses a file shorter than what is stored.
 
   ```bash
   scp transaction_report_YYYYMMDD.csv root@portfolio.srv1211053.hstgr.cloud:/root/p3a.csv
@@ -566,357 +56,70 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   ssh … 'docker exec backend-portfolio-backend-1 python -m app.cli.import_finpension_csv /tmp/p3a.csv --dry-run'
   ```
 
-  Then drop `--dry-run`. It replaces the account wholesale and refuses a file shorter than
-  what is stored, so a truncated download cannot quietly delete history.
+- **Add the HSTS header on the host nginx.** Production sends CSP, nosniff, X-Frame-Options and
+  Referrer-Policy but no `Strict-Transport-Security`. TLS terminates on the VPS's own nginx
+  (`/etc/nginx/sites-*`, not in the repo): one `add_header` line, starting with a short
+  `max-age` because the header is sticky in browsers.
 
-- **Decide what the Flex Query period should actually be — the portal and this repo disagree.**
-  Measured 2026-08-24: the live query is `Last 30 Calendar Days` (the portal download's header says
-  `period="Last30CalendarDays"`, and `data_from`/`data_to` on successful API syncs span 30 days,
-  consistently, back through 07-01). CLAUDE.md recorded it as **narrowed to N=3 on 2026-08-06, "a
-  deliberate choice by the account owner, reaffirmed after the trade-off was put to them"**. Either
-  that portal edit was never applied or it was set back; nothing in `sync_runs` shows a 3-day
-  statement at any point.
-
-  **Nothing is broken either way** — the code now measures the window rather than believing a
-  constant, so the alarm is correct at whatever N is in force, and 30 days is the *safer* of the two
-  (weeks of recovery margin instead of two days). But the file asserted a decision the account was
-  not running, so the decision is worth re-making explicitly:
-
-  - **Keep 30.** More margin against failed syncs, and the reason it was narrowed — `Code=1001` at
-    the request step — has not recurred in the way it did under Year-to-Date. Nothing to do.
-  - **Re-narrow to 3.** Faster statement generation, but the entire margin becomes two consecutive
-    failed days, and 08-23/08-24 was exactly such a pair. Requires a portal edit, which also resets
-    the day's generation — the one thing observed to do so.
-
-  Whichever is chosen, do not re-introduce a hardcoded threshold: `flex_window_days()` reads it.
-
-- **Add the HSTS header on the host nginx.** Found 2026-09-08: production sends CSP, nosniff,
-  X-Frame-Options and Referrer-Policy but no `Strict-Transport-Security`. TLS terminates on the
-  VPS's own nginx (`/etc/nginx/sites-*`), which is not in the repo, so this is one `add_header`
-  line there — start with a short `max-age` and raise it, since the header is sticky in browsers.
-
-- **The look-through's baskets refresh themselves since 2026-09-08, so this stopped being a
-  chore.** The 18:00 `full_sync` fetches any basket older than its issuer's cadence through the
-  same fetchers the CLI uses, keeps the previous one on any failure, and runs the CINS/SEDOL
-  identity pass after a replacement plus a bounded ISIN pass every evening. What a human still
-  does: hand-import a file an issuer only publishes by email (VWCE, if its real basket is ever
-  wanted instead of VT's), and read the 18:00 run's `lookthrough_result` when a stale warning
-  survives past a day. The by-hand commands are unchanged and still safe at any hour:
-
-  ```bash
-  docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets
-  #   then the import line it prints per fund (--dry-run first). VT's line carries a *.json glob and
-  #   `docker exec` runs no shell, so wrap that one in `sh -c` or list the 21 pages.
-  docker exec backend-portfolio-backend-1 python -m app.cli.resolve_identities --constituents
-  ```
-
-  **Order matters**: the second step resolves the CINS/SEDOL identifiers the first stores, so running
-  it first leaves GRID's and QTUM's companies unfolded. A **basket re-import deliberately clears**
-  those resolutions (it keeps the raw identifier), so it is the second half of every basket refresh.
-  The resolve step **commits once at the end** — do not deploy while it is running, and do not use
-  `pgrep` to check on it (not installed in the container; it always reports one match). Read the
-  `manual_identity_resolve` row in `sync_runs` instead.
-
-  **VT will keep refusing until Vanguard's cluster serves one snapshot.** Not a fault to force past —
-  see *Ran on production 2026-08-17*. Its stored basket is kept and VT publishes month-end.
-
-- **`OPENFIGI_API_KEY` is DONE — set on the VPS and read by the app** (2026-08-17 evening,
-  `configured: True, length: 36`). Nothing is outstanding here. Note it was never blocking: the
-  identity backfill that took unresolved value from 4,281 to 516 CHF ran **keyless**, and GLEIF's one
-  request per ISIN is what costs the ~37 minutes, not OpenFIGI's batch size.
-
-  Two traps it cost, both now in CLAUDE.md. The app reads **`backend/.env`**, never the repo-root
-  `.env` — `config.py` resolves `BACKEND_ROOT / ".env"` and compose resolves `env_file` relative to
-  itself, which is also `backend/`. And a hand-run `docker compose up -d` must carry
-  `GIT_COMMIT=<sha>`, or `/health` reports `commit: "unknown"` on current code and never recovers
-  until the next push.
-
-- **VWCE's basket is CLOSED as a task — the VT proxy is the accepted answer.** Do not re-open it,
-  do not chase Vanguard for the real file, and do not reinstate the prohibition this entry used to
-  carry. The owner instructed the proxy on 2026-08-17 and closed the follow-up the same day, with a
-  reason that makes it more than a stopgap: **the Ireland-domiciled sleeve is being rotated into
-  US-domiciled ETFs for tax reasons**, so VWCE is on its way to becoming VT. Borrowing VT's basket
-  approximates a position that is converging on it.
-
-  It is badged as a proxy on every surface and errs *low* — see CLAUDE.md's *A borrowed basket*. If a
-  real file ever does arrive, `import_etf_basket` stores it and the proxy is never consulted again;
-  there is nothing to un-declare.
-
-  **The old prohibition, and why it fell.** This entry used to say "do not ship VT's basket as a
-  proxy", on the grounds that the overlap had never been quantified. It has been: the sleeve VWCE
-  omits is almost entirely the 8,007 of VT's 10,032 rows published at 0.00% weight, and VT spreads
-  the shared names over a *wider* index, so the proxy understates and the shortfall lands in the
-  residual — the direction chosen everywhere else here.
-
-  **Ruled out on 2026-08-14, each verified — kept only so nobody re-investigates:** the US profile
-  API that serves VT rejects the Irish fund id; live EU holdings are GraphQL-only with no key in the
-  delivered HTML; Euronext carries no constituent data and the LSE page is an empty SPA shell; there
-  is no EU analogue to N-PORT; the product page publishes ten holdings with no ISIN column; and
-  Vanguard Funds plc's disclosure policy makes complete holdings request-only by email. The
-  semiannual report PDF lists every holding but carries **zero ISINs**, and this pipeline is
-  ISIN-keyed.
-
-- **SOXQ, GRID, QTUM and SMH are no longer on this list.** All four have adapters as of
-  2026-08-16 — the "single-page app" reading was wrong for each of them in a different way, see
-  *Shipped 2026-08-16 (evening)*. **DBPG never was on it** — it is excluded by design, not for want
-  of data.
-
-- **Two credentials are knowingly unrotated, both by owner decision, and they are different things.** Neither is a task. What IS open is one re-exposure, noted below.
-  - **`API_ADMIN_TOKEN`** was exposed into an agent transcript on 2026-08-07 (a `pgrep -af` printed
-    a curl command line carrying the header). The owner was asked and **chose to accept that one** —
-    do not re-raise the 08-07 incident.
-
-    **It happened a second time on 2026-08-17** — an agent ran `od -c` over the last 60 bytes of the
-    VPS `backend/.env` to check for a trailing newline, and the file's last line is that token, so
-    most of its tail is in that transcript. **The owner was asked and accepted this one too**, on the
-    reasoning that the exposure is a local `.jsonl` transcript plus the vendor's logs rather than
-    anything reachable from the internet — unlike the 07-28 Flex leak, which was genuinely served over
-    HTTPS. *Do not re-raise either.* Both credentials and both exposures are now settled; there is no
-    open security item.
-
-    **The lesson is the part worth keeping, and it is cheap: never dump bytes from a file that holds
-    secrets.** `tail -c 1 | xxd` answers the trailing-newline question without printing a value, and
-    appending defensively answers it without asking at all.
-  - **The IBKR Flex token** was the other one, and it is now **also accepted rather than rotated** — the owner decided on 2026-08-17. See the entry below for the blast radius that makes that reasonable. Neither credential is an open task; only the 08-17 `API_ADMIN_TOKEN` re-exposure is still unruled.
-
-- **Pushing is NOT blocked for an agent, despite what this file claimed until 2026-08-04.** The
-  entry here said it was "refused by the permission classifier". It was tried, and it worked
-  (`169b7e5..5093be5`). So do not treat unpushed work as a human step by default — check
-  `git log --oneline origin/main..main` and ship it. What *does* warrant asking first: anything
-  touching the deploy machinery or the VPS, and landing a push within ~10 minutes of a Berlin slot
-  (which `ops/finish-deploy.sh` and, since 2026-08-04, the installed guard both check for you).
-
-  `ops/finish-deploy.ps1` (PowerShell) and `ops/finish-deploy.sh` (Git Bash) are equivalent twins
-  that run push / token / guard in the only safe order and skip whatever is already done.
-  **Keep the two in step if you change either.** Both take Berlin time from a real timezone
-  database rather than the shell, because Git Bash on Windows silently ignores `TZ=` and returns
-  UTC — a two-hour error in the direction that permits a collision.
-
-  Note the scripts define `$k`/`$h` shorthand *inside one session*; pasting a later command into a
-  fresh shell silently passes empty strings and `scp`/`ssh` print usage. Use literal paths, or
-  re-run the script.
-
-- **The IBKR Flex token will NOT be rotated — the owner decided this on 2026-08-17.** Recorded so it
-  is not rediscovered and re-raised as new: *do not bring this up again unless the owner does.*
-
-  The history, so the decision stays informed rather than just remembered: the token travelled as a
-  `t=` URL parameter into `sync_runs.message` and was served by the public
-  `/api/scheduler/history` until the 2026-07-28 scrub. `app/redact.py` now redacts on write *and* on
-  read, so it cannot recur — but redaction cannot un-leak what was already reachable.
-
-  What an exposed Flex token permits, since that is what the decision turns on: the Flex **Web
-  Service is read-only reporting**. It cannot place trades, move cash or change the account. It can
-  pull this account's statements, and it can spend the token's generation budget — which is how
-  `Code=1025` lockouts happen, so the practical damage is *our own syncs stopping*, not money moving.
-  That bounded blast radius is what makes accepting it defensible.
-
-  **The tell if it ever is being used by someone else**: successful generations appearing in
-  `sync_runs` at hours no job runs, or a `1025` lockout with no failed attempts of ours preceding it.
-  `find_flex_generation_gap` would surface the second one within 2 ET days.
-- **The 2025 tax-year backfill is CLOSED — there is nothing at IBKR to backfill.** The owner
-  confirmed on 2026-08-17 that they did not use IBKR before 2026: the holdings arrived by in-kind
-  transfer from Trading 212, Scalable Capital and Trade Republic in early 2026. So IBKR holds no 2025
-  executions, dividends or cash transactions, and a 2025 Flex statement would generate empty. 2025's
-  `dividend_source='yfinance_estimate'` is the only source that exists, and the flag saying so is the
-  feature working. **Do not change the Flex Query period chasing this**, and do not re-raise it as an
-  open task. Pre-2026 realized gains and Steuerwert have the same ceiling for the same reason; the lot
-  cost basis that *does* reach back came across with the transfer, which is why contributions splice at
-  `coverage_from` rather than trusting the ledger for those years.
+- **VPS tidy-ups from the 2026-10-04 database move (optional, harmless).** `rm
+  /root/finish-hardening.sh /root/finish-hardening.log` and the two set-aside sidecars
+  `backend/data/portfolio.db-{wal,shm}.pre-switchover-20261004T131635Z`; point `DATABASE_URL` in
+  the VPS `backend/.env` at `/app/data/portfolio.db` (docs/deployment.md, *The database
+  directory*). Keep the `backend/portfolio.db -> data/portfolio.db` link while a rollback past
+  `9e57366` is conceivable. `/root/ibkr-backups/failed-deploys/` is never pruned. Also worth a
+  look while there: `df -h` and logrotate.
 
 ## Watching
 
-- **The IBKR primary slot is 18:00 Berlin (12:00 ET), and nine ET days say it works.** Shipped
-  2026-08-08 at the owner's explicit request against the measurements available then. Measured
-  2026-08-17: **12:00 ET succeeded seven days straight (08-09 → 08-15)**, failed 08-16 and was
-  recovered by 00:00 Berlin the same ET day, and failed again 08-17 with the recovery slot still to
-  come. 7 of 9, against 1-of-8 for the retired 20:00 Berlin slot. The old reading blamed
-  mid-session; the confound was that those slots also ran *after* the day's generation was spent.
-  CLAUDE.md's *The 18:00 Berlin slot* now carries the table. It still captures no extra trades,
-  because the Flex window rolls at midnight ET rather than at generation time.
+- **The IBKR primary slot is 18:00 Berlin (12:00 ET), with 00:00 Berlin as the recovery.** A
+  normal day reads a `full_sync` success at 18:00 and `ibkr_retry_1` `skipped` /
+  `already_generated_today` at 00:00; an `error` at 00:00 means both failed. Measurements and the
+  fallback are in docs/flex-and-sync.md, *The 18:00 Berlin slot*; recovery from a missed window
+  is a Client Portal download through `app/cli/ingest_flex_xml.py`, which spends no token budget.
 
-  **The transition is the confusing part, so expect it.** On the deploy day the old 06:00 Berlin
-  slot has already spent that ET day's generation, so the first 18:00 run will record
-  `skipped` / `already_generated_today`. That is the guard working. The **first real test is the
-  following evening**, and until then there can be up to ~36 h between generations — inside the
-  3-day window, but check `max(trade_date)` if anything looks stale.
-
-  What to look for in `/api/scheduler/history` (the field is named `type`, not `sync_type`):
-
-  - a daily `full_sync` at 18:00 Berlin with `ibkr_result.status == "success"`
-  - `ibkr_retry_1` at 00:00 Berlin recording `skipped` with `reason: "already_generated_today"` —
-    **not** `error`. An `error` there means 18:00 failed and the recovery attempt also did.
-  - `ibkr_retry_2` gone from the job list: `_prune_unknown_jobs` evicts it from the persistent
-    store on first boot. If it is still there, the deploy did not take.
-
-  **If generations start failing, the fix is to move `FULL_SYNC_HOUR` back to 6** — 06:00 Berlin is
-  00:00 ET, the instant the window rolls, and it succeeded 8/10 standalone. Recovery in the
-  meantime is a browser download through `app/cli/ingest_flex_xml.py`, which is idempotent and
-  spends no token budget.
-
-- **Every piece of look-through data is a one-off snapshot, and nothing renews any of it.** This is
-  the weakest part of the feature and the thing most likely to mislead later, because the numbers
-  stay confidently on screen while the baskets behind them age. Populated on production 2026-08-14:
-  6 baskets, 16,138 constituent rows, 505 identities — **and the four adapters added 2026-08-16 have
-  not been run against production at all yet** (see *Needs a human*). Decay clocks:
-
-  | data | issuer republishes | badged `†` after | renewed by |
-  |---|---|---|---|
-  | XNAS, XAIX (DWS) | **daily** *(publishes no as-of; fetch date stands in)* | 7 days | nobody |
-  | SXR8, IWDA, EMIM (BlackRock) | **daily** | 7 days | nobody |
-  | SOXQ, GRID, QTUM, SMH (the four new) | **daily** | 7 days | nobody |
-  | VT (Vanguard US) | month-end, ~6wk lag | 75 days | nobody |
-  | VWCE | not published at all | permanently amber | a hand download |
-  | DBPG | — | never (excluded by design) | n/a |
-  | ISIN identities | LEIs never change | nothing warns | nobody |
-
-  **So nine of the ten baskets go stale within a week of a fetch**, the coverage card reads
-  *"N baskets ageing"*, and no job does anything about it. Refresh is `fetch_etf_baskets --all` plus
-  the import lines it prints, **then `resolve_identities --constituents`** — a re-import clears the
-  CINS/SEDOL resolutions on purpose.
-
-  **Identity drift is the quieter half.** A positive answer is cached forever, which is right — but
-  a fund rebalance introduces constituent ISINs nobody has asked about, and **a newly bought
-  security's ISIN is never resolved either**, so it will not fold with an existing holding of the
-  same company until `resolve_identities --constituents` is re-run. `unresolved_value_eur` (3.0% of
-  the book on 08-14) drifts upward silently. Same shape as the documented "run
-  `POST /api/allocation/sync` by hand after buying" rough edge.
-
-  **There is an alarm now, as of 2026-08-17 (night).** `find_stale_etf_baskets()` runs after every
-  market-data sync and contributes to `warnings[]`, per adapter, for held funds only — so the decay
-  above tells you rather than only badging a tab someone has to open. What it deliberately does
-  **not** say anything about: a fund excluded by design, and one whose only route is a hand download
-  with nothing to borrow. Neither can be cleared by running anything.
-
-  **It has never fired on production**, because it shipped after the 08-17 CLI run left every basket
-  fresh. When to expect it, computed from the registry rather than guessed:
-
-  | fund | judged on | expectation | first warns |
-  |---|---|---|---|
-  | IWDA, SXR8, EMIM, XNAS, XAIX, SMH, SOXQ, GRID, QTUM | own basket, as-of ~08-17 | 7 days | **~08-24** |
-  | VOO, and DBPG through it | VOO's basket, as-of 07-31 | 75 days | ~10-14 |
-  | VT, and VWCE through it | VT's basket, as-of 06-30 (its refresh refused) | 75 days | **~09-13** |
-
-  So a quiet `warnings[]` before 08-24 is correct, and **VWCE staying quiet while the nine are
-  flagged is also correct** — it is judged by Vanguard's cadence because that is whose file it
-  reads, not by the 45-day default its own `manual` adapter would have given it. If nothing appears
-  after 08-24, check the market-data job's `details`: the detector is separately guarded, so an
-  exception in it is a log line rather than a failed sync. The *second* half of item 3 — a
-  staleness-guarded automatic refresh — is still open.
-
-- **The TSMC ADR override is about to fire for the first time.** `ISSUER_OVERRIDES` folds
+- **The TSMC ADR override has never been exercised on real data.** `ISSUER_OVERRIDES` folds
   `US8740391003` (the TSM ADR) into the Taiwanese ordinary, pinned from both sides in
-  `test_company_identity.py`, but **zero stored baskets contained the ADR** (checked 08-14: EMIM and
-  VT both hold the *ordinary*). SOXQ and SMH now have adapters, and both hold the ADR — SOXQ under
-  CUSIP `874039100` → `US8740391003`, SMH under a published ISIN. **Check TSMC appears once, not
-  twice, on the first look-through read after those two are imported to production.** It has never
-  been exercised outside a test.
+  `test_company_identity.py`; SOXQ and SMH hold the ADR. Check TSMC appears once, not twice, on
+  `/api/portfolio/lookthrough`.
 
-- **`find_flex_generation_gap` has never fired.** New on 2026-08-08: it warns after 2 ET days with
-  no successful IBKR sync, which is the actual margin under a 3-day Flex window — `find_stale_ibkr_sync`
-  at 7 days fires four days after the trades are gone. It runs from the market-data job, so it
-  surfaces while Flex is refusing. With only two attempts per ET day, this is the alarm that matters;
-  if it appears in `warnings[]`, act rather than waiting.
+- **`full_sync`'s market-data half on a day IBKR refuses** (decoupled 2026-08-07). The 2026-10-04
+  18:00 run got `Code=1001` and is the first such run on record: in `/api/scheduler/history`
+  (the field is `type`) its `details.market_result` should be a real object, not `null`, with the
+  top-level `status` still `error`.
 
-- **`full_sync`'s market-data half is decoupled from its IBKR half and has not yet been observed
-  working.** Deployed 2026-08-07 06:32 Berlin. Note the guard makes a *failed* IBKR half rarer,
-  so this may now be observed less often rather than more — a `skipped` half is not the case it
-  was written for. It is invisible on a morning IBKR *succeeds*, because
-  the old gate would have let it through anyway — so the first real evidence is **the next 08:00
-  Berlin run whose `ibkr_result` is an error**, which on current form is most of them.
+- **MCO and MRVL each forecast off only 2 samples** (`forecast_samples` on the breakdown row). Not
+  known-wrong, but two samples is the shape that once let SBI project a fake monthly cadence.
+  Check `manage_mappings list` for a `DIVIDENDS PREDATE MAPPING` flag before trusting either.
 
-  What to look for in `/api/scheduler/history` (note the field is named `type`, not `sync_type`):
-
-  - `details.market_result` is a real object, **not `null`** — that was the whole bug
-  - top-level `status` is still `error`, so the Yahoo half succeeding does not mask a refused
-    statement and `find_stale_ibkr_sync` keeps counting correctly
-  - any `warnings[]` the market pass raises now actually appear; a *skipped* step emitted none, which
-    is why `find_stale_priced_securities` was silent on exactly the mornings IBKR refused
-
-  If `market_result` is `null` beside an error status, the deploy did not take — check `/health`'s
-  commit against `origin/main`. Background under *Shipped 2026-08-07* in `docs/shipped-log.md`.
-
-- **The three new ETFs landed on 2026-08-07 at the 06:00 Berlin slot, exactly as predicted.** VT 10 @
-  160.50, GRID 10 @ 190, QTUM 3 @ 149.85 and 1 more META @ 589.12, all dated 2026-08-06. Production
-  went 36 → **39 positions**, 979 → **983 open lots**, 40 → **43 securities**, `max(trade_date)`
-  2026-07-29 → **2026-08-06**. `unpriced_holdings` read **3** in the gap before pricing, with the
-  yellow notice above the KPI cards — the completeness signal from the 08-06 batch working on its
-  first real occasion. The look-through mappings and the asset-type fix shipped ahead of the
-  statement all held; nothing needed doing when it arrived.
-
-  **The asset-type fix is confirmed on live data, which is worth more than the mutation test.** All
-  three carry `asset_type='Stock'` (the column default) with `sector` and `country` NULL, exactly the
-  state that used to draw a mapped fund as a Stock in one chart and an ETF in the other two — and all
-  three are now distributed as `is_etf_contribution` across sector *and* geography, with the
-  asset-type chart agreeing. All three breakdowns sum to 100% (two read 100.01, which is 2dp
-  rounding). **So no `POST /api/allocation/sync` is needed for them**; the columns stay NULL and that
-  is fine for a mapped fund.
-
-  Two things worth keeping from how it got there, both now in CLAUDE.md:
-
-  - **`whenGenerated` is US Eastern, and the window rolls at midnight ET.** A statement downloaded
-    at **05:40 Berlin on 08-07** still read `to=20260805`, because that is 23:40 the previous day in
-    New York — it looked like today's file and was yesterday's. The 06:00 Berlin job twenty minutes
-    later (00:00 ET) got the missing day. **Check `toDate` in the header before ingesting a manual
-    download**; the generation time tells you nothing.
-  - That file was ingested anyway, at the owner's request, and was a clean no-op: 979 lots synced,
-    **0 closed, 0 skipped**. Worth knowing it was only safe *because* production still lacked the
-    three — an 08-05 snapshot ingested **after** they exist would drive them through
-    `reconcile_taxlots`' heuristic branch and close them dated 2026-08-05.
-
-- **The Flex Query period is `Last N Calendar Days` with N=3, down from 30 since 2026-08-06.** The
-  owner's call, reaffirmed after the trade-off was put to them, so it is settled rather than open —
-  but it changes the failure math and the write-up in CLAUDE.md's *The Flex Query* is the one to
-  read. Short version: a statement generated on *D* covers *D−3 … D−1*, the account gets about one
-  successful IBKR sync a day, so the margin is **two consecutive failed days** rather than ~90. Only
-  the `<Trades>` rows are at risk — OpenPositions is period-independent, so holdings still arrive.
-  **`find_stale_ibkr_sync` (7 days) is too slow to be the alarm for this**; watch `max(trade_date)`
-  against the calendar instead.
-
-- **The deploy guard covers every slot, installed 2026-08-04** (nine slots then, eight since the
-  2026-08-08 IBKR move — `tests/test_deploy_guard_hours.py` keeps the three copies in step). `/root/auto-deploy.sh` is
-  byte-identical to `ops/auto-deploy.sh` (verified by sha256), so the copy `test_deploy_guard_hours.py`
-  checks is the copy cron executes. Installed by **atomic rename** rather than `install -m 755`,
-  which matters: `install` truncates the destination in place, and replacing a *running* bash script
-  makes the live shell read garbage from its current byte offset. Rename leaves an in-flight run on
-  the old inode. Previous copy kept as `/root/auto-deploy.sh.bak-<date>`.
-
-  What to expect the first time it fires: a `SKIP: within 10min of the HH:00 Europe/Berlin sync slot`
-  line in `/root/auto-deploy.log`, and a push that lands ~10 minutes later than usual. That is the
-  guard working, not a stuck deploy.
-
-- **The `1001` problem is fixed — the Flex Query period is now `Last 30 Calendar Days`.** Confirmed
-  by as clean an A/B as production allows: **20:00 error, 21:08 success, same token, same hour band,
-  68 minutes apart, only the period changed.** 15:08 New York is mid-session, the window that had
-  gone 0-for-8 that day. Statement shape went ~290 trade rows → 103 and ~107 cash transactions → 17.
-
-  The cause was **the query growing from one section to six between 07-24 and 07-28** (Trades,
-  CorporateActions, CashTransactions, then Deposits & Withdrawals and Transfers). Five of those scan
-  the whole period; Open Positions, the only original section, does not — which is why years of
-  YTD queries never provoked it. A *separate* change made it look worse than it was: the 13:00/20:00
-  retry slots were added in `67e6a59` on 07-25, the same day `sync_runs` persistence landed, so new
-  failing slots and first-ever visibility arrived together.
-
-  Verified after the switch: all 71 YTD trades still on record month-by-month, `coverage_from` still
-  2026-01-09, `taxlots_skipped: 0`, 979 lots. Nothing was lost.
-
-  **Still worth confirming**: that 00:00 and 06:00 succeed on a normal night. And don't reason about
-  statement cost from row counts — Open Positions is ~70% of the rows and ~0% of the scan work.
-- **`find_stale_ibkr_sync` is now the thing that tells you a bounded window is drifting.** It warns
-  after 7 days with no successful IBKR sync. Treat it as a prompt to download the statement from
-  Client Portal and run `app/cli/ingest_flex_xml.py` — that path is idempotent, so re-ingesting a
-  YTD export simply fills whatever the 30-day window missed. Real recovery, not a theoretical one,
-  which is why a 30-day window is a comfortable choice rather than a tight one.
-- **MCO and MRVL each forecast off only 2 samples.** Surfaced by the new `forecast_samples` field the
-  day it shipped (the table's `n=2` badge went on 2026-10-14; the field is still served). Not known-wrong — both are real payers with
-  plausible schedules — but two samples is the exact shape that let SBI project a fake monthly cadence,
-  so those projections deserve one look before being trusted. Check `manage_mappings list` for a
-  `DIVIDENDS PREDATE MAPPING` flag (which would mean the rows came from an older ticker) rather than
-  assuming either way.
-- **`market_prices` gaps heal only at 08:00.** The 7-day jobs restore current value after a split
-  purge; the full history comes back at the next 730-day `full_sync` — which, as of 2026-08-07, now
-  actually runs daily. *Shipped 2026-08-07* in `docs/shipped-log.md` has why it had not.
+- **Misfire recovery has never been observed end to end.** The persistent job store survives a
+  recreate (every job logs `kept, next run:`), but no deploy has yet landed within
+  `MISFIRE_GRACE_SECONDS` of a slot. `/health`'s `scheduler_jobstore_persistent: false` means the
+  store fell back to memory; `/api/scheduler/status` cannot tell you.
 
 ## Known rough edges (accepted, not bugs)
+
+- **Credentials: nothing open, by owner decision — do not re-raise.** The IBKR Flex token leaked
+  through `/api/scheduler/history` until the 2026-07-28 scrub and was not rotated (2026-08-17:
+  the Flex Web Service is read-only reporting, so the worst case is our own syncs locked out);
+  `API_ADMIN_TOKEN` reached agent transcripts on 2026-08-07 and 2026-08-17 and both were
+  accepted. The tell of misuse: successful generations at hours no job runs, or a `1025` with no
+  failures of ours before it. The lesson: never dump bytes from a file that holds secrets.
+
+- **VWCE is looked through via VT's basket, and that is closed** (owner, 2026-08-17): the Irish
+  sleeve is being rotated into US-domiciled ETFs, so VWCE is converging on VT. The proxy errs low.
+  A real basket, if one ever arrives, is stored by `import_etf_basket` and supersedes it; every
+  route to one was ruled out on 2026-08-14 (docs/shipped-log.md, under *a borrowed basket*).
+
+- **There is no 2025 tax year at IBKR to backfill** (owner, 2026-08-17): the holdings arrived in
+  kind from other brokers in early 2026, so 2025's `yfinance_estimate` dividends are the only
+  source that exists. Do not change the Flex period chasing it.
+
+- **Off-site backups: declined** (owner, 2026-10-13). Losing the VPS means re-pulling every ledger
+  row older than the Flex window by hand from the Client Portal.
+
+- **After a split purge, `market_prices` history comes back only at the 18:00 `full_sync`** — the
+  730-day pass; the 7-day slots restore the current value within hours
+  (docs/data-model-and-valuation.md).
 
 - **A few holdings the dividend forecast cannot see yet — accepted by the owner 2026-10-04.** IQQ (a
   new iShares Nasdaq-100 ETF) and SBI (Serabi Gold) have one payout each, and two make a cadence, so
@@ -926,79 +129,35 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   (docs/dividends.md, *Measured on production*) also showed SK Hynix sometimes classifying steady in
   history; no live effect, fix described there, left as is by owner decision.
 
-- **The crypto history before 3 Oct 2026 is the 3 Oct basket at each day's price** (owner's
-  decision, 2026-10-03). The rebuild CLI was meant to reconstruct the real quantities back to
-  23 Aug from CoinStats' transactions; its first dry run (fees ignored) refused with BNB going
-  negative from 23 Aug — almost certainly Binance trading fees taken in BNB, carried only in each
-  trade's `fee` field — and the owner chose the simple path instead: no rebuild. The first synced
-  day's basket stands in for every earlier day, and since each day's set is stored, later coins
-  (Revolut X) only ever enter from their own day — the span is never rewritten. **Being retried
-  (owner, 2026-10-03):** the CLI now accepts up to 0.05 BNB of fee dust (written as 0, warned)
-  and its refusal prints each coin's lowest amount; next is a `--dry-run --fees subtract` on the
-  server, then the real run on the owner's word; if 23 Aug still refuses, a later start
-  (`--reference 2026-09-01`) is the owner's accepted fallback. The CLI still reads the whole history (up to 400
-  credits a run).
-
-- **Goes away with the CoinGecko book (committed 2026-10-03, not yet deployed — delete once
-  verified): crypto cost and P&L in a CHF or EUR base are CoinStats' USD figures at the snapshot's rate**
-  — the owner's choice on 2026-09-28 over showing the crypto book in USD. They leave out every FX
-  move since purchase, so they will not match the CoinStats app set to the same currency; the view
-  says so beside the figures (`fx_caveat`), and a USD base shows CoinStats' own numbers exactly.
-  Values (total, holdings, the value chart) convert at their own dates and are exact.
-
-- **Resolved by design once the CoinGecko book is deployed and verified (2026-10-03, see *Watch
-  after the next deploy*) — keep this entry until then.** The book's P&L is now yesterday's coins
-  × the price move, so a transfer cannot be a gain. Until then: **CoinStats counts transfers to
-  and from an untracked exchange as profit and loss.** Seen
-  2026-09-29 in the owner's history: around mid- and late December 2025 (and partly late September
-  2025) the value moves by a large share within one three-day sample, and CoinStats' P&L history
-  moves by the same amount, where a later deposit (August 2026) was recognised as a deposit. The
-  likely cause is coins moving to and from Kraken, which is not connected. Our history mirrors
-  CoinStats (`crypto_daily` is replaced wholesale on every pull), so the fix lives in CoinStats, not
-  here. The owner is closing Kraken; the plan is to export its ledger CSVs first, then connect it
-  read-only to CoinStats or import the CSVs, and to confirm with CoinStats whether an imported
-  portfolio keeps its history once the account is gone. Never rewrite the history on our side.
-
 - **`stack_order` is invariant across every range and NOT across `?forecast=false`** — deliberate,
-  2026-09-20. Projections have to count toward the colour order: measured on production, VT, QQQM,
-  2330, SOXQ and GRID have *zero* realized income and are the chart's five biggest series, VT alone
-  being 45.61 of 190, so a realized-only ranking would fold the largest bars into Other and leave a
-  future planning year colourless. The route still accepts `forecast=false`, which ranks a different
-  set — nothing in the app sends it, because the client fetches once with projections and hides them
-  in the browser so the toggle stays instant. Making it invariant means running the projection for a
-  caller who asked not to have it, and that block is ~200 lines interlocked with `next_12m`,
-  `upcoming`, the accrual tail and the annual accumulators. Pinned both ways in
-  `test_dividend_growth.py`; do not "fix" it by dropping projections from the ranking.
+  2026-09-20. Projections have to count toward the colour order: a realized-only ranking would fold
+  the largest bars (payers with no realized income yet) into Other and leave a future planning year
+  colourless. Nothing in the app sends `forecast=false`; the client fetches once with projections
+  and hides them in the browser. Pinned both ways in `test_dividend_growth.py`; do not "fix" it by
+  dropping projections from the ranking.
 - **The Allocation tab's seven-step neutral ramp is stepped for a white card only** — measured
-  2026-09-20 while fitting the dividend one, pre-existing and not introduced by the visual refresh.
-  `NEUTRAL_STEPS` runs L*55 → 24, so against the dark card its last three steps measure
+  2026-09-20. `NEUTRAL_STEPS` runs L*55 → 24, so against the dark card its last three steps measure
   **2.20 / 1.83 / 1.55:1** and those sector tiles sink into the surface; its top step also measures
-  ΔE 6.0 against `--viz-sector-3` under red-green CVD. The dividend ramp is five per-theme steps in
-  `index.css` for exactly these reasons and deliberately does not share this one — seven steps and
-  five cannot be spaced from one set. Fixing Allocation means per-theme `--viz-muted-*` tokens and a
-  visible dark-mode change to that tab, which is its own piece of work.
-- **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** This closes what used to
-  be *Worth doing next* item 0: a security quoted in the base currency is valued through
-  native→EUR→base with two independently rounded ECB quotes, ~0.12% high (`3.615 × 121.201101`
-  served as 438.65 against 438.14), at the five valuation sites the timeline-equivalence test
-  pins. The same round trip sits in the tax report's SELL-trade conversion (`tax_service`
-  `_to_eur` + `base_fx.convert` where the summary uses `NativeToBase`), and `BaseFx`'s rate
-  cache starts at the first tax lot rather than the first cash event (a pre-lot deposit uses a
-  rate up to a week off). **None of the three is a task**; do not re-open them for anything
-  under that threshold. If a figure ever drifts *past* 0.3%, the fix is the `NativeToBase`
-  short-circuit applied at the valuation sites, and `test_timeline_equivalence.py` is the net.
+  ΔE 6.0 against `--viz-sector-3` under red-green CVD. Fixing it means per-theme `--viz-muted-*`
+  tokens and a visible dark-mode change to that tab, which is its own piece of work.
+- **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** A security quoted in the
+  base currency is valued through native→EUR→base with two independently rounded ECB quotes,
+  ~0.12% high, at the five valuation sites the timeline-equivalence test pins; the same round trip
+  sits in the tax report's SELL-trade conversion, and `BaseFx`'s rate cache starts at the first tax
+  lot (a pre-lot deposit uses a rate up to a week off). **None of the three is a task.** If a
+  figure ever drifts *past* 0.3%, the fix is the `NativeToBase` short-circuit at the valuation
+  sites, and `test_timeline_equivalence.py` is the net.
 - **The realized-P&L headline switches source all-or-nothing, unscoped by account** — found
   2026-09-12, dormant. `_realized_from_trades` uses `trades` for the whole book the moment
   *any* SELL exists there (the 3a importer writes them too), so closed lots of an account
-  without `<Trades>` coverage would drop out. Today every IBKR sale is in `trades` (the
-  holdings arrived in kind and were sold at IBKR), so nothing is wrong; `tax_service` already
-  picks per account and per year, and the fix is to do the same here — a modelling change,
-  not a one-liner.
+  without `<Trades>` coverage would drop out. Today every IBKR sale is in `trades`, so nothing is
+  wrong; `tax_service` already picks per account and per year, and the fix is to do the same here
+  — a modelling change, not a one-liner.
 - **A pillar-3a `LIQUIDATION` closes lots but books no realized P&L and no trade** — found
   2026-09-12, dormant (both 3a funds are accumulating). `finpension_ingest` computes the
-  realized figure and discards it, writing an `INCOME` cash flow. Not fixed because adding a
-  SELL trade beside the flow would double the Balance-oracle replay; the right shape needs a
-  decision about how a liquidation moves cash. It becomes real on the first fund switch.
+  realized figure and discards it, writing an `INCOME` cash flow. Adding a SELL trade beside the
+  flow would double the Balance-oracle replay; the right shape needs a decision about how a
+  liquidation moves cash. It becomes real on the first fund switch.
 - **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
   far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
   shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
@@ -1012,16 +171,14 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   on purpose: the card answers "how much did the portfolio move" at a glance, the chart header pairs
   it with Period Gain so the difference between the two is visible. Neither is a return.
 - **`/api/portfolio/activity` shows dividends net, with estimates badged.** A `yfinance_estimate` row
-  is a gross guess with no withholding and reads *Dividend · est.* This entry used to say the era
-  splice deliberately does **not** apply to the ledger; that stopped being true on 2026-08-05, when
-  not splicing turned out to list every dividend twice and overstate income 72%. It splices like every
-  other reader now — pre-boundary estimates survive and stay badged.
+  is a gross guess with no withholding and reads *Dividend · est.* It splices like every other
+  reader — pre-boundary estimates survive and stay badged.
 - **`/api/portfolio/attribution` excludes-and-counts a line that did not exist at the window start.**
   A spun-off security has no start value to attribute against, so for a window opening before the
   spinoff it is dropped from both sides and reported as `unpriced_holdings: 1` — visible on the ALL
-  range. Doing it properly means combining parent and child, which is a larger change than the
-  valuation floor shipped on 2026-08-07. The timeline, the summary and the Steuerwert all handle it.
-- **A price inside the session is an intraday value, not a close, and that is now normal.** Five of
+  range. Doing it properly means combining parent and child. The timeline, the summary and the
+  Steuerwert all handle it.
+- **A price inside the session is an intraday value, not a close, and that is normal.** Five of
   the seven market-data slots run mid-session, so the newest row is provisional until the market
   shuts; it is re-fetched at every slot for three days and settles on its own. Only a wrong value
   **older** than three days is a bug.
@@ -1032,348 +189,68 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Watch after the next deploy
 
-- **The watchlist refresh's neighbours.** The first slot ran on 2026-10-14 (`watchlist_refresh`
-  success, 23/23, `last_synced` carrying `+00:00`). Still to see: a clean 08:00 market-data run
-  after it, and the Watchlist tab's as-of line in a browser. If the daily validator flags the new
-  `sync_type` in the history, that is its expectation to update, not a fault.
+Only what is still unverified. The verified halves of every entry that used to sit here are in
+docs/shipped-log.md under the change that shipped them.
 
-- **The forecast breakdown (deployed on `4c1d654`).** After the backfill, expect on
-  `GET /api/dividends/forecast-history`: `breakdown.since` equal to `growth_from` on the
-  newest point, `unattributed` within a few hundredths on days recorded with their lines, and
-  the five figures summing to the change since the start (on the snapshot: to the cent, largest
-  `unattributed` on a filled day about 0.2). (`/api/dividends/breakdown` already serves
-  `forecast_by_security` and `growth.per_share`.) The first scheduled job after the deploy should write lines with `reconstructed = 0`.
+- **The browser sweep — every check below is owed, none can be answered by the API.** At 1440
+  and 390 px, both themes. The 2026-10-14 text strip (~38 components) has never been seen
+  rendered, so every tab is in scope; beyond that, by tab:
+  - **Dividends** — colours: step All time → 24m → 2026 → 2025 → 2024 → 2027 and no holding
+    changes colour or vertical position; the five muted steps read as a de-emphasis ramp (dark
+    mode especially); a legend of up to thirteen entries plus Other wraps at 390; hover-dim,
+    click-to-pin and the Other disclosure work on touch; calendar swatches match the chart in a
+    past-year view (`SERIES_MUTED` in `lib/dividendColors.ts` is the one number to change; re-run
+    `dividendColors.test.ts` after). Forecast ON: September's translucent segment roughly
+    doubled by the calendar fold; Forecast OFF: the rolling chart still shows the 2026-08 window,
+    nothing translucent, no series changes colour, the monthly axis and both year selectors show
+    no future range. The WHT popover at 390, its save/refetch feedback and the Performance-card
+    percentage. The calendar at 390: the *payment pending* badge, the `ex …` note beside a
+    shifted date, "ex-date · pay date unknown" rows. The stacked TTM: solid/dashed split, the
+    legend in TTM mode, the toggle dropping open windows. The growth strip per range against
+    the API (`ttm_coverage_start` `2025-05` in every range), and whether the All-time figure is
+    worth keeping once seen (dropping CAGR on coverage-limited ranges is a two-line change). The
+    *Average per month* chips wrap rather than scroll. The forecast trend card: its breakdown and
+    its collapse.
+  - **Performance** — on 3M/1Y the Profit/Loss line starts at 0 on the day the benchmark lines
+    start and ends at the change in Total Value minus the change in Money In; no 09-28 → 09-30
+    hump in the benchmark lines; the visual hierarchy refresh (`4bd3f7f`: content shell, KPI
+    panels, hero grids) has never had a browser pass.
+  - **Look-through** — an alert naming any unvaluable position above the KPIs.
+  - **Watchlist** — the as-of line (amber past four days); the Analyst sort puts `strong_buy`
+    first descending; EPS figures carry no `$`.
+  - **Positions** — the 3a EM fund's row carries its *sibling NAV* badge.
+  - **Crypto** — the four tiles (Total value, Today, P&L since 1 Jan 2026, Coins), 1W · MTD ·
+    YTD, the *peg* badge if USDC is held.
 
-- **The rescale of the EM fund's derived prices (`CH1529078078`, `d2411b5`) first runs on the
-  next finpension upload.** Expect no "could not be moved" warning and the `sibling_scaled`
-  row count unchanged but for the new NAV days. (The days the 2026-10-12 upload lost are
-  already back — docs/shipped-log.md.)
+- **The crypto book on CoinGecko prices — the API half.** With the admin key:
+  `/api/crypto/history` starts on 2026-01-01, `reconstructed` ends on 2026-10-02, and there is no
+  jump in December; the total is within price drift of the CoinStats app (CoinStats' total
+  includes exchange cash, shown here beside it); `/api/crypto/status` credits fall by about 35 a
+  day less than before; `crypto_coin_ids` maps BNB with `method = symbol+price+cap`; no run warns
+  about an unmatched coin; `/api/scheduler/history` still has no `crypto_*` rows. Then compare
+  `crypto_daily` (no longer written) with the new series once, and drop it (*Worth doing next*).
 
-- **The deploy hardening (2026-10-04) — two halves only a later event can show.** The restart
-  re-check waits out a running sync from the second deploy on (the first had only the margin;
-  it logged `Clear of every sync slot`); still to size: whether the 45-minute bound
-  (`DEPLOY_SLOT_WAIT_MAX_MIN`) covers the 18:00 full sync's real runtime in `sync_runs`. The
-  rollback restore shows only when a migrating deploy fails; every deploy should now log `db
-  snapshot of … is …` — a `NOTE: … did not report its snapshot` means `/root/backup-db.sh` went
-  stale again. The symlink case of the restore is rehearsed on CI only.
+- **The IBKR-first forecast's last two checks** (live on `48b1f9c` since 2026-10-04; the rest is
+  verified, docs/shipped-log.md). After a successful IBKR sync, over ssh against
+  `/app/data/portfolio.db`: IBKR dividend rows carry `per_share_native` / `dividend_kind` (the
+  statement re-delivers them), and the stored accruals' withholding is positive (the sign fix).
 
-- **The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
-  replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
-  production*)
-  (migration `a1d6f2b4c8e0`). **Verified on production right after the deploy:** every
-  `upcoming[]` entry carries `amount_source`; withholding reads `ibkr_measured` (~15% on US
-  payers), `accrual` (2330 21%, NXPI, HPE) or `ibkr_country` (Samsung 22%), with only IFX
-  `assumed`; `forward_yield.basis` is `mixed` with 3.73 assumed (IFX); NVDA projects 0.25 USD a
-  share a quarter; TSMC repeats its declared amount after the accrual; VT, GRID, QTUM, SOXQ, SK
-  Hynix and ASML are `same_payment_last_year` with their large slots intact. Next-12M read LOWER
-  than before (312 vs 322) because it is now net of IBKR's real ~15% where the WHT setting was 0%
-  — gross-equivalent it rose. *Per year* now shows a small grey "WHT" line (received + expected
-  withholding, one figure; docs/dividends.md, *The per-year WHT figure*) — check it renders on the
-  live page. **Still to check after the next SUCCESSFUL IBKR sync** — the
-  2026-10-04 18:00 `full_sync` got `Code=1001` from IBKR (statement not generated; failed fast by
-  design, nothing ingested), so the owner's check that evening still read 0 rates and 3 negative
-  accrual taxes, the pre-fix state: IBKR rows gain `per_share_native`/`dividend_kind` (the statement
-  re-delivers them), and the stored accruals' withholding turns positive (the sign fix). The DB path
-  for the check is now `/app/data/portfolio.db`. Then move this to docs/shipped-log.md.
+- **The deploy hardening (2026-10-04) — two halves only a later event can show.** Whether the
+  45-minute bound (`DEPLOY_SLOT_WAIT_MAX_MIN`) covers the 18:00 full sync's real runtime in
+  `sync_runs`. The rollback restore shows only when a migrating deploy fails; every deploy should
+  log `db snapshot of … is …` — a `NOTE: … did not report its snapshot` means
+  `/root/backup-db.sh` went stale again. The symlink case is rehearsed on CI only.
 
-- **The crypto book on CoinGecko prices** (migration `x7a3c9e1f5b2d`; key in since 2026-10-03,
-  BNB priced, the page reviewed by the owner on `6175df1`). Still to check: `/api/crypto/history`
-  starts on 2026-01-01, `reconstructed` ends on 2026-10-02 (the 3 Oct basket stands in, by owner
-  decision — see *Known rough edges*), and there is no jump in December;
-  the total is within price drift of the CoinStats app (CoinStats' own total includes exchange
-  cash, shown here beside it); `/api/crypto/status` credits fall by about 35 a day less than
-  before; `/api/scheduler/history` still has no `crypto_*` rows. A run's warnings should not
-  name an unmatched coin — if one does, its days read unknown and the total is blank until a
-  mapping exists (no CLI for a manual mapping yet). Then a browser pass at 1440 and 390 px: the
-  four tiles, 1W/MTD/YTD, the *peg* badge if USDC
-  is held. `crypto_daily` is no longer written; compare it with the new series once, then drop it
-  (*Worth doing next*).
+- **The EM fund's rescale (`CH1529078078`, `d2411b5`) first runs on the next finpension
+  upload.** Expect no "could not be moved" warning and the `sibling_scaled` row count unchanged
+  but for the new NAV days.
 
-- **The dividend paces under *Average per month*** (live on `93d0e1c`, API-verified 2026-10-02:
-  `growth.ytd_pace` covers 9 finished months, `growth.recent_pace` is Jul–Sep vs Apr–Jun and equals
-  the month bars summed ÷ 3). Not yet seen in a browser at 1440 and 390 px: the tile shows "2026 vs 2025"
-  and "Jul–Sep vs Apr–Jun" chips that wrap rather than scroll, hovers name both averages, and the
-  figures match the month bars summed by hand. On the calendar, the rows with no known pay date
-  (`pay_date_source: ex_date`, five pending on 2026-10-01) read "ex-date · pay date unknown".
+- **The watchlist slot's neighbours.** A clean 08:00 market-data run after the 04:00 refresh. If
+  the daily validator flags the new `sync_type` in the history, that is its expectation to
+  update, not a fault.
 
-- **Leftovers of the 09-28 withdrawal fixes** (the core is verified, see `docs/shipped-log.md`). Not
-  yet seen: the benchmark lines on the chart with no 09-28 → 09-30 hump, and the next market-data
-  warm-up replacing the stale `er-api-latest` CHF→EUR rows for 09-28 and 09-30 (log line
-  `Replacing CHF/EUR … with the published …`).
-
-- **The crypto mode, once given its keys.** Deployed (`/health` on `4a14f41`, checked 2026-09-29):
-  anonymous `/api/crypto/*` answers 401, `/api/scheduler/status` lists only the eight stock jobs and
-  `/api/scheduler/history` has no crypto rows. Still unverified now that the VPS has the CoinStats
-  keys: with the key, `/api/crypto/status` shows the first scheduled `crypto_sync` succeeding at a
-  Berlin slot and its credits line moving by a run's documented cost, while the two scheduler
-  endpoints stay stock-only (the `ibkr-sync-validator` routine reads both). Then a browser pass with real
-  data: the total against the CoinStats app (allowing for price drift), and the not-itemised line
-  small or explained. Local browser passes with invented and with real data are done.
-
-- **The Profit/Loss line is rebased to 0 on the range's first point** (`lib/rangeProfit.ts`),
-  frontend only. On 3M/1Y confirm the green line starts at 0 on the same day the benchmark lines
-  start, that its last value equals the change in Total Value minus the change in Money In over the
-  range, that the new sentence under the chart names that day, and that toggling Profit/Loss off
-  removes the sentence. ALL should look almost unchanged: the inception gap is near 0.
-
-- **The stable dividend colours are live on `26576f8` and have not been seen in a browser.**
-  Everything below the pixels is verified — the service, the transform, the palette measurements,
-  one production snapshot through the real service, and the deployed API and stylesheet — but no
-  part of this session could render the tab. What to check, at
-  1440 px and 390 px and in both themes: step All time → 24m → 2026 → 2025 → 2024 → 2027 and
-  confirm no holding changes colour **or vertical position**; that the five muted steps read as a
-  de-emphasis ramp rather than as five more series, in dark mode especially, where they are the
-  light end of the range; that a legend of up to thirteen entries plus Other still wraps sanely at
-  390 px; that hover-dim, click-to-pin and the Other disclosure all work on a touch device; and
-  that the calendar swatches match the chart in a past-year view, which is where they used to go
-  grey. If the ramp reads badly, `SERIES_MUTED` in `lib/dividendColors.ts` is the one number to
-  change — but the hexes are measured against the hues, so re-run `dividendColors.test.ts` after.
-
-- **The adjustable WHT and forecast-off range fixes are live on `a719644` and API/bundle-verified.**
-  The write path, forecast recomputation, realized-field isolation and exact restoration were checked
-  on production. The deployed lazy chunk contains the WHT control, precision help and forecast toggle.
-  What remains is visual interaction because this session has no browser runtime: check the popover at
-  390 px, confirm its save/refetch feedback and the Performance-card percentage, then turn Forecast off
-  and confirm the monthly axis and both year selectors expose no future range.
-
-- **Folding the calendar into the forecast is live on `9e808fe` and API-verified (2026-09-19,
-  20:45 Berlin) — but the browser half is NOT done, and this change touched the frontend.**
-
-  Verified by comparing the live response against the same endpoint read under the old code twenty
-  minutes earlier — a before/after on one unchanged database, which is the A/B the blocked snapshot
-  pull was for, just taken across the deploy instead of across two processes. **Every realized
-  figure is byte-identical**: `total_net_eur`, `growth.ttm`/`ytd`/`avg_month`, all 31 monthly actual
-  bars, all 32 `ttm_series` measured points, every annual actual. **The calendar is untouched** —
-  90 entries before and after, none added, removed or altered — so the fold moved money into the
-  charts without disturbing the list it reads from. The forecast side moved exactly as predicted:
-  `2026-08` 0.00 → 0.19, `2026-09` 20.60 → 47.92, `2026-10` 0.39 → 1.77,
-  `total_forecast_net_eur` 85.67 → 114.56, `next_12m_eur` 263.45 → 264.83.
-
-  The two durable checks, which outlive those figures: **per month,
-  `months[].forecast_total_eur` equals the calendar entries dated in it** — measured, every month
-  within 0.01 — and **`next_12m_eur == sum(net_eur for upcoming if not pending)`** — 264.83 against
-  264.76, the per-entry rounding gap across ~60 entries (0.03%, inside the documented tolerance).
-  A drift beyond a cent or two in either is the bug.
-
-  And the point the whole client change exists for: the window ending **`2026-08` is `partial:
-  false` and now carries 0.19** of unsettled 000660.KS — measured 60.06, total 60.24. That is a
-  projection inside a closed window, which could not happen before.
-
-  **What remains is the browser pass.** With Forecast ON, September's translucent segment should
-  roughly double. With it OFF, the rolling chart must **still show the 2026-08 window** — that is
-  precisely the point a wrong `partial` would delete — drawn at 60.06 rather than 60.24, with
-  nothing translucent anywhere and no series changing colour on the toggle. Nothing in the API can
-  answer that; `withoutForecast` is covered by unit tests and by
-  `test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it`, but neither mounts a bar.
-
-- **The projection-pending tail is live on `ec35713` and verified against the API
-  (2026-09-19, 12:35 Berlin).** VT's September payment is on the calendar dated its own ex-date,
-  `pending`, `ex_date`, at the amount the pre-ship A/B predicted; `next_pay_date` still reads the
-  next *future* payment; no non-`pending` entry is dated on or before today; and no security
-  carries two entries on one date.
-
-  Verified before shipping by an A/B against one production snapshot, one base currency, old code
-  and new in
-  separate processes, across all six shapes `get_dividend_breakdown` serves (default, no-forecast,
-  each of three years, 24m): **every key except `upcoming` is byte-identical**, no existing
-  `upcoming` entry is removed or altered, and `upcoming` gains exactly one entry — VT, dated its
-  own ex-date, `gross_estimate`, `ex_date`, `pending`. The no-forecast view gains nothing, as it
-  must.
-
-  **Still to see: the handoff on real data.** VT's Yahoo row was due at the 16:08 sync on the
-  19th. When it lands, the projection stops being generated at all (the cadence steps from the last
-  recorded ex-date) and the estimate tail takes the entry over — so VT should stay on the calendar,
-  once, with the amount moving from the projected one to the recorded one. Two entries on 09-18, or
-  none, is the thing to catch. A browser pass is worth it too, though nothing in the frontend
-  changed: a pending row from this tail renders exactly like the five that were already there,
-  which is itself the claim.
-
-- **The estimated-net factor is live on `bb2bb48` and verified (2026-09-19, 11:25 Berlin).**
-  Every gross-sized figure falls by exactly 0.85 — `forward_yield.annual_eur`,
-  `growth.next_12m_eur`, `total_forecast_net_eur` and each `pending` calendar amount — while
-  **every realized figure is byte-identical**: `total_net_eur`, `growth.ttm` / `ytd`, the annual
-  actuals, all 31 monthly actual totals and all 32 `ttm_series` measured points. Provenance stays
-  `gross_estimate` rather than flipping to `net`, and a second read returns the first read's
-  numbers, so the factor cannot compound.
-
-  **Verified by an A/B against one database snapshot, not by comparing two live reads — and that
-  distinction is the lesson.** The first attempt compared production before and after the deploy
-  and reported realized income moving by 7%, which would have meant the factor had escaped into
-  the income ledger. It had not: the base currency was switched from EUR to CHF between the two
-  reads, so every figure moved by FX as well. **Any check phrased as "this number should become
-  that number" is unsound here** — `app_settings.base_currency` changes under you, and CLAUDE.md
-  says so in its first paragraph. Hold the currency fixed by comparing one payload against
-  another built from the same snapshot, or compare ratios inside a single payload.
-
-- **Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
-  (2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
-  measured lag read `ex_date` and `pending`, NVDA reads `measured_lag` dated three weeks past its
-  ex-date. Eleven rows carry a lag, 7–29 days, matching what was measured before the change. Both
-  invariants hold — no elapsed month carries a projection, no non-pending entry is dated on or
-  before today — and the December-window-equals-calendar-year identity is exact for all three
-  years. The migration (`v5e2a9b6c0d1`, additive: one empty table) applied cleanly.
-
-  **Still to see in a browser**: the *payment pending* badge on a real row, the `ex …` note beside
-  a shifted date, and the calendar at 390 px — that row gained two inline elements and is the one
-  place this change is visible. Everything checked so far was the API.
-
-  **The Flex section was ticked on 2026-10-03** (the portal download listed three open accruals),
-  and nothing has exercised it on the server yet. After the next successful 18:00 Berlin
-  `full_sync`: a non-zero `dividend_accruals_seen`; in `/api/dividends/breakdown` `upcoming`, 2330
-  and NXPI paying 8 Oct and HPE 16 Oct, each `pay_date_source: "accrual"` with IBKR's ex-date and
-  **no second row for the same dividend**; Next 12M and the forecast bars moved only by that swap
-  (estimate out, IBKR net in), never by a whole quarter; and each accrual gone within a sync of its
-  cash posting. 005930/000660 are not accrued yet and stay inferred.
-
-- **Crypto after the BNB fix.** Press **Sync crypto** once deployed: no "No CoinGecko coin found"
-  warning; `crypto_coin_ids` maps BNB with `method = symbol+price+cap` (the first fix's price rule alone
-  could not choose: a bridged "BNB" trades at the identical price — `pick_dominant` settles it by
-  market cap); Total value, Today and P&L
-  since 1 Jan show figures and the chart draws from 1 Jan; the total is within price drift of the
-  CoinStats app. If any coin is still unmatched, the tile reads "Excludes … — no price" instead of
-  "—". Browser pass at 1440 and 390 px.
-
-- **The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
-  CAGR at twelve months of span or more) between the first and last rolling window on screen,
-  from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally
-  against the five live `d4640d4` payloads replayed through a browser, and every range matched:
-  All time +15.3%/mo & +451%/yr, 24m +21.3% & +918%, 2025 +28.5% (no CAGR, 7-month span), 2026
-  +18.3% with forecast and +14.5% without, 2027 +6.6%, 2027 with forecast off renders nothing.
-  **Check on production**: those figures against the real API, that `ttm_coverage_start` is
-  `2025-05` in every range, and that the `†` shows on All time / 24m / 2025 and not on 2026 / 2027.
-  **And in a browser**: whether the All-time figure is worth keeping at all once seen in context —
-  if the funding ramp makes it noise rather than information, dropping CAGR on coverage-limited
-  ranges is a two-line change.
-
-- **The stacked, forecast-aware Dividends TTM is live on `170df7c` and verified against the API
-  (2026-09-18, 20:55 Berlin).** Both identities hold on production: the December window equals
-  that calendar year's annual row to the cent (2025 21.83, 2026 147.85, 2027 309.96 — all three
-  exact), and All time's rolling series reaches 2027-12 against the monthly chart's 2026-12, which
-  is the separate-array design doing its job. Per-symbol maps reconcile to their scalars within a
-  cent or two on wide windows — independent rounding, worst case 0.03 on 309.96 (0.01%), written
-  up in `docs/dividends.md`; not a defect and not worth chasing.
-  **Still to see in a browser on production**: the solid/dashed split on a real book, the legend
-  in TTM mode, the toggle dropping the open windows, and the tab at 390 px. Local verification
-  used synthetic fixtures and made no Yahoo or Flex requests.
-
-- **`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
-  Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
-  sum to `end − start` to the cent; `sum(by_sector)` and `sum(by_country)` equal `total_pnl_eur`
-  (14 and 53 rows); the per-security attribution total equals the segments total, so the two
-  surfaces agree. `cash_adjustment_eur` is non-null on 2026 windows and 0 for 2025 (measurement
-  began 08-25). Three things seen that are correct and worth knowing: **2025 carries 7 unsplit
-  holdings** (in-kind-transferred lots whose open dates predate the cached FX history, so their
-  gain is carried whole, not guessed); **Unknown is the second-largest sector and country**
-  because the allocation sync has classified only part of the direct book — run
-  `POST /api/allocation/sync` to shrink it; and **every one of the 16 sold securities has a
-  post-sale price** (the market-data pass still prices them), so *Rose after sale* reads 12 of 16.
-  **Still to see in a browser**: the tab at 390 px, the rolling-risk card asking for 2Y/ALL on
-  a 1Y range, beta only with a benchmark selected, and the reordered tab strip (`4eb3d3b`).
-
-- **Sibling-class pricing for the 3a EM fund is live and verified (2026-09-12, 15:08
-  Berlin).** Deployed `ce0035a` at 13:22, activated with `manage_mappings set CH1529078078
-  FUND 0P0000S0OE.SW --sibling` (33 carried rows dropped, the 09-01 NAV kept as anchor), and
-  the 15:00 market-data slot wrote the first `sibling_scaled` rows: 09-07, 09-09, 09-10 —
-  the 7-day window's weekdays for which the sibling has a close (no 09-08 bar on Yahoo, 09-11
-  not yet published; mutual-fund NAVs lag a day). The position reads `price_source: sibling`,
-  `market_price 122.358` = 121.201 × (182.56 ÷ 180.83), +0.95% since the anchor — not the
-  carried 121.20, not the wrong-class ~182. Run status `success`, no refusal. **One thing left
-  to see once**: the 18:00 `full_sync`'s 730-day pass backfills 09-02 … 09-04 (the intraday
-  slots only look 7 days back) — not checked on 09-13; the price rows are only readable over ssh,
-  and this session had no production-read permission. In the browser the row carries a "sibling NAV" badge. If the
-  sibling ever stops quoting, the 7-day "price feed looks broken" warning covers it. The same
-  run also verified this morning's benchmark fix: `benchmark_result.benchmarks_total: 8`,
-  `rate_limited: false`.
-
-- **The 2026-09-12 bug sweep is live on `e6e7698` (11:22 Berlin) and the API checks passed**
-  — timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
-  row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
-  2026-09-12*). Still to observe:
-  - **The 18:00 Berlin `full_sync` is the first live SendRequest through `send_flex_request` —
-    not yet exercised: the 09-12 slot skipped (`already_generated_today`), so watch 2026-09-13**
-    (one GET, `(10, 60)` timeouts, ibflex's parser). Expect `ibkr_result.status: success` with
-    a reference code logged as before. If it reads `error` with a message naming `SendRequest`
-    or `BadResponseError`, compare the request against `ibflex.client.submit_request`'s
-    (`params={"v": "3", "t", "q"}`, `user-agent: Java`) — the GET is meant to be identical —
-    and do **not** retry by hand; the 00:00 slot is the recovery.
-  - `benchmarks_total: 8` and `rate_limited: false` **seen on the 15:00 run** (the 13:00 run
-    predated the deploy). **Seen on the 09-12 18:00 `full_sync`**: four stale baskets (GRID,
-    IQQ, QQQM, SOXQ) refreshed to 09-10, `identifiers_pending: 25` — the bound held — and the
-    following runs carry an empty `warnings[]`.
-  - The dividends cooldown (429 on a second `POST /api/dividends/sync` inside five minutes) is
-    **closed by the owner on 2026-09-12**: dividends update as expected.
-  - **The finpension importer is rehearsed on a copy of production, 2026-09-12 12:00 Berlin.**
-    Against the 09:40 UTC auto-deploy snapshot and the real 09-06 export: dry run parses 5 rows;
-    a real re-import succeeds with the guard's baseline read from production's own `sync_runs`
-    row (`rows: 5`), 2 trades / 3 deposits / 2 lots / 35 price rows (the World fund is
-    Yahoo-priced, so only the EM fund is carried); with the World fund's 09-01 row forced to a
-    `yahoo_finance` bar the re-import still succeeds and the Yahoo row survives untouched — the
-    exact IntegrityError shape, gone; a `sync_runs` row pretending the previous import parsed 6
-    rows makes the 5-row file refuse with "had 6", and `--force` still applies. Snapshot deleted
-    afterwards. The next routine monthly upload needs nothing special; do it before the carried
-    NAV runs out (last NAV 2026-09-01, the day-40 warning fires ~10-11).
-  - Frontend, in a browser: on a range starting before inception (none of the buttons reach it
-    on this account today — the general case is younger accounts and backfills), Max/Current
-    Drawdown and the hero `DeltaChip` show *unmeasurable* rather than `0`; the Look-through tab shows an
-    alert naming any unvaluable position above its KPIs; the watchlist's Analyst sort puts
-    `strong_buy` first descending; EPS figures carry no `$`.
-
-- **The WAL fix is live (`b6bbe6f`, 18:50 UTC) and its own deploy lost nothing** — the WAL
-  was checkpointed by hand right before the push and the newest `sync_runs` id was 378 on
-  both sides of the deploy. `/root/backup-db.sh` was refreshed from the repo at 18:52 UTC
-  (auto-deploy and the daily cron prefer that copy) and a manual backup logged
-  `WAL checkpoint (busy, frames, done): (0, 0, 0)` before its snapshot. Still to observe
-  once: the *next* deploy's `/root/auto-deploy.log` should carry the same line between the
-  image build and `Stopping` — the first deploy to run the new `deploy.sh` end to end.
-
-- **The dependency bump (2026-09-08) is a major Starlette jump: 0.35 → 1.6, with FastAPI
-  0.109 → 0.141, pydantic 2.5 → 2.13, httpx 0.26 → 0.28, pytest-asyncio 0.23 → 1.4.** The
-  suite passed 1,443/1,443 on the new stack, and the one thing that broke was test code —
-  FastAPI 0.141 keeps included routers as lazy nodes in `app.routes`, so the auth-coverage
-  walk now uses `fastapi.routing.iter_route_contexts`. Watch `/health` for `write_auth_enabled:
-  true` and one `POST` without a key answering 401 after the deploy; the middleware chain is
-  where a Starlette major would bite first.
-
-- **`deploy.sh` changed, so the deploy that ships it runs the OLD copy once** (CLAUDE.md,
-  *Deployment*): expect the usual full-build outage one more time, and the new build-first
-  order from the next push on. After that push, `ls /root/IBKR_investment_tracker/frontend`
-  should show `dist` and no `dist.next` / `dist.old`.
-
-- **Migration `u4d1f8a5b9c0` drops `benchmark_timeline_cache` on the first start.** Nothing
-  reads it; a benchmark chart on any range should render exactly as before, ALL included.
-
-- **The first scheduled-path refresh ran by hand on production right after `75ccc3a` landed**
-  (recorded as a `manual_etf_basket` run): six baskets refreshed — GRID, QQQM, IQQ, QTUM, SOXQ,
-  XAIX — 109 CINS/SEDOL identifiers and 25 ISINs resolved, and **one failure that was a real
-  parser bug**: BlackRock dates EMIM's file `07/Sept/2026`, a four-letter month `%b` does not
-  accept, so `parse_ishares` refused a good basket and the 3a EM fund stayed on the August one
-  — exactly the isolation the design promised (previous basket kept, one warning, job status
-  untouched). Fixed in the follow-up commit; the next 18:00 run, or a by-hand re-run, should
-  refresh EMIM and leave the market-data `warnings[]` empty for the first time since late
-  August. Read `lookthrough_result` on the 18:00 run in `/api/scheduler/history` to confirm.
-
-- **`kept, next run:` is finally readable, and it says `kept` for all nine jobs.** This entry asked
-  for exactly that line and it could not be checked before 2026-08-04 for a dull reason: it is
-  logged at INFO, and `settings.log_level` configured nothing, so it never reached the container log
-  at all. With logging fixed, the rebuild at 19:21 UTC shows every one of the nine jobs `kept` — not
-  `rescheduling` — which is `_add_or_keep` finding an identically-triggered job already in the
-  store. **That confirms the store genuinely persists across a container recreate**, which until now
-  rested on inspecting the sqlite file rather than on the code's own account of what it did.
-
-  **Still unobserved: misfire recovery end to end.** `kept` proves the stored job and its run time
-  survived; it does not prove APScheduler *runs* one that was missed. That needs a deploy landing
-  within `MISFIRE_GRACE_SECONDS` of a Berlin slot, and none has — though with nine slots instead of
-  five it is now much likelier to happen by itself.
-
-  Read a `false` on `scheduler_jobstore_persistent` as: the store fell back to memory again, so a
-  deploy overlapping a slot still loses that sync. `/api/scheduler/status` cannot tell you — it
-  lists every job either way, which is how this went unnoticed for two days.
-
-- **Container log timestamps are UTC, the sync slots are Berlin.** `%(asctime)s` uses the
-  container's local time and `python:3.11-slim` sets no `TZ`, so a line reading `19:21` is `21:21`
-  Berlin. Same convention as every stored timestamp (see CLAUDE.md's naive-UTC paragraph), but it is
-  a two-hour trap when you are matching a log line against a slot — in the direction that makes an
-  on-time sync look early.
+- **The 2026-09-28 withdrawal fixes' last leftover:** the stale `er-api-latest` CHF→EUR rows for
+  09-28 and 09-30 replaced by the published ones (`exchange_rates.source`).
 
 ## Worth doing next
 
@@ -1401,189 +278,113 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   - **"Rose after sale"** counts ETF rotations.
   - **Two gain figures**, 410 apart; cost basis labelled "total invested".
 
-- **Drop `crypto_daily`** one release after the CoinGecko book is verified on production: it is no
-  longer written or read (docs/crypto.md). A migration plus the model, the smoke fixture's import
-  and the probe's mention. Also worth having then: a way to set a CoinStats→CoinGecko mapping by
-  hand for a coin `/coins/list` cannot match.
+Rough priority from here.
 
-0. **Stop the backend test suite writing into the developer's database.** Found 2026-09-28:
-   `tests/test_scheduler_jobs.py`'s spy fixture runs real scheduler jobs, and `_record_run` opens
-   the app's own `AsyncSessionLocal`, bound to `settings.database_url`. Without a
-   `backend/portfolio.db` the insert fails silently, which is why nobody noticed; with one it writes
-   fake `ibkr_sync` rows (a success with 38 securities, a `Code=1025: locked` error) — into a
-   **production snapshot**, if that is what `DATABASE_URL` points at, as this file recommends for
-   local work. The fix is conftest pointing the app's engine at a throwaway database for the whole
-   session; until then, never run the suite against a snapshot you still need.
-
-0. **Crypto follow-ups, in the order they matter.** (a) A finer value history for the short
-   ranges: `type=all` samples every three days, so 1M draws about ten points; a daily
-   `type=3m` pull is 10 credits a day. (b) A Binance / Phantom split: one share token per
-   connection, summed, with CoinStats' per-portfolio P&L labelled as such. (c) A transactions
-   ledger (4 credits a page), storing no wallet addresses or hashes. (d) `app.main` registers CORS
-   innermost, so in local cross-origin dev a 401 arrives as a CORS failure; moving it outermost
-   would let the locked state show locally without the Vite proxy (production is same-origin and
-   unaffected).
-
-0. **Brinson allocation / selection attribution against the benchmark — needs data first.**
-   The Analytics tab (2026-09-13) shows each sector's *weight at start* beside its *share of
-   gain*, which is the portfolio-only half of the question. The other half — "did I beat the
-   index by being overweight the right sectors or by picking the right names inside them" —
-   needs the benchmark's per-sector weights and per-sector returns over the window. The
-   benchmarks are indices with one price series each and no basket, so both are new upstream
-   data: either an index ETF basket (e.g. SPY/URTH from an issuer file, which the basket
-   fetchers already know how to store) plus one price series per sector ETF, or a factor
-   provider. Budget it against rule 1 before building. Design is in
-   `docs/performance-analytics.md`, *What is deliberately not here*.
-
-0. **Stamp the attempt when Yahoo has no analyst rating or no fundamentals for a security**
-   — found 2026-09-12, medium-low. `AnalystRatingService.sync_stale_ratings` and the
-   fundamentals sibling write nothing when Yahoo answers "no data", so every ETF in the book
-   is "missing a rating" forever and re-queued on every `sync-stale` pass: a real Yahoo
-   request plus the 2–4 s pacing each, for an answer already known. Only the explicit routes
-   reach it (no scheduled caller, no frontend auto-trigger), so it costs budget only when
-   someone clicks — which is why it was left out of the sweep's fix list. The pattern is
-   `AllocationService`'s `allocation_last_updated` stamp on the *attempt*
-   (`allocation_service.py`, "leaving it null on failure meant a security Yahoo has no
-   `.info` for was re-fetched on every sync forever"): write a row with zero counts and
-   `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
-
-Rough priority. The auto-deploy install moved to *Needs a human* — it is the last deploy step.
-
-1. **Decide whether a trade should still count as an external flow, now that cash is tracked.**
-   The 2026-08-26 cash work deliberately stopped at the totals and the charts: XIRR, Modified Dietz,
-   the monthly heatmap, drawdown, Sharpe, Sortino and beta all still read `market_value_eur` and
-   still treat a purchase or a sale as money entering or leaving the measured pot. That was correct
-   before — holdings *were* the pot — and it is now a modelling choice rather than the only option.
-
-   With cash inside the pot the textbook definition applies: **only deposits and withdrawals are
-   external flows**, and a trade is an internal transfer that nets to zero. That makes time-weighted
-   return exact instead of Modified-Dietz-approximate, removes the flow-day exclusions beta needs
-   (`MIN_PAIRED_RETURNS` currently drops every day the portfolio traded), and makes the figures
-   describe the account rather than its invested sleeve.
-
-   It is not free, and the trade-off is why it was not bundled in. Returns would start including the
-   **drag of idle cash**, which is a different question from "how did my investments do" — with
-   12,229 CHF undeployed that is ~18% of the book earning nothing. Both are legitimate; showing one
-   silently in place of the other is not. The likely answer is to serve both and label them, which
-   is a design decision rather than a refactor.
-
-   Whatever is chosen, `externalFlow` and `isMeasurable` in `portfolioKpis.ts` are where it lands,
-   `dailyReturnSeries` has five consumers, and `betaAndCorrelation` derives its own returns
-   separately — so all of them move together or the tab disagrees with itself.
-
-2. **SEC N-PORT as the generic fallback for a future fund with no issuer route.** Items 1 and 2 here
-   were the SMH adapter and an N-PORT adapter for SOXQ/GRID/QTUM; **all four now have issuer feeds**
-   (2026-08-16), which are T-1 rather than 75–136 days old, so N-PORT is no longer needed for
-   anything held. It is worth keeping as the escape hatch for the next US-registered fund bought
-   without an issuer route — and **structurally unreachable for Irish and Luxembourg UCITS**, which
-   are not SEC registrants, so it can never be the answer for VWCE. The research is expensive to
-   redo and two points are silent-corruption traps:
-   - **Key on ISIN, never ticker.** `company_tickers_mf.json` maps `SMH → CIK 1137360` (VanEck's *US*
-     fund) and `XAIX → CIK 1503123` (a US namesake of the Xtrackers UCITS we already fetch) — a ticker
-     lookup silently returns the wrong vehicle for **two of our twelve funds**. Verified:
-     SOXQ `(1378872, S000072470)`, GRID `(1364608, S000026919)`, QTUM `(1540305, S000062478)`.
-   - **`data.sec.gov/submissions/CIK*.json` is series-blind** (First Trust ETF II: 976 NPORT-P
-     entries, zero `S000…` strings, 22 accessions filed in one day). Use
-     `efts.sec.gov/LATEST/search-index?q=%22S000026919%22&forms=NPORT-P`, then
-     `/Archives/edgar/data/{cik}/{accession}/primary_doc.xml` (49–141 kB). `/cgi-bin/` is
-     robots-disallowed; `/Archives/` is allowed. A descriptive User-Agent is **mandatory** —
-     omitting it is a 403 plus a ~10-minute IP block.
-   - **Assert `formData/genInfo/seriesId`** before using a row — a sibling series is a silently
-     100%-wrong basket.
-   - **As-of is `repPdDate`, not `repPdEnd`** (the latter is the fiscal year end), and fiscal
-     quarters are not calendar quarters.
-   - **QTUM's `pctVal` sums to 104.61%** (sec-lending collateral). Filter to `assetCat ∈ {EC, EP}`
-     with an `<isin>`, then renormalise, or every weight inflates ~4.6%.
-   - Arrives **75–136 days old**, so it needs its own `ADAPTER_STALE_DAYS` entry rather than a raised
-     default.
-
-3. **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
-   holdings array is the paywalled field at every vendor: FMP's free Basic is 250 calls/day but
-   holdings are Ultimate-tier and US exchanges only; API Ninjas models UCITS domicile correctly but
-   gates `holdings` behind premium; EODHD's Fundamentals feed costs 10 calls against a 20/day quota
-   and is the $59.99 tier, not the $19.99 one; Intrinio has genuine global coverage at enterprise
-   pricing. **Never wire up FMP's "ETF Holder" endpoint** — it returns the institutional investors
-   who own shares *of* the ETF, the reverse direction, and it returns plausible-looking garbage that
-   passes a smoke test.
-
-4. **Look-through coverage keeps itself current since 2026-09-08 — what remains is the measured
-   sector/geography project.** The detector shipped 2026-08-17; the refresh shipped 2026-09-08 as
-   the last step of the 18:00 `full_sync`, built on the detector's own verdict
-   (`etf_basket_refresh.stale_basket_verdicts`), with the CLIs' refusals intact and a bounded
-   identity pass behind it. Identities still have no detector of their own; `unresolved_value_eur`
-   is the figure that shows what the evening pass has not yet reached.
-
-   Then, once every held fund has a basket: `etf_holdings.sector` and `.country` are the raw material
-   for replacing `etf_mappings.py`'s hand-estimated sector/geography blocks with measured ones.
-   `sector` is now normalised through `sector_taxonomy.py` and served for **grouping** the
-   look-through treemap, which is half the work already done; `country` is still unserved and needs a
-   country-to-region map with its own test — `countryOfRisk` is a country and the charts bucket
-   regions — so it is a real project rather than a flag. The precondition is written into
-   `etf_mappings.py`'s docstring, and the reason not to serve two sector *totals* at once is in
-   CLAUDE.md.
-
-5. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before building.**
-   `prune_empty_dividends.py` is a manual CLI and the ingest window already prevents new junk, so
-   there is very little left for a scheduled run to find. Investigating this on 2026-07-31 turned up
-   a **defect in the CLI rather than a case for automating it** (below), which is a fair warning
-   about automating a deleter over financial rows: the value is small and the downside is silent.
-   If it is built, it must reuse the CLI's predicate rather than re-deriving one.
-
-6. **Project the benchmark's baseline the way the portfolio's is projected — now one quantity,
-   not two lookalikes.** Since 2026-08-26 the benchmark invests the *same* `money_in_legs` the
-   chart draws, so this stopped being "two similar series" and became one series projected two
-   ways: the benchmark's baseline wobbles with FX (53,308-53,725 across that week) while the
-   portfolio's sits flat at 53,330 — under half a percent either way, not the 3,000 an early
-   verification claimed by double-applying `_apply_base_currency`, which the service already
-   calls before returning. Still invisible
-   on the chart (only the benchmark's value line is drawn) and it does not reach beta, which
-   excludes flow days — which is why it is here rather than in that change. Originally found while
-   fixing Beta (above) and left alone as out of scope. `_apply_base_currency` converts the running
-   cost basis at each point's date; `_calculate_timeline_swept` converts each lot's cost at its own
-   `open_date`. Same tax lots, two conversion rules — the *dominant failure mode* in CLAUDE.md, in
-   the form where both copies keep working and just stop agreeing. It already cost the Beta card
-   outright, and it leaves the two cost lines on the chart drifting apart with FX. The awkward part
-   is that the timeline cache is EUR-only on purpose (so switching base currency never invalidates
-   it), and a per-lot conversion cannot be derived from the cached aggregate — the cost *events* have
-   to be re-projected at read time. Do not "fix" it by making the portfolio convert per-date instead:
-   that direction breaks the contributions identity, which depends on each leg converting at its own
-   date. The window-anchored series (2026-09-07) inherits it — its `cost_basis_eur` is the seed
-   plus the contributions since, converted at each point's date — and still does not draw it.
-
-7. **CLAUDE.md restructured and STATUS.md's log moved out — done 2026-09-08 (night); one
-   prune left.** CLAUDE.md is ~270 lines (~7k tokens, from ~92k): the two rules, the conventions
-   that hold everywhere, deployment and local-dev essentials, and an index. Every other section
-   moved *verbatim* into `docs/<topic>.md`; the 35 *Shipped* / *Ran on production* sections moved
-   to `docs/shipped-log.md`. What remains: this file's own header is still a stack of "Before
-   that:" recap paragraphs (~200 lines) — each should move to the shipped log once its
-   verification is done, leaving one paragraph for the latest change. `docs/claude-md-analysis.md`
-   is the measurement that sized all of this.
-
-8. **Doc and hygiene drift the audit turned up, none of it shipped yet.** `README.md` is the
-   public front page and still says "all values normalized to EUR", lists five tabs of nine and
-   none of Tax, Dividends, Activity, Look-through, cash, Pillar 3a or write auth. `.env.example`
-   lacks `LOG_LEVEL`, `LOOKTHROUGH_CONTACT_EMAIL` and `SCHEDULER_JOBSTORE_URL`. The `ResizeObserver`
-   stub is copied into seven test files and belongs in a vitest `setupFiles`. ESLint is red (17,
-   seven of them the react-refresh export rule) and neither it nor ruff runs in CI; ruff flags one
-   bare `except` in `currency_service` and two dead assignments (`gross` in `activity_service`,
-   `price_repo` in `routers/market_data.py`). `alembic check` fails on naming drift only — the
-   `ticker_mappings` unique constraint exists unnamed, `corporate_actions` indexes are named
-   `ix_corp_actions_*`, and `index=True` sits on primary keys — so it cannot guard the next
-   forgotten migration until one reconciliation pass makes it green.
-
-9. **Three duplicate helpers the AST lens found, each a copy that still agrees.** `_to_eur` in
-   the dividend and tax services (identical four-line bodies, each docstring citing the other;
-   CLAUDE.md records syncing them twice — extract to `CurrencyService`). Three CLI copies of
-   "resolve a security by symbol and exchange, refuse ambiguity" in `import_prices`,
-   `purge_dividend_estimates` and `manage_mappings`. The inner `_fetch` closures in the fundamentals
-   and watchlist services, which pull the same yfinance sub-endpoints and differ only in that one
-   logs each failure and the other swallows it. Also `BaseFx.convert` returns the EUR amount when no
-   EUR→base rate exists at all (reachable only on a fresh database when Frankfurter also fails), a
-   stand-in that claims a value.
+1. **The test suite writes into the developer's database.** `tests/conftest.py:42` blanks only
+   the job store; the scheduler-job spy tests and the WAL-lifespan test write `sync_runs` rows,
+   seed rows and a checkpoint through the app's own `AsyncSessionLocal`, i.e. into whatever
+   `DATABASE_URL` names — a production snapshot, if that is what local work points at. Since
+   xdist became the default (2026-10-14), N workers write one SQLite file at once: a plausible
+   cause of the one flaky parallel run. Fix: a per-worker temp database before `settings` is
+   imported. Until then, never run the suite against a snapshot you still need.
+2. **Pin what every production build re-resolves.** `backend/requirements.txt:24-29` floats
+   `yfinance`, `lxml` and `pyxirr`, and `deploy.sh:90` builds `--no-cache`, so an upstream
+   release can change figures with no commit (yfinance has changed scale before). A constraints
+   file.
+3. **Copies of one job — the dominant failure mode.** `_to_eur` three times
+   (`dividend_service.py:542`, `tax_service.py:41`, `finpension_ingest.py:452` — the last
+   swallows errors); a fourth inline FX path with a `"USD"` placeholder
+   (`dividend_service.py:471`); the CLI "resolve a security by symbol and exchange" three times,
+   and **`manage_mappings.py:79-83` takes `.first()` without refusing ambiguity**, so a mapping
+   could land on the wrong security; the fundamentals/watchlist `_fetch` closures and
+   forward-estimate parsing; `_pct` drifted (`lookthrough_service.py:808` returns 0.0,
+   `performance_analytics_service.py:77` None); the two crypto clients' `_pace`/`_get`. Extract,
+   and test the family.
+4. **`BaseFx.convert` returns the EUR amount when no rate exists** (`base_fx.py:58-60`) — a
+   stand-in that claims a value, under ~57 call sites; only crypto guards it (`backfill=False`).
+5. **Stamp the attempt when Yahoo has no analyst rating or no fundamentals** — every ETF is
+   re-queued on each `sync-stale` pass (a real request plus pacing) for an answer already known.
+   Copy `AllocationService`'s stamp on the *attempt* (`allocation_service.py`): a row with zero
+   counts and `last_updated`, which `AnalystRating.consensus` already reads as "No Rating".
+6. **Drop `crypto_daily`** once compared on production (no longer written or read): a migration
+   plus the model, the smoke fixture's import and the probe's mention. With it, a CLI to set a
+   CoinStats→CoinGecko mapping by hand for a coin `/coins/list` cannot match.
+7. **Owner's call: are hover texts "on the surface"?** ~25 methodology `title=` tooltips (KPI
+   cards, risk cards, contributions strip, tax tab) and the column-glossary hints (the YoC hint is
+   six sentences; "Note: PEG uses…" appears twice) survived the 2026-10-14 strip.
+8. **Tooling.** ESLint is red (19 problems) and ruff has no config (3 dead assignments, 1 bare
+   `except`); neither runs in CI. `alembic check` fails on naming drift only (the unnamed
+   `ticker_mappings` unique constraint, `ix_corp_actions_*`, `index=True` on primary keys), so it
+   cannot guard a forgotten migration until one reconciliation pass makes it green. The
+   `ResizeObserver` stub is copied into 17 test files and belongs in a vitest `setupFiles`. CI
+   pins Node 20, which is end-of-life.
+9. **`coverage_pct` reads 0.0 on an empty book** (`lookthrough_service.py:853`) — an unknown
+   served as a figure.
+10. **Project the benchmark's baseline the way the portfolio's is projected.**
+    `_apply_base_currency` converts the running cost basis at each point's date;
+    `_calculate_timeline_swept` converts each lot's cost at its own `open_date`. Same tax lots,
+    two conversion rules: under half a percent, invisible on the chart, and it does not reach
+    beta. The timeline cache is EUR-only on purpose, so the cost *events* have to be re-projected
+    at read time. Do not "fix" it by making the portfolio convert per date — that breaks the
+    contributions identity.
+11. **Decide whether a trade should still count as an external flow, now that cash is tracked.**
+    With cash inside the pot only deposits and withdrawals are external, which makes TWR exact
+    and frees beta's flow-day exclusions — but returns would then include the drag of idle cash,
+    a different question. Likely answer: serve both, labelled. `externalFlow`/`isMeasurable` in
+    `portfolioKpis.ts`, `dailyReturnSeries`' five consumers and `betaAndCorrelation` move
+    together or the tab disagrees with itself.
+12. **Look-through projects.** Measured sector/geography from the baskets, replacing
+    `etf_mappings.py`'s hand estimates (`etf_holdings.sector` is already normalised and serves
+    the treemap grouping; `country` needs a country→region map with its own test). An exact
+    World ex CH (IWDA minus its Swiss rows). Nested funds. An identity detector:
+    `unresolved_value_eur` is today the only figure showing what the evening pass has not reached.
+13. **Crypto follow-ups.** (a) A finer value history for the short ranges: a daily `type=3m`
+    pull, 10 credits a day. (b) A Binance / Phantom split: one share token per connection,
+    summed. (c) A transactions ledger (4 credits a page), storing no wallet addresses or hashes.
+    (d) `app.main` registers CORS innermost, so in local cross-origin dev a 401 arrives as a CORS
+    failure; outermost would let the locked state show locally without the Vite proxy.
+14. **Brinson allocation / selection attribution — needs data first** (and the Analytics tab is
+    hidden). It needs the benchmark's per-sector weights and returns: an index ETF basket plus
+    one price series per sector ETF, or a factor provider. Budget it against rule 1. Design in
+    `docs/performance-analytics.md`, *What is deliberately not here*.
+15. **Smaller ideas.** A currency breakout for idle foreign cash. *Prior Period Positions* is
+    ticked in the Flex Query and never read: untick it (a cheaper statement) or use it.
+16. **SEC N-PORT as the generic fallback for a future US fund with no issuer route** (every fund
+    held has an issuer feed; structurally unreachable for Irish and Luxembourg UCITS). The
+    research is expensive to redo and two points are silent-corruption traps:
+    - **Key on ISIN, never ticker.** `company_tickers_mf.json` maps `SMH → CIK 1137360` (VanEck's *US*
+      fund) and `XAIX → CIK 1503123` (a US namesake of the Xtrackers UCITS we already fetch).
+      Verified: SOXQ `(1378872, S000072470)`, GRID `(1364608, S000026919)`, QTUM `(1540305, S000062478)`.
+    - **`data.sec.gov/submissions/CIK*.json` is series-blind.** Use
+      `efts.sec.gov/LATEST/search-index?q=%22S000026919%22&forms=NPORT-P`, then
+      `/Archives/edgar/data/{cik}/{accession}/primary_doc.xml`. `/cgi-bin/` is
+      robots-disallowed; `/Archives/` is allowed. A descriptive User-Agent is **mandatory** —
+      omitting it is a 403 plus a ~10-minute IP block.
+    - **Assert `formData/genInfo/seriesId`** before using a row — a sibling series is a silently
+      100%-wrong basket.
+    - **As-of is `repPdDate`, not `repPdEnd`**, and fiscal quarters are not calendar quarters.
+    - **QTUM's `pctVal` sums to 104.61%** (sec-lending collateral). Filter to `assetCat ∈ {EC, EP}`
+      with an `<isin>`, then renormalise.
+    - Arrives **75–136 days old**: its own `ADAPTER_STALE_DAYS` entry, not a raised default.
+17. **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
+    holdings array is the paywalled field at FMP, API Ninjas, EODHD and Intrinio. **Never wire up
+    FMP's "ETF Holder" endpoint** — it returns who owns shares *of* the ETF, the reverse
+    direction, and passes a smoke test.
+18. **Fold `PRE_OWNERSHIP_HISTORY_YEARS` pruning into a scheduled job — reassess before
+    building.** `prune_empty_dividends.py` is manual and the ingest window already prevents new
+    junk; automating a deleter over financial rows has a small upside and a silent downside. If
+    built, it must reuse the CLI's predicate.
 
 ## Local development traps
 
 Each of these cost real time at least once.
+
+- **Pushing works from an agent session** — it is not blocked by the permission classifier, so
+  the guard is the brief: only `main` goes to GitHub, and in this repo the owner (or the lead of
+  an agent wave) pushes it. `git log --oneline origin/main..main` is the only trustworthy count of
+  what is unpushed. Never push within ~10 minutes of a Berlin slot; `ops/finish-deploy.ps1` and
+  `ops/finish-deploy.sh` are equivalent twins that check it (keep them in step), and the
+  shorthand variables they define live only inside one session.
 
 - **A file under the container's `/tmp` does not survive a deploy.** `fetch_etf_baskets --out
   /tmp/baskets` then `import_etf_basket` in a second step lost both files on 2026-10-04: a push
@@ -1596,22 +397,17 @@ Each of these cost real time at least once.
   Node's own experimental `localStorage` global shadows jsdom's. Not a regression in the code:
   `NODE_OPTIONS=--no-experimental-webstorage npx vitest run` from `frontend/` runs the suite green,
   as does `npx -y node@22 node_modules/vitest/vitest.mjs run`. CI uses Node 20 and is unaffected.
-  Read the failing files before trusting a red count. A fresh worktree also has no
-  `frontend/node_modules` — `npm ci` first.
-- **A fresh checkout here had no `backend/venv`, no `backend/.env` and only Python 3.14.** CI and the
-  image run 3.11: `uv venv --python 3.11 backend/venv` then `uv pip install --python
-  backend/venv/Scripts/python.exe -r backend/requirements.txt`. Start `backend/.env` from
-  `backend/.env.example` with placeholder IBKR values, `SCHEDULER_ENABLED=false` and an
-  `API_ADMIN_TOKEN` — Crypto mode refuses to open without one.
+  Read the failing files before trusting a red count.
+- **A fresh checkout or worktree has no `backend/venv`, no `backend/.env` and no
+  `frontend/node_modules`.** Use Python 3.11, which the image and CI run (docs/local-development.md
+  has the `uv` commands; 3.12 has also worked); the global interpreter's FastAPI is too old to
+  collect `test_api_hardening.py`. Start `backend/.env` from `backend/.env.example` with
+  placeholder IBKR values, `SCHEDULER_ENABLED=false` and an `API_ADMIN_TOKEN` — Crypto mode
+  refuses to open without one. `npm ci` in `frontend/`.
 - **Vite's dev proxy forwards `/api` only.** Running with `VITE_API_URL=` (same-origin, the only way
-  a 401 reaches the page locally — see *Worth doing next*) leaves `/health` unproxied, so the footer
-  and the lock button disappear. Normal work uses the default `VITE_API_URL`.
-
-- **A fresh worktree needs its own dependencies.** The global Python installation has an older
-  FastAPI that cannot collect `test_api_hardening.py` (`iter_route_contexts` import error).
-  Use a Python 3.12 `backend/venv` with `backend/requirements.txt`; use placeholder Flex credentials
-  and `SCHEDULER_ENABLED=false` for offline tests.
-
+  a 401 reaches the page locally — see *Worth doing next*, crypto follow-ups) leaves `/health`
+  unproxied, so the footer and the lock button disappear. Normal work uses the default
+  `VITE_API_URL`.
 - **A service-level benchmark test can reach Yahoo.** `calculate_benchmark_value_over_time`
   calls `_ensure_prices_available` itself, which fetches whenever the fixture leaves a gap it
   considers missing — a leading gap at the range start, or a trailing day inside
@@ -1621,31 +417,31 @@ Each of these cost real time at least once.
   steps for the module and assert the raiser was never reached on teardown; the `_offline`
   fixture in `test_benchmark_window_anchor.py` is the pattern.
 - **`SCHEDULER_ENABLED=false` in `backend/.env` for any local run.** Otherwise starting uvicorn arms
-  the eight daily Europe/Berlin jobs against the live Flex token, Yahoo and, at 18:00, the
-  issuer sites. Defaults to `True` so
-  production is unaffected.
+  every job in `ALL_SYNC_HOURS` against the live Flex token, Yahoo and, at 18:00, the issuer
+  sites. Defaults to `True` so production is unaffected.
 - **Check which port Vite actually took.** If 5173 is occupied it moves to 5174 and says so once. A
   stray dev server on 5173 configured against production means you are reading prod data and issuing
   requests to the live site — including `/api/dividends/summary`, which can enqueue a Yahoo sync.
 - **Use a snapshot of the production DB, not the local `backend/portfolio.db`** — the latter predates
   trades, cash flows and the IBKR dividend era, so it exercises none of the interesting shapes.
   `sqlite3 .backup` on the VPS, copy down, point `DATABASE_URL` at it, **delete it afterwards** (it
-  is real account data; `*.db` is gitignored but it should not linger).
+  is real account data; `*.db` is gitignored but it should not linger). And mind *Worth doing
+  next* item 1: the test suite writes into whatever `DATABASE_URL` names.
 - **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD). Every money
-  figure moves with it, so never compare a number across sessions without checking it.
-- **Don't push within ~10 minutes of a Berlin sync slot** — eight of them, on the hour at
-  00/08/11/13/15/18/20/22 (06:00 retired 2026-08-08). An overlapping deploy used to lose that sync
-  outright; since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the
-  seconds of `down`/`up` rather than the whole build, and the persistent job store recovers a slot
-  missed by under 30 minutes. `ops/finish-deploy.*` checks the window for you.
+  figure moves with it, so never compare a number across sessions without checking it — hold it
+  fixed by comparing payloads built from one snapshot, or ratios inside one payload.
+- **Don't push within ~10 minutes of a Berlin sync slot** — nine of them, on the hour at
+  00/04/08/11/13/15/18/20/22 (`ALL_SYNC_HOURS`; 04:00 is the watchlist's, Tuesday to Saturday).
+  Since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the seconds of
+  `down`/`up`, it waits out a running sync, and the persistent job store recovers a slot missed by
+  under 30 minutes. `ops/finish-deploy.*` checks the window for you.
 - **`curl 127.0.0.1:<vite port>` fails while the browser works.** Vite binds `localhost`, which
   resolves to `::1` first on this machine, so the IPv4 literal gets connection-refused and looks like
   a dead dev server. Use `http://localhost:<port>`.
 - **`pkill` is not installed** (Git Bash has no procps). `pkill -f uvicorn` prints
   "command not found" and exits non-zero — easy to miss inside a `&&` chain — so the old server keeps
   the port and the new one dies on bind while `--strictPort`'s error scrolls past in a log file. The
-  result is a dev server quietly answering from the *previous* config, which cost real time here: a
-  browser pass appeared to show an empty ledger when it was reading the stale local DB. Kill by PID:
+  result is a dev server quietly answering from the *previous* config. Kill by PID:
   `netstat -ano | grep ':8000 ' | grep LISTENING` then `taskkill //F //PID <pid>` (double slashes —
   MSYS eats single ones).
 - **A dev server against a prod snapshot must run on port 5173.** `frontend/.env` points
@@ -1653,12 +449,14 @@ Each of these cost real time at least once.
   ports in `CORS_ORIGINS` work. Any other port fails every request with a CORS error and looks like
   a backend outage.
 - **Every position in the local `backend/portfolio.db` has `market_price: null` and a market value of
-  0.00.** So the currency-exposure card reports *no priced positions* and the rebalance panel shows 29
-  unpriced rows — both correct, and both easy to mistake for a broken feature. Anything that depends on
-  a valued portfolio can only be browser-verified against a production snapshot.
-- **`ResizeObserver` is stubbed inline in seven test files now.** Consolidating it is a real
-  follow-up; until then copy the block from `RebalanceCard.test.tsx`, and remember a jsdom test that
-  renders anything through `DataTable` needs it because `ScrollableTable` measures overflow.
+  0.00.** So the currency-exposure card reports *no priced positions* and the rebalance panel shows
+  every row unpriced — both correct, and both easy to mistake for a broken feature. Anything that
+  depends on a valued portfolio can only be browser-verified against a production snapshot.
+- **A jsdom test that renders `ScrollableTable` (anything through `DataTable`) needs a
+  `ResizeObserver` stub**, copied inline into 17 test files today (*Worth doing next*, tooling);
+  and a component test that renders anything using `useBaseCurrency`/`useCurrencySymbol` needs a
+  `QueryClientProvider` *above* `CurrencyProvider`, or it throws `No QueryClient set`. Neither is
+  a component defect. `RebalanceCard.test.tsx` has both patterns to copy.
 - **uvicorn can die mid-Playwright-run with `OSError: [WinError 64] The specified network name is no
   longer available`** — a Windows asyncio-proactor reaction to an abruptly closed connection, not a code
   fault. The e2e script then reports `ERR_CONNECTION_REFUSED` and a shrunken panel, which reads exactly
@@ -1667,12 +465,6 @@ Each of these cost real time at least once.
 - **A test helper with a default parameter swallows an explicitly-passed `undefined`**, so
   `renderCard(undefined)` renders the default fixture and any "backend down" assertion silently tests the
   loaded state instead. `CurrencyExposureCard.test.tsx` keeps a separate `renderUnloaded()` for this.
-- **A jsdom test that renders `ScrollableTable` needs a `ResizeObserver` stub**, and a component test
-  that renders anything using `useBaseCurrency`/`useCurrencySymbol` needs a `QueryClientProvider`
-  *above* `CurrencyProvider` — the provider reads the base currency through TanStack Query, so
-  wrapping in `CurrencyProvider` alone throws `No QueryClient set`. Neither is a component defect:
-  `ResizeObserver` has been in every browser since 2020, so guarding production code for jsdom's gap
-  would be wrong. `RebalanceCard.test.tsx` has both patterns to copy.
 - **A test that starts a scheduler drops a `scheduler_jobs.db` wherever it runs.** `tests/conftest.py`
   blanks `scheduler_jobstore_url` for the whole suite, so an in-memory store is the default; a test
   that wants persistence points it at `tmp_path` itself.
@@ -1682,24 +474,27 @@ Each of these cost real time at least once.
 - **`TZ=Europe/Berlin date` silently returns UTC in Git Bash.** It does not error and it does not
   warn — `TZ=America/New_York` prints the same time — so any script reasoning about the Berlin sync
   slots from the shell clock is two hours out in summer, in the direction that permits a collision.
-  Use Python's `zoneinfo` (`ops/finish-deploy.sh` has the helper).
+  Use Python's `zoneinfo` (`ops/finish-deploy.sh` has the helper). Container logs are UTC too.
 - **Renaming the working-copy directory breaks `backend/venv`, and the documented test command is the
   one thing that hides it.** `activate`/`activate.bat` hardcode `VIRTUAL_ENV` and every `.exe`
   console-script shim embeds the interpreter's absolute path, so after a rename
   `venv\Scripts\activate && uvicorn ...` and a bare `alembic upgrade head` fail while
   `./venv/Scripts/python.exe -m pytest` keeps passing — python.exe resolves its own prefix, the shims
   do not. Recreate rather than patch, and **`pip freeze` first**: `requirements.txt` floats
-  `yfinance`, `lxml` and `pyxirr`, so reinstalling from it quietly drifts the local env (the frozen
-  set here was `yfinance==1.1.0`, i.e. exactly the documented floor). Then
+  `yfinance`, `lxml` and `pyxirr`, so reinstalling from it quietly drifts the local env. Then
   `python -m venv venv --clear` and install the freeze. A plain `python -m venv venv` regenerates
   `activate` and leaves the shims broken, which is the worst of the three states.
 
 ## Recent sessions (last 5)
 
 One line each, newest first. **Drop the oldest rather than growing this list** — `git log` holds the
-detail; this exists so the next session knows what just moved without reading it. Distinct from the
-*Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
-lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
+detail; this exists so the next session knows what just moved without reading it.
+
+- **2026-10-14 (agent wave, track 4: docs truth)** — STATUS.md pruned from a 1,738-line log to a
+  snapshot: the "Before that" recaps and every verified *Watch* entry moved to
+  `docs/shipped-log.md`, stale entries deleted, the browser checks grouped by tab, the catalogue's
+  unfixed items folded into *Worth doing next*; troubleshooting, pillar3a, data-model, deployment,
+  performance-analytics, DEPLOY.md, README and both `.env.example` files corrected.
 
 - **2026-10-14 (test speed)** — "make the suite quicker", local runs being what the owner
   waits on: the backend runs under `pytest-xdist` (`-n auto --dist worksteal`), and the local
@@ -1715,7 +510,10 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   stripped, the convention in CLAUDE.md rewritten so it is not repaired back. Then merged the
   parallel `simon-per/strip-comments` session (data-quality notes, the USDC peg note, the
   contributions strip's `~`/`*`, dead `coverage_limited`) and removed its worktree and branch.
-  Evening "resume": pushed that merge (`f048a94`) and merged `simon-per/test-speed`.
+  Evening "resume": pushed that merge (`f048a94`) and merged `simon-per/test-speed`. Then an
+  open-points catalogue for an agent-team wave; pre-flight ran the forecast backfill,
+  refreshed `/root/auto-deploy.sh`, synced AGENTS.md (it still carried the old caveat rule)
+  and deleted a stray 3a CSV from the repo root.
 
 - **2026-10-13 (watchlist freshness)** — a brainstorm of open points, of which the owner gave
   this session the watchlist (another session took the heatmap and the forecast-history chart).
@@ -1729,10 +527,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   production snapshot caught two wrong figures before shipping (a fund's single distribution
   as its growth; a book figure carried by one +2400% payer). Merged into `main`, unpushed;
   backfill owed.
-
-- **2026-10-13 (the EM fund's price gap)** — "resume": nothing was in flight, so the one open
-  item. The unknown half needed no Yahoo request — every slot but 18:00 syncs 7 days, so a
-  deleted history could not come back that evening. The importer now rescales the derived rows
-  onto the new NAV instead of deleting them, and the holiday rule counts only derived rows for
-  a sibling fund (`d2411b5`). The lost days were then refilled on production by one run of
-  `sync_sibling_prices`, at the owner's request, rather than waiting for the 18:00 full sync.
