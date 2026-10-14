@@ -14,12 +14,17 @@ cd frontend && npm run dev          # http://localhost:5173
 
 **Set `SCHEDULER_ENABLED=false` in `backend/.env` for any local run.** Starting the backend is not a
 neutral act: the lifespan handler arms every `ALL_SYNC_HOURS` Europe/Berlin job, which call
-the live Flex API with the real token from `.env` and hit Yahoo — both rules at the top of this file,
-from a dev machine. `settings.scheduler_enabled` defaults to **True** so production is unaffected, and
+the live Flex API with the real token from `.env` and hit Yahoo — both rules at the top of CLAUDE.md,
+from a dev machine.
+
+**Python 3.11** is what the image (`backend/Dockerfile`) and CI (`.github/workflows/ci.yml`) run;
+a fresh venv: `uv venv --python 3.11 backend/venv`, then
+`uv pip install --python backend/venv/Scripts/python.exe -r backend/requirements.txt`. 3.12 has
+also worked locally; the global interpreter has not (its FastAPI is too old for the suite). `settings.scheduler_enabled` defaults to **True** so production is unaffected, and
 a disabled scheduler logs a warning because otherwise it looks exactly like a healthy site whose data
 has quietly stopped moving. Pinned by `test_scheduler_is_enabled_by_default`.
 
-Two traps when pointing a browser at a local stack:
+Traps when pointing a browser at a local stack:
 
 - **Check which port Vite actually took.** If 5173 is occupied it silently moves to 5174 and prints it
   once. A second dev server on 5173 configured against production means you are looking at prod data

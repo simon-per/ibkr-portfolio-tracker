@@ -237,8 +237,9 @@ measured levels before merging. Not tidiness: `_apply_measured` turns a level in
 `level − derived_running`, so an IBKR level differenced against a total carrying 3a money
 emits a correction that silently subtracts the 3a balance on every measured day and puts it
 back on every day between. The line would sawtooth and every individual point would look
-plausible. **Latent rather than live** — `cash_balances` is empty until the Cash Report
-section is enabled in the Flex portal.
+plausible. **Live**: the Cash Report section is enabled in the Flex portal and has filled
+`cash_balances` since 2026-08-26, so `cash_source` reads `mixed` — IBKR's measured level beside
+the derived 3a balance (verified 2026-10-04, docs/shipped-log.md).
 
 It iterates the union of accounts-with-events and accounts-with-levels, because a Flex query
 can carry Cash Report while `<Trades>` is still off.

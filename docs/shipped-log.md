@@ -20,6 +20,10 @@ per-security lines with their totals unchanged. **Verified on `GET
 recorded before their lines existed, carry the replay gap the dry run printed for them (+2.1% and
 +0.8%) as `unattributed`, as designed.
 
+## Shipped 2026-10-14 — figures, not explanations; the watchlist's own slot; what the forecast's growth was made of
+
+**The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`; the API still serves every flag (docs/dividends.md, *Data-quality notes are not rendered*). The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (`watchlist_refresh` success, 23/23, `last_synced` carrying `+00:00`), and the installed `/root/auto-deploy.sh` knows its hour since that evening. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, back-filled that evening** (above): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served.
+
 ## Shipped 2026-10-13 — a pillar 3a upload keeps the sibling-derived prices
 
 `d2411b5`, backend only, rules in `docs/pillar3a.md`, *Prices*. The importer deleted every
@@ -71,6 +75,29 @@ market-data runs and the 18:00 Berlin `full_sync` each carry
 `dividend_forecast_result.status: success` and no warning; the endpoint returns one point for
 the day, and its `next_12m_eur` equals `growth.next_12m_eur` on `/api/dividends/breakdown`.
 
+## Shipped 2026-10-04 — the dividend forecast is IBKR-first and sized per payment
+
+**The dividend forecast is IBKR-first and sized per payment** (`48b1f9c`). IBKR's paid amounts never reached the
+forecast: every payer was Yahoo's gross × the WHT setting, one flat median of the last 8 payments,
+so funds lost their big December and raisers trailed by up to two years (NVDA ~0.01 a quarter against
+0.25 paid). Now IBKR's stated rate (parsed off the cash line), its accruals and its measured
+withholding come first; a steady payer repeats its latest payment, a varying one repeats the same
+payment a year earlier; specials are never repeated; no assumed growth. docs/dividends.md, *Sizing*.
+
+**The IBKR-first dividend forecast** — live on `48b1f9c` since 2026-10-04 ~10:00 Berlin; the
+replay on production confirmed it (lowest error of five rules; docs/dividends.md, *Measured on
+production*)
+(migration `a1d6f2b4c8e0`). **Verified on production right after the deploy:** every
+`upcoming[]` entry carries `amount_source`; withholding reads `ibkr_measured` (~15% on US
+payers), `accrual` (2330 21%, NXPI, HPE) or `ibkr_country` (Samsung 22%), with only IFX
+`assumed`; `forward_yield.basis` is `mixed` with 3.73 assumed (IFX); NVDA projects 0.25 USD a
+share a quarter; TSMC repeats its declared amount after the accrual; VT, GRID, QTUM, SOXQ, SK
+Hynix and ASML are `same_payment_last_year` with their large slots intact. Next-12M read LOWER
+than before (312 vs 322) because it is now net of IBKR's real ~15% where the WHT setting was 0%
+— gross-equivalent it rose. *Per year* now shows a small grey "WHT" line (received + expected
+withholding, one figure; docs/dividends.md, *The per-year WHT figure*) — check it renders on the
+live page.
+
 ## Verified 2026-10-04 — the four Flex sections ticked on 2026-10-03
 
 The 2026-10-03 18:00 Berlin `full_sync` (16:08 UTC, success, no warnings) carried
@@ -107,6 +134,36 @@ basket was 52 days old because it had never been held). **Verified on production
 baskets, not stale. A first import attempt failed because a docs push redeployed between fetch
 and import and took the container's `/tmp` with it — now a local-development trap in STATUS.md.
 
+## Shipped 2026-10-03 — IBKR's own ex→pay pairs
+
+**IBKR's own ex→pay pairs.** The owner ticked four more
+Flex sections (Change in Dividend Accruals, Equity Summary in Base, Prior Period Positions,
+Financial Instrument Information — all modelled by `ibflex` 0.15; a portal download was parsed
+locally and every existing extractor matched except the two intended differences). The new
+`dividend_date_pairs` log (migration `y8b4d0f2a6c3`) keeps IBKR's (ex-date, pay date) per dividend
+and the measured lag prefers it over proximity pairing. Verified on the next statement (*Verified 2026-10-04*, above).
+
+## Shipped 2026-10-03 — the crypto book computes its own history, and survives a coin without a price
+
+`ac23ed5`, deployed with `7d1cb99`: **the crypto book computes
+its own history** — CoinStats' holdings × CoinGecko's daily prices from 1 Jan 2026, so a transfer
+or a buy moves the value and never the P&L (the Kraken → Binance spike disappears). Per-coin daily
+holdings are kept now (`crypto_daily_holdings`), prices come from CoinGecko's Demo API, the
+CoinStats history pull is gone (−35 credits a day); the one-off rebuild CLI exists but was not
+run (owner's decision — the 3 Oct basket stands in for earlier days, docs/crypto.md). The KPI tiles are Total value, Today, P&L since 1 Jan 2026
+and Coins; the chart gains 1W · MTD · YTD. USDC without a price is valued at its 1.00 USD peg,
+flagged as one (owner's decision). Migration `x7a3c9e1f5b2d`. Everything is in
+[docs/crypto.md](docs/crypto.md).
+
+Then (`396e639`, `6175df1`): **the crypto book survives a coin without a price.** With the
+CoinGecko key in, one coin (BNB) went unmatched — CoinStats' id is not CoinGecko's and dozens of
+tokens share the symbol — and the book's "one unknown makes the day unknown" rule blanked every
+total, tile, weight and chart point. Now an ambiguous symbol is matched by CoinStats' own price
+(`pick_by_price`, and every new match is price-checked), migration `z9c5e1a3b7d4` clears the stored
+non-matches once, and a coin without a price is **left out and named** ("Excludes BNB — no price")
+rather than blanking the rest. Rules in `docs/crypto.md`. The CoinGecko key went in on 2026-10-03, BNB is priced, and the
+owner reviewed the page on `6175df1`.
+
 ## Shipped 2026-10-03 — Korean and Taiwanese dividends pair with their cash
 
 Every ex→pay pairing was bounded at 30 days; SK Hynix went ex 2026-08-28 and paid 09-30 (33 days),
@@ -119,6 +176,18 @@ ex-date rather than the pay date.
 08-28 ex-date; its row reads `forecast_lag_days: 33`, `forecast_lag_samples: 1`; its next payment is
 ex 11-28, dated 12-31, `measured_lag`. The remaining pending entries (2330, NXPI, HPE, 005930) are
 genuinely unpaid; the first three await tonight's accruals.
+
+## Shipped 2026-10-02 — two reference paces under *Average per month*
+
+`abef3ae`: **the Dividends tab's *Average per
+month* tile carries two reference paces instead of the latest month's MoM/YoY**, which under the
+average read as the average's own growth (one large September showed +507% / +1484%). Both are per
+month over finished months only: this year so far against last year ÷ 12, and the last three months
+against the three before (any three months hold exactly one Mar/Jun/Sep/Dec ETF payout). New
+`growth.ytd_pace` / `growth.recent_pace`; rules in `docs/dividends.md`.
+
+Live on `93d0e1c`, API-verified 2026-10-02: `growth.ytd_pace` covers 9 finished months,
+`growth.recent_pace` is Jul–Sep vs Apr–Jun and equals the month bars summed ÷ 3.
 
 ## Shipped 2026-10-01 — withdrawals dated when booked, and a CHF withdrawal reads CHF
 
@@ -138,6 +207,65 @@ disbursement on 2026-09-28 at −4,500.00 CHF beside the 09-28 deposit; after th
 cash from 09-28 on reads tens of CHF rather than about −4.5k, Total Value equals holdings + cash, and
 Money In steps once on 09-28. Not yet seen: the chart's benchmark lines and the stand-in FX rows
 being replaced (STATUS.md, *Watch after the next deploy*).
+
+## Shipped 2026-09-28 — a separate Crypto mode fed by CoinStats
+
+Pushed on 2026-09-28 and deployed with its CoinStats keys: **a separate
+Crypto mode fed by CoinStats.** The header's Stocks | Crypto switch, beside the theme toggle, swaps
+the whole page. The crypto book has its own tables (`crypto_*`, migration `w6f3b0c7d1e2`), service,
+routes and view and shares no figure with the stocks — pinned both ways over the import graph by
+`tests/test_crypto_isolation.py`. `/api/crypto/*` needs the admin key **for reads too** and fails
+closed without one. Eight crypto jobs ride the existing slots under their own gate; the public
+`/api/scheduler/*` endpoints stay stock-only. Everything is in [docs/crypto.md](docs/crypto.md).
+Stock-side code it touched, all behaviour-preserving: the FX preload and `BaseFx` loader extracted
+into `fx_preload.py` / `base_fx.py`, the header and footer moved out of `Dashboard.tsx`, and the six
+hand-rolled toggle groups moved onto `ui/SegmentedControl.tsx`. Verified locally — the full backend
+suite, 762 frontend tests, the build, headless-browser passes of both modes at 1440 and 390 in both
+themes, and **two real syncs of the owner's CoinStats portfolio** after the shape probe. The real
+answers changed five things the documentation had implied, each now in `docs/crypto.md`: the real
+rate limit is tighter than documented (2 s between calls now), DeFi is reported beside the total
+rather than in it, the P&L history is one day's amount per point (summed over the range, from 0),
+the value history is sampled every three days, and sold coins come back at quantity 0 (skipped
+without a warning). The same push carries `7fe0aab`, merged the same day: **the value chart's
+Profit/Loss line starts at 0 on the first day of the range**, like the benchmarks do since
+2026-09-07.
+
+Deployed (`/health` on `4a14f41`, checked 2026-09-29): anonymous `/api/crypto/*` answers 401,
+`/api/scheduler/status` lists only the eight stock jobs and `/api/scheduler/history` has no crypto rows.
+
+## Shipped 2026-09-20 — a holding keeps its dividend colour in every range
+
+Live on `26576f8` and API-verified: **a holding on the
+Dividends tab keeps its colour whatever the view.** Colour was `palette[position in the selected
+range's top eight]`, so changing the period re-ranked the set and repainted most of the chart —
+measured against production, All time and 2025 shared four of eight symbols and GOOGL moved three
+slots, while the calendar turned every upcoming payment grey in a past-year view. The order is now
+`stack_order` on the response, computed once over the whole history and **identical in every
+range**; the client's own ranking is deleted rather than duplicated, and with it the widest-window
+rule that only existed because the client ranked from a slice. Thirteen holdings get an identity
+(eight hues, then five muted steps) and the rest fold into Other, which is 2.6–12.6% of a range on
+this book against ~22% before. The palette moved into `index.css` as `--viz-series-*` and was
+re-stepped for the **all-pairs** list that identity assignment implies: four slots are the
+untouched `--viz-sector-*` hues, the other four plus the Other grey moved by ΔE 2–7, and the light
+green that measured **1.5 from the Other grey** under red-green CVD — wrong on the shipped chart —
+is gone. `lib/dividendColors.test.ts` now reads the hexes back out of `index.css` and measures
+them, surfaces included. The legend became a control: ordered by what the range paid, hover or
+focus to dim the rest, click to pin, and Other opens to name the holdings inside it.
+
+Verified on production after the deploy: `/health` reports the commit, and **the six ranges return
+one byte-identical `stack_order`** (28 payers, `VT, QQQM, ASML (NASDAQ), SPGI, META, 2330, GOOGL,
+SOXQ` hued and `GRID, MA, GOOG, NXPI, AVGO` muted), which is the whole claim. The deployed
+stylesheet carries both themes' `--viz-series-*` sets at the measured hexes and none of the four
+replaced ones. Before the push: one production snapshot run through the real service, agreeing on
+both forecast settings, plus 1,575 backend and 704 frontend tests, TypeScript, build and
+touched-file lint. **The browser pass has not run** (STATUS.md, *Watch after the next deploy*).
+
+Deployed alongside it on `4bd3f7f`, and carried in the working tree from an earlier session: the
+frontend visual hierarchy refresh gives the dashboard a centred 1,400 px content shell, separates canvas and card
+surfaces in both themes, aligns the chart and semantic colour palette, and combines the two dense
+Performance metric rows into shared KPI panels. The hero-card grids count occupied tracks so their
+two-column hero plus detail cards fill the desktop row. It was verified locally when it was
+written; this session only carried it, and it has had no browser pass either.
 
 ## Shipped 2026-09-20 — adjustable dividend withholding and honest forecast-off ranges
 
@@ -187,6 +315,252 @@ The durable half of these findings is in **CLAUDE.md**, not here: the once-per-d
 that now enforces it, the `whenGenerated`-is-Eastern rule and why 18:00 Berlin was chosen are all
 under *Sync schedule* / *The Flex Query*. This file carries only what is perishable about them.
 
+## Shipped 2026-09-19 — the calendar is the forecast
+
+Live on `9e808fe`, API-verified: **the calendar is the forecast.** The two
+pending fixes below put gone-ex-but-unpaid dividends on the calendar and deliberately in no total;
+that boundary was too conservative, and the giveaway is which money it excluded. A dividend that has
+actually gone ex is the *most* certain entry on the calendar, and it was the only kind absent from
+every chart and every total — the VT payment showed as *payment pending* under a September bar whose
+translucent segment did not contain it. One rule now covers all four producers of `upcoming`: money
+expected and not received goes in the forecast buckets, dated where the calendar dates it. Never the
+realized side, and never `next_12m_eur`/`forward_yield` for a payment already due — a backlog entry
+sits *before* that window. One dated ahead of today is inside it and now counts, which also closes a
+quiet understatement: the cadence steps past a recorded ex-date, so from the moment yfinance wrote
+the row until the cash landed, the forward figures were short one payment per security.
+
+The load-bearing consequence is that **`partial` and "carries projection" have come apart.** A
+closed rolling window can now hold an unsettled payment, so the Forecast toggle **strips** it from
+the point rather than dropping the point — dropping would make twelve months of measured income
+vanish over one late payment. `withoutForecast` in `lib/dividendChart.ts`, the sibling of
+`realizedOnlyYears`. `_rolling_twelve_months` now takes `has_forward_projection` so an overdue
+payment cannot stretch the series into next year.
+
+**Folding the calendar into the forecast is live on `9e808fe` and API-verified (2026-09-19,
+20:45 Berlin) — but the browser half is NOT done, and this change touched the frontend.**
+
+Verified by comparing the live response against the same endpoint read under the old code twenty
+minutes earlier — a before/after on one unchanged database, which is the A/B the blocked snapshot
+pull was for, just taken across the deploy instead of across two processes. **Every realized
+figure is byte-identical**: `total_net_eur`, `growth.ttm`/`ytd`/`avg_month`, all 31 monthly actual
+bars, all 32 `ttm_series` measured points, every annual actual. **The calendar is untouched** —
+90 entries before and after, none added, removed or altered — so the fold moved money into the
+charts without disturbing the list it reads from. The forecast side moved exactly as predicted:
+`2026-08` 0.00 → 0.19, `2026-09` 20.60 → 47.92, `2026-10` 0.39 → 1.77,
+`total_forecast_net_eur` 85.67 → 114.56, `next_12m_eur` 263.45 → 264.83.
+
+The two durable checks, which outlive those figures: **per month,
+`months[].forecast_total_eur` equals the calendar entries dated in it** — measured, every month
+within 0.01 — and **`next_12m_eur == sum(net_eur for upcoming if not pending)`** — 264.83 against
+264.76, the per-entry rounding gap across ~60 entries (0.03%, inside the documented tolerance).
+A drift beyond a cent or two in either is the bug.
+
+And the point the whole client change exists for: the window ending **`2026-08` is `partial:
+false` and now carries 0.19** of unsettled 000660.KS — measured 60.06, total 60.24. That is a
+projection inside a closed window, which could not happen before.
+
+**What remains is the browser pass.** With Forecast ON, September's translucent segment should
+roughly double. With it OFF, the rolling chart must **still show the 2026-08 window** — that is
+precisely the point a wrong `partial` would delete — drawn at 60.06 rather than 60.24, with
+nothing translucent anywhere and no series changing colour on the toggle. Nothing in the API can
+answer that; `withoutForecast` is covered by unit tests and by
+`test_an_unsettled_payment_sits_in_a_closed_window_without_emptying_it`, but neither mounts a bar.
+
+## Shipped 2026-09-19 — a projected dividend survives its own date
+
+Live on `ec35713` and verified: **a projected dividend survives its own date.**
+The pay-date work below rescued dividends yfinance had already *recorded*; this one rescues the ones
+it has not. Yahoo writes a dividend into its series the day AFTER the ex-date, so between the
+projection being deleted on its own date and that row arriving, the payment was in nothing — which
+is what happened to VT, ex 2026-09-18 and invisible on the 19th, its cadence having named the date
+correctly a quarter earlier. A projection whose date has passed is kept, badged `pending`, emitted
+only when nothing else records the dividend: no estimate row, no accrual, no cash inside the lag
+window, and shares actually held on the ex-date. It expires at `PENDING_MAX_AGE_DAYS`, because an
+inference nothing ever confirms has to stop claiming. **An accrual does not** — `_open_accruals` had
+been ageing those out at the same 90 days against its own docstring, hiding a liability IBKR was
+still asserting.
+
+**The projection-pending tail is live on `ec35713` and verified against the API
+(2026-09-19, 12:35 Berlin).** VT's September payment is on the calendar dated its own ex-date,
+`pending`, `ex_date`, at the amount the pre-ship A/B predicted; `next_pay_date` still reads the
+next *future* payment; no non-`pending` entry is dated on or before today; and no security
+carries two entries on one date.
+
+Verified before shipping by an A/B against one production snapshot, one base currency, old code
+and new in
+separate processes, across all six shapes `get_dividend_breakdown` serves (default, no-forecast,
+each of three years, 24m): **every key except `upcoming` is byte-identical**, no existing
+`upcoming` entry is removed or altered, and `upcoming` gains exactly one entry — VT, dated its
+own ex-date, `gross_estimate`, `ex_date`, `pending`. The no-forecast view gains nothing, as it
+must.
+
+**Still to see: the handoff on real data.** VT's Yahoo row was due at the 16:08 sync on the
+19th. When it lands, the projection stops being generated at all (the cadence steps from the last
+recorded ex-date) and the estimate tail takes the entry over — so VT should stay on the calendar,
+once, with the amount moving from the projected one to the recorded one. Two entries on 09-18, or
+none, is the thing to catch. A browser pass is worth it too, though nothing in the frontend
+changed: a pending row from this tail renders exactly like the five that were already there,
+which is itself the claim.
+
+## Shipped 2026-09-19 — a gross-sized forecast deducts an assumed withholding
+
+Live on `bb2bb48` and verified: **a forecast sized from
+Yahoo's gross per-share now deducts an assumed withholding of 15%**
+(`DEFAULT_DIVIDEND_NET_FACTOR = 0.85`; this is now the user-adjustable default).
+Such a projection used to be gross served in a field called `net_eur`: labelled honestly, and still
+overstated — so the forward yield, the next-12-months figure and every pending calendar entry read
+high by whatever tax the payer will actually withhold. `_estimated_net_from_gross` is the one helper,
+applied at the two read paths that select the gross fallback (`_forecast_inputs`, and an unpaid Yahoo
+estimate emitted straight to the calendar), before currency conversion and rounding. **Stored history,
+broker-reported net, accrual `netAmount`, actual cash and every shared income reader are untouched**,
+and because each read starts from the stored gross the factor cannot compound — both pinned, the
+second by re-reading and comparing. The `net` | `mixed` | `gross_estimate` wire values are unchanged
+for compatibility, but `gross_estimate` now means *estimated net derived from gross*, and the
+captions say "assumed withholding" rather than "runs a little high".
+
+**The factor is a single global assumption, and this book is not single-jurisdiction.** 15% is the
+US and Dutch treaty rate; German, Korean and Taiwanese payers withhold materially more, so those
+projections still read high, just less so. A *measured* rate is derivable from data already stored —
+`withholding_tax_eur / gross_amount_eur` on IBKR rows, grouped by the ISIN-prefix country the DA-1
+report already groups by — and that is the honest version of this. **Built 2026-10-04** as the
+withholding ladder's `ibkr_measured` and `ibkr_country` rungs (docs/dividends.md, *Sizing*); the
+setting is only the last rung now.
+
+**The estimated-net factor is live on `bb2bb48` and verified (2026-09-19, 11:25 Berlin).**
+Every gross-sized figure falls by exactly 0.85 — `forward_yield.annual_eur`,
+`growth.next_12m_eur`, `total_forecast_net_eur` and each `pending` calendar amount — while
+**every realized figure is byte-identical**: `total_net_eur`, `growth.ttm` / `ytd`, the annual
+actuals, all 31 monthly actual totals and all 32 `ttm_series` measured points. Provenance stays
+`gross_estimate` rather than flipping to `net`, and a second read returns the first read's
+numbers, so the factor cannot compound.
+
+**Verified by an A/B against one database snapshot, not by comparing two live reads — and that
+distinction is the lesson.** The first attempt compared production before and after the deploy
+and reported realized income moving by 7%, which would have meant the factor had escaped into
+the income ledger. It had not: the base currency was switched from EUR to CHF between the two
+reads, so every figure moved by FX as well. **Any check phrased as "this number should become
+that number" is unsound here** — `app_settings.base_currency` changes under you, and CLAUDE.md
+says so in its first paragraph. Hold the currency fixed by comparing one payload against
+another built from the same snapshot, or compare ratios inside a single payload.
+
+## Shipped 2026-09-19 — a dividend is dated when the cash is expected
+
+Live on `c791fd9` and verified against the API: **a dividend
+is now dated when the cash is expected, and stays visible until it arrives.** Every projected date was an **ex-date** —
+the cadence comes from yfinance's ex-date series and nothing shifted it — while `upcoming[].date`
+and `next_pay_date` were named as pay dates and the calendar headed *Expected next*. Combined with
+`horizon_start = as_of + 1` (a projection is deleted on its own date) and the era splice (which
+drops the estimate recording that same payment), a dividend that had gone ex was in **no figure at
+all** until IBKR posted the cash. Measured on production before the fix: six held securities at
+once, the oldest 22 days in, NVDA with another twelve to go on a 21-day lag.
+
+Three sources now date a projection, each named on the wire as `pay_date_source`: an IBKR
+**accrual** (`<OpenDividendAccruals>` — the only record carrying an ex-date and a pay date
+together, free on the statement already pulled; the portal section was ticked 2026-10-03), a
+**measured lag** per security (`median(pay − ex)` paired out of the raw history by the matcher the
+era splice already runs; every IBKR payment on record paired, and the per-security spread is a day
+or two), or the **ex-date**, now saying that is what it is rather than implying otherwise. A
+payment that has gone ex and not been paid is badged *payment pending* on the calendar and
+deliberately in no total — the cash has not arrived, so counting it would credit the account with
+money it has not been paid. `months[]`, `ttm_series`, `growth` and the toggle's closed-prefix
+guarantee are untouched in shape; the figures move because the dates are now pay dates, which is
+the fix. Accruals live in their own table and never reach `dividend_payments`. Rules in
+`docs/dividends.md`.
+
+Two things the work turned up. **`match_estimates_to_ibkr` is one function now** — the splice wants
+the matched estimates to drop and the lag wants their distances kept, off the identical pairing, and
+a second copy is the file's own opening warning. And **IBKR does send `exDate` on ordinary dividend
+cash transactions; `ibflex` 0.15 does not model it, so the sanitizer has been dropping it on every
+sync** — reading it would make the lag exact, but it needs parsing outside `ibflex` and is
+backward-looking, so it closes nothing the accruals do not (recorded in `docs/flex-and-sync.md` so
+it is not rediscovered as new). `test_flex_attr_coverage.py` also had a hole the work walked into:
+its extractor map was hand-kept, so a new extractor was not merely unchecked but *invisibly*
+unchecked — there is a family test for that now, and three extractors that were never covered are.
+
+1,546 backend and 673 frontend tests pass, plus TypeScript, build and lint (the 16 lint errors are
+pre-existing and in files this did not touch). **The accrual path has still never seen a real
+statement** — it is exercised by fixtures only and the Flex section is off, so every live date
+currently comes from a measured lag or the ex-date.
+
+**Pay-date-dated dividend projections are live on `c791fd9` and verified against the API
+(2026-09-19, 10:45 Berlin).** All six securities that were blind now appear: the five with no
+measured lag read `ex_date` and `pending`, NVDA reads `measured_lag` dated three weeks past its
+ex-date. Eleven rows carry a lag, 7–29 days, matching what was measured before the change. Both
+invariants hold — no elapsed month carries a projection, no non-pending entry is dated on or
+before today — and the December-window-equals-calendar-year identity is exact for all three
+years. The migration (`v5e2a9b6c0d1`, additive: one empty table) applied cleanly.
+
+**Still to see in a browser**: the *payment pending* badge on a real row, the `ex …` note beside
+a shifted date, and the calendar at 390 px — that row gained two inline elements and is the one
+place this change is visible. Everything checked so far was the API.
+
+## Shipped 2026-09-18 — the Dividends growth figure answers the selected range
+
+Live since `c791fd9`: **the Dividends growth figure now
+answers the range you selected.** `d4640d4` shipped it yesterday as a deliberately unwindowed
+six-month rate anchored at the projection horizon, so it read `Jan 27 – Dec 27` while the reader
+was looking at 2026 — the owner's verdict was "not really usable", and he was right: a rate that
+ignores the filter above it is not a rate for anything on screen. It is now **CMGR** between the
+first and last rolling window actually displayed, plus **CAGR** when that span reaches twelve
+months, in one strip with the two endpoint totals beside it and no prose. Computed client-side in
+`lib/dividendPace.ts` from `ttmPoints` — that array already *is* the displayed set, range-sliced by
+the server and stripped of open windows when Forecast is off, so "which windows are showing" stays
+stated once instead of being restated in Python. The server keeps one new field,
+`ttm_coverage_start`, which is the only thing a windowed response cannot work out for itself.
+`DividendTtmPace` and the two `ttm_pace_*` fields are gone.
+
+On this book every range reaching back to the first covered window starts at CHF 3.77 — the account
+mid-funding — and reports +15% to +28% a month. That is arithmetically true and nearly meaningless,
+so it carries `†` plus four words of visible text; narrowing the range gives the clean read (2026
++18.3%/mo with the forecast, +14.5% without). Rules in `docs/dividends.md`.
+
+**The range-aware Dividends growth figure is built and unverified on production.** CMGR (and
+CAGR at twelve months of span or more) between the first and last rolling window on screen,
+from `lib/dividendPace.ts`; the server contributes only `ttm_coverage_start`. Verified locally
+against the five live `d4640d4` payloads replayed through a browser, and every range matched:
+All time +15.3%/mo & +451%/yr, 24m +21.3% & +918%, 2025 +28.5% (no CAGR, 7-month span), 2026
++18.3% with forecast and +14.5% without, 2027 +6.6%, 2027 with forecast off renders nothing.
+
+## Shipped 2026-09-18 — the stacked, forecast-aware Dividends TTM
+
+Live on `d4640d4` (which still carries the unwindowed pace this replaces): **the Dividends TTM
+view is a stacked column chart that folds the forecast in.** It answers "which holdings are carrying this"
+rather than drawing one line, treats a projected payment as real (the Forecast toggle still governs
+it), works on a future year, and drops the months it cannot cover instead of leaving empty space.
+The rolling series moved off `months[]` onto its own `ttm_series`, because on All time it runs to
+the projection horizon while `months[]` must keep its narrower cap — the one that exists because
+coupling them once tripled the all-time forecast total. Both charts now come out of one
+`DividendStackChart` and one ranking, so a symbol cannot change colour between views. Rules in
+`docs/dividends.md`.
+
+Three things the work turned up that are worth knowing. **Ranking over summed rolling windows would
+have ordered symbols by *when* they paid, not how much** — a January payment falls in twelve windows
+and a December one in one, a 12× swing that would have quietly reordered the existing monthly chart;
+the fix is to score a symbol by its widest single window. **Extending the series on the forecast
+*flag* rather than on a projection existing** would have drawn a decline to zero that never happened,
+the same shape this service once served as `next_12m_vs_ttm_pct: -100.0`. And **ending the series at
+the last projected payment** put All time in October while `year=` for the same year ran to December;
+it ends at the horizon now, so every range builds one identical series and only the slice differs.
+
+The stacked TTM was verified on production after deploy (below); the
+growth figure has not been. Locally: 1,522 backend and 665 frontend tests pass, plus TypeScript,
+build and lint. The backend count FELL by eight against `d4640d4` and that is the whole pace
+removal — nine tests plus the auto-generated `DividendTtmPace` contract-drift case, against two
+added for `ttm_coverage_start`; the collected-id diff was checked rather than the totals.
+Browser checks at 1440px and 390px plus dark, replaying the five live `d4640d4` payloads so every
+range was verified against real figures — no overflow, no console errors, no network.
+Earlier the same day: **Monthly/TTM and the Last 24 months range** shipped as `c0ba465` and is live;
+`AGENTS.md` is an exact copy of the root `CLAUDE.md`. Unrelated UI restyle changes already in the
+working tree were preserved and remain uncommitted.
+
+**The stacked, forecast-aware Dividends TTM is live on `170df7c` and verified against the API
+(2026-09-18, 20:55 Berlin).** Both identities hold on production: the December window equals
+that calendar year's annual row to the cent (2025 21.83, 2026 147.85, 2027 309.96 — all three
+exact), and All time's rolling series reaches 2027-12 against the monthly chart's 2026-12, which
+is the separate-array design doing its job. Per-symbol maps reconcile to their scalars within a
+cent or two on wide windows — independent rounding, worst case 0.03 on 309.96 (0.01%), written
+up in `docs/dividends.md`; not a defect and not worth chasing.
+
 ## Shipped 2026-09-13 — the Analytics tab: where the return came from
 
 Goal set by the owner: analytics only, charts first. Four surfaces on a new lazy tab, three
@@ -216,6 +590,20 @@ weights and returns the database does not hold (STATUS.md, *Worth doing next*). 
 Verified: backend 1,505 tests and frontend 626 green; the three routes serve the smoke fixture
 through the real HTTP stack; the bundle gains one 24 kB lazy chunk. Production verification of
 the identity on the public API is recorded in STATUS.md, *Watch after the next deploy*.
+
+### Verified on production, 2026-09-13
+
+**`/api/performance/*` is live on `ec3178a` and verified read-only (2026-09-13, 12:05
+Berlin).** All three routes 200; on the 1Y and 3M windows and on every calendar year the legs
+sum to `end − start` to the cent; `sum(by_sector)` and `sum(by_country)` equal `total_pnl_eur`
+(14 and 53 rows); the per-security attribution total equals the segments total, so the two
+surfaces agree. `cash_adjustment_eur` is non-null on 2026 windows and 0 for 2025 (measurement
+began 08-25). Three things seen that are correct and worth knowing: **2025 carries 7 unsplit
+holdings** (in-kind-transferred lots whose open dates predate the cached FX history, so their
+gain is carried whole, not guessed); **Unknown is the second-largest sector and country**
+because the allocation sync has classified only part of the direct book — run
+`POST /api/allocation/sync` to shrink it; and **every one of the 16 sold securities has a
+post-sale price** (the market-data pass still prices them), so *Rose after sale* reads 12 of 16.
 
 ## Shipped 2026-09-12 (afternoon) — the 3a EM fund prices from its sibling share class
 
@@ -395,6 +783,28 @@ succeeds, the Yahoo row survives), and the guard's refusal when the previous run
 6 rows. Ledger counts identical before and after; snapshot deleted. Still unverified:
 `benchmarks_total` on the next `market_data_only` run (13:00 Berlin).
 
+### After the deploy, 2026-09-12
+
+**The 2026-09-12 bug sweep is live on `e6e7698` (11:22 Berlin) and the API checks passed**
+— timeline tail `cash_source: mixed` matching the summary, SK Hynix and every other forecast
+row `gross_estimate`, non-ASCII key → 401, current-year tax report → 200 (details in *Shipped
+2026-09-12*).
+
+- `benchmarks_total: 8` and `rate_limited: false` **seen on the 15:00 run** (the 13:00 run
+  predated the deploy). **Seen on the 09-12 18:00 `full_sync`**: four stale baskets (GRID,
+  IQQ, QQQM, SOXQ) refreshed to 09-10, `identifiers_pending: 25` — the bound held — and the
+  following runs carry an empty `warnings[]`.
+- **The finpension importer is rehearsed on a copy of production, 2026-09-12 12:00 Berlin.**
+  Against the 09:40 UTC auto-deploy snapshot and the real 09-06 export: dry run parses 5 rows;
+  a real re-import succeeds with the guard's baseline read from production's own `sync_runs`
+  row (`rows: 5`), 2 trades / 3 deposits / 2 lots / 35 price rows (the World fund is
+  Yahoo-priced, so only the EM fund is carried); with the World fund's 09-01 row forced to a
+  `yahoo_finance` bar the re-import still succeeds and the Yahoo row survives untouched — the
+  exact IntegrityError shape, gone; a `sync_runs` row pretending the previous import parsed 6
+  rows makes the 5-row file refuse with "had 6", and `--force` still applies. Snapshot deleted
+  afterwards. The next routine monthly upload needs nothing special; do it before the carried
+  NAV runs out (last NAV 2026-09-01, the day-40 warning fires ~10-11).
+
 ## Shipped 2026-09-08 (late) — the audit batch: self-refreshing baskets, no benchmark cache, build-before-down, current deps
 
 Asked as "look for issues and let's brainstorm", then "push it then and let's call it a day for
@@ -427,6 +837,26 @@ similar + cache?". Four changes, one push.
 
 **What the audit found and did not ship** is recorded under *Worth doing next* items 7–9 and the
 HSTS bullet under *Needs a human*.
+
+### After the deploy
+
+**The WAL fix is live (`b6bbe6f`, 18:50 UTC) and its own deploy lost nothing** — the WAL
+was checkpointed by hand right before the push and the newest `sync_runs` id was 378 on
+both sides of the deploy. `/root/backup-db.sh` was refreshed from the repo at 18:52 UTC
+(auto-deploy and the daily cron prefer that copy) and a manual backup logged
+`WAL checkpoint (busy, frames, done): (0, 0, 0)` before its snapshot. Still to observe
+once: the *next* deploy's `/root/auto-deploy.log` should carry the same line between the
+image build and `Stopping` — the first deploy to run the new `deploy.sh` end to end.
+
+**The first scheduled-path refresh ran by hand on production right after `75ccc3a` landed**
+(recorded as a `manual_etf_basket` run): six baskets refreshed — GRID, QQQM, IQQ, QTUM, SOXQ,
+XAIX — 109 CINS/SEDOL identifiers and 25 ISINs resolved, and **one failure that was a real
+parser bug**: BlackRock dates EMIM's file `07/Sept/2026`, a four-letter month `%b` does not
+accept, so `parse_ishares` refused a good basket and the 3a EM fund stayed on the August one
+— exactly the isolation the design promised (previous basket kept, one warning, job status
+untouched). Fixed in the follow-up commit; the next 18:00 run, or a by-hand re-run, should
+refresh EMIM and leave the market-data `warnings[]` empty for the first time since late
+August. Read `lookthrough_result` on the 18:00 run in `/api/scheduler/history` to confirm.
 
 ## Shipped 2026-09-08 — the Forecast tab's Money In starts at what was paid in
 
@@ -1093,6 +1523,22 @@ a keyless request refuses). Still needs adding on the VPS — *Needs a human*.
 One incidental fix: the new count used a bare `toLocaleString()`, which renders 8,007 as "8.007"
 under a German runtime. Pinned to `en-US` like `formatCurrency` and `formatPercent`.
 
+### VWCE: why the VT proxy, and every route ruled out (from STATUS.md, 2026-10-14)
+
+**The old prohibition, and why it fell.** This entry used to say "do not ship VT's basket as a
+proxy", on the grounds that the overlap had never been quantified. It has been: the sleeve VWCE
+omits is almost entirely the 8,007 of VT's 10,032 rows published at 0.00% weight, and VT spreads
+the shared names over a *wider* index, so the proxy understates and the shortfall lands in the
+residual — the direction chosen everywhere else here.
+
+**Ruled out on 2026-08-14, each verified — kept only so nobody re-investigates:** the US profile
+API that serves VT rejects the Irish fund id; live EU holdings are GraphQL-only with no key in the
+delivered HTML; Euronext carries no constituent data and the LSE page is an empty SPA shell; there
+is no EU analogue to N-PORT; the product page publishes ten holdings with no ISIN column; and
+Vanguard Funds plc's disclosure policy makes complete holdings request-only by email. The
+semiannual report PDF lists every holding but carries **zero ISINs**, and this pipeline is
+ISIN-keyed.
+
 ## Shipped 2026-08-16 (evening) — sector clustering, and four funds that were never unreachable
 
 Two follow-ups on the charts: cluster the treemap **by sector** rather than by how a company is
@@ -1365,6 +1811,36 @@ outcomes now, and the middle one carries no counts, so the old unconditional
 Extracting it is what made that branch testable at all.
 
 Backend 828 → 845, frontend 407 → 416.
+
+## Ran on production 2026-08-07 — the three new ETFs landed at the 06:00 Berlin slot
+
+**The three new ETFs landed on 2026-08-07 at the 06:00 Berlin slot, exactly as predicted.** VT 10 @
+160.50, GRID 10 @ 190, QTUM 3 @ 149.85 and 1 more META @ 589.12, all dated 2026-08-06. Production
+went 36 → **39 positions**, 979 → **983 open lots**, 40 → **43 securities**, `max(trade_date)`
+2026-07-29 → **2026-08-06**. `unpriced_holdings` read **3** in the gap before pricing, with the
+yellow notice above the KPI cards — the completeness signal from the 08-06 batch working on its
+first real occasion. The look-through mappings and the asset-type fix shipped ahead of the
+statement all held; nothing needed doing when it arrived.
+
+**The asset-type fix is confirmed on live data, which is worth more than the mutation test.** All
+three carry `asset_type='Stock'` (the column default) with `sector` and `country` NULL, exactly the
+state that used to draw a mapped fund as a Stock in one chart and an ETF in the other two — and all
+three are now distributed as `is_etf_contribution` across sector *and* geography, with the
+asset-type chart agreeing. All three breakdowns sum to 100% (two read 100.01, which is 2dp
+rounding). **So no `POST /api/allocation/sync` is needed for them**; the columns stay NULL and that
+is fine for a mapped fund.
+
+Two things worth keeping from how it got there, both now in CLAUDE.md:
+
+- **`whenGenerated` is US Eastern, and the window rolls at midnight ET.** A statement downloaded
+  at **05:40 Berlin on 08-07** still read `to=20260805`, because that is 23:40 the previous day in
+  New York — it looked like today's file and was yesterday's. The 06:00 Berlin job twenty minutes
+  later (00:00 ET) got the missing day. **Check `toDate` in the header before ingesting a manual
+  download**; the generation time tells you nothing.
+- That file was ingested anyway, at the owner's request, and was a clean no-op: 979 lots synced,
+  **0 closed, 0 skipped**. Worth knowing it was only safe *because* production still lacked the
+  three — an 08-05 snapshot ingested **after** they exist would drive them through
+  `reconcile_taxlots`' heuristic branch and close them dated 2026-08-05.
 
 ## Shipped 2026-08-07 (evening) — two "avg monthly" figures that were never the same quantity
 

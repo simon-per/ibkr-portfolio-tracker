@@ -258,8 +258,10 @@ earlier is computed, fetched or drawn.
   it has not**: the first synced day's basket (3 Oct 2026) stands in for every earlier day, and
   because every later day's set is stored, coins added later (Revolut X) never rewrite that span.
   The chart draws it like any other day (owner's call, 2026-10-14 — the shading and its sentence
-  were dropped with the app's other data-quality notes); the flag stays on the API. Why the CLI
-  was not run: STATUS.md, *Known rough edges*.
+  were dropped with the app's other data-quality notes); the flag stays on the API. The first
+  dry run refused on BNB fee dust; the CLI has accepted up to 0.05 BNB of it since, and whether
+  to run it is an open owner decision with a deadline — CoinGecko's Demo plan stops serving
+  1 January 2026 at the end of 2026 (STATUS.md, *Needs a human*).
 - **Left out and counted, never valued at 0.** A held coin with no price that day is left out of
   that day's value, and out of its P&L whenever either end of its move is unpriced — so a coin
   gaining or losing its price is never a gain or a loss. It is named on the surface: the Total

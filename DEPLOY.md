@@ -54,7 +54,8 @@ Re-run it with the snippet in section 3; it copies the newest backup to `/tmp`, 
 it against the live database, and deletes itself.
 
 **Why this matters more here than for most apps:** the data cannot be re-fetched. The
-Flex Query window is 3 days and IBKR holds nothing before 2026 for this account, so
+Flex Query window is bounded (measured at 30 calendar days — `flex_window_days()` reads the
+live figure off the last statement) and IBKR holds nothing before 2026 for this account, so
 trades, cash flows, corporate actions and the IBKR dividend ledger exist *only* in this
 file. `OpenPositions` is period-independent, so a sync would restore the lots and
 nothing else.

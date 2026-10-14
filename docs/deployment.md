@@ -25,7 +25,8 @@ before believing it.
 - SSH: `ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud`
 - Secrets live only in `/root/IBKR_investment_tracker/backend/.env` (`IBKR_TOKEN`, `IBKR_QUERY_ID`,
   `API_ADMIN_TOKEN`, `OPENFIGI_API_KEY`, and for the crypto book `COIN_STATS_API_KEY`,
-  `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE` — see [crypto.md](crypto.md))
+  `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE`, `COINGECKO_API_KEY` — see
+  [crypto.md](crypto.md)); every setting is listed in `backend/.env.example`
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
 - Backups: `/root/ibkr-backups/<date>/`
@@ -57,8 +58,9 @@ of creating an empty file. They were the mitigation; the fix is the directory mo
 directory** (`./data:/app/data`), so the `-wal`/`-shm` sidecars land on the host beside it and a
 killed container loses nothing. `docker-compose.yml` sets `DATABASE_URL:
 sqlite+aiosqlite:////app/data/portfolio.db` in `environment:`, which overrides `env_file:` — the
-host `.env` may still say `./portfolio.db` and it no longer matters (tidy it anyway; STATUS.md
-has the VPS steps). Local development is unchanged: `config.py`'s default is still
+host `.env` may still say `./portfolio.db` and it no longer matters (tidy it anyway: set
+`DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db` in the VPS's `backend/.env`, so the
+file says what the container uses). Local development is unchanged: `config.py`'s default is still
 `./portfolio.db`.
 
 The move happens inside an unattended deploy, so it is built around the one outcome that must

@@ -133,9 +133,10 @@ both cases, so `return_pct` is against what was paid. Holding days are cost-weig
 `post_sale_pct` compares two rows of the security's **own price history in its quote
 currency** — the last close on or before the sale date against the newest close after it.
 Base-currency proceeds cannot serve as the reference (they carry FX), and a quote in a
-different currency is refused rather than compared. It is `None` without a later price, which
-is the normal case for a fully sold security: the market-data sync prices open positions
-only. The summary says how many were judged.
+different currency is refused rather than compared. It is `None` without a later price. The
+market-data sync prices every row in `securities`, sold ones included
+(`scheduler_service.sync_market_data` takes `get_all`), so on production every sold security
+had one when this was verified (2026-09-13); the summary says how many were judged.
 
 ## Client-side: rolling risk and the drawdown ledger
 
@@ -162,8 +163,6 @@ Only returns after `firstValuedPoint` are walked, for the reason documented in
   neither exists in the database and both would be new upstream data — which the constraint
   on this work ruled out. The segment table's *weight at start* next to *share of gain* is
   the portfolio-only half of that question. Recorded in STATUS.md, *Worth doing next*.
-- **Post-sale performance for fully sold securities**, until something prices them. It would
-  be one Yahoo request per closed security per day; not worth the budget by default.
 
 ## Tests
 

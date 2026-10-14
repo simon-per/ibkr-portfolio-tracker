@@ -270,7 +270,7 @@ newly inserted on this sync** (`CorporateActionRepository.existing_ib_keys()`) â
 resends every action inside its period every time, so without that check every daily job would wipe and refetch the
 same history forever. Reported in `warnings[]` and as `prices_invalidated`.
 Limitation: the 7-day jobs restore the current value, but the full history only comes back at the next
-**08:00** 730-day `full_sync`. (There are six 7-day jobs now, not two, so the current value returns
+**18:00** 730-day `full_sync` (it moved there from 08:00 with the IBKR slot on 2026-08-08). (There are six 7-day jobs now, not two, so the current value returns
 within a couple of hours rather than by the evening.) Tests: `tests/test_split_price_invalidation.py`.
 
 ---
