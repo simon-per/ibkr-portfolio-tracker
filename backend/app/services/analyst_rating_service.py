@@ -1,7 +1,8 @@
 """
 Analyst Rating Service
 Fetches analyst recommendations from Yahoo Finance using yfinance library.
-Updates ratings twice weekly to avoid excessive API calls.
+Refreshed weekly by the scheduler's `fundamentals_refresh` job (FUNDAMENTALS_REFRESH_DAYS
+in `scheduler_service.py`), and on demand.
 """
 from typing import List, Dict, Optional
 import logging
@@ -83,6 +84,21 @@ def _count(row, column: str) -> int:
     return int(number)
 
 
+RATING_COUNT_FIELDS = ('strong_buy', 'buy', 'hold', 'sell', 'strong_sell')
+
+
+def no_rating(security_id: int) -> Dict:
+    """
+    Yahoo's answer "no analysts cover this", as a row: five zero counts.
+
+    Stored rather than skipped, because a skipped security has no `last_updated` and
+    `sync_stale_ratings` re-queues anything without a row — so every ETF was re-asked on
+    every pass, a request against an IP-based limit for an answer already known. The
+    shape `allocation_service` stamps `allocation_last_updated` on a failed lookup for.
+    """
+    return {'security_id': security_id, **dict.fromkeys(RATING_COUNT_FIELDS, 0)}
+
+
 class AnalystRatingService:
     """
     Service for fetching and caching analyst ratings from Yahoo Finance.
@@ -90,7 +106,8 @@ class AnalystRatingService:
     Uses yfinance library to fetch aggregated analyst recommendations
     showing counts of: strong buy, buy, hold, sell, strong sell.
 
-    Caches ratings in database and refreshes twice weekly (every 3-4 days).
+    Caches ratings in the database; a rating older than 3 days is stale, so the weekly
+    scheduled refresh asks again for every security.
     """
 
 
@@ -121,7 +138,12 @@ class AnalystRatingService:
             security: Security object
 
         Returns:
-            Dict with rating counts or None if not available
+            Dict with rating counts — **all zero when Yahoo answered that there is no
+            current rating** — or None when the fetch itself failed.
+
+        The zero-count answer is stored like any other (see `sync_ratings_for_securities`):
+        `AnalystRating.consensus` reads it as "No Rating", and its `last_updated` is what
+        keeps an ETF from being re-asked on every pass for an answer already known.
         """
         try:
             yahoo_ticker = await self._get_yahoo_ticker(security)
@@ -139,12 +161,12 @@ class AnalystRatingService:
 
             if recommendations is None or recommendations.empty:
                 logger.info(f"No analyst ratings available for {security.symbol}")
-                return None
+                return no_rating(security.id)
 
             latest = select_current_period(recommendations)
             if latest is None:
                 logger.info(f"No current-period analyst ratings for {security.symbol}")
-                return None
+                return no_rating(security.id)
 
             rating_data = {
                 'security_id': security.id,
@@ -213,6 +235,7 @@ class AnalystRatingService:
         logger.info(f"Syncing analyst ratings for {len(securities)} securities")
 
         ratings_updated = 0
+        no_ratings = 0
         errors = 0
 
         pending_ids = [s.id for s in securities]
@@ -237,13 +260,20 @@ class AnalystRatingService:
             try:
                 rating_data = await self.fetch_rating_for_security(security)
 
-                if rating_data:
-                    # Save to database
+                if rating_data is not None:
+                    # Save to database — a "no rating" answer too, which stamps the
+                    # attempt (see `no_rating`).
                     await self.rating_repo.upsert(rating_data)
-                    ratings_updated += 1
                     await self.db.commit()
+                    if any(rating_data[f] for f in RATING_COUNT_FIELDS):
+                        ratings_updated += 1
+                    else:
+                        no_ratings += 1
                 else:
-                    logger.warning(f"Skipping {security.symbol} - no ratings available")
+                    # The fetch failed for this security (not a rate limit — that
+                    # raised): left unstamped, so the next pass asks again.
+                    errors += 1
+                    logger.warning(f"Skipping {security.symbol} - rating fetch failed")
 
                 # Add delay between securities to avoid rate limiting (2-4 seconds)
                 if i < len(securities):
@@ -273,15 +303,20 @@ class AnalystRatingService:
 
         logger.info(
             f"Analyst Rating Sync Complete: "
-            f"processed={len(securities)}, updated={ratings_updated}, errors={errors}"
+            f"processed={len(securities)}, updated={ratings_updated}, "
+            f"no_rating={no_ratings}, errors={errors}"
         )
 
         result = {
             'securities_processed': len(securities),
             'ratings_updated': ratings_updated,
+            'no_rating': no_ratings,
             'errors': errors,
             'rate_limited': self.rate_limited,
-            'message': f'Successfully synced {ratings_updated}/{len(securities)} analyst ratings'
+            'message': (
+                f'Synced {ratings_updated}/{len(securities)} analyst ratings'
+                + (f', {no_ratings} with no analyst coverage' if no_ratings else '')
+            ),
         }
         if self.rate_limited:
             result['warnings'] = [

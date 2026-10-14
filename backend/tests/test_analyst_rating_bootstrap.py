@@ -155,3 +155,84 @@ async def test_it_fetches_only_what_needs_it(db, fetched):
     await AnalystRatingService(db).sync_stale_ratings()
 
     assert sorted(fetched) == ["NEVER", "STALE"]
+
+
+# --- "no rating" is an answer, and it is stamped -----------------------------------
+
+
+def _yahoo_answers(monkeypatch, recommendations):
+    """Stand in for `yf.Ticker`, so the real fetch path decides what is stored."""
+    asked = []
+
+    class FakeTicker:
+        def __init__(self, symbol):
+            asked.append(symbol)
+
+        @property
+        def recommendations(self):
+            if isinstance(recommendations, Exception):
+                raise recommendations
+            return recommendations
+
+    async def _ticker(_self, security):
+        return security.symbol
+
+    monkeypatch.setattr(ars_mod.yf, "Ticker", FakeTicker)
+    monkeypatch.setattr(AnalystRatingService, "_get_yahoo_ticker", _ticker)
+    return asked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["empty", "no current period"])
+async def test_no_coverage_is_stamped_so_the_next_pass_does_not_ask_again(db, monkeypatch, answer):
+    """
+    An ETF has no analysts. That answer used to be dropped without a row, so the
+    security stayed "never rated" and every pass asked Yahoo again for it.
+    """
+    import pandas as pd
+
+    frame = pd.DataFrame() if answer == "empty" else pd.DataFrame(
+        {"period": ["-1m"], "strongBuy": [3], "buy": [1], "hold": [0], "sell": [0], "strongSell": [0]}
+    )
+    asked = _yahoo_answers(monkeypatch, frame)
+    add_security(db, 1, "VWCE")
+    await db.commit()
+
+    result = await AnalystRatingService(db).sync_stale_ratings()
+
+    rating = (await db.execute(
+        AnalystRating.__table__.select().where(AnalystRating.security_id == 1)
+    )).one()
+    assert (rating.strong_buy, rating.buy, rating.hold, rating.sell, rating.strong_sell) == (0,) * 5
+    assert rating.last_updated is not None
+    assert result['no_rating'] == 1 and result['ratings_updated'] == 0
+    assert result['errors'] == 0
+
+    # Stamped: a second pass inside the staleness window does not reach Yahoo.
+    await AnalystRatingService(db).sync_stale_ratings()
+    assert asked == ["VWCE"]
+
+
+@pytest.mark.asyncio
+async def test_a_stored_no_rating_reads_as_no_rating(db):
+    db.add(AnalystRating(security_id=1, strong_buy=0, buy=0, hold=0, sell=0, strong_sell=0,
+                         last_updated=utcnow()))
+    add_security(db, 1, "VWCE")
+    await db.commit()
+
+    rating = await AnalystRatingService(db).get_rating_for_security(1)
+    assert rating.total_ratings == 0
+    assert rating.consensus == "No Rating"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fetch_is_not_stamped(db, monkeypatch):
+    """A failure is not an answer: no row, so the next pass asks again."""
+    _yahoo_answers(monkeypatch, ValueError("Expecting value: line 1 column 1 (char 0)"))
+    add_security(db, 1, "AAPL")
+    await db.commit()
+
+    result = await AnalystRatingService(db).sync_stale_ratings()
+
+    assert (await AnalystRatingService(db).get_rating_for_security(1)) is None
+    assert result['errors'] == 1 and result['no_rating'] == 0

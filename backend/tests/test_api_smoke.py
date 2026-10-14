@@ -41,7 +41,9 @@ from app.models.dividend_forecast_snapshot import (
     DividendForecastSnapshotLine,
 )
 from app.models.dividend_payment import DividendPayment
+from app.models.analyst_rating import AnalystRating
 from app.models.exchange_rate import ExchangeRate
+from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -194,6 +196,24 @@ async def _seed(session: AsyncSession) -> None:
     ]
     for d in dividends:
         session.add(DividendPayment(currency="EUR", **d))
+
+    # Analyst coverage: a real consensus, and the stored "no analysts" answer
+    # (analyst_rating_service.no_rating), which every reader must show as absent.
+    now = datetime.combine(TODAY, time(4))
+    session.add(AnalystRating(security_id=4, strong_buy=3, buy=1, hold=1, sell=0,
+                              strong_sell=0, last_updated=now))
+    session.add(AnalystRating(security_id=1, strong_buy=0, buy=0, hold=0, sell=0,
+                              strong_sell=0, last_updated=now))
+    # Fundamentals in two currencies, so the base-currency market cap is exercised.
+    session.add(FundamentalMetrics(security_id=3, quote_type="EQUITY", trailing_pe=-12.0,
+                                   market_cap=3_000_000_000_000, data_currency="USD",
+                                   last_updated=now))
+    session.add(FundamentalMetrics(security_id=1, quote_type="EQUITY", trailing_pe=35.0,
+                                   market_cap=250_000_000_000, data_currency="EUR",
+                                   last_updated=now))
+    session.add(FundamentalMetrics(security_id=4, quote_type="EQUITY",
+                                   market_cap=10_000_000_000, data_currency="TWD",
+                                   last_updated=now))
 
     session.add(CashFlow(
         ib_key="C1", flow_date=START + timedelta(days=1), flow_type=DEPOSIT_WITHDRAW,
@@ -738,3 +758,14 @@ def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
     # The clamp is enforced by FastAPI rather than trusted.
     assert client.get("/api/portfolio/lookthrough?limit=0").status_code == 422
     assert client.get("/api/portfolio/lookthrough?limit=9999").status_code == 422
+
+
+def test_no_analyst_coverage_reads_as_absent_on_the_positions_table(client):
+    """
+    A zero-count rating row is the stored answer "no analysts cover this"
+    (`analyst_rating_service.no_rating`); the positions table renders a badge for any
+    rating it is handed, so that row must arrive as `null` — the "-" it always showed.
+    """
+    positions = {p["security_id"]: p for p in client.get("/api/portfolio/positions").json()}
+    assert positions[1]["analyst_rating"] is None
+    assert positions[4]["analyst_rating"]["consensus"] == "Buy"
