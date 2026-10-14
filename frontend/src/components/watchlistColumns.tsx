@@ -178,7 +178,7 @@ export function watchlistColumns(deps: {
       sortKey: 'buy_score',
       mobile: 'badge',
       hint: {
-        description: 'Composite score across four equally-weighted categories.',
+        description: 'Composite buy score',
         formula: 'Valuation (25) + Technical (25) + Quality (25) + Analyst (25)',
       },
       cell: (i) =>
@@ -210,8 +210,7 @@ export function watchlistColumns(deps: {
       tone: (i) => colorClass(i.pct_from_52w_high),
       cellClassName: 'font-medium',
       hint: {
-        description:
-          'How far the current price is below the 52-week high. More negative = bigger drawdown from peak.',
+        description: 'Distance below 52-week high',
         formula: '(Price − 52w High) ÷ 52w High × 100',
       },
       cell: (i) => formatPercent(i.pct_from_52w_high),
@@ -223,8 +222,7 @@ export function watchlistColumns(deps: {
       sortKey: 'analyst_rating',
       mobile: 'badge',
       hint: {
-        description:
-          'Analyst consensus rating and mean price target upside. Source: Yahoo Finance.',
+        description: 'Analyst rating and target upside',
       },
       cell: (i) => {
         const upside = analystUpside(i)
@@ -255,8 +253,7 @@ export function watchlistColumns(deps: {
       tone: (i) => rsiColorClass(i.rsi14),
       cellClassName: 'font-medium',
       hint: {
-        description:
-          'Relative Strength Index (14-day). Below 30 = oversold, above 70 = overbought.',
+        description: 'RSI, 14-day',
         formula: 'Wilder RSI on 1-year daily closes',
       },
       cell: (i) => num(i.rsi14),
@@ -269,8 +266,7 @@ export function watchlistColumns(deps: {
       tone: (i) => colorClass(i.pct_from_ma200),
       cellClassName: 'font-medium',
       hint: {
-        description:
-          'Distance from the 200-day moving average. Below 0% = bearish trend, above = uptrend.',
+        description: 'Distance from 200-day MA',
         formula: '(Price − MA200) ÷ MA200 × 100',
       },
       cell: (i) => formatPercent(i.pct_from_ma200),
@@ -281,8 +277,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'PEG',
       sortKey: 'peg_ratio',
       hint: {
-        description:
-          'Forward P/E divided by forward EPS growth rate. A PEG below 1 suggests the stock may be undervalued relative to its expected earnings growth.',
+        description: 'P/E over EPS growth',
         formula: 'P/E ÷ Fwd EPS Growth %',
       },
       cell: (i) => {
@@ -310,8 +305,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'Fwd P/E',
       sortKey: 'forward_pe',
       hint: {
-        description:
-          'Price divided by next-12-month analyst consensus EPS. Lower than trailing P/E = earnings expected to grow.',
+        description: 'Forward P/E',
         formula: 'Price ÷ Next-12M EPS estimate',
       },
       cell: (i) => num(i.forward_pe),
@@ -322,7 +316,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'P/E',
       sortKey: 'trailing_pe',
       hint: {
-        description: 'Price divided by earnings per share over the last 12 months.',
+        description: 'Trailing P/E',
         formula: 'Price ÷ TTM EPS',
       },
       cell: (i) => num(i.trailing_pe),
@@ -333,8 +327,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'EV/EBITDA',
       sortKey: 'ev_to_ebitda',
       hint: {
-        description:
-          'Enterprise value relative to EBITDA. Below 10 = cheap, above 20 = expensive.',
+        description: 'EV / EBITDA',
         formula: 'Enterprise Value ÷ TTM EBITDA',
       },
       cell: (i) => num(i.ev_to_ebitda),
@@ -346,8 +339,7 @@ export function watchlistColumns(deps: {
       sortKey: 'revenue_growth',
       tone: (i) => colorClass(i.revenue_growth != null ? i.revenue_growth * 100 : null, true),
       hint: {
-        description:
-          'TTM revenue growth vs prior TTM (8+ quarters). Falls back to same-quarter YoY (5–7 quarters), then Yahoo Finance .info.',
+        description: 'TTM revenue growth',
         formula: 'sum(Q1–4) ÷ sum(Q5–8) − 1, or Q[0] ÷ Q[4] − 1',
       },
       cell: (i) => pct(i.revenue_growth),
@@ -359,8 +351,7 @@ export function watchlistColumns(deps: {
       sortKey: 'earnings_growth',
       tone: (i) => colorClass(i.earnings_growth != null ? i.earnings_growth * 100 : null, true),
       hint: {
-        description:
-          "TTM EPS/Net Income growth vs prior TTM (8+ quarters). Falls back to same-quarter YoY (5–7 quarters), then Yahoo Finance .info. Note: PEG uses Yahoo's separate 5-year analyst estimate, not this figure.",
+        description: 'TTM EPS growth',
         formula: 'sum(Q1–4) ÷ sum(Q5–8) − 1, or Q[0] ÷ Q[4] − 1',
       },
       cell: (i) => pct(i.earnings_growth),
@@ -373,7 +364,7 @@ export function watchlistColumns(deps: {
       tone: (i) =>
         colorClass(i.fwd_revenue_growth != null ? i.fwd_revenue_growth * 100 : null, true),
       hint: {
-        description: 'Analyst consensus revenue growth estimate for next 12 months.',
+        description: 'Next-12M revenue growth est.',
         formula: "revenue_estimate['+1y']['growth']",
       },
       cell: (i) => pct(i.fwd_revenue_growth),
@@ -385,7 +376,7 @@ export function watchlistColumns(deps: {
       sortKey: 'fwd_eps_growth',
       tone: (i) => colorClass(i.fwd_eps_growth != null ? i.fwd_eps_growth * 100 : null, true),
       hint: {
-        description: 'Analyst consensus EPS growth estimate for next 12 months.',
+        description: 'Next-12M EPS growth est.',
         formula: "growth_estimates['+1y']['stockTrend']",
       },
       cell: (i) => pct(i.fwd_eps_growth),
@@ -396,7 +387,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'Margin',
       sortKey: 'profit_margins',
       hint: {
-        description: 'Net income as a percentage of revenue over the trailing 12 months.',
+        description: 'TTM net margin',
         formula: 'Net Income ÷ Revenue (TTM)',
       },
       cell: (i) => pct(i.profit_margins),
@@ -408,8 +399,7 @@ export function watchlistColumns(deps: {
       // Not sortable, as before — and its definition used to be `onMouseEnter`-only on
       // a non-focusable <th>, so it was unreachable by keyboard as well as by touch.
       hint: {
-        description:
-          'Total market value of all outstanding shares. Displayed in native currency.',
+        description: 'Market cap, native currency',
         formula: 'Share Price × Shares Outstanding',
       },
       cellClassName: 'text-muted-foreground',

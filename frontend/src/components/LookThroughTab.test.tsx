@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LookThroughTab } from './LookThroughTab'
+import { LookThroughTab, unresolvedTone } from './LookThroughTab'
 import { CurrencyProvider } from '@/lib/CurrencyContext'
 import { api } from '@/lib/api'
 import type { LookthroughResponse } from '@/lib/api'
@@ -148,11 +148,11 @@ describe('LookThroughTab', () => {
     // The collapsed header counts the notes, so their existence is visible before their text.
     const header = screen.getByRole('button', { name: /Fund coverage/ })
     expect(header.getAttribute('aria-expanded')).toBe('false')
-    expect(header.textContent).toMatch(/1 note on this view/)
+    expect(header.textContent).toMatch(/1 warning/)
 
     await openFundCoverage()
     expect(header.getAttribute('aria-expanded')).toBe('true')
-    const notes = screen.getByText('Notes on this view').parentElement!
+    const notes = screen.getByRole('list', { name: 'Warnings' })
     expect(notes.textContent).toContain('VWCE')
     expect(notes.textContent).toContain('28.8%')
   })
@@ -260,14 +260,39 @@ describe('LookThroughTab', () => {
     expect(screen.queryByText(/folded on an ISIN alone/)).toBeNull()
   })
 
-  it('states the value attributed to no company at all', async () => {
+  it('carries the fund table as figures, without the prose beneath it (owner, 2026-10-14)', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
     await openFundCoverage()
-    expect(screen.getByText(/Not attributed to any company/)).toBeTruthy()
-    // The fund with no basket is named with its reason rather than omitted.
+    // The fund with no basket is still named, by its status.
     expect(screen.getByText('No basket')).toBeTruthy()
+    // Its reason sentence and the not-attributed paragraph are gone; that figure is the
+    // composition bar's third segment.
+    expect(screen.queryByText(/No machine-readable holdings file/)).toBeNull()
+    expect(screen.queryByText(/Not attributed to any company/)).toBeNull()
+  })
+
+  it('draws a stale basket date amber, with no dagger beside it', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        funds: [
+          {
+            symbol: 'VWCE', fund_isin: 'IE00BK5BQT80', market_value_eur: 6510,
+            status: 'looked_through', reason: null, basket_as_of: '2026-03-31', stale: true,
+            constituents: 3500, equity_weight_pct: 99, residual_eur: 60,
+            asset_class_available: false, source: 'manual',
+            proxy_for_symbol: null, unweighted_constituents: 0,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await openFundCoverage()
+    const date = screen.getByText('2026-03-31')
+    expect(date.className).toContain('text-amber-600')
+    expect(date.textContent).toBe('2026-03-31')
   })
 
   it('reports a failed fetch as a failure instead of an empty portfolio', async () => {
@@ -373,6 +398,39 @@ describe('LookThroughTab coverage tone', () => {
    * ceiling is ~95.1-95.9%. The card would have sat amber forever — the always-present-banner
    * pathology. These pin the reachable rule instead, from both sides.
    */
+  function unresolvedCard() {
+    return screen.getByText('Unresolved').closest('div')?.parentElement as HTMLElement
+  }
+
+  it('keeps Unresolved neutral below 1% of the book — the normal handful of ISINs', async () => {
+    // 15 of 5,200 is about 0.3%, the share this account actually carries: amber at any value
+    // above zero was amber always.
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({ identity: { ...response().identity, unresolved_value_eur: 15 } }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Unresolved')
+    expect(unresolvedCard().querySelector('.text-yellow-600')).toBeNull()
+  })
+
+  it('turns Unresolved amber at 1% of the book or more', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({ identity: { ...response().identity, unresolved_value_eur: 52 } }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Unresolved')
+    expect(unresolvedCard().querySelector('.text-yellow-600')).toBeTruthy()
+  })
+
+  it('decides the Unresolved tone on the share of the book', () => {
+    expect(unresolvedTone(0, 5200)).toBe('neutral')
+    expect(unresolvedTone(51.99, 5200)).toBe('neutral')
+    expect(unresolvedTone(52, 5200)).toBe('warning')
+    expect(unresolvedTone(10, 0)).toBe('neutral')
+  })
+
   function coverageCard() {
     const label = screen.getByText('Coverage')
     // KpiCard renders label and value as siblings inside the card body.

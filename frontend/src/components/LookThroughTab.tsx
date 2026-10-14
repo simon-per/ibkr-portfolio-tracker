@@ -11,6 +11,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
+import { formatCount } from '@/lib/utils'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -48,11 +49,17 @@ const LIMITS = [25, 50, 100] as const
 type LimitOption = (typeof LIMITS)[number]
 
 /**
- * Thousands separators, pinned to `en-US` exactly as `formatCurrency` and `formatPercent` are.
- * A bare `toLocaleString()` renders 8,007 as "8.007" under a German runtime, so the separator
- * would follow whoever is looking rather than the rest of the page.
+ * The share of the book, in percent, at which identity-unresolved value turns the Unresolved
+ * card amber. A handful of ISINs no provider resolves is the normal state (about 0.3% of the
+ * book), and a card amber at any value above zero was amber always — the always-present
+ * warning that teaches the reader to skip it. Below this it is a neutral figure.
  */
-const GROUPED = new Intl.NumberFormat('en-US')
+export const UNRESOLVED_WARN_PCT = 1
+
+export function unresolvedTone(unresolvedValue: number, totalValue: number): 'warning' | 'neutral' {
+  if (!(unresolvedValue > 0) || !(totalValue > 0)) return 'neutral'
+  return (unresolvedValue / totalValue) * 100 >= UNRESOLVED_WARN_PCT ? 'warning' : 'neutral'
+}
 
 /** How a fund's status reads, and whether it counts against coverage. */
 const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
@@ -62,12 +69,12 @@ const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
   implausible: 'Basket rejected',
 }
 
-/** What each identity tier means, shown as the row's badge title rather than a bare code. */
+/** The identifier's full name, as the badge's title. */
 const KEY_TYPE_TITLE: Record<LookthroughCompanyRow['key_type'], string> = {
-  lei: 'Folded on the issuer’s LEI, so different share classes are combined',
-  share_class_figi: 'Folded on the share-class FIGI, so listings on several venues are combined',
-  isin: 'Folded on the ISIN alone — no LEI or share-class FIGI is on record yet',
-  unidentified: 'No identifier at all, so this row cannot be combined with anything',
+  lei: 'Issuer LEI',
+  share_class_figi: 'Share-class FIGI',
+  isin: 'ISIN',
+  unidentified: 'No identifier',
 }
 
 /** The company columns, described once for both renderings. */
@@ -90,10 +97,7 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Held as',
       mobile: 'meta',
       cellClassName: 'text-muted-foreground text-xs max-w-[200px] truncate',
-      hint: {
-        description:
-          'The directly-held listings folded into this row. Empty when the exposure comes only through funds.',
-      },
+      hint: { description: 'Directly-held listings' },
       cell: (row) => (row.listings.length ? row.listings.join(', ') : null),
     },
     {
@@ -110,10 +114,7 @@ export function lookthroughColumns(deps: {
       shortHeader: '% of portfolio',
       align: 'right',
       mobile: 'delta',
-      hint: {
-        description:
-          'Share of the whole portfolio, including the funds that could not be decomposed. Never rescaled onto the covered part, so these figures are understatements while coverage is below 100%.',
-      },
+      hint: { description: 'Share of the whole portfolio' },
       cell: (row) => `${row.pct_of_portfolio.toFixed(2)}%`,
     },
     {
@@ -121,7 +122,7 @@ export function lookthroughColumns(deps: {
       header: 'Direct',
       shortHeader: 'Direct',
       align: 'right',
-      hint: { description: 'Held as a position in this company itself.' },
+      hint: { description: 'Held directly' },
       cell: (row) => (row.direct_value_eur > 0 ? formatCurrency(row.direct_value_eur) : '—'),
     },
     {
@@ -129,7 +130,7 @@ export function lookthroughColumns(deps: {
       header: 'Via funds',
       shortHeader: 'Via funds',
       align: 'right',
-      hint: { description: 'Held indirectly, through the funds listed in the drill-down.' },
+      hint: { description: 'Held through funds' },
       cell: (row) =>
         row.via_funds_value_eur > 0 ? formatCurrency(row.via_funds_value_eur) : '—',
     },
@@ -138,7 +139,7 @@ export function lookthroughColumns(deps: {
       header: 'Funds',
       shortHeader: 'Funds',
       align: 'right',
-      hint: { description: 'How many held funds contribute to this company.' },
+      hint: { description: 'Funds holding it' },
       cell: (row) => (row.via_funds.length ? String(row.via_funds.length) : '—'),
     },
     {
@@ -147,10 +148,7 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Identity',
       align: 'right',
       mobile: 'badge',
-      hint: {
-        description:
-          'Which identifier folded this row. A dagger means at least one holding carried only an ISIN, so a sibling listing under a different ISIN would not have joined.',
-      },
+      hint: { description: 'Identifier that folded this row' },
       cell: (row) => (
         <span
           className="text-xs text-muted-foreground"
@@ -218,15 +216,11 @@ function fundColumns(deps: {
       header: 'Basket as of',
       shortHeader: 'Basket as of',
       align: 'right',
-      hint: {
-        description:
-          "The issuer's own as-of date where it publishes one. Vanguard publishes monthly and lags several weeks, which is normal rather than a fault.",
-      },
+      hint: { description: "Issuer's basket date" },
       cell: (row) =>
         row.basket_as_of ? (
           <span className={row.stale ? 'text-amber-600 dark:text-amber-400' : undefined}>
             {row.basket_as_of}
-            {row.stale ? ' †' : ''}
           </span>
         ) : (
           '—'
@@ -244,15 +238,11 @@ function fundColumns(deps: {
       header: 'Equity weight',
       shortHeader: 'Equity weight',
       align: 'right',
-      hint: {
-        description:
-          "How much of the fund the stored basket attributes to securities. Genuinely below 100% for real funds: their files carry cash, FX and futures rows, and a broad fund also loses weight to rounding — Vanguard publishes weights to 2dp, so thousands of VT's smallest holdings round to zero.",
-      },
+      hint: { description: 'Basket weight in securities' },
       // The count of zero-weight rows sits HERE rather than beside `constituents`, because it
-      // is the explanation for this number and not for that one: a broad fund's shortfall is
-      // its rounded-away tail, not cash. Table view only — the phone card renders a detail
-      // into `shrink-0 tabular-nums`, which is what pushed this page 1,282px sideways once;
-      // the column hint carries the same explanation on both viewports.
+      // belongs to this number and not to that one: a broad fund's shortfall is its
+      // rounded-away tail, not cash. Table view only — the phone card renders a detail into
+      // `shrink-0 tabular-nums`, which is what pushed this page 1,282px sideways once.
       cell: (row, view) => {
         if (row.equity_weight_pct === null) return '—'
         const pct = `${row.equity_weight_pct.toFixed(2)}%`
@@ -261,40 +251,13 @@ function fundColumns(deps: {
           <span className="inline-flex flex-col items-end">
             <span>{pct}</span>
             <span className="text-xs font-normal text-muted-foreground">
-              {GROUPED.format(row.unweighted_constituents)} rows at 0%
+              {formatCount(row.unweighted_constituents)} rows at 0%
             </span>
           </span>
         )
       },
     },
   ]
-}
-
-/**
- * Why each undecomposed fund is undecomposed, as prose.
- *
- * Deliberately NOT a column. `DataTable`'s phone card renders every detail into
- * `<dd class="shrink-0 tabular-nums">` — exactly right for a figure and exactly wrong for a
- * sentence, because `shrink-0` forces the element's intrinsic width. A `reason` column pushed
- * the page 1,282px sideways at 390px, which `e2e/mobile.mjs` caught and no unit test could:
- * jsdom loads no CSS, so overflow is invisible to it.
- *
- * Prose in prose also reads better on both viewports, and it must stay visible on the phone —
- * this is the explanation for a fifth of the portfolio being absent from the table above.
- */
-function FundReasons({ funds }: { funds: LookthroughFundCoverage[] }) {
-  const missing = funds.filter((f) => f.status !== 'looked_through' && f.reason)
-  if (missing.length === 0) return null
-  return (
-    <dl className="space-y-1.5 text-xs">
-      {missing.map((fund) => (
-        <div key={fund.fund_isin} className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
-          <dt className="font-medium sm:shrink-0">{fund.symbol ?? fund.fund_isin}</dt>
-          <dd className="text-muted-foreground">{fund.reason}</dd>
-        </div>
-      ))}
-    </dl>
-  )
 }
 
 /**
@@ -442,7 +405,7 @@ export function LookThroughTab() {
       .map(([n, what]) => `${n} ${what}`)
       .join(', '),
     data && data.warnings.length > 0
-      ? `${data.warnings.length} note${data.warnings.length === 1 ? '' : 's'} on this view`
+      ? `${data.warnings.length} warning${data.warnings.length === 1 ? '' : 's'}`
       : null,
   ]
     .filter((s) => s)
@@ -541,7 +504,10 @@ export function LookThroughTab() {
             <KpiCard
               label="Unresolved"
               value={data.identity.unresolved_isins}
-              tone={data.identity.unresolved_value_eur > 0 ? 'warning' : 'neutral'}
+              tone={unresolvedTone(
+                data.identity.unresolved_value_eur,
+                data.total_market_value_eur,
+              )}
               sub={
                 data.identity.unresolved_value_eur > 0
                   ? `${formatCurrency(data.identity.unresolved_value_eur)} not folded by an identifier`
@@ -656,15 +622,18 @@ export function LookThroughTab() {
               />
               {coverageOpen && (
                 <CardContent id="lookthrough-fund-coverage" className="space-y-3">
+                  {/* The backend's warnings[] name problems present now (a stale or borrowed
+                      basket, a fund with none); they stay, without a heading framing them as
+                      notes. The not-attributed figure is the composition bar's third segment. */}
                   {data.warnings.length > 0 && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                      <p className="font-medium">Notes on this view</p>
-                      <ul className="mt-2 list-disc space-y-1 pl-5">
-                        {data.warnings.map((warning) => (
-                          <li key={warning}>{warning}</li>
-                        ))}
-                      </ul>
-                    </div>
+                    <ul
+                      aria-label="Warnings"
+                      className="list-disc space-y-1 rounded-md border border-amber-300 bg-amber-50 py-3 pl-8 pr-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                    >
+                      {data.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
                   )}
                   {data.funds.length > 0 && (
                     <>
@@ -675,23 +644,6 @@ export function LookThroughTab() {
                         label="Fund coverage"
                         detailLimit={4}
                       />
-                      <FundReasons funds={data.funds} />
-                      <p className="text-xs text-muted-foreground">
-                        Not attributed to any company:{' '}
-                        {formatCurrency(
-                          data.uncovered_fund_eur +
-                            data.fund_residual_eur +
-                            data.nested_fund_eur,
-                        )}{' '}
-                        — {formatCurrency(data.uncovered_fund_eur)} in funds with no usable
-                        basket, and {formatCurrency(data.fund_residual_eur)} left over inside
-                        the funds that were decomposed: cash, derivatives, and weight lost to
-                        rounding in the issuer's own file
-                        {data.nested_fund_eur > 0
-                          ? `, plus ${formatCurrency(data.nested_fund_eur)} in funds held inside those funds`
-                          : ''}
-                        .
-                      </p>
                       {data.oldest_basket_as_of && (
                         <p className="text-xs text-muted-foreground">
                           Oldest basket on record: {data.oldest_basket_as_of}.

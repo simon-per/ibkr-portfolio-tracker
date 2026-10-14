@@ -112,7 +112,7 @@ export function PortfolioSummaryCards({
               pct={periodChangePct}
               flatBand={0}
               label={periodLabel ? `over ${periodLabel}` : undefined}
-              title="Change in total holdings value over the selected chart range. Includes money added — see Period Gain for the return."
+              title="Holdings value change, incl. money added"
             />
           </div>
         ) : undefined}

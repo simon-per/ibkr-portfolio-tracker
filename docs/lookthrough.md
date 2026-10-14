@@ -102,7 +102,11 @@ base-currency projection is inherited and the total **cannot disagree with
   staleness sentences directly under the KPI row pushed the company table below the fold, which
   is the always-present-banner pathology from the other direction. The Coverage footnote names
   every condition present rather than only the most severe, and the collapsed header counts the
-  notes, so what is hidden is their text and never their existence.
+  warnings, so what is hidden is their text and never their existence. Since 2026-10-14 (figures,
+  not explanations) the card holds the warnings and the fund table only: the per-fund `reason`
+  sentences and the not-attributed paragraph are no longer rendered (the status column names the
+  gap; the composition bar carries the not-attributed figure), and a stale basket date is amber
+  with no `†`.
 - **Equity asset classes are a whitelist**, never a blacklist — the reasoning behind
   `get_deposits()` selecting `DEPOSITWITHDRAW` by name. A blacklist admits the next label an
   issuer invents (`Rights`, `Warrant`, `Preferred`) as a company.
@@ -341,7 +345,10 @@ Flex is refusing. Four rules carry it, and each is wrong the other way round:
   own. That was the first draft's bug, and the test is what found it.
 
 Identities still have no detector of their own; the bounded evening pass converges them and
-`unresolved_value_eur` shows what is left.
+`unresolved_value_eur` shows what is left. **The tab's *Unresolved* card turns amber only at
+`UNRESOLVED_WARN_PCT` (1%) of the book** (`unresolvedTone`, 2026-10-14): a handful of ISINs no
+provider resolves is the normal state — about 0.3% here — and amber at any value above zero was
+amber always, the warning that teaches the reader to skip it.
 
 **`as_of_date` is the issuer's own where it publishes one, and the fetch date where it does not** —
 and one issuer publishes a date that is *worse* than none. Xtrackers publishes nothing at all: not
