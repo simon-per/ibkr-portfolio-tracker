@@ -1704,7 +1704,8 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
 - **2026-10-14 (test speed)** — "make the suite quicker": the backend now runs under
   `pytest-xdist` (`-n auto --dist worksteal`, in CI and the documented command). Locally 5:35 →
-  ~1 min; CI's pytest step was 58 s serial. One of ten local parallel runs, during heavy
+  ~1 min; on CI only 58 s → 50 s (4 workers, each test ~3.5× slower in parallel there — not
+  diagnosed; ~10 s of it is collection). One of ten local parallel runs, during heavy
   background load, failed two tests that never reproduced (nine clean runs, including `-n 32`);
   output not captured. If it recurs, suspect the 60 s subprocess guards in the deploy-script tests.
 
