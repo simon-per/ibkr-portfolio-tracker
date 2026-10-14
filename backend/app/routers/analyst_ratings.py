@@ -7,6 +7,7 @@ from app.clock import utcnow
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.repositories.sync_run_repository import utc_iso
 from app.services.analyst_rating_service import AnalystRatingService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 
@@ -62,11 +63,11 @@ async def sync_analyst_ratings(db: AsyncSession = Depends(get_db)):
 @router.post("/sync-stale")
 async def sync_stale_analyst_ratings(db: AsyncSession = Depends(get_db)):
     """
-    Sync only analyst ratings that are stale (older than 3 days).
+    Sync only analyst ratings that are stale (older than 3 days) or missing.
 
-    This endpoint is designed for automated twice-weekly syncs.
-    It only fetches ratings that haven't been updated recently,
-    reducing API calls and respecting rate limits.
+    The scheduler runs the same pass weekly (`fundamentals_refresh`). It only fetches
+    ratings that haven't been updated recently, reducing API calls and respecting rate
+    limits.
 
     Returns:
         Summary of synced data
@@ -129,8 +130,8 @@ async def get_analyst_ratings_status(db: AsyncSession = Depends(get_db)):
         "total_ratings": total_ratings,
         "stale_ratings": stale_ratings,
         "fresh_ratings": total_ratings - stale_ratings,
-        "oldest_update": str(oldest_update) if oldest_update else None,
-        "newest_update": str(newest_update) if newest_update else None,
+        "oldest_update": utc_iso(oldest_update),
+        "newest_update": utc_iso(newest_update),
     }
 
 
@@ -163,5 +164,5 @@ async def get_analyst_rating(security_id: int, db: AsyncSession = Depends(get_db
         "strong_sell": rating.strong_sell,
         "total_ratings": rating.total_ratings,
         "consensus": rating.consensus,
-        "last_updated": str(rating.last_updated),
+        "last_updated": utc_iso(rating.last_updated),
     }

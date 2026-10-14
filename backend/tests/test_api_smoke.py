@@ -769,3 +769,25 @@ def test_no_analyst_coverage_reads_as_absent_on_the_positions_table(client):
     positions = {p["security_id"]: p for p in client.get("/api/portfolio/positions").json()}
     assert positions[1]["analyst_rating"] is None
     assert positions[4]["analyst_rating"]["consensus"] == "Buy"
+
+
+def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client):
+    """
+    The tab sorts market caps on `market_cap_base` — the raw figures are each in their
+    listing's own currency — and prints `last_updated` as its as-of line, so both have
+    to arrive in a form the browser cannot misread.
+    """
+    rows = {r["security_id"]: r for r in client.get("/api/fundamentals/portfolio").json()}
+    # USD -> EUR (0.9) -> CHF (0.94), from cached rates only.
+    assert rows[3]["market_cap_base"] == int(3_000_000_000_000 * 0.9 * 0.94)
+    assert rows[1]["market_cap_base"] == int(250_000_000_000 * 0.94)
+    # No cached TWD rate: absent, never the unconverted figure.
+    assert rows[4]["market_cap_base"] is None
+    assert rows[2]["market_cap_base"] is None and rows[2]["last_updated"] is None
+    assert rows[3]["last_updated"].endswith("+00:00")
+
+    status = client.get("/api/fundamentals/status").json()
+    assert status["newest_update"].endswith("+00:00")
+    ratings = client.get("/api/analyst-ratings/status").json()
+    assert ratings["newest_update"].endswith("+00:00")
+    assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
 from app.repositories.fundamentals_repository import FundamentalsRepository
+from app.repositories.sync_run_repository import utc_iso
 from app.services.fundamentals_service import FundamentalsService
 from app.single_flight import (
     SYNC_PIPELINE,
@@ -153,6 +154,9 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
         "securities_without_data": total_securities - total_metrics,
         "stale_metrics": stale_metrics,
         "total_earnings_events": total_earnings,
-        "oldest_update": str(oldest_update) if oldest_update else None,
-        "newest_update": str(newest_update) if newest_update else None,
+        # Through `utc_iso`: these are naive UTC, and the tab compares `newest_update`
+        # against the browser's clock to see a background sync finish. `str()` was read
+        # as local time — two hours early in Berlin — so a finished sync went unseen.
+        "oldest_update": utc_iso(oldest_update),
+        "newest_update": utc_iso(newest_update),
     }
