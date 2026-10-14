@@ -57,8 +57,9 @@ of creating an empty file. They were the mitigation; the fix is the directory mo
 directory** (`./data:/app/data`), so the `-wal`/`-shm` sidecars land on the host beside it and a
 killed container loses nothing. `docker-compose.yml` sets `DATABASE_URL:
 sqlite+aiosqlite:////app/data/portfolio.db` in `environment:`, which overrides `env_file:` — the
-host `.env` may still say `./portfolio.db` and it no longer matters (tidy it anyway; STATUS.md
-has the VPS steps). Local development is unchanged: `config.py`'s default is still
+host `.env` may still say `./portfolio.db` and it no longer matters (tidy it anyway: set
+`DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db` in the VPS's `backend/.env`, so the
+file says what the container uses). Local development is unchanged: `config.py`'s default is still
 `./portfolio.db`.
 
 The move happens inside an unattended deploy, so it is built around the one outcome that must
