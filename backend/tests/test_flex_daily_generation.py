@@ -519,9 +519,9 @@ async def test_a_narrow_window_keeps_the_threshold_it_had(db):
 @pytest.mark.asyncio
 async def test_the_floor_stops_a_one_day_window_warning_every_weekend(db):
     """
-    IBKR issues nothing Saturday or Sunday, so a Friday success is two ET days old by
-    Sunday through no fault of anything. `max(floor, N-1)` is what keeps a pathologically
-    narrow period off a hair trigger.
+    At a threshold of 1, one failed day would warn. `max(floor, N-1)` is what keeps a
+    pathologically narrow period off a hair trigger. (The ordinary weekend is handled by
+    counting from the oldest unfetched trading day — tests/test_flex_no_new_trading_day.py.)
     """
     await _run(db, "full_sync", "success", NOW - timedelta(days=1), details=_span(1))
 

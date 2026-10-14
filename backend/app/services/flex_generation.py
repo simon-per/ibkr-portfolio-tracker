@@ -106,6 +106,62 @@ def next_generation_opens_at(as_of: Optional[datetime] = None) -> datetime:
     return end
 
 
+# ── Which ET days a generation can bring anything new ─────────────────────────
+#
+# The window ends at the last completed *trading* day before the generation day (a
+# Monday 2026-08-24 statement came back `toDate=20260821`, a Friday). So an ET Sunday or
+# ET Monday generation reaches the same Friday that Saturday's did, and holds no new
+# trading day. They were also where the failures were: 2026-08-08 → 10-14, by ET weekday,
+# Sunday and Monday held ~90% of every failed scheduled generation — each one counted by
+# `Code=1025` — while Tuesday to Saturday at 12:00 ET went 42 for 43. Whatever a late
+# booking adds to a weekend statement, Tuesday's re-delivers: the window is ≥ 30 days.
+#
+# US market holidays are deliberately not modelled: a generation the day after one is
+# still attempted, which is the behaviour this module had before.
+
+
+def is_trading_day(day: date) -> bool:
+    """Monday to Friday. US market holidays are not modelled (see above)."""
+    return day.weekday() < 5
+
+
+def generation_brings_new_trading_day(as_of: Optional[datetime] = None) -> bool:
+    """
+    Whether a statement generated in `as_of`'s ET day would reach a trading day the
+    previous ET day's statement could not — i.e. whether the ET day before it traded.
+
+    False on ET Sunday and ET Monday. The one rule every scheduled IBKR path consults
+    before asking; the manual endpoint does not, because pressing Sync is the owner's call.
+    Note 00:00 Berlin is 18:00 ET of the *previous* ET day, so the Tuesday 00:00 Berlin
+    slot is a Monday ET attempt and is skipped too — this keys on ET, never on Berlin.
+    """
+    day = et_date(as_of or utcnow())
+    return is_trading_day(day - timedelta(days=1))
+
+
+def next_new_trading_day_generation_opens_at(as_of: Optional[datetime] = None) -> datetime:
+    """The next midnight ET from which `generation_brings_new_trading_day` holds, as naive UTC."""
+    opens = next_generation_opens_at(as_of)
+    while not generation_brings_new_trading_day(opens):
+        opens = next_generation_opens_at(opens)
+    return opens
+
+
+def oldest_uncovered_trading_day(generated_on: date) -> date:
+    """
+    The first trading day a statement generated on ET day `generated_on` does not cover.
+
+    The statement reaches the last trading day *before* `generated_on`, so this is
+    `generated_on` itself when that is a trading day, and the following Monday when it
+    was a Saturday or Sunday. It is the day whose trades are first at risk if no later
+    statement lands — what the gap alarm counts from.
+    """
+    day = generated_on
+    while not is_trading_day(day):
+        day += timedelta(days=1)
+    return day
+
+
 async def last_generation_today(
     db: AsyncSession, as_of: Optional[datetime] = None
 ) -> Optional[datetime]:
