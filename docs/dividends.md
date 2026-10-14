@@ -109,8 +109,8 @@ served that exact shape once, as `next_12m_vs_ttm_pct: -100.0`.
 null for a window that is entirely projection — stamping the estimate's provenance there would claim
 income arrived from a guess. `mom_crosses_era` flags a comparison whose two windows jointly contain
 both sources. The latest point's amount, window and change are shown directly, with `incl. … projected`
-on the amount itself rather than only `est.` on the chip; the caveats sit on the surface beside the
-chart, not in a tooltip.
+on the amount itself rather than only `est.` on the chip. `source` and `mom_crosses_era` are no longer
+rendered (owner, 2026-10-14: no provenance notes on screen).
 
 **One identity ties the new series to the old figures**: a window ending in December *is* that
 calendar year, so it must equal `growth.annual[year].total_eur` to the cent. The two are accumulated
@@ -448,8 +448,7 @@ the history would look special and read every winter-starting fund low, so it st
 
 **Each projected payment says how it was sized:** `upcoming[].amount_source` and the row's
 `forecast_method` — `announced` | `latest_payment` | `same_payment_last_year` | `estimate` (Yahoo has
-recorded it, unpaid). The table shows it under the amount (*latest* / *as last yr* / *declared*), with
-the withholding beside it, on the surface.
+recorded it, unpaid). The table no longer shows it (owner, 2026-10-14); it is served for the record.
 
 **The withholding ladder** (`_withholding_rates`) — one rate per security, IBKR first:
 

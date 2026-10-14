@@ -835,6 +835,9 @@ the legend out inline** (`† part of the period only`), because the footnote th
 not rendered yet; and `cellTitle` names the days the figure actually covers, since on a trimmed figure
 the wrong thing is the label, and "part of the period" alone cannot distinguish a lost day from a lost
 half-year.
+**Superseded on 2026-10-14 by the owner's call to carry figures, not explanations** (CLAUDE.md,
+*Conventions*): the dagger, the inline legend and the footnote are gone; `cellTitle` still names the
+measured days in the cell's tooltip.
 
 **The client acts on it in three places, and the metric ones matter more than the chart.** A pair spanning
 a complete day and an incomplete one manufactures a move that never happened — 64,944 then 0 is **−100%
