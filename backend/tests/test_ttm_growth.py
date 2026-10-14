@@ -9,7 +9,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.services.ttm_growth import ttm_growth_from_quarterly
+from app.services.ttm_growth import (
+    EARNINGS_ROWS,
+    growth_over_base,
+    trailing_growth,
+    ttm_growth_from_quarterly,
+)
 
 
 def frame(rows: dict, n_cols: int | None = None) -> pd.DataFrame:
@@ -81,10 +86,67 @@ def test_a_zero_base_is_undefined_growth_not_infinite_growth():
     assert ttm_growth_from_quarterly(df, ["Diluted EPS"]) is None
 
 
-def test_a_recovery_from_a_loss_reads_as_positive_growth():
-    """abs() on the denominator: -100 → +100 is +200%, not -200%."""
+def test_a_recovery_from_a_loss_has_no_growth_rate():
+    """
+    The base was a loss, so there is no meaningful percentage. It used to divide by
+    ``abs(prior)``: -0.01 to +0.50 EPS read as +5,100%, green and top-scored.
+    """
     df = frame({"Net Income": [25, 25, 25, 25, -25, -25, -25, -25]})
-    assert ttm_growth_from_quarterly(df, ["Net Income"]) == 2.0
+    assert ttm_growth_from_quarterly(df, ["Net Income"]) is None
+
+    tiny_loss = frame({"Diluted EPS": [0.5, 0.0, 0.0, 0.0, -0.01]})
+    assert ttm_growth_from_quarterly(tiny_loss, ["Diluted EPS"]) is None
+
+
+def test_a_loss_widening_or_narrowing_has_no_growth_rate_either():
+    for current in (-50, -10):
+        df = frame({"Net Income": [current] * 4 + [-25] * 4})
+        assert ttm_growth_from_quarterly(df, ["Net Income"]) is None
+
+
+def test_a_profit_turning_into_a_loss_is_still_negative_growth():
+    df = frame({"Net Income": [-5, -5, 0, 0, 25, 25, 25, 25]})
+    assert ttm_growth_from_quarterly(df, ["Net Income"]) == -1.1
+
+
+@pytest.mark.parametrize("current, prior, expected", [
+    (110, 100, 0.1),
+    (90, 100, -0.1),
+    (0.5, -0.01, None),     # loss to profit
+    (-1, -2, None),         # a narrowing loss
+    (5, 0, None),           # from zero
+    (None, 100, None),
+    (100, None, None),
+])
+def test_growth_over_base(current, prior, expected):
+    assert growth_over_base(current, prior) == expected
+
+
+def test_trailing_growth_falls_back_to_info_only_when_the_statements_are_silent():
+    """
+    Too few quarters: the statements cannot answer, so yfinance's own figure stands in.
+    A loss base: the statements *did* answer — the growth is undefined — and Yahoo's
+    figure must not paper over that.
+    """
+    short = frame({"Diluted EPS": [1, 1, 1]})
+    assert trailing_growth(short, EARNINGS_ROWS, 0.42) == 0.42
+    assert trailing_growth(None, EARNINGS_ROWS, 0.42) == 0.42
+    assert trailing_growth(None, EARNINGS_ROWS, float("nan")) is None
+
+    loss_base = frame({"Diluted EPS": [1, 1, 1, 1, -1, -1, -1, -1]})
+    assert trailing_growth(loss_base, EARNINGS_ROWS, 3.5) is None
+
+    usable = frame({"Diluted EPS": [110, 110, 110, 110, 100, 100, 100, 100]})
+    assert trailing_growth(usable, EARNINGS_ROWS, 3.5) == 0.1
+
+
+def test_a_non_positive_base_still_falls_through_to_the_next_candidate():
+    """An EPS that rounds to 0.00 can have a Net Income behind it."""
+    df = frame({
+        "Diluted EPS": [0.01, 0.01, 0.01, 0.01, 0, 0, 0, 0],
+        "Net Income": [110, 110, 110, 110, 100, 100, 100, 100],
+    })
+    assert trailing_growth(df, EARNINGS_ROWS, 9.9) == 0.1
 
 
 def test_candidates_are_a_fallback_chain_not_a_first_match_win():
@@ -133,5 +195,6 @@ def test_both_services_call_the_one_implementation():
 
     assert not hasattr(fundamentals_service.FundamentalsService, "_ttm_growth_from_quarterly")
     assert not hasattr(watchlist_service.WatchlistService, "_ttm_growth_from_quarterly")
-    assert fundamentals_service.ttm_growth_from_quarterly is ttm_growth_from_quarterly
-    assert watchlist_service.ttm_growth_from_quarterly is ttm_growth_from_quarterly
+    assert fundamentals_service.trailing_growth is trailing_growth
+    assert watchlist_service.trailing_growth is trailing_growth
+    assert fundamentals_service.EARNINGS_ROWS is watchlist_service.EARNINGS_ROWS

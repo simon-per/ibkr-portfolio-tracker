@@ -11,9 +11,10 @@ from sqlalchemy import select
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
-from app.services.ttm_growth import ttm_growth_from_quarterly
+from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
+from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, is_fund, read_optional
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -51,31 +52,24 @@ class FundamentalsService:
         return safe_int(value)
 
     async def _fetch_yahoo_data(self, yahoo_ticker: str) -> tuple:
-        """Fetch .info, .earnings_dates, .quarterly_financials, .growth_estimates, and .revenue_estimate in a thread."""
+        """
+        Fetch .info, .earnings_dates and the shared estimate endpoints in a thread.
+
+        Five requests for a company, one for a fund. A rate limit on any of them
+        propagates to the loop, which abandons the pass — see `yahoo_estimates`.
+        """
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info
-            try:
-                earnings = ticker.earnings_dates
-            except Exception as e:
-                logger.warning(f"earnings_dates failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                earnings = None
-            try:
-                quarterly_financials = ticker.quarterly_financials
-            except Exception as e:
-                logger.warning(f"quarterly_financials failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                quarterly_financials = None
-            try:
-                growth_estimates = ticker.growth_estimates
-            except Exception as e:
-                logger.warning(f"growth_estimates failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                growth_estimates = None
-            try:
-                revenue_estimate = ticker.revenue_estimate
-            except Exception as e:
-                logger.warning(f"revenue_estimate failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                revenue_estimate = None
-            return info, earnings, quarterly_financials, growth_estimates, revenue_estimate
+            earnings = (
+                None if is_fund(info)
+                else read_optional(lambda: ticker.earnings_dates, "earnings_dates", yahoo_ticker)
+            )
+            frames = fetch_estimate_frames(ticker, info, yahoo_ticker)
+            return (
+                info, earnings, frames["quarterly_financials"],
+                frames["growth_estimates"], frames["revenue_estimate"],
+            )
 
         return await asyncio.to_thread(_fetch)
 
@@ -86,24 +80,8 @@ class FundamentalsService:
             logger.info(f"No fundamental data available for {security.symbol}")
             return None
 
-        # TTM growth from quarterly financials (always current, no lag)
-        ttm_rev = ttm_growth_from_quarterly(quarterly_financials, ['Total Revenue'])
-        ttm_eps = ttm_growth_from_quarterly(quarterly_financials, ['Diluted EPS', 'Basic EPS', 'Net Income'])
-
-        # Forward estimates from analyst consensus
-        fwd_rev = None
-        try:
-            if revenue_estimate is not None and '+1y' in revenue_estimate.index:
-                fwd_rev = self._safe_float(revenue_estimate.loc['+1y', 'growth'])
-        except Exception:
-            pass
-
-        fwd_eps = None
-        try:
-            if growth_estimates is not None and '+1y' in growth_estimates.index:
-                fwd_eps = self._safe_float(growth_estimates.loc['+1y', 'stockTrend'])
-        except Exception:
-            pass
+        # Forward estimates from analyst consensus — one parser with the watchlist.
+        fwd_rev, fwd_eps = forward_growth(revenue_estimate, growth_estimates, info, security.symbol)
 
         metrics_data = {
             'security_id': security.id,
@@ -112,8 +90,9 @@ class FundamentalsService:
             'peg_ratio': self._safe_float(info.get('pegRatio')),
             'price_to_sales': self._safe_float(info.get('priceToSalesTrailing12Months')),
             'price_to_book': self._safe_float(info.get('priceToBook')),
-            'revenue_growth': ttm_rev if ttm_rev is not None else self._safe_float(info.get('revenueGrowth')),
-            'earnings_growth': ttm_eps if ttm_eps is not None else self._safe_float(info.get('earningsGrowth')),
+            # TTM growth from quarterly financials (always current, no lag), else .info.
+            'revenue_growth': trailing_growth(quarterly_financials, REVENUE_ROWS, info.get('revenueGrowth')),
+            'earnings_growth': trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get('earningsGrowth')),
             'fwd_revenue_growth': fwd_rev,
             'fwd_eps_growth': fwd_eps,
             'profit_margins': self._safe_float(info.get('profitMargins')),
