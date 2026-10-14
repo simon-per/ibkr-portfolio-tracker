@@ -24,7 +24,10 @@ from app.services.flex_generation import (
     et_date,
     flex_window_days,
     generation_already_spent,
+    generation_brings_new_trading_day,
     next_generation_opens_at,
+    next_new_trading_day_generation_opens_at,
+    oldest_uncovered_trading_day,
 )
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
@@ -112,9 +115,10 @@ MANUAL_PRICE_STALE_DAYS = 40
 # With a 30-day window, an outage longer than the window loses those trades permanently
 # and silently — the rows simply never appear in any future statement.
 #
-# Seven days against two IBKR attempts a day (18:00 and 00:00 Berlin) means ~14
-# consecutive failures before it fires, so it cannot cry wolf over a `1025` lockout
-# (~14h) or a bad night.
+# Seven days against two IBKR attempts on each of the five ET days that schedule one
+# (Tuesday to Saturday; Sunday and Monday skip, see `generation_brings_new_trading_day`)
+# means ~10 consecutive failures before it fires, so it cannot cry wolf over a `1025`
+# lockout (~14h) or a bad night. The longest healthy gap is Saturday to Tuesday, ~3 days.
 #
 # **Which of the two alarms fires first depends on the query period, and both orders
 # are correct.** `find_flex_generation_gap` warns at N-1 ET days for an N-day window, so
@@ -137,11 +141,10 @@ IBKR_SYNC_STALE_DAYS = 7
 # hand, since the recovery is a browser download through `app/cli/ingest_flex_xml.py`
 # and needs a human awake.
 #
-# Two is the floor rather than the answer. It is what N=3 produces, and it is also the
-# shortest threshold that cannot fire on an ordinary weekend: IBKR issues no statement
-# Saturday or Sunday, so a Friday success is two ET days old by Sunday through no fault
-# of anything. A threshold of 1 would warn every weekend, which is how a warnings list
-# stops being read.
+# Two is the floor rather than the answer. It is what N=3 produces, and it keeps a
+# pathologically narrow window off a hair trigger: at 1, one failed day would warn. An
+# ordinary weekend no longer needs the floor — the alarm counts from the oldest trading
+# day the last statement missed, so a Saturday success is nothing until Monday's trades.
 FLEX_GENERATION_GAP_WARN_DAYS_FLOOR = 2
 
 # Kept under the old name because `tests/test_flex_daily_generation.py` and
@@ -330,6 +333,11 @@ class SchedulerService:
         `Code=1001` at the SendRequest step, which is a *failed generation*, and failed
         generations are exactly what the `Code=1025` token lockout counts.
 
+        Also `status="skipped"`, `reason="no_new_trading_day"`, on an ET Sunday or ET
+        Monday: those statements hold no trading day Saturday's did not, and were where
+        the failed generations clustered (`flex_generation.generation_brings_new_trading_day`).
+        Every scheduled IBKR path comes through here, so this is the one place it is asked.
+
         `force` exists for the one case the history shows really does allow a second
         generation in a day: editing the query definition in the IBKR portal (07-31).
         Nothing scheduled passes it.
@@ -356,6 +364,26 @@ class SchedulerService:
                         "last_success_at": utc_iso(spent),
                         "next_attempt_after": utc_iso(next_generation_opens_at()),
                         "timestamp": utc_iso(utcnow()),
+                    }
+
+                # ET Sunday and ET Monday statements reach the same Friday Saturday's
+                # did, and were ~90% of all failed generations — see
+                # `generation_brings_new_trading_day`. No request at all.
+                now = utcnow()
+                if not generation_brings_new_trading_day(now):
+                    next_at = next_new_trading_day_generation_opens_at(now)
+                    message = (
+                        f"No new trading day to fetch: a statement generated on an ET "
+                        f"{et_date(now):%A} reaches the same Friday Saturday's did. The next "
+                        f"scheduled generation is from {utc_iso(next_at)}."
+                    )
+                    logger.info(f"IBKR sync skipped: {message}")
+                    return {
+                        "status": "skipped",
+                        "reason": "no_new_trading_day",
+                        "message": message,
+                        "next_attempt_after": utc_iso(next_at),
+                        "timestamp": utc_iso(now),
                     }
 
             try:
@@ -675,6 +703,17 @@ class SchedulerService:
         two missed generations two hours apart, and an hours-based age would call that
         one.
 
+        **Counted from the oldest trading day the last statement does not cover**, not
+        from the day it was generated (`oldest_uncovered_trading_day`). A Saturday,
+        Sunday or Monday statement reaches Friday, so nothing is at risk until Monday's
+        trades — which is what keeps the scheduler's ET Sunday/Monday skip from raising
+        this by itself (a Saturday success read on Tuesday morning is one day old, not
+        three). Calendar days from there, never "generation days": the window is N
+        *calendar* days, so counting only Tue–Sat would warn after the trades were gone.
+        A real outage spanning a weekend still counts every day of it — a Friday success
+        with a failed Saturday is two days old by Sunday, and under a narrow window the
+        skipped Sunday and Monday make that warning the one that matters.
+
         Uses `IBKR_SYNC_TYPES`, so an offline `ibkr_manual_xml` ingest **closes** the
         gap. That is the opposite choice from the guard in `flex_generation.py`, which
         excludes it — deliberately, and the two questions are genuinely different. A
@@ -701,7 +740,8 @@ class SchedulerService:
         if newest is None:
             return []
 
-        missed = (et_date(as_of) - et_date(newest)).days
+        at_risk_from = oldest_uncovered_trading_day(et_date(newest))
+        missed = (et_date(as_of) - at_risk_from).days
 
         window = await flex_window_days(db)
         measured = window is not None
@@ -726,7 +766,8 @@ class SchedulerService:
         )
         return [
             f"IBKR: no statement has been generated for {missed} US-Eastern days (last "
-            f"success {et_date(newest):%Y-%m-%d} ET). The Flex Query {provenance}, so "
+            f"success {et_date(newest):%Y-%m-%d} ET, oldest trading day not yet fetched "
+            f"{at_risk_from:%Y-%m-%d}). The Flex Query {provenance}, so "
             f"{urgency} before those trades become unreachable from every future "
             f"statement — download the statement from Client Portal with a wider period "
             f"and ingest it via app/cli/ingest_flex_xml.py"

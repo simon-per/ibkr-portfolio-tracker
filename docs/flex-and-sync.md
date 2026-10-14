@@ -613,7 +613,52 @@ Two properties of the choice are unchanged and still worth knowing:
 What makes it survivable is that the guard reduces the cost of a doomed attempt to zero, and that
 `find_flex_generation_gap` (below) alarms in time to act. **If both slots start failing on the same
 ET day repeatedly, moving the primary back to 06:00 Berlin — the instant the window rolls — is still
-the fix.** A single failed 12:00 ET is not that signal; it is Sunday's shape too.
+the fix.** A single failed 12:00 ET is not that signal.
+
+### No scheduled generation on ET Sunday or ET Monday (since 2026-10-14)
+
+**Both scheduled IBKR paths skip on an ET Sunday and an ET Monday, without a request.** The
+18:00 Berlin `full_sync`'s IBKR half and the 00:00 Berlin recovery return `status="skipped"`,
+`reason="no_new_trading_day"` — recorded like `already_generated_today`, with
+`next_attempt_after` at Tuesday 00:00 ET. The rest of `full_sync` (FX, the 730-day market data,
+dividends, look-through) runs as on any day. The manual `POST /api/sync/ibkr` does not consult the
+rule — pressing Sync is the owner's call — and `force=True` bypasses it like the daily guard.
+`POST /api/scheduler/trigger` runs `full_sync_job`, so its IBKR half skips on those days too.
+
+The weekday is the **ET weekday of the attempt**, and 00:00 Berlin is 18:00 ET (19:00 in the
+weeks the two DST changes are out of step) of the *previous* ET day: Monday 00:00 Berlin is a
+Sunday attempt, Tuesday 00:00 Berlin a Monday one, and Sunday 00:00 Berlin a Saturday one that
+still runs. The rule is `flex_generation.generation_brings_new_trading_day` — true when the ET day
+before the attempt was a trading day — and `SchedulerService.sync_ibkr_data` is the one place it is
+asked, since every scheduled IBKR path goes through it. It is checked after the
+already-generated guard, so a day with a success reads `already_generated_today` either way.
+
+The measurement, production `sync_runs` 2026-08-08 → 2026-10-14, by the ET weekday of the attempt:
+
+| ET day | 12:00 ET (18:00 Berlin) | 18:00 ET (00:00 Berlin next day) |
+|---|---|---|
+| Sunday | 7× `1001`, 3× success | 5× success, 2× error (no code), 3× skipped |
+| Monday | 8× `1001`, 2× success | 5× success, 3× `1001`, 2× skipped |
+| Tuesday–Saturday | 42× success, 1× `1001` (a Friday), 5× skipped | almost all skipped (`already_generated_today`) |
+
+About 90% of every failed scheduled generation fell on those two ET days, and each one counts
+toward `Code=1025`. **Skipping them costs no data:** the window ends at the last completed trading
+day before the generation day (*Also note the window ends at the last completed trading day*,
+above), so a Sunday or Monday statement reaches the same Friday Saturday's did. Friday's trades
+arrive with Saturday's generation, Monday's with Tuesday's, and anything booked late over the
+weekend is re-delivered by Tuesday's statement while the window is wider than four days — 30 as
+measured.
+
+**What it does cost is margin under a narrow window.** A trade on day T is reachable from T+1…T+N.
+At N=3 a Friday trade used to have Saturday, Sunday and Monday; now it has Saturday's two slots
+only. That is why the gap alarm counts the way it does (below): a Friday success with a failed
+Saturday warns on Sunday morning at N=3, while the manual Sync is still there to recover it. At the
+live 30 it is three or four fewer attempt days out of thirty.
+
+**US market holidays are not handled.** A generation the day after a US holiday is still attempted,
+which is the behaviour from before; `is_trading_day` is Monday to Friday and nothing more.
+Tests: `tests/test_flex_no_new_trading_day.py` (both DST changeovers, zero Flex calls, the market
+half still running, the alarm's counting).
 
 **`find_flex_generation_gap` warns after **N−1** ET days with no successful IBKR sync, where N is
 the window `flex_window_days()` measures off the last statement IBKR served.** It exists because
@@ -633,8 +678,17 @@ now enforced rather than written down: the threshold is derived from the measure
 message **states the window it measured** (`reaches back 30 calendar days`, or
 `window length is unknown, assuming 3` when nothing is on record) so a wrong reading is visible
 instead of inferred. `FLEX_GENERATION_GAP_WARN_DAYS_FLOOR` (2) keeps a pathologically narrow period
-off a hair trigger — IBKR issues nothing at the weekend, so a Friday success is two ET days old by
-Sunday through no fault of anything.
+off a hair trigger.
+
+**It counts from the oldest trading day the last statement does not cover**
+(`oldest_uncovered_trading_day`), not from the day the statement was generated. A Saturday, Sunday
+or Monday statement reaches Friday, so nothing is at risk before Monday's trades: a Saturday
+success read on Tuesday morning is one day old, not three, and the skipped Sunday and Monday never
+raise the alarm by themselves. **The count stays in calendar days** from there — the window is N
+calendar days, so counting only the Tuesday-to-Saturday generation days would put the warning
+after the trades had gone. A real outage spanning a weekend counts every day of it: a Friday
+success is two days old on Sunday, which at N=3 is the warning that matters now that Sunday and
+Monday are not asked.
 
 **`full_sync` runs its 730-day market-data pass whether or not IBKR succeeded, and gating it
 was a silent outage (fixed 2026-08-07).** `_full_sync_job_locked` used to wrap step 3 in
@@ -948,8 +1002,10 @@ the weight:
 
 This is what makes **shortening the Flex Query period** safe. Under Year-to-Date a gap costs only
 freshness, because every statement re-delivers the year; under a bounded window trades that fall out
-of it before a sync succeeds are gone from every future statement. Seven days against three IBKR
-attempts a day is ~21 consecutive failures, so it cannot fire over a `1025` lockout (~14h).
+of it before a sync succeeds are gone from every future statement. Seven days against two IBKR
+attempts on each of the five ET days that schedule one (Sunday and Monday skip) is ~10 consecutive
+failures, so it cannot fire over a `1025` lockout (~14h); the longest healthy gap is Saturday to
+Tuesday, about three days.
 
 `_collect_warnings()` hoists each step's warnings to the top of the job's result, because `_record_run`
 reads `result["warnings"]` and a job's own dict never had that key — so warnings were being buried in
