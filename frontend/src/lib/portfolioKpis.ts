@@ -388,17 +388,30 @@ export function sharpeRatio(series: ValueSeriesPoint[]): number | null {
  * fact elsewhere in this codebase.
  */
 export function sortinoRatio(series: ValueSeriesPoint[]): number | null {
+  return sortinoDetail(series).ratio
+}
+
+/**
+ * Why a Sortino is absent. The two nulls are different answers: too few returns is an
+ * unknown, while no downside is a measured fact about the range — and a card that says
+ * "no down days" over a three-day window is asserting something it never measured.
+ */
+export type SortinoAbsence = 'insufficient_history' | 'no_downside'
+
+export function sortinoDetail(
+  series: ValueSeriesPoint[],
+): { ratio: number | null; absence: SortinoAbsence | null } {
   const returns = dailyReturns(series)
-  if (returns.length < MIN_RETURNS) return null
+  if (returns.length < MIN_RETURNS) return { ratio: null, absence: 'insufficient_history' }
 
   const dailyRiskFree = RISK_FREE_RATE / TRADING_DAYS
   const downside = returns.reduce((s, r) => s + Math.min(0, r - dailyRiskFree) ** 2, 0)
   const annualisedDownside = Math.sqrt(downside / returns.length) * Math.sqrt(TRADING_DAYS)
-  if (annualisedDownside <= 0.001) return null
+  if (annualisedDownside <= 0.001) return { ratio: null, absence: 'no_downside' }
 
   const mean = returns.reduce((s, r) => s + r, 0) / returns.length
   const ratio = (mean * TRADING_DAYS - RISK_FREE_RATE) / annualisedDownside
-  return Math.max(-10, Math.min(10, ratio))
+  return { ratio: Math.max(-10, Math.min(10, ratio)), absence: null }
 }
 
 /**

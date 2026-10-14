@@ -114,6 +114,10 @@ from one dominant one.
   seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
   bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
   so it is latent here and live on any younger account or after a backfill.
+- **Sortino's two nulls are told apart** (`sortinoDetail`, 2026-10-14). Too few returns and no
+  downside deviation both returned `null`, and the card captioned every null *"No down days"* — a
+  claim about the range, made over a window too short to have measured it. Only `no_downside` may
+  say it; too little history reads *"Not enough history in this range"*, like Volatility.
 - **`dailyReturnSeries` exists because `dailyReturns` drops days with nothing to divide by**, so the
   nth return is not the nth calendar point. Indexing the input by return position to name a
   drawdown's peak picks the wrong day.

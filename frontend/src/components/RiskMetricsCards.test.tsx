@@ -16,6 +16,7 @@ afterEach(cleanup)
 const base: RiskMetrics = {
   volatilityPct: 18.4,
   sortino: 1.35,
+  sortinoAbsence: null,
   currentDrawdownPct: -3.21,
   maxDrawdownPct: -12.5,
   troughDate: '2026-04-07',
@@ -73,8 +74,15 @@ describe('RiskMetricsCards', () => {
   })
 
   it('says why Sortino is absent instead of showing a cap', () => {
-    renderWith({ sortino: null })
-    expect(screen.getByText('No down days to measure against')).toBeTruthy()
+    renderWith({ sortino: null, sortinoAbsence: 'no_downside' })
+    expect(screen.getByText('No down days')).toBeTruthy()
+  })
+
+  it('does not claim "no down days" over a window too short to measure', () => {
+    // Both absences are null; only a measured range may say nothing fell.
+    renderWith({ sortino: null, sortinoAbsence: 'insufficient_history', volatilityPct: 18.4 })
+    expect(screen.queryByText('No down days')).toBeNull()
+    expect(screen.getByText('Not enough history in this range')).toBeTruthy()
   })
 
   it('asks for a benchmark when none is selected', () => {

@@ -57,7 +57,7 @@ import {
   maxDrawdownPct,
   periodChange,
   sharpeRatio,
-  sortinoRatio,
+  sortinoDetail,
   winRate,
 } from '@/lib/portfolioKpis'
 import { rangeFor, TIME_RANGES, type TimeRange } from '@/lib/dateRanges'
@@ -325,9 +325,12 @@ export function Dashboard() {
         }
       : null
 
+    const sortino = sortinoDetail(valueOverTime)
+
     return {
       volatilityPct: annualizedVolatilityPct(valueOverTime),
-      sortino: sortinoRatio(valueOverTime),
+      sortino: sortino.ratio,
+      sortinoAbsence: sortino.absence,
       currentDrawdownPct: drawdown.currentDrawdownPct,
       maxDrawdownPct: drawdown.maxDrawdownPct,
       troughDate: drawdown.troughDate,

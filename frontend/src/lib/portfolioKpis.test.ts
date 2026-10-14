@@ -14,6 +14,7 @@ import {
   maxDrawdownPct,
   periodChange,
   sharpeRatio,
+  sortinoDetail,
   sortinoRatio,
   winRate,
 } from './portfolioKpis'
@@ -248,6 +249,15 @@ describe('sortinoRatio', () => {
 
   it('is null below the minimum sample', () => {
     expect(sortinoRatio(compounded([-0.01, -0.01]))).toBeNull()
+  })
+
+  it('tells too little history apart from no downside', () => {
+    // Both are null, but only the second is a measured fact about the range.
+    expect(sortinoDetail(compounded([0.01, 0.01])).absence).toBe('insufficient_history')
+    expect(sortinoDetail(compounded(Array(10).fill(0.01))).absence).toBe('no_downside')
+    const measured = sortinoDetail(compounded([0.06, -0.04, 0.05, -0.03, 0.04, -0.02]))
+    expect(measured.absence).toBeNull()
+    expect(measured.ratio).not.toBeNull()
   })
 })
 
