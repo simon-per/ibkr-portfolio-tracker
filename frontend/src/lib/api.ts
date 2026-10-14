@@ -644,6 +644,8 @@ export interface FundamentalMetrics {
   gross_margins: number | null;
   operating_margins: number | null;
   market_cap: number | null;
+  /** `market_cap` in the base currency, for sorting; null when it cannot be converted. */
+  market_cap_base: number | null;
   number_of_analysts: number | null;
   target_mean_price: number | null;
   target_high_price: number | null;

@@ -246,9 +246,25 @@ PORTFOLIO_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_D
 WATCHLIST_REFRESH_HOUR = 4
 WATCHLIST_REFRESH_DAYS = 'tue-sat'
 
+# ── The fundamentals' slot ────────────────────────────────────────────────────
+#
+# The Fundamentals tab and the analyst ratings refreshed only on a click until
+# 2026-10-14, and had sat untouched since 2026-08-25. Weekly is enough for both:
+# ratios move with prices the tab does not claim to track, and the statements and
+# estimates behind them change a few times a quarter. One pass is roughly six Yahoo
+# requests per company and two per fund (docs/flex-and-sync.md, *Sync schedule*).
+#
+# The watchlist's hour on a day the watchlist does not run, so the two never share a
+# pass and the deploy guard learns no new hour. Sunday: no market has moved since the
+# last pass of the week, and it is the furthest day from every IBKR concern.
+FUNDAMENTALS_REFRESH_HOUR = WATCHLIST_REFRESH_HOUR
+FUNDAMENTALS_REFRESH_DAYS = 'sun'
+
 # Every hour at which anything is registered, and so what the deploy guard is checked
-# against. Not the same thing as PORTFOLIO_SYNC_HOURS since the watchlist slot exists.
-ALL_SYNC_HOURS = tuple(sorted({*PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR}))
+# against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
+ALL_SYNC_HOURS = tuple(sorted({
+    *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
+}))
 
 # The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
 # not by copy**, so the deploy guard — which is checked against ALL_SYNC_HOURS, a
@@ -265,7 +281,7 @@ CRYPTO_SYNC_HOURS = PORTFOLIO_SYNC_HOURS
 # validator counts the jobs — while `/api/crypto/status` reads the crypto group. The
 # upkeep group is the watchlist refresh: it is not a sync of the portfolio, so it is in
 # neither list and never becomes "the last sync" (it is absent from SCHEDULED_JOB_TYPES
-# and never sets `last_sync_result`).
+# and never sets `last_sync_result`). The weekly fundamentals refresh sits there too.
 STOCK_JOB_GROUP = "stock"
 CRYPTO_JOB_GROUP = "crypto"
 UPKEEP_JOB_GROUP = "upkeep"
@@ -1487,6 +1503,70 @@ class SchedulerService:
         logger.info(f"Watchlist refresh: {result.get('status')} — {result.get('message')}")
         return result
 
+    async def fundamentals_refresh_job(self) -> Optional[dict]:
+        """
+        The weekly fundamentals and analyst-ratings refresh, at FUNDAMENTALS_REFRESH_HOUR
+        on FUNDAMENTALS_REFRESH_DAYS (Europe/Berlin).
+
+        Under `SYNC_PIPELINE` like every Yahoo job and the tab's own Sync buttons. The
+        loops are the services' stale passes — their pacing, `yahoo_eligible()` filter
+        and abandon-on-429 latch — and nothing here re-implements any of them. A rate
+        limit in the fundamentals pass skips the ratings pass: it is the same IP.
+        """
+        return await self._gated_job("fundamentals_refresh", self._fundamentals_refresh_locked)
+
+    async def _fundamentals_refresh_locked(self) -> dict:
+        # Imported here to avoid any import cycle at module load
+        from app.services.analyst_rating_service import AnalystRatingService
+        from app.services.fundamentals_service import FundamentalsService
+
+        started_at = utcnow()
+        result = {"type": "fundamentals_refresh", "timestamp": utc_iso(started_at)}
+        try:
+            async with AsyncSessionLocal() as db:
+                fundamentals_result = await FundamentalsService(db).sync_stale_fundamentals()
+            if fundamentals_result.get("rate_limited"):
+                ratings_result = {
+                    "status": "skipped",
+                    "message": "Not attempted after the fundamentals pass hit a rate limit",
+                    "warnings": [
+                        "Analyst ratings were not refreshed: Yahoo rate-limited the "
+                        "fundamentals pass first."
+                    ],
+                }
+            else:
+                async with AsyncSessionLocal() as db:
+                    ratings_result = await AnalystRatingService(db).sync_stale_ratings()
+        except Exception as e:
+            logger.error(f"Fundamentals refresh failed: {e}", exc_info=True)
+            result.update(
+                status="error",
+                message=f"Fundamentals refresh failed: {type(e).__name__}: {e}",
+            )
+        else:
+            # A security Yahoo could not serve is that row's warning, never the job's
+            # status. The rate-limit case already carries its own warning.
+            for step, noun in ((fundamentals_result, "fundamentals"),
+                               (ratings_result, "analyst ratings")):
+                failed = step.get("errors", 0)
+                if failed and not step.get("rate_limited"):
+                    step.setdefault("warnings", []).append(
+                        f"{failed} securit{'y' if failed == 1 else 'ies'} could not "
+                        f"refresh {noun} and keep their previous data."
+                    )
+            result.update(
+                status="success",
+                message=f"{fundamentals_result.get('message')}; {ratings_result.get('message')}",
+                fundamentals_result=fundamentals_result,
+                ratings_result=ratings_result,
+            )
+            _collect_warnings(result, fundamentals_result, ratings_result)
+
+        # Not `self.last_sync_result` either: that is the portfolio's "last sync".
+        await self._record_run(result, started_at)
+        logger.info(f"Fundamentals refresh: {result.get('status')} — {result.get('message')}")
+        return result
+
     async def _record_run(self, result: dict, started_at: datetime) -> None:
         """
         Persist a job's outcome to sync_runs.
@@ -1669,7 +1749,8 @@ class SchedulerService:
 
         plus the crypto sync at the same eight slots (CRYPTO_SYNC_HOURS), in its own
         job group, and the watchlist refresh on a slot of its own
-        (WATCHLIST_REFRESH_HOUR, Tuesday to Saturday), in a third.
+        (WATCHLIST_REFRESH_HOUR, Tuesday to Saturday), in a third — beside the weekly
+        fundamentals refresh (FUNDAMENTALS_REFRESH_HOUR, Sunday).
 
         Jobs are persisted to `settings.scheduler_jobstore_url` so a restart that
         overlaps a slot recovers it instead of losing it — see MISFIRE_GRACE_SECONDS.
@@ -1828,6 +1909,17 @@ class SchedulerService:
             f'Watchlist Refresh ({WATCHLIST_REFRESH_HOUR:02d}:00 Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
+        # Fundamentals and analyst ratings, weekly, on the watchlist's hour but never
+        # its day — see FUNDAMENTALS_REFRESH_HOUR.
+        self._add_or_keep(
+            'fundamentals_refresh', fundamentals_refresh_job_entry,
+            CronTrigger(
+                day_of_week=FUNDAMENTALS_REFRESH_DAYS, hour=FUNDAMENTALS_REFRESH_HOUR,
+                minute=0, timezone='Europe/Berlin',
+            ),
+            f'Fundamentals Refresh ({FUNDAMENTALS_REFRESH_HOUR:02d}:00 Europe/Berlin, weekly)',
+            group=UPKEEP_JOB_GROUP,
+        )
 
         self._prune_unknown_jobs()
         self.scheduler.resume()
@@ -1952,3 +2044,7 @@ async def crypto_sync_job_entry() -> Optional[dict]:
 
 async def watchlist_refresh_job_entry() -> Optional[dict]:
     return await get_scheduler().watchlist_refresh_job()
+
+
+async def fundamentals_refresh_job_entry() -> Optional[dict]:
+    return await get_scheduler().fundamentals_refresh_job()

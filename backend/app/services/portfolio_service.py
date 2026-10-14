@@ -1251,9 +1251,10 @@ class PortfolioService:
             position["quantity"] = float(position["quantity"])
             position["cost_basis_eur"] = float(position["cost_basis_eur"])
 
-            # Add analyst rating if available
+            # Add analyst rating if available. A zero-count row is the stored answer
+            # "no analysts cover this" (analyst_rating_service.no_rating): absent here.
             rating = ratings_by_security.get(security_id)
-            if rating:
+            if rating and rating.total_ratings:
                 position["analyst_rating"] = {
                     "strong_buy": rating.strong_buy,
                     "buy": rating.buy,

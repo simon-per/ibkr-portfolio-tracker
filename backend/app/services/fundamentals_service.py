@@ -1,6 +1,8 @@
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 from app.clock import utcnow
+from app.repositories.sync_run_repository import utc_iso
 import logging
 import yfinance as yf
 import random
@@ -11,9 +13,10 @@ from sqlalchemy import select
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
-from app.services.ttm_growth import ttm_growth_from_quarterly
+from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
+from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, is_fund, read_optional
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -51,31 +54,24 @@ class FundamentalsService:
         return safe_int(value)
 
     async def _fetch_yahoo_data(self, yahoo_ticker: str) -> tuple:
-        """Fetch .info, .earnings_dates, .quarterly_financials, .growth_estimates, and .revenue_estimate in a thread."""
+        """
+        Fetch .info, .earnings_dates and the shared estimate endpoints in a thread.
+
+        Five requests for a company, one for a fund. A rate limit on any of them
+        propagates to the loop, which abandons the pass — see `yahoo_estimates`.
+        """
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info
-            try:
-                earnings = ticker.earnings_dates
-            except Exception as e:
-                logger.warning(f"earnings_dates failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                earnings = None
-            try:
-                quarterly_financials = ticker.quarterly_financials
-            except Exception as e:
-                logger.warning(f"quarterly_financials failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                quarterly_financials = None
-            try:
-                growth_estimates = ticker.growth_estimates
-            except Exception as e:
-                logger.warning(f"growth_estimates failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                growth_estimates = None
-            try:
-                revenue_estimate = ticker.revenue_estimate
-            except Exception as e:
-                logger.warning(f"revenue_estimate failed for {yahoo_ticker}: {type(e).__name__}: {e}")
-                revenue_estimate = None
-            return info, earnings, quarterly_financials, growth_estimates, revenue_estimate
+            earnings = (
+                None if is_fund(info)
+                else read_optional(lambda: ticker.earnings_dates, "earnings_dates", yahoo_ticker)
+            )
+            frames = fetch_estimate_frames(ticker, info, yahoo_ticker)
+            return (
+                info, earnings, frames["quarterly_financials"],
+                frames["growth_estimates"], frames["revenue_estimate"],
+            )
 
         return await asyncio.to_thread(_fetch)
 
@@ -86,24 +82,8 @@ class FundamentalsService:
             logger.info(f"No fundamental data available for {security.symbol}")
             return None
 
-        # TTM growth from quarterly financials (always current, no lag)
-        ttm_rev = ttm_growth_from_quarterly(quarterly_financials, ['Total Revenue'])
-        ttm_eps = ttm_growth_from_quarterly(quarterly_financials, ['Diluted EPS', 'Basic EPS', 'Net Income'])
-
-        # Forward estimates from analyst consensus
-        fwd_rev = None
-        try:
-            if revenue_estimate is not None and '+1y' in revenue_estimate.index:
-                fwd_rev = self._safe_float(revenue_estimate.loc['+1y', 'growth'])
-        except Exception:
-            pass
-
-        fwd_eps = None
-        try:
-            if growth_estimates is not None and '+1y' in growth_estimates.index:
-                fwd_eps = self._safe_float(growth_estimates.loc['+1y', 'stockTrend'])
-        except Exception:
-            pass
+        # Forward estimates from analyst consensus — one parser with the watchlist.
+        fwd_rev, fwd_eps = forward_growth(revenue_estimate, growth_estimates, info, security.symbol)
 
         metrics_data = {
             'security_id': security.id,
@@ -112,8 +92,9 @@ class FundamentalsService:
             'peg_ratio': self._safe_float(info.get('pegRatio')),
             'price_to_sales': self._safe_float(info.get('priceToSalesTrailing12Months')),
             'price_to_book': self._safe_float(info.get('priceToBook')),
-            'revenue_growth': ttm_rev if ttm_rev is not None else self._safe_float(info.get('revenueGrowth')),
-            'earnings_growth': ttm_eps if ttm_eps is not None else self._safe_float(info.get('earningsGrowth')),
+            # TTM growth from quarterly financials (always current, no lag), else .info.
+            'revenue_growth': trailing_growth(quarterly_financials, REVENUE_ROWS, info.get('revenueGrowth')),
+            'earnings_growth': trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get('earningsGrowth')),
             'fwd_revenue_growth': fwd_rev,
             'fwd_eps_growth': fwd_eps,
             'profit_margins': self._safe_float(info.get('profitMargins')),
@@ -374,6 +355,56 @@ class FundamentalsService:
         """
         return await self.sync_fundamentals_data(force_refresh=False)
 
+    async def _market_cap_to_base(self):
+        """
+        A converter from ``(market_cap, data_currency)`` to the base currency, or None.
+
+        Exists so the tab can **sort** market caps: the stored figure is in each listing's
+        own currency, and ordering 3 trillion USD against 400 billion TWD by the raw
+        number is a ranking of nothing. Two steps through EUR like every other read path
+        (`native_amounts`), on the newest **cached** rate only — a GET must never reach a
+        provider — and refused past `CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS`.
+
+        None, not a guess, for a minor-unit quote (`GBp`, `ZAc`, `ILA`): whether Yahoo
+        states such a listing's `marketCap` in the minor or the major unit is unverified
+        here, and the two readings are a factor of 100 apart.
+        """
+        from app.repositories.app_settings_repository import AppSettingsRepository
+        from app.services.currency_service import CurrencyService
+        from app.services.market_data_service import MarketDataService
+
+        base = await AppSettingsRepository(self.db).get_base_currency()
+        currency_service = CurrencyService(self.db)
+        today = utcnow().date()
+        memo: Dict[tuple, Optional[Decimal]] = {}
+
+        async def cached_rate(from_currency: str, to_currency: str) -> Optional[Decimal]:
+            if from_currency == to_currency:
+                return Decimal(1)
+            key = (from_currency, to_currency)
+            if key not in memo:
+                recent = await currency_service._get_most_recent_rate(
+                    from_currency, today, to_currency
+                )
+                fresh = recent is not None and (
+                    (today - recent[2]).days <= CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS
+                )
+                memo[key] = recent[0] if fresh and recent[0] else None
+            return memo[key]
+
+        async def to_base(market_cap: Optional[int], currency: Optional[str]) -> Optional[int]:
+            if market_cap is None or not currency or MarketDataService._minor_unit(currency):
+                return None
+            if currency == base:
+                return market_cap
+            to_eur = await cached_rate(currency, "EUR")
+            eur_to_base = await cached_rate("EUR", base)
+            if to_eur is None or eur_to_base is None:
+                return None
+            return int(Decimal(market_cap) * to_eur * eur_to_base)
+
+        return to_base
+
     async def get_fundamentals_for_portfolio(self) -> List[Dict]:
         """Return fundamental metrics joined with security info for all securities."""
         result = await self.db.execute(select(Security))
@@ -381,6 +412,7 @@ class FundamentalsService:
 
         all_metrics = await self.repo.get_all_metrics()
         metrics_map = {m.security_id: m for m in all_metrics}
+        market_cap_to_base = await self._market_cap_to_base()
 
         portfolio_data = []
         for sec in securities:
@@ -408,12 +440,15 @@ class FundamentalsService:
                     'gross_margins': m.gross_margins,
                     'operating_margins': m.operating_margins,
                     'market_cap': m.market_cap,
+                    'market_cap_base': await market_cap_to_base(m.market_cap, m.data_currency),
                     'number_of_analysts': m.number_of_analysts,
                     'target_mean_price': m.target_mean_price,
                     'target_high_price': m.target_high_price,
                     'target_low_price': m.target_low_price,
                     'data_currency': m.data_currency,
-                    'last_updated': m.last_updated.isoformat() if m.last_updated else None,
+                    # Naive UTC in the column; a bare isoformat() is read by the browser
+                    # as local time, which the tab's as-of line prints.
+                    'last_updated': utc_iso(m.last_updated),
                 })
             else:
                 entry.update({
@@ -431,6 +466,7 @@ class FundamentalsService:
                     'gross_margins': None,
                     'operating_margins': None,
                     'market_cap': None,
+                    'market_cap_base': None,
                     'number_of_analysts': None,
                     'target_mean_price': None,
                     'target_high_price': None,

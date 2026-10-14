@@ -404,11 +404,32 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
     root = pathlib.Path(__file__).resolve().parents[1] / "app"
     offenders = []
 
-    def reaches_yahoo(nodes) -> bool:
+    def ticker_names(tree) -> set:
+        """
+        Names bound to `yf.Ticker(...)`. Reading `ticker.growth_estimates` is a Yahoo
+        request as much as `yf.download` is, and matching only the `yf.` prefix let both
+        fetch closures swallow a 429 on their secondary endpoints unseen (2026-10-14).
+        """
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                func = node.value.func
+                if (isinstance(func, ast.Attribute) and func.attr == "Ticker"
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id in {"yf", "yfinance"}):
+                    names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        return names
+
+    def reaches_yahoo(nodes, tickers=frozenset()) -> bool:
         for node in nodes:
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name):
                     if sub.value.id in {"yf", "yfinance"}:
+                        return True
+                    # Public attributes only: `market_data_service` reads the private
+                    # `_price_history` cache of a response already received, which is
+                    # deliberately not a request (see its comment).
+                    if sub.value.id in tickers and not sub.attr.startswith("_"):
                         return True
         return False
 
@@ -442,8 +463,9 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
 
     for path in sorted((root / "services").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        tickers = frozenset(ticker_names(tree))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Try) or not reaches_yahoo(node.body):
+            if not isinstance(node, ast.Try) or not reaches_yahoo(node.body, tickers):
                 continue
             for handler in node.handlers:
                 if not is_broad(handler):

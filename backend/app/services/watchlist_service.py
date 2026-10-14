@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.watchlist_repository import WatchlistRepository
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
-from app.services.ttm_growth import ttm_growth_from_quarterly
+from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
+from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, read_optional
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -201,27 +202,22 @@ class WatchlistService:
         return round(total, 1)
 
     async def _fetch_ticker_data(self, yahoo_ticker: str) -> tuple:
-        """Fetch .info, .quarterly_financials, 1y history, and forward estimates in a single thread."""
+        """
+        Fetch .info, 1y history and the shared estimate endpoints in a single thread.
+
+        A rate limit on any of them propagates: `sync_item` hands its text to `sync_all`,
+        which abandons the pass. These reads used to swallow every exception, a 429
+        included — see `yahoo_estimates`.
+        """
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info
-            try:
-                quarterly_financials = ticker.quarterly_financials
-            except Exception:
-                quarterly_financials = None
-            try:
-                history = ticker.history(period="1y")
-            except Exception:
-                history = None
-            try:
-                revenue_estimate = ticker.revenue_estimate
-            except Exception:
-                revenue_estimate = None
-            try:
-                growth_estimates = ticker.growth_estimates
-            except Exception:
-                growth_estimates = None
-            return info, quarterly_financials, history, revenue_estimate, growth_estimates
+            history = read_optional(lambda: ticker.history(period="1y"), "history", yahoo_ticker)
+            frames = fetch_estimate_frames(ticker, info, yahoo_ticker)
+            return (
+                info, frames["quarterly_financials"], history,
+                frames["revenue_estimate"], frames["growth_estimates"],
+            )
         return await asyncio.to_thread(_fetch)
 
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:
@@ -256,31 +252,9 @@ class WatchlistService:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
             return {"error": str(e)}
 
-        # TTM growth from quarterly financials (always current, no annual lag)
-        ttm_rev = ttm_growth_from_quarterly(quarterly_financials, ['Total Revenue'])
-        ttm_eps = ttm_growth_from_quarterly(quarterly_financials, ['Diluted EPS', 'Basic EPS', 'Net Income'])
-
-        # Forward estimates from analyst consensus
-        fwd_rev = None
-        try:
-            if revenue_estimate is not None and not revenue_estimate.empty and '+1y' in revenue_estimate.index:
-                fwd_rev = self._safe_float(revenue_estimate.loc['+1y', 'growth'])
-        except Exception as e:
-            logger.warning(f"revenue_estimate failed for {yahoo_ticker}: {e}")
-
-        fwd_eps = None
-        try:
-            if growth_estimates is not None and not growth_estimates.empty and '+1y' in growth_estimates.index:
-                fwd_eps = self._safe_float(growth_estimates.loc['+1y', 'stockTrend'])
-        except Exception as e:
-            logger.warning(f"growth_estimates failed for {yahoo_ticker}: {e}")
-
-        # Fallback: derive fwd EPS growth from forwardEps / trailingEps (already in .info, no extra call)
-        if fwd_eps is None:
-            fwd_eps_val = self._safe_float(info.get('forwardEps'))
-            trail_eps_val = self._safe_float(info.get('trailingEps'))
-            if fwd_eps_val and trail_eps_val and trail_eps_val != 0:
-                fwd_eps = self._safe_float((fwd_eps_val - trail_eps_val) / abs(trail_eps_val))
+        # Forward estimates from analyst consensus — one parser with FundamentalsService,
+        # including the forwardEps / trailingEps fallback (already in .info).
+        fwd_rev, fwd_eps = forward_growth(revenue_estimate, growth_estimates, info, yahoo_ticker)
 
         logger.debug(f"{yahoo_ticker}: fwd_rev={fwd_rev}, fwd_eps={fwd_eps}")
 
@@ -296,8 +270,9 @@ class WatchlistService:
             "forward_pe": self._safe_float(info.get("forwardPE")),
             "peg_ratio": self._safe_float(info.get("pegRatio")),
             "ev_to_ebitda": self._safe_float(info.get("enterpriseToEbitda")),
-            "revenue_growth": ttm_rev if ttm_rev is not None else self._safe_float(info.get("revenueGrowth")),
-            "earnings_growth": ttm_eps if ttm_eps is not None else self._safe_float(info.get("earningsGrowth")),
+            # TTM growth from quarterly financials (always current, no annual lag), else .info.
+            "revenue_growth": trailing_growth(quarterly_financials, REVENUE_ROWS, info.get("revenueGrowth")),
+            "earnings_growth": trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get("earningsGrowth")),
             "fwd_revenue_growth": fwd_rev,
             "fwd_eps_growth": fwd_eps,
             "profit_margins": self._safe_float(info.get("profitMargins")),

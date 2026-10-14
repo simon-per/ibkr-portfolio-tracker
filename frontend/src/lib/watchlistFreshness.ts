@@ -33,19 +33,32 @@ export function watchlistFreshness(
   items: { last_synced: string | null }[],
   now: Date,
 ): WatchlistFreshness | null {
-  if (items.length === 0) return null
+  return syncFreshness(items.map(i => i.last_synced), now, WATCHLIST_STALE_AFTER_DAYS)
+}
 
-  const times = items
-    .map(i => (i.last_synced ? new Date(i.last_synced).getTime() : NaN))
+/**
+ * The same reading for any set of per-row sync times — the Fundamentals tab's as-of line
+ * uses it with its own weekly threshold. One implementation, so the two lines cannot
+ * disagree about what "mixed" or "stale" means. `null` when there are no rows.
+ */
+export function syncFreshness(
+  syncedAt: (string | null)[],
+  now: Date,
+  staleAfterDays: number,
+): WatchlistFreshness | null {
+  if (syncedAt.length === 0) return null
+
+  const times = syncedAt
+    .map(s => (s ? new Date(s).getTime() : NaN))
     .filter(t => !Number.isNaN(t))
-  const neverSynced = items.length - times.length
+  const neverSynced = syncedAt.length - times.length
   if (times.length === 0) {
     return { oldest: null, newest: null, neverSynced, mixed: false, stale: true }
   }
 
   const oldest = Math.min(...times)
   const newest = Math.max(...times)
-  const staleAfterMs = WATCHLIST_STALE_AFTER_DAYS * 24 * 60 * 60 * 1000
+  const staleAfterMs = staleAfterDays * 24 * 60 * 60 * 1000
   return {
     oldest: new Date(oldest),
     newest: new Date(newest),

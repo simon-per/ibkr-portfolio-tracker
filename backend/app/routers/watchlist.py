@@ -189,5 +189,5 @@ def _item_to_response(item) -> WatchlistItemResponse:
         # Through `utc_iso`, not a bare `isoformat()`: the tab prints this as the data's
         # as-of time, and a naive string is read by the browser as local time.
         last_synced=utc_iso(item.last_synced),
-        created_at=item.created_at.isoformat() if item.created_at else None,
+        created_at=utc_iso(item.created_at),
     )
