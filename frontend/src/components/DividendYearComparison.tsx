@@ -1,4 +1,5 @@
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
+import { dividendAmount } from '@/lib/dividendFormat'
 import { realizedOnlyYears } from '@/lib/dividendGrowth'
 import { DeltaChip } from './DeltaChip'
 import type { DividendAnnualRow } from '@/lib/api'
@@ -26,10 +27,7 @@ export function DividendYearComparison({
     (row.withholding_eur ?? 0) + (row.forecast_withholding_eur ?? 0)
   // Cents matter at this scale — the earliest year here is under 2 units, which
   // whole-number rounding would flatten to "2" beside a 116.
-  const amount = (v: number) => v.toLocaleString('en-US', {
-    minimumFractionDigits: Math.abs(v) < 1000 ? 2 : 0,
-    maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0,
-  })
+  const amount = (v: number) => dividendAmount(v, curSym)
 
   return (
     <div className="space-y-2">
@@ -55,7 +53,6 @@ export function DividendYearComparison({
                 + (row.forecast_net_eur > 0
                   ? ` plus ${formatCurrency(row.forecast_net_eur)} projected`
                   : '')
-                + '. Click to filter the chart to this year.'
               }
             >
               <span className="w-11 shrink-0 text-sm tabular-nums text-muted-foreground">
@@ -80,12 +77,12 @@ export function DividendYearComparison({
               </span>
 
               <span className="flex-1 text-right text-sm font-medium tabular-nums sm:w-24 sm:flex-none">
-                {curSym}{amount(row.total_eur)}
+                {amount(row.total_eur)}
                 {/* Withheld at source — received plus expected, one figure. A quiet
                     reminder of the DA-1 threshold, not a tax figure. */}
                 {withholding(row) > 0 && (
                   <span className="block text-[10px] font-normal leading-tight text-muted-foreground">
-                    WHT {curSym}{amount(withholding(row))}
+                    WHT {amount(withholding(row))}
                   </span>
                 )}
               </span>
