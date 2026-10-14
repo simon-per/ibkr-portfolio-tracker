@@ -13,8 +13,6 @@ export interface DividendPace {
   months: number
   /** An anchor window carries projection, so the rate is forward-looking. */
   includes_forecast: boolean
-  /** The base is the earliest window on record — see the function's note. */
-  coverage_limited: boolean
 }
 
 /** Whole months from one "YYYY-MM" to another. */
@@ -42,18 +40,8 @@ function monthsBetween(from: string, to: string): number {
  * bar on the chart, so the figure can be checked against what is visible. A
  * regression over every window is less sensitive to one odd endpoint but has no
  * answer to "which two bars is this comparing".
- *
- * `coverage_limited` marks the case where the base is the earliest window that
- * has ever existed. On a portfolio still being built, that window holds a
- * fraction of a year's income and the growth out of it is enormous and nearly
- * meaningless — the `yoy_vs_partial` shape, and it carries the same marker.
- * `coverageStart` has to come from the server: a windowed response cannot say
- * whether an earlier window exists.
  */
-export function dividendPace(
-  points: DividendTtmPoint[],
-  coverageStart: string | null | undefined,
-): DividendPace | null {
+export function dividendPace(points: DividendTtmPoint[]): DividendPace | null {
   // One window is a level, not a rate.
   if (points.length < 2) return null
 
@@ -82,6 +70,5 @@ export function dividendPace(
     // From the anchors, never from the toggle: with the forecast shown but
     // nothing projected, both anchors are measured and neither is an estimate.
     includes_forecast: from.forecast_net_eur > 0 || to.forecast_net_eur > 0,
-    coverage_limited: Boolean(coverageStart) && from.month === coverageStart,
   }
 }

@@ -163,7 +163,6 @@ export function lookthroughColumns(deps: {
               : row.key_type === 'isin'
                 ? 'ISIN'
                 : 'none'}
-          {row.partially_resolved ? ' †' : ''}
         </span>
       ),
     },
@@ -646,12 +645,6 @@ export function LookThroughTab() {
                       A further {data.other_companies_count} companies hold{' '}
                       {formatCurrency(data.other_companies_eur)} between them and are not
                       shown.
-                    </p>
-                  )}
-                  {data.companies.some((r) => r.partially_resolved) && (
-                    <p className="text-xs text-muted-foreground">
-                      † folded on an ISIN alone, so a listing under a different ISIN would
-                      not have joined that row.
                     </p>
                   )}
                 </>

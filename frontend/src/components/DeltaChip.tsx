@@ -13,12 +13,6 @@ interface DeltaChipProps {
    */
   projected?: boolean
   /**
-   * Marks the comparison as unreliable even though the arithmetic is right —
-   * a coverage-limited prior period, or one sourced differently. Shown as a
-   * trailing marker with the reason in the title.
-   */
-  caveat?: string
-  /**
    * Below this magnitude the chip is muted with no arrow. Defaults to the band that
    * suits lumpy series (dividends, monthly contributions); pass 0 where every move is
    * signal, such as a portfolio's period return.
@@ -35,7 +29,7 @@ interface DeltaChipProps {
  * because dividend income is lumpy enough that a few percent is noise.
  */
 export function DeltaChip({
-  pct, label, projected, caveat, flatBand = FLAT_BAND_PCT, title, className,
+  pct, label, projected, flatBand = FLAT_BAND_PCT, title, className,
 }: DeltaChipProps) {
   const arrow = deltaArrow(pct, flatBand)
   const hasValue = pct != null && Number.isFinite(pct)
@@ -57,14 +51,6 @@ export function DeltaChip({
       {projected && hasValue && (
         <span className="font-normal text-muted-foreground" title="Projected, not measured">
           · est.
-        </span>
-      )}
-      {/* A dagger, not "!" — an exclamation mark beside a percentage looks like
-          emphasis or a typo rather than a caveat, and "*" is already taken twice
-          on this tab (gross estimate, incomplete year). */}
-      {caveat && hasValue && (
-        <span className="text-amber-600 dark:text-amber-500" title={caveat} aria-label={caveat}>
-          †
         </span>
       )}
     </span>

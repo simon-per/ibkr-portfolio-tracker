@@ -122,10 +122,7 @@ function dividendColumns(deps: {
       },
       cell: (row, view) =>
         row.trailing_yield_pct != null ? (
-          <>
-            {row.trailing_yield_pct.toFixed(2)}%
-            {row.trailing_yield_partial && <span className="ml-0.5 text-muted-foreground">†</span>}
-          </>
+          `${row.trailing_yield_pct.toFixed(2)}%`
         ) : view === 'table' ? (
           '—'
         ) : null,
@@ -184,14 +181,6 @@ function dividendColumns(deps: {
         showForecast && row.forecast_net_eur > 0 ? (
           <>
             +{formatCurrency(row.forecast_net_eur)}
-            {row.forecast_basis === 'gross_estimate' && (
-              <span className="ml-0.5 text-amber-600 dark:text-amber-500">*</span>
-            )}
-            {row.forecast_samples != null && row.forecast_samples <= 2 && (
-              <span className="ml-0.5 text-amber-600 dark:text-amber-500">
-                n={row.forecast_samples}
-              </span>
-            )}
             {(row.forecast_method || row.forecast_withholding_pct != null) && (
               <span className="block text-[10px] leading-tight">
                 {[
@@ -414,10 +403,7 @@ export function DividendsTab() {
   // windows dropped when Forecast is off — so the rate answers the range the
   // reader selected, and "which windows are showing" is stated once rather than
   // recomputed here or restated on the server.
-  const pace = useMemo(
-    () => dividendPace(ttmPoints, data?.ttm_coverage_start),
-    [ttmPoints, data],
-  )
+  const pace = useMemo(() => dividendPace(ttmPoints), [ttmPoints])
 
   return (
     <Card>
@@ -508,7 +494,6 @@ export function DividendsTab() {
             {(isLoading || hasGrowth) && (
               <DividendKpiCards
                 growth={data?.growth}
-                ibkrFrom={data?.ibkr_from ?? null}
                 isLoading={isLoading}
               />
             )}
@@ -624,40 +609,15 @@ export function DividendsTab() {
                         <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
                         translucent = forecast
                       </span>
-                      {securities.some((r) => r.forecast_basis === 'gross_estimate') && (
-                        <span>
-                          <span className="text-amber-600 dark:text-amber-500">*</span> estimated net
-                          from gross dividends using {formatDividendWithholdingPct(
-                            data.forecast_withholding_pct,
-                          )}% assumed withholding;
-                          actual net payments may differ
-                        </span>
-                      )}
                       {securities.some((r) => r.forecast_method) && (
                         <span>
                           forecast sized by <b className="font-medium">latest</b> regular
                           dividend (carries a raise already paid), <b className="font-medium">as
                           last yr</b> (the same payment a year earlier, for payers whose
-                          amounts vary) or <b className="font-medium">declared</b> by IBKR; WHT
-                          is what IBKR withheld unless marked *
-                        </span>
-                      )}
-                      {securities.some(
-                        (r) => r.forecast_net_eur > 0 && (r.forecast_samples ?? 9) <= 2
-                      ) && (
-                        <span>
-                          <span className="text-amber-600 dark:text-amber-500">n=2</span> cadence
-                          inferred from one or two payments — a guess, not an observed pattern
+                          amounts vary) or <b className="font-medium">declared</b> by IBKR
                         </span>
                       )}
                     </>
-                  )}
-                  {securities.some((r) => r.trailing_yield_partial && r.trailing_yield_pct != null) && (
-                    <span>
-                      <span className="text-muted-foreground">†</span> held less than the full
-                      year, so partial income over a full position value reads low — deliberately
-                      not annualized
-                    </span>
                   )}
                 </div>
 
@@ -683,7 +643,6 @@ export function DividendsTab() {
                   <DividendCalendar
                     upcoming={upcoming}
                     colorOf={colorOf}
-                    withholdingPct={data.forecast_withholding_pct}
                   />
                 </div>
 

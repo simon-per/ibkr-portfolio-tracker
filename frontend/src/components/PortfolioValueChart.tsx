@@ -13,7 +13,7 @@ import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
-import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import { rangeProfitAnchorUnpriced, rangeProfitSeries } from '@/lib/rangeProfit'
 import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 
@@ -94,10 +94,6 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
 
   /** Whether to draw the cash-inclusive pair; see `cashIsTracked` for the refusals. */
   const cashTracked = useMemo(() => cashIsTracked(data?.[data.length - 1]), [data])
-  const caveat = useMemo(
-    () => cashCaveat(data?.[data.length - 1]?.cash_source),
-    [data]
-  )
 
   /**
    * The lines, and what each one means in this mode.
@@ -408,15 +404,6 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             </>
           )}
         </div>
-      )}
-
-      {cashTracked && caveat && (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Total Value</span> is holdings plus
-          uninvested cash, and <span className="font-medium text-foreground">Money In</span> is
-          what you contributed — so a sale moves value between the lines instead of off the
-          chart, and the gap between them is total profit. Cash is {caveat}.
-        </p>
       )}
 
       {profitStart && (

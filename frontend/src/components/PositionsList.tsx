@@ -3,7 +3,7 @@ import type { Position } from '@/lib/api'
 import { formatPercent } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
-import { cashCaveat, cashIsTracked } from '@/lib/portfolioCash'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -550,8 +550,7 @@ export function PositionsList({
             </span>
             <span className="w-full text-xs text-muted-foreground">
               Not a holding, so it has no row below — but it is part of the account, so
-              every weight in this table is a share of holdings <em>plus</em> this
-              {cashCaveat(cash?.cash_source) ? `. The balance is ${cashCaveat(cash?.cash_source)}` : ''}.
+              every weight in this table is a share of holdings <em>plus</em> this.
             </span>
           </div>
         )}

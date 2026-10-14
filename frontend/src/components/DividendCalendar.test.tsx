@@ -36,21 +36,8 @@ function payment(over: Partial<DividendUpcomingPayment> = {}): DividendUpcomingP
 }
 
 describe('DividendCalendar', () => {
-  it('labels gross-derived amounts as estimated net with assumed withholding', () => {
-    render(
-      <DividendCalendar
-        upcoming={[payment({ net_eur: 85, basis: 'gross_estimate', pending: true })]}
-        colorOf={colorOf}
-        withholdingPct={15}
-      />,
-    )
-    expect(screen.getByText(/published gross dividends using 15% assumed withholding/)).toBeTruthy()
-    expect(screen.getByTitle('Estimated net from gross — 15% assumed withholding')).toBeTruthy()
-    expect(screen.queryByText(/withholding tax is not deducted/)).toBeNull()
-  })
-
   it('shows the expected pay date and keeps the ex-date beside it', () => {
-    render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} withholdingPct={15} />)
+    render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} />)
     expect(screen.getByText('22 May')).toBeTruthy()
     expect(screen.getByText('ex 8 May')).toBeTruthy()
   })
@@ -63,7 +50,6 @@ describe('DividendCalendar', () => {
       <DividendCalendar
         upcoming={[payment({ date: '2026-05-08', pay_date_source: 'ex_date' })]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     expect(screen.queryByText(/^ex /)).toBeNull()
@@ -75,7 +61,6 @@ describe('DividendCalendar', () => {
       <DividendCalendar
         upcoming={[payment({ date: '2026-04-20', pending: true })]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     // Twice: once on the row, once in the explanation under the list. A caveat reachable
@@ -85,7 +70,7 @@ describe('DividendCalendar', () => {
   })
 
   it('says nothing about pending payments when there are none', () => {
-    render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} withholdingPct={15} />)
+    render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} />)
     expect(screen.queryByText('payment pending')).toBeNull()
   })
 
@@ -94,7 +79,6 @@ describe('DividendCalendar', () => {
       <DividendCalendar
         upcoming={[payment({ pay_date_source: 'accrual' })]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     expect(screen.getByText('pay dates as announced by IBKR')).toBeTruthy()
@@ -109,7 +93,6 @@ describe('DividendCalendar', () => {
           payment({ security_id: 2, symbol: 'MCO', pay_date_source: 'measured_lag' }),
         ]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     expect(screen.queryByText('pay dates as announced by IBKR')).toBeNull()
@@ -121,7 +104,6 @@ describe('DividendCalendar', () => {
       <DividendCalendar
         upcoming={[payment({ date: '2026-06-02', ex_date: '2026-05-28' })]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     const heading = screen.getByText('Jun 2026')
@@ -131,7 +113,7 @@ describe('DividendCalendar', () => {
 
   it('renders nothing at all when there is nothing expected', () => {
     const { container } = render(
-      <DividendCalendar upcoming={[]} colorOf={colorOf} withholdingPct={15} />,
+      <DividendCalendar upcoming={[]} colorOf={colorOf} />,
     )
     expect(container.firstChild).toBeNull()
   })
@@ -144,7 +126,6 @@ describe('DividendCalendar', () => {
           payment({ security_id: 2, symbol: 'MCO', net_eur: 5 }),
         ]}
         colorOf={colorOf}
-        withholdingPct={15}
       />,
     )
     const group = screen.getByText('May 2026').parentElement as HTMLElement

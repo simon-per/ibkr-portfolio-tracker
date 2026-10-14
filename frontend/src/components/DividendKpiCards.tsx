@@ -4,7 +4,6 @@ import type { DividendGrowth } from '@/lib/api'
 
 interface DividendKpiCardsProps {
   growth: DividendGrowth | null | undefined
-  ibkrFrom: string | null
   isLoading?: boolean
 }
 
@@ -73,7 +72,7 @@ function Tile({
  * average it read as the average's own growth (one large September showed +507%),
  * so it now compares the average with last year's average instead.
  */
-export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCardsProps) {
+export function DividendKpiCards({ growth, isLoading }: DividendKpiCardsProps) {
   const curSym = useCurrencySymbol()
   const formatCurrency = useFormatCurrency()
 
@@ -90,11 +89,6 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
 
   const { ttm, ytd, avg_month: avgMonth, ytd_pace: ytdPace, recent_pace: recent } = growth
   const thisYear = new Date().getFullYear()
-
-  const eraCaveat = growth.ttm_crosses_era && ibkrFrom
-    ? `The comparison spans ${ibkrFrom}, where the source changes from Yahoo Finance `
-      + `estimates to IBKR actuals — comparable in size, not in provenance.`
-    : undefined
 
   return (
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -122,10 +116,9 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
           + ` against ${formatCurrency(ttm.prev_net_eur ?? 0)} in the 365 before that.`
           + ` A rolling window rather than month-over-month, because a quarterly`
           + ` payer leaves most months at zero.`
-          + (eraCaveat ? ` ${eraCaveat}` : '')
         }
       >
-        <DeltaChip pct={ttm.pct} label="vs prior 12M" caveat={eraCaveat} />
+        <DeltaChip pct={ttm.pct} label="vs prior 12M" />
       </Tile>
 
       <Tile
@@ -134,8 +127,7 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
         title={
           `${formatCurrency(growth.next_12m_eur)} projected over the next 365 days,`
           + ` inferred from each holding's own payout cadence and recent per-share`
-          + ` amounts. Nothing forward-looking is published anywhere, so this is an`
-          + ` inference — not an announced schedule.`
+          + ` amounts.`
         }
       >
         <DeltaChip pct={growth.next_12m_vs_ttm_pct} label="vs last 12M" projected />
@@ -157,10 +149,6 @@ export function DividendKpiCards({ growth, ibkrFrom, isLoading }: DividendKpiCar
           <DeltaChip
             pct={ytdPace.pct}
             label={`${thisYear} vs ${ytdPace.prev_year}`}
-            caveat={ytdPace.prev_year_partial
-              ? `Income began partway through ${ytdPace.prev_year}, but the year is still`
-                + ` divided by 12 — its average is understated and the growth overstated.`
-              : undefined}
             title={
               `${thisYear} so far: ${formatCurrency(ytdPace.net_eur)} a month`
               + ` (${ytdPace.months} finished month${ytdPace.months === 1 ? '' : 's'}),`

@@ -3,7 +3,6 @@ import {
   CartesianGrid,
   Line,
   LineChart,
-  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -14,10 +13,7 @@ import type { CryptoHistoryPoint } from '@/lib/api'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   CRYPTO_RANGES,
-  excludedInRange,
   rangePnlSeries,
-  reconstructedCaption,
-  reconstructedSpan,
   sliceRange,
   valueSeries,
   type CryptoRange,
@@ -46,18 +42,9 @@ function pnlCaption(firstDate: string | undefined): string | null {
  * The book's daily history — value or P&L — over a range sliced client-side.
  *
  * A missing point is a gap in the line, never a zero: `connectNulls` is off on purpose,
- * because a line drawn through a day nobody could price asserts a value for it. The days
- * before the first synced holdings are shaded, and the sentence under the chart says what
- * they are — on the surface, not in a hover.
+ * because a line drawn through a day nobody could price asserts a value for it.
  */
-export function CryptoHistoryChart({
-  points, startDate, basketDate, firstSnapshotDate,
-}: {
-  points: readonly CryptoHistoryPoint[]
-  startDate: string
-  basketDate: string | null
-  firstSnapshotDate: string | null
-}) {
+export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryPoint[] }) {
   const [metric, setMetric] = useState<Metric>('value')
   const [range, setRange] = useState<CryptoRange>('YTD')
   const formatCurrency = useFormatCurrency()
@@ -71,9 +58,6 @@ export function CryptoHistoryChart({
     const ys = metric === 'value' ? valueSeries(visible) : rangePnlSeries(visible)
     return visible.map((p, i) => ({ date: p.date, y: ys[i], excluded: p.excluded ?? [] }))
   }, [visible, metric])
-  const excluded = useMemo(() => excludedInRange(visible), [visible])
-  const shaded = useMemo(() => reconstructedSpan(visible), [visible])
-  const caption = reconstructedCaption(startDate, basketDate, firstSnapshotDate, formatDate)
 
   const axis = useMemo(() => {
     const values = data.map(d => d.y).filter((v): v is number => v != null)
@@ -156,15 +140,6 @@ export function CryptoHistoryChart({
                 ticks={axis.ticks}
                 width={isCompact ? 48 : 64}
               />
-              {shaded && (
-                <ReferenceArea
-                  x1={shaded.from}
-                  x2={shaded.to}
-                  fill="hsl(var(--muted-foreground))"
-                  fillOpacity={0.08}
-                  ifOverflow="hidden"
-                />
-              )}
               {metric === 'pnl' && <ReferenceLine y={0} stroke="hsl(var(--border))" />}
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
@@ -191,14 +166,6 @@ export function CryptoHistoryChart({
             </LineChart>
           </ResponsiveContainer>
         </div>
-      )}
-      {excluded.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          No price on some days, left out: {excluded.join(', ')}
-        </p>
-      )}
-      {shaded && caption && (
-        <p className="text-xs text-muted-foreground">{caption}</p>
       )}
     </div>
   )

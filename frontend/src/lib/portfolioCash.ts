@@ -30,27 +30,3 @@ export function cashIsTracked(
 ): boolean {
   return !!carrier && carrier.cash_source != null && carrier.cash_source !== 'unknown'
 }
-
-/**
- * How a tracked balance should be qualified in prose, or `null` when it needs no
- * qualifier.
- *
- * `derived` is ours rather than the broker's: it is computed from the trade, deposit
- * and dividend ledgers and so cannot see broker interest, account fees or the spread on
- * an FX conversion. On this account that is a couple of hundred francs against a
- * five-figure balance — small enough to show, too systematic to leave unsaid, because
- * a figure people reconcile against a broker statement has to declare when it is not
- * the broker's figure.
- */
-export function cashCaveat(source: CashSource | undefined): string | null {
-  if (source === 'derived') {
-    return 'derived from your trade, deposit and dividend history — it excludes broker interest and fees'
-  }
-  // Part measured, part derived. Worth its own sentence rather than reusing the
-  // derived one: the caveat applies to a *portion* of the figure, and saying the
-  // whole balance excludes broker interest would be wrong about the measured half.
-  if (source === 'mixed') {
-    return 'partly IBKR’s own figure and partly derived from your history — the derived part excludes fees and interest'
-  }
-  return null
-}

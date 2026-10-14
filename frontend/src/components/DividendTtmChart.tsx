@@ -5,10 +5,6 @@ import { cn } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 
-const ERA_CAVEAT =
-  'The two windows either side of this change span the switch from Yahoo Finance '
-  + 'estimates to IBKR actuals, so part of the change is a change of source.'
-
 interface DividendTtmChartProps {
   /** Rows to draw — already filtered and ordered to match `points`. */
   data: Record<string, number | string>[]
@@ -40,9 +36,6 @@ export function DividendTtmChart({
   const formatCurrency = useFormatCurrency()
   const latest = points.at(-1)
   const byMonth = new Map(points.map((p) => [p.month, p]))
-  const includesEstimates = points.some((p) => p.source && p.source !== 'ibkr')
-  const crossesEra = points.some((p) => p.mom_crosses_era)
-  const anyProjected = points.some((p) => p.forecast_net_eur > 0)
 
   return (
     <section aria-label="Rolling twelve month dividends" className="space-y-3">
@@ -81,7 +74,6 @@ export function DividendTtmChart({
               label="vs previous window"
               flatBand={0}
               projected={latest.mom_includes_forecast}
-              caveat={latest.mom_crosses_era ? ERA_CAVEAT : undefined}
             />
           </div>
         )}
@@ -110,48 +102,16 @@ export function DividendTtmChart({
             const p = byMonth.get(month)
             if (!p) return null
             return (
-              <>
-                <DeltaChip
-                  pct={p.mom_pct}
-                  label="vs previous window"
-                  flatBand={0}
-                  projected={p.mom_includes_forecast}
-                />
-                {p.source && p.source !== 'ibkr' && (
-                  <span className="text-xs text-muted-foreground">
-                    includes estimated gross
-                  </span>
-                )}
-              </>
+              <DeltaChip
+                pct={p.mom_pct}
+                label="vs previous window"
+                flatBand={0}
+                projected={p.mom_includes_forecast}
+              />
             )
           }}
         />
       )}
-
-      <div className="space-y-1 text-xs text-muted-foreground">
-        {showForecast && anyProjected && (
-          <p>
-            Projected payments are inferred from each holding's own payout cadence and
-            counted as though received. They are a schedule, not an announcement.
-          </p>
-        )}
-        {includesEstimates && (
-          <p>
-            Earlier history includes estimated gross dividends; withholding is not
-            deducted from those estimates.
-          </p>
-        )}
-        {crossesEra && (
-          <p>
-            Some comparisons span the switch from estimates to IBKR actuals, so part of
-            the change is a change of source.
-          </p>
-        )}
-        <p>
-          Portfolio dividend income also moves with what is held and with exchange rates;
-          this is not a measure of dividend increases per share.
-        </p>
-      </div>
     </section>
   )
 }

@@ -252,14 +252,6 @@ describe('LookThroughTab', () => {
     expect(screen.getByText(/A further 38 companies hold/)).toBeTruthy()
   })
 
-  it('explains the dagger inline when a row was folded on an ISIN alone', async () => {
-    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
-    withProviders(<LookThroughTab />)
-
-    await screen.findByText('ALPHABET INC.')
-    expect(screen.getByText(/folded on an ISIN alone/)).toBeTruthy()
-  })
-
   it('states the value attributed to no company at all', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)

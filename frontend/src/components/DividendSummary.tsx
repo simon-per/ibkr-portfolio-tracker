@@ -113,18 +113,6 @@ export function DividendSummary() {
     if (parts.length > 0) summaryText = <>{parts}</>
   }
 
-  // Yahoo's estimates are gross with no withholding; IBKR's rows are net of the
-  // tax actually deducted. Saying which applies is the whole point of the note,
-  // and 'mixed' is the boundary era where both do.
-  const cur = data?.base_currency ?? ''
-  const wht = data ? `${curSym}${formatEur(data.total_withholding_eur)}` : ''
-  const provenanceNote =
-    data?.source === 'ibkr'
-      ? `Net of ${wht} withholding tax actually deducted, from IBKR cash transactions${cur ? ` · ${cur}` : ''}`
-      : data?.source === 'mixed'
-        ? `Estimated gross via Yahoo Finance before ${data.ibkr_from}; IBKR actuals net of ${wht} withholding from there on${cur ? ` · ${cur}` : ''}`
-        : `Estimated gross dividends via Yahoo Finance — withholding taxes, ADR fees, and minor FX differences not reflected`
-
   return (
     <Card>
       <CollapsibleCardHeader
@@ -211,7 +199,6 @@ export function DividendSummary() {
                   </tbody>
                 </table>
               </ScrollableTable>
-              <p className="text-xs text-muted-foreground mt-3 italic">{provenanceNote}</p>
             </>
           )}
         </CardContent>
