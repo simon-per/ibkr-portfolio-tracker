@@ -114,6 +114,19 @@ function sample(inputs: ForecastInputs, month: number): ForecastSample {
 }
 
 /**
+ * The owner's real saving pace, the default monthly contribution: the `12m` window's money in
+ * per month — the figure the ContributionsStrip and the Money In per Month card publish — in
+ * whole units. Floored at 0, because a year of net withdrawals is no contribution and the input
+ * cannot hold a negative one. `null` without the window, so the caller keeps its own default
+ * rather than projecting from a pace nobody measured.
+ */
+export function monthlyPace(contributions: ContributionsResponse | undefined): number | null {
+  const twelveMonth = contributions?.windows.find((w) => w.label === '12m')
+  if (!twelveMonth || !Number.isFinite(twelveMonth.avg_money_in_per_month_eur)) return null
+  return Math.max(0, Math.round(twelveMonth.avg_money_in_per_month_eur))
+}
+
+/**
  * Where a projection starts, from the two responses the tab reads.
  *
  * The start value is **Total Value** (holdings plus cash) whenever the backend tracks cash,

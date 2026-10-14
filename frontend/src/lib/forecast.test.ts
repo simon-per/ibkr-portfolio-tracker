@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ContributionsResponse, PortfolioSummary } from './api'
-import { forecastBaseline, forecastSeries, projectForecast, type ForecastInputs } from './forecast'
+import { forecastBaseline, forecastSeries, monthlyPace, projectForecast, type ForecastInputs } from './forecast'
 
 /** A book worth more than was paid in: 17,000 of gain already made. */
 const book: ForecastInputs = {
@@ -172,5 +172,46 @@ describe('forecastBaseline', () => {
 
   it('has nothing to project from without a summary, and still refuses to invent a baseline', () => {
     expect(forecastBaseline(undefined, undefined, false)).toEqual({ startValue: 0, moneyInToDate: null })
+  })
+})
+
+describe('monthlyPace', () => {
+  const response = (avg?: number): ContributionsResponse => ({
+    windows:
+      avg === undefined
+        ? []
+        : [
+            {
+              label: '12m' as const,
+              months: 12,
+              partial: false,
+              money_in_eur: avg * 12,
+              avg_money_in_per_month_eur: avg,
+              money_in_method: 'deposits' as const,
+              deposits_eur: avg * 12,
+              deployed_eur: avg * 12,
+              avg_deployed_per_month_eur: avg,
+              net_eur: avg * 12,
+            },
+          ],
+    monthly: [],
+    first_contribution_date: null,
+    coverage_from: null,
+    deposits_from: null,
+    transfer_in_date: null,
+    base_currency: 'CHF',
+  })
+
+  it("is the 12m window's money in per month, in whole units", () => {
+    expect(monthlyPace(response(1_234.4))).toBe(1_234)
+  })
+
+  it('is unknown without the response or without a 12m window', () => {
+    expect(monthlyPace(undefined)).toBeNull()
+    expect(monthlyPace(response())).toBeNull()
+  })
+
+  it('is no contribution, not a negative one, after a year of net withdrawals', () => {
+    expect(monthlyPace(response(-300))).toBe(0)
   })
 })

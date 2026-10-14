@@ -4,25 +4,58 @@ import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatCount } from '@/lib/utils'
-import { forecastBaseline, forecastSeries, projectForecast } from '@/lib/forecast'
+import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { readStored, writeStored } from '@/lib/storage'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 
 const STORAGE_KEYS = {
-  monthlyContribution: 'forecast.monthlyContribution',
+  /** Written only when the owner types a contribution; absent means "follow my real pace". */
+  chosenMonthlyContribution: 'forecast.chosenMonthlyContribution',
   expectedReturn: 'forecast.expectedReturn',
   startFromZero: 'forecast.startFromZero',
   forecastYears: 'forecast.forecastYears',
 }
 
-function readNumber(key: string, fallback: number, min: number, max: number): number {
+/**
+ * The key the contribution lived under until 2026-10-14. An effect wrote it back on every
+ * mount, so a stored `1000` is the old default echoed into storage, not something anybody
+ * chose — and every browser that ever opened the tab has one.
+ */
+const LEGACY_CONTRIBUTION_KEY = 'forecast.monthlyContribution'
+const LEGACY_DEFAULT_CONTRIBUTION = 1000
+/** Used when the real pace is unknown: contributions failed to load, or carry no 12m window. */
+const FALLBACK_CONTRIBUTION = 1000
+const MAX_CONTRIBUTION = 1_000_000
+
+function readValid(key: string, min: number, max: number): number | null {
   const saved = readStored(key)
-  if (!saved) return fallback
+  if (!saved) return null
   const val = Number(saved)
-  if (!isFinite(val) || isNaN(val) || val < min || val > max) return fallback
+  if (!isFinite(val) || isNaN(val) || val < min || val > max) return null
   return val
+}
+
+function readNumber(key: string, fallback: number, min: number, max: number): number {
+  return readValid(key, min, max) ?? fallback
+}
+
+/**
+ * The contribution the owner deliberately chose, or `null` to follow their real pace.
+ * Migrates the legacy key once: any value other than the auto-written default was typed by
+ * someone and is kept as a choice; the default itself is dropped. Idempotent, so a second
+ * call (StrictMode) reads the migrated key.
+ */
+function readChosenContribution(): number | null {
+  const chosen = readValid(STORAGE_KEYS.chosenMonthlyContribution, 0, MAX_CONTRIBUTION)
+  if (chosen !== null) return chosen
+  const legacy = readValid(LEGACY_CONTRIBUTION_KEY, 0, MAX_CONTRIBUTION)
+  if (legacy !== null && legacy !== LEGACY_DEFAULT_CONTRIBUTION) {
+    writeStored(STORAGE_KEYS.chosenMonthlyContribution, String(legacy))
+  }
+  writeStored(LEGACY_CONTRIBUTION_KEY, null)
+  return legacy === LEGACY_DEFAULT_CONTRIBUTION ? null : legacy
 }
 
 interface ProjectionRow {
@@ -79,10 +112,7 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
     // A book worth less than was paid in is a loss today, and a loss in blue reads as a gain.
     tone: (p) =>
       p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400',
-    hint: {
-      description:
-        'Portfolio Value minus Money In: the gain or loss already made today, plus what the projection adds.',
-    },
+    hint: { description: 'Value minus money in' },
     cell: (p) => (p.gains === null ? '—' : `${curSym}${formatCount(p.gains)}`),
   },
   {
@@ -90,10 +120,7 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
     header: 'Money In',
     shortHeader: 'Money in',
     align: 'right',
-    hint: {
-      description:
-        'What you have paid in so far plus the monthly contributions projected to this horizon. Money moved between holdings does not count.',
-    },
+    hint: { description: 'Paid in plus projected contributions' },
     cell: (p) => (p.moneyIn === null ? '—' : `${curSym}${formatCount(p.moneyIn)}`),
   },
 ]
@@ -102,7 +129,7 @@ export function ForecastTab() {
   const curSym = useCurrencySymbol()
   const isCompact = useIsCompact()
   const { baseCurrency } = useBaseCurrency()
-  const [monthlyContribution, setMonthlyContribution] = useState(() => readNumber(STORAGE_KEYS.monthlyContribution, 1000, 0, 1000000))
+  const [chosenContribution, setChosenContribution] = useState(readChosenContribution)
   const [expectedReturn, setExpectedReturn] = useState(() => readNumber(STORAGE_KEYS.expectedReturn, 8, 0, 30))
   const [startFromZero, setStartFromZero] = useState(() => {
     const saved = readStored(STORAGE_KEYS.startFromZero)
@@ -110,11 +137,14 @@ export function ForecastTab() {
   })
   const [forecastYears, setForecastYears] = useState(() => readNumber(STORAGE_KEYS.forecastYears, 10, 1, 30))
 
-  // Persist whenever values change, through the one guarded store (`lib/storage.ts`).
-  useEffect(() => {
-    writeStored(STORAGE_KEYS.monthlyContribution, monthlyContribution.toString())
-  }, [monthlyContribution])
+  // The contribution is stored on an edit and never on mount: writing it back on mount is
+  // what made the old default indistinguishable from a choice. `null` follows the real pace.
+  const chooseContribution = (value: number | null) => {
+    setChosenContribution(value)
+    writeStored(STORAGE_KEYS.chosenMonthlyContribution, value === null ? null : String(value))
+  }
 
+  // Persist whenever values change, through the one guarded store (`lib/storage.ts`).
   useEffect(() => {
     writeStored(STORAGE_KEYS.expectedReturn, expectedReturn.toString())
   }, [expectedReturn])
@@ -158,6 +188,10 @@ export function ForecastTab() {
   // to date from the contributions endpoint, or `null` when that could not be loaded.
   const current = forecastBaseline(summary, contributions, false)
   const { startValue, moneyInToDate } = forecastBaseline(summary, contributions, startFromZero)
+
+  const pace = monthlyPace(contributions)
+  const monthlyContribution = chosenContribution ?? pace ?? FALLBACK_CONTRIBUTION
+  const followingPace = chosenContribution === null && pace !== null
 
   const inputs = useMemo(
     () => ({ startValue, moneyInToDate, monthlyContribution, annualReturnPct: expectedReturn }),
@@ -257,17 +291,33 @@ export function ForecastTab() {
                   value={monthlyContribution}
                   onChange={(e) => {
                     const val = Number(e.target.value)
-                    if (!isNaN(val) && isFinite(val) && val >= 0 && val <= 1000000) {
-                      setMonthlyContribution(val)
+                    if (!isNaN(val) && isFinite(val) && val >= 0 && val <= MAX_CONTRIBUTION) {
+                      chooseContribution(val)
                     }
                   }}
+                  aria-label="Monthly Contribution"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
-                  max="1000000"
+                  max={MAX_CONTRIBUTION}
                   step="100"
                 />
                 <span className="text-sm text-muted-foreground">{baseCurrency}</span>
               </div>
+              {pace !== null && (
+                <button
+                  type="button"
+                  onClick={() => chooseContribution(null)}
+                  aria-pressed={followingPace}
+                  title="12M average money in per month"
+                  className={`rounded-md border px-2 py-1 text-xs font-medium tabular-nums transition-colors ${
+                    followingPace
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                >
+                  My pace · {curSym}{formatCount(pace)}
+                </button>
+              )}
             </div>
 
             {/* Expected Return */}
