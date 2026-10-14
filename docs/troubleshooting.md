@@ -108,4 +108,105 @@
 | A 3a fund shows Swiss companies it does not hold | The World ex CH tranche, by owner decision since 2026-10-04: it publishes no basket, so it borrows IWDA's MSCI World (`basket_proxy_isin` in `etf_sources.py`), which puts Nestlé, Roche and Novartis into its share at ~2% and every other company ~2% low. It was `uncovered_fund` until then; if it reads that again, IWDA's stored basket is missing or refused — check the 18:00 run's `lookthrough_result` |
 | A market-data sync warns that a fund's basket is stale | `find_stale_etf_baskets`. Since 2026-09-08 the 18:00 full sync refreshes it, so a warning at 11:00 clears by 20:00 on its own. One that **persists past a day** means the evening refresh failed — read the 18:00 run's `lookthrough_result` for the error — or the fund has no automated route (the message says which). The by-hand route is unchanged: `fetch_etf_baskets`, the import line it prints, then `resolve_identities --constituents`, in that order because a re-import clears the CINS/SEDOL resolutions on purpose. In the container: `docker exec backend-portfolio-backend-1 python -m app.cli.fetch_etf_baskets --all --out /tmp/baskets` and the import lines in one paste (a deploy recreates the container and empties `/tmp`); VT's line carries a `*.json` glob that `docker exec` does not expand, so wrap it in `sh -c`. `resolve_identities` commits once at the end — do not deploy while it runs, and follow it through its `manual_identity_resolve` row in `sync_runs`, not `pgrep` (not installed in the container). A VT import that refuses on a torn read is not a fault to force past (see the VT row above). The threshold is the issuer's own cadence, so a Vanguard basket is not stale at 30 days and an iShares one is |
 
+## Accepted rough edges — not bugs
+
+Moved from STATUS.md on 2026-10-14. Each is known, measured and accepted, mostly by owner
+decision; read the entry before "fixing" one.
+
+- **Credentials: nothing open, by owner decision — do not re-raise.** The IBKR Flex token leaked
+  through `/api/scheduler/history` until the 2026-07-28 scrub and was not rotated (2026-08-17:
+  the Flex Web Service is read-only reporting, so the worst case is our own syncs locked out);
+  `API_ADMIN_TOKEN` reached agent transcripts on 2026-08-07 and 2026-08-17 and both were
+  accepted. The tell of misuse: successful generations at hours no job runs, or a `1025` with no
+  failures of ours before it. The lesson: never dump bytes from a file that holds secrets.
+
+- **VWCE is looked through via VT's basket, and that is closed** (owner, 2026-08-17): the Irish
+  sleeve is being rotated into US-domiciled ETFs, so VWCE is converging on VT. The proxy errs low.
+  A real basket, if one ever arrives, is stored by `import_etf_basket` and supersedes it; every
+  route to one was ruled out on 2026-08-14 (docs/shipped-log.md, under *a borrowed basket*).
+
+- **There is no 2025 tax year at IBKR to backfill** (owner, 2026-08-17): the holdings arrived in
+  kind from other brokers in early 2026, so 2025's `yfinance_estimate` dividends are the only
+  source that exists. Do not change the Flex period chasing it.
+
+- **Off-site backups: declined** (owner, 2026-10-13). Losing the VPS means re-pulling every ledger
+  row older than the Flex window by hand from the Client Portal.
+
+- **After a split purge, `market_prices` history comes back only at the 18:00 `full_sync`** — the
+  730-day pass; the 7-day slots restore the current value within hours
+  (docs/data-model-and-valuation.md).
+
+- **A few holdings the dividend forecast cannot see yet — accepted by the owner 2026-10-04.** IQQ (a
+  new iShares Nasdaq-100 ETF) and SBI (Serabi Gold) have one payout each, and two make a cadence, so
+  they project nothing until their second lands. IFX is the only holding on the `assumed`
+  withholding rung, so at the WHT setting of 0% it reads gross (~1 CHF high; Germany withholds
+  ~26%) until IBKR pays it in February. Together ~1–2% of the yearly forecast. The replay
+  (docs/dividends.md, *Measured on production*) also showed SK Hynix sometimes classifying steady in
+  history; no live effect, fix described there, left as is by owner decision.
+
+- **`stack_order` is invariant across every range and NOT across `?forecast=false`** — deliberate,
+  2026-09-20. Projections have to count toward the colour order: a realized-only ranking would fold
+  the largest bars (payers with no realized income yet) into Other and leave a future planning year
+  colourless. Nothing in the app sends `forecast=false`; the client fetches once with projections
+  and hides them in the browser. Pinned both ways in `test_dividend_growth.py`; do not "fix" it by
+  dropping projections from the ranking.
+- **The Allocation tab's seven-step neutral ramp is stepped for a white card only** — measured
+  2026-09-20. `NEUTRAL_STEPS` runs L*55 → 24, so against the dark card its last three steps measure
+  **2.20 / 1.83 / 1.55:1** and those sector tiles sink into the surface; its top step also measures
+  ΔE 6.0 against `--viz-sector-3` under red-green CVD. Fixing it means per-theme `--viz-muted-*`
+  tokens and a visible dark-mode change to that tab, which is its own piece of work.
+- **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** A security quoted in the
+  base currency is valued through native→EUR→base with two independently rounded ECB quotes,
+  ~0.12% high, at the five valuation sites the timeline-equivalence test pins; the same round trip
+  sits in the tax report's SELL-trade conversion, and `BaseFx`'s rate cache starts at the first tax
+  lot (a pre-lot deposit uses a rate up to a week off). **None of the three is a task.** If a
+  figure ever drifts *past* 0.3%, the fix is the `NativeToBase` short-circuit at the valuation
+  sites, and `test_timeline_equivalence.py` is the net.
+- **The realized-P&L headline switches source all-or-nothing, unscoped by account** — found
+  2026-09-12, dormant. `_realized_from_trades` uses `trades` for the whole book the moment
+  *any* SELL exists there (the 3a importer writes them too), so closed lots of an account
+  without `<Trades>` coverage would drop out. Today every IBKR sale is in `trades`, so nothing is
+  wrong; `tax_service` already picks per account and per year, and the fix is to do the same here
+  — a modelling change, not a one-liner.
+- **A pillar-3a `LIQUIDATION` closes lots but books no realized P&L and no trade** — found
+  2026-09-12, dormant (both 3a funds are accumulating). `finpension_ingest` computes the
+  realized figure and discards it, writing an `INCOME` cash flow. Adding a SELL trade beside the
+  flow would double the Balance-oracle replay; the right shape needs a decision about how a
+  liquidation moves cash. It becomes real on the first fund switch.
+- **The Dividends KPI strip does not follow the year filter.** Its labels are absolute ("2026 so
+  far", "Last 12 months") and the growth block is unwindowed by design — so selecting 2027 still
+  shows this year's figures. Pinned by `test_growth_is_identical_whichever_year_is_selected`. This
+  is the most likely thing to read as a bug when it isn't.
+- **"Next 12 months" stays visible with the Forecast toggle off**, because that card is inherently a
+  projection and hiding it would collapse the four-up grid. The per-year panel *does* respect the
+  toggle, since it is the one surface that mixes measured and projected into one bar.
+- **Accumulating ETFs correctly show no dividends** — DBPG, EMIM, IWDA, SXR8, VWCE, XAIX, XNAS.
+  Verified, not assumed. **Don't "fix" their absence.**
+- **Activity's Market Value delta and the chart's "Value change" are the same number**, shown twice
+  on purpose: the card answers "how much did the portfolio move" at a glance, the chart header pairs
+  it with Period Gain so the difference between the two is visible. Neither is a return.
+- **`/api/portfolio/activity` shows dividends net, with estimates badged.** A `yfinance_estimate` row
+  is a gross guess with no withholding and reads *Dividend · est.* It splices like every other
+  reader — pre-boundary estimates survive and stay badged.
+- **`/api/portfolio/attribution` excludes-and-counts a line that did not exist at the window start.**
+  A spun-off security has no start value to attribute against, so for a window opening before the
+  spinoff it is dropped from both sides and reported as `unpriced_holdings: 1` — visible on the ALL
+  range. Doing it properly means combining parent and child. The timeline, the summary and the
+  Steuerwert all handle it.
+- **A price inside the session is an intraday value, not a close, and that is normal.** Five of
+  the seven market-data slots run mid-session, so the newest row is provisional until the market
+  shuts; it is re-fetched at every slot for three days and settles on its own. Only a wrong value
+  **older** than three days is a bug.
+- **A benchmark's newest point can lag the portfolio's** if nobody opened the chart that day. The
+  scheduled warm-up deliberately skips the provisional refresh — eight warm tickers × seven slots
+  would multiply its burst for a value no one read — and the chart's own lazy fetch refreshes the
+  benchmark actually selected. Deliberate Yahoo-budget trade, not an oversight.
+
+- **US market holidays are not modelled** by the ET Sunday/Monday IBKR skip: the day after one is
+  still attempted, as before.
+- **`market_cap_base` is null for minor-unit quotes** (GBp/ZAc/ILA) until Yahoo's `marketCap`
+  scale for them is verified, so those rows sort last on the Fundamentals tab.
+- **The monthly heatmap's YTD changed method on 2026-10-14**: it is now the months compounded,
+  each measured from the previous month-end, so it differs from earlier reads by design.
+
 ---

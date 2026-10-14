@@ -82,4 +82,104 @@ for q in ['select count(*) from securities','select count(*) from taxlots where 
     print(q, c.execute(q).fetchall())"
 ```
 
+## Traps
+
+Moved from STATUS.md on 2026-10-14. Each of these cost real time at least once; add the one you
+lose time to.
+
+- **Pushing works from an agent session** — it is not blocked by the permission classifier, so
+  the guard is the brief: only `main` goes to GitHub, and in this repo the owner (or the lead of
+  an agent wave) pushes it. `git log --oneline origin/main..main` is the only trustworthy count of
+  what is unpushed. Never push within ~10 minutes of a Berlin slot; `ops/finish-deploy.ps1` and
+  `ops/finish-deploy.sh` are equivalent twins that check it (keep them in step), and the
+  shorthand variables they define live only inside one session.
+
+- **A file under the container's `/tmp` does not survive a deploy.** `fetch_etf_baskets --out
+  /tmp/baskets` then `import_etf_basket` in a second step lost both files on 2026-10-04: a push
+  auto-deployed in between (`*/5`), `down`/`up` recreated the container, and the import said
+  "No such file(s)" (nothing was written — it refuses first). Run fetch and import back to back
+  in one paste, and don't push while someone is mid-way through a manual CLI sequence on the VPS.
+
+- **Node 26 breaks every frontend test that touches `localStorage`** (60 failures in 5 files,
+  seen 2026-09-27 and again 2026-09-28: `Cannot read properties of undefined (reading 'clear')`).
+  Node's own experimental `localStorage` global shadows jsdom's. Not a regression in the code:
+  `NODE_OPTIONS=--no-experimental-webstorage npx vitest run` from `frontend/` runs the suite green,
+  as does `npx -y node@22 node_modules/vitest/vitest.mjs run`. CI uses Node 20 and is unaffected.
+  Read the failing files before trusting a red count.
+- **A fresh checkout or worktree has no `backend/venv`, no `backend/.env` and no
+  `frontend/node_modules`.** Use Python 3.11, which the image and CI run (docs/local-development.md
+  has the `uv` commands; 3.12 has also worked); the global interpreter's FastAPI is too old to
+  collect `test_api_hardening.py`. Start `backend/.env` from `backend/.env.example` with
+  placeholder IBKR values, `SCHEDULER_ENABLED=false` and an `API_ADMIN_TOKEN` — Crypto mode
+  refuses to open without one. `npm ci` in `frontend/`.
+- **Vite's dev proxy forwards `/api` only.** Running with `VITE_API_URL=` (same-origin, the only way
+  a 401 reaches the page locally — see STATUS.md *Worth doing next*, crypto follow-ups) leaves `/health`
+  unproxied, so the footer and the lock button disappear. Normal work uses the default
+  `VITE_API_URL`.
+- **A service-level benchmark test can reach Yahoo.** `calculate_benchmark_value_over_time`
+  calls `_ensure_prices_available` itself, which fetches whenever the fixture leaves a gap it
+  considers missing — a leading gap at the range start, or a trailing day inside
+  `PROVISIONAL_PRICE_DAYS` of today — and its `except Exception` swallows a raiser, so the smoke
+  test's `yf.Ticker` stub alone is *silent* here. This cost exactly one real `^GDAXI` request on
+  2026-09-07 from a fixture whose index started three days after the window. Stub both fetch
+  steps for the module and assert the raiser was never reached on teardown; the `_offline`
+  fixture in `test_benchmark_window_anchor.py` is the pattern.
+- **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD). Every money
+  figure moves with it, so never compare a number across sessions without checking it — hold it
+  fixed by comparing payloads built from one snapshot, or ratios inside one payload.
+- **Don't push within ~10 minutes of a Berlin sync slot** — nine of them, on the hour at
+  00/04/08/11/13/15/18/20/22 (`ALL_SYNC_HOURS`; 04:00 is the watchlist's, Tuesday to Saturday).
+  Since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the seconds of
+  `down`/`up`, it waits out a running sync, and the persistent job store recovers a slot missed by
+  under 30 minutes. `ops/finish-deploy.*` checks the window for you.
+- **`curl 127.0.0.1:<vite port>` fails while the browser works.** Vite binds `localhost`, which
+  resolves to `::1` first on this machine, so the IPv4 literal gets connection-refused and looks like
+  a dead dev server. Use `http://localhost:<port>`.
+- **`pkill` is not installed** (Git Bash has no procps). `pkill -f uvicorn` prints
+  "command not found" and exits non-zero — easy to miss inside a `&&` chain — so the old server keeps
+  the port and the new one dies on bind while `--strictPort`'s error scrolls past in a log file. The
+  result is a dev server quietly answering from the *previous* config. Kill by PID:
+  `netstat -ano | grep ':8000 ' | grep LISTENING` then `taskkill //F //PID <pid>` (double slashes —
+  MSYS eats single ones).
+- **A dev server against a prod snapshot must run on port 5173.** `frontend/.env` points
+  `VITE_API_URL` at `localhost:8000`, so the browser calls the backend cross-origin and only the
+  ports in `CORS_ORIGINS` work. Any other port fails every request with a CORS error and looks like
+  a backend outage.
+- **Every position in the local `backend/portfolio.db` has `market_price: null` and a market value of
+  0.00.** So the currency-exposure card reports *no priced positions* and the rebalance panel shows
+  every row unpriced — both correct, and both easy to mistake for a broken feature. Anything that
+  depends on a valued portfolio can only be browser-verified against a production snapshot.
+- **A jsdom test that renders `ScrollableTable` (anything through `DataTable`) needs a
+  `ResizeObserver` stub**, copied inline into 17 test files today (STATUS.md *Worth doing next*, tooling);
+  and a component test that renders anything using `useBaseCurrency`/`useCurrencySymbol` needs a
+  `QueryClientProvider` *above* `CurrencyProvider`, or it throws `No QueryClient set`. Neither is
+  a component defect. `RebalanceCard.test.tsx` has both patterns to copy.
+- **uvicorn can die mid-Playwright-run with `OSError: [WinError 64] The specified network name is no
+  longer available`** — a Windows asyncio-proactor reaction to an abruptly closed connection, not a code
+  fault. The e2e script then reports `ERR_CONNECTION_REFUSED` and a shrunken panel, which reads exactly
+  like a regression in whatever you just wrote. **Confirm `/health` still answers before believing an
+  e2e failure.**
+- **A test helper with a default parameter swallows an explicitly-passed `undefined`**, so
+  `renderCard(undefined)` renders the default fixture and any "backend down" assertion silently tests the
+  loaded state instead. `CurrencyExposureCard.test.tsx` keeps a separate `renderUnloaded()` for this.
+- **A test that starts a scheduler drops a `scheduler_jobs.db` wherever it runs.** `tests/conftest.py`
+  blanks `scheduler_jobstore_url` for the whole suite, so an in-memory store is the default; a test
+  that wants persistence points it at `tmp_path` itself.
+- **`sqlite:////tmp/x.db` in Git Bash lands in `C:\tmp`, not the shell's `/tmp`.** The SQLAlchemy URL
+  is read by Python, which does not apply the MSYS path translation, so a stray file goes somewhere
+  `ls /tmp` will not show it.
+- **`TZ=Europe/Berlin date` silently returns UTC in Git Bash.** It does not error and it does not
+  warn — `TZ=America/New_York` prints the same time — so any script reasoning about the Berlin sync
+  slots from the shell clock is two hours out in summer, in the direction that permits a collision.
+  Use Python's `zoneinfo` (`ops/finish-deploy.sh` has the helper). Container logs are UTC too.
+- **Renaming the working-copy directory breaks `backend/venv`, and the documented test command is the
+  one thing that hides it.** `activate`/`activate.bat` hardcode `VIRTUAL_ENV` and every `.exe`
+  console-script shim embeds the interpreter's absolute path, so after a rename
+  `venv\Scripts\activate && uvicorn ...` and a bare `alembic upgrade head` fail while
+  `./venv/Scripts/python.exe -m pytest` keeps passing — python.exe resolves its own prefix, the shims
+  do not. Recreate rather than patch, and **`pip freeze` first**: `requirements.txt` floats
+  `yfinance`, `lxml` and `pyxirr`, so reinstalling from it quietly drifts the local env. Then
+  `python -m venv venv --clear` and install the freeze. A plain `python -m venv venv` regenerates
+  `activate` and leaves the shims broken, which is the worst of the three states.
+
 ---

@@ -600,3 +600,29 @@ Tests: `test_company_identity.py`, `test_lookthrough_partition.py`, `test_etf_so
 case in `test_api_smoke.py` and `LookThroughTab.test.tsx`.
 
 ---
+
+### Future sources, researched and parked
+
+Moved from STATUS.md's *Worth doing next* on 2026-10-14; expensive to redo.
+
+- **SEC N-PORT as the generic fallback for a future US fund with no issuer route** (every fund
+   held has an issuer feed; structurally unreachable for Irish and Luxembourg UCITS). The
+   research is expensive to redo and two points are silent-corruption traps:
+   - **Key on ISIN, never ticker.** `company_tickers_mf.json` maps `SMH → CIK 1137360` (VanEck's *US*
+     fund) and `XAIX → CIK 1503123` (a US namesake of the Xtrackers UCITS we already fetch).
+     Verified: SOXQ `(1378872, S000072470)`, GRID `(1364608, S000026919)`, QTUM `(1540305, S000062478)`.
+   - **`data.sec.gov/submissions/CIK*.json` is series-blind.** Use
+     `efts.sec.gov/LATEST/search-index?q=%22S000026919%22&forms=NPORT-P`, then
+     `/Archives/edgar/data/{cik}/{accession}/primary_doc.xml`. `/cgi-bin/` is
+     robots-disallowed; `/Archives/` is allowed. A descriptive User-Agent is **mandatory** —
+     omitting it is a 403 plus a ~10-minute IP block.
+   - **Assert `formData/genInfo/seriesId`** before using a row — a sibling series is a silently
+     100%-wrong basket.
+   - **As-of is `repPdDate`, not `repPdEnd`**, and fiscal quarters are not calendar quarters.
+   - **QTUM's `pctVal` sums to 104.61%** (sec-lending collateral). Filter to `assetCat ∈ {EC, EP}`
+     with an `<isin>`, then renormalise.
+   - Arrives **75–136 days old**: its own `ADAPTER_STALE_DAYS` entry, not a raised default.
+- **Commercial holdings APIs are not viable free — checked 2026-08-16, do not re-shop.** The
+   holdings array is the paywalled field at FMP, API Ninjas, EODHD and Intrinio. **Never wire up
+   FMP's "ETF Holder" endpoint** — it returns who owns shares *of* the ETF, the reverse
+   direction, and passes a smoke test.

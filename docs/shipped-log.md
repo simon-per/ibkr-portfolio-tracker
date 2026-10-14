@@ -7,6 +7,26 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-14 (evening) — the agent-team wave, browser-checked on production
+
+Six tracks in parallel worktrees, merged after review and deployed as `b81aa9e`: the scheduled
+IBKR generation skips ET Sunday and Monday (`no_new_trading_day`, docs/flex-and-sync.md;
+production `sync_runs` since 08-08: Sun/Mon 12:00 ET failed 15 of 20, Tue–Sat 1 of 48); a weekly
+fundamentals and analyst-ratings refresh, Sunday 04:00 Berlin (`yahoo_estimates.py` re-raises a
+429); the Dividends tab's one Next-12M figure with MTD/YTD growth, "from buys", a received-income
+line, payout raises/cuts and a sortable table; the Forecast tab at the owner's real 12-month pace
+with the entered rate as the effective annual rate; the KPI fixes (tax withholding absent on
+estimates, Sortino on thin history, the heatmap chained to YTD with an `MTD` tag, the look-through
+Unresolved threshold, loss P/E, market-cap sort in base currency, EPS growth on a loss base);
+STATUS.md pruned from 1,738 lines. Hover texts shortened in every track (owner's choice).
+
+**Browser sweep on `b81aa9e`** — every tab at 1440 and 390 px in both themes, read-only,
+Yahoo-reaching routes aborted. Passed: Dividends colours across ranges, Forecast off, the trend
+card matching the KPI tile, sorting, the pending badge at 390, the WHT popover, the paces' wrap;
+the Forecast pace control; Money In "so far · 12M avg · YTD"; the heatmap `MTD` tag; Profit/Loss
+from 0; Tax "—" withholding; Look-through without `†` and a muted Unresolved; the Watchlist as-of;
+the sibling-NAV badge. Defects found are STATUS.md *Worth doing next* item 0.
+
 ## Ran on production 2026-10-14 — the forecast-breakdown backfill
 
 `python -m app.cli.backfill_dividend_forecast --from 2026-06-01`, after a fresh backup

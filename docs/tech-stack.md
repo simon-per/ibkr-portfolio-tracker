@@ -7,8 +7,11 @@
 
 ## Tech stack
 
-**Backend** — FastAPI (async), SQLAlchemy 2.0 + aiosqlite (WAL), Alembic, APScheduler,
-`ibflex` **0.15** (pinned), `yfinance` >= 1.1.0, Frankfurter API for FX.
+**Backend** — FastAPI (async), SQLAlchemy 2.0 + aiosqlite (WAL), Alembic, APScheduler with a
+persistent job store, `ibflex` **0.15** (pinned — it aborts on unknown attributes, hence
+`_sanitize_flex_xml`), `yfinance` >= 1.1.0, Frankfurter for FX with `open.er-api.com` as the
+bounded fallback. Pins are in `backend/requirements.txt` and were moved to current on
+2026-09-08; `pip-audit` or an OSV query against them is worth running when they age again.
 **Frontend** — React 19 + TypeScript + Vite, TanStack Query, Recharts, Tailwind + shadcn/ui.
 Vitest runs in `node` by default; component tests opt into jsdom per file with a
 `// @vitest-environment jsdom` docblock, because the pure `lib/` tests are the large majority and

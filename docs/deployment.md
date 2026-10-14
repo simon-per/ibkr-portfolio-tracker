@@ -29,7 +29,13 @@ before believing it.
   [crypto.md](crypto.md)); every setting is listed in `backend/.env.example`
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
-- Backups: `/root/ibkr-backups/<date>/`
+- Backups: `/root/ibkr-backups/<date>/`, 30 days, at least 10 kept. `/root/auto-deploy.sh` and
+  `/root/backup-db.sh` are COPIES of `ops/` that auto-deploy and the daily cron prefer — refresh
+  them by atomic rename (copy to a temp name beside them, then `mv` over) when the repo scripts
+  change
+- `/health` reports `commit`, `scheduler_enabled`, `write_auth_enabled` and
+  `scheduler_jobstore_persistent` (`false` means misfire recovery is off, whatever
+  `/api/scheduler/status` says)
 
 **`portfolio.db` was a FILE bind mount until 2026-10-04, and until 2026-09-08 every deploy
 silently discarded the tail of the database.** SQLite in WAL mode writes its `-wal` and `-shm` sidecars *beside*

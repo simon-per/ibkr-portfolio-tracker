@@ -4,22 +4,20 @@ Full-stack portfolio tracker for an Interactive Brokers account plus a Swiss pil
 securities, tax lots, trades, corporate actions, dividends and cash; cost-basis vs. market-value
 charts; a Swiss tax report; company-level look-through of the ETFs. A crypto book from CoinStats
 lives beside it in its own **Crypto** mode and shares no figure with the stocks
-([docs/crypto.md](docs/crypto.md)). All money is stored in EUR — the crypto book's USD, as
-CoinStats reports it, is the one exception — and projected into a base currency the user switches
-at will (`app_settings.base_currency`, EUR/CHF/USD) — **read it from `/api/settings`, never from a
-document**; it has been both CHF and EUR, and every figure moves with it.
+([docs/crypto.md](docs/crypto.md)). All money is stored in EUR (the crypto book's USD is the one
+exception) and projected into a base currency the user switches at will
+(`app_settings.base_currency`, EUR/CHF/USD) — **read it from `/api/settings`, never from a
+document**; every figure moves with it.
 
 **Live:** https://portfolio.srv1211053.hstgr.cloud · **Repo is PUBLIC** (never commit account data)
 
-**Read [STATUS.md](STATUS.md) too, and leave it accurate before you stop** — see *Keeping STATUS.md
-current* below. This file is deliberately short: the two rules that must never break, the
-conventions that hold everywhere, and an index. The reasoning behind each subsystem — every
-invariant that was a bug first — lives in `docs/`, one file per area, moved there verbatim on
-2026-09-08. **Those files are authoritative.** Read the one for the area you are touching before
-changing it, and update it in the same change that moves the code it describes. A rule stated only
-in prose is a rule the next reader repairs back. Code comments and STATUS.md entries that cite a
-CLAUDE.md section by name (*Sync schedule*, *Reconciliation*, …) refer to the `docs/` file that now
-holds it — the index below maps them.
+**Read [STATUS.md](STATUS.md) too, and leave it accurate before you stop** (*Keeping STATUS.md
+current* below). This file holds the two rules that must never break, the conventions that hold
+everywhere, and an index. The reasoning behind each subsystem — every invariant that was a bug
+first — lives in `docs/`, one file per area. **Those files are authoritative.** Read the one for
+the area you are touching before changing it, and update it in the same change that moves the
+code. A code comment citing a CLAUDE.md section by name (*Sync schedule*, *Reconciliation*, …)
+means the `docs/` file the index maps.
 
 ## Where things are
 
@@ -34,16 +32,16 @@ holds it — the index below maps them.
 | [docs/pillar3a.md](docs/pillar3a.md) | the second account, `finpension_*`, account isolation, `price_source`, the NAV oracle |
 | [docs/crypto.md](docs/crypto.md) | the crypto book: `coinstats_client`, `coingecko_client`, `crypto_book`, `crypto_service`, `/api/crypto`, the Crypto mode, CoinStats credits, the share token, the rebuild CLI, the USDC peg |
 | [docs/activity-ledger.md](docs/activity-ledger.md) | `activity_service` |
-| [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh |
+| [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh, researched future sources |
 | [docs/pricing-and-fx.md](docs/pricing-and-fx.md) | ticker mapping, `manage_mappings`, minor-unit quotes, `currency_service`, Frankfurter and the fallback |
 | [docs/frontend.md](docs/frontend.md) | `frontend/src/lib/` analytics (risk, rebalance, currency exposure, forecast), `DataTable`, the mobile layout |
 | [docs/performance-analytics.md](docs/performance-analytics.md) | `performance_analytics_service`, `/api/performance/*`, `attribution_rows`, the price/FX split, the Analytics tab (hidden since 2026-10-04), `rollingRisk.ts` |
-| [docs/tech-stack.md](docs/tech-stack.md) | versions, the bundle boundaries, `e2e/` |
-| [docs/deployment.md](docs/deployment.md) | `deploy.sh`, auto-deploy, the VPS, `.env`, `/health`, the database directory (`ops/db-layout.sh`, `app/db_guard.py`) |
-| [docs/local-development.md](docs/local-development.md) | running it locally, the smoke test, snapshots, test commands |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | a symptom you are looking at — symptom-indexed table |
+| [docs/tech-stack.md](docs/tech-stack.md) | versions and pins, the bundle boundaries, `e2e/` |
+| [docs/deployment.md](docs/deployment.md) | `deploy.sh`, auto-deploy, the VPS, `.env`, `/health`, backups, the database directory (`ops/db-layout.sh`, `app/db_guard.py`) |
+| [docs/local-development.md](docs/local-development.md) | running it locally, the smoke test, snapshots, test commands, **the local-dev traps** |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | a symptom you are looking at — symptom-indexed, plus **the accepted rough edges (not bugs)** |
 | [docs/history.md](docs/history.md) | the 2026-07-29 correctness sweep and the 2026-07-28 state snapshot |
-| [docs/shipped-log.md](docs/shipped-log.md) | what shipped when and what was verified on production — STATUS.md's former *Shipped* sections, newest first |
+| [docs/shipped-log.md](docs/shipped-log.md) | what shipped when and what was verified on production, newest first |
 
 ---
 
@@ -90,14 +88,13 @@ self-inflicted. **When locked: do nothing; the schedule recovers it. Retrying ca
   (`requests.RequestException`) never reached IBKR and are retried.
 - `IBKRService._download_statement()` drives the two-step protocol itself: SendRequest **once**,
   then poll GetStatement on the same reference until a deadline. Never `ibflex.client.download()`
-  — it raises on `1001`, so any outer retry starts a brand-new generation. **And never
-  `client.request_statement()` for the SendRequest step** (found 2026-09-12): its
-  `submit_request` re-sends the same GET up to three times on a 5 s timeout, each a new
-  generation. `send_flex_request` issues one GET with a (connect, read) timeout pair, and a
-  `ReadTimeout` there fails fast like a `1001` — the request may have been accepted.
-  `tests/test_flex_retry_policy.py` pins that the name is never called.
+  (raises on `1001`, so an outer retry starts a new generation) and never
+  `client.request_statement()` (re-sends the GET up to three times, each a new generation).
+  `send_flex_request` issues one GET; a `ReadTimeout` there fails fast like a `1001`.
+  `tests/test_flex_retry_policy.py` pins both.
 - IBKR generates about **one statement per ET calendar day**; `flex_generation` makes the second
-  daily slot skip once one succeeded. Adding IBKR slots adds failed generations, not freshness.
+  daily slot skip once one succeeded, and ET Sunday/Monday are skipped outright. Adding IBKR slots
+  adds failed generations, not freshness.
 - The Flex Query period is a portal setting. **Measure it** (`flex_window_days()` reads
   `data_to − data_from` off the last statement); never assert a number in a document.
 - The escape hatch from a lockout is a Client Portal download ingested through
@@ -107,56 +104,41 @@ self-inflicted. **When locked: do nothing; the schedule recovers it. Retrying ca
 
 ## Keeping STATUS.md current
 
-STATUS.md answers "where does this actually stand?", and it is only worth reading if it is true.
-**Updating it is part of the work, not a courtesy afterwards.**
+STATUS.md answers "where does this actually stand?" — needs a human, watching, unverified after
+deploy, next. **Updating it is part of the work.** Leave it accurate before you stop whenever your
+turn changed what it should say: code, config or a migration changed (and *Worth doing next* loses
+what you finished); you shipped, reverted, or left something to watch; you found something broken,
+flaky, or only a human can do. Discovering something is a change of status even when no code moved.
 
-Leave it accurate before you stop, on any turn where your work changed what it should say:
-
-- code, config or a migration changed — and *Worth doing next* should lose whatever you just finished
-- you shipped, reverted, or left something that needs watching after the next deploy
-- you found something known-broken or flaky, or something only a human can do (rotate a token,
-  change a Flex Query period, click through the IBKR portal)
-- a *Known rough edge* stopped being true, or a new accepted-not-a-bug appeared
-- you lost time to a *local-dev trap* that isn't in the list yet
-
-A turn that only answers a question and finds nothing new needs no edit — but **discovering
-something is a change of status even when no code moved**.
-
-**It is a snapshot, not a log.** Bump `Last updated`, add what became true, and **delete what
-stopped being true** instead of stacking corrections. A *Shipped* write-up goes to
-[docs/shipped-log.md](docs/shipped-log.md) (newest first); STATUS.md's *Watch after the next
-deploy* carries only what is still unverified. *Recent sessions* is the one append-only part,
-capped at five one-liners — drop the oldest. Never accumulate **figures** (public repo,
-user-switchable base currency, and a pasted total goes stale silently) or **what git already
-records**. When a subsystem's rules change, the durable half of that change goes into its
-`docs/` file in the same commit.
+**It is a snapshot, not a log.** Bump `Last updated`, add what became true, **delete what stopped
+being true**. A *Shipped* write-up goes to [docs/shipped-log.md](docs/shipped-log.md) (newest
+first); an accepted-not-a-bug goes to docs/troubleshooting.md's *Accepted rough edges*; a new
+local-dev trap to docs/local-development.md's *Traps*. *Recent sessions* is capped at five
+one-liners. Never write **figures** there (public repo, switchable base currency) or **what git
+already records**. When a subsystem's rules change, the durable half goes into its `docs/` file
+in the same commit.
 
 ---
 
 ## The dominant failure mode: two implementations of one job, drifting
 
-More bugs here have come from duplicated logic diverging than from any other cause, and the
-divergences are quiet — both copies keep working, they just stop agreeing, and the number nobody
-recomputes by hand is the one that is wrong. The catalogue of every instance, with how each
-diverged, is [docs/failure-modes.md](docs/failure-modes.md); the rules are:
+More bugs here have come from duplicated logic diverging than from any other cause, and quietly:
+both copies keep working, they just stop agreeing. The catalogue is
+[docs/failure-modes.md](docs/failure-modes.md); the rules:
 
-- **When you find a copy, extract rather than sync it**, and write the test against the *family*
-  ("every service resolving a ticker agrees with the price path") rather than the instance, so the
-  next copy is caught the same way. `ttm_growth.py`, `peg_ratio.py`, `safe_numbers.py`,
-  `native_amounts.py`, `yahoo_rate_limit.py`, `positionValuation.ts`, `forecast.ts` are what that
-  looks like.
-- **A correct copy is still a copy.** Agreement is what a copy looks like right up to the moment it
-  stops being one. The test to write is "is there a copy at all", not "do the copies agree".
-- **Three lenses find them.** Walk the AST for function names defined in more than one module and
-  read each cluster (router-to-service pairs and repository CRUD are noise; a *service* helper twice
-  is not). Ask which paths reach the same **upstream** (a route and a job that both loop Yahoo must
-  agree about when to stop). Ask, of every figure and every table, **which other code reads the same
-  rows or publishes the same name** — and does it apply the same rules.
-- **The cheapest moment to catch one is while writing the third copy.** Several extractions here
-  happened exactly then.
-- **The exception is a duplicate that writes its reasoning down on both sides** — `dividendGrowth.ts`
-  reimplements the server's arithmetic across the language boundary and has not drifted, because
-  both ends name the rules they copy.
+- **When you find a copy, extract rather than sync it**, and test the *family* ("every service
+  resolving a ticker agrees with the price path"), so the next copy is caught too. `ttm_growth.py`,
+  `peg_ratio.py`, `safe_numbers.py`, `native_amounts.py`, `yahoo_rate_limit.py`,
+  `positionValuation.ts`, `forecast.ts` are what that looks like.
+- **A correct copy is still a copy.** The test to write is "is there a copy at all", not "do the
+  copies agree".
+- **Three lenses find them:** function names defined in more than one *service* module; paths that
+  reach the same **upstream** (a route and a job that both loop Yahoo must agree when to stop); and,
+  for every figure, **which other code reads the same rows or publishes the same name**.
+- **The cheapest moment is while writing the third copy.**
+- **The exception is a duplicate that writes its reasoning down on both sides** —
+  `dividendGrowth.ts` mirrors the server's arithmetic across the language boundary and both ends
+  name the rules they copy.
 
 ---
 
@@ -167,45 +149,41 @@ Each of these was a bug first; the file for the area has the story.
 - **Every stored timestamp is naive UTC and `app/clock.utcnow()` is the only way to make one.**
   Never `datetime.now()`; `tests/test_clock_convention.py` walks the tree.
 - **An unknown is absent, never a stand-in.** `None`/`null`, not `0`, not `100`, not a reassuring
-  sentence. Ask what the stand-in would *claim*: a `0.00` Sharpe and a `0%` concentration look like
-  answers, which is what makes them dangerous. Severity tracks plausibility, not magnitude.
+  sentence. A `0.00` Sharpe and a `0%` concentration look like answers, which is what makes them
+  dangerous.
 - **An unvaluable holding is excluded from both sides and counted**, never valued at 0.00.
   `unpriced_holdings` rides on every valuation response; the client reads `isUnpriced` from
   `positionValuation.ts` (price **or** FX can be missing) and never recomputes the backend's count.
-- **The UI carries figures, not explanations** (the owner's call, 2026-10-14: the history before
-  2025/26 is the imperfect part and matters less every month). No footnotes, definitions,
-  provenance or methodology notes, `†`/`*` markers or shaded "replayed" spans on the surface.
-  What stays: a short tag on the figure itself (`est.`), and a conditional warning that names a
+- **The UI carries figures, not explanations** (owner, 2026-10-14). No footnotes, definitions,
+  provenance or methodology notes, `†`/`*` markers or shaded "replayed" spans; hover texts a few
+  words at most. What stays: a short tag on the figure (`est.`) and a conditional warning naming a
   problem present right now (unpriced holdings, a failed load, a missing price, a stale basket).
-  The reasoning lives in `docs/` and in code comments, never on screen. Don't add it back.
+  The reasoning lives in `docs/` and code comments. Don't add it back.
 - **Refuse whole; never half-apply.** Imports, parsers, `replace_basket`, the finpension ledger: a
   partial result is indistinguishable afterwards from a complete one. A refusal is that row's or
   fund's warning, never the job's status.
 - **`warnings[]` on a successful run is the surface for anything a reader must see** — and a
-  warning that is always present teaches the reader to skip the banner. Build the fix rather than
-  leave the banner (the stale baskets sat there for two weeks before the refresh existed).
+  warning that is always present teaches the reader to skip it. Build the fix rather than leave the
+  banner.
 - **Never renormalise to 100; report the shortfall.** Percentages are shares of the whole book.
 - **Whitelist, never blacklist** — flow types that count as money in, asset classes that count as
   equity.
-- **Bound every retry and every re-ask** — the holiday rule, `UPSTREAM_RETRY_COOLDOWN_SECONDS`,
-  `*_checked_at` stamps, `HOLIDAY_GRACE_DAYS`. A loop that asks the same question forever is how
-  an IP-based rate limit is spent.
+- **Bound every retry and every re-ask** — `UPSTREAM_RETRY_COOLDOWN_SECONDS`, `*_checked_at`
+  stamps, `HOLIDAY_GRACE_DAYS`. A loop that asks the same question forever spends an IP-based limit.
 - **Secrets are redacted on write and on read** (`app/redact.py`): Flex puts the token in the URL
   and transport errors stringify it.
 - **No upload endpoints.** `/api/` is public; the CLIs under `app/cli/` over ssh are the write path
   for anything not on the sync, and each records a `sync_runs` row. Every `POST/PUT/PATCH/DELETE`
   under `/api/` is gated by `app/auth.py` middleware (method-keyed, so a new route is covered the
   moment it exists); reads are open and rate-limited — **except under `/api/crypto`, whose reads
-  need the key too and fail closed** when no key is configured (docs/crypto.md).
+  need the key too and fail closed** when no key is configured.
 - **A `response_model` is a filter.** Complete the model before attaching one, and pin the
   service's key set against it in both directions (`test_dividend_summary_contract.py`).
 - **Pillar 3a blends everywhere except where it must not.** `reconcile_taxlots`, the wipe guard
   and `restamp_unsourced_closed_lots` are scoped to `account=IBKR`; the tax report excludes 3a;
-  every other reader sees one portfolio. `tests/test_account_isolation.py` pins the destructive
-  paths plus an AST rule.
-- **Crypto blends nowhere** — the opposite of 3a. Its own tables, service, router and view, never
-  an `account` label; no stock reader can see a crypto row because none is written to a stock
-  table. `tests/test_crypto_isolation.py` pins the import graph both ways (docs/crypto.md).
+  every other reader sees one portfolio. `tests/test_account_isolation.py` pins it.
+- **Crypto blends nowhere** — its own tables, service, router and view, never an `account` label.
+  `tests/test_crypto_isolation.py` pins the import graph both ways.
 - **`price_source` is the Yahoo opt-out**, honoured at every Yahoo call site
   (`tests/test_yahoo_eligibility_family.py`).
 - **Frontend formatters are pinned to `en-US`** in `lib/utils.ts`; a bare `toLocaleString()`
@@ -213,90 +191,49 @@ Each of these was a bug first; the file for the area has the story.
 
 ---
 
-## Tech stack
+## Stack, deploy, local — the essentials
 
-**Backend** — FastAPI (async) on Starlette, SQLAlchemy 2.0 + aiosqlite (WAL), Alembic, APScheduler
-with a persistent job store, `ibflex` **0.15** (pinned — it aborts on unknown attributes, hence
-`_sanitize_flex_xml`), `yfinance >= 1.1.0`, Frankfurter for FX with `open.er-api.com` as the
-bounded fallback. Pins are in `backend/requirements.txt` and were moved to current on 2026-09-08;
-`pip-audit` or an OSV query against them is worth running when they age again.
-**Frontend** — React 19 + TypeScript + Vite, TanStack Query, Recharts, Tailwind + shadcn/ui. Vitest
-runs in `node` by default; component tests opt into jsdom per file. The bundle is code-split with
-two deliberate boundaries (Recharts stays eager; lazy tabs sit behind `ui/LazyTabPanel.tsx`) — see
-[docs/tech-stack.md](docs/tech-stack.md) before "optimising" either. **`e2e/`** is a separate
-Playwright package that the deploy never installs; its scripts have per-script preconditions
-(`e2e/README.md`).
+**Stack:** FastAPI + SQLAlchemy 2.0/aiosqlite (WAL) + Alembic + APScheduler; `ibflex` **0.15**
+pinned; React 19 + TypeScript + Vite, TanStack Query, Recharts, Tailwind/shadcn. Two deliberate
+bundle boundaries — read [docs/tech-stack.md](docs/tech-stack.md) before "optimising" either.
+`e2e/` is a separate Playwright package the deploy never installs.
 
----
+**Deploy** ([docs/deployment.md](docs/deployment.md)):
 
-## Deployment — the essentials
-
-Full detail in [docs/deployment.md](docs/deployment.md).
-
-- **Push to `main` → deployed automatically within 5 minutes** (once CI is green).
-  `/root/auto-deploy.sh` (root crontab, `*/5` since 2026-10-04) resets the checkout, backs up the
-  DB, runs `deploy.sh`, health-checks, and rolls back on failure — restoring that DB snapshot
-  when the failed range carried a migration that ran (since 2026-10-04; the failed-state DB is
-  kept in `/root/ibkr-backups/failed-deploys/`). It defers a deploy that would land inside a sync
-  slot; don't push within ~10 minutes of one (`ALL_SYNC_HOURS` in `scheduler_service.py`;
+- **Push to `main` → deployed within 5 minutes** once CI is green, by `/root/auto-deploy.sh`
+  (backs up the DB, runs `deploy.sh`, health-checks, rolls back on failure). **Don't push within
+  ~10 minutes of a Berlin sync slot** (`ALL_SYNC_HOURS` in `scheduler_service.py`;
   `ops/finish-deploy.*` checks). `/root/auto-deploy.sh` and `/root/backup-db.sh` are COPIES of
-  `ops/` — refresh them by atomic rename when the repo scripts change (docs/deployment.md).
-- **`deploy.sh` builds before it stops anything** (frontend into `dist.next`, then the image),
-  re-checks the sync slots and waits out a running sync (bounded; `DEPLOY_IGNORE_SLOTS=1` skips),
-  then checkpoints SQLite's WAL inside the running container, then `down`, swap `dist`, `up`. Measured
-  after the reorder: zero failed health probes across a deploy.
-- **The database is `backend/data/portfolio.db` behind a DIRECTORY bind mount** (`./data:/app/data`,
-  with `DATABASE_URL` pinned in compose's `environment:` so the host `.env` cannot override it), so
-  SQLite's `-wal`/`-shm` land on the host. It was a FILE mount (`./portfolio.db`) until 2026-10-04,
-  whose sidecars lived in the container layer and died with `docker compose down` — every deploy
-  discarded the commits since the last auto-checkpoint. `deploy.sh` moves a legacy
-  `backend/portfolio.db` into `data/` once (`ops/db-layout.sh`: idempotent, refuses any layout it
-  does not recognise) and leaves a symlink at the old path for older scripts and rollbacks. **The
-  container refuses to start on a missing or empty database** (`app/db_guard.py`, before alembic);
-  only a genuine fresh install sets `ALLOW_NEW_DATABASE=1`. The three WAL checkpoints stay
-  (`tests/test_wal_checkpoint_on_shutdown.py`); `tests/test_db_directory_mount.py` pins the rest.
-  Anything that writes to production by hand and then stops the container must checkpoint first.
-- **Changing `backend/.env` needs `docker compose up -d`, never `restart`** (compose reads
-  `env_file` only when it creates a container), **with `GIT_COMMIT=$(git rev-parse HEAD)`
-  exported**, or `/health` reports `commit: "unknown"` until the next push. Confirm against
-  `/health`, not the command's exit status.
-- `/health` reports `commit`, `scheduler_enabled`, `write_auth_enabled` and
-  `scheduler_jobstore_persistent` (`false` means misfire recovery is off, whatever
-  `/api/scheduler/status` says). Its check right after start often reports FAILED spuriously;
-  re-check after ~15 s.
+  `ops/` — refresh them by atomic rename when the repo scripts change.
+- **The database is `backend/data/portfolio.db` behind a DIRECTORY bind mount**; the container
+  refuses to start on a missing or empty one (`app/db_guard.py`). Anything that writes to
+  production by hand and then stops the container must checkpoint the WAL first.
+- **Changing `backend/.env` needs `docker compose up -d`, never `restart`**, with
+  `GIT_COMMIT=$(git rev-parse HEAD)` exported. Confirm against `/health` (re-check after ~15 s; the
+  first probe after start often fails spuriously).
 - SSH: `ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud`. Secrets only in
-  `/root/IBKR_investment_tracker/backend/.env`. Backups in `/root/ibkr-backups/<date>/`, 30 days,
-  at least 10 kept. `/root/backup-db.sh` is a *copy* of `ops/backup-db.sh` that auto-deploy and the
-  daily cron prefer — refresh it when the repo script changes.
-- A cloud routine `ibkr-sync-validator` runs daily at 07:45 UTC against the public API; it cannot
-  ssh, so it opens PRs rather than pushing.
+  `/root/IBKR_investment_tracker/backend/.env`. A cloud routine `ibkr-sync-validator` checks the
+  public API daily at 07:45 UTC and opens PRs.
 
----
-
-## Local development — the essentials
-
-Full detail and the traps in [docs/local-development.md](docs/local-development.md) and STATUS.md's
-*Local development traps*.
+**Local** ([docs/local-development.md](docs/local-development.md), including its *Traps*):
 
 ```bash
 cd backend && ./venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000   # SCHEDULER_ENABLED=false in backend/.env first
-cd frontend && npm run dev                                                            # http://localhost:5173 — check which port Vite actually took
+cd frontend && npm run dev                                                            # check which port Vite actually took
 cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q -n auto --dist worksteal -m "not deploy_scripts"
-    # all offline, parallel, ~25 s; drop -m after touching deploy.sh or ops/ (docs/local-development.md); take the printed count as the baseline
+    # offline, parallel, ~25 s; drop -m after touching deploy.sh or ops/; take the printed count as the baseline
 cd frontend && npx tsc -b && npm run test && npm run build
 ```
 
-- **`SCHEDULER_ENABLED=false` in `backend/.env` for any local run.** Defaults to `True` so
-  production is unaffected; a disabled scheduler logs a warning on purpose.
-- The local `backend/portfolio.db` predates trades, cash flows and the IBKR dividend era, so it
-  exercises none of the interesting shapes. Use a `sqlite3 .backup` snapshot from the VPS, point
-  `DATABASE_URL` at it, and **delete it afterwards** — it is real account data.
-- `tests/test_api_smoke.py` runs every read endpoint through the real HTTP stack against a fixture
-  carrying the shapes that break. **Add a case there when a response shape changes.**
-- Repo files are CRLF in the working tree (git autocrlf); an edit script must preserve line endings
-  or every later replace fails and the whole file reads as changed.
+- The local `backend/portfolio.db` exercises none of the interesting shapes. Use a `sqlite3
+  .backup` snapshot from the VPS and **delete it afterwards** — it is real account data. The test
+  suite writes into whatever `DATABASE_URL` names (STATUS.md *Worth doing next* 1).
+- `tests/test_api_smoke.py` runs every read endpoint through the real HTTP stack. **Add a case
+  there when a response shape changes.**
+- Repo files are CRLF in the working tree (git autocrlf); an edit script must preserve line endings.
 
 ## When something looks wrong
 
-Start at [docs/troubleshooting.md](docs/troubleshooting.md): it is indexed by symptom, and most
-entries end in "expected, and here is why" — read those before fixing what is not broken.
+Start at [docs/troubleshooting.md](docs/troubleshooting.md): indexed by symptom, and most entries
+end in "expected, and here is why" — read those, and the accepted rough edges, before fixing what
+is not broken.
