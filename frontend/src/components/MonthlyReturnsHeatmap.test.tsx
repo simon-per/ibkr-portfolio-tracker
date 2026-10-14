@@ -76,6 +76,24 @@ describe('MonthlyReturnsHeatmap', () => {
     expect(screen.getByText(/Mar:/)).toBeTruthy()
   })
 
+  it('tags the running month MTD, in the summary and in its cell only', () => {
+    render(
+      <MonthlyReturnsHeatmap
+        isLoading={false}
+        runningMonth="2026-03"
+        data={[point('2026-02-02', 1000), point('2026-02-27', 1010), point('2026-03-31', 1030)]}
+      />,
+    )
+    expect(screen.getByText(/Mar MTD:/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Monthly Returns/ }))
+    expect(screen.getAllByText('MTD')).toHaveLength(1)
+    expect(screen.getByTitle(/^Mar 2026:/).textContent).toContain('MTD')
+    expect(screen.getByTitle(/^Feb 2026:/).textContent).not.toContain('MTD')
+    // An empty month is the app's one absent glyph, not an en dash.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.queryByText('–')).toBeNull()
+  })
+
   it('says the request failed rather than claiming there is not enough data', () => {
     render(<MonthlyReturnsHeatmap isLoading={false} isError data={undefined} />)
     expect(screen.getByText(/Could not load the value history/)).toBeTruthy()

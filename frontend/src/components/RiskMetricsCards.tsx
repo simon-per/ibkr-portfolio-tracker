@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
+import type { SortinoAbsence } from '@/lib/portfolioKpis'
 
 /**
  * Beta needs a benchmark, and there are three separate reasons it can be
@@ -21,6 +22,8 @@ export interface RiskBeta {
 export interface RiskMetrics {
   volatilityPct: number | null
   sortino: number | null
+  /** Why `sortino` is null; only `no_downside` may claim there were no down days. */
+  sortinoAbsence: SortinoAbsence | null
   /**
    * Both drawdowns are `null` when not one daily return in the range was measurable.
    * A `0` cannot stand in for that: this card reads a zero max as licence to print
@@ -132,12 +135,8 @@ export function RiskMetricsCards({
             : []),
         ].join(' · ')
 
-  // Prose the footnote has no room for. It carries no figure that exists nowhere else,
-  // because a caveat reachable only by hovering does not exist on a touch device.
-  const dividendTitle =
-    'Projected over the next 12 months from each payer’s own cadence, against current ' +
-    'market value. Accumulating ETFs and non-payers correctly contribute nothing, and ' +
-    'unpriced holdings are excluded from both sides.'
+  // Names the figure only; the method lives in docs/dividends.md.
+  const dividendTitle = 'Next-12-month income / market value'
   // The current fall is the one that describes now; the max describes the worst
   // the account has survived. Showing only the max reads as a live warning long
   // after the recovery.
@@ -163,7 +162,11 @@ export function RiskMetricsCards({
           : metrics.sortino >= 1 ? 'positive'
           : metrics.sortino >= 0 ? 'warning'
           : 'negative'}
-        sub={metrics.sortino !== null ? undefined : 'No down days to measure against'}
+        sub={metrics.sortino !== null
+          ? undefined
+          : metrics.sortinoAbsence === 'no_downside'
+            ? 'No down days'
+            : 'Not enough history in this range'}
       />
 
       {/* Beta vs the primary benchmark. Three distinct reasons it can be absent, and the
@@ -232,9 +235,7 @@ export function RiskMetricsCards({
         label="Yield on Cost"
         icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
         value={dividend?.on_cost_pct != null ? `${dividend.on_cost_pct.toFixed(2)}%` : null}
-        title="The same projected income measured against what the holdings cost rather
-               than what they are worth. On an appreciated position the two diverge, and
-               the gap is the part a current-yield figure hides."
+        title="Next-12-month income / cost basis"
         sub={dividendUnavailable
           ? "Couldn't load dividend data"
           : dividend === undefined

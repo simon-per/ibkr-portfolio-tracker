@@ -131,3 +131,120 @@ export function computeModifiedDietzReturn(
       : {}),
   }
 }
+
+export interface YearRow {
+  year: number
+  /** January..December; `null` where the range holds no point or the return is undefined. */
+  months: (MonthReturn | null)[]
+  /** The year's months linked geometrically — `null` when a month inside the chain is. */
+  ytd: MonthReturn | null
+}
+
+/**
+ * The heatmap's matrix: one Modified Dietz return per calendar month, **measured from the
+ * previous month's last point**, and a YTD that is those months compounded.
+ *
+ * Until 2026-10-14 each month started at its own first point, so the move from one
+ * month's last close to the next month's first was in no month at all — a dozen trading
+ * days a year — and the YTD column, a separate Modified Dietz over the whole year, did
+ * not equal the months it sat beside (2026: months chained to about 25%, YTD read 32%).
+ * Anchoring each month on the prior month-end puts every day in exactly one month, and
+ * linking the months makes `∏(1 + month) = 1 + YTD` an identity rather than a hope. A
+ * year-long Modified Dietz could not keep it: its flow weighting is an approximation
+ * that drifts furthest over a long window with large contributions, which is this book.
+ *
+ * Leading months with no return (nothing held at their start) are outside the chain, and
+ * the YTD says it covers part of the year; a null month *inside* the chain makes the YTD
+ * null, because a compounded figure with a hole in it is not the year's return.
+ */
+export function monthlyReturnRows(
+  data: PortfolioValuePoint[],
+  rangeStart?: string,
+): YearRow[] {
+  if (data.length < 2) return []
+
+  const monthGroups = new Map<string, PortfolioValuePoint[]>()
+  for (const point of data) {
+    const key = point.date.substring(0, 7) // "YYYY-MM"
+    const group = monthGroups.get(key)
+    if (group) group.push(point)
+    else monthGroups.set(key, [point])
+  }
+
+  const keys = [...monthGroups.keys()].sort()
+  const monthReturns = new Map<string, MonthReturn>()
+  // The days each month's figure covers, whether or not it is partial — what the YTD
+  // names as its own window when it is.
+  const spans = new Map<string, Span>()
+  let previousEnd: PortfolioValuePoint | undefined
+  for (const key of keys) {
+    const points = monthGroups.get(key)!
+    // Not from a month-end that held nothing: the move from nothing to the first lot is
+    // inception, which the first valued point already contains (`firstValuedPoint`).
+    const window = previousEnd && previousEnd.market_value_eur > 0 ? [previousEnd, ...points] : points
+    const result = computeModifiedDietzReturn(window, { periodStart: `${key}-01`, rangeStart })
+    if (result) {
+      monthReturns.set(key, result)
+      spans.set(key, result.measured ?? { from: window[0].date, to: window[window.length - 1].date })
+    }
+    previousEnd = points[points.length - 1]
+  }
+
+  const years = [...new Set(keys.map((k) => Number(k.substring(0, 4))))]
+  const rows: YearRow[] = years.map((year) => {
+    const months: (MonthReturn | null)[] = new Array(12).fill(null)
+    const monthSpans: (Span | null)[] = new Array(12).fill(null)
+    const present: boolean[] = new Array(12).fill(false)
+    for (const key of keys) {
+      if (Number(key.substring(0, 4)) !== year) continue
+      const i = Number(key.substring(5, 7)) - 1
+      present[i] = true
+      months[i] = monthReturns.get(key) ?? null
+      monthSpans[i] = spans.get(key) ?? null
+    }
+    return { year, months, ytd: linkMonths(months, monthSpans, present, `${year}-01-01`, rangeStart) }
+  })
+  return rows.sort((a, b) => b.year - a.year)
+}
+
+type Span = { from: string; to: string }
+
+function linkMonths(
+  months: (MonthReturn | null)[],
+  spans: (Span | null)[],
+  present: boolean[],
+  periodStart: string,
+  rangeStart: string | undefined,
+): MonthReturn | null {
+  const first = months.findIndex((m) => m !== null)
+  if (first < 0) return null
+  let last = 11
+  while (!present[last]) last--
+  // A month the range holds no point in is not a hole: the next month is measured from
+  // the last point before it, so its move is already inside that figure.
+  const chain = months.slice(first, last + 1).filter((_, i) => present[first + i])
+  if (chain.some((m) => m === null)) return null
+  const linked = chain as MonthReturn[]
+
+  const growth = linked.reduce((g, m) => g * (1 + m.returnPercent / 100), 1)
+  const skippedLeading = present.slice(0, first).some(Boolean)
+  const range = rangeStart !== undefined && rangeStart > periodStart
+  const unpriced = linked.some((m) => m.shortenedBy?.unpriced)
+  const partial = skippedLeading || range || linked.some((m) => m.partial)
+  const head = linked[0]
+  const tail = linked[linked.length - 1]
+
+  return {
+    returnPercent: (growth - 1) * 100,
+    startValue: head.startValue,
+    endValue: tail.endValue,
+    newInvestment: linked.reduce((s, m) => s + m.newInvestment, 0),
+    ...(partial
+      ? {
+          partial: true,
+          measured: { from: spans[first]!.from, to: spans[last]!.to },
+          shortenedBy: { unpriced, range },
+        }
+      : {}),
+  }
+}

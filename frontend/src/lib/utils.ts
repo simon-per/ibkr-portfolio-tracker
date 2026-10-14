@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * The one glyph for an absent figure. `KpiCard` and the tables already drew an em dash;
+ * a hyphen in the watchlist and an en dash in the heatmap read as three different
+ * states, and a lone `-` beside signed figures looks like a stray minus.
+ */
+export const ABSENT = '—'
+
 export function formatCurrency(value: number, currency: string = "EUR"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -164,7 +171,7 @@ export function formatCount(value: number): string {
  * reading as eight hundred fifty *thousandths* of a currency unit.
  */
 export function formatMarketCap(value: number | null): string {
-  if (value === null) return '-'
+  if (value === null) return ABSENT
   if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`
   if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`
   if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`

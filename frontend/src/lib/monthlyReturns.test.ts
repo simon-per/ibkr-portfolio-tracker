@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeModifiedDietzReturn } from './monthlyReturns'
+import { computeModifiedDietzReturn, monthlyReturnRows } from './monthlyReturns'
 import type { PortfolioValuePoint } from './api'
 
 function point(date: string, mv: number, cost: number, flow?: number): PortfolioValuePoint {
@@ -274,5 +274,97 @@ describe('a period the chart range began inside', () => {
       computeModifiedDietzReturn(septemberFromThe12th, { periodStart: '2025-09-01' })?.partial,
     ).toBeUndefined()
     expect(computeModifiedDietzReturn(septemberFromThe12th)?.partial).toBeUndefined()
+  })
+})
+
+/**
+ * Each month used to start at its own first point, so the move from one month's last
+ * close to the next month's first was in no month, and the YTD — a separate Modified
+ * Dietz over the year — did not equal the months beside it (measured on 2026: about 25%
+ * chained against 32%). The identity below is the whole point of the matrix.
+ */
+describe('monthlyReturnRows', () => {
+  // A year with a contribution every month and a gap-up on every month's first day.
+  const year = [
+    point('2025-12-31', 1000, 1000, 0),
+    point('2026-01-02', 1050, 1000, 0),
+    point('2026-01-15', 1250, 1200, 200),
+    point('2026-01-30', 1300, 1200, 0),
+    point('2026-02-02', 1380, 1200, 0),
+    point('2026-02-16', 1480, 1300, 100),
+    point('2026-02-27', 1420, 1300, 0),
+    point('2026-03-02', 1500, 1300, 0),
+    point('2026-03-16', 2000, 1800, 500),
+    point('2026-03-31', 2100, 1800, 0),
+  ]
+  const row2026 = () => monthlyReturnRows(year).find((r) => r.year === 2026)!
+
+  it('compounds the months to exactly the YTD, flows and all', () => {
+    const { months, ytd } = row2026()
+    const chained = months
+      .filter((m) => m !== null)
+      .reduce((g, m) => g * (1 + m!.returnPercent / 100), 1)
+    expect(ytd).not.toBeNull()
+    expect(1 + ytd!.returnPercent / 100).toBeCloseTo(chained, 12)
+    expect(ytd!.newInvestment).toBe(800)
+  })
+
+  it('measures each month from the previous month-end, so the boundary move is counted', () => {
+    // February's first day gapped up 80 on no flow; a month started at its own first
+    // point would miss it and read 1420 / (1380 + 100·w) - …, a loss.
+    const feb = row2026().months[1]!
+    const expected = computeModifiedDietzReturn(year.slice(3, 7))!.returnPercent
+    expect(feb.returnPercent).toBeCloseTo(expected, 12)
+    expect(feb.startValue).toBe(1300)
+    expect(feb.returnPercent).toBeGreaterThan(0)
+  })
+
+  it('agrees with a flow-free year measured end to end', () => {
+    const flat = [
+      point('2025-12-31', 1000, 1000, 0),
+      point('2026-01-30', 1100, 1000, 0),
+      point('2026-02-02', 1200, 1000, 0),
+      point('2026-02-27', 1150, 1000, 0),
+    ]
+    const ytd = monthlyReturnRows(flat).find((r) => r.year === 2026)!.ytd!
+    expect(ytd.returnPercent).toBeCloseTo(15, 10)
+    expect(ytd.partial).toBeUndefined()
+  })
+
+  it('starts the chain at the first month with a return, and says the YTD is partial', () => {
+    // Nothing held in January, so it has no return; the year is measured from February.
+    const inception = [
+      point('2026-01-02', 0, 0, 0),
+      point('2026-01-30', 0, 0, 0),
+      point('2026-02-02', 1000, 1000, 1000),
+      point('2026-02-27', 1100, 1000, 0),
+      point('2026-03-31', 1210, 1000, 0),
+    ]
+    const row = monthlyReturnRows(inception)[0]
+    expect(row.months[0]).toBeNull()
+    expect(row.ytd!.returnPercent).toBeCloseTo((1 + row.months[1]!.returnPercent / 100) * 1.1 * 100 - 100, 10)
+    expect(row.ytd!.partial).toBe(true)
+    expect(row.ytd!.measured?.to).toBe('2026-03-31')
+  })
+
+  it('refuses a YTD with an undefined month inside the chain', () => {
+    // March: a withdrawal early in the month outweighs its starting value, so its
+    // return is undefined — and a compounded year with a hole is not the year's return.
+    const withHole = [
+      point('2026-01-02', 1000, 1000, 0),
+      point('2026-01-30', 1000, 1000, 0),
+      point('2026-03-02', 2000, 1000, 0),
+      point('2026-03-03', 10, 10, -1990),
+      ...['04', '05', '06', '09', '10', '11', '12', '13'].map((d) => point(`2026-03-${d}`, 10, 10, 0)),
+      point('2026-04-30', 11, 10, 0),
+    ]
+    const row = monthlyReturnRows(withHole)[0]
+    expect(row.months[2]).toBeNull()
+    expect(row.ytd).toBeNull()
+  })
+
+  it('marks the YTD partial when the range began inside the year', () => {
+    const row = monthlyReturnRows(year.slice(1), '2026-01-02').find((r) => r.year === 2026)!
+    expect(row.ytd?.shortenedBy).toEqual({ unpriced: false, range: true })
   })
 })

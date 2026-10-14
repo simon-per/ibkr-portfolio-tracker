@@ -1147,8 +1147,11 @@ export interface TaxDividendRow {
   isin: string | null;
   pay_date: string;
   gross: number;
+  /** 0 on an estimated row means "not recorded", not "none withheld". */
   withholding: number;
   net: number;
+  /** Per-row era: an estimate carries a guessed gross and no withholding at all. */
+  source: 'ibkr' | 'yfinance_estimate';
 }
 
 export interface TaxCountryRow {

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { getRatingScore } from '@/lib/analystRating'
-import { cn, formatShortDateTime } from '@/lib/utils'
+import { ABSENT, cn, formatShortDateTime } from '@/lib/utils'
 import { watchlistFreshness } from '@/lib/watchlistFreshness'
 import { DataTable } from '@/components/ui/DataTable'
 import { watchlistColumns, type WatchlistSortColumn } from './watchlistColumns'
@@ -22,7 +22,7 @@ export function WatchlistTab() {
   // Per-row data_currency via the shared formatter's override; a row with no
   // currency falls back to the base currency rather than a hardcoded USD.
   const formatCurrency = (value: number | null, currency: string | null): string =>
-    value === null ? '-' : formatBase(value, currency ?? undefined)
+    value === null ? ABSENT : formatBase(value, currency ?? undefined)
   const [tickerInput, setTickerInput] = useState('')
   const [sortColumn, setSortColumn] = useState<SortColumn>('buy_score')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')

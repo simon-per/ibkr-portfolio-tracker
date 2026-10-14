@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
+import { formatCount } from '@/lib/utils'
 import {
   computeCurrencyExposure,
   foreignQuotedPct,
@@ -126,7 +127,7 @@ export function CurrencyExposureCard({
                         </td>
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {curSym}
-                          {Math.round(row.marketValue).toLocaleString('en-US')}
+                          {formatCount(Math.round(row.marketValue))}
                         </td>
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {row.pct.toFixed(1)}%

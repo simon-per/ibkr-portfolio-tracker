@@ -114,6 +114,10 @@ from one dominant one.
   seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
   bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
   so it is latent here and live on any younger account or after a backfill.
+- **Sortino's two nulls are told apart** (`sortinoDetail`, 2026-10-14). Too few returns and no
+  downside deviation both returned `null`, and the card captioned every null *"No down days"* — a
+  claim about the range, made over a window too short to have measured it. Only `no_downside` may
+  say it; too little history reads *"Not enough history in this range"*, like Volatility.
 - **`dailyReturnSeries` exists because `dailyReturns` drops days with nothing to divide by**, so the
   nth return is not the nth calendar point. Indexing the input by return position to name a
   drawdown's peak picks the wrong day.
@@ -244,6 +248,27 @@ exactly that), so the last rolling point equals the risk cards over the same win
 every metric is `null` below its sample floor, never `0`. The Analytics tab never asks the
 benchmark endpoint unless the Performance tab has a benchmark selected — a cache miss there
 is a Yahoo request, and it is handed the selection as a prop rather than re-reading storage.
+
+### Monthly returns (`monthlyReturns.ts`, `MonthlyReturnsHeatmap`)
+
+**`∏(1 + month) = 1 + YTD` is an identity, pinned in `monthlyReturns.test.ts`** (2026-10-14).
+Each month used to start at its own first point, so the move from one month's last close to
+the next month's first belonged to no month — a dozen trading days a year — and the YTD
+column, a separate Modified Dietz over the year, did not equal the months beside it (2026
+chained to about 25% against a YTD of 32%). `monthlyReturnRows` now measures each month from
+the **previous month's last point** (flows weighted as before), and YTD is the months linked
+geometrically. A year-long Modified Dietz could not keep the identity: its flow weighting is
+an approximation that drifts furthest over long windows with large contributions.
+
+- A month-end that held nothing is not an anchor: the inception month starts at its own first
+  point, as before (the move from nothing to the first lot is inception).
+- Leading months with no return sit outside the chain and the YTD is `partial`; a month with
+  data but an undefined return **inside** the chain makes the YTD `null`. A month with no
+  point at all is not a hole — the next month is measured across it.
+- The running month is tagged `MTD` (cell and collapsed summary).
+
+The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, described in
+[flex-and-sync.md](flex-and-sync.md).
 
 ---
 

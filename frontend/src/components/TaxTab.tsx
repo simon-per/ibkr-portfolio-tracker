@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 
@@ -16,10 +16,6 @@ import { DataTable, type Column } from '@/components/ui/DataTable'
  */
 const FALLBACK_FIRST_TAX_YEAR = 2024
 
-function formatMoney(amount: number): string {
-  return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 /** Green for gains, red for losses, muted for zero. */
 function gainClass(amount: number): string {
   if (amount > 0) return 'text-green-600 dark:text-green-400'
@@ -28,6 +24,42 @@ function gainClass(amount: number): string {
 }
 
 type Money = (n: number) => string
+
+/** Withholding is a deduction, so a recorded amount prints with its minus. */
+function withheld(money: Money, amount: number): string {
+  return amount ? `-${money(amount)}` : money(0)
+}
+
+function signed(money: Money, amount: number): string {
+  return `${amount >= 0 ? '+' : ''}${money(amount)}`
+}
+
+/**
+ * How many dividend rows are estimates. An estimate has a guessed gross and *no*
+ * withholding on record — its 0 is "not known", not "nothing withheld" — so its
+ * withholding cell is absent and a total built over it says how many it left out.
+ */
+export function estimatedDividendRows(rows: TaxReport['dividend_income']): number {
+  return rows.filter((d) => d.source === 'yfinance_estimate').length
+}
+
+/**
+ * The withholding total's cell. The backend's sum carries every estimate as 0, so it is
+ * the recorded withholding only: absent when every row is an estimate, and tagged with
+ * the count it excludes when some are.
+ */
+export function withholdingTotalLabel(
+  money: Money,
+  total: number,
+  rowCount: number,
+  estimatedRows: number,
+): { amount: string; excluded: string | null } {
+  if (rowCount > 0 && estimatedRows === rowCount) return { amount: '—', excluded: null }
+  return {
+    amount: withheld(money, total),
+    excluded: estimatedRows > 0 ? `excl. ${estimatedRows} est.` : null,
+  }
+}
 type DividendIncomeRow = TaxReport['dividend_income'][number]
 type ByCountryRow = TaxReport['dividend_by_country'][number]
 type RealizedRow = TaxReport['realized_gains'][number]
@@ -89,11 +121,19 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Withholding',
     align: 'right',
     cellClassName: 'text-muted-foreground',
-    cell: (d) => (d.withholding ? `-${money(d.withholding)}` : money(0)),
+    cell: (d) => (d.source === 'yfinance_estimate' ? '—' : withheld(money, d.withholding)),
   },
 ]
 
-const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
+/**
+ * A country row does not say which of its payments were estimates, so the column
+ * follows the report's era: absent in an estimate-only year, tagged in the boundary
+ * year, where its sum is the recorded withholding only.
+ */
+const BY_COUNTRY_COLUMNS = (
+  money: Money,
+  dividendSource: TaxReport['dividend_source'],
+): Column<ByCountryRow>[] => [
   {
     key: 'country',
     header: 'Country',
@@ -131,7 +171,17 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     header: 'Withholding',
     shortHeader: 'Withholding',
     align: 'right',
-    cell: (c) => (c.withholding ? `-${money(c.withholding)}` : money(0)),
+    cell: (c) =>
+      dividendSource === 'yfinance_estimate' ? (
+        '—'
+      ) : dividendSource === 'mixed' ? (
+        <>
+          {withheld(money, c.withholding)}
+          <span className="ml-1 text-xs text-muted-foreground">excl. est.</span>
+        </>
+      ) : (
+        withheld(money, c.withholding)
+      ),
   },
 ]
 
@@ -161,7 +211,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
     mobile: 'value',
     tone: (r) => gainClass(r.gain_loss),
     cellClassName: 'font-medium',
-    cell: (r) => `${r.gain_loss >= 0 ? '+' : ''}${money(r.gain_loss)}`,
+    cell: (r) => signed(money, r.gain_loss),
   },
   {
     key: 'quantity',
@@ -222,8 +272,47 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
   },
 ]
 
+function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money }) {
+  const rows = data.dividend_income
+  const withholding = withholdingTotalLabel(
+    money,
+    data.dividend_totals.withholding,
+    rows.length,
+    estimatedDividendRows(rows),
+  )
+  return (
+    <DataTable
+      rows={rows}
+      columns={DIVIDEND_INCOME_COLUMNS(money)}
+      getRowKey={(_, i) => i}
+      label="Dividend income"
+      density="compact"
+      footer={[
+        { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: 'Total' },
+        { key: 'gross', spans: ['gross'], align: 'right', content: money(data.dividend_totals.gross) },
+        {
+          key: 'withholding',
+          spans: ['withholding'],
+          align: 'right',
+          content: (
+            <>
+              {withholding.amount}
+              {withholding.excluded && (
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  {withholding.excluded}
+                </span>
+              )}
+            </>
+          ),
+        },
+        { key: 'net', spans: ['net'], align: 'right', content: money(data.dividend_totals.net) },
+      ]}
+    />
+  )
+}
+
 export function TaxTab() {
-  const curSym = useCurrencySymbol()
+  const money: Money = useFormatCurrency()
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
 
@@ -248,8 +337,6 @@ export function TaxTab() {
     queryFn: () => api.getTaxReport(year),
     staleTime: 30 * 60 * 1000, // 30 min
   })
-
-  const money = (n: number) => `${curSym}${formatMoney(n)}`
 
   return (
     <div className="space-y-6">
@@ -320,7 +407,6 @@ export function TaxTab() {
             <Card>
               <CardHeader>
                 <CardTitle>Pillar 3a</CardTitle>
-                <CardDescription>Excluded from every section below.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -361,10 +447,10 @@ export function TaxTab() {
                   )}
                   title={
                     data.dividend_source === 'ibkr'
-                      ? 'Actual figures from IBKR cash transactions'
+                      ? 'IBKR cash transactions'
                       : data.dividend_source === 'mixed'
-                        ? `Estimates before ${data.dividend_ibkr_from ?? 'the IBKR era'}; IBKR actuals with real withholding from there on`
-                        : 'Estimated gross from Yahoo Finance — withholding not reflected'
+                        ? `IBKR from ${data.dividend_ibkr_from ?? '—'}`
+                        : 'Estimated gross'
                   }
                 >
                   {data.dividend_source === 'ibkr'
@@ -381,26 +467,7 @@ export function TaxTab() {
                   No dividend income recorded for {year}.
                 </p>
               ) : (
-                <DataTable
-                  rows={data.dividend_income}
-                  columns={DIVIDEND_INCOME_COLUMNS(money)}
-                  getRowKey={(_, i) => i}
-                  label="Dividend income"
-                  density="compact"
-                  footer={[
-                    { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: 'Total' },
-                    { key: 'gross', spans: ['gross'], align: 'right', content: money(data.dividend_totals.gross) },
-                    {
-                      key: 'withholding',
-                      spans: ['withholding'],
-                      align: 'right',
-                      content: data.dividend_totals.withholding
-                        ? `-${money(data.dividend_totals.withholding)}`
-                        : money(0),
-                    },
-                    { key: 'net', spans: ['net'], align: 'right', content: money(data.dividend_totals.net) },
-                  ]}
-                />
+                <DividendIncomeTable data={data} money={money} />
               )}
             </CardContent>
           </Card>
@@ -410,12 +477,11 @@ export function TaxTab() {
             <Card>
               <CardHeader>
                 <CardTitle>Withholding by country (DA-1)</CardTitle>
-                <CardDescription>{data.dividend_country_note}</CardDescription>
               </CardHeader>
               <CardContent>
                 <DataTable
                   rows={data.dividend_by_country}
-                  columns={BY_COUNTRY_COLUMNS(money)}
+                  columns={BY_COUNTRY_COLUMNS(money, data.dividend_source)}
                   getRowKey={(c) => c.country}
                   label="Withholding by country"
                   density="compact"
@@ -438,8 +504,8 @@ export function TaxTab() {
                   )}
                   title={
                     data.realized_source === 'trades'
-                      ? "Exact figures from IBKR trade executions (FIFO realized P&L)"
-                      : 'Estimated from closed lots at market price on the close date — no IBKR trade data for this year'
+                      ? 'IBKR trades, FIFO'
+                      : 'Closed lots at close-date price'
                   }
                 >
                   {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
@@ -467,7 +533,7 @@ export function TaxTab() {
                       spans: ['gain_loss'],
                       align: 'right',
                       tone: gainClass(data.realized_totals.gain_loss),
-                      content: `${data.realized_totals.gain_loss >= 0 ? '+' : ''}${money(data.realized_totals.gain_loss)}`,
+                      content: signed(money, data.realized_totals.gain_loss),
                     },
                   ]}
                 />
@@ -482,7 +548,7 @@ export function TaxTab() {
                 <CardTitle>Holdings snapshot (wealth tax / Steuerwert)</CardTitle>
                 <span
                   className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                  title="Swiss wealth tax is assessed on the 31 December value"
+                  title="Steuerwert date"
                 >
                   as at {data.holdings_as_of}
                 </span>
