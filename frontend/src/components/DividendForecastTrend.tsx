@@ -17,7 +17,8 @@ import {
   CHART_TOOLTIP_STYLE,
 } from '@/lib/chartTooltip'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
-import { forecastTrend, partLabel } from '@/lib/dividendForecastTrend'
+import { dividendAmount } from '@/lib/dividendFormat'
+import { forecastTrend, fromBuysLabel, type LiveForecast } from '@/lib/dividendForecastTrend'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { cn, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
@@ -42,8 +43,15 @@ function shortDay(iso: string): string {
  * keeps the figure, the growth and its "est." on the surface in both states. Replayed
  * days are drawn like recorded ones — the owner's call (2026-10-14): an estimate is
  * what the whole line is.
+ *
+ * `live` is the breakdown's own figure for today, so the header and the KPI tile above
+ * it print one "Next 12 months" (`lib/dividendForecastTrend.ts`, rule 3). The header
+ * also carries the month's and the year's growth and what shares bought added — the
+ * part of the growth the owner controls; the other parts stay in the collapsed detail.
+ * The received line under the forecast is the trailing twelve months, so the income
+ * actually paid can be watched climbing toward what is forecast.
  */
-export function DividendForecastTrend() {
+export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) {
   const formatCurrency = useFormatCurrency()
   const curSym = useCurrencySymbol()
   const isCompact = useIsCompact()
@@ -53,11 +61,11 @@ export function DividendForecastTrend() {
     queryKey: ['dividends', 'forecast-history'],
     queryFn: () => api.getDividendForecastHistory(),
   })
-  const trend = useMemo(() => forecastTrend(data), [data])
+  const trend = useMemo(() => forecastTrend(data, live), [data, live])
 
   const axis = useMemo(() => {
     if (!trend) return null
-    const values = trend.points.map((p) => p.value)
+    const values = trend.points.flatMap((p) => [p.value, p.received])
     const min = Math.min(...values)
     const max = Math.max(...values)
     const pad = (max - min || Math.abs(max) || 1) * 0.15
@@ -90,7 +98,7 @@ export function DividendForecastTrend() {
         />
         <span className="text-xs font-medium text-muted-foreground">Next 12 months</span>
         <span className="text-sm font-semibold tabular-nums">
-          {formatCurrency(trend.latest)}
+          {dividendAmount(trend.latest, curSym)}
         </span>
         <DeltaChip
           pct={trend.sincePct}
@@ -98,8 +106,19 @@ export function DividendForecastTrend() {
           flatBand={0}
           projected
           className="text-sm"
-          title="Growth of the projected next-12-month income since the day it is measured from."
+          title="Forecast growth since start"
         />
+        {trend.mtdPct != null && (
+          <DeltaChip pct={trend.mtdPct} label="MTD" flatBand={0} title="Forecast growth this month" />
+        )}
+        {trend.ytdPct != null && (
+          <DeltaChip pct={trend.ytdPct} label="YTD" flatBand={0} title="Forecast growth this year" />
+        )}
+        {trend.fromBuys != null && (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {signed(trend.fromBuys)} {fromBuysLabel(trend.fromBuys)}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -135,6 +154,17 @@ export function DividendForecastTrend() {
                 />
                 <Line
                   type="monotone"
+                  dataKey="received"
+                  name="Received"
+                  stroke="hsl(var(--muted-foreground))"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.7}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  isAnimationActive={false}
+                />
+                <Line
+                  type="monotone"
                   dataKey="value"
                   name="Next 12 months"
                   stroke="hsl(var(--primary))"
@@ -153,7 +183,7 @@ export function DividendForecastTrend() {
               {trend.parts.map((part, i) => (
                 <span key={part.key}>
                   {i > 0 && ' · '}
-                  <span className="tabular-nums">{signed(part.value)}</span> {partLabel(part)}
+                  <span className="tabular-nums">{signed(part.value)}</span> {part.label}
                 </span>
               ))}
             </p>

@@ -7,6 +7,7 @@ import {
   type DividendForecastHistoryPoint,
   type DividendForecastHistoryResponse,
 } from '@/lib/api'
+import type { LiveForecast } from '@/lib/dividendForecastTrend'
 import { DividendForecastTrend } from './DividendForecastTrend'
 
 // jsdom cannot measure charts. Everything around the plot stays real.
@@ -50,6 +51,8 @@ const HISTORY: DividendForecastHistoryResponse = {
     point('2026-08-28', 300, { reconstructed: true }),
     point('2026-10-13', 360, {
       next_12m_since_start_pct: 20,
+      next_12m_mtd_pct: 3,
+      ttm_net_eur: 150,
       breakdown: {
         since: '2026-08-28', shares: 52, payout: 9, newly_forecast: 0, fx: -1,
         unattributed: 0,
@@ -58,12 +61,12 @@ const HISTORY: DividendForecastHistoryResponse = {
   ],
 }
 
-function mount(history: DividendForecastHistoryResponse) {
+function mount(history: DividendForecastHistoryResponse, live?: LiveForecast) {
   vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue(history)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
     <QueryClientProvider client={client}>
-      <DividendForecastTrend />
+      <DividendForecastTrend live={live} />
     </QueryClientProvider>,
   )
 }
@@ -77,6 +80,10 @@ describe('DividendForecastTrend', () => {
     expect(section.textContent).toContain('since Aug 28')
     expect(section.textContent).toContain('+20%')
     expect(section.textContent).toContain('est.')
+    // The month's growth, what buying added, and no year chip where the server has none.
+    expect(section.textContent).toMatch(/\+3%\s*MTD/)
+    expect(section.textContent).not.toContain('YTD')
+    expect(section.textContent).toContain('+€52.00 from buys')
     expect(screen.queryByTestId('chart')).toBeNull()
     expect(section.textContent).not.toContain('Of the change')
 
@@ -85,13 +92,23 @@ describe('DividendForecastTrend', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(document.getElementById(toggle.getAttribute('aria-controls')!)).not.toBeNull()
     expect(screen.getByTestId('chart')).toBeTruthy()
-    // The parts that round to nothing are not printed, the residual among them.
-    expect(section.textContent).toMatch(/Of the change:.*shares bought.*payouts and timing.*currency/)
+    // The parts that round to nothing are not printed, the residual among them; the
+    // shares part is in the header, not repeated here.
+    expect(section.textContent).toMatch(/Of the change:.*payouts and timing.*currency/)
+    expect(section.textContent).not.toContain('shares bought')
     expect(section.textContent).not.toContain('newly forecast')
     expect(section.textContent).not.toContain('unexplained')
 
     fireEvent.click(toggle)
     expect(screen.queryByTestId('chart')).toBeNull()
+  })
+
+  it('prints the live figure the KPI tile prints, not the newest snapshot', async () => {
+    mount(HISTORY, { next12m: 372, ttm: 155, currency: 'EUR' })
+    const section = await screen.findByRole('region', { name: 'Dividend forecast over time' })
+    expect(section.textContent).toContain('€372.00')
+    expect(section.textContent).not.toContain('€360.00')
+    expect(section.textContent).toContain('+24%')    // 372 over the start day's 300
   })
 
   it('renders nothing until there are two days to connect', async () => {

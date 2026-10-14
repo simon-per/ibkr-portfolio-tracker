@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { realizedOnlyYears } from './dividendGrowth'
+import { growthPct, payoutChanges, RAISE_BAND_PCT, realizedOnlyYears } from './dividendGrowth'
 import type { DividendAnnualRow } from './api'
 
 function row(part: Partial<DividendAnnualRow> & { year: number }): DividendAnnualRow {
@@ -87,5 +87,47 @@ describe('realizedOnlyYears and withholding', () => {
     ])
     expect(out.withholding_eur).toBe(15)
     expect(out.forecast_withholding_eur).toBe(0)
+  })
+})
+
+describe('growthPct', () => {
+  it('copies the server rules: a zero or missing base has no growth', () => {
+    expect(growthPct(10, 0)).toBeNull()
+    expect(growthPct(10, null)).toBeNull()
+    expect(growthPct(10, -5)).toBeNull()
+  })
+
+  it('rounds to the digits asked for, one by default', () => {
+    expect(growthPct(372, 340)).toBe(9.4)
+    expect(growthPct(372, 340, 2)).toBe(9.41)
+    expect(growthPct(0, 50)).toBe(-100)
+  })
+})
+
+describe('payoutChanges', () => {
+  const rows = (...pcts: (number | null | undefined)[]) =>
+    pcts.map((per_share_growth_pct) => ({ per_share_growth_pct }))
+
+  it('counts raises and cuts outside the band, and a move inside it as neither', () => {
+    expect(payoutChanges(rows(8, 3.2, -12, 0.4, -0.9))).toEqual({
+      raised: 2, cut: 1, flat: 2, measured: 5,
+    })
+  })
+
+  it('puts the edge of the band inside it', () => {
+    const out = payoutChanges(rows(RAISE_BAND_PCT, -RAISE_BAND_PCT, RAISE_BAND_PCT + 0.01))!
+    expect(out.flat).toBe(2)
+    expect(out.raised).toBe(1)
+  })
+
+  it('leaves a payer without a year of history out rather than calling it flat', () => {
+    expect(payoutChanges(rows(5, null, undefined))).toEqual({
+      raised: 1, cut: 0, flat: 0, measured: 1,
+    })
+  })
+
+  it('is null when no payer is measured, never "0 raised · 0 cut"', () => {
+    expect(payoutChanges(rows(null, undefined))).toBeNull()
+    expect(payoutChanges([])).toBeNull()
   })
 })

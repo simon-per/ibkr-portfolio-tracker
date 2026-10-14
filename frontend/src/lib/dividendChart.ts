@@ -1,5 +1,6 @@
 import type { DividendBreakdownResponse, DividendTtmPoint } from './api'
 import { SERIES_IDENTITIES } from './dividendColors'
+import { growthPct } from './dividendGrowth'
 
 /** The fold. Not a symbol, and never present in `stack_order`. */
 export const OTHER = 'Other'
@@ -70,9 +71,9 @@ export interface ChartSeriesOptions {
  * also means `total_eur` describes what is actually drawn.
  *
  * `mom_pct` compared two totals, so it is recomputed off the measured halves —
- * the sibling of `realizedOnlyYears` in dividendGrowth.ts, copying the same two
- * server rules it does: one decimal place, and a zero base yields nothing rather
- * than a percentage. The previous window is the one before it in the SERVER's
+ * the sibling of `realizedOnlyYears` in dividendGrowth.ts, through the same
+ * `growthPct` copy of the server's two rules: one decimal place, and a zero base
+ * yields nothing rather than a percentage. The previous window is the one before it in the SERVER's
  * series, so a point keeps the same change whichever range is showing it; the
  * first point of a windowed response has no predecessor here, and reports null
  * rather than a change measured against the wrong neighbour.
@@ -84,9 +85,7 @@ function withoutForecast(p: DividendTtmPoint, prev: DividendTtmPoint | undefined
     forecast: {},
     forecast_net_eur: 0,
     total_eur: p.net_eur,
-    mom_pct: !prev || prev.net_eur <= 0
-      ? null
-      : Math.round(((p.net_eur - prev.net_eur) / prev.net_eur) * 1000) / 10,
+    mom_pct: prev ? growthPct(p.net_eur, prev.net_eur) : null,
     mom_includes_forecast: false,
   }
 }
