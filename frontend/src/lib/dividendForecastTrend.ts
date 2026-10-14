@@ -39,7 +39,7 @@ export interface ForecastTrendPart {
 }
 
 export interface ForecastTrend {
-  points: { date: string; value: number; reconstructed: boolean }[]
+  points: { date: string; value: number }[]
   /** The day growth is measured from: the first point drawn. */
   start: string
   latest: number
@@ -49,8 +49,6 @@ export interface ForecastTrend {
   parts: ForecastTrendPart[]
   /** Set only when the breakdown starts later than the line does. */
   partsSince: string | null
-  /** First and last replayed day on screen, for the shaded span. */
-  replayed: { from: string; to: string } | null
 }
 
 export function partLabel(part: ForecastTrendPart): string {
@@ -74,19 +72,13 @@ export function forecastTrend(
         .map(([key, label]) => ({ key, label, value: breakdown[key] }))
         .filter((part) => Math.abs(part.value) >= PART_MIN)
     : []
-  const replayedDays = visible.filter((p) => p.reconstructed)
 
   return {
-    points: visible.map((p) => ({
-      date: p.date, value: p.next_12m_eur, reconstructed: p.reconstructed,
-    })),
+    points: visible.map((p) => ({ date: p.date, value: p.next_12m_eur })),
     start: visible[0].date,
     latest: last.next_12m_eur,
     sincePct: last.next_12m_since_start_pct,
     parts,
     partsSince: breakdown && breakdown.since !== visible[0].date ? breakdown.since : null,
-    replayed: replayedDays.length
-      ? { from: replayedDays[0].date, to: replayedDays[replayedDays.length - 1].date }
-      : null,
   }
 }

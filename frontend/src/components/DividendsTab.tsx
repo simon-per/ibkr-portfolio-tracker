@@ -519,7 +519,7 @@ export function DividendsTab() {
             <DividendGrowthPace pace={pace} />
 
             {/* The forecast's own history. A projection, so it goes with the toggle. */}
-            {showForecast && <DividendForecastTrend perShare={data?.growth?.per_share} />}
+            {showForecast && <DividendForecastTrend />}
 
             {isLoading ? (
               <div className={cn(DIVIDEND_CHART_BOX, 'animate-pulse rounded bg-muted')} />

@@ -954,7 +954,12 @@ that it keeps growing, and have the breakdown available without it being the lou
   existed will ever get. The backfill writes them without touching that day's total.
 - **The surface is one line and a sentence** (`lib/dividendForecastTrend.ts`). Nothing
   before `growth_from` is drawn; a part under half a unit of the base currency is not
-  printed, the residual included; replayed days are shaded and named under the chart.
+  printed, the residual included. The card starts collapsed: its header row (figure,
+  growth since the start, "est.") is the toggle, and the chart and the sentence open
+  under it. Replayed days are drawn like recorded ones and the book's per-share growth
+  is not repeated there (it is the table's Growth column per payer) — the owner's call
+  on 2026-10-14, the whole line being an estimate; `reconstructed` and
+  `growth.per_share` are still served.
 
 Tests: `tests/test_dividend_forecast_attribution.py`, the lines and breakdown cases in
 `tests/test_dividend_forecast_snapshot.py`, `lib/dividendForecastTrend.test.ts`.

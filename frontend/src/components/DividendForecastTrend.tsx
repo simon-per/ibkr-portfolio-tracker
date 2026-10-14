@@ -1,16 +1,16 @@
-import { useMemo } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ChevronRight } from 'lucide-react'
 import {
   CartesianGrid,
   Line,
   LineChart,
-  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
-import { api, type DividendPerShareGrowth } from '@/lib/api'
+import { api } from '@/lib/api'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
@@ -20,13 +20,8 @@ import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { forecastTrend, partLabel } from '@/lib/dividendForecastTrend'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
-import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { cn, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
-
-interface DividendForecastTrendProps {
-  /** The payers' own growth, from the breakdown — the part that needs no purchase. */
-  perShare?: DividendPerShareGrowth | null
-}
 
 function shortDay(iso: string): string {
   const date = parseLocalDate(iso)
@@ -42,11 +37,18 @@ function shortDay(iso: string): string {
  * on a book still being funded it is nearly all shares bought, which is worth knowing
  * once and not worth a stacked bar every day. Renders nothing until there are two days
  * to connect.
+ *
+ * Collapsed by default, like the other optional cards: the header row is the toggle and
+ * keeps the figure, the growth and its "est." on the surface in both states. Replayed
+ * days are drawn like recorded ones — the owner's call (2026-10-14): an estimate is
+ * what the whole line is.
  */
-export function DividendForecastTrend({ perShare }: DividendForecastTrendProps) {
+export function DividendForecastTrend() {
   const formatCurrency = useFormatCurrency()
   const curSym = useCurrencySymbol()
   const isCompact = useIsCompact()
+  const [open, setOpen] = useState(false)
+  const contentId = useId()
   const { data } = useQuery({
     queryKey: ['dividends', 'forecast-history'],
     queryFn: () => api.getDividendForecastHistory(),
@@ -70,9 +72,22 @@ export function DividendForecastTrend({ perShare }: DividendForecastTrendProps) 
   return (
     <section
       aria-label="Dividend forecast over time"
-      className="space-y-2 rounded-lg border border-border bg-card/50 px-4 py-3"
+      className="rounded-lg border border-border bg-card/50"
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={contentId}
+        className="flex w-full select-none flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-4 py-3 text-left ring-offset-background transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            '-ml-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
+            open && 'rotate-90',
+          )}
+        />
         <span className="text-xs font-medium text-muted-foreground">Next 12 months</span>
         <span className="text-sm font-semibold tabular-nums">
           {formatCurrency(trend.latest)}
@@ -85,91 +100,66 @@ export function DividendForecastTrend({ perShare }: DividendForecastTrendProps) 
           className="text-sm"
           title="Growth of the projected next-12-month income since the day it is measured from."
         />
-      </div>
+      </button>
 
-      <div className="h-[120px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={trend.points} margin={{ top: 4, right: isCompact ? 8 : 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-            <XAxis
-              dataKey="date"
-              className="text-xs"
-              tick={{ fill: 'hsl(var(--muted-foreground))' }}
-              tickFormatter={shortDay}
-              interval="preserveStartEnd"
-              minTickGap={isCompact ? 44 : 60}
-            />
-            <YAxis
-              className="text-xs"
-              tick={{ fill: 'hsl(var(--muted-foreground))' }}
-              // The headline carries the currency; on a phone the axis has no room to repeat it.
-              tickFormatter={(value: number) =>
-                isCompact ? String(Math.round(value)) : `${curSym}${Math.round(value)}`}
-              domain={axis.domain}
-              ticks={axis.ticks}
-              width={isCompact ? 40 : 72}
-            />
-            {trend.replayed && (
-              <ReferenceArea
-                x1={trend.replayed.from}
-                x2={trend.replayed.to}
-                fill="hsl(var(--muted-foreground))"
-                fillOpacity={0.08}
-                ifOverflow="hidden"
-              />
-            )}
-            <Tooltip
-              contentStyle={CHART_TOOLTIP_STYLE}
-              itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-              labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-              labelFormatter={(label, payload) => {
-                const text = typeof label === 'string' ? formatDate(label) : label
-                return payload?.[0]?.payload?.reconstructed ? `${text} · replayed` : text
-              }}
-              formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
-            />
-            <Line
-              type="monotone"
-              dataKey="value"
-              name="Next 12 months"
-              stroke="hsl(var(--primary))"
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 5 }}
-              isAnimationActive={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      {open && (
+        <div id={contentId} className="space-y-2 px-4 pb-3">
+          <div className="h-[120px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trend.points} margin={{ top: 4, right: isCompact ? 8 : 16, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  className="text-xs"
+                  tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                  tickFormatter={shortDay}
+                  interval="preserveStartEnd"
+                  minTickGap={isCompact ? 44 : 60}
+                />
+                <YAxis
+                  className="text-xs"
+                  tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                  // The headline carries the currency; on a phone the axis has no room to repeat it.
+                  tickFormatter={(value: number) =>
+                    isCompact ? String(Math.round(value)) : `${curSym}${Math.round(value)}`}
+                  domain={axis.domain}
+                  ticks={axis.ticks}
+                  width={isCompact ? 40 : 72}
+                />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  labelFormatter={(label) => (typeof label === 'string' ? formatDate(label) : label)}
+                  formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Next 12 months"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
 
-      <div className="space-y-1 text-xs text-muted-foreground">
-        {trend.parts.length > 0 && (
-          <p>
-            Of the change{trend.partsSince ? ` since ${shortDay(trend.partsSince)}` : ''}:{' '}
-            {trend.parts.map((part, i) => (
-              <span key={part.key}>
-                {i > 0 && ' · '}
-                <span className="tabular-nums">{signed(part.value)}</span> {partLabel(part)}
-              </span>
-            ))}
-          </p>
-        )}
-        {perShare && (
-          <p>
-            Payers&apos; own growth per share over the last year:{' '}
-            <span className="tabular-nums">
-              {perShare.pct > 0 ? '+' : ''}{perShare.pct.toFixed(1)}%
-            </span>
-            {' '}(covers {Math.floor(perShare.covered_pct)}% of the forecast).
-          </p>
-        )}
-        {trend.replayed && (
-          <p>
-            Shaded: {shortDay(trend.replayed.from)} – {shortDay(trend.replayed.to)} replayed
-            under today&apos;s rules, not what was shown on the day.
-          </p>
-        )}
-      </div>
+          {trend.parts.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Of the change{trend.partsSince ? ` since ${shortDay(trend.partsSince)}` : ''}:{' '}
+              {trend.parts.map((part, i) => (
+                <span key={part.key}>
+                  {i > 0 && ' · '}
+                  <span className="tabular-nums">{signed(part.value)}</span> {partLabel(part)}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   )
 }

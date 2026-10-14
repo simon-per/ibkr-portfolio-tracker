@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   api,
   type DividendForecastHistoryPoint,
   type DividendForecastHistoryResponse,
-  type DividendPerShareGrowth,
 } from '@/lib/api'
 import { DividendForecastTrend } from './DividendForecastTrend'
 
@@ -59,30 +58,40 @@ const HISTORY: DividendForecastHistoryResponse = {
   ],
 }
 
-function mount(history: DividendForecastHistoryResponse, perShare?: DividendPerShareGrowth) {
+function mount(history: DividendForecastHistoryResponse) {
   vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue(history)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
     <QueryClientProvider client={client}>
-      <DividendForecastTrend perShare={perShare} />
+      <DividendForecastTrend />
     </QueryClientProvider>,
   )
 }
 
 describe('DividendForecastTrend', () => {
-  it('leads with the growth since the start day and says what it was made of', async () => {
-    mount(HISTORY, { pct: 6.25, covered_pct: 81.4, payers: 12 })
+  it('starts closed with the growth on the surface, and opens to the chart and its parts', async () => {
+    mount(HISTORY)
 
     const section = await screen.findByRole('region', { name: 'Dividend forecast over time' })
+    // Collapsed: the figure, the growth since the start day and its "est." stay visible.
     expect(section.textContent).toContain('since Aug 28')
     expect(section.textContent).toContain('+20%')
+    expect(section.textContent).toContain('est.')
+    expect(screen.queryByTestId('chart')).toBeNull()
+    expect(section.textContent).not.toContain('Of the change')
+
+    const toggle = screen.getByRole('button', { expanded: false })
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).not.toBeNull()
+    expect(screen.getByTestId('chart')).toBeTruthy()
     // The parts that round to nothing are not printed, the residual among them.
     expect(section.textContent).toMatch(/Of the change:.*shares bought.*payouts and timing.*currency/)
     expect(section.textContent).not.toContain('newly forecast')
     expect(section.textContent).not.toContain('unexplained')
-    expect(section.textContent).toContain('+6.3% (covers 81% of the forecast)')
-    // The replayed day on screen is named on the surface, not only in a tooltip.
-    expect(section.textContent).toContain('Shaded: Aug 28 – Aug 28 replayed')
+
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId('chart')).toBeNull()
   })
 
   it('renders nothing until there are two days to connect', async () => {

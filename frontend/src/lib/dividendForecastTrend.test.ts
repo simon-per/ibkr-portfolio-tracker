@@ -92,17 +92,6 @@ describe('forecastTrend', () => {
     expect(same?.partsSince).toBeNull()
   })
 
-  it('reports the replayed span that is on screen', () => {
-    const trend = forecastTrend(history([
-      point('2026-08-01', 40, { reconstructed: true }),
-      point('2026-08-28', 300, { reconstructed: true }),
-      point('2026-10-06', 340, { reconstructed: true }),
-      point('2026-10-07', 345),
-    ]))
-    expect(trend?.replayed).toEqual({ from: '2026-08-28', to: '2026-10-06' })
-    expect(forecastTrend(history([point('2026-10-07', 345)]))?.replayed).toBeNull()
-  })
-
   it('is null without a history or without a day from the start on', () => {
     expect(forecastTrend(undefined)).toBeNull()
     expect(forecastTrend(history([]))).toBeNull()
