@@ -407,6 +407,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
+| 04:00, Sun | 22:00 Sat | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, own job group | **yes** |
 
 **The watchlist has a slot of its own, away from the portfolio's** (2026-10-13, at the owner's
 request — nothing scheduled it before, so it aged until someone pressed *Refresh All*). It is the
@@ -417,8 +418,28 @@ Tuesday to Saturday is once after each US close. The job is `WatchlistService.sy
 and it records a `watchlist_refresh` row in `sync_runs`; a ticker Yahoo cannot serve is a warning
 on that row, never its status. It sits in the `upkeep` job group and outside
 `SCHEDULED_JOB_TYPES`, so the public `/api/scheduler/status` list, the dashboard's "Next:" and
-"last sync" are the portfolio's alone. The Fundamentals tab and the analyst ratings are still
-unscheduled.
+"last sync" are the portfolio's alone.
+
+**Fundamentals and analyst ratings refresh weekly, on the watchlist's hour but never its day**
+(2026-10-14 — before that only a click refreshed them, and they had sat since 2026-08-25).
+`FUNDAMENTALS_REFRESH_HOUR` *is* `WATCHLIST_REFRESH_HOUR` and `FUNDAMENTALS_REFRESH_DAYS` is
+`sun`, disjoint from `tue-sat`, so the two loops never share a pass and `ALL_SYNC_HOURS` — and the
+three deploy-guard copies — did not change. The job is `FundamentalsService.sync_stale_fundamentals`
+then `AnalystRatingService.sync_stale_ratings` under `SYNC_PIPELINE`: their own pacing,
+`yahoo_eligible()` filter (`price_source` honoured) and abandon-on-429 latch; **a rate limit in the
+fundamentals pass skips the ratings pass** (same IP). It records a `fundamentals_refresh` row;
+a security Yahoo cannot serve is a warning, never the status. Same upkeep group as the watchlist.
+Both stale thresholds (1 day, 3 days) are shorter than the week, so every pass refreshes every
+eligible security, and a pass a 429 cut short is resumed by the next one — what the services'
+rate-limit warning promises.
+
+*Yahoo budget per pass*: a company costs 6 requests — `.info`, `earnings_dates`,
+`quarterly_financials`, `revenue_estimate`, `growth_estimates`, then `recommendations` — and a fund
+2 (`.info` and `recommendations`; `yahoo_estimates.FUND_QUOTE_TYPES` skips the four a fund cannot
+have). With *C* companies and *F* funds that is `6C + 2F` a week, paced as the manual sync is:
+1–3 s before each security's burst and 2–4 s between securities in each loop, so ~40 securities
+take roughly 10 minutes. A no-coverage rating answer is stored as a zero-count row
+(`analyst_rating_service.no_rating`) so it is not re-asked inside the staleness window.
 
 **The crypto sync rides every one of the portfolio's slots, and adds none.** `CRYPTO_SYNC_HOURS`
 is *derived* from `PORTFOLIO_SYNC_HOURS` — not from `ALL_SYNC_HOURS`, which since the watchlist

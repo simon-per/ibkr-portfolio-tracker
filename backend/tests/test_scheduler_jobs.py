@@ -40,6 +40,8 @@ from app.services.scheduler_service import (
     CRYPTO_JOB_GROUP,
     CRYPTO_SYNC_HOURS,
     FULL_SYNC_HOUR,
+    FUNDAMENTALS_REFRESH_DAYS,
+    FUNDAMENTALS_REFRESH_HOUR,
     IBKR_ONLY_HOURS,
     MARKET_DATA_HOURS,
     MISFIRE_GRACE_SECONDS,
@@ -53,6 +55,7 @@ from app.services.scheduler_service import (
     _collect_warnings,
     crypto_sync_job_entry,
     full_sync_job_entry,
+    fundamentals_refresh_job_entry,
     ibkr_only_sync_job_entry,
     market_data_only_sync_job_entry,
     watchlist_refresh_job_entry,
@@ -515,6 +518,7 @@ def _declared_job_ids() -> set:
         *(f'market_sync_{i}' for i in range(1, len(MARKET_DATA_HOURS) + 1)),
         *(f'crypto_sync_{i}' for i in range(1, len(CRYPTO_SYNC_HOURS) + 1)),
         'watchlist_refresh',
+        'fundamentals_refresh',
     }
 
 
@@ -816,6 +820,7 @@ async def test_jobs_are_serializable_into_the_persistent_store(jobstore_url):
         assert funcs['market_sync_1'] is market_data_only_sync_job_entry
         assert funcs['crypto_sync_1'] is crypto_sync_job_entry
         assert funcs['watchlist_refresh'] is watchlist_refresh_job_entry
+        assert funcs['fundamentals_refresh'] is fundamentals_refresh_job_entry
     finally:
         second.shutdown()
 
@@ -1349,10 +1354,10 @@ async def test_the_watchlist_refresh_has_a_slot_of_its_own(jobstore_url):
     svc = SchedulerService()
     try:
         svc.start()
-        upkeep = svc.jobs_in_group(UPKEEP_JOB_GROUP)
-        assert [j.id for j in upkeep] == ['watchlist_refresh']
-        assert _trigger_hour(upkeep[0]) == WATCHLIST_REFRESH_HOUR
-        assert f"day_of_week='{WATCHLIST_REFRESH_DAYS}'" in str(upkeep[0].trigger)
+        upkeep = {j.id: j for j in svc.jobs_in_group(UPKEEP_JOB_GROUP)}
+        assert set(upkeep) == {'watchlist_refresh', 'fundamentals_refresh'}
+        assert _trigger_hour(upkeep['watchlist_refresh']) == WATCHLIST_REFRESH_HOUR
+        assert f"day_of_week='{WATCHLIST_REFRESH_DAYS}'" in str(upkeep['watchlist_refresh'].trigger)
         assert 'watchlist_refresh' not in {j.id for j in svc.jobs_in_group(STOCK_JOB_GROUP)}
     finally:
         svc.shutdown()
@@ -1467,3 +1472,167 @@ async def test_a_crashed_watchlist_refresh_is_recorded_as_an_error(monkeypatch):
     assert result["status"] == "error"
     assert "RuntimeError" in result["message"]
     assert recorded == [result]
+
+
+# --- the weekly fundamentals refresh -----------------------------------------------------
+
+
+_CRON_DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
+
+
+def _cron_days(spec: str) -> set:
+    """APScheduler's `day_of_week` ('tue-sat', 'sun', 'mon,thu') as a set of names."""
+    days = set()
+    for part in spec.split(','):
+        if '-' in part:
+            first, last = part.split('-')
+            i, j = _CRON_DAYS.index(first), _CRON_DAYS.index(last)
+            days.update(_CRON_DAYS[i:j + 1])
+        else:
+            days.add(part)
+    return days
+
+
+@pytest.mark.asyncio
+async def test_the_fundamentals_refresh_takes_the_watchlist_hour_on_a_day_it_is_free(jobstore_url):
+    """
+    The watchlist's hour — already in ALL_SYNC_HOURS, so the deploy guard and its three
+    shell copies need no new hour — on a day the watchlist does not run, so two
+    five-endpoint Yahoo loops never share a pass. Weekly, in the upkeep group: never the
+    portfolio's "last sync" and not in the public status list.
+    """
+    assert FUNDAMENTALS_REFRESH_HOUR == WATCHLIST_REFRESH_HOUR
+    assert FUNDAMENTALS_REFRESH_HOUR in ALL_SYNC_HOURS
+    assert ALL_SYNC_HOURS == tuple(sorted({*PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR}))
+    days = _cron_days(FUNDAMENTALS_REFRESH_DAYS)
+    assert len(days) == 1, "weekly"
+    assert not days & _cron_days(WATCHLIST_REFRESH_DAYS)
+
+    svc = SchedulerService()
+    try:
+        svc.start()
+        upkeep = {j.id: j for j in svc.jobs_in_group(UPKEEP_JOB_GROUP)}
+        job = upkeep['fundamentals_refresh']
+        assert _trigger_hour(job) == FUNDAMENTALS_REFRESH_HOUR
+        assert f"day_of_week='{FUNDAMENTALS_REFRESH_DAYS}'" in str(job.trigger)
+        assert 'fundamentals_refresh' not in {j.id for j in svc.jobs_in_group(STOCK_JOB_GROUP)}
+        assert job.misfire_grace_time == MISFIRE_GRACE_SECONDS
+    finally:
+        svc.shutdown()
+
+
+def _fake_fundamentals(monkeypatch, fundamentals, ratings):
+    """Stand outcomes in for the two services' stale passes; returns the calls made."""
+    calls = []
+
+    class FakeFundamentals:
+        def __init__(self, db):
+            pass
+
+        async def sync_stale_fundamentals(self):
+            calls.append("fundamentals")
+            if isinstance(fundamentals, Exception):
+                raise fundamentals
+            return dict(fundamentals)
+
+    class FakeRatings:
+        def __init__(self, db):
+            pass
+
+        async def sync_stale_ratings(self):
+            calls.append("ratings")
+            return dict(ratings)
+
+    import app.services.analyst_rating_service as ratings_module
+    import app.services.fundamentals_service as fundamentals_module
+    monkeypatch.setattr(fundamentals_module, "FundamentalsService", FakeFundamentals)
+    monkeypatch.setattr(ratings_module, "AnalystRatingService", FakeRatings)
+    monkeypatch.setattr(
+        'app.services.scheduler_service.AsyncSessionLocal', lambda: _WatchlistSession()
+    )
+    return calls
+
+
+_OK_FUNDAMENTALS = {"errors": 0, "rate_limited": False, "message": "Synced 3/3 fundamentals"}
+_OK_RATINGS = {"errors": 0, "rate_limited": False, "message": "Synced 2/3 analyst ratings"}
+
+
+@pytest.mark.asyncio
+async def test_the_fundamentals_job_runs_both_stale_passes_as_its_own_run(monkeypatch):
+    svc = SchedulerService()
+    svc.last_sync_result = {"type": "market_data_only", "status": "success"}
+    calls = _fake_fundamentals(monkeypatch, _OK_FUNDAMENTALS, _OK_RATINGS)
+    recorded = _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals", "ratings"]
+    assert result["type"] == "fundamentals_refresh"
+    assert result["status"] == "success"
+    assert "warnings" not in result
+    assert recorded == [result]
+    assert svc.last_sync_result == {"type": "market_data_only", "status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_in_the_fundamentals_pass_skips_the_ratings_pass(monkeypatch):
+    """Rule 1: the same IP was just refused, so the second loop must not ask it."""
+    svc = SchedulerService()
+    calls = _fake_fundamentals(monkeypatch, {
+        "errors": 1, "rate_limited": True, "message": "Synced 1/4 fundamentals",
+        "warnings": ["Yahoo Finance rate limit reached; the rest of this pass was abandoned."],
+    }, _OK_RATINGS)
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals"]
+    assert result["status"] == "success"
+    assert result["warnings"][0].startswith("Yahoo Finance rate limit reached")
+    assert any("Analyst ratings were not refreshed" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_a_security_yahoo_cannot_serve_is_a_warning_never_the_fundamentals_status(monkeypatch):
+    svc = SchedulerService()
+    _fake_fundamentals(monkeypatch, {**_OK_FUNDAMENTALS, "errors": 2}, {**_OK_RATINGS, "errors": 1})
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert result["status"] == "success"
+    assert result["warnings"] == [
+        "2 securities could not refresh fundamentals and keep their previous data.",
+        "1 security could not refresh analyst ratings and keep their previous data.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_crashed_fundamentals_refresh_is_recorded_as_an_error(monkeypatch):
+    svc = SchedulerService()
+    calls = _fake_fundamentals(monkeypatch, RuntimeError("database is locked"), _OK_RATINGS)
+    recorded = _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals"]
+    assert result["status"] == "error"
+    assert "RuntimeError" in result["message"]
+    assert recorded == [result]
+
+
+@pytest.mark.asyncio
+async def test_the_fundamentals_job_yields_to_a_running_pipeline(monkeypatch):
+    """The manual Sync buttons and every Yahoo job share SYNC_PIPELINE with it."""
+    from app.single_flight import SYNC_PIPELINE, single_flight
+
+    svc = SchedulerService()
+    calls = _fake_fundamentals(monkeypatch, _OK_FUNDAMENTALS, _OK_RATINGS)
+    recorded = _record_into(svc, monkeypatch)
+
+    with single_flight(SYNC_PIPELINE):
+        result = await svc.fundamentals_refresh_job()
+
+    assert calls == []
+    assert result["status"] == "skipped" and result["reason"] == "pipeline_busy"
+    assert recorded[0]["type"] == "fundamentals_refresh"
