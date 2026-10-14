@@ -28,8 +28,18 @@ describe('projectForecast', () => {
     }
   })
 
-  it('compounds the seed and the monthly contributions at the nominal rate over twelve', () => {
-    const r = 0.08 / 12
+  it('treats the entered rate as the effective annual rate: twelve months at r grow by exactly r', () => {
+    // At the nominal rate over twelve, 8% entered compounded to 8.30% a year.
+    const seedOnly = { ...book, monthlyContribution: 0 }
+    for (const rate of [1, 5, 8, 12, 30]) {
+      const p = projectForecast({ ...seedOnly, startValue: 100_000, annualReturnPct: rate }, 12)
+      expect(p.value).toBe(100_000 + 1_000 * rate)
+    }
+    expect(projectForecast({ ...seedOnly, annualReturnPct: 8 }, 120).value).toBe(Math.round(72_000 * 1.08 ** 10))
+  })
+
+  it('compounds the monthly contributions at the effective monthly rate', () => {
+    const r = 1.08 ** (1 / 12) - 1
     const g = (1 + r) ** 12
     expect(projectForecast(book, 12).value).toBe(Math.round(72_000 * g + 1_000 * ((g - 1) / r)))
   })
