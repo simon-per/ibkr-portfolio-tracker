@@ -1701,12 +1701,21 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-14 (test speed)** — "make the suite quicker", local runs being what the owner
+  waits on: the backend runs under `pytest-xdist` (`-n auto --dist worksteal`), and the local
+  command deselects the new `deploy_scripts` marker (20 Git Bash tests; CI runs them). Locally
+  5:35 → ~25 s (~55 s with them); on CI only 58 s → 50 s (4 workers, each test ~3.5× slower in
+  parallel there — not diagnosed). One of ten local parallel runs, during heavy
+  background load, failed two tests that never reproduced (nine clean runs, including `-n 32`);
+  output not captured. If it recurs, suspect the 60 s subprocess guards in the deploy-script tests.
+
 - **2026-10-14 (push, then strip the text)** — pushed and deployed `4c1d654`; the forecast
   backfill dry-run clean, the real run refused by the permission classifier (owed). Then, at
   the owner's word, the forecast card made collapsible and every tab's explanatory text
   stripped, the convention in CLAUDE.md rewritten so it is not repaired back. Then merged the
   parallel `simon-per/strip-comments` session (data-quality notes, the USDC peg note, the
   contributions strip's `~`/`*`, dead `coverage_limited`) and removed its worktree and branch.
+  Evening "resume": pushed that merge (`f048a94`) and merged `simon-per/test-speed`.
 
 - **2026-10-13 (watchlist freshness)** — a brainstorm of open points, of which the owner gave
   this session the watchlist (another session took the heatmap and the forecast-history chart).

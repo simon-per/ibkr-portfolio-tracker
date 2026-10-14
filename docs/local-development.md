@@ -46,9 +46,22 @@ Tests (1427 backend as of 2026-09-07 + 555 frontend as of 2026-09-08, all offlin
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
-cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q
+cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q -n auto --dist worksteal -m "not deploy_scripts"
 cd frontend && npx tsc -b && npm run test && npm run build
 ```
+The backend runs in parallel under `pytest-xdist`: ~25 s on Windows, against 5½ min serial.
+`-m "not deploy_scripts"` deselects the 20 tests that run `deploy.sh` and `ops/auto-deploy.sh`
+under bash (the slot-wait harness and the rollback rehearsal). Git Bash forks slowly, so they are
+10–30 s each and would double the run; on Linux they are cheap. **Drop the `-m` when you touched
+`deploy.sh` or `ops/`** (~1 min). CI never deselects them, and `ops/auto-deploy.sh` refuses a
+red commit, so a deploy-script regression is caught before production either way, only later.
+Under xdist the summary line does not say "deselected"; the count is simply lower than CI's.
+
+`worksteal` matters for that full run: the default `load` scheduler piles the deploy tests onto
+one worker (93 s against 55 s). Drop the flags, or pass `-n 0`, to run a single test serially with
+readable output and `pdb`. Contention slows the deploy tests (~25 s → ~35 s each on a busy
+machine), closer to their 60 s subprocess guards; if one fails only in a parallel run, rerun that
+file with `-n 0` before calling it a regression.
 
 Useful:
 ```bash

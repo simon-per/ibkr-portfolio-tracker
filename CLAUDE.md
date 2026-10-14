@@ -281,7 +281,8 @@ Full detail and the traps in [docs/local-development.md](docs/local-development.
 ```bash
 cd backend && ./venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000   # SCHEDULER_ENABLED=false in backend/.env first
 cd frontend && npm run dev                                                            # http://localhost:5173 — check which port Vite actually took
-cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q                           # all offline; take the count the suite prints as the baseline
+cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q -n auto --dist worksteal -m "not deploy_scripts"
+    # all offline, parallel, ~25 s; drop -m after touching deploy.sh or ops/ (docs/local-development.md); take the printed count as the baseline
 cd frontend && npx tsc -b && npm run test && npm run build
 ```
 

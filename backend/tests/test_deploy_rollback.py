@@ -353,10 +353,16 @@ def _find_bash() -> str | None:
 BASH = _find_bash()
 BACKUP_DB = REPO_ROOT / "ops" / "backup-db.sh"
 
-rehearsal = pytest.mark.skipif(
+_needs_bash = pytest.mark.skipif(
     BASH is None or shutil.which("git") is None or not BACKUP_DB.exists(),
     reason="the rollback rehearsal needs bash, git and ops/backup-db.sh",
 )
+
+
+def rehearsal(test):
+    """Skipped without bash, and tagged `deploy_scripts`: 10-20 s each under Git Bash, so
+    the local command deselects them. CI runs them, and its verdict gates the deploy."""
+    return pytest.mark.deploy_scripts(_needs_bash(test))
 
 _STUBS = {
     # The guard reads `TZ=Europe/Berlin date '+%-H'` / `'+%-M'`; 03:30 is no sync slot.

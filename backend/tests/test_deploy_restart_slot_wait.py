@@ -132,12 +132,14 @@ def _run(start_s: int, **kwargs):
     return slept, now, out
 
 
+@pytest.mark.deploy_scripts
 def test_outside_the_margin_it_restarts_at_once():
     slept, _, out = _run(_at(14, 0))
     assert slept == 0
     assert "Clear of every sync slot" in out
 
 
+@pytest.mark.deploy_scripts
 def test_before_a_slot_it_waits_until_the_margin_after_it_has_passed():
     """17:55 is five minutes before the 18:00 full sync. The guard's window is inclusive
     (`delta <= SLOT_MARGIN_MIN`), so 18:10 still holds and 18:11 is the first clear minute."""
@@ -148,6 +150,7 @@ def test_before_a_slot_it_waits_until_the_margin_after_it_has_passed():
     assert "restarting" in out and "anyway" not in out
 
 
+@pytest.mark.deploy_scripts
 def test_the_margin_edges_match_the_guard():
     results, _ = _run_many([_at(17, 49), _at(17, 50), _at(18, 10), _at(18, 11)])
     slept = [s for s, _ in results]
@@ -157,6 +160,7 @@ def test_the_margin_edges_match_the_guard():
     assert slept[3] == 0       # 11 minutes after: clear
 
 
+@pytest.mark.deploy_scripts
 def test_the_midnight_slot_wraps():
     """23:55 is five minutes from the 00:00 IBKR recovery slot, not 1435."""
     slept, now, out = _run(_at(23, 55))
@@ -165,6 +169,7 @@ def test_the_midnight_slot_wraps():
     assert "0:00 Europe/Berlin sync slot" in out
 
 
+@pytest.mark.deploy_scripts
 def test_after_the_margin_it_waits_for_a_running_sync():
     """The 18:00 full sync is still running when the margin ends; the restart waits for it."""
     slept, now, out = _run(_at(18, 5), running_until_s=_at(18, 25))
@@ -173,12 +178,14 @@ def test_after_the_margin_it_waits_for_a_running_sync():
     assert "sync slot" in out and "sync in progress" in out
 
 
+@pytest.mark.deploy_scripts
 def test_a_sync_running_away_from_any_slot_is_waited_for_too():
     """A manual POST /api/sync/... at 14:00 holds the same gate."""
     slept, now, _ = _run(_at(14, 0), running_until_s=_at(14, 3))
     assert (slept, now) == (3 * 60, _at(14, 3))
 
 
+@pytest.mark.deploy_scripts
 def test_the_wait_is_bounded_and_then_restarts_anyway():
     """
     Proceeding, not aborting, is the chosen behaviour at the bound. Under auto-deploy a
@@ -192,6 +199,7 @@ def test_the_wait_is_bounded_and_then_restarts_anyway():
     assert "restarting anyway" in out
 
 
+@pytest.mark.deploy_scripts
 def test_the_default_bound_is_45_minutes_and_a_malformed_one_falls_back_to_it():
     """One run covers both (each poll forks, which is slow under Git Bash): a malformed
     value takes the same path as an unset one."""
@@ -199,12 +207,14 @@ def test_the_default_bound_is_45_minutes_and_a_malformed_one_falls_back_to_it():
     assert slept == 45 * 60
 
 
+@pytest.mark.deploy_scripts
 def test_the_override_skips_the_check():
     slept, _, out = _run(_at(18, 0), running_until_s=_at(48, 0), DEPLOY_IGNORE_SLOTS=1)
     assert slept == 0
     assert "skipped (DEPLOY_IGNORE_SLOTS=1)" in out
 
 
+@pytest.mark.deploy_scripts
 def test_an_unreadable_guard_fails_open_and_says_so():
     """No ops/auto-deploy.sh beside it: warn and restart, never hang or abort a deploy."""
     slept, _, out = _run(_at(18, 0), repo_dir="./does-not-exist")
@@ -212,6 +222,7 @@ def test_an_unreadable_guard_fails_open_and_says_so():
     assert "WARNING: could not read the sync slots" in out
 
 
+@pytest.mark.deploy_scripts
 def test_the_hours_it_holds_for_are_exactly_the_scheduled_ones():
     """
     The behavioural half of `test_deploy_guard_hours.py`: whatever deploy.sh reads the
