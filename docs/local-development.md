@@ -46,9 +46,16 @@ Tests (1427 backend as of 2026-09-07 + 555 frontend as of 2026-09-08, all offlin
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale
 by 200+ on both halves before:
 ```bash
-cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q
+cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q -n auto --dist worksteal
 cd frontend && npx tsc -b && npm run test && npm run build
 ```
+The backend runs in parallel under `pytest-xdist` (about 1 min instead of 5½ on Windows; the
+bash-driven deploy tests are most of the serial time, since Git Bash forks slowly). `worksteal`
+matters: the default `load` scheduler piles those tests onto one worker. Drop the flags, or pass
+`-n 0`, to run a single test serially with readable output and `pdb`. Contention slows the deploy
+tests (~25 s → ~35 s each on a busy machine), which brings them closer to their 60 s subprocess
+guards; if one fails only in a parallel run, rerun that file with `-n 0` before calling it a
+regression.
 
 Useful:
 ```bash

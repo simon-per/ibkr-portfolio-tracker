@@ -1702,6 +1702,12 @@ detail; this exists so the next session knows what just moved without reading it
 *Shipped* write-ups in `docs/shipped-log.md`, which record what shipped and what was verified: these
 lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
 
+- **2026-10-14 (test speed)** — "make the suite quicker": the backend now runs under
+  `pytest-xdist` (`-n auto --dist worksteal`, in CI and the documented command). Locally 5:35 →
+  ~1 min; CI's pytest step was 58 s serial. One of ten local parallel runs, during heavy
+  background load, failed two tests that never reproduced (nine clean runs, including `-n 32`);
+  output not captured. If it recurs, suspect the 60 s subprocess guards in the deploy-script tests.
+
 - **2026-10-14 (push)** — "resume and push": both suites green, the merge pushed at 06:15
   Berlin clear of every slot, deployed as `4c1d654`. DB backed up and the forecast backfill
   dry-run clean; the real run was refused by the permission classifier and is owed by the owner.
@@ -1725,16 +1731,3 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   onto the new NAV instead of deleting them, and the holiday rule counts only derived rows for
   a sibling fund (`d2411b5`). The lost days were then refilled on production by one run of
   `sync_sibling_prices`, at the owner's request, rather than waiting for the 18:00 full sync.
-
-- **2026-10-12 (pillar 3a upload)** — the real finpension export carrying the 10-06 buys
-  imported on production: DB backed up first, dry run clean, 12 rows / 6 lots,
-  `rows_restated` 2 (the two estimates replaced), both funds priced, nothing unpriced. Then
-  "add percentages to the forecast history": day-over-day, month- and year-to-date growth on
-  `GET /api/dividends/forecast-history`, each naming the day it is measured from
-  (docs/dividends.md); backend only, live and verified on `eaccb7b`. Then "backfill it to
-  1 June": a `replay` mode on the forecast, a `reconstructed` flag on the rows (migration
-  `c3f8b4d6e0a2`) and `app.cli.backfill_dividend_forecast`; the replay sat within 0.1% of the
-  six recorded days, and production (`35e430b`) now has a point for every day from 2026-06-01,
-  128 of them reconstructed. Growth is measured from 2026-08-28 at the owner's request
-  (`growth_from`): before it the Irish-to-US ETF switch is what the percentages showed. Found on the way: the upload left the EM fund unpriced for nine
-  September days (*Worth doing next*).

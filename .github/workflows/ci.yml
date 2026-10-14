@@ -67,7 +67,12 @@ jobs:
       # rootdir inference puts tests/ on sys.path but not backend/, and every
       # `from app...` import fails. The documented local command has the same shape for
       # the same reason.
-      - run: python -m pytest tests/ -q
+      #
+      # `-n auto` runs one worker per core. `--dist worksteal`, not the default `load`:
+      # `load` hands each worker a contiguous run of tests up front, so the bash-driven
+      # deploy tests (seconds each, all in two files) pile onto one worker and set the wall
+      # time. Measured locally on 16 cores: 55 s worksteal, 93 s load, 5:35 serial.
+      - run: python -m pytest tests/ -q -n auto --dist worksteal
 
   frontend:
     runs-on: ubuntu-latest
