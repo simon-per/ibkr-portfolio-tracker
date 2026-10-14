@@ -49,7 +49,7 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
           variant="outline"
           size="sm"
           aria-label="Edit forecast withholding"
-          title="Withholding assumed for forecasts derived from gross dividends"
+          title="Assumed forecast withholding"
         >
           WHT {formatDividendWithholdingPct(appliedPct)}%
         </Button>

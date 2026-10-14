@@ -68,6 +68,23 @@ describe('DividendCalendar', () => {
     expect(screen.queryByText(/has gone ex and the cash has not reached/)).toBeNull()
   })
 
+  it('keeps the pending badge out of the truncated symbol, so a narrow row cannot clip it', () => {
+    // jsdom lays nothing out, so this pins the structure that makes it visible at 390px:
+    // only the symbol truncates, and the badge is its sibling rather than its child.
+    render(
+      <DividendCalendar
+        upcoming={[payment({
+          date: '2026-04-20', ex_date: '2026-04-08', pending: true,
+          pay_date_source: 'ex_date', symbol: 'VERYLONGSYMBOL',
+        })]}
+        colorOf={colorOf}
+      />,
+    )
+    expect(screen.getByText('payment pending').closest('.truncate')).toBeNull()
+    expect(screen.getByText('ex-date · pay date unknown').closest('.truncate')).toBeNull()
+    expect(screen.getByText('VERYLONGSYMBOL').className).toContain('truncate')
+  })
+
   it('says nothing about pending payments when there are none', () => {
     render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} />)
     expect(screen.queryByText('payment pending')).toBeNull()
