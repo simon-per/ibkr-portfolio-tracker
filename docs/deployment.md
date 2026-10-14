@@ -25,7 +25,8 @@ before believing it.
 - SSH: `ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud`
 - Secrets live only in `/root/IBKR_investment_tracker/backend/.env` (`IBKR_TOKEN`, `IBKR_QUERY_ID`,
   `API_ADMIN_TOKEN`, `OPENFIGI_API_KEY`, and for the crypto book `COIN_STATS_API_KEY`,
-  `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE` — see [crypto.md](crypto.md))
+  `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE`, `COINGECKO_API_KEY` — see
+  [crypto.md](crypto.md)); every setting is listed in `backend/.env.example`
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
 - Backups: `/root/ibkr-backups/<date>/`
