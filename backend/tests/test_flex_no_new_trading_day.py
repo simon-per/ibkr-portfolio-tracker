@@ -312,7 +312,24 @@ async def test_a_failed_saturday_under_a_narrow_window_warns_on_sunday(db):
         db, as_of=_morning_check(2026, 10, 11))
 
     assert len(warnings) == 1
-    assert "oldest trading day not yet fetched 2026-10-09" in warnings[0]
+    assert "oldest trading day not yet fetched is 2026-10-09" in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_the_warning_counts_from_the_day_it_names(db):
+    """
+    A Saturday success, the skipped Sunday and Monday, then a failed Tuesday: Wednesday
+    morning is two days past Monday and four past the success. The number has to sit
+    beside the day it counts from, or the sentence contradicts its own dates.
+    """
+    await _success(db, _et(2026, 10, 10, 12, 30), window=3)
+
+    warnings = await SchedulerService().find_flex_generation_gap(
+        db, as_of=_morning_check(2026, 10, 14))
+
+    assert len(warnings) == 1
+    assert ("oldest trading day not yet fetched is 2026-10-12, 2 US-Eastern days ago "
+            "(last success 2026-10-10 ET)") in warnings[0]
 
 
 @pytest.mark.asyncio

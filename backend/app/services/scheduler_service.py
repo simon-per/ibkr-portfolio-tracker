@@ -142,9 +142,11 @@ IBKR_SYNC_STALE_DAYS = 7
 # and needs a human awake.
 #
 # Two is the floor rather than the answer. It is what N=3 produces, and it keeps a
-# pathologically narrow window off a hair trigger: at 1, one failed day would warn. An
-# ordinary weekend no longer needs the floor — the alarm counts from the oldest trading
-# day the last statement missed, so a Saturday success is nothing until Monday's trades.
+# pathologically narrow window off a hair trigger: at 1 it would warn every weekday
+# morning with nothing wrong, because the market-data checks before 12:00 ET already see
+# yesterday's success as one day old. An ordinary weekend no longer needs the floor —
+# the alarm counts from the oldest trading day the last statement missed, so a Saturday
+# success is nothing until Monday's trades.
 FLEX_GENERATION_GAP_WARN_DAYS_FLOOR = 2
 
 # Kept under the old name because `tests/test_flex_daily_generation.py` and
@@ -764,10 +766,13 @@ class SchedulerService:
             if remaining > 0
             else "that margin is already gone"
         )
+        # The count runs from `at_risk_from`, not from the last success, so the sentence
+        # names that day: "no statement for 2 days" beside a success four days back (a
+        # Saturday success, the skipped Sunday and Monday, a failed Tuesday) reads as a bug.
         return [
-            f"IBKR: no statement has been generated for {missed} US-Eastern days (last "
-            f"success {et_date(newest):%Y-%m-%d} ET, oldest trading day not yet fetched "
-            f"{at_risk_from:%Y-%m-%d}). The Flex Query {provenance}, so "
+            f"IBKR: the oldest trading day not yet fetched is {at_risk_from:%Y-%m-%d}, "
+            f"{missed} US-Eastern days ago (last success {et_date(newest):%Y-%m-%d} ET). "
+            f"The Flex Query {provenance}, so "
             f"{urgency} before those trades become unreachable from every future "
             f"statement — download the statement from Client Portal with a wider period "
             f"and ingest it via app/cli/ingest_flex_xml.py"
