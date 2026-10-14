@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { MonthlyDeploymentCard } from './MonthlyDeploymentCard'
 import type { ContributionsResponse, ContributionWindow, ContributionMonthlyItem } from '@/lib/api'
@@ -30,6 +30,13 @@ import type { ContributionsResponse, ContributionWindow, ContributionMonthlyItem
  */
 
 afterEach(cleanup)
+
+// "This month" is the reader's calendar month, so the clock is pinned to mid-July 2026.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 6, 15, 12))
+})
+afterEach(() => vi.useRealTimers())
 
 function win(over: Partial<ContributionWindow> = {}): ContributionWindow {
   return {
@@ -109,26 +116,43 @@ describe('the 12M average comes from the server, not from a second computation',
 })
 
 describe('the headline figure is money in, not gross deployment', () => {
-  it('summarises the latest month as money in and reads the money-in average', () => {
+  it('summarises this month as money in and reads the money-in average', () => {
     render(
       <MonthlyDeploymentCard
-        data={data({ monthly: [month('2026-08', 31400, 1240)] })}
+        data={data({ monthly: [month('2026-07', 31400, 1240)] })}
         isLoading={false}
       />,
     )
     // The month that prompted this: 31,400 deployed, 1,240 actually paid in. The
     // summary is the surface everybody reads, so it must carry the smaller, true one.
-    expect(screen.getByText(/1,240 in/)).toBeTruthy()
+    expect(screen.getByText(/Jul so far: \S*1,240/)).toBeTruthy()
     expect(screen.queryByText(/31,400/)).toBeNull()
     // And the average is money in too, so it is the same quantity as the strip's.
     expect(screen.getByText(/2,000\/mo/)).toBeTruthy()
     expect(screen.queryByText(/2,500\/mo/)).toBeNull()
   })
 
-  it('still reports the latest month when the server sends no 12m window', () => {
+  it('still reports this month when the server sends no 12m window', () => {
     render(<MonthlyDeploymentCard data={data({ windows: [] })} isLoading={false} />)
-    expect(screen.getByText(/9,999 in/)).toBeTruthy()
+    expect(screen.getByText(/Jul so far: \S*9,999/)).toBeTruthy()
     expect(screen.queryByText(/avg/)).toBeNull()
+  })
+
+  it("adds up this calendar year's money in, and nothing before it", () => {
+    render(
+      <MonthlyDeploymentCard
+        data={data({ monthly: [month('2025-12', 50000), month('2026-02', 1500), month('2026-07', 700)] })}
+        isLoading={false}
+      />,
+    )
+    expect(screen.getByText(/YTD: \S*2,200/)).toBeTruthy()
+  })
+
+  it('reads a month with nothing recorded yet as 0 so far, not as last month', () => {
+    // `monthly[]` has a row for every month with a deposit or a purchase, so no row is a real 0.
+    render(<MonthlyDeploymentCard data={data({ monthly: [month('2026-06', 1000)] })} isLoading={false} />)
+    expect(screen.getByText(/Jul so far: \S*0 ·/)).toBeTruthy()
+    expect(screen.getByText(/YTD: \S*1,000/)).toBeTruthy()
   })
 
   it('falls back to deployment when the backend does not publish money in', () => {
@@ -140,6 +164,7 @@ describe('the headline figure is money in, not gross deployment', () => {
     render(<MonthlyDeploymentCard data={legacy} isLoading={false} />)
     expect(screen.getByText(/9,999 deployed/)).toBeTruthy()
     expect(screen.getByText(/2,500\/mo/)).toBeTruthy()   // the deployed average, as before
+    expect(screen.queryByText(/YTD/)).toBeNull()          // money in is not published, so no YTD of it
   })
 })
 

@@ -43,6 +43,11 @@ function whole(value: number): string {
   return value.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
+/** "YYYY-MM" of the reader's calendar month — the key `monthly[]` rows carry. */
+function monthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
 /**
  * Money in per month — one series, answering one question: how much new money went in.
  *
@@ -97,7 +102,12 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // money in with nothing beside it to disagree.
   const showDeployed = !hasMoneyIn
 
-  // Collapsed summary: last month + the 12M average.
+  // Collapsed summary: this month so far, the 12M average pace, and year-to-date money in
+  // (the legacy deployment fallback keeps last month + the average).
+  //
+  // `monthly[]` has a row for every month with a deposit or a purchase, clamped at the
+  // server's today, so a month without a row had nothing recorded: this month so far and
+  // YTD are then a real 0, not an unknown. A row whose money in is missing reads "—".
   //
   // The average is READ from the server's 12m window, not recomputed here. It was
   // recomputed until 2026-08-05 as `monthly.slice(-12)` summed and divided by its own
@@ -113,30 +123,42 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // It reads `avg_money_in_per_month_eur` now rather than `avg_deployed_per_month_eur`,
   // so this figure and the strip's are the same quantity as well as the same number.
   const twelveMonth = data?.windows.find(w => w.label === '12m')
+  const money = (v: number | null | undefined) => (v == null ? '—' : `${curSym}${whole(v)}`)
   let summaryText: React.ReactNode = hasMoneyIn ? 'Money in per month' : 'Capital deployed per month'
   if (isError) {
     summaryText = 'Could not load contributions'
   } else if (monthly.length > 0) {
+    const today = new Date()
+    const thisMonth = monthKey(today)
+    const thisYear = `${today.getFullYear()}-`
+    // `hasMoneyIn` means every row carries a number; a month with no row is a real 0.
+    const thisMonthRow = monthly.find(m => m.month === thisMonth)
+    const monthSoFar = thisMonthRow ? thisMonthRow.money_in_eur : 0
+    const yearToDate = monthly
+      .filter(m => m.month.startsWith(thisYear))
+      .reduce<number | undefined>(
+        (sum, m) => (sum === undefined || m.money_in_eur === undefined ? undefined : sum + m.money_in_eur),
+        0,
+      )
     const last = monthly[monthly.length - 1]
     summaryText = (
-      <>
-        {monthLabel(last.month)}: {curSym}
+      <span className="tabular-nums">
         {hasMoneyIn
-          ? `${whole(last.money_in_eur ?? 0)} in`
-          : `${whole(last.deployed_eur)} deployed`}
+          ? `${MONTH_NAMES[today.getMonth()]} so far: ${money(monthSoFar)}`
+          : `${monthLabel(last.month)}: ${money(last.deployed_eur)} deployed`}
         {twelveMonth && (
           <>
             {' · '}
             {/* A four-month-old portfolio has no twelve-month average, and the server
                 already refuses to pretend otherwise by clamping the divisor. Naming the
                 window it actually measured is the matching honesty on this side. */}
-            {twelveMonth.partial ? `${twelveMonth.months.toFixed(0)}M avg` : '12M avg'}: {curSym}
-            {whole(hasMoneyIn
+            {twelveMonth.partial ? `${twelveMonth.months.toFixed(0)}M avg` : '12M avg'}: {money(hasMoneyIn
               ? twelveMonth.avg_money_in_per_month_eur
               : twelveMonth.avg_deployed_per_month_eur)}/mo
           </>
         )}
-      </>
+        {hasMoneyIn && ` · YTD: ${money(yearToDate)}`}
+      </span>
     )
   }
 
@@ -230,7 +252,7 @@ function DeploymentTooltip(
         {hasMoneyIn && (
           <p>
             <span className="text-muted-foreground">Money in: </span>
-            <span className="font-medium">{fmt(d.money_in_eur ?? 0)}</span>
+            <span className="font-medium">{d.money_in_eur == null ? '—' : fmt(d.money_in_eur)}</span>
           </p>
         )}
         <p>

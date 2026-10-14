@@ -31,9 +31,12 @@ import { cashIsTracked } from './portfolioCash'
  * it. Falling back to 0 would redraw the very lie this module exists to remove; falling
  * back to the start value would too. `value` is unaffected — it never needed the baseline.
  *
- * The rate is the nominal annual figure divided by twelve and the contribution is an
- * ordinary annuity paid at each month's end — both unchanged from the original, and both
- * conventional simplifications rather than defects.
+ * **The entered rate is the effective annual rate.** It compounds monthly at
+ * `(1 + annual)^(1/12) − 1`, so twelve months at 8% grow the seed by exactly 8%. It was the
+ * nominal figure over twelve until 2026-10-14, which compounds 8% entered into 8.30% a year —
+ * a projection quietly more generous than the rate on screen, by more every decade. The
+ * contribution is an ordinary annuity paid at each month's end, a conventional
+ * simplification.
  */
 export interface ForecastInputs {
   /**
@@ -74,10 +77,11 @@ function whole(v: number): number {
  * Value, money in and gains `months` from now.
  *
  *   value = start · (1 + r)^m + PMT · ((1 + r)^m − 1) / r      (r = 0 → PMT · m)
+ *   r     = (1 + annual)^(1/12) − 1                             (the effective monthly rate)
  */
 export function projectForecast(inputs: ForecastInputs, months: number): ForecastPoint {
   const { startValue, moneyInToDate, monthlyContribution, annualReturnPct } = inputs
-  const r = annualReturnPct / 100 / 12
+  const r = Math.pow(1 + annualReturnPct / 100, 1 / 12) - 1
   const growth = Math.pow(1 + r, months)
   const annuity = r === 0 ? monthlyContribution * months : monthlyContribution * ((growth - 1) / r)
   const value = whole(startValue * growth + annuity)
@@ -107,6 +111,19 @@ export function forecastSeries(
 
 function sample(inputs: ForecastInputs, month: number): ForecastSample {
   return { month, year: (month / 12).toFixed(1), ...projectForecast(inputs, month) }
+}
+
+/**
+ * The owner's real saving pace, the default monthly contribution: the `12m` window's money in
+ * per month — the figure the ContributionsStrip and the Money In per Month card publish — in
+ * whole units. Floored at 0, because a year of net withdrawals is no contribution and the input
+ * cannot hold a negative one. `null` without the window, so the caller keeps its own default
+ * rather than projecting from a pace nobody measured.
+ */
+export function monthlyPace(contributions: ContributionsResponse | undefined): number | null {
+  const twelveMonth = contributions?.windows.find((w) => w.label === '12m')
+  if (!twelveMonth || !Number.isFinite(twelveMonth.avg_money_in_per_month_eur)) return null
+  return Math.max(0, Math.round(twelveMonth.avg_money_in_per_month_eur))
 }
 
 /**

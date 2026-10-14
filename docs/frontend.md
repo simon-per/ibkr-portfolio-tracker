@@ -216,7 +216,17 @@ scenario, and carrying today's money in would report a negative gain of that siz
 could not be loaded is `null`, never 0**: the grey band is omitted, Money In and Gains read `—`, and a
 notice under the chart says so, while Portfolio Value — which never needed the baseline — is
 unaffected. Falling back to 0 or to the start value would redraw the very lie the module removes.
-The nominal/12 monthly rate and end-of-period annuity are unchanged and conventional.
+**The entered rate is the effective annual rate**: it compounds monthly at `(1 + r)^(1/12) − 1`,
+so twelve months at r grow the seed by exactly r (pinned in `forecast.test.ts`). It was `r/12`
+until 2026-10-14, which turned 8% entered into 8.30% a year — a projection more generous than the
+rate on screen. The end-of-period annuity is unchanged and conventional.
+
+**The monthly contribution defaults to the owner's real pace** — the `12m` window's
+`avg_money_in_per_month_eur`, rounded, floored at 0 — until a value is typed; the "My pace" button
+returns to it. Only a typed value is stored (`forecast.chosenMonthlyContribution`). The old key
+`forecast.monthlyContribution` was written back on every mount, so a stored `1000` was the default
+rather than a choice: it is dropped, and any other legacy value is migrated as a choice. Without
+contributions (failed load, or no `12m` window) the default stays 1,000.
 
 Tests: `src/lib/portfolioKpis.test.ts`, `src/lib/rebalance.test.ts`,
 `src/lib/currencyExposure.test.ts`, `src/lib/forecast.test.ts`, plus jsdom tests beside each

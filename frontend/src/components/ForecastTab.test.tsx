@@ -157,3 +157,79 @@ describe('ForecastTab', () => {
     expect(await screen.findByRole('button', { name: /Current \(.*60,000\)/ })).toBeTruthy()
   })
 })
+
+describe('the monthly contribution defaults to the real pace', () => {
+  /** 12m money in averaging 1,234.40 a month. */
+  const withPace: ContributionsResponse = {
+    ...contributions,
+    windows: [
+      ...contributions.windows,
+      { ...contributions.windows[0], label: '12m', months: 12, avg_money_in_per_month_eur: 1_234.4 },
+    ],
+  }
+  const CHOSEN = 'forecast.chosenMonthlyContribution'
+  const LEGACY = 'forecast.monthlyContribution'
+
+  const input = () => screen.getByLabelText('Monthly Contribution') as HTMLInputElement
+  const paceButton = () => screen.findByRole('button', { name: /My pace .*1,234/ })
+
+  it('projects with the 12M pace when nothing was chosen, and stores nothing on mount', async () => {
+    mockApi({ contributions: withPace })
+    renderTab()
+
+    expect((await paceButton()).getAttribute('aria-pressed')).toBe('true')
+    expect(input().value).toBe('1234')
+    await waitFor(async () => expect(amount((await oneYearRow())[3])).toBe(55_000 + 12 * 1_234))
+    expect(localStorage.getItem(CHOSEN)).toBeNull()
+  })
+
+  it('treats the auto-written legacy 1000 as unset', async () => {
+    // The old tab wrote 1000 back on every mount, so every browser has it stored.
+    localStorage.setItem(LEGACY, '1000')
+    mockApi({ contributions: withPace })
+    renderTab()
+
+    await paceButton()
+    expect(input().value).toBe('1234')
+    expect(localStorage.getItem(LEGACY)).toBeNull()
+    expect(localStorage.getItem(CHOSEN)).toBeNull()
+  })
+
+  it('keeps any other legacy value as a choice, and My pace returns to the pace', async () => {
+    localStorage.setItem(LEGACY, '2500')
+    mockApi({ contributions: withPace })
+    renderTab()
+
+    const button = await paceButton()
+    expect(input().value).toBe('2500')
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    expect(localStorage.getItem(CHOSEN)).toBe('2500')
+
+    fireEvent.click(button)
+    expect(input().value).toBe('1234')
+    expect(localStorage.getItem(CHOSEN)).toBeNull()
+  })
+
+  it('stores a typed value, which wins over the pace on the next visit', async () => {
+    mockApi({ contributions: withPace })
+    const { unmount } = renderTab()
+    await paceButton()
+
+    fireEvent.change(input(), { target: { value: '800' } })
+    expect(localStorage.getItem(CHOSEN)).toBe('800')
+    unmount()
+
+    renderTab()
+    await paceButton()
+    expect(input().value).toBe('800')
+  })
+
+  it('keeps the old default, and offers no pace, when contributions failed to load', async () => {
+    mockApi({ contributions: new Error('backend down') })
+    renderTab()
+
+    await screen.findByRole('alert')
+    expect(input().value).toBe('1000')
+    expect(screen.queryByRole('button', { name: /My pace/ })).toBeNull()
+  })
+})
