@@ -209,43 +209,15 @@ sweep and the read-only checks under *Watch after the next deploy*.
 Only what is still unverified. The verified halves of every entry that used to sit here are in
 docs/shipped-log.md under the change that shipped them.
 
-- **The browser sweep — every check below is owed, none can be answered by the API.** At 1440
-  and 390 px, both themes. The 2026-10-14 text strip (~38 components) has never been seen
-  rendered, so every tab is in scope; beyond that, by tab:
-  - **Dividends** — colours: step All time → 24m → 2026 → 2025 → 2024 → 2027 and no holding
-    changes colour or vertical position; the five muted steps read as a de-emphasis ramp (dark
-    mode especially); a legend of up to thirteen entries plus Other wraps at 390; hover-dim,
-    click-to-pin and the Other disclosure work on touch; calendar swatches match the chart in a
-    past-year view (`SERIES_MUTED` in `lib/dividendColors.ts` is the one number to change; re-run
-    `dividendColors.test.ts` after). Forecast ON: September's translucent segment roughly
-    doubled by the calendar fold; Forecast OFF: the rolling chart still shows the 2026-08 window,
-    nothing translucent, no series changes colour, the monthly axis and both year selectors show
-    no future range. The WHT popover at 390, its save/refetch feedback and the Performance-card
-    percentage. The calendar at 390: the *payment pending* badge, the `ex …` note beside a
-    shifted date, "ex-date · pay date unknown" rows. The stacked TTM: solid/dashed split, the
-    legend in TTM mode, the toggle dropping open windows. The growth strip per range against
-    the API (`ttm_coverage_start` `2025-05` in every range), and whether the All-time figure is
-    worth keeping once seen (dropping CAGR on coverage-limited ranges is a two-line change). The
-    *Average per month* chips wrap rather than scroll. The forecast trend card: its breakdown and
-    its collapse; its header and the KPI tile print the same Next-12M (also right after a WHT
-    change), the MTD/YTD chips, "+X from buys", the muted received line; "Payouts · N raised ·
-    M cut" above the table; every figure column sorts, unknowns last.
-  - **Forecast** — opens at the 12-month pace, not 1000, in a browser holding the old
-    auto-written value; a value typed earlier survives; *My pace* follows the pace. The
-    *Money In per Month* card reads "so far · 12M avg · YTD".
-  - **Tax** — "—" withholding on estimated rows, the total "—" or "excl. N est.".
-  - **Fundamentals** — the as-of line (amber past 8 days), a loss P/E in red, market-cap sort.
-  - **Performance** — the heatmap's `MTD` tag; Sortino reads "Not enough history" on a thin
-    range. On 3M/1Y the Profit/Loss line starts at 0 on the day the benchmark lines
-    start and ends at the change in Total Value minus the change in Money In; no 09-28 → 09-30
-    hump in the benchmark lines; the visual hierarchy refresh (`4bd3f7f`: content shell, KPI
-    panels, hero grids) has never had a browser pass.
-  - **Look-through** — an alert naming any unvaluable position above the KPIs.
-  - **Watchlist** — the as-of line (amber past four days); the Analyst sort puts `strong_buy`
-    first descending; EPS figures carry no `$`.
-  - **Positions** — the 3a EM fund's row carries its *sibling NAV* badge.
-  - **Crypto** — the four tiles (Total value, Today, P&L since 1 Jan 2026, Coins), 1W · MTD ·
-    YTD, the *peg* badge if USDC is held.
+- **The browser sweep ran on `b81aa9e` (2026-10-14 evening)** — every tab at 1440 and 390 px in
+  both themes, read-only, Yahoo-reaching routes aborted. Every owed check passed (Dividends colours
+  across ranges, Forecast off, the trend card matching the KPI tile, sorting, the pending badge at
+  390, the WHT popover, the paces' wrap; the Forecast pace control; Money In "so far · 12M avg ·
+  YTD"; the heatmap `MTD` tag; Profit/Loss from 0; Tax "—" withholding; Look-through without `†`
+  and a muted Unresolved; the Watchlist as-of; the sibling-NAV badge). Still unseen: **Crypto**
+  (needs the admin key) and a **loss P/E in red** (no holding has one). The defects it found are
+  item 1 of *Worth doing next*. The Fundamentals as-of reads 2026-08-25 until the first weekly
+  refresh on 2026-10-18.
 
 - **The crypto book on CoinGecko prices — the API half.** With the admin key:
   `/api/crypto/history` starts on 2026-01-01, `reconstructed` ends on 2026-10-02, and there is no
@@ -302,6 +274,22 @@ docs/shipped-log.md under the change that shipped them.
   - **Two gain figures**, 410 apart; cost basis labelled "total invested".
 
 Rough priority from here.
+
+0. **What the 2026-10-14 browser sweep found on production.** Real defects: the **Watchlist
+   scrolls sideways at 1440** (211 px) — the `sr-only` "Actions" header span is `position:absolute`
+   with no positioned ancestor inside the table's scroller, so it escapes the clip; **chart y-axis
+   labels are clipped** — Performance at 1440 loses the leading "C" of "CHF", at 390 the ticks are
+   clipped inconsistently, and the Forecast chart at 390 clips them too, with its "Years" title
+   over the legend; **Tax at 390 truncates "Withholding"** in the DA-1 country cards; the
+   **heatmap measures a range-clipped first month and its year's YTD from mid-month** (1Y starting
+   mid-October) with nothing marking them partial; **ASML appears as two companies** in the
+   look-through (one LEI-folded, one held via a fund with identity "none"). Explanatory text the
+   strip missed: the sibling-NAV badge tooltip (`PositionsList.tsx:86`), the Positions "Yield on
+   cost" definition (53 words), the Watchlist column-definitions popover (165 words, formulas),
+   the 3a row tooltip, the WHT popover hint, and two look-through lines ("A further N companies…",
+   "not folded by an identifier"). Nits: the 3M x-axis repeats month labels; Fundamentals prints
+   "1191.1TKRW" without a space; Allocation's region list mixes "Emerging Markets", "Other Emerging
+   M…" and countries. Also confirm NVDA's +2400% payout growth is a real raise.
 
 1. **The test suite writes into the developer's database.** `tests/conftest.py:42` blanks only
    the job store; the scheduler-job spy tests and the WAL-lifespan test write `sync_runs` rows,
