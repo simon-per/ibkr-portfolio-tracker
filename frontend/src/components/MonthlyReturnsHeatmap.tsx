@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
-import { cn } from '@/lib/utils'
+import { ABSENT, cn } from '@/lib/utils'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { monthlyReturnRows, type MonthReturn } from '@/lib/monthlyReturns'
 import type { PortfolioValuePoint } from '@/lib/api'
@@ -200,7 +200,7 @@ export function MonthlyReturnsHeatmap({
                               )}
                             </div>
                           ) : (
-                            <div className="text-center text-xs text-muted-foreground py-1">—</div>
+                            <div className="text-center text-xs text-muted-foreground py-1">{ABSENT}</div>
                           )}
                         </td>
                       ))}
@@ -216,7 +216,7 @@ export function MonthlyReturnsHeatmap({
                             {row.ytd.returnPercent >= 0 ? '+' : ''}{row.ytd.returnPercent.toFixed(1)}%
                           </div>
                         ) : (
-                          <div className="text-center text-xs text-muted-foreground py-1">—</div>
+                          <div className="text-center text-xs text-muted-foreground py-1">{ABSENT}</div>
                         )}
                       </td>
                     </tr>

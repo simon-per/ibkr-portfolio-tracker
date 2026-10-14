@@ -45,7 +45,7 @@ import { AppFooter } from './AppFooter'
 import { SyncStatusMessage } from './SyncStatusMessage'
 import { BenchmarkPicker } from './BenchmarkPicker'
 import { benchmarkColor } from '@/lib/benchmarkColors'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useFormatCurrency } from '@/lib/CurrencyContext'
 import {
   MIN_PAIRED_RETURNS,
   annualizedVolatilityPct,
@@ -96,7 +96,8 @@ export function readSelectedBenchmarks(): string[] {
 export function Dashboard() {
   const queryClient = useQueryClient()
   // The currency controls themselves live in the shared AppHeader.
-  const curSym = useCurrencySymbol()
+  const formatCurrency = useFormatCurrency()
+  const signedCurrency = (n: number) => `${n >= 0 ? '+' : ''}${formatCurrency(n)}`
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
 
@@ -568,12 +569,12 @@ export function Dashboard() {
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span
                           className="text-muted-foreground"
-                          title="Change in total holdings value over the period. This includes money you added — it is not a return; see Period Gain for that."
+                          title="Holdings value change, incl. money added"
                         >
                           Value change:
                         </span>
                         <span className={`font-semibold ${performanceMetrics.absoluteChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {performanceMetrics.absoluteChange >= 0 ? '+' : ''}{curSym}{performanceMetrics.absoluteChange.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {signedCurrency(performanceMetrics.absoluteChange)}
                         </span>
                         {/* Absent, not `(+0.00%)`, when nothing was held at the range start:
                             a percentage of zero is undefined, and the figure beside it
@@ -591,12 +592,12 @@ export function Dashboard() {
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span
                           className="text-muted-foreground"
-                          title="What the holdings actually earned over the period: value change plus proceeds of anything sold, less money put in. Realized gains count."
+                          title="Value change less net money in"
                         >
                           Period Gain:
                         </span>
                         <span className={`font-semibold ${performanceMetrics.periodGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {performanceMetrics.periodGain >= 0 ? '+' : ''}{curSym}{performanceMetrics.periodGain.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {signedCurrency(performanceMetrics.periodGain)}
                         </span>
                         {performanceMetrics.periodGainPercent !== null && (
                           <span className={`font-semibold ${performanceMetrics.periodGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>

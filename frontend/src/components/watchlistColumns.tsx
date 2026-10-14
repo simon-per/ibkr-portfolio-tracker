@@ -1,4 +1,4 @@
-import { formatMarketCap } from '@/lib/utils'
+import { ABSENT, formatMarketCap } from '@/lib/utils'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
 
@@ -47,7 +47,7 @@ export const RATING_LABELS: Record<string, string> = {
 }
 
 export function formatPercent(value: number | null): string {
-  if (value === null) return '-'
+  if (value === null) return ABSENT
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
 }
 
@@ -107,8 +107,8 @@ export function pegOf(item: WatchlistItem): number | null {
   )
 }
 
-const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : '-')
-const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : '-')
+const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : ABSENT)
+const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : ABSENT)
 
 export function watchlistColumns(deps: {
   formatCurrency: (value: number | null, currency: string | null) => string
@@ -231,7 +231,7 @@ export function watchlistColumns(deps: {
         return (
           <div>
             <div className={`text-xs font-medium ${ratingColorClass(i.analyst_rating)}`}>
-              {i.analyst_rating ? RATING_LABELS[i.analyst_rating] || i.analyst_rating : '-'}
+              {i.analyst_rating ? RATING_LABELS[i.analyst_rating] || i.analyst_rating : ABSENT}
             </div>
             {upside !== null && (
               <div
@@ -300,7 +300,7 @@ export function watchlistColumns(deps: {
             {peg.toFixed(2)}
           </span>
         ) : (
-          '-'
+          ABSENT
         )
       },
     },

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { Download, ArrowLeftRight, Banknote, Coins, Split } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatCount } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { rangeFor, type TimeRange } from '@/lib/dateRanges'
@@ -270,7 +270,7 @@ export function ActivityTab() {
             <div>
               <CardTitle>Activity</CardTitle>
               {data && (
-                <CardDescription>{data.total.toLocaleString('en-US')} events</CardDescription>
+                <CardDescription>{formatCount(data.total)} events</CardDescription>
               )}
             </div>
             <a
@@ -400,7 +400,7 @@ export function ActivityTab() {
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
                   <span>
                     {data.offset + 1}–{Math.min(data.offset + data.limit, data.total)} of{' '}
-                    {data.total.toLocaleString('en-US')}
+                    {formatCount(data.total)}
                   </span>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>

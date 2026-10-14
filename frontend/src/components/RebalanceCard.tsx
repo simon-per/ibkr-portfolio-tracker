@@ -4,6 +4,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { readStored, writeStored } from '@/lib/storage'
+import { formatCount } from '@/lib/utils'
 import {
   DEFAULT_BAND_PP,
   computeRebalancePlan,
@@ -156,7 +157,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         align: 'right',
         mobile: 'value',
         cell: (row) =>
-          row.unpriced ? '—' : `${curSym}${Math.round(row.marketValue).toLocaleString('en-US')}`,
+          row.unpriced ? '—' : `${curSym}${formatCount(Math.round(row.marketValue))}`,
       },
       {
         key: 'drift',
@@ -203,7 +204,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         cell: (row) =>
           row.tradeValue === null
             ? '—'
-            : `${row.tradeValue > 0 ? '+' : '−'}${curSym}${Math.round(Math.abs(row.tradeValue)).toLocaleString('en-US')}`,
+            : `${row.tradeValue > 0 ? '+' : '-'}${curSym}${formatCount(Math.round(Math.abs(row.tradeValue)))}`,
       },
     ],
     // `setTarget` is deliberately out of the deps: it only ever calls setTargets with a

@@ -10,7 +10,21 @@ import {
   formatShortDateTime,
   parseLocalDate,
   tooltipValue,
+  formatMarketCap,
+  ABSENT,
 } from './utils'
+
+describe('formatMarketCap', () => {
+  it('draws the app-wide absent glyph for an unknown, never a hyphen', () => {
+    expect(formatMarketCap(null)).toBe(ABSENT)
+    expect(ABSENT).toBe('—')
+  })
+
+  it('keeps its T / B / M scale', () => {
+    expect(formatMarketCap(2.5e12)).toBe('2.5T')
+    expect(formatMarketCap(850_000)).toBe('850,000')
+  })
+})
 
 /**
  * `lib/utils.ts` had no tests, and it holds the money formatter every surface
@@ -94,6 +108,10 @@ describe('formatCurrency', () => {
 
   it('keeps a negative sign, which withdrawals and losses depend on', () => {
     expect(formatCurrency(-800, 'EUR')).toBe('-€800.00')
+  })
+
+  it('puts the sign before a word-length code too — the app-wide convention', () => {
+    expect(formatCurrency(-800, 'CHF')).toBe('-CHF 800.00')
   })
 
   it('rounds rather than truncating', () => {
