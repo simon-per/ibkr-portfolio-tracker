@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Ran on production 2026-10-14 — the forecast-breakdown backfill
+
+`python -m app.cli.backfill_dividend_forecast --from 2026-06-01`, after a fresh backup
+(`/root/ibkr-backups/2026-10-14/portfolio.db.manual-174614`) and a clean dry run (23 s): the
+128 replayed days rewritten, and the seven days recorded since 2026-10-07 given their
+per-security lines with their totals unchanged. **Verified on `GET
+/api/dividends/forecast-history` right after:** on every point the five parts (`shares`,
+`payout`, `newly_forecast`, `fx`, `unattributed`) sum to the change since `growth_from`
+(2026-08-28) to the cent; the newest point, recorded by the scheduled job with its own lines
+(`reconstructed: false`), has `unattributed` 0.00; 2026-10-12 and 2026-10-13, whose totals were
+recorded before their lines existed, carry the replay gap the dry run printed for them (+2.1% and
++0.8%) as `unattributed`, as designed.
+
 ## Shipped 2026-10-13 — a pillar 3a upload keeps the sibling-derived prices
 
 `d2411b5`, backend only, rules in `docs/pillar3a.md`, *Prices*. The importer deleted every

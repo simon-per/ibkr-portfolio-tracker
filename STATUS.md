@@ -5,7 +5,7 @@
 > `docs/<topic>.md` (CLAUDE.md is the index). This file keeps only what is current: what needs a
 > human, what is being watched, what is accepted, what is next, and the local-dev traps.
 
-**Last updated: 2026-10-14.** **The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`; the API still serves every flag (docs/dividends.md, *Data-quality notes are not rendered*). The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (23/23 synced); see *Needs a human* and *Watch after the next deploy*. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, backfill still owed** (see *Needs a human*): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history` — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
+**Last updated: 2026-10-14.** **The UI carries figures, not explanations** (owner, 2026-10-14; CLAUDE.md *Conventions*): every tab lost its footnotes, definitions, provenance notes, `†`/`*` markers and shaded replayed spans; `est.` tags and live-problem warnings stay, and the 3a reason left the tax report's `warnings[]` for `pillar3a.note`; the API still serves every flag (docs/dividends.md, *Data-quality notes are not rendered*). The dividend forecast card collapses. **The watchlist refreshes itself** — its own Yahoo slot at 04:00 Berlin, Tuesday to Saturday, away from the portfolio's (docs/flex-and-sync.md, *Sync schedule*), and the tab states its data's as-of time, amber past four days. Live; the first slot ran on 2026-10-14 (23/23 synced), and the installed `/root/auto-deploy.sh` knows its hour since that evening; see *Watch after the next deploy*. **The dividend forecast says what its growth was made of — live on `4c1d654` since 2026-10-14, back-filled and verified that evening** (docs/shipped-log.md): each day's forecast is stored per security (`dividend_forecast_snapshot_lines`, migration `d4a9c5e7f1b3`), `forecast-history` serves the growth since `growth_from` and its split into shares bought, payouts and timing, newly forecast and currency, the Dividends tab draws it (`DividendForecastTrend`), and every payer carries its own per-share growth (docs/dividends.md, *What the forecast's growth was made of* and *Per-share growth*). Checked against a production snapshot; on production `forecast_by_security` and `growth.per_share` are served. **A pillar 3a upload keeps the EM fund's derived prices** (`d2411b5`: rescaled onto the new NAV in place, and the days between statement NAVs are no longer read as holidays — docs/pillar3a.md, *Prices*); the September days the 2026-10-12 upload had lost were refilled by hand on 2026-10-13 and the value chart is whole again (docs/shipped-log.md). **The dividend forecast keeps a daily history** (`dividend_forecast_snapshots`, `GET /api/dividends/forecast-history` — docs/dividends.md, *The forecast's history*): since 2026-10-12 with growth percentages, the days from 2026-06-01 replayed and flagged `reconstructed`, and growth measured from 2026-08-28; live and verified on `5bc4228` (docs/shipped-log.md). **Pillar 3a on production is the real finpension export through the 2026-10-06 buys** (imported 2026-10-12, replacing the estimates). **Deploy hardening, live and verified on `9e57366` (docs/shipped-log.md):** the database lives in `backend/data/` behind a directory mount (the WAL survives `down`),
 the auto-deploy rollback restores the DB snapshot when the failed deploy migrated, and `deploy.sh`
 re-checks the sync slots right before the restart — see *Needs a human*. Before that: The **Swisscanto 3a funds now look through** via index proxies
 (verified: coverage 98.9%, nothing uncovered — docs/shipped-log.md), and
@@ -521,28 +521,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
 
 ## Needs a human
 
-- **Refresh `/root/auto-deploy.sh` once the watchlist slot is deployed.** `ops/auto-deploy.sh`
-  gained 04:00 in `SYNC_HOURS` on 2026-10-13 and the installed copy is what cron runs. By atomic
-  rename, as in docs/deployment.md. Until then a deploy can land on the 04:00 watchlist refresh
-  unguarded, which costs at most that night's refresh (the misfire grace or the next night
-  recovers it) — no portfolio slot is affected.
-
-- **Run the forecast-breakdown backfill once on production.** Deployed on `4c1d654`
-  (2026-10-14, migration `d4a9c5e7f1b3` at head). A backup was taken
-  (`/root/ibkr-backups/2026-10-14/portfolio.db.manual-042835`) and the dry run was clean: lines
-  for 7 recorded days (2026-10-07..13), replay within 0.3% of the recorded total except
-  2026-10-12 (+1.6%, the pillar 3a import day). The write itself was refused by the session's
-  permission classifier, so it is the owner's to run:
-
-  ```bash
-  docker exec backend-portfolio-backend-1 python -m app.cli.backfill_dividend_forecast --from 2026-06-01
-  ```
-
-  It rewrites only the replayed days and gives the days recorded
-  since 2026-10-07 their missing lines, leaving their totals alone (it prints how many). Until
-  it has run, the card shows the line and the since-start percentage and no breakdown, because
-  only days recorded after the deploy have lines.
-
 - **Leftovers of the 2026-10-04 database move (optional, harmless).** `rm
   /root/finish-hardening.sh /root/finish-hardening.log` and the two set-aside sidecars
   `backend/data/portfolio.db-{wal,shm}.pre-switchover-20261004T131635Z` (the `-wal` was 0 bytes).
@@ -1036,13 +1014,6 @@ is user-switchable, and a pasted total goes stale silently — check the API or 
   success, 23/23, `last_synced` carrying `+00:00`). Still to see: a clean 08:00 market-data run
   after it, and the Watchlist tab's as-of line in a browser. If the daily validator flags the new
   `sync_type` in the history, that is its expectation to update, not a fault.
-
-- **The forecast breakdown (deployed on `4c1d654`).** After the backfill, expect on
-  `GET /api/dividends/forecast-history`: `breakdown.since` equal to `growth_from` on the
-  newest point, `unattributed` within a few hundredths on days recorded with their lines, and
-  the five figures summing to the change since the start (on the snapshot: to the cent, largest
-  `unattributed` on a filled day about 0.2). (`/api/dividends/breakdown` already serves
-  `forecast_by_security` and `growth.per_share`.) The first scheduled job after the deploy should write lines with `reconstructed = 0`.
 
 - **The rescale of the EM fund's derived prices (`CH1529078078`, `d2411b5`) first runs on the
   next finpension upload.** Expect no "could not be moved" warning and the `sibling_scaled`
@@ -1715,7 +1686,10 @@ lines are permanent, so don't "tidy up" the overlap by deleting the wrong one.
   stripped, the convention in CLAUDE.md rewritten so it is not repaired back. Then merged the
   parallel `simon-per/strip-comments` session (data-quality notes, the USDC peg note, the
   contributions strip's `~`/`*`, dead `coverage_limited`) and removed its worktree and branch.
-  Evening "resume": pushed that merge (`f048a94`) and merged `simon-per/test-speed`.
+  Evening "resume": pushed that merge (`f048a94`) and merged `simon-per/test-speed`. Then an
+  open-points catalogue for an agent-team wave; pre-flight ran the forecast backfill,
+  refreshed `/root/auto-deploy.sh`, synced AGENTS.md (it still carried the old caveat rule)
+  and deleted a stray 3a CSV from the repo root.
 
 - **2026-10-13 (watchlist freshness)** — a brainstorm of open points, of which the owner gave
   this session the watchlist (another session took the heatmap and the forecast-history chart).
