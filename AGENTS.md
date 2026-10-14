@@ -172,8 +172,12 @@ Each of these was a bug first; the file for the area has the story.
 - **An unvaluable holding is excluded from both sides and counted**, never valued at 0.00.
   `unpriced_holdings` rides on every valuation response; the client reads `isUnpriced` from
   `positionValuation.ts` (price **or** FX can be missing) and never recomputes the backend's count.
-- **A caveat inside a collapsible or behind a hover does not exist.** Qualifiers sit on the surface
-  next to the figure they qualify.
+- **The UI carries figures, not explanations** (the owner's call, 2026-10-14: the history before
+  2025/26 is the imperfect part and matters less every month). No footnotes, definitions,
+  provenance or methodology notes, `†`/`*` markers or shaded "replayed" spans on the surface.
+  What stays: a short tag on the figure itself (`est.`), and a conditional warning that names a
+  problem present right now (unpriced holdings, a failed load, a missing price, a stale basket).
+  The reasoning lives in `docs/` and in code comments, never on screen. Don't add it back.
 - **Refuse whole; never half-apply.** Imports, parsers, `replace_basket`, the finpension ledger: a
   partial result is indistinguishable afterwards from a complete one. A refusal is that row's or
   fund's warning, never the job's status.
