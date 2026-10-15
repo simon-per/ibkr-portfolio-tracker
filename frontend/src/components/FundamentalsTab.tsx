@@ -162,8 +162,9 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
         ) : (
           <>
             {formatMarketCap(row.market_cap)}
+            {/* A text space, not a margin: the copied and read-aloud text was "1191.1TKRW". */}
             {row.data_currency ? (
-              <span className="text-muted-foreground text-xs ml-1">{row.data_currency}</span>
+              <span className="text-muted-foreground text-xs">&nbsp;{row.data_currency}</span>
             ) : (
               ''
             )}
