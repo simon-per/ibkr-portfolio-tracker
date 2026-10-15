@@ -179,7 +179,6 @@ export function watchlistColumns(deps: {
       mobile: 'badge',
       hint: {
         description: 'Composite buy score',
-        formula: 'Valuation (25) + Technical (25) + Quality (25) + Analyst (25)',
       },
       cell: (i) =>
         i.buy_score !== null ? (
@@ -211,7 +210,6 @@ export function watchlistColumns(deps: {
       cellClassName: 'font-medium',
       hint: {
         description: 'Distance below 52-week high',
-        formula: '(Price − 52w High) ÷ 52w High × 100',
       },
       cell: (i) => formatPercent(i.pct_from_52w_high),
     },
@@ -254,7 +252,6 @@ export function watchlistColumns(deps: {
       cellClassName: 'font-medium',
       hint: {
         description: 'RSI, 14-day',
-        formula: 'Wilder RSI on 1-year daily closes',
       },
       cell: (i) => num(i.rsi14),
     },
@@ -267,7 +264,6 @@ export function watchlistColumns(deps: {
       cellClassName: 'font-medium',
       hint: {
         description: 'Distance from 200-day MA',
-        formula: '(Price − MA200) ÷ MA200 × 100',
       },
       cell: (i) => formatPercent(i.pct_from_ma200),
     },
@@ -278,7 +274,6 @@ export function watchlistColumns(deps: {
       sortKey: 'peg_ratio',
       hint: {
         description: 'P/E over EPS growth',
-        formula: 'P/E ÷ Fwd EPS Growth %',
       },
       cell: (i) => {
         const peg = pegOf(i)
@@ -306,7 +301,6 @@ export function watchlistColumns(deps: {
       sortKey: 'forward_pe',
       hint: {
         description: 'Forward P/E',
-        formula: 'Price ÷ Next-12M EPS estimate',
       },
       cell: (i) => num(i.forward_pe),
     },
@@ -317,7 +311,6 @@ export function watchlistColumns(deps: {
       sortKey: 'trailing_pe',
       hint: {
         description: 'Trailing P/E',
-        formula: 'Price ÷ TTM EPS',
       },
       cell: (i) => num(i.trailing_pe),
     },
@@ -328,7 +321,6 @@ export function watchlistColumns(deps: {
       sortKey: 'ev_to_ebitda',
       hint: {
         description: 'EV / EBITDA',
-        formula: 'Enterprise Value ÷ TTM EBITDA',
       },
       cell: (i) => num(i.ev_to_ebitda),
     },
@@ -340,7 +332,6 @@ export function watchlistColumns(deps: {
       tone: (i) => colorClass(i.revenue_growth != null ? i.revenue_growth * 100 : null, true),
       hint: {
         description: 'TTM revenue growth',
-        formula: 'sum(Q1–4) ÷ sum(Q5–8) − 1, or Q[0] ÷ Q[4] − 1',
       },
       cell: (i) => pct(i.revenue_growth),
     },
@@ -352,7 +343,6 @@ export function watchlistColumns(deps: {
       tone: (i) => colorClass(i.earnings_growth != null ? i.earnings_growth * 100 : null, true),
       hint: {
         description: 'TTM EPS growth',
-        formula: 'sum(Q1–4) ÷ sum(Q5–8) − 1, or Q[0] ÷ Q[4] − 1',
       },
       cell: (i) => pct(i.earnings_growth),
     },
@@ -365,7 +355,6 @@ export function watchlistColumns(deps: {
         colorClass(i.fwd_revenue_growth != null ? i.fwd_revenue_growth * 100 : null, true),
       hint: {
         description: 'Next-12M revenue growth est.',
-        formula: "revenue_estimate['+1y']['growth']",
       },
       cell: (i) => pct(i.fwd_revenue_growth),
     },
@@ -377,7 +366,6 @@ export function watchlistColumns(deps: {
       tone: (i) => colorClass(i.fwd_eps_growth != null ? i.fwd_eps_growth * 100 : null, true),
       hint: {
         description: 'Next-12M EPS growth est.',
-        formula: "growth_estimates['+1y']['stockTrend']",
       },
       cell: (i) => pct(i.fwd_eps_growth),
     },
@@ -388,7 +376,6 @@ export function watchlistColumns(deps: {
       sortKey: 'profit_margins',
       hint: {
         description: 'TTM net margin',
-        formula: 'Net Income ÷ Revenue (TTM)',
       },
       cell: (i) => pct(i.profit_margins),
     },
@@ -400,7 +387,6 @@ export function watchlistColumns(deps: {
       // a non-focusable <th>, so it was unreachable by keyboard as well as by touch.
       hint: {
         description: 'Market cap, native currency',
-        formula: 'Share Price × Shares Outstanding',
       },
       cellClassName: 'text-muted-foreground',
       cell: (i) => formatMarketCap(i.market_cap),

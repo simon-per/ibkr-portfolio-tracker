@@ -70,7 +70,7 @@ const COLUMNS: Column<Holding, SortKey>[] = [
     key: 'weight',
     header: 'Weight',
     align: 'right',
-    hint: { description: 'Share of total portfolio market value.', formula: 'value / total' },
+    hint: { description: 'Share of total portfolio market value.' },
     cell: r => `${r.weight}%`,
   },
 ]
@@ -315,7 +315,6 @@ describe('the hint glossary', () => {
       render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="Holdings table" mode={mode} />)
       fireEvent.click(screen.getByLabelText('What the Holdings table columns mean'))
       expect(screen.getByText('Share of total portfolio market value.')).toBeTruthy()
-      expect(screen.getByText('value / total')).toBeTruthy()
     }
   })
 

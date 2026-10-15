@@ -91,7 +91,7 @@ describe('the yield-on-cost column', () => {
     const col = cols().find((c) => c.key === 'yoc')!
     expect(col.sortKey).toBe('yield_on_cost')
     expect(col.shortHeader).toBe('Yield on cost')
-    expect(col.hint?.description).toMatch(/next-12-month/)
+    expect(col.hint?.description).toMatch(/forecast ÷ cost/)
   })
 })
 

@@ -71,16 +71,12 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               aria-invalid={!valid}
-              aria-describedby="dividend-withholding-help"
               className="h-9 w-full rounded-md border border-input bg-background px-3 pr-8 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
               %
             </span>
           </div>
-          <p id="dividend-withholding-help" className="text-xs text-muted-foreground">
-            Enter 0% to 100%, with up to three decimal places. The current default is 15%.
-          </p>
           {!valid && (
             <p className="text-xs text-destructive" role="alert">
               Enter 0 to 100 with up to three decimal places.

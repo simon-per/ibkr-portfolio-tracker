@@ -82,14 +82,15 @@ const priceSourceBadge = (p: Position): { label: string; title: string } | null 
   if (p.price_source === 'sibling') {
     return {
       label: 'sibling NAV',
-      title:
-        'Priced from a sibling share class of the same fund: the last statement NAV sets the level, the sibling’s daily moves carry it forward. Re-anchored on every finpension upload.',
+      // The last statement NAV sets the level, the sibling's daily moves carry it
+      // forward; re-anchored on every finpension upload.
+      title: 'Scaled by a sibling share class',
     }
   }
   if (p.price_source === 'manual') {
     return {
       label: 'statement NAV',
-      title: 'Priced from the provider’s last statement NAV, carried forward until the next upload.',
+      title: 'Carried until the next upload',
     }
   }
   return null
@@ -174,7 +175,7 @@ export function positionColumns(deps: {
             {badge ? (
               <span
                 className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
-                title="Held in your pillar 3a account. Excluded from the tax report's wealth and income sections."
+                title="Pillar 3a account"
               >
                 {badge}
               </span>
@@ -323,14 +324,8 @@ export function positionColumns(deps: {
       sortKey: 'yield_on_cost',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      hint: {
-        description:
-          'Projected next-12-month dividend income over what this position cost. The ' +
-          'same figure the Dividends tab shows, and the same definition the Yield on ' +
-          'Cost card above uses. A dash means the holding distributes nothing — every ' +
-          'accumulating ETF reads that way, correctly, because it reinvests internally ' +
-          'instead of paying out.',
-      },
+      // A dash is a holding that distributes nothing: every accumulating ETF, correctly.
+      hint: { description: 'Next 12M forecast ÷ cost' },
       // `toFixed(2)` and an em dash, matching DividendsTab's `yoc` column and the KPI
       // card rather than this file's `formatPercent`/hyphen: it is the same number on a
       // third screen, and the hyphen belongs to the rating badge, where a lone dash in a

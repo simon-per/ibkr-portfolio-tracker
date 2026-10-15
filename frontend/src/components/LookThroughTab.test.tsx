@@ -249,7 +249,7 @@ describe('LookThroughTab', () => {
     withProviders(<LookThroughTab />)
 
     await screen.findByText('ALPHABET INC.')
-    expect(screen.getByText(/A further 38 companies hold/)).toBeTruthy()
+    expect(screen.getByText(/\+38 more/)).toBeTruthy()
   })
 
   it('does not footnote a row folded on an ISIN alone (owner, 2026-10-14)', async () => {

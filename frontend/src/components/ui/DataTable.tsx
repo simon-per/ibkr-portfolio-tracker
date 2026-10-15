@@ -66,7 +66,6 @@ export type CellView = 'table' | 'cards'
 
 export interface ColumnHint {
   description: string
-  formula?: string
 }
 
 export interface Column<Row, SortKey extends string = never> {
@@ -629,11 +628,6 @@ function Glossary<Row, SortKey extends string>({
               <dd className="leading-relaxed text-muted-foreground">
                 {col.hint!.description}
               </dd>
-              {col.hint!.formula && (
-                <dd className="mt-1 rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[10px] text-muted-foreground/80">
-                  {col.hint!.formula}
-                </dd>
-              )}
             </div>
           ))}
         </dl>

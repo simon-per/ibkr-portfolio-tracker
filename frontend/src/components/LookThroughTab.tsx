@@ -510,8 +510,8 @@ export function LookThroughTab() {
               )}
               sub={
                 data.identity.unresolved_value_eur > 0
-                  ? `${formatCurrency(data.identity.unresolved_value_eur)} not folded by an identifier`
-                  : 'every holding folded by an identifier'
+                  ? formatCurrency(data.identity.unresolved_value_eur)
+                  : undefined
               }
             />
           </div>
@@ -596,9 +596,8 @@ export function LookThroughTab() {
                   />
                   {data.other_companies_count > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      A further {data.other_companies_count} companies hold{' '}
-                      {formatCurrency(data.other_companies_eur)} between them and are not
-                      shown.
+                      +{formatCount(data.other_companies_count)} more ·{' '}
+                      {formatCurrency(data.other_companies_eur)}
                     </p>
                   )}
                 </>
