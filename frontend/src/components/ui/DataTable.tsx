@@ -482,9 +482,11 @@ function CompactRow<Row, SortKey extends string>({
       {shownDetails.length > 0 && (
         <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
           {shownDetails.map(col => (
-            <div key={col.key} className="flex min-w-0 items-baseline justify-between gap-2">
-              <dt className="truncate text-muted-foreground">{columnLabel(col)}</dt>
-              <dd className={cn('shrink-0 tabular-nums', col.tone?.(row))}>
+            // Wraps rather than truncates: a cut label ("Withh…") loses the meaning,
+            // while a value under its label at 390px only costs a line.
+            <div key={col.key} className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2">
+              <dt className="text-muted-foreground">{columnLabel(col)}</dt>
+              <dd className={cn('ml-auto shrink-0 tabular-nums', col.tone?.(row))}>
                 {col.cell(row, 'cards')}
               </dd>
             </div>
@@ -534,11 +536,11 @@ function CompactFooterRow<Row, SortKey extends string>({
       ))}
       <dl className={cn('grid grid-cols-2 gap-x-3 gap-y-1 text-xs', heading.length > 0 && 'mt-1.5')}>
         {pairs.map(cell => (
-          <div key={cell.key} className="flex min-w-0 items-baseline justify-between gap-2">
-            <dt className="truncate text-muted-foreground">
+          <div key={cell.key} className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2">
+            <dt className="text-muted-foreground">
               {cell.label ?? columnLabel(byKey.get(cell.spans[0]))}
             </dt>
-            <dd className={cn('shrink-0 tabular-nums', cell.tone)}>{cell.content}</dd>
+            <dd className={cn('ml-auto shrink-0 tabular-nums', cell.tone)}>{cell.content}</dd>
           </div>
         ))}
       </dl>
