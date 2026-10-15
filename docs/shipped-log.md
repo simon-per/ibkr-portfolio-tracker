@@ -7,7 +7,7 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
-## Committed 2026-10-15 — the browser sweep's findings (not yet deployed)
+## Shipped 2026-10-15 — the browser sweep's findings (pushed 07:40 Berlin)
 
 STATUS.md *Worth doing next* item 0, fixed on `main` in eight commits: the Watchlist's 211px sideways
 scroll (`ScrollableTable` positioned); every value axis `width="auto"` (CHF labels clipped), pinned

@@ -7,10 +7,9 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-15.** Production healthy on `f7ebbf5`. The browser sweep's findings are
-fixed and committed on `main` but **not pushed** (docs/shipped-log.md, 2026-10-15); push outside a
-sync window to deploy. The agent-team wave's scheduled halves are under *Watch after the next
-deploy*.
+**Last updated: 2026-10-15.** Production was healthy on `f7ebbf5`; the browser sweep's findings
+were pushed at 07:40 Berlin (docs/shipped-log.md, 2026-10-15) — confirm `/health` reports the new
+commit. The agent-team wave's scheduled halves are under *Watch after the next deploy*.
 
 ---
 
@@ -145,7 +144,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-10-15 (sweep fixes)** — item 0 fixed and committed, not pushed: overflow, axes, wrap,
+- **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
   date axis, regions, leftover text; the look-through CINS starvation found and fixed.
 - **2026-10-14 (docs trim)** — STATUS.md cut to a snapshot (rough edges → troubleshooting, traps →
   local-development), CLAUDE.md slimmed, AGENTS.md made a pointer.
