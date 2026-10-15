@@ -82,10 +82,23 @@ const GEOGRAPHIC_MAPPING: Record<string, string> = {
   'Saudi Arabia': 'Middle East & Africa', 'UAE': 'Middle East & Africa', 'Israel': 'Middle East & Africa',
   'South Africa': 'Middle East & Africa',
   'Brazil': 'Latin America', 'Argentina': 'Latin America', 'Chile': 'Latin America',
+  'Other Emerging Markets': 'Emerging Markets',
 }
+
+/** What the region chart may show: the regions above plus the server's own buckets. */
+const REGIONS = new Set([...Object.values(GEOGRAPHIC_MAPPING), 'Emerging Markets', 'Cash', 'Unknown'])
 
 function normalize(name: string, mapping: Record<string, string>): string {
   return mapping[name] || name
+}
+
+/**
+ * A whitelist: a country the map does not know joins `Other` rather than standing beside
+ * the regions under its own name ("Cayman Islands" next to "Europe").
+ */
+function regionOf(name: string): string {
+  const region = normalize(name, GEOGRAPHIC_MAPPING)
+  return REGIONS.has(region) ? region : 'Other'
 }
 
 /**
@@ -179,12 +192,12 @@ function CustomTreemapContent(props: TreemapContentProps) {
 // Merge allocation categories that share the same normalized name
 function mergeAllocation(
   raw: Record<string, AllocationCategory>,
-  mapping: Record<string, string>,
+  rename: (name: string) => string,
 ): Record<string, AllocationCategory> {
   const merged: Record<string, AllocationCategory> = {}
 
   for (const [name, cat] of Object.entries(raw)) {
-    const normalized = normalize(name, mapping)
+    const normalized = rename(name)
     if (!merged[normalized]) {
       merged[normalized] = { percentage: 0, market_value_eur: 0, positions: [] }
     }
@@ -494,7 +507,7 @@ export function AllocationTab() {
   const sectorAllocation = useMemo(
     () =>
       allocation?.sector_allocation
-        ? mergeAllocation(allocation.sector_allocation, SECTOR_MAPPING)
+        ? mergeAllocation(allocation.sector_allocation, (n) => normalize(n, SECTOR_MAPPING))
         : NO_ALLOCATION,
     [allocation],
   )
@@ -502,7 +515,7 @@ export function AllocationTab() {
   const geoAllocation = useMemo(
     () =>
       allocation?.geographic_allocation
-        ? mergeAllocation(allocation.geographic_allocation, GEOGRAPHIC_MAPPING)
+        ? mergeAllocation(allocation.geographic_allocation, regionOf)
         : NO_ALLOCATION,
     [allocation],
   )

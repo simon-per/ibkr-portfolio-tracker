@@ -185,3 +185,31 @@ describe('AllocationTab drill-down', () => {
     expect(screen.getByText('Apple Inc')).toBeTruthy()
   })
 })
+
+describe('AllocationTab regions', () => {
+  const slice = (pct: number) => ({
+    percentage: pct,
+    market_value_eur: pct * 10,
+    positions: [
+      { symbol: 'X', description: 'X', weight: pct, market_value_eur: pct * 10, is_etf_contribution: false },
+    ],
+  })
+
+  it('lists regions only: an unmapped country joins Other, and one emerging bucket', async () => {
+    mockApi({
+      geographic_allocation: {
+        'United States': slice(60),
+        'Cayman Islands': slice(10),
+        'Emerging Markets': slice(20),
+        'Other Emerging Markets': slice(10),
+      },
+    })
+    withProviders(<AllocationTab />)
+
+    await waitFor(() => expect(screen.getAllByText('North America').length).toBeGreaterThan(0))
+    expect(screen.queryAllByText('Cayman Islands')).toHaveLength(0)
+    expect(screen.queryAllByText('Other Emerging Markets')).toHaveLength(0)
+    expect(screen.getAllByText('Other').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Emerging Markets').length).toBeGreaterThan(0)
+  })
+})
