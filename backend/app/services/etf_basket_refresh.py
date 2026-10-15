@@ -315,8 +315,9 @@ async def resolve_pending_identities(
     The two identity passes the look-through needs, bounded for a scheduled run.
 
     The CINS/SEDOL pass (`resolve_constituent_identifiers`) runs only after a basket was
-    replaced, because that is the only event that creates work for it — a re-import clears
-    those resolutions on purpose — and it is a handful of OpenFIGI batches. The ISIN pass
+    replaced, because that is the only event that creates work for it — a replace carries
+    over every identifier already resolved, so what is pending is the new ones and the
+    misses — and it is a handful of OpenFIGI batches. The ISIN pass
     runs every evening but asks each provider about at most `limit` ISINs, so a newly bought
     security folds with its fund exposure within a day and a rebalance's worth of new
     constituents converges over a few.

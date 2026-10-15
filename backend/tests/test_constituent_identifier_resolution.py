@@ -32,6 +32,7 @@ from app.services.identity_service import (
     OPENFIGI_BATCH_KEYED,
     OPENFIGI_ID_TYPES,
     IdentityService,
+    rotating_window,
 )
 
 GRID = "US33737A1088"
@@ -142,11 +143,14 @@ async def test_one_identifier_resolves_every_fund_that_carries_it(session):
 
 
 @pytest.mark.asyncio
-async def test_a_re_import_drops_the_resolution_and_keeps_the_published_identifier(session):
+async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(session):
     """
-    Deliberate, and cheap: the FIGI is re-derivable from one request, while a cached identity
-    outliving the basket row it described is the harder thing to reason about. What must NOT
-    happen is the raw identifier going with it — that would need a re-download.
+    Until 2026-10-15 a replace dropped the FIGI, on the grounds that it was re-derivable from
+    one request. That stopped holding once the evening pass was capped at
+    `SCHEDULED_IDENTITY_LIMIT` while the Invesco baskets are replaced every evening: each night
+    undid more than the pass restored, and ASML stood as three companies. A CINS names one
+    security for good, so OpenFIGI's earlier answer is still the answer. A new identifier in
+    the fresher basket is still pending, and the raw identifier is never dropped.
     """
     repo = EtfBasketRepository(session)
     await repo.replace_basket(basket([
@@ -156,13 +160,68 @@ async def test_a_re_import_drops_the_resolution_and_keeps_the_published_identifi
     await repo.apply_resolved_identifiers({EATON_CINS: EATON_FIGI})
 
     fresher = basket([
-        row(1, "Eaton Corporation Plc", "55", identifier=EATON_CINS),
-        row(2, "Nvidia Corp", "45", isin="US67066G1040"),
+        row(1, "Eaton Corporation Plc", "50", identifier=EATON_CINS),
+        row(2, "Nvidia Corp", "40", isin="US67066G1040"),
+        row(3, "ASML Holding NV", "10", identifier="N07059210"),
     ])
     fresher.as_of_date = date(2026, 8, 15)
     await repo.replace_basket(fresher)
 
-    assert await repo.unresolved_identifiers() == [EATON_CINS]
+    assert await repo.unresolved_identifiers() == ["N07059210"]
+    stored = (await session.execute(
+        select(EtfHolding).where(EtfHolding.line_no == 1)
+    )).scalars().one()
+    assert stored.constituent_share_class_figi == EATON_FIGI
+    assert stored.constituent_identifier == EATON_CINS
+
+
+@pytest.mark.asyncio
+async def test_another_funds_answer_reaches_a_newly_imported_basket(session):
+    """One identifier is one security whichever fund lists it — the same rule as the update."""
+    repo = EtfBasketRepository(session)
+    await repo.replace_basket(basket([
+        row(1, "Eaton Corporation Plc", "100", identifier=EATON_CINS),
+    ]))
+    await repo.apply_resolved_identifiers({EATON_CINS: EATON_FIGI})
+
+    other = basket([
+        row(1, "Eaton Corp Plc", "50", identifier=EATON_CINS),
+        row(2, "Cloudflare Inc", "50", isin="US18915M1071"),
+    ])
+    other.fund_isin = "US26922A4206"
+    await repo.replace_basket(other)
+
+    assert await repo.unresolved_identifiers() == []
+
+
+# ------------------------------------------------------------------- the bounded window
+
+def test_the_window_reaches_past_a_prefix_of_permanent_misses():
+    """
+    The starvation it replaced: `pending[:limit]` of a sorted list asked the same first
+    identifiers every evening, so with `limit` permanent misses sorting ahead (SEDOLs lead
+    with digits) a CINS starting `N` was never asked at all.
+    """
+    misses = [f"{n:07d}" for n in range(25)]
+    pending = misses + ["N07059210"]
+    asked = set()
+    for turn in range(2):
+        asked.update(rotating_window(pending, 25, turn))
+    assert "N07059210" in asked
+
+
+@pytest.mark.parametrize("size,limit", [(1, 25), (25, 25), (26, 25), (101, 25), (7, 3)])
+def test_consecutive_turns_cover_every_item(size, limit):
+    items = [f"I{n:04d}" for n in range(size)]
+    turns = -(-size // limit)
+    asked = [i for turn in range(turns) for i in rotating_window(items, limit, turn)]
+    assert set(asked) == set(items)
+    assert all(len(rotating_window(items, limit, t)) == min(limit, size) for t in range(turns))
+
+
+def test_an_empty_or_zero_window_asks_nothing():
+    assert rotating_window([], 25, 3) == []
+    assert rotating_window(["A"], 0, 3) == []
 
 
 # --------------------------------------------------------------------------- the fold

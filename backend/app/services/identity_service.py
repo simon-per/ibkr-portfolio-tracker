@@ -82,6 +82,21 @@ GLEIF_MIN_INTERVAL_S = 1.1
 REQUEST_TIMEOUT_S = 20.0
 
 
+def rotating_window(items: List[str], limit: int, turn: int) -> List[str]:
+    """
+    `limit` items starting `turn * limit` along `items`, wrapping around.
+
+    Consecutive turns cover every item within `ceil(len(items) / limit)` turns whatever the
+    items are, so no prefix of the list can hold the budget for good.
+    """
+    if limit <= 0 or not items:
+        return []
+    if len(items) <= limit:
+        return list(items)
+    start = (turn * limit) % len(items)
+    return (items[start:] + items[:start])[:limit]
+
+
 class IdentityService:
     """Fetches and caches company identity for ISINs."""
 
@@ -222,11 +237,17 @@ class IdentityService:
         `SCHEDULED_IDENTITY_LIMIT`) — that bounds the re-ask the way the ISIN pass is bounded.
         Caching the misses is the durable fix and needs a column; do it if the pending set
         grows past a few hundred.
+
+        **The bounded window rotates by day** (`rotating_window`). It was `pending[:limit]` of
+        a sorted list until 2026-10-15, so the same alphabetically-first identifiers were asked
+        every evening and everything after them never: ASML's CINS `N07059210` sat unasked in
+        SOXQ and QQQM while OpenFIGI resolves it at once, and ASML read as three companies. A
+        permanent miss now costs its slot one evening in `ceil(pending / limit)`, not forever.
         """
         repo = EtfBasketRepository(self.db)
         pending = await repo.unresolved_identifiers()
         if limit is not None:
-            pending = pending[:limit]
+            pending = rotating_window(pending, limit, utcnow().date().toordinal())
 
         summary = {
             "identifiers_pending": len(pending),

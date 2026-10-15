@@ -107,6 +107,34 @@ class EtfBasketRepository:
         ).scalars().all()
         return sorted({r.strip().upper() for r in rows if r and r.strip()})
 
+    async def resolved_figis(self, identifiers: Iterable[Optional[str]]) -> Dict[str, str]:
+        """
+        The shareClassFIGI already resolved for each identifier, from any fund's holdings.
+
+        One identifier names one security whichever fund lists it, so an answer stamped on a
+        GRID row serves the same CINS in SOXQ. Ties break on the lowest FIGI so the result
+        does not depend on row order.
+        """
+        wanted = {i.strip().upper() for i in identifiers if i and i.strip()}
+        if not wanted:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(EtfHolding.constituent_identifier, EtfHolding.constituent_share_class_figi)
+                .where(
+                    EtfHolding.constituent_identifier.in_(wanted),
+                    EtfHolding.constituent_share_class_figi.isnot(None),
+                )
+                .distinct()
+            )
+        ).all()
+        found: Dict[str, str] = {}
+        for identifier, figi in rows:
+            key = identifier.strip().upper()
+            if key not in found or figi < found[key]:
+                found[key] = figi
+        return found
+
     async def apply_resolved_identifiers(self, figi_by_identifier: Dict[str, str]) -> int:
         """
         Stamp resolved shareClassFIGIs onto every holding carrying those identifiers.
@@ -170,6 +198,9 @@ class EtfBasketRepository:
                     f"fund genuinely shrank."
                 )
 
+        # Read before the delete, which removes this fund's own earlier answers.
+        known_figis = await self.resolved_figis(row.identifier for row in parsed.rows)
+
         # Delete-then-insert inside the caller's transaction, so a failure part-way leaves the
         # previous basket intact rather than a half-replaced one.
         await self.session.execute(
@@ -181,9 +212,13 @@ class EtfBasketRepository:
                 "line_no": row.line_no,
                 "constituent_isin": row.isin,
                 "constituent_identifier": row.identifier,
-                # Never carried in from a parse: it is OpenFIGI's answer, and a
-                # replacement basket has not been asked about yet.
-                "constituent_share_class_figi": None,
+                # Never taken from the parse — it is OpenFIGI's answer — but OpenFIGI's
+                # earlier answer for the same identifier still holds: a CINS or SEDOL names
+                # one security for good. Clearing it on every replace undid the Invesco
+                # funds' resolutions each evening, faster than the bounded pass restores them.
+                "constituent_share_class_figi": (
+                    known_figis.get(row.identifier.strip().upper()) if row.identifier else None
+                ),
                 "constituent_ticker": row.ticker,
                 "constituent_name": row.name,
                 "weight_pct": row.weight_pct,
