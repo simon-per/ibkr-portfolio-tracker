@@ -436,8 +436,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             tickFormatter={formatYAxisTick}
             domain={yAxisConfig.domain}
             ticks={yAxisConfig.ticks}
-            // "€12k" is ~34px; the default 60 spends a fifth of a phone's plot area.
-            width={isCompact ? 44 : 60}
+            // Measured, not fixed: "€12k" and "CHF 120k" differ by half the axis.
+            width="auto"
           />
           <Tooltip
             contentStyle={CHART_TOOLTIP_STYLE}

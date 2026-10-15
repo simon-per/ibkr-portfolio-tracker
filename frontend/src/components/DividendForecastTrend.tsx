@@ -143,7 +143,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                     isCompact ? String(Math.round(value)) : `${curSym}${Math.round(value)}`}
                   domain={axis.domain}
                   ticks={axis.ticks}
-                  width={isCompact ? 40 : 72}
+                  width="auto"
                 />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}

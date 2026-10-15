@@ -136,7 +136,7 @@ export function DividendStackChart({
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
             tickLine={false}
             axisLine={false}
-            width={isCompact ? 40 : 60}
+            width="auto"
           />
           <Tooltip content={renderTooltip} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.35 }} />
           {stackSymbols.map((s, i) => (

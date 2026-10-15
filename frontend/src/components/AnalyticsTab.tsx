@@ -123,7 +123,7 @@ function pct(v: number | null | undefined, digits = 2): string {
   return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`
 }
 
-/** "12.3k" style axis labels with the currency symbol, so a 60px axis is enough. */
+/** "12.3k" style axis labels with the currency symbol; the axis measures its own width. */
 function useCompactMoney() {
   const symbol = useCurrencySymbol()
   const fmt = useMemo(
@@ -360,8 +360,8 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
                 <LineChart data={rolling} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(d: string) => formatDate(d)} minTickGap={48} interval="preserveStartEnd" />
-                  <YAxis yAxisId="ratio" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={36} />
-                  <YAxis yAxisId="vol" orientation="right" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={40} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                  <YAxis yAxisId="ratio" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" />
+                  <YAxis yAxisId="vol" orientation="right" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                   <Tooltip
                     {...tooltipProps}
                     formatter={(value, name) => {
@@ -468,7 +468,7 @@ function Waterfall({
               tick={{ fontSize: 11, fill: AXIS }}
               tickLine={false}
               axisLine={false}
-              width={52}
+              width="auto"
               tickFormatter={compactMoney}
             />
             <Tooltip
@@ -529,7 +529,7 @@ function YearlyLegs({
           <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="22%" barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width={52} tickFormatter={compactMoney} />
+            <YAxis tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={compactMoney} />
             <Tooltip {...tooltipProps} formatter={(v, n) => [v === null ? ABSENT : formatCurrency(Number(v)), String(n)]} />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: compact ? 11 : 12 }} />
             <ReferenceLine y={0} stroke={AXIS} strokeDasharray="2 2" />

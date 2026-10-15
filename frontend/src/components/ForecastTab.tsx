@@ -6,7 +6,6 @@ import { api } from '@/lib/api'
 import { formatCount } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
-import { useIsCompact } from '@/lib/useMediaQuery'
 import { readStored, writeStored } from '@/lib/storage'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 
@@ -127,7 +126,6 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
 
 export function ForecastTab() {
   const curSym = useCurrencySymbol()
-  const isCompact = useIsCompact()
   const { baseCurrency } = useBaseCurrency()
   const [chosenContribution, setChosenContribution] = useState(readChosenContribution)
   const [expectedReturn, setExpectedReturn] = useState(() => readNumber(STORAGE_KEYS.expectedReturn, 8, 0, 30))
@@ -392,7 +390,6 @@ export function ForecastTab() {
               <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
               <XAxis
                 dataKey="year"
-                label={{ value: 'Years', position: 'insideBottom', offset: -5 }}
                 tick={{ fontSize: 12 }}
               />
               <YAxis
@@ -400,7 +397,7 @@ export function ForecastTab() {
                 ticks={yAxisConfig.ticks}
                 tickFormatter={(value) => `${curSym}${(value / 1000).toFixed(0)}k`}
                 tick={{ fontSize: 12 }}
-                width={isCompact ? 48 : 80}
+                width="auto"
               />
               <Tooltip
                 formatter={(value: number | undefined) => value != null ? `${curSym}${formatCount(value)}` : '—'}

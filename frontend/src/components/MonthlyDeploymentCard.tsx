@@ -200,6 +200,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                     />
                     <YAxis
                       fontSize={12}
+                      width="auto"
                       tickFormatter={(value: number) => {
                         if (Math.abs(value) >= 1000) {
                           return `${(value / 1000).toFixed(1)}k`

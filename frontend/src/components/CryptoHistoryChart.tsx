@@ -131,7 +131,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
                 tickFormatter={formatYAxisTick}
                 domain={axis.domain}
                 ticks={axis.ticks}
-                width={isCompact ? 48 : 64}
+                width="auto"
               />
               {metric === 'pnl' && <ReferenceLine y={0} stroke="hsl(var(--border))" />}
               <Tooltip
