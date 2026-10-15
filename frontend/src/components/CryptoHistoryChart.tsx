@@ -24,7 +24,8 @@ import {
   CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_STYLE,
 } from '@/lib/chartTooltip'
-import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { formatDate, tooltipValue } from '@/lib/utils'
+import { dateAxis } from '@/lib/dateAxis'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
@@ -68,15 +69,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
     return niceTicks(paddedMin, max + pad, isCompact ? 4 : 6, floor)
   }, [data, metric, isCompact])
 
-  const shortRange = range === '1W' || range === 'MTD' || range === '1M' || range === '3M'
-  const formatXAxisTick = (value: string) => {
-    const date = parseLocalDate(value)
-    if (Number.isNaN(date.getTime())) return ''
-    return date.toLocaleDateString(
-      'en-US',
-      shortRange ? { month: 'short', day: 'numeric' } : { month: 'short', year: '2-digit' },
-    )
-  }
+  const xAxis = useMemo(() => dateAxis(data.map((p) => p.date)), [data])
   const formatYAxisTick = (value: number) => {
     const abs = Math.abs(value)
     if (abs >= 1000) return `${value < 0 ? '-' : ''}${curSym}${(abs / 1000).toFixed(abs >= 10_000 ? 0 : 1)}k`
@@ -121,7 +114,8 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
                 dataKey="date"
                 className="text-xs"
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={formatXAxisTick}
+                ticks={xAxis.ticks}
+                tickFormatter={xAxis.tickFormatter}
                 interval="preserveStartEnd"
                 minTickGap={isCompact ? 44 : 60}
               />

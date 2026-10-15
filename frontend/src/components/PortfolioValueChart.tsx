@@ -9,7 +9,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { PortfolioValuePoint, BenchmarkValuePoint } from '@/lib/api'
-import { formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { formatDate, tooltipValue } from '@/lib/utils'
+import { dateAxis } from '@/lib/dateAxis'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
@@ -204,31 +205,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
   // direction. Only while the line is drawn.
   const profitAnchorUnpriced = showProfit ? rangeProfitAnchorUnpriced(data ?? []) > 0 : false
 
-  /**
-   * X tick labels.
-   *
-   * This used to return a label only on the 1st of a month and `''` otherwise. That
-   * defeats recharts' own thinning, which drops ticks by *index*: over two years it
-   * kept up to 24 full-length labels while the ticks between them were empty strings,
-   * so `minTickGap` had nothing to measure and the labels collided.
-   *
-   * Every tick is labelled now and recharts thins by measured text width. Consequence
-   * to expect on desktop too: ticks no longer land on month firsts. The conservative
-   * alternative — keep the day-1 rule, raise `interval` — does not fix 2Y at 390px, so
-   * it does not fix the problem.
-   */
-  const formatXAxisTick = (value: string) => {
-    // `parseLocalDate`, not `new Date(value)`. The API speaks date-only strings, which
-    // `Date` parses as **UTC midnight** — so for any viewer west of Greenwich the point
-    // dated 2026-01-01 becomes 2025-12-31 local and this tick prints "Dec 25" while the
-    // tooltip for the very same point, which already goes through `formatDate` ->
-    // `parseLocalDate`, prints "Jan 1, 2026". Axis and tooltip disagreeing on one screen,
-    // and every month-boundary tick naming the wrong month. `utils.ts` exists for exactly
-    // this and this was its last unconverted call site.
-    const date = parseLocalDate(value)
-    if (Number.isNaN(date.getTime())) return ''
-    return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
-  }
+  // One tick per month (or per day on a short span) — see `dateAxis`.
+  const xAxis = useMemo(() => dateAxis(chartData.map((p) => String(p.date))), [chartData])
 
   // Custom tick formatter for Y axis
   const formatYAxisTick = (value: number) => {
@@ -424,10 +402,9 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             dataKey="date"
             className="text-xs"
             tick={{ fill: 'hsl(var(--muted-foreground))' }}
-            tickFormatter={formatXAxisTick}
+            ticks={xAxis.ticks}
+            tickFormatter={xAxis.tickFormatter}
             interval="preserveStartEnd"
-            // Every tick is labelled now, so recharts can thin by measured text width.
-            // See formatXAxisTick for why the old day-1 rule made that impossible.
             minTickGap={isCompact ? 44 : 60}
           />
           <YAxis
