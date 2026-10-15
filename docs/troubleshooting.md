@@ -208,5 +208,9 @@ decision; read the entry before "fixing" one.
   scale for them is verified, so those rows sort last on the Fundamentals tab.
 - **The monthly heatmap's YTD changed method on 2026-10-14**: it is now the months compounded,
   each measured from the previous month-end, so it differs from earlier reads by design.
+- **A heatmap month or YTD cut by the selected range is unmarked on the surface** (owner,
+  2026-10-14, the figures-not-explanations pass): `monthlyReturns.ts` still computes `partial`
+  and the cell's hover names the days measured. The 2026-10-14 browser sweep flagged it without
+  that context; do not re-add a marker.
 
 ---

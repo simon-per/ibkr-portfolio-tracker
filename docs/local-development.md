@@ -87,6 +87,12 @@ for q in ['select count(*) from securities','select count(*) from taxlots where 
 Moved from STATUS.md on 2026-10-14. Each of these cost real time at least once; add the one you
 lose time to.
 
+- **Playwright: the LAST registered `page.route` wins.** A catch-all that proxies a local build's
+  `/api/` to production, added after the two `abort()` routes for `/api/dividends/summary` and
+  `/api/portfolio/benchmark`, forwards both to the live site — rule 1. Refuse those two paths
+  inside the catch-all itself. And a `vite build` calls relative `/api/…` (`.env.production`), so
+  `vite preview` answers 500 from its own proxy unless the route matches the preview origin.
+
 - **Pushing works from an agent session** — it is not blocked by the permission classifier, so
   the guard is the brief: only `main` goes to GitHub, and in this repo the owner (or the lead of
   an agent wave) pushes it. `git log --oneline origin/main..main` is the only trustworthy count of

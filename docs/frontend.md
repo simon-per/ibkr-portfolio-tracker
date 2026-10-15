@@ -315,7 +315,7 @@ comparison *between* rows is the point, and there is no identity column to promo
 *squeezed to min-content* rather than scrolled, and why its edge fades were describing a problem they
 did not cause.
 
-**Four things here were each a bug first:**
+**Six things here were each a bug first:**
 
 - **`justify-center` on a flex overflow container hides its leading items.** A centred row wider than
   its scroller overflows on *both* sides and `scrollLeft` cannot go negative, so the first tab sat
@@ -334,6 +334,13 @@ did not cause.
   is what lets every pre-existing component test keep seeing the `<table>` it was written against,
   needs no vitest setup file, and keeps `e2e/a11y.mjs`'s `aria-sort` count non-zero. Flip it and two
   component tests plus an e2e check fail on day one.
+- **An `absolute` descendant of a scroller escapes it unless the scroller is positioned.** The
+  `sr-only` "Actions" header span resolved its containing block to `ScrollableTable`'s outer
+  wrapper, sat at the wide table's far edge unclipped, and scrolled the whole Watchlist page 211px
+  sideways at 1440. The scroller itself is `relative` now.
+- **A card detail wraps, it never truncates its label.** Label and value share half a card; at 390
+  "Withholding" read "Withh…" beside a long figure. The pair is `flex-wrap` with the value
+  `ml-auto`, so it drops under its label instead.
 
 **`MAX_RANGE_DAYS` is the other cross-language constant**, and it drifts with no other symptom:
 `dateRanges.ts` clamps the ALL button to `365 * 5` precisely so it never asks
@@ -353,6 +360,12 @@ languages is the same failure mode again.
 property of the assembled page at a real width, and jsdom loads no CSS. Read its docblock before
 "fixing" an overflow: `body { overflow-x: hidden }` clips rather than fixes, kills `position: sticky`,
 and makes the check pass vacuously. Two assertions are paired specifically to catch that.
+
+**Every value axis is `width="auto"`** (`chartAxisFamily.test.ts` scans every `<YAxis>`): a fixed
+width is sized for one currency, and the base currency switches — "CHF 120k" lost its leading "C"
+on axes sized for "€12k". Category axes of symbol names keep a fixed width, deliberately. **Date
+axes go through `lib/dateAxis.ts`**: day labels up to ~100 days, otherwise one explicit tick per
+month, so a month+year label cannot repeat.
 
 Chart heights are CSS on a wrapper plus `height="100%"`, hoisted to a module constant per file — or
 to the shared chart component when two files draw the same chart — so the chart and its

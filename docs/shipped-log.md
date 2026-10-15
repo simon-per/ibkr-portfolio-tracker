@@ -7,6 +7,20 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Committed 2026-10-15 — the browser sweep's findings (not yet deployed)
+
+STATUS.md *Worth doing next* item 0, fixed on `main` in eight commits: the Watchlist's 211px sideways
+scroll (`ScrollableTable` positioned); every value axis `width="auto"` (CHF labels clipped), pinned
+by a family test; the Forecast "Years" title dropped; card details wrap rather than truncate (DA-1
+"Withholding"); one `lib/dateAxis.ts` for the value and crypto charts (3M repeated "Aug 26");
+"1191.1T KRW"; Allocation's region chart a whitelist with *Other*; the leftover hover and helper
+text cut to figures. **ASML as three companies** was the CINS identity pass starving since
+2026-09-12 — `replace_basket` reset every FIGI each evening and the capped pass re-asked the same
+sorted prefix (docs/lookthrough.md). Closed without code: the heatmap's unmarked partial periods
+(an owner call, now an accepted rough edge) and NVDA's +2400% (a real raise, $0.01 → $0.25, May
+2026). Verified on a local build against production data at 1440 and 390: no page overflow on
+Watchlist or Tax, axis labels whole in CHF, Forecast legend clear, DA-1 labels whole (54 of 54).
+
 ## Shipped 2026-10-14 (evening) — the agent-team wave, browser-checked on production
 
 Six tracks in parallel worktrees, merged after review and deployed as `b81aa9e`: the scheduled

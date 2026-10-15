@@ -7,9 +7,10 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-14.** Production healthy on `f7ebbf5`. The agent-team wave of 2026-10-14
-is live and browser-checked (docs/shipped-log.md); its scheduled halves are under *Watch after the
-next deploy*.
+**Last updated: 2026-10-15.** Production healthy on `f7ebbf5`. The browser sweep's findings are
+fixed and committed on `main` but **not pushed** (docs/shipped-log.md, 2026-10-15); push outside a
+sync window to deploy. The agent-team wave's scheduled halves are under *Watch after the next
+deploy*.
 
 ---
 
@@ -62,6 +63,12 @@ next deploy*.
 
 Only what is still unverified.
 
+- **Look-through identities after the CINS fix (`66cd9cd`):** ASML one row, not three; NXP,
+  Tower, Nebius, Prysmian, Terna folded; `identity.unidentified_groups` well below 78. The capped
+  evening pass drains the backlog over a few evenings — `app.cli.resolve_identities` on the server
+  does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
+  read off the API, not the database.
+- **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
 - **The first `fundamentals_refresh`, Sunday 2026-10-18 04:00 Berlin:** a success row in
   `/api/scheduler/history`, no rate-limit warning, the Fundamentals as-of within a week (it reads
   2026-08-25 until then).
@@ -88,21 +95,6 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-0. **What the 2026-10-14 browser sweep found.**
-   - Watchlist scrolls 211 px sideways at 1440: the `sr-only` "Actions" header span is absolute
-     with no positioned ancestor inside the table scroller.
-   - Chart y-axis labels clipped: Performance at 1440 (leading "C" of "CHF") and 390; the Forecast
-     chart at 390, whose "Years" title also overlaps the legend.
-   - Tax at 390 truncates "Withholding" in the DA-1 country cards.
-   - The heatmap's range-clipped first month and its year's YTD are unmarked as partial.
-   - ASML shows as two companies in look-through (one LEI-folded, one via a fund with identity
-     "none").
-   - Leftover explanatory text: the sibling-NAV tooltip (`PositionsList.tsx:86`), the YoC
-     definition (53 words), the Watchlist column popover (165 words), the 3a row tooltip, the WHT
-     popover hint, two look-through lines ("A further N companies…", "not folded by an
-     identifier").
-   - Nits: the 3M x-axis repeats month labels; "1191.1TKRW" lacks a space; Allocation's region list
-     mixes regions and countries. Confirm NVDA's +2400% payout growth is a real raise.
 1. **The test suite writes into the developer's database.** `tests/conftest.py:42` blanks only the
    job store; the scheduler-job spy tests and the WAL-lifespan test write through
    `AsyncSessionLocal` into whatever `DATABASE_URL` names, and under xdist N workers share one
@@ -153,6 +145,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-15 (sweep fixes)** — item 0 fixed and committed, not pushed: overflow, axes, wrap,
+  date axis, regions, leftover text; the look-through CINS starvation found and fixed.
 - **2026-10-14 (docs trim)** — STATUS.md cut to a snapshot (rough edges → troubleshooting, traps →
   local-development), CLAUDE.md slimmed, AGENTS.md made a pointer.
 - **2026-10-14 (agent-team wave)** — growth/forecast pack, KPI fixes, ET Sun/Mon IBKR skip, weekly
@@ -160,5 +154,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-14 (test speed)** — backend under `pytest-xdist`, `deploy_scripts` deselected locally:
   5:35 → ~25 s.
 - **2026-10-14 (strip the text)** — every tab's explanatory text stripped; forecast backfill run.
-- **2026-10-13 (watchlist, forecast breakdown)** — nightly watchlist slot; per-security forecast
-  lines and the growth split.
