@@ -62,8 +62,11 @@ export function ScrollableTable({ children, label, className }: ScrollableTableP
         tabIndex={0}
         role="region"
         aria-label={`${label} (scrolls horizontally)`}
+        // `relative` makes the scroller the containing block of any absolute descendant
+        // (an `sr-only` header span is one): otherwise it resolves to the wrapper outside
+        // the scroller, sits at the table's far edge unclipped, and widens the page.
         className={cn(
-          'overflow-x-auto rounded-sm ring-offset-background',
+          'relative overflow-x-auto rounded-sm ring-offset-background',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           className
         )}
