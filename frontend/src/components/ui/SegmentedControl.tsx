@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
 
@@ -69,9 +69,21 @@ export function SegmentedControl<T extends string | number>(props: SegmentedCont
     else props.onChange?.(value)
   }
 
+  // A row that scrolls sideways on a phone keeps its selected option in view — the
+  // default 1Y sat past the right edge of a 390px screen, so nothing looked selected.
+  // `scrollLeft` on the row itself, never `scrollIntoView`, which can move the page.
+  const groupRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const group = groupRef.current
+    if (!group || group.scrollWidth <= group.clientWidth) return
+    const active = group.querySelector<HTMLElement>('[aria-pressed="true"]')
+    if (!active) return
+    group.scrollLeft = active.offsetLeft - (group.clientWidth - active.offsetWidth) / 2
+  }, [props.value])
+
   if (variant === 'buttons') {
     return (
-      <div role="group" aria-label={label} className={cn('flex gap-1', className)}>
+      <div ref={groupRef} role="group" aria-label={label} className={cn('relative flex gap-1', className)}>
         {options.map(option => {
           const active = pressed(option.value)
           return (

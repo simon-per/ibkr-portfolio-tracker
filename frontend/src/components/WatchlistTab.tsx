@@ -270,20 +270,14 @@ export function WatchlistTab() {
               type="text"
               value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)}
-              placeholder="Ticker, e.g. NVDA"
+              placeholder="Ticker, e.g. NVDA or ASML.AS"
               className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm"
             />
             <Button type="submit" disabled={addMutation.isPending || !tickerInput.trim()} size="sm">
               <Plus className="h-4 w-4 mr-1" />
-              {addMutation.isPending ? 'Adding...' : 'Add'}
+              {addMutation.isPending ? 'Adding…' : 'Add'}
             </Button>
           </form>
-          {/* The suffix rule was in the placeholder, where it was clipped mid-word at
-              390px and — worse everywhere — vanished the moment you started typing,
-              which is exactly when it matters. */}
-          <p className="mt-2 text-xs text-muted-foreground">
-            Yahoo Finance ticker. Non-US listings carry a suffix, e.g. <code>ASML.AS</code>.
-          </p>
 
           {addMutation.isError && (
             <p className="text-sm text-red-600 dark:text-red-400 mt-2">

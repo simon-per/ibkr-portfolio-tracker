@@ -1,3 +1,4 @@
+import { displayName } from '@/lib/securityName'
 import { ABSENT, formatMarketCap } from '@/lib/utils'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
@@ -130,7 +131,7 @@ export function watchlistColumns(deps: {
           <div>
             <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
             <div className="text-xs text-muted-foreground truncate max-w-[140px]">
-              {i.company_name || i.yahoo_ticker}
+              {displayName(i.company_name) || i.yahoo_ticker}
             </div>
             {(i.notes || i.target_price !== null) && (
               <div className="text-[10px] text-muted-foreground/70 mt-0.5 space-x-2">
@@ -153,7 +154,7 @@ export function watchlistColumns(deps: {
       shortHeader: 'Company',
       desktop: 'hide',
       mobile: 'meta',
-      cell: (i) => i.company_name || i.yahoo_ticker,
+      cell: (i) => displayName(i.company_name) || i.yahoo_ticker,
     },
     {
       key: 'note',
@@ -234,7 +235,7 @@ export function watchlistColumns(deps: {
                 className={`text-[10px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
               >
                 {upside >= 0 ? '+' : ''}
-                {upside.toFixed(0)}% upside{i.analyst_count ? ` (${i.analyst_count})` : ''}
+                {upside.toFixed(0)}% upside
               </div>
             )}
           </div>

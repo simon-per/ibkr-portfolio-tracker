@@ -356,7 +356,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       )}
 
       {/* Series toggles. The min-height is the phone's touch target. */}
-      <div className="flex flex-wrap items-center gap-1.5 px-2 sm:px-0 [&>button]:min-h-9 sm:[&>button]:min-h-0">
+      <div className="flex flex-wrap items-center gap-1 px-2 sm:gap-1.5 sm:px-0">
         {series.map(s => (
           <button
             key={s.key}

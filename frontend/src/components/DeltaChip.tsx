@@ -37,7 +37,7 @@ export function DeltaChip({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 text-xs tabular-nums',
+        'inline-flex flex-wrap items-center gap-x-1 text-xs tabular-nums [&>span]:whitespace-nowrap',
         hasValue ? deltaColor(pct, flatBand) : 'text-muted-foreground',
         className,
       )}

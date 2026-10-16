@@ -425,10 +425,13 @@ function CompactRow<Row, SortKey extends string>({
   const delta = pick('delta')[0]
   const metas = pick('meta')
   const badges = pick('badge')
-  const details = pick('detail')
+  // A card has room to leave an absent figure out, where a table cell has to print its
+  // dash: "Shares —  Price —" under a deposit is two lines saying nothing.
+  const details = pick('detail').filter(col => !isAbsent(col.cell(row, 'cards')))
 
-  const shownDetails =
-    detailLimit != null && !expanded ? details.slice(0, detailLimit) : details
+  // A disclosure that would reveal a single line costs as much as the line itself.
+  const limit = detailLimit != null && details.length - detailLimit > 1 ? detailLimit : null
+  const shownDetails = limit != null && !expanded ? details.slice(0, limit) : details
   const hiddenCount = details.length - shownDetails.length
 
   return (
@@ -485,7 +488,7 @@ function CompactRow<Row, SortKey extends string>({
         </dl>
       )}
 
-      {(hiddenCount > 0 || expanded) && detailLimit != null && details.length > detailLimit && (
+      {(hiddenCount > 0 || expanded) && limit != null && (
         <button
           type="button"
           onClick={() => setExpanded(v => !v)}
@@ -505,6 +508,11 @@ function CompactRow<Row, SortKey extends string>({
       )}
     </li>
   )
+}
+
+/** What a cell renders for "no figure": nothing, an empty string, or the dash. */
+function isAbsent(node: React.ReactNode): boolean {
+  return node == null || node === false || node === '' || node === '—' || node === '-'
 }
 
 function CompactFooterRow<Row, SortKey extends string>({

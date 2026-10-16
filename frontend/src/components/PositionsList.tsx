@@ -184,7 +184,7 @@ export function positionColumns(deps: {
       shortHeader: 'Ticker',
       desktop: 'hide',
       mobile: 'meta',
-      cell: (p) => p.symbol,
+      cell: (p) => `${p.symbol} · ${exchangeOf(p)}`,
     },
     {
       key: 'rating',
@@ -289,15 +289,6 @@ export function positionColumns(deps: {
         const y = yocOf(p)
         return y != null ? `${y.toFixed(2)}%` : '—'
       },
-    },
-    // Carried by the desktop name cell as a sub-line; on a phone it is the detail pair
-    // that keeps a dual-listed security (ASML is two securities) tellable apart.
-    {
-      key: 'exchange',
-      header: 'Exchange',
-      shortHeader: 'Exchange',
-      desktop: 'hide',
-      cell: exchangeOf,
     },
   ]
 }

@@ -140,7 +140,9 @@ function activityColumns(deps: {
       mobile: 'title',
       cell: (row, view) => {
         const detail = detailOf(row)
-        if (view !== 'table') return row.symbol ?? subtypeBadge(row).text
+        // The type badge sits under the title on a card, so a cash row is titled "Cash"
+        // rather than repeating "Deposit" twice.
+        if (view !== 'table') return row.symbol ?? 'Cash'
         return (
           <div className="flex items-center gap-3">
             {row.symbol ? (
