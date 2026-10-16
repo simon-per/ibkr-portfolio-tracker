@@ -31,8 +31,10 @@ const TONE_CLASS: Record<KpiTone, string> = {
  * `text-lg` below `sm`: two cards share 358px, and "CHF 48,561.36" is ~182px in `text-2xl`.
  * The hero keeps its size because it has the whole row to itself.
  */
-const VALUE_CLASS = 'text-lg font-semibold tracking-tight tabular-nums sm:text-xl'
-const HERO_VALUE_CLASS = 'text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl'
+/* No `tabular-nums` on a lone figure: Inter gives the hyphen a full figure width under it,
+   which opened a gap in every negative value, and one figure has nothing to align with. */
+const VALUE_CLASS = 'text-lg font-semibold tracking-tight sm:text-xl'
+const HERO_VALUE_CLASS = 'text-2xl font-semibold tracking-tight sm:text-3xl'
 const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
 
 export const ABSENT = '—'

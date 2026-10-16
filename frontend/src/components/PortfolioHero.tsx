@@ -96,13 +96,13 @@ export function PortfolioHero({
             {headline === null ? (
               <div className="mt-2 h-10 w-56 animate-pulse rounded-lg bg-muted" />
             ) : (
-              <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl">
+              <p className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
                 {formatCurrency(headline)}
               </p>
             )}
             {/* Absent rather than `+0.00%` while the range is unknown or held nothing. */}
             {period && (
-              <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-sm tabular-nums">
+              <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-sm">
                 <span className={cn('font-semibold', period.periodGain >= 0 ? GAIN : LOSS)}>
                   <span aria-hidden="true">{period.periodGain >= 0 ? '▲' : '▼'} </span>
                   {signed(period.periodGain)}
@@ -165,7 +165,7 @@ function Stat({ label, value, tone, sub }: { label: string; value: string; tone?
   return (
     <div className="px-[var(--card-padding)] py-3 sm:py-4">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold tabular-nums sm:text-lg">
+      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold sm:text-lg">
         <span className={tone}>{value}</span>
         {sub && <span className={cn('text-xs font-medium', tone)}>{sub}</span>}
       </dd>
