@@ -132,7 +132,7 @@ describe('AllocationTab completeness', () => {
     mockApi()
     withProviders(<AllocationTab />)
 
-    await waitFor(() => expect(screen.getByText('Technology')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Technology').length).toBeGreaterThan(0))
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -142,7 +142,7 @@ describe('AllocationTab completeness', () => {
     mockApi({ unpriced_holdings: undefined, unpriced_symbols: undefined })
     withProviders(<AllocationTab />)
 
-    await waitFor(() => expect(screen.getByText('Technology')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Technology').length).toBeGreaterThan(0))
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

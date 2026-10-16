@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { api } from '@/lib/api'
 import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
+import { displayName } from '@/lib/securityName'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
@@ -69,14 +70,6 @@ const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
   implausible: 'Basket rejected',
 }
 
-/** The identifier's full name, as the badge's title. */
-const KEY_TYPE_TITLE: Record<LookthroughCompanyRow['key_type'], string> = {
-  lei: 'Issuer LEI',
-  share_class_figi: 'Share-class FIGI',
-  isin: 'ISIN',
-  unidentified: 'No identifier',
-}
-
 /** The company columns, described once for both renderings. */
 export function lookthroughColumns(deps: {
   formatCurrency: (v: number) => string
@@ -89,7 +82,7 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Company',
       mobile: 'title',
       cellClassName: 'font-medium max-w-[260px] truncate',
-      cell: (row) => row.name,
+      cell: (row) => displayName(row.name),
     },
     {
       key: 'listings',
@@ -98,7 +91,11 @@ export function lookthroughColumns(deps: {
       mobile: 'meta',
       cellClassName: 'text-muted-foreground text-xs max-w-[200px] truncate',
       hint: { description: 'Directly-held listings' },
-      cell: (row) => (row.listings.length ? row.listings.join(', ') : null),
+      // Tickers only: the listing keys carry their exchange ("GOOG@NASDAQ") for identity.
+      cell: (row) =>
+        row.listings.length
+          ? [...new Set(row.listings.map((l) => l.split('@')[0]))].join(', ')
+          : null,
     },
     {
       key: 'value',
@@ -141,28 +138,6 @@ export function lookthroughColumns(deps: {
       align: 'right',
       hint: { description: 'Funds holding it' },
       cell: (row) => (row.via_funds.length ? String(row.via_funds.length) : '—'),
-    },
-    {
-      key: 'identity',
-      header: 'Identity',
-      shortHeader: 'Identity',
-      align: 'right',
-      mobile: 'badge',
-      hint: { description: 'Identifier that folded this row' },
-      cell: (row) => (
-        <span
-          className="text-xs text-muted-foreground"
-          title={KEY_TYPE_TITLE[row.key_type]}
-        >
-          {row.key_type === 'lei'
-            ? 'LEI'
-            : row.key_type === 'share_class_figi'
-              ? 'FIGI'
-              : row.key_type === 'isin'
-                ? 'ISIN'
-                : 'none'}
-        </span>
-      ),
     },
   ]
 }
@@ -378,17 +353,13 @@ export function LookThroughTab() {
   // The Coverage footnote is now the ONLY qualifier above the fold, so it names every
   // condition present rather than the most severe one — the itemised list that used to sit
   // under it is inside the collapsed card at the bottom.
+  const fundsWord = (n: number) => `${n} fund${n === 1 ? '' : 's'}`
   const coverageConditions = [
-    unresolvedFunds.length > 0 ? `${unresolvedFunds.length} fund(s) have no basket` : null,
-    proxiedFunds.length > 0 ? `${proxiedFunds.length} fund(s) use another fund's basket` : null,
-    staleFunds.length > 0 ? `${staleFunds.length} basket(s) ageing` : null,
+    unresolvedFunds.length > 0 ? `${fundsWord(unresolvedFunds.length)} without holdings` : null,
+    proxiedFunds.length > 0 ? `${fundsWord(proxiedFunds.length)} via a similar fund` : null,
+    staleFunds.length > 0 ? `${fundsWord(staleFunds.length)} with dated holdings` : null,
   ].filter((s): s is string => s !== null)
-  const coverageSub =
-    unresolvedFunds.length === 0 && proxiedFunds.length === 0
-      ? staleFunds.length > 0
-        ? `every fund decomposed, ${staleFunds.length} basket(s) ageing`
-        : 'every fund decomposed or deliberately excluded'
-      : coverageConditions.join(' · ')
+  const coverageSub = coverageConditions.length > 0 ? coverageConditions.join(' · ') : undefined
 
   // The collapsed card's one line: what is inside, counted, so a reader who never opens it
   // still knows the notes exist. Only the non-zero states are named.
@@ -422,7 +393,7 @@ export function LookThroughTab() {
         </CardHeader>
         <CardContent>
           <p className="py-8 text-center text-sm text-muted-foreground">
-            Couldn't load look-through exposure — the backend didn't respond. It retries
+            Couldn't load look-through exposure — the server didn't respond. It retries
             automatically.
           </p>
         </CardContent>
@@ -452,17 +423,14 @@ export function LookThroughTab() {
                   ? ` (${data.unvaluable_symbols.join(', ')})`
                   : ''}
               </span>
-              {' '}— every exposure and percentage below is a share of what could be valued,
-              not of the whole portfolio. Check the market-data sync's warnings and the
-              position's ticker mapping.
+              {' '}— percentages are a share of what could be valued.
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <KpiCard
               label="Companies"
-              value={data.company_count_total > 0 ? data.company_count_total : null}
-              sub={`${data.companies_shown} shown`}
+              value={data.company_count_total > 0 ? data.company_count_total.toLocaleString('en-US') : null}
             />
             {/*
               Toned on whether any fund is UNRESOLVED, not on a percentage threshold.
@@ -501,19 +469,16 @@ export function LookThroughTab() {
               }
               sub={`${data.funds.length} funds held`}
             />
-            <KpiCard
-              label="Unresolved"
-              value={data.identity.unresolved_isins}
-              tone={unresolvedTone(
-                data.identity.unresolved_value_eur,
-                data.total_market_value_eur,
-              )}
-              sub={
-                data.identity.unresolved_value_eur > 0
-                  ? formatCurrency(data.identity.unresolved_value_eur)
-                  : undefined
-              }
-            />
+            {/* Only when it matters: a handful of unidentifiable securities is the normal
+                state, and a card that always shows a count teaches the reader to skip it. */}
+            {unresolvedTone(data.identity.unresolved_value_eur, data.total_market_value_eur) === 'warning' && (
+              <KpiCard
+                label="Unidentified"
+                value={formatCurrency(data.identity.unresolved_value_eur)}
+                tone="warning"
+                sub={`${data.identity.unresolved_isins.toLocaleString('en-US')} securities`}
+              />
+            )}
           </div>
 
           {/*

@@ -306,27 +306,15 @@ describe('expandedRow puts a panel under its own row', () => {
   })
 })
 
-describe('the hint glossary', () => {
-  it('lists every hinted column, in both modes, from one source', () => {
-    // The desktop `title=` and the phone glossary read the same `hint`, so a
-    // definition cannot exist on one surface and be missing from the other.
-    for (const mode of ['table', 'cards'] as const) {
-      cleanup()
-      render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="Holdings table" mode={mode} />)
-      fireEvent.click(screen.getByLabelText('What the Holdings table columns mean'))
-      expect(screen.getByText('Share of total portfolio market value.')).toBeTruthy()
-    }
-  })
-
-  it('also puts the hint on the desktop header, where it was before', () => {
+describe('the column hint', () => {
+  it('puts the hint on the desktop header, where it was before', () => {
     render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="t" mode="table" />)
     const th = Array.from(document.querySelectorAll('th')).find(h => h.textContent?.includes('Weight'))
     expect(th?.getAttribute('title')).toBe('Share of total portfolio market value.')
   })
 
-  it('renders no glossary button when no column defines a hint', () => {
-    const columns = COLUMNS.map(c => ({ ...c, hint: undefined }))
-    render(<DataTable rows={ROWS} columns={columns} getRowKey={r => r.id} label="t" mode="cards" />)
-    expect(screen.queryByLabelText(/columns mean/)).toBeNull()
+  it('renders no definitions on screen (owner, 2026-10-14: figures, not explanations)', () => {
+    render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="t" mode="cards" />)
+    expect(screen.queryByText('Share of total portfolio market value.')).toBeNull()
   })
 })

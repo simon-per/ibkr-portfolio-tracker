@@ -1,3 +1,4 @@
+import { displayName } from './securityName'
 import type { LookthroughResponse } from './api'
 import { UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
 
@@ -82,7 +83,7 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
     const group = sectorGroup(row.sector)
     const tile: ExposureTile = {
       key: row.company_key,
-      name: row.name,
+      name: displayName(row.name),
       value: row.value_eur,
       pct: row.pct_of_portfolio,
       // The row's own sector, not `group` — a company folded into `Other sectors` must still be

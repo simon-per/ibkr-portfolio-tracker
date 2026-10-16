@@ -104,7 +104,7 @@ describe('analyst-rating sort, across both tables', () => {
   it('ranks the positions table strongest-first on a descending Rating sort', () => {
     const { container } = render(<PositionsList positions={FIXTURE.map(position)} />)
     // Default sort is market value; the first click on a new column sorts descending.
-    fireEvent.click(screen.getByRole('button', { name: 'Rating' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Analysts' }))
     expect(rowSymbols(container)).toEqual(EXPECTED_DESCENDING)
   })
 
@@ -118,7 +118,7 @@ describe('analyst-rating sort, across both tables', () => {
 
   it('agrees between the two tables in the ascending direction as well', async () => {
     const positions = render(<PositionsList positions={FIXTURE.map(position)} />)
-    const rating = screen.getByRole('button', { name: 'Rating' })
+    const rating = screen.getByRole('button', { name: 'Analysts' })
     fireEvent.click(rating) // descending
     fireEvent.click(rating) // flips to ascending
     const positionsAscending = rowSymbols(positions.container)

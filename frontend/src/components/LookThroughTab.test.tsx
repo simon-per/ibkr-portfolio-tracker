@@ -142,7 +142,7 @@ describe('LookThroughTab', () => {
 
     // Above the fold: the KPI footnote says a fund has no basket, without the ten-line list.
     await screen.findByText('Coverage')
-    expect(screen.getByText(/1 fund\(s\) have no basket/)).toBeTruthy()
+    expect(screen.getByText(/1 fund without holdings/)).toBeTruthy()
     expect(screen.queryByText(/28\.8%/)).toBeNull()
 
     // The collapsed header counts the notes, so their existence is visible before their text.
@@ -161,7 +161,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     const companies = screen.getByText('Company exposure')
     const coverage = screen.getByRole('button', { name: /Fund coverage/ })
     // DOCUMENT_POSITION_FOLLOWING: the coverage header comes after the company card's title.
@@ -172,12 +172,12 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     // One row, naming all three listings that were folded into it.
-    expect(screen.getByText(/ABEA@IBIS, GOOG@NASDAQ, GOOGL@NASDAQ/)).toBeTruthy()
+    expect(screen.getByText('ABEA, GOOG, GOOGL')).toBeTruthy()
     expect(screen.getAllByText('44.23%').length).toBeGreaterThan(0)
     // A fund-only company has no direct value and says so with a dash, not a zero.
-    expect(screen.getByText('NVIDIA CORP')).toBeTruthy()
+    expect(screen.getByText('NVIDIA')).toBeTruthy()
   })
 
   /**
@@ -194,16 +194,16 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     const rows = () => Array.from(document.querySelectorAll('tbody tr'))
     expect(rows().some((r) => r.textContent?.includes('Held directly as'))).toBe(false)
 
-    const alphabetRow = rows().find((r) => r.textContent?.includes('ALPHABET INC.'))!
+    const alphabetRow = rows().find((r) => r.textContent?.includes('Alphabet'))!
     fireEvent.click(within(alphabetRow as HTMLElement).getByRole('button', { name: 'Breakdown' }))
 
     // The panel is the row IMMEDIATELY after Alphabet's, not somewhere further down.
     const after = rows()
-    const owner = after.findIndex((r) => r.textContent?.includes('ALPHABET INC.'))
+    const owner = after.findIndex((r) => r.textContent?.includes('Alphabet'))
     expect(after[owner + 1]?.textContent).toContain('Held directly as')
     expect(after[owner + 1]?.textContent).toContain('XNAS')
   })
@@ -212,14 +212,14 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('NVIDIA CORP')
+    await screen.findByText('NVIDIA')
     const rows = () => Array.from(document.querySelectorAll('tbody tr'))
-    const nvidiaRow = rows().find((r) => r.textContent?.includes('NVIDIA CORP'))!
+    const nvidiaRow = rows().find((r) => r.textContent?.includes('NVIDIA'))!
     fireEvent.click(within(nvidiaRow as HTMLElement).getByRole('button', { name: 'Breakdown' }))
 
     // Nvidia is fund-only, so its panel names the fund and no direct listing.
     const after = rows()
-    const owner = after.findIndex((r) => r.textContent?.includes('NVIDIA CORP'))
+    const owner = after.findIndex((r) => r.textContent?.includes('NVIDIA'))
     expect(after[owner + 1]?.textContent).toContain('Held through funds')
     expect(after[owner + 1]?.textContent).not.toContain('Held directly as')
     // Exactly one panel open — the toggle is not additive.
@@ -230,14 +230,14 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     const rowFor = (name: string) =>
       Array.from(document.querySelectorAll('tbody tr')).find((r) =>
         r.textContent?.includes(name),
       ) as HTMLElement
 
-    fireEvent.click(within(rowFor('ALPHABET INC.')).getByRole('button', { name: 'Breakdown' }))
-    const hide = within(rowFor('ALPHABET INC.')).getByRole('button', { name: 'Hide' })
+    fireEvent.click(within(rowFor('Alphabet')).getByRole('button', { name: 'Breakdown' }))
+    const hide = within(rowFor('Alphabet')).getByRole('button', { name: 'Hide' })
     expect(hide.getAttribute('aria-expanded')).toBe('true')
 
     fireEvent.click(hide)
@@ -248,7 +248,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     expect(screen.getByText(/\+38 more/)).toBeTruthy()
   })
 
@@ -256,7 +256,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     expect(screen.queryByText(/folded on an ISIN alone/)).toBeNull()
   })
 
@@ -342,7 +342,7 @@ describe('LookThroughTab', () => {
     const spy = vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('ALPHABET INC.')
+    await screen.findByText('Alphabet')
     expect(spy).toHaveBeenCalledWith(50)
     expect(screen.getByRole('button', { name: 'Top 100' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Top 25' })).toBeTruthy()
@@ -398,11 +398,7 @@ describe('LookThroughTab coverage tone', () => {
    * ceiling is ~95.1-95.9%. The card would have sat amber forever — the always-present-banner
    * pathology. These pin the reachable rule instead, from both sides.
    */
-  function unresolvedCard() {
-    return screen.getByText('Unresolved').closest('div')?.parentElement as HTMLElement
-  }
-
-  it('keeps Unresolved neutral below 1% of the book — the normal handful of ISINs', async () => {
+  it('shows no Unidentified card below 1% of the book — the normal handful of ISINs', async () => {
     // 15 of 5,200 is about 0.3%, the share this account actually carries: amber at any value
     // above zero was amber always.
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
@@ -410,18 +406,18 @@ describe('LookThroughTab coverage tone', () => {
     )
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Unresolved')
-    expect(unresolvedCard().querySelector('.text-yellow-600')).toBeNull()
+    await screen.findByText('Coverage')
+    expect(screen.queryByText('Unidentified')).toBeNull()
   })
 
-  it('turns Unresolved amber at 1% of the book or more', async () => {
+  it('shows an amber Unidentified card at 1% of the book or more', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
       response({ identity: { ...response().identity, unresolved_value_eur: 52 } }),
     )
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Unresolved')
-    expect(unresolvedCard().querySelector('.text-yellow-600')).toBeTruthy()
+    const label = await screen.findByText('Unidentified')
+    expect(label.closest('div')?.parentElement?.querySelector('.text-yellow-600')).toBeTruthy()
   })
 
   it('decides the Unresolved tone on the share of the book', () => {
@@ -458,7 +454,7 @@ describe('LookThroughTab coverage tone', () => {
     await screen.findByText('Coverage')
     expect(coverageCard().querySelector('.text-green-600')).toBeNull()
     expect(coverageCard().querySelector('.text-yellow-600')).toBeTruthy()
-    expect(screen.getByText(/1 fund\(s\) have no basket/)).toBeTruthy()
+    expect(screen.getByText(/1 fund without holdings/)).toBeTruthy()
   })
 
   it('is green when the only undecomposed fund is the deliberately excluded one', async () => {
@@ -489,7 +485,6 @@ describe('LookThroughTab coverage tone', () => {
 
     await screen.findByText('Coverage')
     expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
-    expect(screen.getByText(/every fund decomposed or deliberately excluded/)).toBeTruthy()
   })
 
   it('stays green but names ageing baskets, since coverage_pct cannot show that', async () => {
@@ -513,7 +508,7 @@ describe('LookThroughTab coverage tone', () => {
     // Every fund IS decomposed, so the card is not amber - but a hand-imported basket rots
     // invisibly, and the percentage never moves when it does.
     expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
-    expect(screen.getByText(/1 basket\(s\) ageing/)).toBeTruthy()
+    expect(screen.getByText(/1 fund with dated holdings/)).toBeTruthy()
   })
 
   it('is not green when a fund is decomposed from another fund\'s basket', async () => {
@@ -538,7 +533,7 @@ describe('LookThroughTab coverage tone', () => {
 
     await screen.findByText('Coverage')
     expect(coverageCard().querySelector('.text-green-600')).toBeNull()
-    expect(screen.getByText(/1 fund\(s\) use another fund's basket/)).toBeTruthy()
+    expect(screen.getByText(/1 fund via a similar fund/)).toBeTruthy()
     // And the fund's own row must say which, rather than a green "Decomposed".
     await openFundCoverage()
     expect(screen.getByText('Via VT')).toBeTruthy()

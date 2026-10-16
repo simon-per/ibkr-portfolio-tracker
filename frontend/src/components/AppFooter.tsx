@@ -18,14 +18,15 @@ export function AppFooter() {
   if (!health) return null
 
   return (
-    <footer className="border-t">
+    <footer className="border-t border-border/70">
       {/* A flex row rather than inline spans with `ml-*`: those margins survive a
           wrap and indent the start of the next line. */}
-      <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs text-muted-foreground">
-        <span>Portfolio Analyzer v{health.version}</span>
-        {health.commit && health.commit !== 'unknown' && (
-          <span className="font-mono">{health.commit.slice(0, 7)}</span>
-        )}
+      <div className="mx-auto flex w-full max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-1 px-4 py-4 text-xs text-muted-foreground sm:px-6">
+        {/* The build's commit rides in the tooltip: a deploy is confirmed against it, and
+            nobody else needs to read a hash. */}
+        <span title={health.commit && health.commit !== 'unknown' ? health.commit.slice(0, 7) : undefined}>
+          Portfolio Analyzer v{health.version}
+        </span>
         {/* Both call out a *disabled* safeguard, never a working one: a scheduler
             that has quietly stopped looks exactly like a healthy site. */}
         {!health.scheduler_enabled && (

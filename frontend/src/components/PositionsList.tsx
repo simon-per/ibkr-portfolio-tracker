@@ -8,6 +8,8 @@ import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { displayName } from '@/lib/securityName'
 
 interface PositionsListProps {
   positions: Position[]
@@ -37,27 +39,26 @@ interface PositionsListProps {
 type SortColumn = 'symbol' | 'description' | 'rating' | 'quantity' | 'cost_basis_eur' | 'market_value_eur' | 'gain_loss_eur' | 'gain_loss_percent' | 'portfolio_percent' | 'yield_on_cost'
 type SortDirection = 'asc' | 'desc'
 
+/** A soft chip per consensus: the rating is context for a holding, not an alarm. */
 const getRatingBadgeColor = (consensus: string): string => {
   switch (consensus.toLowerCase()) {
     case 'strong buy':
-      return 'bg-green-600 text-white'
     case 'buy':
-      return 'bg-green-500 text-white'
+      return 'bg-green-500/10 text-green-700 dark:text-green-400'
     case 'hold':
-      return 'bg-yellow-500 text-white'
+      return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
     case 'sell':
-      return 'bg-red-500 text-white'
     case 'strong sell':
-      return 'bg-red-600 text-white'
+      return 'bg-red-500/10 text-red-700 dark:text-red-400'
     default:
-      return 'bg-gray-500 text-white'
+      return 'bg-muted text-muted-foreground'
   }
 }
 
 // The rating sort score lives in `lib/analystRating.ts`, shared with the watchlist — the
 // two tables ranked the same ratings by different rules until 2026-09-12.
 
-const exchangeOf = (p: Position) => p.exchange || 'N/A'
+const exchangeOf = (p: Position) => p.exchange || '—'
 
 /**
  * A short label for the account a row belongs to, or null for the brokerage one.
@@ -69,32 +70,6 @@ const exchangeOf = (p: Position) => p.exchange || 'N/A'
  */
 const accountBadge = (p: Position): string | null =>
   p.account && p.account.startsWith('pillar3a') ? '3a' : null
-
-/**
- * How a derived or carried price is qualified, or null for an ordinary quote.
- *
- * `sibling`: the provider's statement NAV scaled by a sibling share class's daily moves,
- * because Yahoo does not quote this tranche at all. `manual`: the statement NAV carried
- * between uploads. Both are the honest value of the position and both are not a quote
- * of *this* instrument, so the figure carries the word — next to it, not behind a hover.
- */
-const priceSourceBadge = (p: Position): { label: string; title: string } | null => {
-  if (p.price_source === 'sibling') {
-    return {
-      label: 'sibling NAV',
-      // The last statement NAV sets the level, the sibling's daily moves carry it
-      // forward; re-anchored on every finpension upload.
-      title: 'Scaled by a sibling share class',
-    }
-  }
-  if (p.price_source === 'manual') {
-    return {
-      label: 'statement NAV',
-      title: 'Carried until the next upload',
-    }
-  }
-  return null
-}
 
 /**
  * A holding the backend could not value, on the shared two-clause predicate.
@@ -118,6 +93,10 @@ const NO_VALUE = '—'
 const gainTone = (p: Position) =>
   cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-green-600' : 'text-red-600'
 
+/** Whole shares print whole; fractional ones keep up to four places. */
+export const formatQuantity = (q: number) =>
+  q.toLocaleString('en-US', { maximumFractionDigits: Number.isInteger(q) ? 0 : 4 })
+
 /**
  * The positions table, described once for both renderings.
  *
@@ -125,10 +104,10 @@ const gainTone = (p: Position) =>
  * formatter and the portfolio total — which is also what lets a test import the exact
  * array the component renders instead of a copy of it.
  *
- * Note where the two views legitimately differ. The desktop table stacks the exchange
- * under the symbol and the ISIN under the description; the card puts the symbol on its
- * title line and the other two in the detail grid, so those get `desktop: 'hide'`
- * companions. The *values* come from one place either way.
+ * Note where the two views legitimately differ. The desktop table seats a monogram, the
+ * name and the ticker in one cell and puts the percentage under the gain; the card puts
+ * the name on its title line and the rest in the detail grid, so those get
+ * `desktop: 'hide'` companions. The *values* come from one place either way.
  */
 export function positionColumns(deps: {
   formatCurrency: (value: number) => string
@@ -161,110 +140,77 @@ export function positionColumns(deps: {
   return [
     {
       key: 'symbol',
-      header: 'Symbol',
-      shortHeader: 'Symbol',
-      sortKey: 'symbol',
+      header: 'Position',
+      shortHeader: 'Name',
+      sortKey: 'description',
       mobile: 'title',
       cell: (p, view) => {
         const badge = accountBadge(p)
         // One Column[] renders both the table and the phone card list, so the badge
         // reaches mobile without a second edit — the whole reason DataTable exists.
-        const priced = priceSourceBadge(p)
-        const tag = (
-          <>
-            {badge ? (
-              <span
-                className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
-                title="Pillar 3a account"
-              >
-                {badge}
-              </span>
-            ) : null}
-            {priced ? (
-              <span
-                className="ml-1.5 rounded border border-amber-300/60 bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 align-middle dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-                title={priced.title}
-              >
-                {priced.label}
-              </span>
-            ) : null}
-          </>
-        )
+        const tag = badge ? (
+          <span
+            className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle"
+            title="Pillar 3a account"
+          >
+            {badge}
+          </span>
+        ) : null
+        const name = displayName(p.description) || p.symbol
         return view === 'table' ? (
-          <>
-            <div className="font-medium">
-              {p.symbol}
-              {tag}
+          <div className="flex items-center gap-3">
+            <TickerAvatar symbol={p.symbol} />
+            <div className="min-w-0">
+              <div className="max-w-[16rem] truncate font-medium" title={p.description}>
+                {name}
+                {tag}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {p.symbol} · {exchangeOf(p)}
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground">{exchangeOf(p)}</div>
-          </>
+          </div>
         ) : (
           <>
-            {p.symbol}
+            {name}
             {tag}
           </>
         )
       },
     },
     {
-      key: 'description',
-      header: 'Description',
-      shortHeader: 'Description',
-      sortKey: 'description',
+      key: 'ticker',
+      header: 'Ticker',
+      shortHeader: 'Ticker',
+      desktop: 'hide',
       mobile: 'meta',
-      cellClassName: 'max-w-xs',
-      cell: (p, view) =>
-        view === 'table' ? (
-          <>
-            <div className="max-w-xs truncate text-sm">{p.description}</div>
-            <div className="text-xs text-muted-foreground">{p.isin}</div>
-          </>
-        ) : (
-          p.description
-        ),
+      cell: (p) => p.symbol,
     },
     {
       key: 'rating',
-      header: 'Rating',
-      shortHeader: 'Rating',
+      header: 'Analysts',
+      shortHeader: 'Analysts',
       sortKey: 'rating',
       align: 'center',
       mobile: 'badge',
       cell: (p, view) =>
         !p.analyst_rating ? (
           // A table cell cannot be empty, so the dash is the desktop placeholder. In a
-          // card it would be a stray "-" floating in the badge row, saying nothing.
-          view === 'table' ? <div className="text-center text-xs text-muted-foreground">-</div> : null
+          // card it would be a stray dash floating in the badge row, saying nothing.
+          view === 'table' ? <span className="text-xs text-muted-foreground">—</span> : null
         ) : (
-          <div
-            className="flex flex-col items-center gap-1"
-            title={`Strong Buy: ${p.analyst_rating.strong_buy}, Buy: ${p.analyst_rating.buy}, Hold: ${p.analyst_rating.hold}, Sell: ${p.analyst_rating.sell}, Strong Sell: ${p.analyst_rating.strong_sell}`}
+          <span
+            className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${getRatingBadgeColor(p.analyst_rating.consensus)}`}
+            title={`Strong Buy ${p.analyst_rating.strong_buy} · Buy ${p.analyst_rating.buy} · Hold ${p.analyst_rating.hold} · Sell ${p.analyst_rating.sell} · Strong Sell ${p.analyst_rating.strong_sell}`}
           >
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-medium ${getRatingBadgeColor(p.analyst_rating.consensus)}`}
-            >
-              {p.analyst_rating.consensus}
-            </span>
-            {/* The breakdown is rendered, not just in the `title=`, which is what makes
-                it readable on a phone where no hover exists. */}
-            <div className="text-[10px] text-muted-foreground flex gap-0.5">
-              <span className="text-green-600 font-semibold">{p.analyst_rating.strong_buy}</span>
-              <span>/</span>
-              <span className="text-green-500 font-semibold">{p.analyst_rating.buy}</span>
-              <span>/</span>
-              <span className="text-yellow-600 font-semibold">{p.analyst_rating.hold}</span>
-              <span>/</span>
-              <span className="text-red-500 font-semibold">{p.analyst_rating.sell}</span>
-              <span>/</span>
-              <span className="text-red-600 font-semibold">{p.analyst_rating.strong_sell}</span>
-            </div>
-          </div>
+            {p.analyst_rating.consensus}
+          </span>
         ),
     },
     {
       key: 'market_value',
-      header: 'Market Value',
-      shortHeader: 'Market Value',
+      header: 'Value',
+      shortHeader: 'Value',
       sortKey: 'market_value_eur',
       align: 'right',
       mobile: 'value',
@@ -272,38 +218,47 @@ export function positionColumns(deps: {
     },
     {
       key: 'gain_loss_percent',
-      header: '%',
-      shortHeader: 'Gain/Loss %',
+      header: 'Return',
+      shortHeader: 'Return %',
       sortKey: 'gain_loss_percent',
       align: 'right',
       mobile: 'delta',
+      // Carried under the gain on desktop.
+      desktop: 'hide',
       tone: gainTone,
       cell: (p) => (cannotValue(p) ? NO_VALUE : formatPercent(p.gain_loss_percent)),
     },
     {
       key: 'quantity',
-      header: 'Quantity',
-      shortHeader: 'Quantity',
+      header: 'Shares',
+      shortHeader: 'Shares',
       sortKey: 'quantity',
       align: 'right',
-      cell: (p) => p.quantity.toFixed(2),
+      cell: (p) => formatQuantity(p.quantity),
     },
     {
       key: 'cost_basis',
-      header: 'Cost Basis',
-      shortHeader: 'Cost Basis',
+      header: 'Cost basis',
+      shortHeader: 'Cost basis',
       sortKey: 'cost_basis_eur',
       align: 'right',
       cell: (p) => formatCurrency(p.cost_basis_eur),
     },
     {
       key: 'gain_loss',
-      header: 'Gain/Loss',
-      shortHeader: 'Gain/Loss',
+      header: 'Gain',
+      shortHeader: 'Gain',
       sortKey: 'gain_loss_eur',
       align: 'right',
       tone: gainTone,
-      cell: (p) => (cannotValue(p) ? NO_VALUE : formatCurrency(p.gain_loss_eur)),
+      cell: (p, view) =>
+        cannotValue(p) ? NO_VALUE
+        : view === 'table' ? (
+          <>
+            <div>{formatCurrency(p.gain_loss_eur)}</div>
+            <div className="text-xs">{formatPercent(p.gain_loss_percent)}</div>
+          </>
+        ) : formatCurrency(p.gain_loss_eur),
     },
     {
       key: 'weight',
@@ -325,7 +280,7 @@ export function positionColumns(deps: {
       align: 'right',
       cellClassName: 'text-muted-foreground',
       // A dash is a holding that distributes nothing: every accumulating ETF, correctly.
-      hint: { description: 'Next 12M forecast ÷ cost' },
+      hint: { description: 'Yield on cost' },
       // `toFixed(2)` and an em dash, matching DividendsTab's `yoc` column and the KPI
       // card rather than this file's `formatPercent`/hyphen: it is the same number on a
       // third screen, and the hyphen belongs to the rating badge, where a lone dash in a
@@ -335,9 +290,8 @@ export function positionColumns(deps: {
         return y != null ? `${y.toFixed(2)}%` : '—'
       },
     },
-    // Carried by the desktop cells above as sub-lines, so they would be duplicated
-    // there; on a phone they are the detail pairs that keep a dual-listed security
-    // (ASML is two securities) tellable apart.
+    // Carried by the desktop name cell as a sub-line; on a phone it is the detail pair
+    // that keeps a dual-listed security (ASML is two securities) tellable apart.
     {
       key: 'exchange',
       header: 'Exchange',
@@ -345,7 +299,6 @@ export function positionColumns(deps: {
       desktop: 'hide',
       cell: exchangeOf,
     },
-    { key: 'isin', header: 'ISIN', shortHeader: 'ISIN', desktop: 'hide', cell: (p) => p.isin },
   ]
 }
 
@@ -400,8 +353,8 @@ export function PositionsList({
           bValue = b.symbol.toLowerCase()
           break
         case 'description':
-          aValue = a.description.toLowerCase()
-          bValue = b.description.toLowerCase()
+          aValue = displayName(a.description).toLowerCase()
+          bValue = displayName(b.description).toLowerCase()
           break
         case 'rating':
           aValue = getRatingScore(a.analyst_rating?.consensus)
@@ -486,7 +439,7 @@ export function PositionsList({
         </CardHeader>
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
-            Couldn't load positions — the backend didn't respond. It retries automatically.
+            Couldn't load positions — the server didn't respond. It retries automatically.
           </div>
         </CardContent>
       </Card>
@@ -501,7 +454,7 @@ export function PositionsList({
         </CardHeader>
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
-            No positions found. Sync your IBKR data to see your holdings.
+            No positions yet — sync your account to see your holdings.
           </div>
         </CardContent>
       </Card>
@@ -511,7 +464,9 @@ export function PositionsList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Positions ({positions.length})</CardTitle>
+        <CardTitle>
+          Positions <span className="font-normal text-muted-foreground">{positions.length}</span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         {unpriced.length > 0 && (
@@ -527,20 +482,17 @@ export function PositionsList({
             <span className="font-medium">
               {unpriced.length} {unpriced.length === 1 ? 'holding' : 'holdings'} could not be valued
             </span>{' '}
-            ({unpriced.map((p) => p.symbol).join(', ')}). Their value, gain and weight
-            show a dash rather than a figure — the backend has no cached price, or no FX
-            rate for the currency it trades in. Check the market-data sync's warnings and
-            that security's <code>ticker_mappings</code> row. Totals elsewhere on this
-            page exclude them too.
+            ({unpriced.map((p) => p.symbol).join(', ')}) — no price or exchange rate is
+            available, so totals exclude them.
           </div>
         )}
         {cashTracked && totalMarketValue > 0 && (
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-            <span className="font-medium">Cash (uninvested)</span>
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
+            <span className="font-medium">Cash</span>
             <span className="tabular-nums">
               {formatCurrency(cashAmount)}
               <span className="ml-2 text-muted-foreground">
-                {((cashAmount / totalMarketValue) * 100).toFixed(2)}% of the account
+                {((cashAmount / totalMarketValue) * 100).toFixed(2)}%
               </span>
             </span>
           </div>

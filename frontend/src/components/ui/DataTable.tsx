@@ -1,10 +1,9 @@
 import * as React from 'react'
-import { ArrowDown, ArrowUp, Info } from 'lucide-react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { ScrollableTable } from './ScrollableTable'
 import { SortableTh, type SortDirection } from './SortableTh'
-import { Popover, PopoverContent, PopoverTrigger } from './popover'
 
 /**
  * One table, described once, rendered as a table on a laptop and as a list of cards on
@@ -152,7 +151,7 @@ export interface DataTableProps<Row, SortKey extends string = never> {
   rows: readonly Row[]
   columns: readonly Column<Row, SortKey>[]
   getRowKey: (row: Row, index: number) => React.Key
-  /** Names the scroll region, the card list and the glossary button. */
+  /** Names the scroll region and the card list. */
   label: string
   /** Screen-reader-only `<caption>`; mirrored as sr-only text above the card list. */
   caption?: React.ReactNode
@@ -214,20 +213,13 @@ export function DataTable<Row, SortKey extends string = never>({
   const isCompact = useIsCompact()
   const asCards = mode === 'cards' || (mode === 'auto' && isCompact)
 
-  const hinted = columns.filter(c => c.hint)
-  const glossary = hinted.length > 0 ? <Glossary label={label} columns={hinted} /> : null
-
   return (
     <div className={className}>
       {asCards ? (
         <>
-          {/* Sort and glossary share one row: on their own lines they read as two
-              unrelated controls with a band of dead space between them and the first
-              card. */}
-          {(sort || glossary) && (
+          {sort && (
             <div className="mb-3 flex items-center gap-2">
-              {sort && <CompactSortControl label={label} columns={columns} sort={sort} />}
-              {glossary}
+              <CompactSortControl label={label} columns={columns} sort={sort} />
             </div>
           )}
           {caption && <p className="sr-only">{caption}</p>}
@@ -249,7 +241,6 @@ export function DataTable<Row, SortKey extends string = never>({
         </>
       ) : (
         <>
-          {glossary && <div className="mb-2 flex justify-end">{glossary}</div>}
           <WideTable
             rows={rows}
             columns={columns}
@@ -599,41 +590,3 @@ function CompactSortControl<Row, SortKey extends string>({
   )
 }
 
-function Glossary<Row, SortKey extends string>({
-  label,
-  columns,
-}: {
-  label: string
-  columns: readonly Column<Row, SortKey>[]
-}) {
-  return (
-    /* Rendered in both modes from the same `hint`s that feed the desktop `<th>`'s
-       `title=`. Every metric definition in this app lived in a `title=` or a
-       mouse-only tooltip, which no touch device can reach and one of which
-       (Watchlist's Mkt Cap) was unreachable by keyboard too. Radix Popover opens on
-       click, portals out of the scroll container and handles Escape and focus. */
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`What the ${label} columns mean`}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground ring-offset-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          <Info aria-hidden="true" className="h-4 w-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="max-h-[70vh] w-72 overflow-y-auto" align="end">
-        <dl className="space-y-2.5 text-xs">
-          {columns.map(col => (
-            <div key={col.key}>
-              <dt className="font-medium text-foreground">{columnLabel(col)}</dt>
-              <dd className="leading-relaxed text-muted-foreground">
-                {col.hint!.description}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </PopoverContent>
-    </Popover>
-  )
-}

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Treemap, ResponsiveContainer, Tooltip } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { AllocationCategory } from '@/lib/api'
@@ -103,7 +103,7 @@ function regionOf(name: string): string {
 
 /**
  * The "nothing loaded" allocation, as one module-level object rather than a fresh `{}` per
- * render. `AllocationTreemap` resets its drill-down whenever its `allocation` prop changes
+ * render. `AllocationBreakdown` resets its drill-down whenever its `allocation` prop changes
  * identity, so a literal here would close the panel on every parent re-render.
  */
 const NO_ALLOCATION: Record<string, AllocationCategory> = {}
@@ -122,71 +122,6 @@ function mappedColor(colorMap: Record<string, string>) {
     // neutral ramp supplies its own ink for the same reason.
     return fill ? { fill, ink: '#ffffff' } : neutralPaint(name)
   }
-}
-
-// Custom treemap content renderer
-interface TreemapContentProps {
-  x: number
-  y: number
-  width: number
-  height: number
-  name: string
-  percentage: number
-  fill: string
-  ink: string
-  depth: number
-}
-
-function CustomTreemapContent(props: TreemapContentProps) {
-  const { x, y, width, height, name, percentage, fill, ink, depth } = props
-  if (depth !== 1) return null
-
-  const showLabel = width > 60 && height > 30
-  const showPct = width > 40 && height > 20
-
-  return (
-    <g>
-      <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        fill={fill}
-        stroke="hsl(var(--background))"
-        strokeWidth={2}
-        rx={4}
-        className="cursor-pointer transition-opacity hover:opacity-80"
-      />
-      {showLabel && (
-        <text
-          x={x + width / 2}
-          y={y + height / 2 - (showPct ? 8 : 0)}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fill={ink}
-          fontSize={Math.min(14, width / 8)}
-          fontWeight={600}
-          className="pointer-events-none"
-        >
-          {name.length > width / 8 ? name.slice(0, Math.floor(width / 8)) + '...' : name}
-        </text>
-      )}
-      {showPct && (
-        <text
-          x={x + width / 2}
-          y={y + height / 2 + 12}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fill={ink}
-          opacity={0.85}
-          fontSize={Math.min(12, width / 9)}
-          className="pointer-events-none"
-        >
-          {percentage.toFixed(1)}%
-        </text>
-      )}
-    </g>
-  )
 }
 
 // Merge allocation categories that share the same normalized name
@@ -319,8 +254,15 @@ function DrillDownPanel({
   )
 }
 
-// Treemap section component
-function AllocationTreemap({
+/**
+ * One breakdown: a donut, and beside it the legend that is also the way in — a row or a
+ * slice opens the holdings behind that category.
+ *
+ * A donut rather than the treemap it replaced (2026-10-16): with a legend carrying every
+ * share, the chart's job is the proportion at a glance, and a ring does that without the
+ * unlabelled slivers a treemap leaves for anything under a few percent.
+ */
+function AllocationBreakdown({
   title,
   allocation,
   colorFor,
@@ -337,15 +279,15 @@ function AllocationTreemap({
   // Reset selection when allocation data changes
   useEffect(() => { setSelected(null) }, [allocation])
 
-  const entries = Object.entries(allocation)
+  const entries = Object.entries(allocation).sort(([, a], [, b]) => b.percentage - a.percentage)
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">{title}</CardTitle>
+          <CardTitle>{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center h-80 text-muted-foreground">Loading...</div>
+          <div className="flex h-64 items-center justify-center text-muted-foreground">Loading…</div>
         </CardContent>
       </Card>
     )
@@ -355,90 +297,97 @@ function AllocationTreemap({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">{title}</CardTitle>
+          <CardTitle>{title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center h-80 text-muted-foreground">
-            No data available. Click "Sync Now" to fetch allocation data.
+          <div className="flex h-64 items-center justify-center text-muted-foreground">
+            No data yet.
           </div>
         </CardContent>
       </Card>
     )
   }
 
-  const treemapData = entries.map(([name, cat]) => ({
+  const slices = entries.map(([name, cat]) => ({
     name,
-    size: cat.percentage,
-    percentage: cat.percentage,
+    value: cat.percentage,
     market_value_eur: cat.market_value_eur,
     fill: colorFor(name).fill,
-    ink: colorFor(name).ink,
   }))
+  const toggle = (name: string) => setSelected(selected === name ? null : name)
+  const [leadName, lead] = entries[0]
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-2xl">{title}</CardTitle>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Stacks below `sm`. Side by side, the 200px legend leaves the treemap ~86px
-            of a 390px screen — and CustomTreemapContent suppresses every label under
-            60x30, so the chart rendered as unlabelled colour blocks. Stacked, the
-            treemap is full width and the labels come back on their own. */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:gap-6 sm:items-start">
-          {/* Treemap */}
-          <div className="h-[240px] w-full min-w-0 sm:h-[400px] sm:flex-1">
+        <div className="flex flex-col items-center gap-5">
+          <div className="relative h-[190px] w-[190px] shrink-0">
             <ResponsiveContainer width="100%" height="100%">
-              <Treemap
-                data={treemapData}
-                dataKey="size"
-                aspectRatio={4 / 3}
-                isAnimationActive={false}
-                content={<CustomTreemapContent x={0} y={0} width={0} height={0} name="" percentage={0} fill="" ink="#ffffff" depth={1} />}
-                onClick={(node: any) => {
-                  if (node?.name) {
-                    setSelected(selected === node.name ? null : node.name)
-                  }
-                }}
-              >
+              <PieChart>
+                <Pie
+                  data={slices}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius="68%"
+                  outerRadius="100%"
+                  paddingAngle={slices.length > 1 ? 1.5 : 0}
+                  stroke="none"
+                  isAnimationActive={false}
+                  onClick={(d: { name?: string }) => d?.name && toggle(d.name)}
+                  className="cursor-pointer"
+                >
+                  {slices.map((s) => (
+                    <Cell
+                      key={s.name}
+                      fill={s.fill}
+                      opacity={selected && selected !== s.name ? 0.35 : 1}
+                    />
+                  ))}
+                </Pie>
                 <Tooltip
                   content={({ payload }) => {
                     if (!payload || payload.length === 0) return null
                     const d = payload[0].payload
                     return (
-                      <div className="bg-card border border-border rounded-lg px-3 py-2 shadow-lg text-sm">
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-lg">
                         <p className="font-semibold">{d.name}</p>
-                        <p className="text-muted-foreground">{d.percentage?.toFixed(1)}%</p>
-                        <p className="text-muted-foreground">{formatCurrency(d.market_value_eur)}</p>
+                        <p className="text-muted-foreground">
+                          {d.value?.toFixed(1)}% · {formatCurrency(d.market_value_eur)}
+                        </p>
                       </div>
                     )
                   }}
                 />
-              </Treemap>
+              </PieChart>
             </ResponsiveContainer>
+            {/* The largest slice, named in the hole. */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+              <span className="text-2xl font-semibold tabular-nums">{lead.percentage.toFixed(0)}%</span>
+              <span className="max-w-[7rem] truncate text-xs text-muted-foreground">{leadName}</span>
+            </div>
           </div>
 
-          {/* Legend */}
-          <div className="w-full space-y-1.5 sm:w-[200px] sm:shrink-0 sm:pt-2">
+          <div className="w-full min-w-0 space-y-0.5">
             {entries.map(([name, cat]) => (
               <button
                 key={name}
-                onClick={() => setSelected(selected === name ? null : name)}
-                className={`flex min-h-11 items-center gap-2 w-full text-left py-1 px-1.5 rounded transition-colors sm:min-h-0 ${
-                  selected === name ? 'bg-muted' : 'hover:bg-muted/50'
+                onClick={() => toggle(name)}
+                className={`flex min-h-10 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm transition-colors sm:min-h-8 ${
+                  selected === name ? 'bg-muted' : 'hover:bg-muted/60'
                 }`}
               >
-                <div
-                  style={{
-                    width: '12px',
-                    height: '12px',
-                    borderRadius: '3px',
-                    backgroundColor: colorFor(name).fill,
-                    flexShrink: 0,
-                  }}
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: colorFor(name).fill }}
                 />
-                <span className="text-sm truncate flex-1">{name}</span>
-                <span className="text-sm font-semibold tabular-nums">{cat.percentage.toFixed(1)}%</span>
+                <span className="min-w-0 flex-1 truncate">{name}</span>
+                <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
+                  {formatCurrency(cat.market_value_eur)}
+                </span>
+                <span className="w-14 text-right font-medium tabular-nums">{cat.percentage.toFixed(1)}%</span>
               </button>
             ))}
           </div>
@@ -500,7 +449,7 @@ export function AllocationTab() {
   )
 
   // Merge and normalize allocation data. Memoised on `allocation`, because
-  // `AllocationTreemap` resets its drill-down whenever its `allocation` prop changes
+  // `AllocationBreakdown` resets its drill-down whenever its `allocation` prop changes
   // identity — and `mergeAllocation` in the render body handed it a fresh object on every
   // render, so the Dashboard's 60-second `scheduler/status` refetch, which re-renders
   // everything under it, closed the open panel once a minute.
@@ -530,7 +479,7 @@ export function AllocationTab() {
         <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
           <CardContent className="pt-6">
             <p className="text-sm text-red-800 dark:text-red-200">
-              Couldn't load allocation data — the backend didn't respond. It retries automatically.
+              Couldn't load allocation data — the server didn't respond. It retries automatically.
             </p>
           </CardContent>
         </Card>
@@ -552,8 +501,7 @@ export function AllocationTab() {
           <span className="font-medium">
             The account carries a negative cash balance
           </span>{' '}
-          — a margin debit cannot be drawn as a slice, so these charts leave it out
-          entirely and every percentage below is a share of the holdings alone.
+          , so these percentages are shares of the holdings alone.
         </div>
       )}
 
@@ -570,8 +518,7 @@ export function AllocationTab() {
               ? ` (${allocation!.unpriced_symbols.join(', ')})`
               : ''}
           </span>
-          {' '}— every percentage below is a share of what could be valued, not of the whole
-          portfolio. Check the market-data sync's warnings and the position's ticker mapping.
+          {' '}— percentages are a share of what could be valued.
         </div>
       )}
 
@@ -582,10 +529,8 @@ export function AllocationTab() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                  Allocation data needs updating
-                </p>
-                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                  {status.securities_without_data} securities missing allocation data
+                  {status.securities_without_data}{' '}
+                  {status.securities_without_data === 1 ? 'holding has' : 'holdings have'} no sector or region yet
                 </p>
               </div>
               <Button
@@ -596,12 +541,12 @@ export function AllocationTab() {
                 {syncMutation.isPending ? (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Syncing...
+                    Updating…
                   </>
                 ) : (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4" />
-                    Sync Now
+                    Update
                   </>
                 )}
               </Button>
@@ -614,7 +559,8 @@ export function AllocationTab() {
         <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950">
           <CardContent className="pt-6">
             <p className="text-sm text-green-800 dark:text-green-200">
-              Sync successful! Updated {syncMutation.data.securities_updated} securities
+              Updated {syncMutation.data.securities_updated}{' '}
+              {syncMutation.data.securities_updated === 1 ? 'holding' : 'holdings'}
             </p>
           </CardContent>
         </Card>
@@ -626,35 +572,31 @@ export function AllocationTab() {
             <p className="text-sm text-red-800 dark:text-red-200">
               Sync failed
               {syncMutation.error instanceof Error ? ` — ${syncMutation.error.message}` : ''}.
-              Yahoo may be rate-limiting; try again in a while.
+              Try again in a while.
             </p>
           </CardContent>
         </Card>
       )}
 
-      {/* Sector Breakdown - Full Width Treemap */}
-      <AllocationTreemap
-        title="Sector Breakdown"
-        allocation={sectorAllocation}
-        colorFor={allocationSectorPaint}
-        isLoading={isLoading}
-      />
-
-      {/* Geographic and Asset Type side by side */}
       {/* `[&>*]:min-w-0` because a grid item defaults to `min-width: auto`, so it
           refuses to shrink below its content's min-content width — one wide table
           inside made this single-column track 392px in a 358px page and pushed the
           whole document sideways. The track, not the card, is what has to yield. */}
-      <div className="grid gap-6 [&>*]:min-w-0 lg:grid-cols-2">
-        <AllocationTreemap
-          title="Geographic Breakdown"
+      <div className="grid gap-6 [&>*]:min-w-0 lg:grid-cols-3">
+        <AllocationBreakdown
+          title="Sectors"
+          allocation={sectorAllocation}
+          colorFor={allocationSectorPaint}
+          isLoading={isLoading}
+        />
+        <AllocationBreakdown
+          title="Regions"
           allocation={geoAllocation}
           colorFor={mappedColor(REGION_COLORS)}
           isLoading={isLoading}
         />
-
-        <AllocationTreemap
-          title="Asset Type"
+        <AllocationBreakdown
+          title="Asset types"
           allocation={assetAllocation}
           colorFor={mappedColor(ASSET_TYPE_COLORS)}
           isLoading={isLoading}
