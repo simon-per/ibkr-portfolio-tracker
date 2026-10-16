@@ -145,16 +145,12 @@ describe('LookThroughTab', () => {
     expect(screen.getByText(/1 fund without holdings/)).toBeTruthy()
     expect(screen.queryByText(/28\.8%/)).toBeNull()
 
-    // The collapsed header counts the notes, so their existence is visible before their text.
+    // The backend's warning paragraphs stay off the screen (owner, 2026-10-14), opened or not.
     const header = screen.getByRole('button', { name: /Fund coverage/ })
     expect(header.getAttribute('aria-expanded')).toBe('false')
-    expect(header.textContent).toMatch(/1 warning/)
-
     await openFundCoverage()
     expect(header.getAttribute('aria-expanded')).toBe('true')
-    const notes = screen.getByRole('list', { name: 'Warnings' })
-    expect(notes.textContent).toContain('VWCE')
-    expect(notes.textContent).toContain('28.8%')
+    expect(screen.queryByRole('list', { name: 'Warnings' })).toBeNull()
   })
 
   it('keeps the fund table below the company table, last on the page', async () => {
@@ -266,7 +262,7 @@ describe('LookThroughTab', () => {
 
     await openFundCoverage()
     // The fund with no basket is still named, by its status.
-    expect(screen.getByText('No basket')).toBeTruthy()
+    expect(screen.getByText('No data')).toBeTruthy()
     // Its reason sentence and the not-attributed paragraph are gone; that figure is the
     // composition bar's third segment.
     expect(screen.queryByText(/No machine-readable holdings file/)).toBeNull()
@@ -558,7 +554,7 @@ describe('LookThroughTab coverage tone', () => {
     await screen.findByText('Coverage')
     await openFundCoverage()
     expect(screen.getByText('91.86%')).toBeTruthy()
-    expect(screen.getByText('8,007 rows at 0%')).toBeTruthy()
+    expect(screen.queryByText('8,007 rows at 0%')).toBeNull()
   })
 
   /*

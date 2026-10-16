@@ -590,7 +590,7 @@ export function DividendsTab() {
                     <>
                       <span className="inline-flex items-center gap-1.5">
                         <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground/70" />
-                        translucent = forecast
+                        Forecast
                       </span>
                     </>
                   )}

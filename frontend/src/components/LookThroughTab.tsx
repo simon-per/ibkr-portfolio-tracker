@@ -64,10 +64,10 @@ export function unresolvedTone(unresolvedValue: number, totalValue: number): 'wa
 
 /** How a fund's status reads, and whether it counts against coverage. */
 const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
-  looked_through: 'Decomposed',
-  no_basket: 'No basket',
+  looked_through: 'Covered',
+  no_basket: 'No data',
   excluded: 'Excluded',
-  implausible: 'Basket rejected',
+  implausible: 'Unusable data',
 }
 
 /** The company columns, described once for both renderings. */
@@ -188,8 +188,8 @@ function fundColumns(deps: {
     },
     {
       key: 'as_of',
-      header: 'Basket as of',
-      shortHeader: 'Basket as of',
+      header: 'Holdings as of',
+      shortHeader: 'Holdings as of',
       align: 'right',
       hint: { description: "Issuer's basket date" },
       cell: (row) =>
@@ -214,23 +214,8 @@ function fundColumns(deps: {
       shortHeader: 'Equity weight',
       align: 'right',
       hint: { description: 'Basket weight in securities' },
-      // The count of zero-weight rows sits HERE rather than beside `constituents`, because it
-      // belongs to this number and not to that one: a broad fund's shortfall is its
-      // rounded-away tail, not cash. Table view only — the phone card renders a detail into
-      // `shrink-0 tabular-nums`, which is what pushed this page 1,282px sideways once.
-      cell: (row, view) => {
-        if (row.equity_weight_pct === null) return '—'
-        const pct = `${row.equity_weight_pct.toFixed(2)}%`
-        if (view !== 'table' || row.unweighted_constituents === 0) return pct
-        return (
-          <span className="inline-flex flex-col items-end">
-            <span>{pct}</span>
-            <span className="text-xs font-normal text-muted-foreground">
-              {formatCount(row.unweighted_constituents)} rows at 0%
-            </span>
-          </span>
-        )
-      },
+      cell: (row) =>
+        row.equity_weight_pct === null ? '—' : `${row.equity_weight_pct.toFixed(2)}%`,
     },
   ]
 }
@@ -361,26 +346,10 @@ export function LookThroughTab() {
   ].filter((s): s is string => s !== null)
   const coverageSub = coverageConditions.length > 0 ? coverageConditions.join(' · ') : undefined
 
-  // The collapsed card's one line: what is inside, counted, so a reader who never opens it
-  // still knows the notes exist. Only the non-zero states are named.
+  // The collapsed card's one line. The backend's `warnings[]` stay in the API (and in
+  // docs/lookthrough.md's reasoning); on screen the Coverage card names what is wrong.
   const funds = data?.funds ?? []
-  const fundSummary = [
-    `${funds.length} fund${funds.length === 1 ? '' : 's'} held`,
-    [
-      [funds.filter((f) => f.status === 'looked_through' && !f.proxy_for_symbol).length, 'decomposed'],
-      [proxiedFunds.length, "via another fund's basket"],
-      [unresolvedFunds.length, 'with no basket'],
-      [funds.filter((f) => f.status === 'excluded').length, 'excluded by design'],
-    ]
-      .filter(([n]) => (n as number) > 0)
-      .map(([n, what]) => `${n} ${what}`)
-      .join(', '),
-    data && data.warnings.length > 0
-      ? `${data.warnings.length} warning${data.warnings.length === 1 ? '' : 's'}`
-      : null,
-  ]
-    .filter((s) => s)
-    .join(' — ')
+  const fundSummary = `${funds.length} fund${funds.length === 1 ? '' : 's'} held`
 
   // A fetch failure must not impersonate an empty portfolio — the table below would render
   // nothing and read as "you own no companies", which is the worst possible misreading of a
@@ -575,7 +544,7 @@ export function LookThroughTab() {
             each fund's reason, and the itemised notes are reference material for the Coverage
             card above, not the content. The header's one line counts what is inside.
           */}
-          {(data.funds.length > 0 || data.warnings.length > 0) && (
+          {data.funds.length > 0 && (
             <Card>
               <CollapsibleCardHeader
                 open={coverageOpen}
@@ -586,35 +555,13 @@ export function LookThroughTab() {
               />
               {coverageOpen && (
                 <CardContent id="lookthrough-fund-coverage" className="space-y-3">
-                  {/* The backend's warnings[] name problems present now (a stale or borrowed
-                      basket, a fund with none); they stay, without a heading framing them as
-                      notes. The not-attributed figure is the composition bar's third segment. */}
-                  {data.warnings.length > 0 && (
-                    <ul
-                      aria-label="Warnings"
-                      className="list-disc space-y-1 rounded-md border border-amber-300 bg-amber-50 py-3 pl-8 pr-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-                    >
-                      {data.warnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {data.funds.length > 0 && (
-                    <>
-                      <DataTable
-                        rows={data.funds}
-                        columns={coverageColumns}
-                        getRowKey={(row) => row.fund_isin}
-                        label="Fund coverage"
-                        detailLimit={4}
-                      />
-                      {data.oldest_basket_as_of && (
-                        <p className="text-xs text-muted-foreground">
-                          Oldest basket on record: {data.oldest_basket_as_of}.
-                        </p>
-                      )}
-                    </>
-                  )}
+                  <DataTable
+                    rows={data.funds}
+                    columns={coverageColumns}
+                    getRowKey={(row) => row.fund_isin}
+                    label="Fund coverage"
+                    detailLimit={4}
+                  />
                 </CardContent>
               )}
             </Card>

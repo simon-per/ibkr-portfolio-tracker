@@ -244,7 +244,7 @@ describe('Dividend chart controls', () => {
     await screen.findByText(/Received/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
     expect(screen.getByText('AAA')).toBeTruthy()
-    expect(screen.getByText('translucent = forecast')).toBeTruthy()
+    expect(screen.getAllByText('Forecast').some((el) => el.querySelector('.border-dashed'))).toBe(true)
   })
 
   it('requests 24 months and allows an annual row to restore a calendar year without changing mode', async () => {
