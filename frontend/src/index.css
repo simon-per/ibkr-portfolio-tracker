@@ -258,9 +258,19 @@
   }
 }
 
-/* Every chart's axis ticks at one small size; Recharts sets none of its own. */
+/* Every chart's axis ticks at one small size; Recharts sets none of its own. Axis rules
+   and tick marks go: the grid already carries the scale, and the lines only add ink. */
 .recharts-cartesian-axis-tick-value {
   font-size: 12px;
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  display: none;
+}
+/* The hover band behind a bar chart's column: Recharts paints it #ccc on both themes. */
+.recharts-tooltip-cursor.recharts-rectangle {
+  fill: hsl(var(--muted));
+  fill-opacity: 0.7;
 }
 
 /*

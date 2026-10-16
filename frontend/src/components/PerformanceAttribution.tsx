@@ -55,7 +55,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
   // per-row allowance and the ceiling are re-parameterised for a phone.
   const chartHeight = Math.min(
     isCompact ? 600 : 900,
-    Math.max(240, sorted.length * (isCompact ? 28 : 36)),
+    Math.max(240, sorted.length * (isCompact ? 24 : 26)),
   )
 
   return (
@@ -85,7 +85,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
         >
           {data!.unpriced_holdings} holding{data!.unpriced_holdings === 1 ? '' : 's'} could not be
           priced for this period and {data!.unpriced_holdings === 1 ? 'is' : 'are'} left out, so the
-          total covers less than the whole portfolio. That is missing price data, not a loss.
+          total covers less than the whole portfolio — missing prices, not a loss.
         </p>
       )}
       {open && (
@@ -109,7 +109,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                 layout="vertical"
                 margin={{ top: 5, right: isCompact ? 8 : 30, left: 0, bottom: 5 }}
               >
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <CartesianGrid horizontal={false} stroke="hsl(var(--border))" />
                 <XAxis
                   type="number"
                   tickFormatter={(value: number) => {
@@ -123,13 +123,16 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                 <YAxis
                   type="category"
                   dataKey="symbol"
-                  width={isCompact ? 48 : 70}
+                  width={isCompact ? 64 : 84}
                   fontSize={12}
+                  // Every bar keeps its label; Recharts drops alternate ones by default.
+                  interval={0}
                   tick={{ fill: 'currentColor' }}
+                  tickFormatter={(s: string) => (s.length > 9 ? `${s.slice(0, 8)}…` : s)}
                 />
                 <Tooltip content={<AttributionTooltip />} />
                 <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeWidth={1} />
-                <Bar dataKey="pnl_contribution_eur" radius={[0, 4, 4, 0]}>
+                <Bar dataKey="pnl_contribution_eur" radius={[0, 4, 4, 0]} maxBarSize={16}>
                   {sorted.map((entry, index) => (
                     <Cell
                       key={index}
