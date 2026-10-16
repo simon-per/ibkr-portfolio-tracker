@@ -111,7 +111,7 @@ describe('CryptoOverview states', () => {
     vi.spyOn(api, 'getCryptoPortfolio').mockRejectedValue(new UnauthorizedError('generic'))
     renderOverview()
     expect(await screen.findByText('Crypto is locked')).toBeTruthy()
-    expect(screen.getByText(/lock button/)).toBeTruthy()
+    expect(screen.getByText(/the lock, top right/)).toBeTruthy()
     expect(screen.queryByText('generic')).toBeNull()
   })
 

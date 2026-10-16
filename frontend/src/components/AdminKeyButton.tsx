@@ -67,8 +67,7 @@ export function AdminKeyButton({ writeAuthEnabled }: AdminKeyButtonProps) {
         <div>
           <p className="text-sm font-medium">Admin key</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Required to sync, change the base currency, edit the watchlist, or view the
-            crypto book. Reading the stock portfolio never needs it.
+            Unlocks syncing, settings, the watchlist and crypto on this browser.
           </p>
         </div>
         <form
@@ -101,9 +100,6 @@ export function AdminKeyButton({ writeAuthEnabled }: AdminKeyButtonProps) {
             )}
           </div>
         </form>
-        <p className="text-[11px] leading-tight text-muted-foreground">
-          Stored in this browser only, and sent to this API alone.
-        </p>
       </PopoverContent>
     </Popover>
   )

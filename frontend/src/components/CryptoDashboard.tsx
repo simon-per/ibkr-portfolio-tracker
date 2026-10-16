@@ -55,7 +55,7 @@ export function CryptoDashboard() {
   const canSync = access === 'open' && statusQuery.data?.configured !== false
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <AppHeader
         status={<CryptoStatusLine access={access} status={statusQuery.data} />}
         actions={
@@ -85,7 +85,7 @@ export function CryptoDashboard() {
         }
       />
 
-      <div className="mx-auto w-full max-w-[1400px] px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-4 sm:px-6 sm:py-6">
         <LazyTabPanel label="Crypto">
           <CryptoOverview serverHasNoKey={serverHasNoKey} />
         </LazyTabPanel>

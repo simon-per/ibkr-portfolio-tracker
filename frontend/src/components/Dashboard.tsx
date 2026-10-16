@@ -355,7 +355,7 @@ export function Dashboard() {
   return (
     // The Tabs element is the page, so the section strip can sit directly under the header
     // at full width while the panels stay in the centred column below it.
-    <Tabs defaultValue="performance" className="min-h-screen bg-background">
+    <Tabs defaultValue="performance" className="flex min-h-screen flex-col bg-background">
       {/* Header — shared with the crypto view; this view fills its three slots. */}
       <AppHeader
         status={
@@ -455,7 +455,7 @@ export function Dashboard() {
 
       {/* Constrained and centred: at 1440px and wider a full-bleed grid reads as a
           spreadsheet, and every reference app constrains its content. */}
-      <div className="mx-auto w-full max-w-[1400px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
+      <div className="mx-auto w-full max-w-[1400px] flex-1 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
           {/* Performance Tab */}          {/* Performance Tab */}
           <TabsContent value="performance" className="mt-0 space-y-6">
             {/* The headline, the range's gain, the chart and what the headline is made of. */}

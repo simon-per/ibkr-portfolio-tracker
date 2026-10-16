@@ -74,8 +74,7 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
     return (
       <Notice title="Crypto is locked">
         <p>
-          Crypto balances are private. Add the admin key with the lock button at the top
-          right to view them — it is kept in this browser only.
+          Crypto balances are private — unlock them with the admin key (the lock, top right).
         </p>
       </Notice>
     )
