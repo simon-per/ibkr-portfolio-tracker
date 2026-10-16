@@ -88,7 +88,7 @@ export function AdminKeyButton({ writeAuthEnabled }: AdminKeyButtonProps) {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             placeholder={saved ? 'Replace the saved key' : 'Paste the key'}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={!draft.trim()}>

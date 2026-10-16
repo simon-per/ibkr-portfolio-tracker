@@ -294,7 +294,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
         <div className="text-center">
           <p className="text-muted-foreground">Couldn't load the chart</p>
           <p className="text-sm text-muted-foreground mt-2">
-            The backend didn't respond — it may be redeploying. It retries automatically.
+            The server didn't respond — it may be redeploying. It retries automatically.
           </p>
         </div>
       </div>

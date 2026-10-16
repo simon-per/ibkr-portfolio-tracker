@@ -96,7 +96,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
             // A server error must not impersonate "no P&L changes" — see
             // PortfolioValueChart's error state for the same pattern.
             <p className="text-muted-foreground text-center py-8">
-              Couldn't load the attribution — the backend didn't respond. It retries automatically.
+              Couldn't load the attribution — the server didn't respond. It retries automatically.
             </p>
           ) : sorted.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">

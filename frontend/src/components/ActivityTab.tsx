@@ -1,3 +1,4 @@
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -73,14 +74,14 @@ function subtypeBadge(row: ActivityRow): { text: string; className: string } {
       }
     }
     return {
-      text: 'Transfer · not money in',
+      text: 'Transfer',
       className: 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200',
     }
   }
   if (row.kind === 'trade') {
     const isSell = row.subtype.toUpperCase().includes('SELL')
     return {
-      text: row.subtype || 'Trade',
+      text: isSell ? 'Sell' : row.subtype ? 'Buy' : 'Trade',
       className: isSell
         ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
         : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
@@ -97,7 +98,26 @@ function subtypeBadge(row: ActivityRow): { text: string; className: string } {
         : 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200',
     }
   }
-  return { text: row.subtype || 'Action', className: 'bg-muted text-muted-foreground' }
+  return { text: sentenceCase(row.subtype) || 'Action', className: 'bg-muted text-muted-foreground' }
+}
+
+/** `FORWARDSPLIT` → `Forwardsplit`; `CASH RECEIPTS / X` → `Cash receipts / x`. */
+function sentenceCase(text: string | null | undefined): string {
+  if (!text) return ''
+  if (/[a-z]/.test(text)) return text
+  const lower = text.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+/**
+ * The row's broker text, where it says something the other columns do not: a corporate
+ * action's terms, or what a non-contribution transfer was. A trade's "BUY 0.6 CRDO" and a
+ * deposit's "CASH RECEIPTS / ELECTRONIC FUND TRANSFERS" only repeat the type and amount.
+ */
+function detailOf(row: ActivityRow): string | null {
+  if (row.kind === 'trade' || row.kind === 'dividend') return null
+  if (row.kind === 'cash_flow' && row.counts_as_money_in) return null
+  return sentenceCase(row.description) || null
 }
 
 /**
@@ -115,12 +135,32 @@ function activityColumns(deps: {
   return [
     {
       key: 'symbol',
-      header: 'Symbol',
-      shortHeader: 'Symbol',
+      header: 'Asset',
+      shortHeader: 'Asset',
       mobile: 'title',
-      cellClassName: 'font-medium',
-      cell: (row, view) =>
-        row.symbol ?? (view === 'table' ? '—' : subtypeBadge(row).text),
+      cell: (row, view) => {
+        const detail = detailOf(row)
+        if (view !== 'table') return row.symbol ?? subtypeBadge(row).text
+        return (
+          <div className="flex items-center gap-3">
+            {row.symbol ? (
+              <TickerAvatar symbol={row.symbol} className="h-8 w-8 text-[10px]" />
+            ) : (
+              <span aria-hidden="true" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Banknote className="h-4 w-4" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <div className="font-medium">{row.symbol ?? 'Cash'}</div>
+              {detail && (
+                <div className="max-w-[22rem] truncate text-xs text-muted-foreground" title={row.description}>
+                  {detail}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      },
     },
     {
       key: 'date',
@@ -135,10 +175,9 @@ function activityColumns(deps: {
       header: 'Detail',
       shortHeader: 'Detail',
       mobile: 'meta',
-      // 22rem is 352px — wider than the whole card interior at 390px, so it only ever
-      // constrained the desktop cell.
-      cellClassName: 'max-w-[22rem] truncate text-muted-foreground',
-      cell: (row) => row.description,
+      // The desktop name cell carries it as a sub-line.
+      desktop: 'hide',
+      cell: (row) => detailOf(row),
     },
     {
       key: 'kind',
@@ -148,7 +187,7 @@ function activityColumns(deps: {
       cell: (row) => {
         const badge = subtypeBadge(row)
         return (
-          <span className={cn('whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium', badge.className)}>
+          <span className={cn('whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', badge.className)}>
             {badge.text}
           </span>
         )
@@ -180,8 +219,8 @@ function activityColumns(deps: {
     },
     {
       key: 'quantity',
-      header: 'Quantity',
-      shortHeader: 'Quantity',
+      header: 'Shares',
+      shortHeader: 'Shares',
       align: 'right',
       cell: (row) => qty(row.quantity),
     },
@@ -275,7 +314,7 @@ export function ActivityTab() {
             </div>
             <a
               href={api.getActivityCsvUrl({ ...params, limit: undefined, offset: undefined })}
-              className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-3 shadow-sm text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <Download className="h-4 w-4" />
               Download CSV
@@ -342,7 +381,7 @@ export function ActivityTab() {
                 value={symbolDraft}
                 onChange={e => setSymbolDraft(e.target.value)}
                 placeholder="Ticker"
-                className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="h-9 w-28 rounded-lg border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
               <Button type="submit" size="sm" variant="outline">
                 Filter
@@ -370,7 +409,7 @@ export function ActivityTab() {
           ) : isError ? (
             // Never let a backend failure read as "nothing happened in this window".
             <p className="py-12 text-center text-muted-foreground">
-              Couldn't load activity — the backend didn't respond. It retries automatically.
+              Couldn't load activity — the server didn't respond. It retries automatically.
             </p>
           ) : !data || data.items.length === 0 ? (
             <p className="py-12 text-center text-muted-foreground">

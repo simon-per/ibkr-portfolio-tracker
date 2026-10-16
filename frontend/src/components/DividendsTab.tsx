@@ -437,7 +437,7 @@ export function DividendsTab() {
               onChange={(e) => setYear(
                 e.target.value === 'all' || e.target.value === '24m' ? e.target.value : Number(e.target.value),
               )}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium"
             >
               <option value="all">All time</option>
               <option value="24m">Last 24 months</option>
@@ -470,7 +470,7 @@ export function DividendsTab() {
       <CardContent className="space-y-6">
         {isError ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            Couldn't load dividends — the backend didn't respond. Try again in a moment.
+            Couldn't load dividends — the server didn't respond. Try again in a moment.
           </div>
         ) : (
           <>

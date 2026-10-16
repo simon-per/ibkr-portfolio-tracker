@@ -151,7 +151,7 @@ describe('CurrencyExposureCard', () => {
       const { container } = renderUnloaded()
       expand()
       expect(container.querySelector('table')).toBeNull()
-      expect(screen.getByText(/the backend didn't respond/)).toBeTruthy()
+      expect(screen.getByText(/the server didn't respond/)).toBeTruthy()
     })
 
     it('treats an explicit query error the same as absent data', () => {

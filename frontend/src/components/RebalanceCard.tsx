@@ -254,7 +254,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
             // No table at all. Rendering one from an empty position list is what
             // produced the "Not currently held" rows.
             <p className="text-sm text-red-800 dark:text-red-200">
-              Couldn't load your positions — the backend didn't respond, so current weights
+              Couldn't load your positions — the server didn't respond, so current weights
               and drift are unavailable. Your saved targets are untouched. It retries
               automatically.
             </p>

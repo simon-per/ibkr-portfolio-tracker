@@ -356,7 +356,7 @@ export function TaxTab() {
                 id="tax-year"
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium"
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium"
               >
                 {years.map((y) => (
                   <option key={y} value={y}>
@@ -368,7 +368,7 @@ export function TaxTab() {
                 href={api.getTaxReportCsvUrl(year)}
                 download={`tax_report_${year}.csv`}
                 className={cn(
-                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                 )}
               >
                 <Download className="h-4 w-4" />
@@ -424,7 +424,7 @@ export function TaxTab() {
                       {money(data.pillar3a.holdings_value)}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      Assets held · not in the Steuerwert
+                      Assets held
                     </div>
                   </div>
                 </div>
@@ -437,29 +437,18 @@ export function TaxTab() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-1 text-xs font-medium',
-                    data.dividend_source === 'ibkr'
-                      ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                      : data.dividend_source === 'mixed'
-                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
-                  )}
-                  title={
-                    data.dividend_source === 'ibkr'
-                      ? 'IBKR cash transactions'
-                      : data.dividend_source === 'mixed'
-                        ? `IBKR from ${data.dividend_ibkr_from ?? '—'}`
-                        : 'Estimated gross'
-                  }
-                >
-                  {data.dividend_source === 'ibkr'
-                    ? 'IBKR actual'
-                    : data.dividend_source === 'mixed'
-                      ? 'Mixed (est. + IBKR)'
-                      : 'Estimated (yfinance)'}
-                </span>
+                {/* Only the `est.` mark survives (owner, 2026-10-14): which feed a figure came
+                    from is not the reader's business, whether it is an estimate is. */}
+                {data.dividend_source !== 'ibkr' && (
+                  <span
+                    className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                    title={data.dividend_source === 'mixed' && data.dividend_ibkr_from
+                      ? `Broker figures from ${data.dividend_ibkr_from}`
+                      : undefined}
+                  >
+                    {data.dividend_source === 'mixed' ? 'Partly est.' : 'est.'}
+                  </span>
+                )}
               </div>
             </CardHeader>
             <CardContent>

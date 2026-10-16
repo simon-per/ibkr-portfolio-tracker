@@ -97,7 +97,7 @@ function amount(cell: HTMLElement): number {
 }
 
 async function oneYearRow() {
-  const label = await screen.findByText('1 Year')
+  const label = await screen.findByText('1 year')
   return within(label.closest('tr')!).getAllByRole('cell')
 }
 
@@ -115,7 +115,7 @@ describe('ForecastTab', () => {
     expect(amount(value)).toBe(amount(moneyIn) + amount(gains))
     expect(amount(gains)).toBeGreaterThan(17_000)
 
-    expect(screen.getByRole('columnheader', { name: /Money In/ })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Money in/ })).toBeTruthy()
     expect(screen.queryByText(/Total Contributions/)).toBeNull()
   })
 

@@ -86,7 +86,7 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
         <p>
           {portfolioQuery.error instanceof Error && portfolioQuery.error.message
             ? portfolioQuery.error.message
-            : 'The backend did not respond.'}{' '}
+            : 'The server did not respond.'}{' '}
           It is asked again on the next visit.
         </p>
       </Notice>
@@ -256,7 +256,7 @@ function CryptoBook({
           <CardContent>
             {historyFailed ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Couldn&apos;t load the history — the backend didn&apos;t respond.
+                Couldn&apos;t load the history — the server didn&apos;t respond.
               </p>
             ) : historyLoading ? (
               <div className="h-[260px] animate-pulse rounded-md bg-muted sm:h-[340px]" />

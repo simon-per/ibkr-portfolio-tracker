@@ -179,7 +179,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
             // A failed fetch must not read as "you have deployed no capital" — same
             // rule as PortfolioValueChart and PerformanceAttribution.
             <p className="text-muted-foreground text-center py-8">
-              Couldn't load contributions — the backend didn't respond. It retries automatically.
+              Couldn't load contributions — the server didn't respond. It retries automatically.
             </p>
           ) : chartData.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">

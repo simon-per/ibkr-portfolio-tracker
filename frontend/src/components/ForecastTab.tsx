@@ -1,3 +1,4 @@
+import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
@@ -86,37 +87,36 @@ const SCENARIOS = [
 const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
   {
     key: 'horizon',
-    header: 'Time Horizon',
+    header: 'Horizon',
     shortHeader: 'Horizon',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (p) => `${p.year} ${p.year === 1 ? 'Year' : 'Years'}`,
+    cell: (p) => `${p.year} ${p.year === 1 ? 'year' : 'years'}`,
   },
   {
     key: 'value',
-    header: 'Portfolio Value',
+    header: 'Portfolio value',
     shortHeader: 'Portfolio value',
     align: 'right',
     mobile: 'value',
-    tone: () => 'text-green-600 dark:text-green-400',
     cellClassName: 'font-semibold',
     cell: (p) => `${curSym}${formatCount(p.value)}`,
   },
   {
     key: 'gains',
-    header: 'Investment Gains',
-    shortHeader: 'Investment gains',
+    header: 'Gains',
+    shortHeader: 'Gains',
     align: 'right',
     mobile: 'delta',
-    // A book worth less than was paid in is a loss today, and a loss in blue reads as a gain.
+    // A book worth less than was paid in is a loss today.
     tone: (p) =>
-      p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400',
+      p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
     hint: { description: 'Value minus money in' },
     cell: (p) => (p.gains === null ? '—' : `${curSym}${formatCount(p.gains)}`),
   },
   {
     key: 'moneyIn',
-    header: 'Money In',
+    header: 'Money in',
     shortHeader: 'Money in',
     align: 'right',
     hint: { description: 'Paid in plus projected contributions' },
@@ -294,7 +294,7 @@ export function ForecastTab() {
                     }
                   }}
                   aria-label="Monthly Contribution"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
                   max={MAX_CONTRIBUTION}
                   step="100"
@@ -307,7 +307,7 @@ export function ForecastTab() {
                   onClick={() => chooseContribution(null)}
                   aria-pressed={followingPace}
                   title="12M average money in per month"
-                  className={`rounded-md border px-2 py-1 text-xs font-medium tabular-nums transition-colors ${
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
                     followingPace
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-background hover:bg-accent hover:text-accent-foreground'
@@ -333,7 +333,7 @@ export function ForecastTab() {
                       setExpectedReturn(val)
                     }
                   }}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
                   max="30"
                   step="0.5"
@@ -350,7 +350,7 @@ export function ForecastTab() {
               <div className="flex items-center gap-2 h-10">
                 <button
                   onClick={() => setStartFromZero(false)}
-                  className={`flex-1 h-full rounded-md border text-sm font-medium transition-colors ${
+                  className={`h-full min-w-0 flex-1 truncate rounded-lg border px-2 text-sm font-medium transition-colors ${
                     !startFromZero
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-background hover:bg-accent hover:text-accent-foreground'
@@ -360,7 +360,7 @@ export function ForecastTab() {
                 </button>
                 <button
                   onClick={() => setStartFromZero(true)}
-                  className={`flex-1 h-full rounded-md border text-sm font-medium transition-colors ${
+                  className={`h-full min-w-0 flex-1 truncate rounded-lg border px-2 text-sm font-medium transition-colors ${
                     startFromZero
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-background hover:bg-accent hover:text-accent-foreground'
@@ -377,31 +377,46 @@ export function ForecastTab() {
       {/* Projection Chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Projected Portfolio Growth ({forecastYears} {forecastYears === 1 ? 'Year' : 'Years'})</CardTitle>
+          <CardTitle>Projected growth</CardTitle>
           <CardDescription>
-            Based on {expectedReturn}% annual return and {curSym}{formatCount(monthlyContribution)} monthly contribution
+            {expectedReturn}% a year · {curSym}{formatCount(monthlyContribution)} a month · {forecastYears} {forecastYears === 1 ? 'year' : 'years'}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
           {/* Height in CSS on the wrapper: 640px was 76% of an 844px phone screen. */}
-          <div className="h-[280px] w-full sm:h-[440px] lg:h-[640px]">
+          <div className="h-[260px] w-full sm:h-[360px] lg:h-[420px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+            <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="forecast-value-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
+                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
               <XAxis
                 dataKey="year"
-                tick={{ fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={8}
+                tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                // Whole years only; the series is monthly.
+                ticks={monthlyData.filter((d) => d.year.endsWith('.0')).map((d) => d.year)}
+                tickFormatter={(year: string) => `${Number(year)}y`}
               />
               <YAxis
                 domain={yAxisConfig.domain}
                 ticks={yAxisConfig.ticks}
                 tickFormatter={(value) => `${curSym}${(value / 1000).toFixed(0)}k`}
-                tick={{ fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'hsl(var(--muted-foreground))' }}
                 width="auto"
               />
               <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
                 formatter={(value: number | undefined) => value != null ? `${curSym}${formatCount(value)}` : '—'}
-                labelFormatter={(label) => `Year ${label}`}
+                labelFormatter={(label) => `In ${Number(label)} ${Number(label) === 1 ? 'year' : 'years'}`}
               />
               {/* This two-series area had no legend at all, at any width — the grey band
                   and the green band were unlabelled. Unreadable is not a mobile problem,
@@ -420,15 +435,18 @@ export function ForecastTab() {
                   type="monotone"
                   dataKey="moneyIn"
                   stroke="#94a3b8"
+                  strokeDasharray="4 4"
                   fill="#94a3b8"
+                  fillOpacity={0.12}
                   name="Money In"
                 />
               )}
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="#22c55e"
-                fill="#22c55e"
+                stroke="#3b82f6"
+                strokeWidth={2.25}
+                fill="url(#forecast-value-fill)"
                 name="Portfolio Value"
               />
             </AreaChart>
@@ -451,7 +469,7 @@ export function ForecastTab() {
       {/* Projection Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Future Value Projections</CardTitle>
+          <CardTitle>Projections</CardTitle>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -467,20 +485,16 @@ export function ForecastTab() {
       {/* Scenario Comparison */}
       <Card>
         <CardHeader>
-          <CardTitle>Scenario Comparison ({forecastYears}-Year Outlook)</CardTitle>
+          <CardTitle>Scenarios in {forecastYears} {forecastYears === 1 ? 'year' : 'years'}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             {scenarios.map((scenario) => (
-              <div key={scenario.name} className="flex items-center justify-between p-4 rounded-lg border">
-                <div>
-                  <div className="font-medium">{scenario.name}</div>
-                  <div className="text-sm text-muted-foreground">{scenario.rate}% annual return</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {curSym}{formatCount(scenario.value)}
-                  </div>
+              <div key={scenario.name} className="rounded-lg bg-muted/50 p-4">
+                <div className="text-sm font-medium">{scenario.name}</div>
+                <div className="text-xs text-muted-foreground">{scenario.rate}% a year</div>
+                <div className="mt-3 text-xl font-semibold tabular-nums sm:text-2xl">
+                  {curSym}{formatCount(scenario.value)}
                 </div>
               </div>
             ))}

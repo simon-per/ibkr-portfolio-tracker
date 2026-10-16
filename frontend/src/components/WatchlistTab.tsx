@@ -170,7 +170,7 @@ export function WatchlistTab() {
                 rows={3}
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none"
                 placeholder="Add notes..."
               />
             </div>
@@ -184,7 +184,7 @@ export function WatchlistTab() {
                 step="0.01"
                 value={editTargetPrice}
                 onChange={(e) => setEditTargetPrice(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
                 placeholder="0.00"
               />
             </div>
@@ -271,7 +271,7 @@ export function WatchlistTab() {
               value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)}
               placeholder="Ticker, e.g. NVDA"
-              className="min-w-0 flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm"
+              className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm"
             />
             <Button type="submit" disabled={addMutation.isPending || !tickerInput.trim()} size="sm">
               <Plus className="h-4 w-4 mr-1" />
@@ -311,7 +311,7 @@ export function WatchlistTab() {
       ) : isError ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
-            Couldn't load your watchlist — the backend didn't respond. It retries
+            Couldn't load your watchlist — the server didn't respond. It retries
             automatically. This is not an empty watchlist.
           </CardContent>
         </Card>

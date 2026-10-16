@@ -156,7 +156,7 @@ export function MonthlyReturnsHeatmap({
           ) : isError ? (
             // "Not enough data" would be a lie when the request simply failed.
             <p className="text-muted-foreground text-center py-8">
-              Couldn't load the value history — the backend didn't respond. It retries automatically.
+              Couldn't load the value history — the server didn't respond. It retries automatically.
             </p>
           ) : yearRows.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">

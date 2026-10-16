@@ -566,7 +566,7 @@ function CompactSortControl<Row, SortKey extends string>({
         id={id}
         value={sort.column ?? ''}
         onChange={e => sort.onSort(e.target.value as SortKey)}
-        className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm font-medium"
+        className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm font-medium"
       >
         {sortable.map(col => (
           <option key={col.key} value={col.sortKey}>
@@ -578,7 +578,7 @@ function CompactSortControl<Row, SortKey extends string>({
         type="button"
         onClick={() => sort.column && sort.onSort(sort.column)}
         aria-label={`Sort ${sort.direction === 'asc' ? 'descending' : 'ascending'}`}
-        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-input bg-background ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         {sort.direction === 'asc' ? (
           <ArrowUp aria-hidden="true" className="h-4 w-4" />

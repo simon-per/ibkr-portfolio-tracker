@@ -62,7 +62,7 @@ export function CurrencyExposureCard({
             <div className="h-24 bg-muted animate-pulse rounded" />
           ) : unavailable ? (
             <p className="text-sm text-red-800 dark:text-red-200">
-              Couldn't load your positions — the backend didn't respond, so currency exposure
+              Couldn't load your positions — the server didn't respond, so currency exposure
               is unavailable. It retries automatically.
             </p>
           ) : exposure.rows.length === 0 ? (

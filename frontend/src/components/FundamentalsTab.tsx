@@ -600,49 +600,13 @@ export function FundamentalsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Sync Status */}
-      {needsSync && (
-        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                  Fundamentals data needs updating
-                </p>
-                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                  {status.securities_without_data} securities missing fundamental data
-                  {status.stale_metrics > 0 && `, ${status.stale_metrics} stale`}
-                </p>
-              </div>
-              <Button
-                onClick={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending || isSyncing}
-                variant="outline"
-              >
-                {syncMutation.isPending || isSyncing ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Syncing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Sync Now
-                  </>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {isSyncing && (
         <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <RefreshCw className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                Sync running in background — data will update automatically when complete.
+                Updating — the table refreshes when it is done.
               </p>
             </div>
           </CardContent>
@@ -653,7 +617,7 @@ export function FundamentalsTab() {
         <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
           <CardContent className="pt-6">
             <p className="text-sm text-red-800 dark:text-red-200">
-              Sync failed: {syncMutation.error.message}
+              Update failed: {syncMutation.error.message}
             </p>
           </CardContent>
         </Card>
@@ -664,7 +628,7 @@ export function FundamentalsTab() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-2xl">Growth Metrics</CardTitle>
+              <CardTitle>Fundamentals</CardTitle>
               {freshness?.oldest && (
                 <p
                   className={cn(
@@ -677,25 +641,32 @@ export function FundamentalsTab() {
                     : `Data as of ${formatShortDateTime(freshness.oldest)}`}
                 </p>
               )}
+              {needsSync && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  {status.securities_without_data}{' '}
+                  {status.securities_without_data === 1 ? 'holding has' : 'holdings have'} no data yet
+                </p>
+              )}
             </div>
-            {!needsSync && (
+            {needsSync ? (
+              <Button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending || isSyncing}
+                variant="outline"
+                size="sm"
+              >
+                <RefreshCw className={cn('mr-2 h-4 w-4', (syncMutation.isPending || isSyncing) && 'animate-spin')} />
+                {syncMutation.isPending || isSyncing ? 'Updating…' : 'Update'}
+              </Button>
+            ) : (
               <Button
                 onClick={() => forceRefreshMutation.mutate()}
                 disabled={forceRefreshMutation.isPending || isSyncing}
                 variant="outline"
                 size="sm"
               >
-                {forceRefreshMutation.isPending || isSyncing ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Syncing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Refresh
-                  </>
-                )}
+                <RefreshCw className={cn('mr-2 h-4 w-4', (forceRefreshMutation.isPending || isSyncing) && 'animate-spin')} />
+                {forceRefreshMutation.isPending || isSyncing ? 'Updating…' : 'Refresh'}
               </Button>
             )}
           </div>
@@ -705,13 +676,13 @@ export function FundamentalsTab() {
             <div className="flex items-center justify-center h-40 text-muted-foreground">Loading...</div>
           ) : metricsError ? (
             <div className="flex items-center justify-center h-40 text-center text-muted-foreground">
-              Couldn't load fundamentals — the backend didn't respond. It retries automatically.
+              Couldn't load fundamentals — the server didn't respond. It retries automatically.
             </div>
           ) : fundamentals && fundamentals.length > 0 ? (
             <MetricsTable data={fundamentals} />
           ) : (
             <div className="flex items-center justify-center h-40 text-muted-foreground">
-              No data available. Click "Sync Now" to fetch fundamental data.
+              No data yet.
             </div>
           )}
         </CardContent>
@@ -733,7 +704,7 @@ export function FundamentalsTab() {
               <div className="flex items-center justify-center h-20 text-muted-foreground">Loading...</div>
             ) : earningsError ? (
               <div className="flex items-center justify-center h-20 text-center text-muted-foreground">
-                Couldn't load upcoming earnings — the backend didn't respond.
+                Couldn't load upcoming earnings — the server didn't respond.
               </div>
             ) : (
               <EarningsCalendar data={upcomingEarnings || []} />
@@ -751,7 +722,7 @@ export function FundamentalsTab() {
               <div className="flex items-center justify-center h-20 text-muted-foreground">Loading...</div>
             ) : historyError ? (
               <div className="flex items-center justify-center h-20 text-center text-muted-foreground">
-                Couldn't load earnings history — the backend didn't respond.
+                Couldn't load earnings history — the server didn't respond.
               </div>
             ) : (
               <EarningsSurpriseHistory data={earningsHistory || []} pageSize={historyPageSize} />

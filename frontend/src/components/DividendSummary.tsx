@@ -130,7 +130,7 @@ export function DividendSummary() {
             // "No dividend data available yet" reads as a fact about the portfolio.
             // A failed request is a fact about the backend; say which one it is.
             <p className="text-muted-foreground text-center py-8">
-              Couldn't load dividend income — the backend didn't respond. It retries automatically.
+              Couldn't load dividend income — the server didn't respond. It retries automatically.
             </p>
           ) : yearRows.length === 0 ? (
             <div className="text-center py-8">
