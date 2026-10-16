@@ -26,7 +26,7 @@ naming: `PerformanceMetricsCards` and `RiskMetricsCards` returned `null` wheneve
 and Dashboard's memos return null when their query fails — so a backend outage did not render an error
 state on those rows, it rendered *nothing*, and twelve metrics were simply absent from the page. A row
 that disappears is worse than one that fails visibly: a stated failure invites a retry, while a missing
-row reads as a feature that was never built. `PortfolioSummaryCards`, in the same directory, had the
+row reads as a feature that was never built. `PortfolioSummaryCards` (now `PortfolioHero`) had the
 correct branch all along. The `null` return survives for the genuine no-data-yet case — an empty
 portfolio is not a failure and must not claim to be one — so the two states are now distinct props
 rather than one absent value.
@@ -203,7 +203,7 @@ at all. Two rules, each a wrong number on screen first:
   that every gain the portfolio had ever made was contributed and the gap to the green band showed
   only *future* gains. The baseline is `windows['all'].money_in_eur` from
   `/api/portfolio/contributions` — the app's one answer to "how much have I paid in", the figure the
-  ContributionsStrip and the value chart's Money In line both publish, already in Dashboard's query
+  Money In per Month card and the value chart's Money In line both publish, already in Dashboard's query
   cache so it costs no request. Never `total_cost_basis_eur`, which is *deployed* and counts a
   rotation twice.
 - **`Portfolio Value = Money In + Investment Gains`**, on every row and every point, on the rounded
@@ -457,3 +457,37 @@ app: the mode switch, the crypto chart's Value | P&L and ranges, and the six gro
 Analytics (×2), Dividends and Look-through used to hand-roll — one of which had already lost its
 `aria-pressed`. Two looks (`segmented`, `buttons`), single-select or a set of independent toggles.
 `SegmentedControl.test.tsx` scans `components/` so a seventh copy fails.
+
+## The product pass (2026-10-16)
+
+The owner asked for an end-user product in the getquin mould: polished, not complex, no stray
+text. What that settled, so the next change keeps it:
+
+- **One hero, not a wall of cards.** `PortfolioHero` is the top of the Performance tab: total value,
+  the range's *gain* (value change less net money in — a value change that counts deposits reads
+  as growth that was never earned), the range picker, the area chart, and a five-figure strip
+  (cost basis, unrealized, realized, cash, positions). The two KPI panels sit under it with
+  sentence-case labels, no icons, and colour only on returns and drawdowns — a green Sortino is
+  decoration.
+- **Names go through `lib/securityName.displayName`** wherever a person reads them. IBKR's
+  descriptions are upper-case, truncated and carry listing noise; GLEIF's legal names are
+  upper-case too. Display only: sorting by name sorts the display name, and every lookup, export
+  and `title=` keeps the raw string. A name that already has lower-case letters keeps its casing.
+  Extend `KEEP_UPPER` / `EXPAND` there rather than special-casing a table.
+- **`TickerAvatar`** is a monogram on a tint hashed from the ticker, never a fetched logo: the CSP
+  allows images from our origin only, and a logo service would learn every holding.
+- **No definitions on screen**, which removed the `DataTable` glossary popover; a column `hint` is
+  a header `title=` of a few words. No provenance either: the positions table's sibling/statement
+  NAV badges, the dividends table's Source column and the tax report's feed badge are gone; the
+  `est.` mark is the one survivor. Server `warnings[]` paragraphs (look-through fund coverage) stay
+  in the API, not on the page.
+- **Allocation is three donuts** with a value legend that is also the drill-down. The palette is
+  unchanged: `--viz-sector-*` and the neutral ramp are pinned by colour-distance tests
+  (`lib/dividendColors.test.ts`), and every softer green tried failed them against the orange slot.
+- **Charts share one look**: no axis rules or tick marks (global CSS in `index.css`), horizontal
+  grid only, a themed hover band, the value series as the one gradient area. Bar-chart labels use
+  `interval={0}` so a long list does not silently drop every other name.
+- **Phone cards drop absent details** (`DataTable`'s `isAbsent`) and skip a disclosure that would
+  reveal one line; a horizontally scrolling `SegmentedControl` keeps its selected option centred.
+- **Font**: Inter, bundled via `@fontsource-variable/inter` and served from our origin, which is
+  what the CSP's `font-src 'self'` allows.

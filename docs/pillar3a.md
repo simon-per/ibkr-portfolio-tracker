@@ -210,9 +210,9 @@ way in: with one NAV on record it anchors the level; with two or more it verifie
 sibling's *moves* against the provider's NAV ratios at the same bound before saving, and
 refuses a security Yahoo already quotes directly. `yahoo_eligible()` still says **no** for a
 sibling-priced security — the sibling's dividend history and `.info` are not this fund's, so
-only the price loop consults `is_sibling_priced`. The positions table badges the row
-"sibling NAV" (and a manual one "statement NAV"), since a derived figure carries its word
-next to it. Tests: `tests/test_sibling_pricing.py`, the sibling blocks in
+only the price loop consults `is_sibling_priced`. The positions table badged the row
+"sibling NAV" (and a manual one "statement NAV") until 2026-10-16, when the owner's
+no-provenance rule removed both; `Position.price_source` still carries it. Tests: `tests/test_sibling_pricing.py`, the sibling blocks in
 `test_finpension_import.py` and `test_mapping_cli.py`.
 
 **`manage_mappings set` verifies a candidate against those published NAVs and refuses on a

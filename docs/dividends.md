@@ -343,7 +343,7 @@ every payer look stopped and returned an empty year.
 `forecast_basis` reports whether the withholding deducted was **measured** (`net`) or **assumed**
 (`gross_estimate`) — see *The withholding ladder* below. Only the last rung, the application setting
 `dividend_forecast_net_factor` (default `DEFAULT_DIVIDEND_NET_FACTOR = Decimal("0.85")`, an assumed
-15%), is `gross_estimate`. The Dividends tab exposes that setting as **WHT 15%**, and the response
+15%), is `gross_estimate`. The Dividends tab exposes that setting as **Tax 15%** (it read *WHT* until 2026-10-16), and the response
 carries `forecast_withholding_pct` (the setting) at the top level and `forecast_withholding_pct` /
 `forecast_withholding_source` on each row (the rate that row actually deducts).
 Changing it recomputes the read-time forecast; it does not rewrite a dividend row or call Yahoo.
@@ -819,6 +819,8 @@ null; rounded to the digits asked for), shared by `realizedOnlyYears`, `withoutF
 `src/lib/delta.test.ts`.
 
 ### Growth pace — CMGR and CAGR across the selected range
+
+On screen the two read "per month" and "per year" (since 2026-10-16); the acronyms are the code's.
 
 `DividendGrowthPace`, a strip under the KPI tiles, in both chart modes. Computed by
 `lib/dividendPace.ts` from the windows **currently on screen**.

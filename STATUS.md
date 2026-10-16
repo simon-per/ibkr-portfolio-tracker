@@ -7,9 +7,9 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-15.** Production was healthy on `f7ebbf5`; the browser sweep's findings
-were pushed at 07:40 Berlin (docs/shipped-log.md, 2026-10-15) — confirm `/health` reports the new
-commit. The agent-team wave's scheduled halves are under *Watch after the next deploy*.
+**Last updated: 2026-10-16.** The product pass (frontend only, docs/shipped-log.md 2026-10-16)
+is committed on `main`; confirm `/health` reports its commit after the deploy. The agent-team
+wave's scheduled halves are under *Watch after the next deploy*.
 
 ---
 
@@ -61,6 +61,11 @@ commit. The agent-team wave's scheduled halves are under *Watch after the next d
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **The product pass on production** (verified only on a local build proxied to the live API):
+  the bundled Inter font loads under the production CSP (`e2e/csp.mjs`), the favicon renders, and
+  the Dividend Income card and benchmark lines — aborted in the local check because they can
+  reach Yahoo — render in the new styling. Crypto unlocked was not seen (needs the admin key).
 
 - **Look-through identities after the CINS fix (`66cd9cd`):** ASML one row, not three; NXP,
   Tower, Nebius, Prysmian, Terna folded; `identity.unidentified_groups` well below 78. The capped
@@ -144,6 +149,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
+  provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
   date axis, regions, leftover text; the look-through CINS starvation found and fixed.
 - **2026-10-14 (docs trim)** — STATUS.md cut to a snapshot (rough edges → troubleshooting, traps →
@@ -152,4 +159,3 @@ One line each, newest first; drop the oldest.
   fundamentals refresh, STATUS pruned; browser sweep on production.
 - **2026-10-14 (test speed)** — backend under `pytest-xdist`, `deploy_scripts` deselected locally:
   5:35 → ~25 s.
-- **2026-10-14 (strip the text)** — every tab's explanatory text stripped; forecast backfill run.

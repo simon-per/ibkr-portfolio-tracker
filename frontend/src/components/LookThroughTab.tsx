@@ -12,7 +12,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
-import { formatCount } from '@/lib/utils'
+import { cn, formatCount } from '@/lib/utils'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -338,6 +338,8 @@ export function LookThroughTab() {
   // The Coverage footnote is now the ONLY qualifier above the fold, so it names every
   // condition present rather than the most severe one — the itemised list that used to sit
   // under it is inside the collapsed card at the bottom.
+  const showUnidentified =
+    !!data && unresolvedTone(data.identity.unresolved_value_eur, data.total_market_value_eur) === 'warning'
   const fundsWord = (n: number) => `${n} fund${n === 1 ? '' : 's'}`
   const coverageConditions = [
     unresolvedFunds.length > 0 ? `${fundsWord(unresolvedFunds.length)} without holdings` : null,
@@ -396,7 +398,12 @@ export function LookThroughTab() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div
+            className={cn(
+              'grid grid-cols-2 gap-3',
+              showUnidentified ? 'sm:grid-cols-4' : 'sm:grid-cols-3',
+            )}
+          >
             <KpiCard
               label="Companies"
               value={data.company_count_total > 0 ? data.company_count_total.toLocaleString('en-US') : null}
@@ -440,7 +447,7 @@ export function LookThroughTab() {
             />
             {/* Only when it matters: a handful of unidentifiable securities is the normal
                 state, and a card that always shows a count teaches the reader to skip it. */}
-            {unresolvedTone(data.identity.unresolved_value_eur, data.total_market_value_eur) === 'warning' && (
+            {showUnidentified && (
               <KpiCard
                 label="Unidentified"
                 value={formatCurrency(data.identity.unresolved_value_eur)}

@@ -377,9 +377,11 @@ Tests: `tests/test_cash_balance.py`, the cash block in `tests/test_api_smoke.py`
 
 ## Contributions — money in per month
 
-`GET /api/portfolio/contributions` → `PortfolioService.get_contributions()`, rendered as a slim strip
-(`ContributionsStrip.tsx`) below the KPI cards: all time / 12M / 6M / 3M, each trailing window shown as
-a delta against the all-time average, so a change in savings rate is visible at a glance.
+`GET /api/portfolio/contributions` → `PortfolioService.get_contributions()`, rendered by the
+*Money In per Month* card (`MonthlyDeploymentCard.tsx`), whose collapsed line carries the month so
+far, the 12-month average and YTD. The all time / 12M / 6M / 3M strip (`ContributionsStrip.tsx`)
+that sat in the chart header was removed on 2026-10-16 with the portfolio hero: it repeated the
+card's average a few hundred pixels higher.
 
 **`money_in_eur` is the answer**, and it is **spliced at `coverage_from`** because no single source is
 authoritative for the whole history. This design took three attempts; the reasoning below is why.

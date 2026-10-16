@@ -997,7 +997,7 @@ unmeasurable would put a permanent warning on every chart served by an older bac
 the hero card — and an unpriced holding leaves it while its cost stays in `total_cost_basis_eur`, so the
 total and both gain figures understate. This is the SBI incident restated: deleting one security's
 poisoned prices took 446.93 CHF off exactly this number and the only thing that said so was a sync
-warning nobody has to read. `PortfolioSummaryCards` now renders a `role="alert"` above the row.
+warning nobody has to read. `PortfolioHero` now renders a `role="alert"` under the headline.
 
 It comes off `_calculate_daily_value`, the same helper the timeline uses, so the headline and every chart
 point agree about their own completeness instead of each deciding — pinned by `test_api_smoke.py`, which

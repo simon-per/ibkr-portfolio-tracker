@@ -7,6 +7,24 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-16 — the product pass (frontend only)
+
+The owner's goal: an end-user product in the getquin mould — polished, not complex, no stray
+text. Ten frontend commits; no backend or API change. The Performance tab opens on one
+`PortfolioHero` (total value, the range's gain, range picker, gradient area chart, a five-figure
+strip) instead of five summary cards and a chart card; the sections became a full-width sticky
+underline nav under a header with a brand mark and one "Updated" line; Inter is bundled.
+`displayName()` turns broker/GLEIF names into readable ones on every table and the treemap;
+positions, dividends and activity rows carry ticker monograms. Allocation's three treemaps became
+donuts with a value legend. Removed from the screen: the table glossary popovers, analyst counts,
+ISIN lines, price-source and feed badges (only `est.` remains), the look-through Identity column,
+its always-on Unresolved card and its warning paragraphs, the contributions strip, the commit hash,
+WHT/CMGR jargon, and most explanatory tails on conditional warnings. Charts lost axis rules and
+tick marks; the attribution chart labels every bar. Phone cards skip absent details. Rules in
+docs/frontend.md, *The product pass*. Verified on a local build against production data: all
+nine tabs at 1440 and 390, light and dark — no console errors, no horizontal overflow; 866
+frontend tests green.
+
 ## Shipped 2026-10-15 — the browser sweep's findings (pushed 07:40 Berlin)
 
 STATUS.md *Worth doing next* item 0, fixed on `main` in eight commits: the Watchlist's 211px sideways
