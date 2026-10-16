@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
-import { formatPercent } from '@/lib/utils'
+import { formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
 import { cashIsTracked } from '@/lib/portfolioCash'
@@ -92,10 +92,6 @@ const NO_VALUE = '—'
 
 const gainTone = (p: Position) =>
   cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-green-600' : 'text-red-600'
-
-/** Whole shares print whole; fractional ones keep up to four places. */
-export const formatQuantity = (q: number) =>
-  q.toLocaleString('en-US', { maximumFractionDigits: Number.isInteger(q) ? 0 : 4 })
 
 /**
  * The positions table, described once for both renderings.

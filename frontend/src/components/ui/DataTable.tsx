@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { ABSENT, cn } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { ScrollableTable } from './ScrollableTable'
 import { SortableTh, type SortDirection } from './SortableTh'
@@ -512,7 +512,7 @@ function CompactRow<Row, SortKey extends string>({
 
 /** What a cell renders for "no figure": nothing, an empty string, or the dash. */
 function isAbsent(node: React.ReactNode): boolean {
-  return node == null || node === false || node === '' || node === '—' || node === '-'
+  return node == null || node === false || node === '' || node === ABSENT || node === '-'
 }
 
 function CompactFooterRow<Row, SortKey extends string>({
