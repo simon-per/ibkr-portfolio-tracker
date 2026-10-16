@@ -7,9 +7,7 @@ import { AdminKeyButton } from './AdminKeyButton'
 import { ModeToggle } from './ModeToggle'
 
 interface AppHeaderProps {
-  /** Under the title from `sm` up; what this view is. */
-  strapline?: ReactNode
-  /** Under the title at every width: the view's last/next sync and its warnings. */
+  /** Under the title at every width: the view's last sync and its warnings. */
   status?: ReactNode
   /** After the shared controls: the view's own sync button. */
   actions?: ReactNode
@@ -26,7 +24,7 @@ interface AppHeaderProps {
  * feed them and this component knows nothing about IBKR or CoinStats. The markup is the
  * one `Dashboard` rendered, moved verbatim, plus the mode toggle before the theme toggle.
  */
-export function AppHeader({ strapline, status, actions, below }: AppHeaderProps) {
+export function AppHeader({ status, actions, below }: AppHeaderProps) {
   const {
     baseCurrency, supportedCurrencies, setBaseCurrency,
     isUpdating: currencyUpdating, updateError: currencyError, currencyIsAssumed,
@@ -40,19 +38,16 @@ export function AppHeader({ strapline, status, actions, below }: AppHeaderProps)
   })
 
   return (
-    <div className="border-b border-border/70 bg-card/60 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-      <div className="mx-auto w-full max-w-[1400px] px-4 py-3 sm:px-6 sm:py-4">
-        {/* Wraps below `sm`: the title block and the controls cannot share a 358px row,
-            and `justify-between` on a row that cannot wrap is what pushed the cluster
-            past the viewport edge. `items-start` so the controls sit level with the
-            title rather than with the bottom of the status block. */}
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Portfolio Analyzer</h1>
-            {/* Hidden below `sm`: the strapline costs a line of an 844px screen and
-                tells a returning user nothing they do not already know. */}
-            {strapline && <p className="text-muted-foreground mt-1 hidden sm:block">{strapline}</p>}
-            {status}
+    <div className="bg-background">
+      <div className="mx-auto w-full max-w-[1400px] px-4 pb-3 pt-4 sm:px-6 sm:pt-5">
+        {/* Wraps below `sm`: the brand and the controls cannot share a 358px row. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandMark />
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold leading-tight tracking-tight sm:text-xl">Portfolio Analyzer</h1>
+              {status}
+            </div>
           </div>
           {/* Wraps: at 390px the currency select plus the sync button are wider than
               the viewport, and without this the whole page scrolled horizontally by
@@ -63,7 +58,7 @@ export function AppHeader({ strapline, status, actions, below }: AppHeaderProps)
               onChange={(e) => setBaseCurrency(e.target.value)}
               disabled={currencyUpdating}
               title="Base currency"
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm font-medium disabled:opacity-50"
+              className="h-9 rounded-lg border border-input bg-card px-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-accent disabled:opacity-50"
             >
               {supportedCurrencies.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -92,5 +87,29 @@ export function AppHeader({ strapline, status, actions, below }: AppHeaderProps)
         {below}
       </div>
     </div>
+  )
+}
+
+/** The app's mark: a rising line on the primary gradient, the same drawing as the favicon. */
+function BrandMark() {
+  return (
+    <svg viewBox="0 0 32 32" className="h-9 w-9 shrink-0" aria-hidden="true">
+      <defs>
+        <linearGradient id="brand-mark" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#3b82f6" />
+          <stop offset="1" stopColor="#6366f1" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="url(#brand-mark)" />
+      <path
+        d="M7 21.5 L12.5 15.5 L17 19 L25 10.5"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="25" cy="10.5" r="2.2" fill="#fff" />
+    </svg>
   )
 }

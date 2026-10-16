@@ -83,10 +83,10 @@
   @media (min-width: 640px) {
     /* Tailwind's stock `sm` — see src/lib/breakpoints.ts, which pins the same number
        from the JS side and fails the suite if tailwind.config.js ever overrides it.
-       These two values are today's desktop `p-6` and `text-2xl` exactly. */
+       Titles are 18px at every width: a section heading, not a page heading. */
     :root {
       --card-padding: 1.5rem;
-      --card-title-size: 1.5rem;
+      --card-title-size: 1.125rem;
     }
   }
 
@@ -244,9 +244,11 @@
 
   body {
     @apply bg-background text-foreground;
-    /* Inter where installed, otherwise the platform UI face; the CSP forbids a webfont. */
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    /* Inter, bundled (`@fontsource-variable/inter`) and served from our own origin, which
+       is what the CSP's `font-src 'self'` allows. */
+    font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     /* Several surfaces now scroll horizontally on purpose — the tab strip, the range
@@ -254,6 +256,11 @@
        scroll to the page and fires the browser's back-swipe gesture. */
     overscroll-behavior-x: none;
   }
+}
+
+/* Every chart's axis ticks at one small size; Recharts sets none of its own. */
+.recharts-cartesian-axis-tick-value {
+  font-size: 12px;
 }
 
 /*

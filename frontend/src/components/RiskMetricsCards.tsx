@@ -96,8 +96,7 @@ export function RiskMetricsCards({
     return (
       <Card>
         <CardContent className="py-8 text-center text-muted-foreground">
-          Couldn't load the risk metrics — the backend didn't respond. Volatility, Sortino, beta, drawdown and the dividend rates are
-          unavailable. It retries automatically.
+          Couldn't load the risk metrics — the server didn't respond. It retries automatically.
         </CardContent>
       </Card>
     )
@@ -129,7 +128,7 @@ export function RiskMetricsCards({
       ? 'No projected dividends'
       : [
           `${formatCurrency(dividend.annual_eur)}/yr`,
-          `${dividend.paying_holdings} of ${dividend.priced_holdings} pay`,
+          `${dividend.paying_holdings} of ${dividend.priced_holdings} holdings pay`,
           ...(dividend.unpriced_holdings > 0
             ? [`${dividend.unpriced_holdings} unpriced`]
             : []),
@@ -155,13 +154,9 @@ export function RiskMetricsCards({
 
       <KpiCard
         tile
-        label="Sortino Ratio"
+        label="Sortino ratio"
         icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
         value={metrics.sortino !== null ? metrics.sortino.toFixed(2) : null}
-        tone={metrics.sortino === null ? 'muted'
-          : metrics.sortino >= 1 ? 'positive'
-          : metrics.sortino >= 0 ? 'warning'
-          : 'negative'}
         sub={metrics.sortino !== null
           ? undefined
           : metrics.sortinoAbsence === 'no_downside'
@@ -179,16 +174,14 @@ export function RiskMetricsCards({
         sub={beta === null
           ? 'No benchmark selected'
           : beta.beta === null
-            ? `Needs ${beta.minSampleDays} flow-free days (${beta.sampleDays} so far)`
-            : `vs ${beta.benchmarkName}${
-                beta.correlation !== null ? ` · r ${beta.correlation.toFixed(2)}` : ''
-              }`}
+            ? 'Not enough history in this range'
+            : `vs ${beta.benchmarkName}`}
       />
 
       {/* Current drawdown, with the worst one for context */}
       <KpiCard
         tile
-        label="Current Drawdown"
+        label="Current drawdown"
         icon={<TrendingDown
           className={`h-4 w-4 ${inDrawdown ? 'text-red-600' : 'text-muted-foreground'}`}
         />}
@@ -219,7 +212,7 @@ export function RiskMetricsCards({
           The per-security column on the Dividends tab is the audit. */}
       <KpiCard
         tile
-        label="Dividend Yield"
+        label="Dividend yield"
         icon={<Coins className="h-4 w-4 text-muted-foreground" />}
         value={dividend != null ? `${dividend.pct.toFixed(2)}%` : null}
         title={dividendTitle}
@@ -232,7 +225,7 @@ export function RiskMetricsCards({
           reason that reading is valid. */}
       <KpiCard
         tile
-        label="Yield on Cost"
+        label="Yield on cost"
         icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
         value={dividend?.on_cost_pct != null ? `${dividend.on_cost_pct.toFixed(2)}%` : null}
         title="Next-12-month income / cost basis"

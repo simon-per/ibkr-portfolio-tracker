@@ -31,7 +31,7 @@ const TONE_CLASS: Record<KpiTone, string> = {
  * `text-lg` below `sm`: two cards share 358px, and "CHF 48,561.36" is ~182px in `text-2xl`.
  * The hero keeps its size because it has the whole row to itself.
  */
-const VALUE_CLASS = 'text-lg font-semibold tracking-tight tabular-nums sm:text-2xl'
+const VALUE_CLASS = 'text-lg font-semibold tracking-tight tabular-nums sm:text-xl'
 const HERO_VALUE_CLASS = 'text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl'
 const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
 
@@ -84,11 +84,9 @@ export function KpiCard({
 
   if (tile) {
     return (
-      <div className={cn('flex flex-col gap-2 p-4 sm:p-5', hero && 'col-span-2', className)} title={title}>
-        <div className="flex items-center justify-between gap-2">
-          <span className={LABEL_CLASS}>{label}</span>
-          {icon && <span className="opacity-70">{icon}</span>}
-        </div>
+      // No icon in a tile: six glyphs in a row of six figures is decoration, not information.
+      <div className={cn('flex flex-col gap-1.5 p-4 sm:p-5', hero && 'col-span-2', className)} title={title}>
+        <span className={LABEL_CLASS}>{label}</span>
         {body}
       </div>
     )

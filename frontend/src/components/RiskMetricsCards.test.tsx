@@ -94,12 +94,12 @@ describe('RiskMetricsCards', () => {
     renderWith({
       beta: { beta: null, correlation: null, sampleDays: 12, minSampleDays: 20, benchmarkName: 'S&P 500' },
     })
-    expect(screen.getByText('Needs 20 flow-free days (12 so far)')).toBeTruthy()
+    expect(screen.getByText('Not enough history in this range')).toBeTruthy()
   })
 
   it('credits the benchmark and the correlation beside a beta', () => {
     renderWith()
-    expect(screen.getByText('vs S&P 500 · r 0.87')).toBeTruthy()
+    expect(screen.getByText('vs S&P 500')).toBeTruthy()
   })
 
   it('drops the correlation from the footnote when only beta resolved', () => {
@@ -152,7 +152,7 @@ describe('RiskMetricsCards', () => {
 describe('the dividend rate cards', () => {
   it('states the annual amount and the coverage beside the rate', () => {
     renderWith({}, { dividend })
-    expect(screen.getByText(/19 of 36 pay/)).toBeTruthy()
+    expect(screen.getByText(/19 of 36 holdings pay/)).toBeTruthy()
   })
 
   it('keeps rendering the other four metrics when the dividend query is still out', () => {
@@ -205,12 +205,7 @@ describe('a backend failure is stated, not silent', () => {
   it('says the backend did not respond instead of rendering nothing', () => {
     const { container } = render(<RiskMetricsCards metrics={null} isError />)
     expect(container.firstChild).not.toBeNull()
-    expect(screen.getByText(/backend didn't respond/)).toBeTruthy()
-  })
-
-  it('names what is unavailable rather than failing generically', () => {
-    render(<RiskMetricsCards metrics={null} isError />)
-    expect(screen.getByText(/Volatility, Sortino, beta, drawdown/)).toBeTruthy()
+    expect(screen.getByText(/didn't respond/)).toBeTruthy()
   })
 
   it('still renders nothing when there is simply no data yet', () => {

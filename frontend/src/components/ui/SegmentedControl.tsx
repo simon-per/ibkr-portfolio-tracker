@@ -57,7 +57,7 @@ export type SegmentedControlProps<T extends string | number> =
   | ToggleSetProps<T>
 
 const SEGMENT_CLASS =
-  'h-8 rounded px-3 text-sm font-medium transition-colors ring-offset-background ' +
+  'h-7 rounded-md px-3 text-sm font-medium transition-colors ring-offset-background ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
 
 export function SegmentedControl<T extends string | number>(props: SegmentedControlProps<T>) {
@@ -79,12 +79,19 @@ export function SegmentedControl<T extends string | number>(props: SegmentedCont
               key={String(option.value)}
               type="button"
               size="sm"
-              variant={active ? 'default' : 'outline'}
+              variant="ghost"
               aria-pressed={active}
               aria-label={option.ariaLabel}
               title={option.title}
               onClick={() => choose(option.value)}
-              className={cn(buttonClassName, option.className)}
+              className={cn(
+                'h-8 px-2.5',
+                active
+                  ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+                  : 'text-muted-foreground hover:text-foreground',
+                buttonClassName,
+                option.className,
+              )}
             >
               {option.label}
             </Button>
@@ -98,7 +105,7 @@ export function SegmentedControl<T extends string | number>(props: SegmentedCont
     <div
       role="group"
       aria-label={label}
-      className={cn('inline-flex rounded-md border border-input p-0.5', className)}
+      className={cn('inline-flex rounded-lg bg-muted p-0.5', className)}
     >
       {options.map(option => {
         const active = pressed(option.value)
@@ -112,7 +119,9 @@ export function SegmentedControl<T extends string | number>(props: SegmentedCont
             onClick={() => choose(option.value)}
             className={cn(
               SEGMENT_CLASS,
-              active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent',
+              active
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
               buttonClassName,
               option.className,
             )}

@@ -66,8 +66,7 @@ export function PerformanceMetricsCards({
     return (
       <Card>
         <CardContent className="py-8 text-center text-muted-foreground">
-          Couldn't load the performance metrics — the backend didn't respond. Annual return, drawdown, Sharpe, win rate, Calmar and concentration are
-          unavailable. It retries automatically.
+          Couldn't load the performance metrics — the server didn't respond. It retries automatically.
         </CardContent>
       </Card>
     )
@@ -78,7 +77,6 @@ export function PerformanceMetricsCards({
   }
 
   const isPositiveXIRR = metrics.xirr !== null && metrics.xirr >= 0
-  const isPositiveSharpe = metrics.sharpeRatio !== null && metrics.sharpeRatio >= 0
   const xirrUnpriced = metrics.xirrUnpriced ?? 0
   const unvalued = metrics.unvaluedPositions ?? 0
 
@@ -95,12 +93,10 @@ export function PerformanceMetricsCards({
           className="col-span-2 md:col-span-3 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
         >
           <span className="font-medium">
-            Annual Return is measured against an incomplete valuation — {xirrUnpriced}{' '}
+            Annual return is understated — {xirrUnpriced}{' '}
             {xirrUnpriced === 1 ? 'holding had' : 'holdings had'} no usable price at one end
             of this period
           </span>
-          {' '}— their purchases still count as money in, so the return and the Calmar ratio
-          understate. Check the market-data sync's warnings and the position's ticker mapping.
         </div>
       )}
 
@@ -108,7 +104,7 @@ export function PerformanceMetricsCards({
           the label follows it rather than annualising a few days of noise. */}
       <KpiCard
         tile
-        label={metrics.xirrMethod === 'simple_period' ? 'Period Return' : 'Annual Return (XIRR)'}
+        label={metrics.xirrMethod === 'simple_period' ? 'Period return' : 'Annual return'}
         // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
         // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
         // window, which 1W on a week with no trades produces — drew a red downward
@@ -129,7 +125,7 @@ export function PerformanceMetricsCards({
 
       <KpiCard
         tile
-        label="Max Drawdown"
+        label="Max drawdown"
         icon={<TrendingDown className="h-4 w-4 text-red-600" />}
         value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
         tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
@@ -140,10 +136,9 @@ export function PerformanceMetricsCards({
 
       <KpiCard
         tile
-        label="Sharpe Ratio"
+        label="Sharpe ratio"
         icon={<Activity className="h-4 w-4 text-muted-foreground" />}
         value={metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : null}
-        tone={metrics.sharpeRatio === null ? 'muted' : isPositiveSharpe ? 'positive' : 'negative'}
         // Says which of the two absences it is, the way the Volatility and Sortino
         // cards do — the range is too short far more often than the market is flat.
         sub={metrics.sharpeRatio !== null ? undefined : 'Not enough history in this range'}
@@ -151,7 +146,7 @@ export function PerformanceMetricsCards({
 
       <KpiCard
         tile
-        label="Win Rate"
+        label="Win rate"
         icon={<Target className="h-4 w-4 text-muted-foreground" />}
         value={metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : null}
         // The excluded count belongs beside the ratio, not only in the alert above: a
@@ -159,30 +154,22 @@ export function PerformanceMetricsCards({
         // figure while looking like an ordinary loser.
         sub={metrics.winRate === null
           ? 'No priced positions'
-          : `${metrics.profitablePositions} of ${metrics.totalPositions} profitable` +
-            (unvalued > 0 ? ` · ${unvalued} unpriced, not judged` : '')}
+          : `${metrics.profitablePositions} of ${metrics.totalPositions} in profit` +
+            (unvalued > 0 ? ` · ${unvalued} unpriced` : '')}
       />
 
       <KpiCard
         tile
-        label="Calmar Ratio"
+        label="Calmar ratio"
         icon={<Shield className="h-4 w-4 text-muted-foreground" />}
         value={metrics.calmarRatio !== null ? metrics.calmarRatio.toFixed(2) : null}
-        tone={metrics.calmarRatio === null ? 'muted'
-          : metrics.calmarRatio >= 1 ? 'positive'
-          : metrics.calmarRatio >= 0 ? 'warning'
-          : 'negative'}
       />
 
       <KpiCard
         tile
-        label="Top 5 Weight"
+        label="Top 5 weight"
         icon={<PieChart className="h-4 w-4 text-muted-foreground" />}
         value={metrics.top5Weight !== null ? `${metrics.top5Weight.toFixed(1)}%` : null}
-        tone={metrics.top5Weight === null ? 'muted'
-          : metrics.top5Weight > 70 ? 'negative'
-          : metrics.top5Weight > 50 ? 'warning'
-          : 'positive'}
         sub={metrics.top5Weight === null
           // Both figures are absent on the same condition — nothing priced — so say that
           // rather than leaving a bare "Concentration risk" under a dash.

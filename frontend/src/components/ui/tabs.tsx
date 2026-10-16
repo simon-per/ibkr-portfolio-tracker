@@ -113,11 +113,8 @@ export function TabsList({ children, className, label = 'Sections' }: TabsListPr
       // scroller silently got an inline-flex one. That is why the Dashboard strip
       // used to be forced into `grid`.
       //
-      // `min-h-10` rather than `h-10`: at >=sm the triggers plus `p-1` come to exactly
-      // 40px, so desktop is unchanged, but a mobile consumer can raise the triggers to
-      // a real touch target without being clipped by a fixed height.
       className={cn(
-        'inline-flex min-h-10 items-center justify-center rounded-lg bg-muted/70 p-1 text-muted-foreground',
+        'flex items-stretch gap-1 text-muted-foreground sm:gap-6',
         className,
       )}
     >
@@ -147,13 +144,14 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
       // Roving tabIndex: the list is one tab stop and arrows move within it.
       tabIndex={isActive ? 0 : -1}
       onClick={() => setValue(value)}
-      // `min-h-11` (44px) below `sm` only: the trigger is ~30px tall, under any touch
-      // guideline, and `sm:min-h-0` leaves the desktop strip at exactly today's 32px.
-      // `shrink-0` keeps the pills at their label width inside the mobile scroller;
-      // it is inert in the desktop grid.
+      // `min-h-11` is the 44px touch target; `shrink-0` keeps each label whole inside the
+      // phone's horizontal scroller.
+      // An underline nav: the active section is marked by a primary rule along the strip's
+      // bottom edge rather than a raised pill, which is what keeps nine sections calm.
       className={cn(
-        'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 sm:min-h-0',
-        isActive ? 'bg-card text-foreground shadow-sm' : 'hover:text-foreground',
+        'relative inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:min-h-12 sm:px-0',
+        'after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:transition-colors',
+        isActive ? 'text-foreground after:bg-primary' : 'hover:text-foreground after:bg-transparent',
         className,
       )}
     >
@@ -184,7 +182,7 @@ export function TabsContent({ value, children, className, forceMount }: TabsCont
       // which is what makes a keyboard-only pass through the app read in order.
       tabIndex={isActive ? 0 : -1}
       hidden={forceMount && !isActive}
-      className={`mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${className || ''} ${forceMount && !isActive ? 'hidden' : ''}`}
+      className={`ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${className || ''} ${forceMount && !isActive ? 'hidden' : ''}`}
     >
       {children}
     </div>

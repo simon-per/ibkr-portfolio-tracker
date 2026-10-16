@@ -60,8 +60,8 @@ describe('PerformanceMetricsCards', () => {
 
   it('labels a short window a period return instead of annualizing it', () => {
     renderWith({ xirrMethod: 'simple_period' })
-    expect(screen.getByText('Period Return')).toBeTruthy()
-    expect(screen.queryByText('Annual Return (XIRR)')).toBeNull()
+    expect(screen.getByText('Period return')).toBeTruthy()
+    expect(screen.queryByText('Annual return')).toBeNull()
   })
 
   it('shows a dash, never a zero, for an unresolved return', () => {
@@ -107,7 +107,7 @@ describe('an incomplete valuation is stated, not absorbed', () => {
     expect(alert.textContent).toMatch(/2 holdings had no usable price/)
     // The caveat sits outside the cards, in the row's own flow: a qualifier you have to
     // open or hover something to reach does not exist on a touch device.
-    expect(alert.textContent).toMatch(/Calmar/)
+    expect(alert.textContent).toMatch(/Annual return is understated/)
   })
 
   it('says nothing when the valuation was complete', () => {
@@ -120,7 +120,7 @@ describe('an incomplete valuation is stated, not absorbed', () => {
     // 0.00 and so carries a gain of -cost, which used to make it an ordinary-looking
     // loser. Three of them did exactly that for hours on 2026-08-07.
     renderWith({ winRate: 100, profitablePositions: 36, totalPositions: 36, unvaluedPositions: 3 })
-    expect(screen.getByText('36 of 36 profitable · 3 unpriced, not judged')).toBeTruthy()
+    expect(screen.getByText('36 of 36 in profit · 3 unpriced')).toBeTruthy()
   })
 
   it('has no win rate at all when nothing could be valued', () => {
@@ -143,7 +143,7 @@ describe('a backend failure is stated, not silent', () => {
   it('says the backend did not respond instead of rendering nothing', () => {
     const { container } = render(<PerformanceMetricsCards metrics={null} isError />)
     expect(container.firstChild).not.toBeNull()
-    expect(screen.getByText(/backend didn't respond/)).toBeTruthy()
+    expect(screen.getByText(/didn't respond/)).toBeTruthy()
   })
 
   it('still renders nothing when there is simply no data yet', () => {

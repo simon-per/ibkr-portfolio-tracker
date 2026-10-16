@@ -80,7 +80,7 @@ describe('KpiCard', () => {
     // columns, so it keeps the large size.
     const { unmount } = render(<KpiCard label="Cost Basis" value="CHF 48,561" />)
     expect(screen.getByText('CHF 48,561').className).toContain('text-lg')
-    expect(screen.getByText('CHF 48,561').className).toContain('sm:text-2xl')
+    expect(screen.getByText('CHF 48,561').className).toContain('sm:text-xl')
     unmount()
 
     render(<KpiCard hero label="Market Value" value="CHF 65,024" />)

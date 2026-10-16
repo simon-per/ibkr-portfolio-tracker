@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import {
-  LineChart,
+  ComposedChart,
+  Area,
   Line,
   XAxis,
   YAxis,
@@ -20,10 +21,12 @@ import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 
 /**
  * One height for the chart and its three placeholder states, so a range switch or a
- * fetch failure cannot make the page jump. 600px was the only value at every width,
- * which is 71% of an 844px phone screen.
+ * fetch failure cannot make the page jump.
  */
-const CHART_BOX = 'h-[280px] sm:h-[420px] lg:h-[600px]'
+const CHART_BOX = 'h-[260px] sm:h-[340px] lg:h-[400px]'
+
+/** The value series' blue, which the area's gradient is drawn from. */
+const VALUE_COLOR = '#3b82f6'
 
 /**
  * How far below zero the Y axis may extend, in the **base currency** (EUR/CHF/USD — the
@@ -117,7 +120,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       // read against; cash and profit take the two secondary hues. Hex rather than CSS
       // variables because the legend chips derive an alpha background from the string.
       { ...baseline, color: '#94a3b8', show: showBaseline, toggle: () => setShowBaseline(v => !v) },
-      { ...value, color: '#3b82f6', show: showValue, toggle: () => setShowValue(v => !v) },
+      { ...value, color: VALUE_COLOR, show: showValue, toggle: () => setShowValue(v => !v) },
       ...(cashTracked
         ? [{ key: 'cash_eur', name: 'Cash', color: '#14b8a6', show: showCash, toggle: () => setShowCash(v => !v) }]
         : []),
@@ -316,7 +319,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       {(incomplete.days > 0 || understatedCount > 0 || profitAnchorUnpriced) && (
         <div
           role="alert"
-          className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+          className="mx-2 rounded-lg border border-yellow-600/40 sm:mx-0 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
         >
           {incomplete.days > 0 && (
             <>
@@ -325,9 +328,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
                 be fully valued
               </span>{' '}
               — up to {incomplete.worst} {incomplete.worst === 1 ? 'holding' : 'holdings'} had no
-              usable price{incomplete.from ? `, from ${incomplete.from}` : ''}. Market value and
-              profit are understated on those days by the whole value of the missing holdings, so
-              the dip is a gap in the price data rather than a loss. Risk metrics skip them.
+              usable price{incomplete.from ? `, from ${incomplete.from}` : ''}, so the dip is
+              missing data rather than a loss.
             </>
           )}
           {understatedCount > 0 && (
@@ -338,8 +340,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
                 {understatedCount === 1 ? 'line starts' : 'lines start'} from a day the
                 portfolio could not be fully valued
               </span>
-              , so {understatedCount === 1 ? 'it is' : 'they are'} understated for the whole
-              range, not only that day.
+              , so {understatedCount === 1 ? 'it is' : 'they are'} understated for the whole range.
             </>
           )}
           {profitAnchorUnpriced && (
@@ -348,26 +349,25 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
               <span className="font-medium">
                 The Profit/Loss line starts from a day the portfolio could not be fully valued
               </span>
-              , so it is overstated for the whole range, not only that day.
+              , so it is overstated for the whole range.
             </>
           )}
         </div>
       )}
 
-      {/* Toggle Buttons. Already wrapping; the min-height is the touch target. */}
-      <div className="flex gap-2 flex-wrap items-center sm:gap-3 [&>button]:min-h-11 sm:[&>button]:min-h-0">
-        <span className="text-sm text-muted-foreground">Show:</span>
+      {/* Series toggles. The min-height is the phone's touch target. */}
+      <div className="flex flex-wrap items-center gap-1.5 px-2 sm:px-0 [&>button]:min-h-9 sm:[&>button]:min-h-0">
         {series.map(s => (
           <button
             key={s.key}
             onClick={s.toggle}
-            className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
-              s.show ? 'font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            aria-pressed={s.show}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+              s.show ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
-            style={s.show ? { backgroundColor: `${s.color}1a`, color: s.color } : undefined}
           >
-            <div
-              className="w-2.5 h-2.5 rounded-full"
+            <span
+              className="h-2 w-2 rounded-full"
               style={{ backgroundColor: s.show ? s.color : 'hsl(var(--muted-foreground) / 0.3)' }}
             />
             {s.name}
@@ -377,14 +377,12 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
           <button
             key={b.key}
             onClick={() => toggleBenchmark(b.key)}
-            className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-md transition-all ${
-              visibleBenchmarks.has(b.key)
-                ? `font-medium`
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            aria-pressed={visibleBenchmarks.has(b.key)}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+              visibleBenchmarks.has(b.key) ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
-            style={visibleBenchmarks.has(b.key) ? { backgroundColor: `${b.color}15`, color: b.color } : undefined}
           >
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: visibleBenchmarks.has(b.key) ? b.color : 'hsl(var(--muted-foreground) / 0.3)' }} />
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: visibleBenchmarks.has(b.key) ? b.color : 'hsl(var(--muted-foreground) / 0.3)' }} />
             {b.name}
           </button>
         ))}
@@ -396,11 +394,20 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       <ResponsiveContainer width="100%" height="100%">
         {/* `left: 20` double-padded a chart that already has a Y axis — 20px of a
             324px card. */}
-        <LineChart data={chartData} margin={{ top: 5, right: isCompact ? 8 : 30, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <ComposedChart data={chartData} margin={{ top: 8, right: isCompact ? 8 : 16, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="portfolio-value-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={VALUE_COLOR} stopOpacity={0.22} />
+              <stop offset="100%" stopColor={VALUE_COLOR} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
           <XAxis
             dataKey="date"
             className="text-xs"
+            axisLine={false}
+            tickLine={false}
+            tickMargin={8}
             tick={{ fill: 'hsl(var(--muted-foreground))' }}
             ticks={xAxis.ticks}
             tickFormatter={xAxis.tickFormatter}
@@ -409,6 +416,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
           />
           <YAxis
             className="text-xs"
+            axisLine={false}
+            tickLine={false}
             tick={{ fill: 'hsl(var(--muted-foreground))' }}
             tickFormatter={formatYAxisTick}
             domain={yAxisConfig.domain}
@@ -424,18 +433,33 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
             formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
           />
           {series.map(s =>
-            s.show ? (
+            !s.show ? null
+            : s.color === VALUE_COLOR ? (
+              // The headline series is the one area, filled down to the axis; every other
+              // series is a plain line read against it.
+              <Area
+                key={s.key}
+                type="monotone"
+                dataKey={s.key}
+                stroke={s.color}
+                strokeWidth={2.25}
+                fill="url(#portfolio-value-fill)"
+                name={s.name}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0 }}
+              />
+            ) : (
               <Line
                 key={s.key}
                 type="monotone"
                 dataKey={s.key}
                 stroke={s.color}
-                strokeWidth={2}
+                strokeWidth={1.75}
                 name={s.name}
                 dot={false}
-                activeDot={{ r: 6 }}
+                activeDot={{ r: 4, strokeWidth: 0 }}
               />
-            ) : null
+            )
           )}
           {availableBenchmarks.map(b =>
             visibleBenchmarks.has(b.key) ? (
@@ -444,16 +468,16 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
                 type="monotone"
                 dataKey={`bench_${b.key}`}
                 stroke={b.color}
-                strokeWidth={2}
+                strokeWidth={1.75}
                 strokeDasharray="5 5"
                 name={b.name}
                 dot={false}
-                activeDot={{ r: 6 }}
+                activeDot={{ r: 4, strokeWidth: 0 }}
                 connectNulls
               />
             ) : null
           )}
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
       </div>
     </div>

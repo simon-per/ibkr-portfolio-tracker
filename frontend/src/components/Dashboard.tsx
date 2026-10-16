@@ -3,14 +3,13 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { api } from '@/lib/api'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LazyTabPanel } from '@/components/ui/LazyTabPanel'
 import { PortfolioValueChart } from './PortfolioValueChart'
-import { PortfolioSummaryCards } from './PortfolioSummaryCards'
+import { PortfolioHero } from './PortfolioHero'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { PerformanceMetricsCards } from './PerformanceMetricsCards'
 import { RiskMetricsCards } from './RiskMetricsCards'
-import { ContributionsStrip } from './ContributionsStrip'
 import { PositionsList } from './PositionsList'
 import { PerformanceAttribution } from './PerformanceAttribution'
 import { MonthlyReturnsHeatmap } from './MonthlyReturnsHeatmap'
@@ -45,7 +44,6 @@ import { AppFooter } from './AppFooter'
 import { SyncStatusMessage } from './SyncStatusMessage'
 import { BenchmarkPicker } from './BenchmarkPicker'
 import { benchmarkColor } from '@/lib/benchmarkColors'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
 import {
   MIN_PAIRED_RETURNS,
   annualizedVolatilityPct,
@@ -63,7 +61,7 @@ import {
 import { rangeFor, TIME_RANGES, type TimeRange } from '@/lib/dateRanges'
 import { readStored, writeStored } from '@/lib/storage'
 import { formatShortDateTime } from '@/lib/utils'
-import { RefreshCw, Download, Clock } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 
 const BENCHMARKS_KEY = 'selectedBenchmarks'
 
@@ -95,9 +93,6 @@ export function readSelectedBenchmarks(): string[] {
 
 export function Dashboard() {
   const queryClient = useQueryClient()
-  // The currency controls themselves live in the shared AppHeader.
-  const formatCurrency = useFormatCurrency()
-  const signedCurrency = (n: number) => `${n >= 0 ? '+' : ''}${formatCurrency(n)}`
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
 
@@ -358,31 +353,19 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    // The Tabs element is the page, so the section strip can sit directly under the header
+    // at full width while the panels stay in the centred column below it.
+    <Tabs defaultValue="performance" className="min-h-screen bg-background">
       {/* Header — shared with the crypto view; this view fills its three slots. */}
       <AppHeader
         status={
           <>
-            {schedulerStatus && schedulerStatus.status === 'running' && (
-              // Short timestamps at every width, not short only on phones: two full
-              // toLocaleString() values are ~50 characters each, and "8/2/26, 8:00 AM"
-              // answers "did the sync run" just as well on a desktop. One format,
-              // nothing to drift.
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-                <Clock className="h-3 w-3 shrink-0" />
-                {schedulerStatus.last_sync ? (
-                  <span>
-                    Last sync: {formatShortDateTime(schedulerStatus.last_sync.timestamp)} ({schedulerStatus.last_sync.status})
-                  </span>
-                ) : (
-                  <span>No sync has run yet</span>
-                )}
-                {schedulerStatus.jobs.length > 0 && schedulerStatus.jobs[0].next_run_time && (
-                  <span>
-                    · Next: {formatShortDateTime(schedulerStatus.jobs[0].next_run_time)}
-                  </span>
-                )}
-              </div>
+            {/* When the data was last refreshed. A skipped run found nothing new, so it
+                counts as fresh; the failure case is spelled out just below. */}
+            {schedulerStatus?.last_sync && (
+              <p className="text-xs text-muted-foreground">
+                Updated {formatShortDateTime(schedulerStatus.last_sync.timestamp)}
+              </p>
             )}
             {/* A bare "(error)" isn't actionable — show what actually went wrong. */}
             {schedulerStatus?.last_sync?.status === 'error' && schedulerStatus.last_sync.message && (
@@ -419,17 +402,16 @@ export function Dashboard() {
             <Button
               onClick={handleSync}
               disabled={syncMutation.isPending}
-              variant="outline"
-              className="px-3 sm:px-4"
+              className="h-9 px-3 sm:px-4"
               aria-label={syncMutation.isPending ? 'Syncing IBKR data' : 'Sync IBKR data'}
             >
               {syncMutation.isPending ? (
                 <RefreshCw className="h-4 w-4 animate-spin sm:mr-2" />
               ) : (
-                <Download className="h-4 w-4 sm:mr-2" />
+                <RefreshCw className="h-4 w-4 sm:mr-2" />
               )}
               <span className="hidden sm:inline">
-                {syncMutation.isPending ? 'Syncing...' : 'Sync IBKR Data'}
+                {syncMutation.isPending ? 'Syncing…' : 'Sync'}
               </span>
             </Button>
           </>
@@ -448,70 +430,76 @@ export function Dashboard() {
         }
       />
 
-      {/* Main Content. Constrained and centred: at 1440px and wider a full-bleed grid of
-          KPI cards reads as a spreadsheet, and every reference app constrains its content. */}
-      <div className="mx-auto w-full max-w-[1400px] px-4 py-4 sm:px-6 sm:py-6">
-        <Tabs defaultValue="performance" className="space-y-6 sm:space-y-8">
-          {/* Sticky and full-bleed below `sm`, exactly today's eight-column grid above
-              it.
+      {/* Sticky at every width: it is the one control used constantly, and a 3,000px panel
+          scrolls under it. On a phone the strip scrolls sideways and the half-cut next
+          label is the "there is more" cue. `justify-start` matters: a centred flex row
+          wider than its scroller overflows on both sides, and the leading overflow is
+          unreachable. */}
+      <div className="sticky top-0 z-30 border-b border-border/70 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+        <TabsList
+          label="Portfolio sections"
+          className="mx-auto w-full max-w-[1400px] justify-start overflow-x-auto px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
+        >
+          {/* Most-used first, left to right — the owner's order (2026-09-13). */}
+          <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="dividends">Dividends</TabsTrigger>
+          <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
+          <TabsTrigger value="allocation">Allocation</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="fundamentals">Fundamentals</TabsTrigger>
+          <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
+          <TabsTrigger value="tax">Tax</TabsTrigger>
+          <TabsTrigger value="forecast">Forecast</TabsTrigger>
+        </TabsList>
+      </div>
 
-              Eight sections do not fit in 358px — each cell was ~53px while the
-              triggers are whitespace-nowrap, so the labels overlapped into a smear —
-              so the strip scrolls. It runs to the screen edge (`-mx-4` here, the gutter
-              restored as `px-4` *inside* the scroller) so the next pill is visibly
-              half-cut: that is the "there is more" cue, and unlike an edge fade it
-              cannot lie about which end still has content. It stays put while a
-              3,000px panel scrolls under it because it is the one control used
-              constantly on a phone.
-
-              `p-0` before `px-4 py-2` so tailwind-merge drops TabsList's base `p-1`
-              outright rather than the result depending on Tailwind's emit order. */}
-          <div className="sticky top-0 z-30 -mx-4 border-b bg-background sm:static sm:mx-0 sm:border-0 sm:bg-transparent">
-            <TabsList
-              label="Portfolio sections"
-              // `justify-start` matters and is not cosmetic: TabsList's base is
-              // `justify-center`, and a centred flex row wider than its scroller
-              // overflows equally on BOTH sides — the leading overflow is unreachable
-              // because scrollLeft cannot go negative. With eight tabs in 358px that
-              // put "Performance" ~150px off the left edge, permanently untappable.
-              className="flex w-full justify-start gap-1 overflow-x-auto rounded-none p-0 px-4 py-2 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:max-w-4xl sm:auto-cols-fr sm:grid-flow-col sm:gap-0 sm:rounded-md sm:p-1"
-            >
-              {/* Most-used first, left to right — the owner's order (2026-09-13). The phone
-                  strip scrolls, so what sits leftmost is what is reachable without a swipe. */}
-              <TabsTrigger value="performance">Performance</TabsTrigger>
-              <TabsTrigger value="dividends">Dividends</TabsTrigger>
-              <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
-              <TabsTrigger value="allocation">Allocation</TabsTrigger>
-              <TabsTrigger value="activity">Activity</TabsTrigger>
-              <TabsTrigger value="fundamentals">Fundamentals</TabsTrigger>
-              <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
-              <TabsTrigger value="tax">Tax</TabsTrigger>
-              <TabsTrigger value="forecast">Forecast</TabsTrigger>
-            </TabsList>
-          </div>
-
-          {/* Performance Tab */}
-          <TabsContent value="performance" className="space-y-8">
-            {/* Summary Cards */}
-            <PortfolioSummaryCards
+      {/* Constrained and centred: at 1440px and wider a full-bleed grid reads as a
+          spreadsheet, and every reference app constrains its content. */}
+      <div className="mx-auto w-full max-w-[1400px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
+          {/* Performance Tab */}          {/* Performance Tab */}
+          <TabsContent value="performance" className="mt-0 space-y-6">
+            {/* The headline, the range's gain, the chart and what the headline is made of. */}
+            <PortfolioHero
               summary={summary}
               isLoading={summaryLoading}
               isError={summaryError}
-              periodChangePct={performanceMetrics?.percentageChange ?? null}
-              periodLabel={selectedRange}
-            />
+              period={performanceMetrics}
+              range={selectedRange}
+              controls={
+                <div className="flex min-w-0 items-center gap-2">
+                  {/* `min-w-0` is load-bearing: without it this flex child refuses to
+                      shrink below its content width and overflows the card. All nine
+                      ranges stay reachable by scrolling sideways on a phone. */}
+                  <SegmentedControl
+                    label="Time range"
+                    variant="buttons"
+                    value={selectedRange}
+                    onChange={setSelectedRange}
+                    options={TIME_RANGES.map((r) => ({ value: r, label: r }))}
+                    className="min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-none"
+                    buttonClassName="shrink-0"
+                  />
+                  <BenchmarkPicker
+                    selected={selectedBenchmarks}
+                    onChange={handleBenchmarkChange}
+                  />
+                </div>
+              }
+            >
+              <PortfolioValueChart
+                data={valueOverTime || []}
+                benchmarks={benchmarkDatasets}
+                isLoading={chartLoading}
+                isError={chartError}
+              />
+            </PortfolioHero>
 
-            {/* Performance Metrics - Time-Filtered KPIs */}
+            {/* Return and risk, over the selected range. */}
             <PerformanceMetricsCards
               metrics={kpiMetrics}
               isLoading={chartLoading || positionsLoading || xirrLoading}
               isError={chartError || positionsError}
             />
-
-            {/* Risk Metrics — the denominators the row above divides by, plus the two
-                dividend rates. `isLoading` deliberately excludes the dividend query:
-                gating this row on it would hide four already-computed metrics behind a
-                third request, and the two cards state their own absence instead. */}
             <RiskMetricsCards
               metrics={riskMetrics}
               dividend={dividendBreakdown?.forward_yield}
@@ -519,107 +507,6 @@ export function Dashboard() {
               isLoading={chartLoading || positionsLoading}
               isError={chartError || positionsError}
             />
-
-            {/* Portfolio Value Chart */}
-            <Card>
-              <CardHeader>
-                {/* Stacks below `sm`. Nine range buttons come to ~465px and the
-                    benchmark picker another 40 — against ~324px of card interior at
-                    390px, which is what put the whole page into horizontal scroll. */}
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                  <div className="min-w-0">
-                    <CardTitle>Portfolio Value Over Time</CardTitle>
-                  </div>
-                  <div className="flex min-w-0 items-center gap-2">
-                    {/* `min-w-0` is load-bearing: without it this flex child refuses to
-                        shrink below its content width and overflows the card whatever
-                        `overflow-x-auto` says. All nine ranges stay reachable — a
-                        shortened mobile set would need a second control *and* a second
-                        copy of TIME_RANGES. Snap points because the pills are
-                        near-uniform width; the tab strip deliberately does not snap,
-                        because its labels are not. */}
-                    <div className="flex min-w-0 flex-1 snap-x snap-mandatory gap-1 overflow-x-auto scroll-px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-none sm:snap-none sm:overflow-visible">
-                      {TIME_RANGES.map((range) => (
-                        <Button
-                          key={range}
-                          variant={selectedRange === range ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSelectedRange(range)}
-                          className="shrink-0 snap-start"
-                        >
-                          {range}
-                        </Button>
-                      ))}
-                    </div>
-                    <BenchmarkPicker
-                      selected={selectedBenchmarks}
-                      onChange={handleBenchmarkChange}
-                    />
-                  </div>
-                </div>
-                {/* Period metrics on the left, average money added on the right — the
-                    contributions strip lives here rather than in a card of its own, and
-                    sits outside the performanceMetrics guard so it survives without them. */}
-                <div className="mt-4 flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
-                {performanceMetrics && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-6 text-sm">
-                      {/* Wraps: label + currency + percent fits at 390px in EUR but not
-                          with "CHF 12,345.67", and the three are one unbreakable run. */}
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span
-                          className="text-muted-foreground"
-                          title="Holdings value change, incl. money added"
-                        >
-                          Value change:
-                        </span>
-                        <span className={`font-semibold ${performanceMetrics.absoluteChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {signedCurrency(performanceMetrics.absoluteChange)}
-                        </span>
-                        {/* Absent, not `(+0.00%)`, when nothing was held at the range start:
-                            a percentage of zero is undefined, and the figure beside it
-                            already says what changed. */}
-                        {performanceMetrics.percentageChange !== null && (
-                          <span className={`font-semibold ${performanceMetrics.percentageChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            ({performanceMetrics.percentageChange >= 0 ? '+' : ''}{performanceMetrics.percentageChange.toFixed(2)}%)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6 text-sm">
-                      {/* Wraps: label + currency + percent fits at 390px in EUR but not
-                          with "CHF 12,345.67", and the three are one unbreakable run. */}
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span
-                          className="text-muted-foreground"
-                          title="Value change less net money in"
-                        >
-                          Period Gain:
-                        </span>
-                        <span className={`font-semibold ${performanceMetrics.periodGain >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                          {signedCurrency(performanceMetrics.periodGain)}
-                        </span>
-                        {performanceMetrics.periodGainPercent !== null && (
-                          <span className={`font-semibold ${performanceMetrics.periodGainPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            ({performanceMetrics.periodGainPercent >= 0 ? '+' : ''}{performanceMetrics.periodGainPercent.toFixed(2)}%)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                  <ContributionsStrip data={contributions} isLoading={contributionsLoading} isError={contributionsError} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <PortfolioValueChart
-                  data={valueOverTime || []}
-                  benchmarks={benchmarkDatasets}
-                  isLoading={chartLoading}
-                  isError={chartError}
-                />
-              </CardContent>
-            </Card>
 
             {/* Monthly Returns Heatmap. `rangeStart` is what lets it badge a year or month
                 the selected range only partly covers — on 1Y, last year's "YTD" is
@@ -692,10 +579,9 @@ export function Dashboard() {
           <TabsContent value="tax">
             <LazyTabPanel label="Tax"><TaxTab /></LazyTabPanel>
           </TabsContent>
-        </Tabs>
       </div>
 
       <AppFooter />
-    </div>
+    </Tabs>
   )
 }
