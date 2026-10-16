@@ -132,7 +132,15 @@ export function PortfolioHero({
       <div className="px-2 pb-2 sm:px-4">{children}</div>
 
       {summary && (
-        <dl className="grid grid-cols-2 gap-px border-t border-border/70 bg-border/60 sm:grid-cols-3 lg:grid-cols-5 [&>div]:bg-card">
+        // Two columns until there is room for all of them in one row; an odd last cell
+        // spans the pair rather than leaving a blank tile beside it.
+        <dl
+          className={cn(
+            'grid grid-cols-2 gap-px border-t border-border/70 bg-border/60 [&>div]:bg-card',
+            '[&>div:last-child:nth-child(odd)]:col-span-2 md:[&>div:last-child:nth-child(odd)]:col-span-1',
+            hasCash ? 'md:grid-cols-5' : 'md:grid-cols-4',
+          )}
+        >
           <Stat label="Cost basis" value={formatCurrency(summary.total_cost_basis_eur)} />
           <Stat
             label="Unrealized gain"
