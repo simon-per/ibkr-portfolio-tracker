@@ -82,7 +82,7 @@ export function DividendYearComparison({
                     reminder of the DA-1 threshold, not a tax figure. */}
                 {withholding(row) > 0 && (
                   <span className="block text-[10px] font-normal leading-tight text-muted-foreground">
-                    WHT {amount(withholding(row))}
+                    tax {amount(withholding(row))}
                   </span>
                 )}
               </span>

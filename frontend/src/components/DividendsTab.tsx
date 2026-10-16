@@ -26,36 +26,16 @@ import { DividendWithholdingControl } from './DividendWithholdingControl'
 import { cn } from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { displayName } from '@/lib/securityName'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
 
-function SourceBadge({ row }: { row: DividendSecurityRow }) {
-  if (row.payouts === 0 && row.forecast_payouts > 0) {
-    return (
-      <span
-        className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-200"
-        title="Projected only"
-      >
-        Forecast
-      </span>
-    )
-  }
-  if (row.source === 'ibkr') {
-    return (
-      <span
-        className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800 dark:bg-teal-950/60 dark:text-teal-200"
-        title="IBKR cash"
-      >
-        IBKR
-      </span>
-    )
-  }
-  return (
-    <span
-      className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200"
-      title={row.source === 'mixed' ? 'IBKR and Yahoo' : 'Yahoo estimate'}
-    >
-      {row.source === 'mixed' ? 'Mixed' : 'Est.'}
-    </span>
-  )
+/**
+ * The one provenance mark the owner keeps (2026-10-14): `est.` on a row whose income is
+ * projected or estimated rather than paid by the broker. Which source it came from is not
+ * the reader's business.
+ */
+function isEstimated(row: DividendSecurityRow): boolean {
+  return (row.payouts === 0 && row.forecast_payouts > 0) || (row.source !== 'ibkr' && row.source !== 'mixed')
 }
 
 /**
@@ -76,33 +56,44 @@ function dividendColumns(deps: {
     {
       key: 'symbol',
       sortKey: 'symbol',
-      header: 'Symbol',
+      header: 'Position',
       shortHeader: 'Symbol',
       mobile: 'title',
-      cellClassName: 'font-medium',
-      cell: (row) => (
-        <>
-          {row.symbol}
-          {duplicated.has(row.symbol) && row.exchange && (
-            <span className="ml-1 text-xs font-normal text-muted-foreground">{row.exchange}</span>
-          )}
-        </>
-      ),
+      cell: (row, view) => {
+        const exchange = duplicated.has(row.symbol) && row.exchange ? row.exchange : null
+        const est = isEstimated(row) ? (
+          <span className="ml-1.5 text-xs font-normal text-muted-foreground">est.</span>
+        ) : null
+        return view === 'table' ? (
+          <div className="flex items-center gap-3">
+            <TickerAvatar symbol={row.symbol} className="h-8 w-8 text-[10px]" />
+            <div className="min-w-0">
+              <div className="max-w-[15rem] truncate font-medium" title={row.description}>
+                {displayName(row.description) || row.symbol}
+                {est}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {row.symbol}
+                {exchange && ` · ${exchange}`}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {row.symbol}
+            {exchange && <span className="ml-1 text-xs font-normal text-muted-foreground">{exchange}</span>}
+            {est}
+          </>
+        )
+      },
     },
     {
       key: 'description',
-      header: 'Description',
-      shortHeader: 'Description',
+      header: 'Name',
+      shortHeader: 'Name',
       mobile: 'meta',
-      cellClassName: 'max-w-[14rem] truncate text-muted-foreground',
-      cell: (row) => row.description,
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      shortHeader: 'Source',
-      mobile: 'badge',
-      cell: (row) => <SourceBadge row={row} />,
+      desktop: 'hide',
+      cell: (row) => displayName(row.description),
     },
     {
       key: 'net',

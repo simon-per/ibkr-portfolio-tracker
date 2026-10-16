@@ -12,6 +12,7 @@ import { RebalanceCard } from './RebalanceCard'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { allocationSectorPaint, neutralPaint, type SectorPaint } from '@/lib/sectorColors'
+import { displayName } from '@/lib/securityName'
 
 /**
  * Sector colours now come from `lib/sectorColors.ts`, shared with the Look-through treemap so
@@ -181,7 +182,7 @@ function drillDownColumns(deps: {
       shortHeader: 'Description',
       mobile: 'meta',
       cellClassName: 'text-muted-foreground max-w-[200px] truncate',
-      cell: (pos) => pos.description,
+      cell: (pos) => displayName(pos.description),
     },
     {
       key: 'value',

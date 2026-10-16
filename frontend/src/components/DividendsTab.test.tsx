@@ -99,7 +99,7 @@ describe('Dividend chart controls', () => {
     mount()
 
     const trigger = await screen.findByRole('button', { name: 'Edit forecast withholding' })
-    expect(trigger.textContent).toBe('WHT 15%')
+    expect(trigger.textContent).toBe('Tax 15%')
     await user.click(trigger)
     const input = screen.getByLabelText('Withholding percentage')
     await user.clear(input)
@@ -110,7 +110,7 @@ describe('Dividend chart controls', () => {
     await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(1))
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Edit forecast withholding' }).textContent)
-        .toBe('WHT 26.375%'),
+        .toBe('Tax 26.375%'),
     )
   })
 
@@ -214,8 +214,8 @@ describe('Dividend chart controls', () => {
     await screen.findByText(/Received/)
 
     const withForecast = screen.getByLabelText('Dividend income growth').textContent!
-    expect(withForecast).toContain('Jan 26')
-    expect(withForecast).toContain('Feb 26')   // the open window is the endpoint
+    // The open window is the endpoint, so the rate rests on a projection.
+    expect(withForecast).toContain('per month')
     expect(withForecast).toContain('est.')
 
     await user.click(screen.getByRole('button', { name: 'Toggle forecast overlay' }))
@@ -271,7 +271,7 @@ describe('Dividend chart controls', () => {
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
     mount()
     const annual = (await screen.findByText('Per year')).parentElement!
-    expect(within(annual).getByText(/WHT .*15\.00/)).toBeTruthy()
+    expect(within(annual).getByText(/tax .*15\.00/)).toBeTruthy()
   })
 
   it('shows unavailable TTM rather than zero for short or future history', async () => {
@@ -490,7 +490,8 @@ describe('The per-position table', () => {
   const bodyOrder = () => {
     const table = screen.getByRole('table')
     return within(table).getAllByRole('row').slice(1)
-      .map((r) => within(r).getAllByRole('cell')[0].textContent)
+      // The ticker line under the name; the cell also carries the monogram and the name.
+      .map((r) => within(r).getAllByRole('cell')[0].querySelector('.text-xs')?.textContent)
   }
 
   it('sorts by a column, with a payer that has no growth last either way', async () => {

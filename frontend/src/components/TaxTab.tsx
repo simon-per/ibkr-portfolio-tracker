@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { displayName } from '@/lib/securityName'
 
 /**
  * Only the first-paint fallback for the year picker. The real floor is the year of the
@@ -90,7 +91,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Description',
     mobile: 'meta',
     cellClassName: 'max-w-[240px] truncate text-muted-foreground',
-    cell: (d) => d.description ?? '—',
+    cell: (d) => (d.description ? displayName(d.description) : '—'),
   },
   {
     key: 'pay_date',

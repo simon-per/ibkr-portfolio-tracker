@@ -15,6 +15,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
+import { displayName } from '@/lib/securityName'
 
 interface PerformanceAttributionProps {
   data: PerformanceAttributionResponse | undefined
@@ -155,7 +156,7 @@ function AttributionTooltip({ active, payload }: { active?: boolean; payload?: A
   return (
     <div className="bg-popover border rounded-lg shadow-md p-3 text-sm space-y-1">
       <p className="font-semibold">{d.symbol}</p>
-      <p className="text-muted-foreground text-xs">{d.description}</p>
+      <p className="text-muted-foreground text-xs">{displayName(d.description)}</p>
       <div className="border-t pt-1 mt-1 space-y-0.5">
         <p>
           <span className="text-muted-foreground">P&L: </span>

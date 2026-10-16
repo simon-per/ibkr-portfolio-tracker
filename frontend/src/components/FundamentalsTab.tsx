@@ -9,6 +9,7 @@ import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } fr
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
 import { RefreshCw } from 'lucide-react'
+import { displayName } from '@/lib/securityName'
 
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
@@ -99,7 +100,7 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
               ETF
             </span>
             <span className="font-medium">{etf.symbol}</span>
-            <span className="text-xs text-muted-foreground truncate max-w-[160px]">{etf.description}</span>
+            <span className="text-xs text-muted-foreground truncate max-w-[160px]">{displayName(etf.description)}</span>
           </div>
         ))}
       </div>
@@ -135,7 +136,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
         view === 'table' ? (
           <>
             <div className="font-medium">{row.symbol}</div>
-            <div className="text-xs text-muted-foreground truncate max-w-[180px]">{row.description}</div>
+            <div className="text-xs text-muted-foreground truncate max-w-[180px]">{displayName(row.description)}</div>
           </>
         ) : (
           row.symbol
@@ -147,7 +148,7 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       shortHeader: 'Description',
       desktop: 'hide',
       mobile: 'meta',
-      cell: (row) => row.description,
+      cell: (row) => displayName(row.description),
     },
     {
       key: 'market_cap',

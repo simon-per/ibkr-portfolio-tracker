@@ -13,6 +13,7 @@ import {
   type DriftRow,
   type TargetMap,
 } from '@/lib/rebalance'
+import { displayName } from '@/lib/securityName'
 
 const TARGETS_KEY = 'allocationTargets'
 const BAND_KEY = 'allocationBandPp'
@@ -135,7 +136,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
             <>
               <span className="font-medium">{row.symbol}</span>
               <span className="block text-xs text-muted-foreground">
-                {row.unpriced ? 'No cached price' : row.description}
+                {row.unpriced ? 'No price' : displayName(row.description)}
               </span>
             </>
           ) : (
@@ -148,7 +149,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         shortHeader: 'Description',
         desktop: 'hide',
         mobile: 'meta',
-        cell: (row) => (row.unpriced ? 'No cached price' : row.description),
+        cell: (row) => (row.unpriced ? 'No price' : displayName(row.description)),
       },
       {
         key: 'value',

@@ -18,26 +18,19 @@ function pace(over: Partial<DividendPace> = {}): DividendPace {
 const strip = () => screen.getByLabelText('Dividend income growth')
 
 describe('the dividend income growth strip', () => {
-  it('names both rates and the windows they were measured between', () => {
+  it('names both rates in words, not acronyms', () => {
     render(<DividendGrowthPace pace={pace()} />)
 
-    expect(strip().textContent).toContain('CMGR')
     expect(strip().textContent).toContain('+18.3%')
-    expect(strip().textContent).toContain('/mo')
-    expect(strip().textContent).toContain('CAGR')
-    expect(strip().textContent).toContain('/yr')
-    // The two endpoints, so the figure can be checked against the chart below
-    // rather than taken on trust.
-    expect(strip().textContent).toContain('Jan 26')
-    expect(strip().textContent).toContain('Dec 26')
-    expect(strip().textContent).toContain('23.22')
-    expect(strip().textContent).toContain('147.86')
+    expect(strip().textContent).toContain('per month')
+    expect(strip().textContent).toContain('per year')
+    expect(strip().textContent).not.toContain('CMGR')
   })
 
   it('drops CAGR when there is under a year of span to annualize from', () => {
     render(<DividendGrowthPace pace={pace({ cagr_pct: null, months: 7 })} />)
-    expect(strip().textContent).toContain('CMGR')
-    expect(strip().textContent).not.toContain('CAGR')
+    expect(strip().textContent).toContain('per month')
+    expect(strip().textContent).not.toContain('per year')
   })
 
   it('marks a rate resting on projected windows, and only then', () => {

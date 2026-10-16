@@ -51,7 +51,7 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
           aria-label="Edit forecast withholding"
           title="Assumed forecast withholding"
         >
-          WHT {formatDividendWithholdingPct(appliedPct)}%
+          Tax {formatDividendWithholdingPct(appliedPct)}%
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 space-y-3" align="end">

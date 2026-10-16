@@ -179,10 +179,10 @@ describe('AllocationTab drill-down', () => {
 
     // The legend entry is a real button; the treemap itself is an SVG jsdom cannot size.
     fireEvent.click(await screen.findByRole('button', { name: /Technology/ }))
-    expect(screen.getByText('Apple Inc')).toBeTruthy()
+    expect(screen.getByText('Apple')).toBeTruthy()
 
     view.rerender(tree())
-    expect(screen.getByText('Apple Inc')).toBeTruthy()
+    expect(screen.getByText('Apple')).toBeTruthy()
   })
 })
 

@@ -1,5 +1,3 @@
-import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { dividendMonthLabel } from '@/lib/dividendChart'
 import type { DividendPace } from '@/lib/dividendPace'
 import { DeltaChip } from './DeltaChip'
 
@@ -21,7 +19,6 @@ interface DividendGrowthPaceProps {
  * version of this.
  */
 export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
-  const formatCurrency = useFormatCurrency()
   if (!pace) return null
 
   return (
@@ -30,15 +27,12 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
       className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg border border-border bg-card/50 px-4 py-3"
     >
       <span className="text-xs font-medium text-muted-foreground">Income growth</span>
-      {/* The acronym leads and the unit trails it: "CMGR +15.3% /mo" is how the
-          figure is said, where DeltaChip's own value-then-label order would give
-          "+15.3% CMGR". flatBand 0 on both — the default band mutes lumpy series,
-          and a rolling twelve-month total is the opposite of lumpy. */}
+      {/* flatBand 0 on both — the default band mutes lumpy series, and a rolling
+          twelve-month total is the opposite of lumpy. */}
       <span className="inline-flex items-baseline gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">CMGR</span>
         <DeltaChip
           pct={pace.cmgr_pct}
-          label="/mo"
+          label="per month"
           flatBand={0}
           projected={pace.includes_forecast}
           className="text-sm"
@@ -47,10 +41,9 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
       </span>
       {pace.cagr_pct != null && (
         <span className="inline-flex items-baseline gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">CAGR</span>
           <DeltaChip
             pct={pace.cagr_pct}
-            label="/yr"
+            label="per year"
             flatBand={0}
             projected={pace.includes_forecast}
             className="text-sm"
@@ -58,13 +51,6 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
           />
         </span>
       )}
-      {/* The two windows it is measured between, so the figure can be checked
-          against the first and last bar of the chart below. */}
-      <span className="text-xs text-muted-foreground">
-        {dividendMonthLabel(pace.from_month, true)} → {dividendMonthLabel(pace.to_month, true)}
-        {' · '}
-        {formatCurrency(pace.from_eur)} → {formatCurrency(pace.to_eur)}
-      </span>
     </section>
   )
 }
