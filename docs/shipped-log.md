@@ -7,6 +7,25 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 — dividend raises, a resizable forecast chart, base-currency market caps, daily fundamentals
+
+Four of the owner's five 2026-10-17 asks (`bdb5758`, `e41f03c`, `ad7607f`, `5c66d04`; logos are
+still to come), deployed 17:41 Berlin after a short unrelated outage of the VPS. The Next 12
+months header shows "from raises" beside "from buys": the forecast's payout change is split into
+`raises` (a per-security payout level, `dividend_forecast.payout_level`, stored as
+`level_eur` on the snapshot lines) and `timing` — an API change, `payout` is gone. The forecast
+chart opens at 260 px and resizes by drag or keyboard. Market caps show in the base currency on
+the Fundamentals tab and the watchlist through one converter (`app/services/market_cap.py`), and
+the FX sync warms the quoted currencies every three days at most. Fundamentals and ratings refresh
+Tue–Sat 05:00 Berlin for held securities only, stale after 20 hours. A watchlist test fixture
+missing the settings table, a fallout of the market-cap change, was fixed (`2faee89`). Rules in
+docs/dividends.md, docs/frontend.md, docs/pricing-and-fx.md and docs/flex-and-sync.md *Sync
+schedule*. Verified before the push: 2035 backend tests (no marker filter) and 880 frontend tests
+green, `tsc` and the build clean. On production: `/health` on `5c66d04`, the fundamentals list
+held rows only with every cap converted, the forecast breakdown carries `raises`/`timing`, the
+watchlist serves `market_cap_base`. Not yet seen: per-line levels (the backfill), the first 05:00
+pass, the UI in a browser.
+
 ## Shipped 2026-10-16 — the product pass (frontend only)
 
 The owner's goal: an end-user product in the getquin mould — polished, not complex, no stray
