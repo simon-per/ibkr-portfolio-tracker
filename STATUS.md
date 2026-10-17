@@ -12,9 +12,8 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#12 all shipped the same night; no issue is open. A fintech UI pass is landing in waves:
-the design foundation (tokens, chart palette, tab icons, KPI icon/delta/sparkline) is on `main`
-(docs/frontend.md *Design foundation*); the per-tab adoption follows.
+#2–#12 all shipped the same night; no issue is open. The fintech UI pass shipped the same night
+on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-17 late night).
 
 ---
 
@@ -76,9 +75,11 @@ the design foundation (tokens, chart palette, tab icons, KPI icon/delta/sparklin
 
 Only what is still unverified.
 
-- **The design foundation in a real browser** (2026-10-17; screenshots from a routed preview
-  only): the tab pills scroll cleanly on a phone, the sticky strip's shadow appears on scroll,
-  both themes.
+- **The fintech UI pass in a real browser** (2026-10-17; seen only as screenshots of a routed
+  preview, the dividend summary and benchmarks refused): the Dividend Income card and benchmark
+  lines in the new look; the Performance insights strip's *Next dividend*; constituent logos by
+  ISIN on Look-through (the basket fill-ahead has not run, so most are monograms); the crypto view
+  with data (its reads need the key); the sticky tab strip's shadow on scroll; both themes.
 
 - **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
@@ -199,7 +200,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
 9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+10. **UI follow-ups from the fintech pass:** `/api/tax/report`'s realized and holdings rows carry
+    no ISIN or security id, so their avatars are monograms; Activity's phone cards have no logo
+    (`DataTable`'s card view); the earnings calendar and surprise history list some companies
+    twice (seen on production 2026-10-17, not investigated); `SectionHeader`'s `aside` is
+    `shrink-0`, so a wide one overflows a phone (Dividends moved its controls out).
+11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
@@ -207,6 +213,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-17 (fintech UI, agent team)** — design foundation, then four tabs' areas in parallel
+  worktrees; logos by ISIN; every `--viz-*` token replaced by one ten-slot palette.
 - **2026-10-17 (merge)** — the fintech pass merged into `main` over the owner's batch; two
   held helpers made one (`security_repository.held`).
 - **2026-10-17 (owner's batch)** — raises/timing (funds' changes are timing), resizable forecast
@@ -216,5 +224,3 @@ One line each, newest first; drop the oldest.
   DB, CLI lookup, the copies of one job and ESLint closed; every e2e script green.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
-- **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
-  date axis, regions, leftover text; the look-through CINS starvation found and fixed.

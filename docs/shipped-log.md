@@ -7,6 +7,38 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (late night) — the fintech UI pass
+
+The owner's goal: a clean fintech look with icons, colour and insights, every function and figure
+kept. Built by an agent team: one foundation agent, then four area agents in parallel worktrees,
+each change reviewed and cherry-picked onto `main`.
+
+- **Foundation** (`40c1321`): state tokens (`gain/loss/warn/info` + soft), `raised`,
+  `border-strong`, a ten-slot categorical palette measured for colour-blind separation
+  (`lib/chartPalette.ts`, re-measured from `index.css` by its test), tab icons in pills, a sticky
+  strip that lifts on scroll, `KpiCard` icon wells / delta pills / sparklines, `SectionHeader`,
+  `IconChip`, `Sparkline`.
+- **Logos by ISIN** (`5a7f0c6`): `/api/logos` gained `isins`, `/api/logos/isin/{isin}`;
+  `TickerAvatar` takes `isin`.
+- **Performance**: insights strip (top mover, biggest drag, largest holding, next dividend — no new
+  request; `weightDenominator` is the one definition of weight), KPI groups, weight bars, token
+  heatmap.
+- **Dividends / Forecast / Tax**: KPI panels with growth pills and sparklines, dividend stack on
+  the palette (13 identities → 10), calendar logos, Forecast horizon panel, Tax year summary panel
+  repeating existing totals rows. No tax figure changed.
+- **Look-through / Allocation**: treemap and donuts on the palette by identity (ten sector hues,
+  the old four-hue rule's trade-off in docs/lookthrough.md), insight strip, constituent logos.
+- **Activity / Fundamentals / Watchlist / header / Crypto**: tone badges with icons, a figures strip
+  for the window, Fundamentals logos and beat count, Watchlist score bands, `StatusBanner`, the
+  header in two groups. Fixed on the way: the Earnings Surprise History card grew until it showed
+  every row (~9,300 px page).
+- **Removed**: every `--viz-*` token and the measurement tests they carried.
+
+Verified: frontend 84 files / 1044 tests, `tsc -b`, ESLint, build; screenshots of every tab in both
+themes at 1280 and 390 against production data through a preview that refused
+`/api/dividends/summary`, `/api/portfolio/benchmark*` and every non-GET. Not verified in a real
+browser — STATUS.md *Watch after the next deploy*.
+
 ## Shipped 2026-10-17 (night) — the Yahoo request diet (#11)
 
 Issue #11, rule 1: six passes paid for requests whose content was already in hand.
