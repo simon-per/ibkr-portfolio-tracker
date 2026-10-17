@@ -3,8 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.services.market_cap import market_cap_to_base
-from app.services.peg_ratio import peg_from_growth
-from app.services.safe_numbers import safe_float
+from app.services.peg_ratio import read_time_peg
 from app.services.watchlist_service import WatchlistService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 from app.repositories.sync_run_repository import utc_iso
@@ -145,14 +144,10 @@ def _compute_peg(item):
     forward-EPS tier the copy came from — the tier whose inference bug turned 222%
     growth into 2.2245% and a PEG of 0.25 into 24.56.
     """
-    if item.peg_ratio is not None:
-        return item.peg_ratio
-    # Through `safe_float` for the same reason the sync path is: it rounds to 4dp, and
-    # a derived PEG that rounds differently from a stored one is the `_safe_float`
-    # divergence CLAUDE.md records — the same ratio reading differently on two screens.
-    return safe_float(
-        peg_from_growth(item.trailing_pe, item.fwd_eps_growth, is_fraction=True)
-    )
+    # `read_time_peg` is the sync path's own forward-EPS tier (`peg_ratio.py`), rounded
+    # to 4dp by the same `safe_float`: a derived PEG that rounds differently from a stored
+    # one is the `_safe_float` divergence CLAUDE.md records.
+    return read_time_peg(item.peg_ratio, item.trailing_pe, item.fwd_eps_growth)
 
 
 async def _responses(db: AsyncSession, items) -> list[WatchlistItemResponse]:

@@ -55,6 +55,7 @@ from app.services.finpension_ingest import (
 )
 from app.services.market_data_service import MarketDataService, clear_price_backoff
 from app.services.yahoo_rate_limit import is_rate_limit
+from app.yf_cache import configure_yfinance_cache
 
 logger = logging.getLogger(__name__)
 
@@ -681,6 +682,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    # `test` and `set` probe Yahoo; share the app's on-disk yfinance cache (app/yf_cache.py).
+    configure_yfinance_cache()
     return asyncio.run(run(build_parser().parse_args()))
 
 

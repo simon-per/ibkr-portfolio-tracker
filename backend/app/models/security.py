@@ -60,9 +60,10 @@ class Security(Base):
     country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     asset_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="Stock")  # Stock, ETF, etc.
     allocation_last_updated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    # When the dividend pass last had an answer from Yahoo for this security — data,
-    # an empty series or an error, never a rate limit. `needs_dividend_check` in
-    # dividend_service.py reads it; purging the estimates clears it.
+    # When the dividend pass last had an answer from Yahoo for this security's full
+    # history — data, an empty series or an error, never a rate limit. The price pass's
+    # chart capture never sets it. `needs_dividend_check` in dividend_service.py reads it;
+    # purging the estimates clears it, and so does a split seen after it.
     dividends_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     # When every price provider last came back empty for this security's missing
     # dates, and how many times running — never on a rate limit, cleared by any row

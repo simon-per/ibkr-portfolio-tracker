@@ -17,8 +17,17 @@ Closing it cost nothing: ``FundamentalsService`` already fetches
 ``growth_estimates`` and already computes ``fwd_eps`` from it for its own
 ``fwd_eps_growth`` column — it simply never fed it to the PEG fallback. Both
 services now run the same three tiers in the same order over the same inputs.
+
+**The order itself now lives here too** (GitHub issue #11, item b): `resolve_peg` is the
+one place that knows it, and both services call it — it was written out in each, plus a
+third copy of one tier in `routers/watchlist.py`, which now calls `read_time_peg`. Yahoo's
+``trailingPegRatio`` became the first tier: `.info` pays a fundamentals-timeseries request
+for that one key on every call, and nothing read it. `tests/test_peg_ratio.py` keeps the
+two `.info` key names in this module alone.
 """
-from typing import Optional
+from typing import Dict, Optional
+
+from app.services.safe_numbers import safe_float
 
 
 def growth_pct_from_estimate(
@@ -82,3 +91,47 @@ def peg_from_growth(
     if growth_pct is None:
         return None
     return trailing_pe / growth_pct
+
+
+#: Yahoo's own PEG figures in `.info`, most preferred first. ``trailingPegRatio`` is the
+#: one `.info` pays its third request for; ``pegRatio`` is often absent.
+YAHOO_PEG_KEYS = ("trailingPegRatio", "pegRatio")
+
+
+def forward_eps_peg(trailing_pe: Optional[float], fwd_eps_growth: Optional[float]) -> Optional[float]:
+    """The forward-EPS tier: P/E over the `+1y` EPS growth, a known fraction; 4 dp."""
+    return safe_float(peg_from_growth(trailing_pe, fwd_eps_growth, is_fraction=True))
+
+
+def resolve_peg(
+    info: Optional[Dict], trailing_pe: Optional[float], fwd_eps_growth: Optional[float],
+) -> Optional[float]:
+    """
+    The PEG both services store, by the one tier order:
+
+    1. Yahoo's ``trailingPegRatio``, then its ``pegRatio`` (`YAHOO_PEG_KEYS`);
+    2. trailing P/E over forward EPS growth (`forward_eps_peg`) — the watchlist's
+       "preferred" derived tier, which fundamentals once lacked;
+    3. trailing P/E over the analyst long-term EPS CAGR, whose unit is inferred.
+
+    None when no tier answers.
+    """
+    info = info or {}
+    for key in YAHOO_PEG_KEYS:
+        peg = safe_float(info.get(key))
+        if peg is not None:
+            return peg
+    peg = forward_eps_peg(trailing_pe, fwd_eps_growth)
+    if peg is not None:
+        return peg
+    lt_growth = safe_float(info.get("longTermGrowth") or info.get("longTermEpsGrowth"))
+    return safe_float(peg_from_growth(trailing_pe, lt_growth))
+
+
+def read_time_peg(
+    stored: Optional[float], trailing_pe: Optional[float], fwd_eps_growth: Optional[float],
+) -> Optional[float]:
+    """A stored PEG, else the forward-EPS tier over the stored inputs (`routers/watchlist`)."""
+    if stored is not None:
+        return stored
+    return forward_eps_peg(trailing_pe, fwd_eps_growth)

@@ -78,7 +78,7 @@ async def test_an_unmeasurable_technical_is_cleared_rather_than_left_standing(db
     item = await _seed_stale(db)
     service = WatchlistService(db)
 
-    async def _fetch(_ticker):
+    async def _fetch(_ticker, **_kw):
         # info without fiftyTwoWeekHigh / twoHundredDayAverage, and no history at all.
         return {"currentPrice": 100.0}, None, None, None, None
 
@@ -102,7 +102,7 @@ async def test_a_measurable_technical_is_still_written(db, monkeypatch):
     item = await _seed_stale(db)
     service = WatchlistService(db)
 
-    async def _fetch(_ticker):
+    async def _fetch(_ticker, **_kw):
         return (
             {"currentPrice": 90.0, "fiftyTwoWeekHigh": 100.0, "twoHundredDayAverage": 80.0},
             None, None, None, None,

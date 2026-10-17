@@ -31,7 +31,8 @@ SYNC_COOLDOWN_SECONDS = 300
 # The summary enqueues a pass only while `needs_dividend_check` selects a security —
 # the loop's own predicate — and no more often than this. The interval is a backstop
 # (in-process, so a restart resets it): a pass stamps what it asked, so after one
-# nothing is due until a holding is new, a week old, or was cut off by a rate limit.
+# nothing is due until a holding is new, remapped, split, a month old
+# (`DIVIDENDS_RECHECK_AFTER`), or was cut off by a rate limit.
 _AUTO_SYNC_MIN_INTERVAL = timedelta(hours=6)
 _last_auto_sync: Optional[datetime] = None
 

@@ -59,6 +59,9 @@ class WatchlistItem(Base):
     # Meta
     data_currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     last_synced: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # When quarterly_financials and the estimates were last fetched; the growth columns
+    # above are refreshed weekly from them (`WatchlistService.ESTIMATES_REFRESH_AFTER`).
+    estimates_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 
     def __repr__(self) -> str:

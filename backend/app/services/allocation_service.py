@@ -14,6 +14,7 @@ import yfinance as yf
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.cash_service import CashService, UNKNOWN
+from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
 
@@ -51,6 +52,37 @@ def needs_allocation_refresh(cutoff: datetime):
         Security.allocation_last_updated.is_(None),
         Security.allocation_last_updated < cutoff,
     )
+
+
+def asset_type_for_quote_type(quote_type: Optional[str]) -> str:
+    """'ETF' for every `FUND_QUOTE_TYPES` (a MUTUALFUND was 'Stock' here), else 'Stock'."""
+    return 'ETF' if is_fund_quote_type(quote_type) else 'Stock'
+
+
+def allocation_from_info(info: Dict) -> Dict:
+    """The allocation columns a Yahoo `.info` carries, keyed by `Security` attribute."""
+    return {
+        'asset_type': asset_type_for_quote_type(info.get('quoteType')),
+        'sector': info.get('sector'),
+        'industry': info.get('industry'),
+        'country': info.get('country'),
+    }
+
+
+def apply_allocation(security: Security, allocation: Dict) -> None:
+    """
+    Write `allocation_from_info`'s columns and stamp them fresh.
+
+    Shared by this sync and the daily fundamentals pass, which already holds the same
+    `.info` (GitHub issue #11, item c): a new holding gets its sector and country the
+    next morning instead of staying 'Unknown' until someone presses the Allocation
+    tab's button, and this sync then skips it — three requests saved per security.
+    """
+    security.asset_type = allocation['asset_type']
+    security.sector = allocation.get('sector')
+    security.industry = allocation.get('industry')
+    security.country = allocation.get('country')
+    security.allocation_last_updated = utcnow()
 
 
 class AllocationService:
@@ -131,26 +163,10 @@ class AllocationService:
                 logger.warning(f"No info data for {yahoo_ticker}")
                 return {'success': False, 'error': 'No data'}
 
-            sector = info.get('sector')
-            industry = info.get('industry')
-            country = info.get('country')
+            allocation = allocation_from_info(info)
+            logger.info(f"{yahoo_ticker}: {allocation['sector']}, {allocation['country']}")
 
-            # Determine asset type
-            quote_type = info.get('quoteType', '')
-            if quote_type == 'ETF':
-                asset_type = 'ETF'
-            else:
-                asset_type = 'Stock'
-
-            logger.info(f"{yahoo_ticker}: {sector}, {country}")
-
-            return {
-                'success': True,
-                'asset_type': asset_type,
-                'sector': sector,
-                'industry': industry,
-                'country': country,
-            }
+            return {'success': True, **allocation}
 
         except Exception as e:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
@@ -212,12 +228,7 @@ class AllocationService:
                 break
 
             if result['success']:
-                # Update security with allocation data
-                security.asset_type = result['asset_type']
-                security.sector = result.get('sector')
-                security.industry = result.get('industry')
-                security.country = result.get('country')
-                security.allocation_last_updated = utcnow()
+                apply_allocation(security, result)
                 updated_count += 1
             else:
                 # Stamp the *attempt*, not just the success. Selection above takes
@@ -372,8 +383,8 @@ class AllocationService:
             # The look-through table wins over the column, because otherwise this chart
             # and the two below answer "is this a fund?" by different rules. They decide
             # it from a live table lookup needing no sync, while `securities.asset_type` is
-            # written *only* by `POST /api/allocation/sync`, which nothing schedules.
-            # `sync_helper` never writes it, so an IBKR-ingested fund carries the column
+            # written only by `POST /api/allocation/sync` and, since 2026-10-17, the daily
+            # fundamentals pass (held securities, `apply_allocation`). `sync_helper` never writes it, so an IBKR-ingested fund carries the column
             # default "Stock" indefinitely: it would be a Stock here and an ETF
             # distributed across eleven sectors a few pixels away, on the same tab. Every
             # entry declares `asset_type: "ETF"` and `test_etf_mappings.py` pins that, so
@@ -413,9 +424,10 @@ class AllocationService:
                 # This is reached routinely rather than in theory. `sync_helper` never
                 # writes sector or country, so a newly bought security has both NULL,
                 # while `asset_type` carries a "Stock" column default — so a new holding
-                # appeared in the asset-type chart and in neither of these. Only
-                # `sync_allocation_data` fills them and nothing schedules it (it needs
-                # Yahoo), so the gap lasts until someone runs it by hand.
+                # appeared in the asset-type chart and in neither of these. Since
+                # 2026-10-17 the daily fundamentals pass fills them for held securities
+                # from the `.info` it already fetches (`apply_allocation`), so the gap
+                # lasts until its next 05:00 run rather than until someone clicks.
                 _add_to_category(
                     sector_alloc, security.sector or 'Unknown', pos_weight, pos_value, sym, desc)
                 _add_to_category(

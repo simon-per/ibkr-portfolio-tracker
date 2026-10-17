@@ -204,7 +204,9 @@ async def test_a_week_of_dashboard_loads_and_scheduled_passes_asks_each_holding_
 
 
 @pytest.mark.asyncio
-async def test_after_a_week_each_holding_is_asked_again_once(monkeypatch):
+async def test_after_the_recheck_interval_each_holding_is_asked_again_once(monkeypatch):
+    """`DIVIDENDS_RECHECK_AFTER`: a week until issue #11, a month since the price pass
+    captures new ex-dates in between."""
     engine, session = await _session()
     try:
         clock = _Clock()
@@ -213,11 +215,11 @@ async def test_after_a_week_each_holding_is_asked_again_once(monkeypatch):
         await DividendService(session).sync_dividend_data()
         assert sorted(asked) == ["ACC", "PAY"]
 
-        clock.now = START + timedelta(days=7) - timedelta(minutes=1)
+        clock.now = START + ds.DIVIDENDS_RECHECK_AFTER - timedelta(minutes=1)
         await DividendService(session).sync_dividend_data()
-        assert len(asked) == 2, "a security checked under 7 days ago was asked again"
+        assert len(asked) == 2, "a security checked inside the interval was asked again"
 
-        clock.now = START + timedelta(days=7, minutes=1)
+        clock.now = START + ds.DIVIDENDS_RECHECK_AFTER + timedelta(minutes=1)
         await DividendService(session).sync_dividend_data()
         assert sorted(asked) == ["ACC", "ACC", "PAY", "PAY"]
     finally:

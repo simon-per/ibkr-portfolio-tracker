@@ -12,11 +12,14 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.etf_mappings import allocation_for_fund_isin
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.security_repository import held
+from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.analyst_rating import AnalystRating
+from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -107,8 +110,9 @@ class AnalystRatingService:
     Uses yfinance library to fetch aggregated analyst recommendations
     showing counts of: strong buy, buy, hold, sell, strong sell.
 
-    Caches ratings in the database; a rating older than 3 days is stale, so the weekly
-    scheduled refresh asks again for every security.
+    Caches ratings in the database; a rating older than 3 days is stale, so the scheduled
+    refresh asks again for every security but a fund (`_fund_ids`), whose no-rating row
+    is re-stamped without a request.
     """
 
 
@@ -130,6 +134,26 @@ class AnalystRatingService:
         from app.services.market_data_service import MarketDataService
         market_service = MarketDataService(self.db)
         return await market_service._get_yahoo_ticker(security)
+
+    async def _fund_ids(self, securities: List[Security]) -> set:
+        """
+        The securities known to be funds, which have no analyst coverage to ask about.
+
+        A fund always came back `no_rating`, and the 3-day staleness is shorter than the
+        pass interval, so every fund cost a `recommendations` request on every pass
+        (GitHub issue #11, item e). Known without Yahoo: the stored
+        `fundamental_metrics.quote_type` (written by the fundamentals pass, which runs
+        just before this one) through `FUND_QUOTE_TYPES`, or an ISIN the ETF table maps
+        (`allocation_for_fund_isin`, the allocation pass's test). A security neither
+        knows yet — bought today, fundamentals not fetched — is asked once, as before.
+        """
+        ids = [s.id for s in securities]
+        rows = await self.db.execute(
+            select(FundamentalMetrics.security_id, FundamentalMetrics.quote_type)
+            .where(FundamentalMetrics.security_id.in_(ids))
+        )
+        funds = {sid for sid, quote_type in rows.all() if is_fund_quote_type(quote_type)}
+        return funds | {s.id for s in securities if allocation_for_fund_isin(s.isin)}
 
     async def fetch_rating_for_security(self, security: Security) -> Optional[Dict]:
         """
@@ -238,8 +262,10 @@ class AnalystRatingService:
 
         ratings_updated = 0
         no_ratings = 0
+        funds_not_asked = 0
         errors = 0
 
+        fund_ids = await self._fund_ids(securities)
         pending_ids = [s.id for s in securities]
 
         for i, security_id in enumerate(pending_ids, 1):
@@ -260,6 +286,15 @@ class AnalystRatingService:
             )
 
             try:
+                if security.id in fund_ids:
+                    # Stored as Yahoo's own answer for a fund would be, without asking
+                    # (`_fund_ids`): it still reads "No Rating", and it is never paced.
+                    await self.rating_repo.upsert(no_rating(security.id))
+                    await self.db.commit()
+                    no_ratings += 1
+                    funds_not_asked += 1
+                    continue
+
                 rating_data = await self.fetch_rating_for_security(security)
 
                 if rating_data is not None:
@@ -313,6 +348,7 @@ class AnalystRatingService:
             'securities_processed': len(securities),
             'ratings_updated': ratings_updated,
             'no_rating': no_ratings,
+            'funds_not_asked': funds_not_asked,
             'errors': errors,
             'rate_limited': self.rate_limited,
             'message': (
@@ -366,6 +402,10 @@ class AnalystRatingService:
 
         rated_ids = {r.security_id for r in await self.rating_repo.get_all()}
         stale_ids = {r.security_id for r in await self.get_stale_ratings(days_old=3)}
+        # Funds stay candidates, so their row keeps the staleness every other row has
+        # (`/api/analyst-ratings/status`), but `sync_ratings_for_securities` re-stamps
+        # them without a request.
+        fund_ids = await self._fund_ids(all_securities)
 
         security_ids = [
             s.id for s in all_securities
@@ -380,10 +420,14 @@ class AnalystRatingService:
                 'message': 'No stale or missing ratings to update'
             }
 
-        never_rated = sum(1 for s in all_securities if s.id not in rated_ids)
+        funds = sum(1 for sid in security_ids if sid in fund_ids)
+        never_rated = sum(
+            1 for s in all_securities if s.id not in rated_ids and s.id not in fund_ids
+        )
         logger.info(
-            f"Refreshing {len(security_ids)} ratings "
-            f"({never_rated} never rated, {len(security_ids) - never_rated} stale)"
+            f"Refreshing {len(security_ids)} ratings ({never_rated} never rated, "
+            f"{len(security_ids) - never_rated - funds} stale, "
+            f"{funds} funds stored as no rating without asking)"
         )
 
         return await self.sync_ratings_for_securities(security_ids)

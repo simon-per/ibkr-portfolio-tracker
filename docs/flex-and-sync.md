@@ -19,7 +19,7 @@ User-Agent, rate-limit detection that aborts the run, and incremental caching (o
 
 **Every service that loops against Yahoo must abandon the pass on a 429, and until
 2026-08-05 only `market_data_service` did.** Six services import `yfinance`;
-`fundamentals` (~5 endpoints per security, the most expensive), `analyst ratings`,
+`fundamentals` (six requests per company, the most expensive), `analyst ratings`,
 `watchlist`, `allocation`, `dividends` and the scheduler's benchmark warm-up all caught
 the error, logged it, and asked the next one seconds later — the exact shape fixed for
 market data, five times over. The predicate now lives once in
@@ -455,7 +455,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 
 **The watchlist has a slot of its own, away from the portfolio's** (2026-10-13, at the owner's
 request — nothing scheduled it before, so it aged until someone pressed *Refresh All*). It is the
-most expensive Yahoo loop per row, five endpoints an item (`WatchlistService._fetch_ticker_data`),
+most expensive Yahoo loop per row, up to six requests an item (`WatchlistService._fetch_ticker_data`),
 so it rides no repricing pass: 04:00 leaves six hours after the 22:00 touch and four before 08:00.
 Tuesday to Saturday is once after each US close. The job is `WatchlistService.sync_all` under
 `SYNC_PIPELINE` — the loop's own pacing and its abandon-on-429 latch, no second implementation —
@@ -467,7 +467,7 @@ on that row, never its status. It sits in the `upkeep` job group and outside
 **Fundamentals and analyst ratings refresh daily at 05:00, Tuesday to Saturday, for held
 securities only** (2026-10-17 at the owner's request; weekly on Sundays from 2026-10-14, and
 before that only a click refreshed them). Same days as the watchlist, an hour later: the two
-five-endpoint loops never share a pass, and since both hold `SYNC_PIPELINE` an overlap would
+most expensive loops never share a pass, and since both hold `SYNC_PIPELINE` an overlap would
 record the second as `skipped` for the day — a watchlist pass takes minutes. 05:00 is an hour of
 its own in `ALL_SYNC_HOURS`, so the three deploy-guard copies (`ops/auto-deploy.sh` and both
 `ops/finish-deploy.*`) carry it, and `/root/auto-deploy.sh` must be refreshed from `ops/` to
@@ -483,7 +483,7 @@ warning on the row (`logos_result`), never the status.
 
 - **Held only.** `security_repository.held()` (an open tax lot in any account) bounds both loops,
   the manual *Refresh* and the all-securities ratings sync, and the tab's listing
-  (`get_fundamentals_for_portfolio`) — a sold position would otherwise cost ~6 requests a day
+  (`get_fundamentals_for_portfolio`) — a sold position would otherwise cost ~7 requests a day
   forever and age the tab's as-of line. Its stored row stays. Pillar 3a funds are held and so
   listed; one that `price_source` keeps off Yahoo is listed without figures.
 - **Stale means 20 hours** (`fundamentals_repository.STALE_AFTER`), not a day: a row written at
@@ -493,14 +493,41 @@ warning on the row (`logos_result`), never the status.
 - A pass a 429 cut short is resumed by the next one — what the services' rate-limit warning
   promises.
 
-*Yahoo budget per pass*: a company costs 6 requests — `.info`, `earnings_dates`,
-`quarterly_financials`, `revenue_estimate`, `growth_estimates`, then `recommendations` — and a fund
-2 (`.info` and `recommendations`; `yahoo_estimates.FUND_QUOTE_TYPES` skips the four a fund cannot
-have). With *C* held companies and *F* held funds a pass spends `5C + F`, plus `C + F` on the
-passes where the ratings are due — five passes a week. Paced as the manual sync is: 1–3 s before
-each security's burst and 2–4 s between securities in each loop, so ~40 securities take roughly
-10 minutes. A no-coverage rating answer is stored as a zero-count row
-(`analyst_rating_service.no_rating`) so it is not re-asked inside the staleness window.
+*Yahoo budget per pass*: **`.info` is three requests**, not one — quoteSummary, the v7 quote and a
+fundamentals-timeseries call for `trailingPegRatio` alone (yfinance's `_fetch_info` +
+`_fetch_complementary`); this paragraph counted it as one until GitHub issue #11. A company costs 6
+— `.info` (3), `earnings_dates`, `quarterly_financials`, `revenue_estimate` — plus `recommendations`
+when its rating is due; a fund costs 3, `.info` alone (`yahoo_estimates.FUND_QUOTE_TYPES` skips what
+a fund cannot have). Since issue #11: `growth_estimates` is no longer read — its one used column is
+the `earningsTrend` that `revenue_estimate` already fetched (`eps_growth_from_trend`), −1 per
+company; `trailingPegRatio`, which `.info` pays for, is now `peg_ratio.resolve_peg`'s first tier
+instead of being discarded; and a fund's rating is never asked (`AnalystRatingService._fund_ids`:
+the stored `quote_type`, or an ISIN the ETF table maps), its no-rating row re-stamped without a
+request, −1 per fund each time it goes stale. With *C* held companies and *F* held funds a pass
+spends `6C + 3F`, plus `C` on the passes where a rating is due (3-day staleness: every third or
+fourth pass). Paced as the manual sync is: 1–3 s before each security's burst and 2–4 s between
+securities in each loop, so ~40 securities take roughly 10 minutes. A no-coverage rating answer is
+stored as a zero-count row (`analyst_rating_service.no_rating`) so it is not re-asked inside the
+staleness window.
+
+**The pass also fills the allocation columns** (issue #11, item c): `sector`, `industry`,
+`country`, `asset_type` and `allocation_last_updated`, from the `.info` it already holds, through
+`allocation_service.apply_allocation` — the allocation sync's own writer — except for an ISIN
+`allocation_for_fund_isin` maps, whose ETF mapping wins. A new holding gets its sector and country
+the next morning instead of 'Unknown' until someone presses the Allocation tab's button, and that
+sync (three requests a security, 7-day staleness) then has nothing held left to ask. One
+quoteType→asset type rule, `asset_type_for_quote_type`: every `FUND_QUOTE_TYPES` is 'ETF' (a
+MUTUALFUND was 'Stock').
+
+**The watchlist fetches its slow fields weekly** (issue #11, item d). `quarterly_financials` and
+the estimates are read when `watchlist_items.estimates_synced_at` is NULL or older than
+`WatchlistService.ESTIMATES_REFRESH_AFTER` (7 days); the other runs read `.info` (and history) only,
+carry the stored growth columns, and build PEG and the buy score over them — a fast run never nulls
+a slow field. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
+`market_prices` closes instead of `history("1y")` (`_held_closes`; Yahoo's history is
+dividend-adjusted, the stored closes are not, so the RSI can differ slightly around an ex-date).
+*Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
+6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
 **The crypto sync rides every one of the portfolio's slots, and adds none.** `CRYPTO_SYNC_HOURS`
 is *derived* from `PORTFOLIO_SYNC_HOURS` — not from `ALL_SYNC_HOURS`, which since the watchlist
@@ -533,7 +560,7 @@ production's weekend passes reported `51 of 51` and rewrote the same ~140 rows, 
   purge, still gets its history. It is keyed on the calendar, never on the IBKR result — that gate
   was a silent outage. `collect_market_data_diagnostics` still runs at its end.
 - **The dividend step is unchanged on weekends.** Since issue #6 it asks only about securities due
-  their weekly check, so skipping it saves nothing: the due ones would be asked on Monday instead, or
+  a full read (`needs_dividend_check`), so skipping it saves nothing: the due ones would be asked on Monday instead, or
   sooner by a weekend dashboard load, since `GET /api/dividends/summary` enqueues a pass while
   anything is due.
 - **The deploy guard is unchanged**: same hours, fewer days, and the crypto jobs still run at every
@@ -666,8 +693,8 @@ every exception, so the loop reads `BenchmarkService.rate_limited` after each ti
 missing is checked, not fetched. Tests: `tests/test_benchmark_warmup.py`, which drives the real job
 gate and the real fetch with only `yf.Ticker` stubbed.
 
-**The dividend pass asks about each held security at most once a week** (GitHub issue #6,
-2026-10-17). It runs in the 18:00 `full_sync_job`, and `GET /api/dividends/summary` can enqueue it.
+**The dividend pass asks about each held security at most once a month** (GitHub issue #6,
+2026-10-17, a week then; a month since issue #11, below). It runs in the 18:00 `full_sync_job`, and `GET /api/dividends/summary` can enqueue it.
 Before, its 7-day guard read the newest `dividend_payments.created_at`, which is set on insert only,
 so a non-payer or a payer between ex-dates was asked on every pass, sold positions included; and the
 summary enqueued a pass whenever the card's `last_updated` was a day old, a timestamp only a Flex
@@ -675,11 +702,29 @@ re-delivery moves. On a week with no dividend in the Flex window that was five p
 one request per security ever owned each time. Now every answer from Yahoo stamps
 `securities.dividends_checked_at`: data, an empty series, or an error that is not a rate limit.
 `needs_dividend_check()` (`dividend_service.py`) selects Yahoo-eligible, held
-(`security_repository.held`), unstamped-or-week-old securities, and both the loop and the summary
-route use it. *Budget*: one request per held security per week, plus one for each new purchase at
-the next pass. A rate limit stamps nothing from the 429 on, so the next pass resumes there.
+(`security_repository.held`), unstamped-or-stale securities, and both the loop and the summary
+route use it. A rate limit stamps nothing from the 429 on, so the next pass resumes there.
 `tests/test_dividend_check_budget.py` counts the stubbed requests over a simulated week of
 dashboard loads and 18:00 passes: 105 before, 2 after, for two holdings and one sold position.
+
+**Since GitHub issue #11 (item a) the price passes capture new ex-dates, and the dividend pass is a
+monthly re-verify.** Every `history()` call already asks `v8/finance/chart` for
+`events=div,splits,capitalGains` (yfinance's `actions=True` default), and the price window — a few
+days before the oldest missing date to today, with the trailing `PROVISIONAL_PRICE_DAYS` always
+missing on a trading day — is re-read at each of the seven repricing slots, so every new ex-date
+passes through several responses. `_try_fetch_yahoo` keeps the frame's dividends and split dates
+(`chart_actions`) for the ticker whose prices were kept (never a variation the currency check
+rejected; never Alpha Vantage's), and `fetch_and_cache_prices` hands them to
+`DividendService.store_chart_dividends` after the prices are committed: held securities only, the
+same row builder as the dividend pass (`yahoo_dividend_rows`), best effort. It never stamps
+`dividends_checked_at`, which keeps meaning "the full history was read". `.dividends` — a second
+chart request for 99 years of daily bars — is now asked only when the stamp is NULL (a new holding, a
+purge), older than `DIVIDENDS_RECHECK_AFTER` (**30 days**, was 7), older than the active ticker
+mapping's `updated_at`, or cleared by a split the price pass saw dated after it (Yahoo restates the
+history). *Budget*, worked from the code: one full-history request per holding every 7 days became
+one every 30 — at 40 holdings ~40 a week → ~9 (−77%), and as many decade-long payloads; the capture
+itself adds no request. Rows it stores sit uncomputed until the 18:00 full sync's
+`compute_dividend_income`, as the pass's own did. Tests: `tests/test_chart_dividends.py`.
 
 **A rate limit now abandons the rest of the pass.** This file already credited
 `market_data_service.py` with "rate-limit detection that aborts the run" and it only ever aborted the

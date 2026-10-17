@@ -63,8 +63,11 @@ class FundamentalMetrics(Base):
     # same name in the metadata twice and broke Base.metadata.create_all(). Schema unchanged.
 
     @property
-    def is_etf(self) -> bool:
-        return self.quote_type == 'ETF'
+    def is_fund(self) -> bool:
+        # `yahoo_estimates.FUND_QUOTE_TYPES`, not `== 'ETF'`: this was `is_etf`, a second
+        # and narrower fund classifier that read a MUTUALFUND as a company.
+        from app.services.yahoo_estimates import is_fund_quote_type
+        return is_fund_quote_type(self.quote_type)
 
     def __repr__(self) -> str:
         return (

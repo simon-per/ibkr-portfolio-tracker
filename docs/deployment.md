@@ -108,6 +108,18 @@ bounded Flex window into the empty file. Three layers:
 only while `data/` holds nothing, so a copy installed before the move does not fail every backup
 (and with it every auto-deploy).
 
+**`data/yf-cache/` is yfinance's cache, and it is disposable** (GitHub issue #11, 2026-10-17).
+yfinance keeps each ticker's exchange timezone, Yahoo's A3 cookie and its ISIN lookups in three
+small SQLite files. By default they sat in `/root/.cache/py-yfinance` inside the container's
+writable layer, so every `build --no-cache` / `down` / `up` started empty and each ticker's first
+`history()` paid an extra `chart?range=1d` request for its timezone, plus a fresh cookie fetch.
+`app/yf_cache.py` points them at `yf-cache/` beside the database (derived from `DATABASE_URL`, so
+`/app/data/yf-cache` on the mount; `backend/yf-cache/` locally, gitignored), called first in the
+lifespan and in `manage_mappings`. It is a **subdirectory**, never a file beside `portfolio.db`:
+`db_guard`, `db-layout.sh` and `backup-db.sh` look only at `portfolio.db` and its sidecars by name,
+and backups do not copy it. Deleting it costs one timezone request per ticker, never data; if it
+cannot be written yfinance falls back to a dummy cache and logs it.
+
 **A fresh install** (no database anywhere, on purpose): `ALLOW_NEW_DATABASE=1 ./deploy.sh` once.
 Without the flag, `preflight` refuses and nothing is stopped. Restoring a backup instead: put the
 snapshot at `backend/data/portfolio.db` (with the backend down, no `-wal`/`-shm` beside it) and

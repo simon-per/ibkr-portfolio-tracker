@@ -9,15 +9,19 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.etf_mappings import allocation_for_fund_isin
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.security_repository import held
+from app.services.allocation_service import allocation_from_info, apply_allocation
 from app.services.market_cap import market_cap_to_base
-from app.services.peg_ratio import peg_from_growth
+from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, is_fund, read_optional
+from app.services.yahoo_estimates import (
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
+)
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -58,8 +62,10 @@ class FundamentalsService:
         """
         Fetch .info, .earnings_dates and the shared estimate endpoints in a thread.
 
-        Five requests for a company, one for a fund. A rate limit on any of them
-        propagates to the loop, which abandons the pass — see `yahoo_estimates`.
+        Six requests for a company (`.info` is three: quoteSummary, v7 quote and the
+        timeseries call for `trailingPegRatio`), three for a fund. A rate limit on any of
+        them propagates to the loop, which abandons the pass — see `yahoo_estimates`.
+        The fourth element is the `+1y` EPS growth read off the cached trend.
         """
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
@@ -71,26 +77,28 @@ class FundamentalsService:
             frames = fetch_estimate_frames(ticker, info, yahoo_ticker)
             return (
                 info, earnings, frames["quarterly_financials"],
-                frames["growth_estimates"], frames["revenue_estimate"],
+                frames[EPS_TREND_GROWTH], frames["revenue_estimate"],
             )
 
         return await asyncio.to_thread(_fetch)
 
     def _extract_metrics(self, security: Security, info: Dict, quarterly_financials=None,
-                         growth_estimates=None, revenue_estimate=None) -> Optional[Dict]:
+                         eps_trend_growth=None, revenue_estimate=None) -> Optional[Dict]:
         """Extract fundamental metrics from a Yahoo Finance info dict."""
         if not info:
             logger.info(f"No fundamental data available for {security.symbol}")
             return None
 
         # Forward estimates from analyst consensus — one parser with the watchlist.
-        fwd_rev, fwd_eps = forward_growth(revenue_estimate, growth_estimates, info, security.symbol)
+        fwd_rev, fwd_eps = forward_growth(revenue_estimate, eps_trend_growth, info, security.symbol)
+        trailing_pe = self._safe_float(info.get('trailingPE'))
 
         metrics_data = {
             'security_id': security.id,
-            'trailing_pe': self._safe_float(info.get('trailingPE')),
+            'trailing_pe': trailing_pe,
             'forward_pe': self._safe_float(info.get('forwardPE')),
-            'peg_ratio': self._safe_float(info.get('pegRatio')),
+            # One tier order with the watchlist, in one place (`peg_ratio.resolve_peg`).
+            'peg_ratio': resolve_peg(info, trailing_pe, fwd_eps),
             'price_to_sales': self._safe_float(info.get('priceToSalesTrailing12Months')),
             'price_to_book': self._safe_float(info.get('priceToBook')),
             # TTM growth from quarterly financials (always current, no lag), else .info.
@@ -109,23 +117,6 @@ class FundamentalsService:
             'quote_type': info.get('quoteType', 'EQUITY'),
             'data_currency': info.get('currency'),
         }
-
-        # PEG fallbacks, in the same order as WatchlistService — Yahoo's own figure,
-        # then forward EPS growth, then the analyst 5-year CAGR (which matches
-        # Yahoo's own PEG methodology). The orders used to differ: this path had no
-        # forward-EPS tier at all, so the same security could show one PEG on
-        # /api/fundamentals/portfolio and another on /api/watchlist. `fwd_eps` was
-        # already computed above, so closing that costs no extra request.
-        if metrics_data['peg_ratio'] is None:
-            metrics_data['peg_ratio'] = self._safe_float(
-                peg_from_growth(metrics_data['trailing_pe'], fwd_eps, is_fraction=True)
-            )
-
-        if metrics_data['peg_ratio'] is None:
-            lt_growth = self._safe_float(info.get('longTermGrowth') or info.get('longTermEpsGrowth'))
-            metrics_data['peg_ratio'] = self._safe_float(
-                peg_from_growth(metrics_data['trailing_pe'], lt_growth)
-            )
 
         logger.info(f"Got fundamentals for {security.symbol} (type={metrics_data['quote_type']})")
         return metrics_data
@@ -185,7 +176,7 @@ class FundamentalsService:
 
     async def sync_fundamentals_data(self, force_refresh: bool = False) -> Dict:
         """Sync fundamental metrics and earnings for every held security."""
-        # yahoo_eligible(): ~5 Yahoo endpoints per security, the most expensive loop
+        # yahoo_eligible(): six Yahoo requests per company (`.info` is three), the most expensive loop
         # in the app. And held only (`security_repository.held`, 2026-10-17): every read
         # of these rows — the table, both earnings lists, `/status` — shows what is held,
         # and the daily pass would otherwise refetch a sold position forever. Buying it
@@ -208,6 +199,7 @@ class FundamentalsService:
         logger.info(f"Syncing fundamentals for {len(securities)} securities")
 
         metrics_updated = 0
+        allocations_updated = 0
         earnings_updated = 0
         errors = 0
 
@@ -262,13 +254,19 @@ class FundamentalsService:
                 await asyncio.sleep(random.uniform(1.0, 3.0))
 
                 # Single consolidated fetch in a thread (non-blocking)
-                info, earnings_df, quarterly_financials, growth_estimates, revenue_estimate = await self._fetch_yahoo_data(yahoo_ticker)
+                info, earnings_df, quarterly_financials, eps_trend_growth, revenue_estimate = await self._fetch_yahoo_data(yahoo_ticker)
 
                 # Extract and save fundamentals (TTM growth from quarterly financials)
-                metrics_data = self._extract_metrics(security, info, quarterly_financials, growth_estimates, revenue_estimate)
+                metrics_data = self._extract_metrics(security, info, quarterly_financials, eps_trend_growth, revenue_estimate)
                 if metrics_data:
                     await self.repo.upsert_metrics(metrics_data)
                     metrics_updated += 1
+                    # The allocation sync's sector/industry/country/asset type are in this
+                    # same `.info`; writing them here spares it three requests a security.
+                    # Not over a fund the ETF table maps: its mapping wins there.
+                    if not allocation_for_fund_isin(security.isin):
+                        apply_allocation(security, allocation_from_info(info))
+                        allocations_updated += 1
 
                 # Extract and save earnings
                 earnings_data = self._extract_earnings(security, earnings_df)
@@ -293,7 +291,7 @@ class FundamentalsService:
                 errors += 1
                 await self.db.rollback()
                 # Rule 1: a rate limit means stop, not slow down. This is the most
-                # expensive of the four Yahoo loops — roughly five endpoints per
+                # expensive of the four Yahoo loops — six requests per company
                 # security — so continuing past a 429 spent the rest of the pass asking
                 # an IP that had already refused us, once every one to three seconds.
                 # Same fix `MarketDataService.sync_securities` took on 2026-08-04; this
@@ -322,6 +320,7 @@ class FundamentalsService:
         result = {
             'securities_processed': len(needs_update),
             'metrics_updated': metrics_updated,
+            'allocations_updated': allocations_updated,
             'earnings_updated': earnings_updated,
             'errors': errors,
             'rate_limited': self.rate_limited,

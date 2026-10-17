@@ -1,27 +1,47 @@
 from typing import Dict, Optional, List
-from datetime import timedelta
+from datetime import date, timedelta
 from app.clock import utcnow
 import logging
 import yfinance as yf
 import random
 import asyncio
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.market_price import MarketPrice
+from app.models.security import Security
+from app.repositories.security_repository import held
 from app.repositories.watchlist_repository import WatchlistRepository
-from app.services.peg_ratio import peg_from_growth
+from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
-from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, read_optional
+from app.services.yahoo_estimates import (
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, read_optional,
+)
+from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
+
+# RSI-14 needs 15 closes.
+RSI_MIN_CLOSES = 15
 
 
 class WatchlistService:
     """Service for managing watchlist items with cached fundamentals and technicals."""
 
     CACHE_TTL_HOURS = 1
+
+    # How long `quarterly_financials` and the estimates are reused before a refresh asks
+    # again (`estimates_synced_at`). They move a few times a quarter; the nightly runs
+    # refresh `.info` (price, P/E, margins, analyst target) and the RSI only, and build
+    # PEG and the score over the stored growth columns. A week: one full fetch per five
+    # nightly runs, and never a whole earnings season late.
+    ESTIMATES_REFRESH_AFTER = timedelta(days=7)
+
+    # `_held_closes`' ticker map, built once per service (a pass builds its own).
+    _held_by_ticker: Optional[Dict[str, int]] = None
 
     # Latched the first time Yahoo answers with a rate limit, mirroring
     # `MarketDataService.rate_limited`. On the class as well as the instance so a
@@ -201,9 +221,15 @@ class WatchlistService:
         total = valuation_score + technical_score + quality_score + analyst_score
         return round(total, 1)
 
-    async def _fetch_ticker_data(self, yahoo_ticker: str) -> tuple:
+    async def _fetch_ticker_data(
+        self, yahoo_ticker: str, with_estimates: bool = True, with_history: bool = True,
+    ) -> tuple:
         """
         Fetch .info, 1y history and the shared estimate endpoints in a single thread.
+
+        `.info` is three requests; history, `quarterly_financials` and the estimates one
+        each. `with_estimates=False` skips the slow two (`ESTIMATES_REFRESH_AFTER`),
+        `with_history=False` the history (`_held_closes` had it): None in their places.
 
         A rate limit on any of them propagates: `sync_item` hands its text to `sync_all`,
         which abandons the pass. These reads used to swallow every exception, a 429
@@ -212,13 +238,52 @@ class WatchlistService:
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info
-            history = read_optional(lambda: ticker.history(period="1y"), "history", yahoo_ticker)
-            frames = fetch_estimate_frames(ticker, info, yahoo_ticker)
+            history = (
+                read_optional(lambda: ticker.history(period="1y"), "history", yahoo_ticker)
+                if with_history else None
+            )
+            frames = (
+                fetch_estimate_frames(ticker, info, yahoo_ticker) if with_estimates
+                else {}
+            )
             return (
-                info, frames["quarterly_financials"], history,
-                frames["revenue_estimate"], frames["growth_estimates"],
+                info, frames.get("quarterly_financials"), history,
+                frames.get("revenue_estimate"), frames.get(EPS_TREND_GROWTH),
             )
         return await asyncio.to_thread(_fetch)
+
+    async def _held_closes(self, yahoo_ticker: str) -> Optional[np.ndarray]:
+        """
+        A year of closes from `market_prices` when `yahoo_ticker` is a held security's own
+        Yahoo ticker — the price pass already fetches them, so `history("1y")` would be a
+        request for rows on disk. None when nothing held resolves to it, or fewer than the
+        RSI needs are stored. Resolved like every Yahoo caller (`_get_yahoo_ticker`) over
+        held, Yahoo-eligible securities, once per service.
+        """
+        if self._held_by_ticker is None:
+            from app.services.market_data_service import MarketDataService
+
+            market = MarketDataService(self.db)
+            securities = (await self.db.execute(
+                select(Security).where(yahoo_eligible(), held())
+            )).scalars().all()
+            self._held_by_ticker = {
+                (await market._get_yahoo_ticker(s)).upper(): s.id for s in securities
+            }
+        security_id = self._held_by_ticker.get(yahoo_ticker.upper())
+        if security_id is None:
+            return None
+        rows = (await self.db.execute(
+            select(MarketPrice.close_price)
+            .where(
+                MarketPrice.security_id == security_id,
+                MarketPrice.date >= date.today() - timedelta(days=365),
+            )
+            .order_by(MarketPrice.date)
+        )).scalars().all()
+        if len(rows) < RSI_MIN_CLOSES:
+            return None
+        return np.array([float(c) for c in rows])
 
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:
         """Remove outlier prices (likely currency-mixed data)."""
@@ -243,18 +308,37 @@ class WatchlistService:
                 logger.debug(f"{yahoo_ticker} is fresh ({age} old), skipping")
                 return {}
 
-        logger.info(f"Fetching data for {yahoo_ticker}...")
+        # Statements and estimates change a few times a quarter: asked weekly, and on the
+        # other runs the growth columns they feed are carried from the row (GitHub issue
+        # #11, item d). A held ticker's RSI reads the closes the price pass stored.
+        slow = (
+            item.estimates_synced_at is None
+            or utcnow() - item.estimates_synced_at >= self.ESTIMATES_REFRESH_AFTER
+        )
+        held_closes = await self._held_closes(yahoo_ticker)
+
+        logger.info(f"Fetching data for {yahoo_ticker}{'' if slow else ' (.info only)'}...")
         await asyncio.sleep(random.uniform(1.0, 3.0))
 
         try:
-            info, quarterly_financials, history, revenue_estimate, growth_estimates = await self._fetch_ticker_data(yahoo_ticker)
+            info, quarterly_financials, history, revenue_estimate, eps_trend_growth = await self._fetch_ticker_data(
+                yahoo_ticker, with_estimates=slow, with_history=held_closes is None,
+            )
         except Exception as e:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
             return {"error": str(e)}
 
-        # Forward estimates from analyst consensus — one parser with FundamentalsService,
-        # including the forwardEps / trailingEps fallback (already in .info).
-        fwd_rev, fwd_eps = forward_growth(revenue_estimate, growth_estimates, info, yahoo_ticker)
+        if slow:
+            # Forward estimates from analyst consensus — one parser with FundamentalsService,
+            # including the forwardEps / trailingEps fallback (already in .info).
+            fwd_rev, fwd_eps = forward_growth(revenue_estimate, eps_trend_growth, info, yahoo_ticker)
+            # TTM growth from quarterly financials (always current, no annual lag), else .info.
+            revenue_growth = trailing_growth(quarterly_financials, REVENUE_ROWS, info.get("revenueGrowth"))
+            earnings_growth = trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get("earningsGrowth"))
+        else:
+            fwd_rev, fwd_eps = item.fwd_revenue_growth, item.fwd_eps_growth
+            revenue_growth, earnings_growth = item.revenue_growth, item.earnings_growth
+        trailing_pe = self._safe_float(info.get("trailingPE"))
 
         logger.debug(f"{yahoo_ticker}: fwd_rev={fwd_rev}, fwd_eps={fwd_eps}")
 
@@ -266,13 +350,13 @@ class WatchlistService:
             "current_price": current_price,
             "currency": info.get("currency"),
             "data_currency": info.get("currency"),
-            "trailing_pe": self._safe_float(info.get("trailingPE")),
+            "trailing_pe": trailing_pe,
             "forward_pe": self._safe_float(info.get("forwardPE")),
-            "peg_ratio": self._safe_float(info.get("pegRatio")),
+            # One tier order with FundamentalsService, in one place (`peg_ratio.resolve_peg`).
+            "peg_ratio": resolve_peg(info, trailing_pe, fwd_eps),
             "ev_to_ebitda": self._safe_float(info.get("enterpriseToEbitda")),
-            # TTM growth from quarterly financials (always current, no annual lag), else .info.
-            "revenue_growth": trailing_growth(quarterly_financials, REVENUE_ROWS, info.get("revenueGrowth")),
-            "earnings_growth": trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get("earningsGrowth")),
+            "revenue_growth": revenue_growth,
+            "earnings_growth": earnings_growth,
             "fwd_revenue_growth": fwd_rev,
             "fwd_eps_growth": fwd_eps,
             "profit_margins": self._safe_float(info.get("profitMargins")),
@@ -282,21 +366,8 @@ class WatchlistService:
             "analyst_count": self._safe_int(info.get("numberOfAnalystOpinions")),
             "last_synced": utcnow(),
         }
-
-        # Fallback 1 (preferred): P/E / Fwd EPS growth %. FundamentalsService runs the
-        # same tiers in the same order over the same inputs — it used to lack this one
-        # entirely, so the two endpoints disagreed. See app/services/peg_ratio.py.
-        if data["peg_ratio"] is None:
-            data["peg_ratio"] = self._safe_float(
-                peg_from_growth(data["trailing_pe"], fwd_eps, is_fraction=True)
-            )
-
-        # Fallback 2 (last resort): Trailing P/E / analyst 5-yr EPS CAGR %
-        if data["peg_ratio"] is None:
-            lt_growth = self._safe_float(info.get("longTermGrowth") or info.get("longTermEpsGrowth"))
-            data["peg_ratio"] = self._safe_float(
-                peg_from_growth(data["trailing_pe"], lt_growth)
-            )
+        if slow:
+            data["estimates_synced_at"] = utcnow()
 
         # Use .info for 52-week high/low and moving averages (reliable, pre-computed)
         data["week52_high"] = self._safe_float(info.get("fiftyTwoWeekHigh"))
@@ -333,12 +404,14 @@ class WatchlistService:
                 (current_price - data["ma200"]) / data["ma200"] * 100, 2
             )
 
-        # RSI-14: computed from history fetched alongside .info
+        # RSI-14: from the stored closes of a held ticker, else the history fetched with .info
         try:
-            if history is not None and not history.empty and len(history) > 0:
+            closes = held_closes
+            if closes is None and history is not None and not history.empty:
                 closes = history["Close"].values.astype(float)
+            if closes is not None:
                 closes = self._filter_outliers(closes)
-                if len(closes) >= 15:
+                if len(closes) >= RSI_MIN_CLOSES:
                     data["rsi14"] = self._compute_rsi(closes, period=14)
         except Exception as e:
             logger.warning(f"Failed to compute RSI ({yahoo_ticker}): {e}")

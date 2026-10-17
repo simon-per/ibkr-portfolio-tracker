@@ -74,6 +74,12 @@ async def lifespan(app: FastAPI):
     # rather than merely absent. `init_db` itself stays in app/database.py for tests and
     # scripts that want a schema without a migration run.
 
+    # Before anything can build a `yf.Ticker` — the scheduler starts below — so the
+    # timezone and cookie caches live on the data mount and outlive a deploy
+    # (app/yf_cache.py, GitHub issue #11).
+    from app.yf_cache import configure_yfinance_cache
+    configure_yfinance_cache()
+
     # Initialize default ticker mappings
     from app.database import AsyncSessionLocal
     from app.repositories.ticker_mapping_repository import TickerMappingRepository

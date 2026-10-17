@@ -250,8 +250,9 @@ PORTFOLIO_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_D
 # Nothing scheduled the watchlist until 2026-10-13: it refreshed when someone pressed
 # *Refresh All* and aged silently otherwise. The owner asked for a scheduled refresh
 # **away from the portfolio slots**, because it is the most expensive Yahoo loop per
-# row — five endpoints an item (`WatchlistService._fetch_ticker_data`) — and stacking
-# it on a repricing pass is how an IP-based rate limit gets spent.
+# row — up to six requests an item (`WatchlistService._fetch_ticker_data`; `.info` alone
+# is three), four on the nights its weekly estimates are not due — and stacking it on a
+# repricing pass is how an IP-based rate limit gets spent.
 #
 # 04:00 Berlin: Yahoo's last scheduled touch is 22:00 and the next 08:00 (00:00 is
 # IBKR-only), so this leaves six quiet hours before it and four after. Tuesday to
@@ -263,13 +264,14 @@ WATCHLIST_REFRESH_DAYS = 'tue-sat'
 #
 # The Fundamentals tab and the analyst ratings refreshed only on a click until
 # 2026-10-14, then weekly; since 2026-10-17 daily, at the owner's request — the tab's
-# ratios are read beside prices that move every day. One pass is roughly six Yahoo
-# requests per company and two per fund, **held securities only**
+# ratios are read beside prices that move every day. One pass is six Yahoo requests per
+# company (seven when its rating is due) and three per fund (`.info` is three of them;
+# a fund's rating is never asked), **held securities only**
 # (`security_repository.held`), and only rows older than `STALE_AFTER`
 # (docs/flex-and-sync.md, *Sync schedule*).
 #
 # Tuesday to Saturday, once after each US close, like the watchlist — and an hour after
-# it, so the two five-endpoint loops never share a pass (a watchlist pass takes minutes,
+# it, so the two most expensive Yahoo loops never share a pass (a watchlist pass takes minutes,
 # and the shared SYNC_PIPELINE gate would turn an overlap into a skipped day). 05:00
 # still leaves three quiet hours before the 08:00 repricing. A new hour, so the deploy
 # guard's copies in ops/ carry it too (`tests/test_deploy_guard_hours.py`).
@@ -1267,8 +1269,9 @@ class SchedulerService:
 
         Independent of IBKR (yfinance-based); computes against existing tax lots.
         Cheap to run daily: the pass asks only about held, Yahoo-eligible securities
-        whose `dividends_checked_at` is NULL or a week old (`needs_dividend_check`),
-        so most days it asks nothing.
+        whose `dividends_checked_at` is NULL, a month old, or older than a mapping change
+        or a split (`needs_dividend_check`) — the price passes capture new ex-dates in
+        between — so most days it asks nothing.
 
         Returns:
             Summary of the dividend sync + compute steps
@@ -1439,8 +1442,8 @@ class SchedulerService:
 
         # Step 4: Sync dividends (always — yfinance-based, computes against existing tax lots)
         #
-        # Weekends included, on purpose: the pass asks only about securities due their
-        # weekly check (`needs_dividend_check`), so skipping it would not save a request,
+        # Weekends included, on purpose: the pass asks only about securities due a full
+        # read (`needs_dividend_check`), so skipping it would not save a request,
         # only move them to Monday — or to a weekend dashboard load, since
         # `GET /api/dividends/summary` enqueues a pass while anything is due.
         logger.info("Syncing dividends...")

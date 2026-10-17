@@ -34,6 +34,8 @@ htmlcov/
 # The live database's directory on the VPS (docker-compose mounts backend/data/), and
 # the set-aside sidecars ops/db-layout.sh leaves in it — names no pattern above catches.
 backend/data/
+# yfinance's cache beside a local backend/portfolio.db (app/yf_cache.py).
+backend/yf-cache/
 
 # Generated portfolio data exports
 portfolio_data*.json

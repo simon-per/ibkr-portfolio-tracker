@@ -258,11 +258,28 @@ since there is no cutoff to infer. Rows awaiting computation
 (`shares_held IS NULL`) are still never touched. Tests:
 `tests/test_prune_preserves_forecast_basis.py`.
 
-### The Yahoo pass — each holding at most once a week
+### The Yahoo pass — each holding at most once a month; new ex-dates ride the price pass
+
+**New ex-dates come from the price responses** (GitHub issue #11, item a, 2026-10-17). Every price
+fetch is a `v8/finance/chart` request with `events=div,splits` — the endpoint `.dividends` reads,
+over the price window instead of 99 years — and that window is re-read at each repricing slot, so a
+new ex-date passes through several responses. `MarketDataService` keeps the frame's dividends for the
+ticker whose prices it stored (`chart_actions`; never a rejected variation, never Alpha Vantage) and
+`DividendService.store_chart_dividends` writes them through **`yahoo_dividend_rows`, the one row
+builder** the pass below uses too: ex-date = the index's exchange-local date, Yahoo's amount as
+reported, the security's currency, `source='yfinance_estimate'`, nothing before
+`pre_ownership_cutoff(first lot)`, held securities only. Same endpoint, same events, same builder, so
+the rows are the same rows and the era splice treats them alike
+(`test_one_frame_through_both_paths_stores_the_same_rows` feeds one frame through both). It is best
+effort after the prices commit, and it **never stamps `dividends_checked_at`**: a window is not the
+full history. A split in the window dated after the stamp clears the stamp instead (Yahoo restates
+split-adjusted history), like a purge does.
 
 `sync_dividend_data()` asks Yahoo only about the securities `needs_dividend_check()` selects:
 Yahoo-eligible, **held** (an open lot, `security_repository.held`), and with
-`securities.dividends_checked_at` NULL or older than `DIVIDENDS_RECHECK_AFTER` (7 days). Every answer
+`securities.dividends_checked_at` NULL, older than `DIVIDENDS_RECHECK_AFTER` (30 days — 7 until the
+capture above existed), or older than the active ticker mapping's `updated_at` (the rows came from
+another ticker; a new mapping re-reads at the next pass). Every answer
 stamps it: data, an **empty series** (a non-payer such as an accumulating ETF) and an error that is not
 a rate limit. A **rate limit stamps nothing**: `is_rate_limit` is checked before the stamp, as in the
 allocation sync, so a pass cut short at 5 of 40 leaves the other 35 due and the next pass resumes there.
@@ -272,12 +289,13 @@ and payers between ex-dates were asked on every pass, and so was every sold posi
 
 - **Held only.** A sold position has nothing to earn or forecast. Pre-ownership history is unaffected:
   a held security still keeps `PRE_OWNERSHIP_HISTORY_YEARS` before its first lot. A new purchase has
-  a NULL stamp and is asked at the next pass. A re-buy after more than a week is due anyway, and one
-  inside the week was asked while it was still held.
+  a NULL stamp and is asked at the next pass. A re-buy after more than `DIVIDENDS_RECHECK_AFTER` is
+  due anyway; one inside it picks up new ex-dates from the price pass again, and an ex-date that fell
+  while it was sold (no income, cadence only) waits for the re-verify.
 - **A purge re-arms the check.** `DividendRepository.delete_estimates_for_security`, the one path
   both `purge_dividend_estimates` and `manage_mappings disable --purge-prices` delete through, clears
   the stamp in the same transaction. The corrected ticker is asked at the next pass instead of a
-  week later.
+  month later. A mapping changed without a purge is due too, through its `updated_at`.
 - **The summary card enqueues a pass only while something is due.** `GET /api/dividends/summary`
   counts `needs_dividend_check()`, the loop's own expression, and enqueues
   `_run_dividend_sync_background` only when the count is above 0 and the 6-hour in-process throttle
@@ -286,11 +304,12 @@ and payers between ex-dates were asked on every pass, and so was every sold posi
   re-stamps IBKR rows on every Flex re-delivery, so that timestamp tracked the Flex window and never
   the Yahoo pass. On every day with no dividend inside the window, and across each ET Sunday/Monday
   skip, each load past the throttle started another near-full pass, up to four a day on top of
-  18:00's. After a pass nothing is due until a holding is new or a week old, or a rate limit cut the
-  pass short. The throttle is the backstop for that last case.
+  18:00's. After a pass nothing is due until a holding is new, remapped, split or a month old, or a
+  rate limit cut the pass short. The throttle is the backstop for that last case.
 
 Tests: `tests/test_dividend_check_budget.py`, which counts the stubbed requests over a simulated week
-(105 before, 2 after), plus the rate-limit, error, sold, new-purchase, purge and summary cases.
+(105 before, 2 after), plus the rate-limit, error, sold, new-purchase, purge and summary cases;
+`tests/test_chart_dividends.py` for the capture, the shared builder and when `.dividends` is read.
 
 ### A wrong mapping poisons dividends too, and only prices were ever purged
 

@@ -707,8 +707,8 @@ async def test_the_weekend_full_sync_prices_missing_dates_only(spy, monkeypatch,
     Berlin weekend its price pass skips the provisional re-fetch. Keyed on the calendar,
     never on the IBKR result: gating the price half on that was a silent outage.
 
-    The dividend step still runs: it asks only about securities due their weekly check
-    (issue #6), so skipping it would move those requests, not save them.
+    The dividend step still runs: it asks only about securities due a full read
+    (issues #6, #11), so skipping it would move those requests, not save them.
     """
     svc, s = spy
     asked = []

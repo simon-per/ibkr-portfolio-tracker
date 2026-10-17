@@ -8,7 +8,7 @@ import logging
 import random
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from statistics import median
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
@@ -22,6 +22,7 @@ from app.clock import utcnow
 from app.etf_mappings import is_known_etf_isin
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.models.ticker_mapping import TickerMapping
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
@@ -54,10 +55,14 @@ logger = logging.getLogger(__name__)
 # still discarding the decades yfinance returns.
 PRE_OWNERSHIP_HISTORY_YEARS = 3
 
-# How long Yahoo's answer about a security's dividends is trusted before the pass asks
-# again. A new ex-date is announced weeks ahead and IBKR's ledger books the real
-# payment, so a week costs the forecast nothing.
-DIVIDENDS_RECHECK_AFTER = timedelta(days=7)
+# How long a security's full Yahoo dividend history is trusted before the pass re-reads
+# it. Since GitHub issue #11 the price pass captures each new ex-date from the chart
+# response it already fetches (`store_chart_dividends`), at every repricing slot, so the
+# dedicated `.dividends` request — the whole history, decades of daily bars — is a slow
+# re-verify for what the chart cannot see: a late or restated amount outside the price
+# window, a holding whose prices did not come from Yahoo. It was 7 days while it was the
+# only source.
+DIVIDENDS_RECHECK_AFTER = timedelta(days=30)
 
 
 def needs_dividend_check() -> ColumnElement[bool]:
@@ -65,22 +70,74 @@ def needs_dividend_check() -> ColumnElement[bool]:
     The one SQL predicate for "the dividend pass should ask Yahoo about this security".
 
     Yahoo-eligible, held (an open lot — a sold position earns nothing to forecast), and
-    unanswered for `DIVIDENDS_RECHECK_AFTER`. The pass selects with it and
-    `GET /api/dividends/summary` counts it before enqueueing a pass, so the route can
-    never call a pass due that the loop would then skip (GitHub issue #6: the route read
-    the card's `last_computed`, which the Yahoo pass never moves, and the loop read the
-    newest row's `created_at`, which a non-payer never gets). `IS NULL` is the half
-    `needs_allocation_refresh` records losing: a security never asked is due.
+    one of: never read (NULL — a new holding, or a purge cleared it), read longer than
+    `DIVIDENDS_RECHECK_AFTER` ago, or read before its active ticker mapping last changed
+    (the rows came from another ticker). A split the price pass sees after the read
+    clears the stamp (`store_chart_dividends`), since Yahoo restates history. The pass
+    selects with it and `GET /api/dividends/summary` counts it before enqueueing a pass,
+    so the route can never call a pass due that the loop would then skip (GitHub issue #6:
+    the route read the card's `last_computed`, which the Yahoo pass never moves, and the
+    loop read the newest row's `created_at`, which a non-payer never gets). `IS NULL` is
+    the half `needs_allocation_refresh` records losing: a security never asked is due.
     """
     cutoff = utcnow() - DIVIDENDS_RECHECK_AFTER
+    remapped = (
+        select(TickerMapping.id)
+        .where(
+            TickerMapping.ibkr_symbol == Security.symbol,
+            TickerMapping.ibkr_exchange == Security.exchange,
+            TickerMapping.is_active == True,  # noqa: E712 — SQLAlchemy needs the operator
+            TickerMapping.updated_at > Security.dividends_checked_at,
+        )
+        .exists()
+    )
     return and_(
         yahoo_eligible(),
         held(),
         or_(
             Security.dividends_checked_at.is_(None),
             Security.dividends_checked_at < cutoff,
+            remapped,
         ),
     )
+
+
+def pre_ownership_cutoff(first_lot: Optional[date]) -> Optional[date]:
+    """The oldest ex-date worth keeping: `PRE_OWNERSHIP_HISTORY_YEARS` before the first lot."""
+    if first_lot is None:
+        return None
+    return first_lot - timedelta(days=365 * PRE_OWNERSHIP_HISTORY_YEARS)
+
+
+def yahoo_dividend_rows(
+    security: Security, dividends: Iterable[Tuple[Any, Any]], keep_from: Optional[date],
+) -> Tuple[List[Dict], int]:
+    """
+    The `dividend_payments` rows a Yahoo dividend series becomes, and how many it skipped.
+
+    **The one row builder** for both readers of Yahoo's dividends: the dividend pass's
+    `.dividends` and the price pass's chart frame (`store_chart_dividends`, GitHub issue
+    #11). Both are the `v8/finance/chart` endpoint's `div` events, so the same builder over
+    the same events writes the same rows: the ex-date is the index's exchange-local date,
+    the amount is Yahoo's as reported, the currency is the security's, the source is
+    `yfinance_estimate`, and anything before `keep_from` (`pre_ownership_cutoff`) is
+    skipped. Pure; raises on an amount that is not a number before anything is written.
+    """
+    rows = []
+    skipped = 0
+    for dt_index, amount in dividends:
+        ex_date = dt_index.date() if hasattr(dt_index, 'date') else dt_index
+        if keep_from and ex_date < keep_from:
+            skipped += 1
+            continue
+        rows.append({
+            'security_id': security.id,
+            'ex_date': ex_date,
+            'amount_per_share': Decimal(str(amount)),
+            'currency': security.currency,
+            'source': 'yfinance_estimate',
+        })
+    return rows, skipped
 
 # Below this many days held inside the trailing year, a trailing-12M yield divides
 # a partial year's income by a full position value and so reads low. 350 rather
@@ -323,9 +380,55 @@ class DividendService:
         if security is not None:
             security.dividends_checked_at = utcnow()
 
+    async def store_chart_dividends(
+        self, security: Security, dividends: Iterable[Tuple[Any, Any]], split_dates: Iterable[date],
+    ) -> int:
+        """
+        Store the dividends a price-pass chart response carried, and nothing else.
+
+        `MarketDataService._try_fetch_yahoo` already asks `v8/finance/chart` for
+        `events=div,splits` on every price fetch, and its window — a few days before the
+        oldest missing date to today — is re-read at every repricing slot, so each new
+        ex-date passes through it repeatedly (GitHub issue #11, item a). Same endpoint,
+        same events, same builder (`yahoo_dividend_rows`) as `sync_dividend_data`, so the
+        rows are identical, and so is the scope: held securities only, with the
+        pre-ownership cutoff. The caller has already applied `is_yahoo_eligible`.
+
+        **It never stamps `dividends_checked_at`.** That stamp means "the full history was
+        read", which a window cannot claim; `needs_dividend_check` keeps keying the
+        bootstrap and the slow re-verify off it. A split in the window dated after the
+        stamp **clears** it instead — Yahoo restates the history on a split, so the next
+        dividend pass re-reads all of it, as a purge does. Once read after the split, the
+        same split no longer re-arms. Returns the rows written; the caller commits.
+        """
+        is_held = (await self.db.execute(
+            select(Security.id).where(Security.id == security.id, held())
+        )).first() is not None
+        if not is_held:
+            return 0
+        first_lot = (await self.db.execute(
+            select(func.min(TaxLot.open_date)).where(TaxLot.security_id == security.id)
+        )).scalar()
+        rows, _skipped = yahoo_dividend_rows(security, dividends, pre_ownership_cutoff(first_lot))
+
+        checked = security.dividends_checked_at
+        if checked is not None and any(
+            checked < datetime.combine(d, datetime.min.time()) for d in split_dates
+        ):
+            logger.info(
+                f"{security.symbol}: split after the last full dividend read; "
+                f"the next dividend pass re-reads its history"
+            )
+            security.dividends_checked_at = None
+
+        for row in rows:
+            await self.repo.upsert_payment(row)
+        return len(rows)
+
     async def sync_dividend_data(self) -> Dict:
         """Fetch dividend ex-dates from yfinance for the securities `needs_dividend_check` selects."""
-        # Held, Yahoo-eligible and unanswered for a week. The breakdown reader below
+        # Held, Yahoo-eligible, and new, remapped, split or unread for a month (the price
+        # pass captures new ex-dates in between, `store_chart_dividends`). The breakdown reader below
         # deliberately does not filter: it must name every holding, including ones
         # Yahoo cannot price.
         result = await self.db.execute(
@@ -353,7 +456,6 @@ class DividendService:
         # is exactly what happened to TSMC, Samsung and the SOXQ ETF. Keep a few
         # years before ownership: enough to establish a schedule, not decades of it.
         first_lot = await self._first_lot_dates()
-        history_lookback = timedelta(days=365 * PRE_OWNERSHIP_HISTORY_YEARS)
 
         dividends_added = 0
         errors = 0
@@ -401,21 +503,13 @@ class DividendService:
 
                 # Every security here is held, so it has a first lot; the fallback
                 # keeps everything rather than guess a cutoff if one ever has none.
-                owned_from = first_lot.get(security.id)
-                keep_from = owned_from - history_lookback if owned_from else None
-
-                for dt_index, amount in dividends_series.items():
-                    ex_date = dt_index.date() if hasattr(dt_index, 'date') else dt_index
-                    if keep_from and ex_date < keep_from:
-                        pre_ownership_skipped += 1
-                        continue
-                    await self.repo.upsert_payment({
-                        'security_id': security.id,
-                        'ex_date': ex_date,
-                        'amount_per_share': Decimal(str(amount)),
-                        'currency': security.currency,
-                        'source': 'yfinance_estimate',
-                    })
+                rows, skipped = yahoo_dividend_rows(
+                    security, dividends_series.items(),
+                    pre_ownership_cutoff(first_lot.get(security.id)),
+                )
+                pre_ownership_skipped += skipped
+                for row in rows:
+                    await self.repo.upsert_payment(row)
                     dividends_added += 1
 
                 await self.db.commit()

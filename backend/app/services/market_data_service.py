@@ -57,6 +57,27 @@ PRICE_MISS_BACKOFF_SLACK = timedelta(hours=4)
 ALPHA_VANTAGE_COMPACT_REACH_DAYS = 130
 
 
+def chart_actions(hist) -> Tuple[List[Tuple], List[date]]:
+    """
+    The dividends and split dates a `history()` frame carried, at no extra request.
+
+    yfinance asks `v8/finance/chart` for `events=div,splits,capitalGains` on every
+    history call and merges them into the frame (`actions=True`, its default). The
+    dividends come back as `(index, amount)` pairs — exactly what `Ticker.dividends`
+    (the same endpoint over the whole history) iterates as — and the split dates as
+    exchange-local dates. Empty when the frame has neither column.
+    """
+    dividends: List[Tuple] = []
+    splits: List[date] = []
+    if "Dividends" in hist.columns:
+        column = hist["Dividends"]
+        dividends = list(column[column != 0].items())
+    if "Stock Splits" in hist.columns:
+        column = hist["Stock Splits"]
+        splits = [index.date() for index in column[column != 0].index]
+    return dividends, splits
+
+
 def price_backoff_until(security: Security, is_held: bool) -> Optional[datetime]:
     """When the price loop may next ask about `security`, or None when it is not backing off."""
     misses = security.price_miss_count or 0
@@ -149,6 +170,11 @@ class MarketDataService:
 
         return self.EXCHANGE_SUFFIXES.get(exchange, '')
 
+    # Per-fetch state (see `__init__`), on the class too so a service built through
+    # `__new__` in a test can read it.
+    yahoo_chart_actions = None
+    _last_chart_actions = None
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.market_price_repo = MarketPriceRepository(db)
@@ -168,6 +194,12 @@ class MarketDataService:
         # own, so it is per-run state and never leaks into a later job.
         self.rate_limited = False
         self.alpha_vantage_capped = False
+
+        # `chart_actions` of the response whose prices `fetch_prices_from_yahoo` returned,
+        # or None (no Yahoo prices, or a fallback provider's). `_last_chart_actions` is
+        # `(ticker, actions)` of the last `_try_fetch_yahoo` that parsed prices.
+        self.yahoo_chart_actions = None
+        self._last_chart_actions = None
 
         # yfinance 1.1.0+ handles sessions and User-Agent headers internally
         # No need to create a custom session
@@ -258,6 +290,9 @@ class MarketDataService:
         """
         # Get primary ticker (checks custom mappings first)
         ticker = await self._get_yahoo_ticker(security)
+        self.yahoo_chart_actions = None
+        self._last_chart_actions = None
+        accepted = ticker
 
         # Try primary ticker first
         prices, rate_limited = await self._try_fetch_yahoo(ticker, security, start_date, end_date)
@@ -314,8 +349,14 @@ class MarketDataService:
                         source="auto",
                         notes=f"Auto-discovered from {ticker}"
                     )
+                    accepted = alt_ticker
                     break
 
+        # The dividends ride with the prices that were kept, never with a variation
+        # the currency check rejected.
+        last = self._last_chart_actions
+        if prices and last is not None and last[0] == accepted:
+            self.yahoo_chart_actions = last[1]
         return prices
 
     # Tickers where the suffix-based currency guess is wrong
@@ -500,6 +541,15 @@ class MarketDataService:
                         # 'yahoo_finance' for both providers.
                         'source': 'yahoo_finance',
                     })
+
+            if prices:
+                # The dividends in this same response (GitHub issue #11, item a): stored
+                # by `fetch_and_cache_prices` if these prices are the ones kept. Parsing
+                # only — never allowed to cost the prices.
+                try:
+                    self._last_chart_actions = (ticker, chart_actions(hist))
+                except Exception as e:
+                    logger.warning(f"Could not read chart dividends for {ticker}: {e}")
 
             return prices, False
 
@@ -701,9 +751,12 @@ class MarketDataService:
         )
 
         # Try Yahoo Finance first (primary source)
+        self.yahoo_chart_actions = None
         prices_data = await self.fetch_prices_from_yahoo(
             security, fetch_start, end_date
         )
+        # Read before any fallback: Alpha Vantage's prices carry no dividends.
+        chart = self.yahoo_chart_actions
 
         # If Yahoo Finance returns nothing, try Alpha Vantage (US stocks only). Not when
         # Yahoo *refused* us: a 429 also comes back as an empty list, and falling through
@@ -767,6 +820,7 @@ class MarketDataService:
             clear_price_backoff(security)
             await self.db.commit()
             logger.info(f"Cached {count} new prices for {security.symbol}")
+            await self._store_chart_dividends(security, chart)
 
             # Add delay between securities to be polite to Yahoo Finance
             # 3-6 seconds feels human and keeps us well under rate limits
@@ -776,7 +830,37 @@ class MarketDataService:
 
             return count
 
+        await self._store_chart_dividends(security, chart)
         return 0
+
+    async def _store_chart_dividends(self, security: Security, chart) -> None:
+        """
+        Hand the kept response's dividends to `DividendService.store_chart_dividends`.
+
+        After the prices are committed, and best effort: a dividend that cannot be stored
+        here is read by the dividend pass's re-verify, so it must never cost the prices.
+        A failed write is rolled back and `security` refreshed, because the callers read
+        its attributes next and an expired one would raise MissingGreenlet.
+        """
+        if not chart:
+            return
+        dividends, split_dates = chart
+        if not dividends and not split_dates:
+            return
+        from app.services.dividend_service import DividendService
+
+        symbol = security.symbol
+        try:
+            stored = await DividendService(self.db).store_chart_dividends(
+                security, dividends, split_dates
+            )
+            await self.db.commit()
+            if stored:
+                logger.info(f"Stored {stored} dividend(s) for {symbol} from its price response")
+        except Exception as e:
+            logger.warning(f"Could not store the chart dividends for {symbol}: {e}")
+            await self.db.rollback()
+            await self.db.refresh(security)
 
     # How far before the anchor date to look for the sibling's close when the anchor
     # day itself has none — a NAV struck on a Swiss holiday, or the two strike on

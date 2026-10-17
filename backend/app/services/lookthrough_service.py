@@ -478,9 +478,9 @@ class LookthroughService:
         """
         Canonical sector per directly-held security id, from `securities.sector`.
 
-        Expect gaps and do not read them as breakage: only `POST /api/allocation/sync` writes that
-        column and nothing schedules it, so an IBKR-ingested security carries NULL until someone
-        runs it by hand. Measured on this account, 27 of 39 held securities have one — but the
+        Expect gaps and do not read them as breakage: `POST /api/allocation/sync` and, since
+        2026-10-17, the daily fundamentals pass write that column, so an IBKR-ingested security
+        carries NULL until the next 05:00 pass (or a security Yahoo has no sector for, always). Measured on this account, 27 of 39 held securities have one — but the
         issuer baskets answer 97 of the 103 ISINs behind the top companies, so this is the *weaker*
         of the two sources and exists to cover holdings that appear in no fund at all.
         """

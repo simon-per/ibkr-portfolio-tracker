@@ -21,7 +21,14 @@ import pathlib
 
 import pytest
 
-from app.services.peg_ratio import growth_pct_from_estimate, peg_from_growth
+from app.services.peg_ratio import (
+    YAHOO_PEG_KEYS,
+    forward_eps_peg,
+    growth_pct_from_estimate,
+    peg_from_growth,
+    read_time_peg,
+    resolve_peg,
+)
 
 
 class TestGrowthNormalisation:
@@ -70,36 +77,74 @@ class TestPeg:
         assert peg_from_growth(25.0, 0.01) == pytest.approx(25.0)
 
 
-def _peg_block(func) -> str:
-    return inspect.getsource(func)
-
-
-def test_both_services_resolve_peg_in_the_same_order():
+def test_both_services_resolve_peg_through_the_one_tier_order():
     """
-    Structural rather than behavioural, because exercising either service means
-    faking a yfinance `.info` frame — but the defect was *order*, and order is
-    visible in the source.
-
-    Pins that each service tries forward-EPS growth before the long-term CAGR, and
-    that both route through the shared helper rather than reimplementing it.
+    The order was written out in each service (and one tier again in the router), so it
+    could drift between `/api/watchlist` and `/api/fundamentals/portfolio`. Now both call
+    `resolve_peg`, which is the only place that knows it (GitHub issue #11, item b).
     """
     from app.services.fundamentals_service import FundamentalsService
     from app.services.watchlist_service import WatchlistService
 
     for func in (FundamentalsService._extract_metrics, WatchlistService.sync_item):
-        src = _peg_block(func)
-        assert "peg_from_growth" in src, f"{func.__qualname__} does not use the shared helper"
-        assert src.count("peg_from_growth") >= 2, (
-            f"{func.__qualname__} has fewer than two PEG fallback tiers — the "
-            f"forward-EPS tier is what fundamentals used to be missing"
+        src = inspect.getsource(func)
+        assert "resolve_peg(" in src, f"{func.__qualname__} does not use the shared order"
+        assert "peg_from_growth" not in src and "longTermGrowth" not in src, (
+            f"{func.__qualname__} resolves a PEG tier itself again"
         )
-        fwd = src.index("fwd_eps")
-        lt = src.index("longTermGrowth")
-        assert fwd < lt, (
-            f"{func.__qualname__} consults longTermGrowth before forward EPS; the "
-            f"watchlist calls the forward-EPS tier the preferred one, so both must "
-            f"try it first or the two endpoints disagree"
-        )
+
+
+class TestTierOrder:
+    """`resolve_peg`: trailingPegRatio, pegRatio, forward EPS, long-term CAGR."""
+
+    INFO = {"trailingPegRatio": 1.7, "pegRatio": 2.5, "longTermGrowth": 0.25}
+
+    def test_yahoos_trailing_peg_comes_first(self):
+        assert resolve_peg(self.INFO, 30.0, 0.5) == 1.7
+
+    def test_then_its_peg_ratio(self):
+        info = {**self.INFO, "trailingPegRatio": None}
+        assert resolve_peg(info, 30.0, 0.5) == 2.5
+
+    def test_then_forward_eps_growth_as_a_fraction(self):
+        info = {"longTermGrowth": 0.25}
+        assert resolve_peg(info, 30.0, 0.5) == pytest.approx(0.6)
+        # A fraction above 1 stays a fraction: the SNDK case.
+        assert resolve_peg({}, 30.0, 2.2245) == pytest.approx(round(30.0 / 222.45, 4))
+
+    def test_then_the_long_term_cagr(self):
+        assert resolve_peg({"longTermGrowth": 0.25}, 30.0, None) == pytest.approx(1.2)
+        assert resolve_peg({"longTermEpsGrowth": 15}, 30.0, None) == pytest.approx(2.0)
+
+    def test_none_when_no_tier_answers(self):
+        assert resolve_peg({}, 30.0, None) is None
+        assert resolve_peg(None, -15.0, 0.5) is None  # a loss-maker has no derived PEG
+
+    def test_rounded_like_every_stored_figure(self):
+        assert resolve_peg({"trailingPegRatio": 1.234567}, None, None) == 1.2346
+
+    def test_the_read_time_tier_is_the_forward_eps_tier(self):
+        assert read_time_peg(1.23, 30.0, 0.5) == 1.23
+        assert read_time_peg(None, 30.0, 0.37) == forward_eps_peg(30.0, 0.37)
+        assert read_time_peg(None, 30.0, 0.37) == resolve_peg({}, 30.0, 0.37)
+
+
+def test_only_peg_ratio_names_yahoos_peg_keys():
+    """
+    The family form: a module reading `pegRatio` or `trailingPegRatio` out of `.info` is
+    choosing a PEG tier, and the order must live in `peg_ratio.resolve_peg` alone.
+    String constants in code, so prose mentioning the names does not count.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = [
+        f"{path.relative_to(root)}:{node.lineno}"
+        for path in sorted(root.rglob("*.py"))
+        if path.name != "peg_ratio.py"
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Constant) and node.value in YAHOO_PEG_KEYS
+    ]
+    assert not offenders, offenders
+    assert set(YAHOO_PEG_KEYS) == {"trailingPegRatio", "pegRatio"}
 
 
 def test_neither_service_still_normalises_growth_inline():
