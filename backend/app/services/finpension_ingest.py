@@ -47,6 +47,7 @@ from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_SIBLING, Secur
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.models.cash_flow import CashFlow
+from app.services.eur_conversion import to_eur_or_none
 from app.services.finpension_report import (
     ACCOUNT_CURRENCY,
     DEPOSIT,
@@ -449,16 +450,6 @@ async def ingest_finpension_report(
     counts = defaultdict(int)
     unconvertible: set = set()
 
-    async def _to_eur(amount: Decimal, on: date) -> Optional[Decimal]:
-        if amount == 0:
-            return Decimal("0")
-        try:
-            return await currency_service.convert_to_eur(
-                amount=amount, from_currency=ACCOUNT_CURRENCY, target_date=on
-            )
-        except Exception:
-            return None
-
     for row in report.rows:
         ib_key = _ib_key(account, row, seen_keys)
 
@@ -468,7 +459,9 @@ async def ingest_finpension_report(
             gross = abs(row.cash_flow)
 
             if row.is_buy:
-                cost_eur = await _to_eur(gross, row.row_date)
+                cost_eur = await to_eur_or_none(
+                    currency_service, gross, ACCOUNT_CURRENCY, row.row_date
+                )
                 if cost_eur is None:
                     unconvertible.add(row.row_date.isoformat())
                     continue
@@ -523,7 +516,9 @@ async def ingest_finpension_report(
             LIQUIDATION: FLOW_INCOME,
         }[row.kind]
 
-        amount_eur = await _to_eur(row.cash_flow, row.row_date)
+        amount_eur = await to_eur_or_none(
+            currency_service, row.cash_flow, ACCOUNT_CURRENCY, row.row_date
+        )
         if amount_eur is None:
             unconvertible.add(row.row_date.isoformat())
             continue

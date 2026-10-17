@@ -4,7 +4,7 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnalyticsTab } from './AnalyticsTab'
 import { waterfallRows } from '@/lib/returnDecomposition'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import type {
   ClosedPositionsResponse,

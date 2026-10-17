@@ -2,12 +2,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  CurrencyProvider,
-  useBaseCurrency,
-  useCurrencySymbol,
-  useFormatCurrency,
-} from './CurrencyContext'
+import { useBaseCurrency, useCurrencySymbol, useFormatCurrency } from './CurrencyContext'
+import { CurrencyProvider } from './CurrencyProvider'
 import { api } from './api'
 
 /**
@@ -32,7 +28,7 @@ beforeEach(() => {
 })
 
 function Probe() {
-  const { baseCurrency, currencyIsAssumed, updateError, isUpdating } = useBaseCurrency()
+  const { baseCurrency, currencyIsAssumed, updateError, isUpdating, unavailableBase } = useBaseCurrency()
   const format = useFormatCurrency()
   const symbol = useCurrencySymbol()
   return (
@@ -43,6 +39,7 @@ function Probe() {
       <dd data-testid="isUpdating">{String(isUpdating)}</dd>
       <dd data-testid="formatted">{format(1234.5)}</dd>
       <dd data-testid="symbol">{symbol}</dd>
+      <dd data-testid="unavailable">{unavailableBase ?? '(none)'}</dd>
     </dl>
   )
 }
@@ -86,6 +83,25 @@ describe('CurrencyProvider', () => {
     // The whole point of the context: one source for the label.
     expect(read('formatted')).toContain('CHF')
     expect(read('symbol')).toBe('CHF ')
+  })
+
+  it('labels in the base the server uses, and names the chosen one it cannot', async () => {
+    // No EUR->CHF rate exists, so the server reports in EUR and says so.
+    vi.spyOn(api, 'getSettings').mockResolvedValue({
+      ...CHF_SETTINGS, base_currency: 'EUR', base_currency_unavailable: 'CHF',
+    } as never)
+    renderProbe()
+    await waitFor(() => expect(read('unavailable')).toBe('CHF'))
+    expect(read('base')).toBe('EUR')
+    expect(read('formatted')).toContain('€')
+    expect(read('assumed')).toBe('false')
+  })
+
+  it('has nothing unavailable when the chosen base is in use', async () => {
+    vi.spyOn(api, 'getSettings').mockResolvedValue(CHF_SETTINGS as never)
+    renderProbe()
+    await waitFor(() => expect(read('base')).toBe('CHF'))
+    expect(read('unavailable')).toBe('(none)')
   })
 
   describe('when the settings fetch fails', () => {

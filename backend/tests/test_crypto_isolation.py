@@ -29,6 +29,8 @@ CRYPTO_MODULES = {
     "app.cli.crypto_rebuild_holdings",
     "app.services.coingecko_client",
     "app.services.crypto_book",
+    # The paced GET both clients share (2026-10-17): crypto's own transport, no stock data.
+    "app.services.crypto_http",
 }
 
 # Non-crypto modules allowed to import a crypto module, each for a named reason.

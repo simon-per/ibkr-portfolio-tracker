@@ -5,6 +5,7 @@ Read/update application-level settings, notably the portfolio's base (display) c
 import logging
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -30,6 +31,10 @@ class SettingsResponse(BaseModel):
     base_currency: str
     supported_currencies: list[str]
     dividend_forecast_withholding_pct: float
+    # The stored choice when it cannot be used — no EUR->base rate exists at all, so
+    # figures are reported in EUR (`AppSettingsRepository.get_base_currency`). None
+    # otherwise; the header warns while it is set.
+    base_currency_unavailable: Optional[str] = None
 
 
 class UpdateBaseCurrencyRequest(BaseModel):
@@ -51,8 +56,11 @@ async def _settings_response(
     *,
     base_currency: str | None = None,
 ) -> SettingsResponse:
+    in_use = base_currency or await repo.get_base_currency()
+    stored = await repo.get_stored_base_currency()
     return SettingsResponse(
-        base_currency=base_currency or await repo.get_base_currency(),
+        base_currency=in_use,
+        base_currency_unavailable=stored if stored != in_use else None,
         supported_currencies=SUPPORTED_BASE_CURRENCIES,
         dividend_forecast_withholding_pct=_withholding_pct(
             await repo.get_dividend_net_factor()

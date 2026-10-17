@@ -26,6 +26,7 @@ from app.models.trade import Trade
 from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
+from app.services.eur_conversion import to_eur_or_none
 from app.services.dividend_service import DividendService
 from app.services.native_amounts import cash_flow_in_base
 from app.services.portfolio_service import PortfolioService
@@ -37,34 +38,6 @@ class TaxService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.currency_service = CurrencyService(db)
-
-    async def _to_eur(
-        self, amount: Decimal, currency: str, on_date: date
-    ) -> Optional[Decimal]:
-        """
-        Convert to EUR, or return None when no rate can be resolved.
-
-        It used to return the *unconverted* amount on failure, which reports a
-        foreign figure as base currency — a TWD sale would read ~35x high in a
-        filing aid still badged realized_source='trades', the badge that means
-        authoritative. Every other FX consumer skips the row with a warning
-        instead (sync_helper, portfolio_service, benchmark_service); this one
-        silently produced a number, and logged nothing at all.
-        """
-        if not amount:
-            return Decimal("0")
-        if (currency or "EUR") == "EUR":
-            return amount
-        try:
-            return await self.currency_service.convert_to_eur(
-                amount=amount, from_currency=currency, target_date=on_date
-            )
-        except Exception as e:
-            logger.warning(
-                f"No {currency}->EUR rate for {on_date} ({e}); "
-                f"skipping the row rather than reporting {currency} as EUR"
-            )
-            return None
 
     async def get_tax_report(self, year: int) -> Dict:
         start = date(year, 1, 1)
@@ -224,8 +197,16 @@ class TaxService:
         for t, sec in trade_rows:
             if (t.buy_sell or "").upper() != "SELL":
                 continue
-            proceeds_e = await self._to_eur(t.proceeds or Decimal("0"), t.currency, t.trade_date)
-            gain_e = await self._to_eur(t.realized_pnl or Decimal("0"), t.currency, t.trade_date)
+            # Through the one shared rule (`eur_conversion`). It returned the
+            # *unconverted* amount on failure until 2026-07-30, reporting a foreign
+            # figure as base currency — a TWD sale ~35x high in a filing aid badged
+            # realized_source='trades', the badge that means authoritative.
+            proceeds_e = await to_eur_or_none(
+                self.currency_service, t.proceeds or Decimal("0"), t.currency, t.trade_date
+            )
+            gain_e = await to_eur_or_none(
+                self.currency_service, t.realized_pnl or Decimal("0"), t.currency, t.trade_date
+            )
             if proceeds_e is None or gain_e is None:
                 # Reporting the raw foreign amount would be worse than omitting
                 # it: the figure looks plausible and the badge says authoritative.

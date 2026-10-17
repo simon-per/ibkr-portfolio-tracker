@@ -25,6 +25,7 @@ from app import rate_limit
 from app.auth import API_KEY_HEADER
 from app.config import settings
 from app.database import Base, get_db
+from app.models.app_settings import AppSetting
 from app.models.exchange_rate import ExchangeRate
 from app.services.currency_service import CurrencyService
 from app.main import app
@@ -78,12 +79,19 @@ def env(monkeypatch):
         ))
         loop.run_until_complete(session.commit())
 
+    def store_base(value):
+        # As a database whose base was chosen before the switch refused anything.
+        session.add(AppSetting(key="base_currency", value=value))
+        loop.run_until_complete(session.commit())
+
     async def _override():
         yield session
 
     app.dependency_overrides[get_db] = _override
     try:
-        yield TestClient(app), provider, seed_rate, calls
+        client = TestClient(app)
+        client.store_base = store_base
+        yield client, provider, seed_rate, calls
     finally:
         app.dependency_overrides.clear()
         loop.run_until_complete(session.close())
@@ -172,3 +180,27 @@ def test_an_unsupported_currency_is_refused_before_anything_runs(env):
     assert "Unsupported base currency" in r.json()["detail"]
     assert calls == []
     assert _base(client) == "EUR"
+
+
+def test_a_stored_base_with_no_rate_reports_in_eur_and_says_which_it_could_not_use(env):
+    # The way into the mislabel the switch now refuses: a base stored before the refusal
+    # existed, or rates gone. Every figure would be EUR under a CHF label.
+    client, _provider, _seed, _calls = env
+    client.store_base("CHF")
+
+    settings_body = client.get("/api/settings").json()
+    assert settings_body["base_currency"] == "EUR"
+    assert settings_body["base_currency_unavailable"] == "CHF"
+    # And the figures' own label agrees with the header's.
+    assert client.get("/api/portfolio/summary").json()["base_currency"] == "EUR"
+
+
+def test_a_stored_base_with_a_rate_is_the_one_in_use(env):
+    client, _provider, seed_rate, _calls = env
+    seed_rate("CHF")
+    client.store_base("CHF")
+
+    settings_body = client.get("/api/settings").json()
+    assert settings_body["base_currency"] == "CHF"
+    assert settings_body["base_currency_unavailable"] is None
+    assert client.get("/api/portfolio/summary").json()["base_currency"] == "CHF"

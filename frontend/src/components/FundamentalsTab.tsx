@@ -12,6 +12,7 @@ import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
 import { RefreshCw } from 'lucide-react'
 import { displayName } from '@/lib/securityName'
+import { compareNullsLast } from '@/lib/nullsLast'
 
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
@@ -80,15 +81,6 @@ function surpriseColor(result: string | null): string {
   return 'bg-muted text-muted-foreground'
 }
 
-// Sort comparator that handles nulls (nulls last)
-function compareValues(a: number | string | null, b: number | string | null, dir: SortDir): number {
-  if (a === null && b === null) return 0
-  if (a === null) return 1
-  if (b === null) return -1
-  if (a < b) return dir === 'asc' ? -1 : 1
-  if (a > b) return dir === 'asc' ? 1 : -1
-  return 0
-}
 
 function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
   if (etfs.length === 0) return null
@@ -288,7 +280,7 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
     // listing's own currency, and ranking raw USD against TWD ranks nothing.
     const sortValue = (row: FundamentalMetrics) =>
       sortKey === 'market_cap' ? row.market_cap_base : row[sortKey]
-    return [...stocks].sort((a, b) => compareValues(sortValue(a), sortValue(b), sortDir))
+    return [...stocks].sort((a, b) => compareNullsLast(sortValue(a), sortValue(b), sortDir))
   }, [stocks, sortKey, sortDir])
 
   const columns = useMemo(() => metricsColumns(), [])

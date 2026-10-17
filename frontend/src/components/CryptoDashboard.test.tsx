@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   api, UnauthorizedError, type CryptoPortfolioResponse, type CryptoStatusResponse,
 } from '@/lib/api'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
-import { ModeProvider } from '@/lib/portfolioMode'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
+import { ModeProvider } from '@/lib/ModeProvider'
 import { CryptoDashboard, CryptoStatusLine, CryptoSyncMessage } from './CryptoDashboard'
 
 vi.mock('recharts', async () => {

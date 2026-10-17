@@ -7,6 +7,26 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (evening) — the copies of one job, the base currency in use, lint (same branch)
+
+The backlog items a review named, closed on the same branch. **One EUR conversion rule**
+(`eur_conversion.to_eur_or_none`) replaces `TaxService._to_eur`, `DividendService._to_eur`,
+finpension's silent copy and the inline estimate conversion; a row with **no currency** is now
+unconvertible everywhere — it had meant EUR in some places and USD in others, about ten guesses in
+all, `NativeToBase` included — and is skipped and counted, never converted on a guess. **One share
+of a whole** (`percentages.share_pct`, None for a share of nothing) replaces the look-through and
+analytics `_pct`s, which disagreed about a zero whole. **One paced GET** (`crypto_http.PacedGet`)
+for both crypto clients. **One missing-last sort** (`lib/nullsLast.ts`) for four tables, two of which
+sorted `undefined` as a value; `ABSENT` defined once. **The base currency in use:**
+`AppSettingsRepository.get_base_currency()` answers EUR while the stored base has no EUR→base rate
+at all, so `BaseFx`'s EUR fallback can no longer meet a CHF/USD label; `/api/settings` names the
+unusable choice and the header says *No CHF rate yet — showing EUR.* (docs/pricing-and-fx.md). The
+Fundamentals sync fetches held securities only. **ESLint is clean**: providers apart from their
+hooks, storage readers in `lib/`, the two table descriptors the one documented exception. Each
+extraction has a family test that fails a new copy. **Verified, on the synthetic book:** backend
+2025 passed, 2 skipped; frontend 932; ESLint 0; every e2e script green; the header warning seen in
+the browser with a base that has no rate. Not verified on real data (network policy).
+
 ## Shipped 2026-10-17 (afternoon) — the fintech pass, second half (same branch, not on `main`)
 
 Closing what the morning's write-up left open, on the same branch. **Calculations:** the tax

@@ -138,6 +138,11 @@ async def session():
                          rate=USD_EUR, source="test"),
             ExchangeRate(date=date(2026, 1, 2), from_currency="EUR", to_currency="CHF",
                          rate=EUR_CHF, source="test"),
+            # A USD base needs no rate for the crypto book itself, but the app reports in
+            # a base only while an EUR->base rate exists (`get_base_currency`), and a real
+            # install has one: the scheduler refreshes EUR->USD daily.
+            ExchangeRate(date=date(2026, 1, 2), from_currency="EUR", to_currency="USD",
+                         rate=1 / USD_EUR, source="test"),
         ])
         await s.commit()
     async with factory() as s:
@@ -266,11 +271,21 @@ async def test_holdings_weights_cash_spam_and_unpriced(session):
 
 
 @pytest.mark.asyncio
-async def test_no_eur_to_base_rate_at_all_is_unconvertible_not_euros_in_disguise(session):
+async def test_no_eur_to_base_rate_at_all_reports_euros_as_euros_never_in_disguise(session):
+    # A base with no EUR->base rate at all used to leave every figure unconvertible here,
+    # while the stock side showed EUR under the base's label. Since 2026-10-17 the app
+    # reports in EUR while that lasts (`AppSettingsRepository.get_base_currency`), so the
+    # book reads exactly as under EUR — and says EUR.
     await _base(session, "GBP")
-    out = await CryptoService(session).portfolio()
-    assert out["total_value"] is None
-    assert out["fx_unavailable"] > 0
+    stored_gbp = await CryptoService(session).portfolio()
+    await session.execute(delete(AppSetting))
+    await session.commit()
+    await _base(session, "EUR")
+    eur = await CryptoService(session).portfolio()
+
+    assert stored_gbp["base_currency"] == "EUR"
+    assert stored_gbp["total_value"] == eur["total_value"] is not None
+    assert stored_gbp["fx_unavailable"] == eur["fx_unavailable"]
 
 
 @pytest.mark.asyncio

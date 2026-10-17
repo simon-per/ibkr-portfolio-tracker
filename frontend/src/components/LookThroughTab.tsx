@@ -14,6 +14,7 @@ import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
 import { formatCount } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
+import { unresolvedTone } from '@/lib/lookthroughTone'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -49,19 +50,6 @@ import { useRememberedOpen } from '@/lib/storage'
 
 const LIMITS = [25, 50, 100] as const
 type LimitOption = (typeof LIMITS)[number]
-
-/**
- * The share of the book, in percent, at which identity-unresolved value turns the Unresolved
- * card amber. A handful of ISINs no provider resolves is the normal state (about 0.3% of the
- * book), and a card amber at any value above zero was amber always — the always-present
- * warning that teaches the reader to skip it. Below this it is a neutral figure.
- */
-export const UNRESOLVED_WARN_PCT = 1
-
-export function unresolvedTone(unresolvedValue: number, totalValue: number): 'warning' | 'neutral' {
-  if (!(unresolvedValue > 0) || !(totalValue > 0)) return 'neutral'
-  return (unresolvedValue / totalValue) * 100 >= UNRESOLVED_WARN_PCT ? 'warning' : 'neutral'
-}
 
 /** How a fund's status reads, and whether it counts against coverage. */
 const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {

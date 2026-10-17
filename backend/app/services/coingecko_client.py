@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import httpx
 
 from app.config import settings
+from app.services.crypto_http import PacedGet, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def _finite(value: Any) -> Optional[float]:
     return number
 
 
-class CoinGeckoClient:
+class CoinGeckoClient(PacedGet):
     """
     One pass's worth of CoinGecko calls. Use as an async context manager.
 
@@ -144,25 +145,14 @@ class CoinGeckoClient:
             await self._client.aclose()
             self._client = None
 
-    async def _pace(self) -> None:
-        if self._last_request_at is not None:
-            wait = self._min_interval_s - (self._clock() - self._last_request_at)
-            if wait > 0:
-                await self._sleep(wait)
-
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         if self._client is None:
             raise RuntimeError("CoinGeckoClient must be used as an async context manager")
-        await self._pace()
-        try:
-            response = await self._client.get(
-                path, params=params,
-                headers={KEY_HEADER: (settings.coingecko_api_key or "").strip()},
-            )
-        except httpx.HTTPError as e:
-            raise CoinGeckoTransientError(f"{path}: {type(e).__name__}: {e}") from e
-        finally:
-            self._last_request_at = self._clock()
+        response = await self._send(
+            path, params=params,
+            headers={KEY_HEADER: (settings.coingecko_api_key or "").strip()},
+            transient=CoinGeckoTransientError,
+        )
 
         status = response.status_code
         if status in (401, 403):
@@ -184,10 +174,7 @@ class CoinGeckoClient:
                 f"{path}: HTTP {status}. {_error_detail(response)}".strip()
             )
         self.calls += 1
-        try:
-            return response.json()
-        except ValueError as e:
-            raise CoinGeckoTransientError(f"{path}: the response was not JSON") from e
+        return json_body(path, response, CoinGeckoTransientError)
 
     # ---------------------------------------------------------------- endpoints
 

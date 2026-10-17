@@ -9,7 +9,7 @@ import {
   type CryptoHistoryResponse,
   type CryptoPortfolioResponse,
 } from '@/lib/api'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { CryptoOverview } from './CryptoOverview'
 
 // jsdom cannot measure charts. Keep every control, caption and transform real.

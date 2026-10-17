@@ -4,7 +4,7 @@ import { render, screen, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TaxTab } from './TaxTab'
 import { includedEstimatesTag, withholdingTotalLabel } from '@/lib/taxTotals'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import type { TaxReport, TaxDividendRow } from '@/lib/api'
 

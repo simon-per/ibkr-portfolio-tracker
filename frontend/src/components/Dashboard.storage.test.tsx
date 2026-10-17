@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import { readSelectedBenchmarks } from './Dashboard'
+import { readSelectedBenchmarks } from '@/lib/benchmarkSelection'
 
 /**
  * `Dashboard` reads its benchmark selection from localStorage on every mount and then

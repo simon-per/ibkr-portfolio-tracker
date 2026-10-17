@@ -49,7 +49,7 @@ import {
 } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
-import { KpiCard, KpiCardSkeleton, ABSENT } from '@/components/ui/KpiCard'
+import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { api } from '@/lib/api'
 import type {
@@ -77,7 +77,7 @@ import {
   CHART_TOOLTIP_STYLE,
   CHART_GRID_PROPS,
 } from '@/lib/chartTooltip'
-import { formatDate, formatAxisMoney } from '@/lib/utils'
+import { ABSENT, formatDate, formatAxisMoney } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
 const GAIN = '#10b981'

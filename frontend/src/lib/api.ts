@@ -11,6 +11,11 @@ export interface AppSettings {
   supported_currencies: string[];
   /** Assumed tax deducted from gross-derived dividend forecasts only. */
   dividend_forecast_withholding_pct: number;
+  /**
+   * The chosen base currency while the server cannot use it (no EUR->base rate at all):
+   * `base_currency` then says EUR and every figure is in EUR. Absent or null otherwise.
+   */
+  base_currency_unavailable?: string | null;
 }
 
 /**

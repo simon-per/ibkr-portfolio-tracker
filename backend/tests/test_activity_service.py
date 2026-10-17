@@ -458,6 +458,10 @@ async def test_csv_leaves_an_inapplicable_figure_blank(db):
 @pytest.mark.asyncio
 async def test_csv_names_the_base_currency_in_its_amount_columns(db):
     await seed(db, base_currency="CHF")
+    # The app reports in CHF only while an EUR->CHF rate exists (`get_base_currency`).
+    db.add(ExchangeRate(date=TODAY, from_currency="EUR", to_currency="CHF",
+                        rate=Decimal("0.94"), source="test"))
+    await db.commit()
     header = ActivityService.to_csv(await fetch(db)).split("\n")[0]
     assert "amount_chf" in header
 

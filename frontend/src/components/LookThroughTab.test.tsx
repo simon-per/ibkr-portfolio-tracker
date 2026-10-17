@@ -2,8 +2,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { LookThroughTab, unresolvedTone } from './LookThroughTab'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { LookThroughTab } from './LookThroughTab'
+import { unresolvedTone } from '@/lib/lookthroughTone'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import type { LookthroughResponse } from '@/lib/api'
 

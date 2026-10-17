@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ModeToggle } from './ModeToggle'
-import { MODE_STORAGE_KEY, ModeProvider, useMode } from '@/lib/portfolioMode'
+import { MODE_STORAGE_KEY, useMode } from '@/lib/portfolioMode'
+import { ModeProvider } from '@/lib/ModeProvider'
 
 afterEach(() => {
   cleanup()

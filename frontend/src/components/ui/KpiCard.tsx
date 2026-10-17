@@ -15,7 +15,7 @@
  */
 import type { ReactNode } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { ABSENT, cn } from '@/lib/utils'
 
 export type KpiTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'muted'
 
@@ -36,8 +36,6 @@ const TONE_CLASS: Record<KpiTone, string> = {
 const VALUE_CLASS = 'text-lg font-semibold leading-tight tracking-tight sm:text-[1.375rem]'
 const HERO_VALUE_CLASS = 'text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-[2rem]'
 const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
-
-export const ABSENT = '—'
 
 export interface KpiCardProps {
   label: ReactNode

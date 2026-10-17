@@ -135,7 +135,17 @@ read path's own loader (`load_base_fx(..., backfill=False)`) whether it would fi
 then writes the setting; with none it answers 503 and the base stays where it was (the header says
 *Currency change failed — still showing the previous currency*). One stored rate is enough: `BaseFx`
 carries the nearest one forward and back, so the worst case is a stale rate, never a mislabelled
-figure. The fallback inside `convert` stays for a database whose base was set before this existed.
+figure.
+
+**And a stored base with no rate behind it is not used** (same day). The one way left into the
+mislabel was a database whose base was chosen before the refusal existed, or whose rates are gone.
+`AppSettingsRepository.get_base_currency()` — which every reader asks: the portfolio, look-through,
+fundamentals and crypto services and `/api/settings` — now answers the stored base only while an
+EUR→base rate exists, and EUR otherwise; `get_stored_base_currency()` keeps the choice, and
+`/api/settings` serves it as `base_currency_unavailable` while it cannot be used, which the header
+turns into a one-line warning. So `BaseFx.convert`'s EUR fallback can no longer meet a non-EUR
+label: a base is in use only with a rate to convert by. The scheduler refreshes EUR→CHF and EUR→USD
+daily, so on a running install the check passes and costs one indexed lookup per request.
 Tests: `tests/test_base_currency_switch.py`.
 
 ---

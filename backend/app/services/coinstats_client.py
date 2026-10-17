@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 import httpx
 
 from app.config import settings
+from app.services.crypto_http import PacedGet, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def _error_detail(response: httpx.Response) -> str:
     return ""
 
 
-class CoinStatsClient:
+class CoinStatsClient(PacedGet):
     """
     One pass's worth of CoinStats calls. Use as an async context manager.
 
@@ -188,30 +189,16 @@ class CoinStatsClient:
                 headers["passcode"] = passcode
         return headers
 
-    async def _pace(self) -> None:
-        # `_last_request_at` is when the previous call *finished* (see `_get`): a slow
-        # portfolio call must not let the next one follow on its heels.
-        if self._last_request_at is not None:
-            wait = self._min_interval_s - (self._clock() - self._last_request_at)
-            if wait > 0:
-                await self._sleep(wait)
-
     async def _get(
         self, path: str, cost_key: str, params: Optional[Dict[str, Any]] = None,
         portfolio: bool = True,
     ) -> Any:
         if self._client is None:
             raise RuntimeError("CoinStatsClient must be used as an async context manager")
-        await self._pace()
-        try:
-            response = await self._client.get(
-                path, params=params, headers=self._headers(portfolio)
-            )
-        except httpx.HTTPError as e:
-            # The type and message only; the URL in it carries no secret by construction.
-            raise CoinStatsTransientError(f"{path}: {type(e).__name__}: {e}") from e
-        finally:
-            self._last_request_at = self._clock()
+        response = await self._send(
+            path, params=params, headers=self._headers(portfolio),
+            transient=CoinStatsTransientError,
+        )
 
         status = response.status_code
         # A refused call is not charged (CoinStats refunds 503s explicitly, and a 4xx does
@@ -237,10 +224,7 @@ class CoinStatsClient:
             )
 
         self.credits_spent += CREDIT_COST[cost_key]
-        try:
-            return response.json()
-        except ValueError as e:
-            raise CoinStatsTransientError(f"{path}: the response was not JSON") from e
+        return json_body(path, response, CoinStatsTransientError)
 
     # ---------------------------------------------------------------- endpoints
 

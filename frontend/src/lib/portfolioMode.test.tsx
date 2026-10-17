@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
-import { MODE_STORAGE_KEY, ModeProvider, readStoredMode, useMode } from './portfolioMode'
+import { MODE_STORAGE_KEY, readStoredMode, useMode } from './portfolioMode'
+import { ModeProvider } from './ModeProvider'
 
 afterEach(() => {
   cleanup()

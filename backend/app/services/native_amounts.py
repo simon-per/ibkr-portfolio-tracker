@@ -76,6 +76,11 @@ class NativeToBase:
         # rows with no cash and therefore no rate to find.
         if not amount:
             return Decimal("0")
+        # A row with no currency recorded is not converted on a guess — the rule
+        # `eur_conversion.to_eur_or_none` states for every EUR path. A missing currency
+        # read as EUR here, while the dividend ingest read it as USD.
+        if not currency:
+            return None
 
         # Already in the display currency: a round trip through EUR costs a rate lookup
         # and buys only rounding error, because the stored native->EUR rate and the
@@ -84,11 +89,11 @@ class NativeToBase:
         # one figure in this app people reconcile against a broker statement line for
         # line. The EUR/EUR case was already short-circuited by the two clauses below;
         # this is the same exemption for every other base.
-        if currency and currency == self._base_fx.base_currency:
+        if currency == self._base_fx.base_currency:
             return amount
 
         eur = amount
-        if currency and currency != "EUR":
+        if currency != "EUR":
             rate = await self.rate(currency, on_date)
             if rate is None:
                 return None

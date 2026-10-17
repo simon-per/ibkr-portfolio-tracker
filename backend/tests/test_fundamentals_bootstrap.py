@@ -17,7 +17,8 @@ file, and its own opening paragraph repeats the claim.
 
 Offline: `_fetch_yahoo_data` is faked, so yfinance is never reached.
 """
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -29,6 +30,7 @@ from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.services import fundamentals_service as fs_mod
 from app.services.fundamentals_service import FundamentalsService
 
@@ -59,13 +61,21 @@ def _no_delays(monkeypatch):
     monkeypatch.setattr(fs_mod.random, "uniform", lambda *_a: 0)
 
 
-def add_security(session, security_id: int, symbol: str) -> Security:
+def add_security(session, security_id: int, symbol: str, held: bool = True) -> Security:
+    """A security, held through one open lot unless `held=False` — the sync fetches only
+    what is held (`held_security_ids`)."""
     security = Security(
         id=security_id, isin=f"US000000000{security_id}", symbol=symbol,
         description=symbol, currency="USD", conid=security_id,
         asset_category="STK", exchange="NASDAQ",
     )
     session.add(security)
+    session.add(TaxLot(
+        security_id=security_id, open_date=date(2026, 1, 5), quantity=Decimal("10"),
+        cost_basis=Decimal("1000"), price_per_unit=Decimal("100"), currency="USD",
+        cost_basis_eur=Decimal("900"), is_open=held,
+        close_date=None if held else date(2026, 6, 1),
+    ))
     return security
 
 
@@ -215,3 +225,15 @@ async def test_the_threshold_lives_in_one_place(db):
                     and any(k.arg == "days_old" for k in node.keywords)):
                 offenders.append(f"{module.__name__}:{node.lineno}")
     assert not offenders, f"a call site passes its own staleness threshold: {offenders}"
+
+
+@pytest.mark.asyncio
+async def test_a_sold_security_is_not_fetched(db, fetched):
+    """Every read shows held securities only, so a sold one is not worth a Yahoo request."""
+    add_security(db, 1, "HELD")
+    add_security(db, 2, "SOLD", held=False)
+    await db.commit()
+
+    await FundamentalsService(db).sync_stale_fundamentals()
+
+    assert fetched == ["HELD"]

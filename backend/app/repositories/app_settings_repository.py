@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_settings import AppSetting
+from app.models.exchange_rate import ExchangeRate
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +91,42 @@ class AppSettingsRepository:
         await self.session.flush()
         return row
 
-    async def get_base_currency(self) -> str:
+    async def get_stored_base_currency(self) -> str:
+        """The base currency as chosen and stored — see `get_base_currency` for the one in use."""
         return await self.get(BASE_CURRENCY_KEY, DEFAULT_BASE_CURRENCY)
+
+    async def get_base_currency(self) -> str:
+        """
+        The base currency every figure is projected into: the stored choice, unless no
+        EUR->base rate exists at all — then EUR.
+
+        `BaseFx.convert` hands back the EUR amount when it holds no rate, so a CHF or USD
+        base with no rate behind it printed EUR figures under a CHF or USD label: right
+        numbers, wrong currency, nothing inviting doubt. The switch refuses to enter that
+        state (`PUT /api/settings/base-currency`, 2026-10-17); this closes the way left
+        into it — a database whose base was chosen before the refusal existed, or whose
+        rates are gone. Every reader (the portfolio, look-through, fundamentals and crypto
+        services, `/api/settings`) asks here, so the label and the figures cannot part,
+        and `/api/settings` names the currency it could not use. One stored rate is
+        enough: `BaseFx` carries the nearest one forward and back, and the scheduler
+        refreshes EUR->CHF and EUR->USD daily.
+        """
+        stored = await self.get_stored_base_currency()
+        if stored == "EUR" or await self._has_eur_rate(stored):
+            return stored
+        logger.warning(
+            f"No EUR->{stored} exchange rate is stored; reporting in EUR rather than "
+            f"labelling EUR figures {stored}"
+        )
+        return "EUR"
+
+    async def _has_eur_rate(self, currency: str) -> bool:
+        row = await self.session.execute(
+            select(ExchangeRate.id).where(
+                ExchangeRate.from_currency == "EUR", ExchangeRate.to_currency == currency,
+            ).limit(1)
+        )
+        return row.first() is not None
 
     async def set_base_currency(self, currency: str) -> str:
         currency = normalize_base_currency(currency)

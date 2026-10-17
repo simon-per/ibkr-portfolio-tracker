@@ -34,6 +34,7 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
   const {
     baseCurrency, supportedCurrencies, setBaseCurrency,
     isUpdating: currencyUpdating, updateError: currencyError, currencyIsAssumed,
+    unavailableBase,
   } = useBaseCurrency()
 
   // Same key and staleTime as the footer's read, so it is one request per session.
@@ -84,6 +85,14 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
             {currencyIsAssumed && !currencyError && (
               <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
                 Couldn't read your display currency — showing {baseCurrency}, which may not be it.
+              </span>
+            )}
+            {/* The chosen base has no exchange rate behind it, so the server reports in
+                EUR (`AppSettingsRepository.get_base_currency`) — said here, or the
+                choice would look ignored. */}
+            {unavailableBase && !currencyError && !currencyIsAssumed && (
+              <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
+                No {unavailableBase} rate yet — showing {baseCurrency}.
               </span>
             )}
             <ModeToggle />

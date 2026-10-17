@@ -28,6 +28,7 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
+from app.services.eur_conversion import to_eur_or_none
 from app.services.dividend_forecast_attribution import (
     PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
 )
@@ -467,43 +468,24 @@ class DividendService:
 
                 gross_amount = dp.amount_per_share * shares
 
-                # Convert to EUR
-                currency = dp.currency or "USD"
-                if currency == "EUR":
-                    gross_eur = gross_amount
-                else:
-                    try:
-                        fx_rate = await self.currency_service.get_exchange_rate(
-                            currency, dp.ex_date
-                        )
-                        gross_eur = gross_amount * fx_rate
-                    except Exception as e:
-                        # `gross_eur = gross_amount  # fallback: store unconverted` is
-                        # what stood here — the identical defect fixed in
-                        # `TaxService._to_eur`, and then in this file's own `_to_eur`,
-                        # surviving in the second conversion path a few dozen lines
-                        # below both of them. Fixing a helper is not fixing the file:
-                        # this code never went through either helper.
-                        #
-                        # It writes a foreign figure into a column named `_eur`, on an
-                        # ingest path, so the wrong number is *persisted* and then read
-                        # by the Dividends tab, the forecast, the forward yield and the
-                        # tax report's DA-1 income. A TWD payment would sit in
-                        # `gross_amount_eur` roughly 35x high with nothing marking it.
-                        #
-                        # Leaving the row uncomputed is what makes this self-healing:
-                        # `shares_held IS NULL` is the "awaiting computation" sentinel
-                        # `prune_empty_dividends` already refuses to touch, so the next
-                        # pass retries the row once a rate exists. Reachable whenever
-                        # `get_exchange_rate` exhausts both providers — TWD is outside
-                        # the ECB set entirely, and the er-api fallback refuses any date
-                        # older than FALLBACK_MAX_AGE_DAYS.
-                        logger.warning(
-                            f"No {currency}->EUR rate for {dp.ex_date} ({e}); leaving this "
-                            f"dividend uncomputed rather than storing {currency} as EUR"
-                        )
-                        fx_skipped += 1
-                        continue
+                # To EUR through the one shared rule (`eur_conversion`): no rate, or no
+                # currency on the row, leaves it uncomputed. The fallback that stood here,
+                # `gross_eur = gross_amount  # store unconverted`, wrote a foreign figure
+                # into a column named `_eur` on an ingest path — persisted, then read by
+                # the Dividends tab, the forecast, the forward yield and the tax report's
+                # DA-1 income (a TWD payment ~35x high, nothing marking it). Leaving the
+                # row uncomputed is what makes it self-healing: `shares_held IS NULL` is
+                # the "awaiting computation" sentinel `prune_empty_dividends` refuses to
+                # touch, so the next pass retries it once a rate exists — reachable
+                # whenever `get_exchange_rate` exhausts both providers (TWD is outside the
+                # ECB set, and the er-api fallback refuses dates older than
+                # FALLBACK_MAX_AGE_DAYS).
+                gross_eur = await to_eur_or_none(
+                    self.currency_service, gross_amount, dp.currency, dp.ex_date
+                )
+                if gross_eur is None:
+                    fx_skipped += 1
+                    continue
 
                 dp.shares_held = shares
                 dp.gross_amount_eur = gross_eur
@@ -538,40 +520,6 @@ class DividendService:
                 f'exists — see WARM_CURRENCIES if the currency is not an ECB one.'
             ]
         return result
-
-    async def _to_eur(self, amount: Decimal, currency: str, on_date: date) -> Optional[Decimal]:
-        """
-        Convert to EUR, or return None when no rate can be resolved.
-
-        It used to `return amount  # fallback: store unconverted`, which writes a
-        foreign figure into a column named `_eur` — and unlike the identical defect
-        fixed in `TaxService._to_eur` on 2026-07-30, this one is on the **ingest**
-        path, so the wrong number is *persisted* and then read by the Dividends tab,
-        the forecast, and the tax report's DA-1 income. A TWD payment would sit in
-        `gross_amount_eur` roughly 35x high with nothing marking it.
-
-        That fix listed the consumers already skipping correctly — sync_helper,
-        portfolio_service, benchmark_service — and missed this sibling, which was
-        doing exactly what the tax report used to do.
-
-        Skipping the row matches how every other ingest handles an unconvertible
-        currency: `reconcile_taxlots` skips the lot into `taxlots_skipped`, and
-        cash-flow ingest skips one row rather than failing the sync.
-        """
-        if not amount:
-            return Decimal("0")
-        if (currency or "EUR") == "EUR":
-            return amount
-        try:
-            return await self.currency_service.convert_to_eur(
-                amount=amount, from_currency=currency, target_date=on_date
-            )
-        except Exception as e:
-            logger.warning(
-                f"No {currency}->EUR rate for {on_date} ({e}); skipping the dividend "
-                f"rather than storing {currency} as EUR"
-            )
-            return None
 
     async def sync_dividends_from_cash_transactions(
         self, cash_txns: List[Dict], conid_to_security_id: Dict[str, int]
@@ -622,16 +570,18 @@ class DividendService:
                 # Only withholding with no matching dividend (e.g. a reclass) — skip.
                 continue
             withholding = -g["wht"]  # make positive
-            currency = g["currency"] or "USD"
+            # IBKR names the currency on every cash line; a row without one is not
+            # converted on a guess (`eur_conversion`), it is skipped and counted.
+            currency = g["currency"]
 
-            gross_eur = await self._to_eur(gross, currency, pay_date)
-            wht_eur = await self._to_eur(withholding, currency, pay_date)
+            gross_eur = await to_eur_or_none(self.currency_service, gross, currency, pay_date)
+            wht_eur = await to_eur_or_none(self.currency_service, withholding, currency, pay_date)
             if gross_eur is None or wht_eur is None:
                 # No rate for this date. Storing the foreign figure in a column named
                 # `_eur` is what this used to do; a missing dividend is recoverable
                 # (the statement is re-ingested idempotently once the rate exists),
                 # a silently inflated one is not.
-                skipped_currencies[currency] = skipped_currencies.get(currency, 0) + 1
+                skipped_currencies[currency or "?"] = skipped_currencies.get(currency or "?", 0) + 1
                 continue
             net_eur = gross_eur - wht_eur
 
@@ -733,10 +683,10 @@ class DividendService:
             key = (security_id, a["pay_date"])
             if key in seen:
                 continue  # one open accrual per security per pay date
-            currency = a.get("currency") or "EUR"
-            rate = fx.get(currency)
+            currency = a.get("currency")
+            rate = fx.get(currency) if currency else None
             if rate is None:
-                skipped_currencies[currency] = skipped_currencies.get(currency, 0) + 1
+                skipped_currencies[currency or "?"] = skipped_currencies.get(currency or "?", 0) + 1
                 continue
             gross = (a.get("gross_amount") or Decimal("0")) * rate
             # Stored positive. IBKR sends `tax` POSITIVE on <OpenDividendAccrual> (a real
@@ -1440,7 +1390,7 @@ class DividendService:
         def _to_eur_ps(native: Optional[Decimal], currency: Optional[str]) -> Optional[Decimal]:
             if native is None or native <= 0:
                 return None
-            rate = fx_to_eur.get(currency or "EUR")
+            rate = fx_to_eur.get(currency) if currency else None
             return native * rate if rate is not None else None
 
         hist_by_sec: Dict[int, List[HistPayment]] = defaultdict(list)
@@ -3099,8 +3049,8 @@ class DividendService:
                     ),
                     "currency": securities[sid].currency,
                     "fx_to_eur": (
-                        float(sizing_fx[securities[sid].currency or "EUR"])
-                        if (securities[sid].currency or "EUR") in sizing_fx else None
+                        float(sizing_fx[securities[sid].currency])
+                        if securities[sid].currency in sizing_fx else None
                     ),
                 }
                 for sid, qty in sorted(held_shares.items())

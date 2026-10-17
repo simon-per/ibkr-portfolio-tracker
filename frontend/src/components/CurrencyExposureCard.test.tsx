@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import type { CurrencyExposureInput } from '@/lib/currencyExposure'
 
 /**

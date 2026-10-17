@@ -2,8 +2,9 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { RebalanceCard, readTargets } from './RebalanceCard'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { RebalanceCard } from './RebalanceCard'
+import { readTargets } from '@/lib/rebalanceTargets'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import type { DriftInput } from '@/lib/rebalance'
 
 /**

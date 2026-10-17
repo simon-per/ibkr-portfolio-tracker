@@ -1,4 +1,5 @@
 import type { Column } from '@/components/ui/DataTable'
+import { compareNullsLast } from '@/lib/nullsLast'
 import type { CryptoHoldingItem } from '@/lib/api'
 import { formatQuantity } from '@/lib/utils'
 
@@ -162,15 +163,8 @@ export function sortCryptoHoldings(
       case 'weight': return h.weight_pct
     }
   }
-  const sign = direction === 'asc' ? 1 : -1
-  return [...rows].sort((a, b) => {
-    const va = value(a)
-    const vb = value(b)
-    if (va == null && vb == null) return 0
-    if (va == null) return 1
-    if (vb == null) return -1
-    if (va < vb) return -1 * sign
-    if (va > vb) return 1 * sign
-    return (a.symbol ?? a.coin_id).localeCompare(b.symbol ?? b.coin_id)
-  })
+  return [...rows].sort((a, b) =>
+    compareNullsLast(value(a), value(b), direction)
+      || (a.symbol ?? a.coin_id).localeCompare(b.symbol ?? b.coin_id),
+  )
 }

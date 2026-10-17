@@ -551,6 +551,19 @@ insight. What that settled, on top of the product pass:
   middle band is plain ink. A third, yellow band put a colour on nearly every cell.
 - **Fundamentals list what is held.** The table, both earnings lists and `/api/fundamentals/status`
   read open lots only (`held_security_ids`); a sold position was a row of dashes counted as
-  "no data yet". The sync scope is unchanged, so this costs no Yahoo request.
+  "no data yet". The sync fetches held securities only too, which only removes Yahoo requests
+  (a sold security comes back with the next sync after it is bought again).
 - **Copy stays figure-first.** A conditional caveat is one muted line (the currency-exposure fund
   caveat), never a paragraph, and the empty and error states say what is missing in a sentence.
+- **A component module exports components only** (ESLint `react-refresh/only-export-components`,
+  green since 2026-10-17). Providers sit apart from their hooks (`CurrencyProvider.tsx` beside
+  `CurrencyContext.tsx`, `ModeProvider.tsx` beside `portfolioMode.tsx`, `useTheme.ts` beside
+  `ThemeProvider.tsx`) and storage readers live in `lib/` (`benchmarkSelection.ts`,
+  `rebalanceTargets.ts`, `lookthroughTone.ts`). The two table descriptors, `positionColumns` and
+  `lookthroughColumns`, are the named exception in `eslint.config.js`: each closes over helpers its
+  component renders with, and the table family test imports the exact array the component
+  renders; editing either file reloads the page instead of hot-swapping it.
+- **A chosen base currency the server cannot use is named, not hidden.** With no EUR→base rate
+  stored, `/api/settings` answers `base_currency: EUR` and `base_currency_unavailable: CHF`
+  (docs/pricing-and-fx.md); the header shows *No CHF rate yet — showing EUR.* and every figure is
+  labelled EUR, because it is EUR.
