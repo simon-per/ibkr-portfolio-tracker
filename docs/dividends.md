@@ -133,8 +133,9 @@ such drift exists — a tolerance there would hide a real bucketing bug.
 
 **`stack_order` is the colour order**: every symbol with realized income or a projection over the
 whole history, biggest first, with the symbol as the tie-break. `dividendColor(symbol, stackOrder)`
-is `hue[rank]` for the first 8, a muted step for ranks 9–13, and the *Other* grey for everything
-after — so a holding's colour depends on the holding and on nothing else on screen.
+is the app palette's slot `rank` (`chartColor`, `--chart-1..10`) for the first 10 and the *Other*
+grey for everything after — so a holding's colour depends on the holding and on nothing else on
+screen.
 
 **It replaced a per-view ranking, which is what made the chart repaint.** `buildChartSeries` used to
 rank the slice it had been sent and hand the top eight to `palette[stackSymbols.indexOf(sym)]`.
@@ -158,18 +159,19 @@ largest bars into *Other* and leave a future planning year colourless. The cost 
 client fetches once **with** projections and hides them in the browser so the toggle stays instant,
 so no rendering crosses that boundary. Both halves are pinned in `test_dividend_growth.py`.
 
-**Thirteen identities, and the split is measured rather than chosen.** Eight hues plus five muted
-steps: several hues collapse toward a neutral under CVD (`--viz-sector-3` becomes L\*64 C\*4 under
-deuteranopia), which forbids the lightness bands they land in, and a fill needs 3:1 against its own
-card to be visible — what is left fits five steps ≥ ΔE 6.3 apart. Seven would have to be spaced
-~4.5, below what a de-emphasis ramp is for. On this book the fold is then 2.6–12.6% of a range
-depending on which one, against ~22% for the old eight-slot scheme on All time alone.
+**Ten identities, the app palette's (2026-10-17).** The stack had its own palette until then —
+eight hues plus a five-step muted ramp (`--viz-series-*`), thirteen identities, measured all-pairs
+in `dividendColors.test.ts`. The ramp drew the 9th–13th payers as near-black bars in light mode and
+was a second categorical palette beside the app's, so the stack moved onto `lib/chartPalette.ts`:
+ten hues, each slot measured there (`chartPalette.test.ts`), and a fold that takes the three payers
+the ramp used to carry. Those are the smallest named payers, and the fold lists its members on
+click, so no figure left the tab. `seriesColor` **is** `chartColorFor` (pinned by identity, not by
+agreement), and the crypto donut, which shares it, moved with it.
 
-The hexes live in `index.css` as `--viz-series-*`; `lib/dividendColors.ts` owns only the assignment,
-the same split `sectorColors.ts` states. Because colour follows the holding, the visible set is an
-arbitrary subset and any two slots can sit side by side — so the pairlist is **all-pairs**, not the
-consecutive one the old fixed-order palette relied on. `dividendColors.test.ts` reads the values
-back out of `index.css` and measures them, surfaces included, rather than restating a docblock.
+`lib/dividendColors.ts` owns only the assignment and the fold; the palette owns what each slot looks
+like. Because colour follows the holding, the visible set is an arbitrary subset and any two slots
+can sit side by side, which is why the palette's first three slots clear its bar all-pairs and every
+adjacent pair does.
 
 Tests: `test_dividend_growth.py` covers coverage trimming, stopped/quarterly payers, forecast
 folding, a future year, the per-symbol reconciliation, the no-projection gate, range agreement, era
@@ -177,9 +179,9 @@ deduplication and payment-date FX; `test_dividend_breakdown_contract.py` and `te
 serialization and query validation. `test_dividend_growth.py` also pins `stack_order` equal across every range and records the forecast
 dependency. On the client the transform is covered by `src/lib/dividendChart.test.ts` — **not**
 `DividendsTab.test.tsx`, which mocks recharts' `ResponsiveContainer` away so no `<Bar>` ever mounts;
-that file covers controls, captions, the legend and states. `dividendColors.test.ts` asks the two
-family questions — *can a view repaint a holding* and *can every slot be told apart* — rather than
-the instance ones.
+that file covers controls, captions, the legend and states. `dividendColors.test.ts` asks the family
+question — *can a view repaint a holding* — and pins rank *n* to slot *n*; *can every slot be told
+apart* is `chartPalette.test.ts`'s.
 
 **The boundary itself leaked one dividend per security until 2026-08-05, and the reason is the
 splice's own premise.** The rule keeps estimates strictly *before* the first IBKR payment — but the

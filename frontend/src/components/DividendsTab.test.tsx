@@ -259,7 +259,7 @@ describe('Dividend chart controls', () => {
     await screen.findByText(/Received.*200/)
     expect(request).toHaveBeenLastCalledWith(undefined, '24m')
     expect(screen.getByRole('button', { name: 'TTM' }).getAttribute('aria-pressed')).toBe('true')
-    const annual = screen.getByText('Per year').parentElement!
+    const annual = screen.getByRole('region', { name: 'Dividends per year' })
     await user.click(within(annual).getByRole('button'))
     await screen.findByText(/Received.*30/)
     expect(request).toHaveBeenLastCalledWith(2025, undefined)
@@ -272,7 +272,7 @@ describe('Dividend chart controls', () => {
     growth.annual = [{ ...growth.annual[0], withholding_eur: 12, forecast_withholding_eur: 3 }]
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
     mount()
-    const annual = (await screen.findByText('Per year')).parentElement!
+    const annual = await screen.findByRole('region', { name: 'Dividends per year' })
     expect(within(annual).getByText(/tax .*15\.00/)).toBeTruthy()
   })
 
@@ -424,15 +424,16 @@ describe('The dividend legend', () => {
     mount()
     await screen.findByText(/Received/)
 
-    const fold = screen.getByRole('button', { name: /^Other · 3 holdings$/ })
+    // Ten identities (the palette's slots), so S10..S15 fold.
+    const fold = screen.getByRole('button', { name: /^Other · 6 holdings$/ })
     expect(fold.getAttribute('aria-expanded')).toBe('false')
     // Scoped to the disclosure: every symbol also appears in the table underneath.
     expect(screen.queryByLabelText('Holdings folded into Other')).toBeNull()
     await user.click(fold)
     const list = screen.getByLabelText('Holdings folded into Other')
-    expect(within(list).getByText('S13')).toBeTruthy()
+    expect(within(list).getByText('S10')).toBeTruthy()
     expect(within(list).getByText('S15')).toBeTruthy()
-    expect(within(list).queryByText('S00')).toBeNull()
+    expect(within(list).queryByText('S09')).toBeNull()
   })
 })
 
@@ -455,7 +456,9 @@ describe('One "Next 12 months" figure', () => {
     })
     mount()
     await screen.findByRole('region', { name: 'Dividend forecast over time' })
-    const surfaces = screen.getAllByText('Next 12 months').map((label) => label.parentElement!)
+    // The tile (which carries its `title`) and the forecast card's header button.
+    const surfaces = screen.getAllByText('Next 12 months')
+      .map((label) => label.closest<HTMLElement>('[title], button')!)
     expect(surfaces).toHaveLength(2)
     for (const surface of surfaces) {
       expect(surface.textContent).toContain('€160.00')

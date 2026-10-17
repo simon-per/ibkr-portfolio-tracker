@@ -109,6 +109,15 @@ describe('DividendCalendar', () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("leads each row with its date chip and the holding's avatar, swatch on the avatar", () => {
+    render(<DividendCalendar upcoming={[payment()]} colorOf={() => 'rgb(1, 2, 3)'} />)
+    const row = screen.getByText('22 May').closest('li')!
+    // No QueryClient here, so the avatar is the monogram; with one it is the logo.
+    expect(within(row).getByText('AS')).toBeTruthy()
+    const swatch = row.querySelector<HTMLElement>('span.absolute')!
+    expect(swatch.style.backgroundColor).toBe('rgb(1, 2, 3)')
+  })
+
   it('totals each month from the rows it shows', () => {
     render(
       <DividendCalendar

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
-import { Loader2 } from 'lucide-react'
+import { HandCoins, Loader2 } from 'lucide-react'
 import { cn, formatCount } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
@@ -120,6 +120,7 @@ export function DividendSummary() {
         open={open}
         onToggle={() => setOpen(o => !o)}
         title="Dividend Income"
+        icon={HandCoins}
         description={summaryText}
         contentId="dividend-summary-content"
       />

@@ -1,6 +1,13 @@
 import { CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
 import { useState, useMemo, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  ChartArea, Milestone, Rocket, Scale, Shield, SlidersHorizontal, Split, Sprout, Telescope, Wallet,
+  type LucideIcon,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
@@ -69,11 +76,15 @@ interface ProjectionRow {
 /** The horizons the table reports — fixed, independent of the chart's slider. */
 const HORIZON_YEARS = [1, 5, 10, 15, 20]
 
-const SCENARIOS = [
-  { name: 'Conservative', rate: 5 },
-  { name: 'Moderate', rate: 8 },
-  { name: 'Aggressive', rate: 12 },
+const SCENARIOS: { name: string; rate: number; icon: LucideIcon }[] = [
+  { name: 'Conservative', rate: 5, icon: Shield },
+  { name: 'Moderate', rate: 8, icon: Scale },
+  { name: 'Aggressive', rate: 12, icon: Rocket },
 ]
+
+/** The projection's own colour, and the reference band's: the palette's first slot and grey. */
+const VALUE_COLOR = chartColor(0)
+const MONEY_IN_COLOR = NEUTRAL_COLOR
 
 /**
  * The projection table's four columns, described once for both renderings.
@@ -209,9 +220,10 @@ export function ForecastTab() {
 
   const scenarios = useMemo(
     () =>
-      SCENARIOS.map(({ name, rate }) => ({
+      SCENARIOS.map(({ name, rate, icon }) => ({
         name,
         rate,
+        icon,
         value: projectForecast({ ...inputs, annualReturnPct: rate }, forecastYears * 12).value,
       })),
     [inputs, forecastYears],
@@ -219,6 +231,10 @@ export function ForecastTab() {
 
   // Every 6 months for a cleaner chart; the exact horizon is always the last point.
   const monthlyData = useMemo(() => forecastSeries(inputs, forecastYears * 12), [inputs, forecastYears])
+  // The headline tiles read the chart's own last point — the horizon — so the figures above
+  // the chart and the end of its line are one number, not two calls that could drift.
+  const horizon = monthlyData[monthlyData.length - 1]
+  const yearsLabel = `${forecastYears} ${forecastYears === 1 ? 'year' : 'years'}`
 
   // Calculate dynamic Y-axis configuration — always produces ≤ 10 ticks
   const yAxisConfig = useMemo(() => {
@@ -255,9 +271,7 @@ export function ForecastTab() {
     <div className="space-y-8">
       {/* Input Controls */}
       <Card>
-        <CardHeader>
-          <CardTitle>Forecast Parameters</CardTitle>
-        </CardHeader>
+        <SectionHeader icon={SlidersHorizontal} title="Forecast Parameters" />
         <CardContent>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {/* Forecast Years */}
@@ -370,23 +384,52 @@ export function ForecastTab() {
         </CardContent>
       </Card>
 
+      {/* The horizon in three figures. Money in and gains are absent, not zero, when the
+          baseline could not be loaded — the alert under the chart says so. */}
+      {horizon && (
+        <KpiPanel columns={4}>
+          <KpiCard
+            tile
+            hero
+            icon={Telescope}
+            label={`Value in ${yearsLabel}`}
+            value={`${curSym}${formatCount(horizon.value)}`}
+            sparkline={monthlyData.map((d) => d.value)}
+          />
+          <KpiCard
+            tile
+            icon={Wallet}
+            label="Money in"
+            value={horizon.moneyIn === null ? null : `${curSym}${formatCount(horizon.moneyIn)}`}
+          />
+          <KpiCard
+            tile
+            icon={Sprout}
+            label="Gains"
+            tone={horizon.gains === null ? 'neutral' : horizon.gains < 0 ? 'negative' : 'positive'}
+            value={horizon.gains === null ? null : `${curSym}${formatCount(horizon.gains)}`}
+          />
+        </KpiPanel>
+      )}
+
       {/* Projection Chart */}
       <Card>
-        <CardHeader>
-          <CardTitle>Projected growth</CardTitle>
-          <CardDescription>
-            {expectedReturn}% a year · {curSym}{formatCount(monthlyContribution)} a month · {forecastYears} {forecastYears === 1 ? 'year' : 'years'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
+        <SectionHeader
+          icon={ChartArea}
+          title="Projected growth"
+          description={
+            <>{expectedReturn}% a year · {curSym}{formatCount(monthlyContribution)} a month · {yearsLabel}</>
+          }
+        />
+        <CardContent className="pt-2">
           {/* Height in CSS on the wrapper: 640px was 76% of an 844px phone screen. */}
           <div className="h-[260px] w-full sm:h-[360px] lg:h-[420px]">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="forecast-value-fill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2a78d6" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="#2a78d6" stopOpacity={0.02} />
+                  <stop offset="0%" style={{ stopColor: VALUE_COLOR, stopOpacity: 0.25 }} />
+                  <stop offset="100%" style={{ stopColor: VALUE_COLOR, stopOpacity: 0.02 }} />
                 </linearGradient>
               </defs>
               <CartesianGrid {...CHART_GRID_PROPS} />
@@ -430,9 +473,9 @@ export function ForecastTab() {
                 <Area
                   type="monotone"
                   dataKey="moneyIn"
-                  stroke="#94a3b8"
+                  stroke={MONEY_IN_COLOR}
                   strokeDasharray="4 4"
-                  fill="#94a3b8"
+                  fill={MONEY_IN_COLOR}
                   fillOpacity={0.12}
                   name="Money In"
                 />
@@ -440,7 +483,7 @@ export function ForecastTab() {
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="#2a78d6"
+                stroke={VALUE_COLOR}
                 strokeWidth={2.25}
                 fill="url(#forecast-value-fill)"
                 name="Portfolio Value"
@@ -453,7 +496,7 @@ export function ForecastTab() {
           {startFromZero || moneyInToDate !== null || contributionsPending ? null : (
             <p
               role="alert"
-              className="mt-3 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+              className="mt-3 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-xs text-warn"
             >
               Money in to date isn't available, so Money In and Investment Gains aren't shown.
               Portfolio Value is unaffected.
@@ -464,9 +507,7 @@ export function ForecastTab() {
 
       {/* Projection Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Projections</CardTitle>
-        </CardHeader>
+        <SectionHeader icon={Milestone} title="Projections" />
         <CardContent>
           <DataTable
             rows={projections}
@@ -480,21 +521,20 @@ export function ForecastTab() {
 
       {/* Scenario Comparison */}
       <Card>
-        <CardHeader>
-          <CardTitle>Scenarios in {forecastYears} {forecastYears === 1 ? 'year' : 'years'}</CardTitle>
-        </CardHeader>
+        <SectionHeader icon={Split} title={`Scenarios in ${yearsLabel}`} />
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <KpiPanel columns={3} fillLastRow className="shadow-none">
             {scenarios.map((scenario) => (
-              <div key={scenario.name} className="rounded-lg bg-muted/50 p-4">
-                <div className="text-sm font-medium">{scenario.name}</div>
-                <div className="text-xs text-muted-foreground">{scenario.rate}% a year</div>
-                <div className="mt-3 text-xl font-semibold tabular-nums sm:text-2xl">
-                  {curSym}{formatCount(scenario.value)}
-                </div>
-              </div>
+              <KpiCard
+                key={scenario.name}
+                tile
+                icon={scenario.icon}
+                label={scenario.name}
+                value={`${curSym}${formatCount(scenario.value)}`}
+                sub={`${scenario.rate}% a year`}
+              />
             ))}
-          </div>
+          </KpiPanel>
         </CardContent>
       </Card>
     </div>

@@ -1,9 +1,11 @@
+import { ChartColumnStacked } from 'lucide-react'
 import type { DividendTtmPoint } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendTtmWindowLabel } from '@/lib/dividendChart'
 import { cn } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
+import { DividendSubheading } from './DividendSubheading'
 
 interface DividendTtmChartProps {
   /** Rows to draw — already filtered and ordered to match `points`. */
@@ -39,14 +41,14 @@ export function DividendTtmChart({
 
   return (
     <section aria-label="Rolling twelve month dividends" className="space-y-3">
-      <div className="space-y-1">
-        <div className="text-sm font-medium">Rolling 12 months by holding</div>
+      <div className="space-y-2">
+        <DividendSubheading title="Rolling 12 months by holding" icon={ChartColumnStacked} />
         {latest && (
           <div
             className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
             aria-label="Latest rolling 12 months"
           >
-            <span className="text-xl font-semibold tabular-nums">
+            <span className="text-2xl font-semibold tracking-tight">
               {formatCurrency(latest.total_eur)}
             </span>
             <span className="text-xs text-muted-foreground">
@@ -62,6 +64,7 @@ export function DividendTtmChart({
               </span>
             )}
             <DeltaChip
+              variant="pill"
               pct={latest.mom_pct}
               label="vs previous window"
               flatBand={0}

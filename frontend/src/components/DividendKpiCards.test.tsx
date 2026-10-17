@@ -17,7 +17,8 @@ function growth(extra: Partial<DividendGrowth> = {}): DividendGrowth {
   }
 }
 
-const tile = (label: string) => screen.getByText(label).parentElement!
+// The tile is the element carrying the figure's `title`; the label sits a level or two in.
+const tile = (label: string) => screen.getByText(label).closest<HTMLElement>('[title]')!
 
 describe('DividendKpiCards', () => {
   it('compares against the prior period when there is one', () => {
@@ -43,5 +44,30 @@ describe('DividendKpiCards', () => {
     render(<DividendKpiCards growth={growth()} />)
     expect(tile('Next 12 months').textContent).toContain('€1,235')
     expect(tile('Last 12 months').textContent).toContain('€130.00')
+  })
+})
+
+describe('the growth furniture', () => {
+  const sparklines = (el: Element) => el.querySelectorAll('svg[preserveAspectRatio="none"]')
+
+  it("draws each twelve-month tile's own history under it, and nothing without one", () => {
+    const { container } = render(
+      <DividendKpiCards growth={growth()} trend={{ received: [100, 120, 130], forecast: [1100, 1234.5] }} />,
+    )
+    expect(sparklines(tile('Last 12 months'))).toHaveLength(1)
+    expect(sparklines(tile('Next 12 months'))).toHaveLength(1)
+    expect(sparklines(tile('Average per month'))).toHaveLength(0)
+    expect(sparklines(container)).toHaveLength(2)
+    cleanup()
+    const bare = render(<DividendKpiCards growth={growth()} />)
+    expect(sparklines(bare.container)).toHaveLength(0)
+  })
+
+  it('keeps the dividend flat band on every pill, so a few percent stays quiet', () => {
+    render(<DividendKpiCards growth={growth({ ttm: { net_eur: 103, prev_net_eur: 100, pct: 3 } })} />)
+    const chip = tile('Last 12 months').querySelector('.rounded-full')!
+    expect(chip.textContent).toContain('+3%')
+    expect(chip.textContent).not.toContain('▲')
+    expect(chip.className).toContain('bg-muted')
   })
 })

@@ -233,3 +233,36 @@ describe('the monthly contribution defaults to the real pace', () => {
     expect(screen.queryByRole('button', { name: /My pace/ })).toBeNull()
   })
 })
+
+describe('the horizon tiles', () => {
+  /** A KPI tile: the panel's direct child holding `label`. */
+  function tile(label: string | RegExp): HTMLElement {
+    let el: HTMLElement = screen.getAllByText(label).find((e) => !e.closest('table'))!
+    while (el.parentElement && !el.parentElement.className.includes('gap-px')) el = el.parentElement
+    return el
+  }
+  /** The tile's money figure; the label's "10" is too short to be mistaken for it. */
+  const figure = (el: HTMLElement) =>
+    Number(el.textContent!.match(/-?[\d,]{4,}/)![0].replace(/,/g, ''))
+
+  it("prints the chart's last point: value, money in, and the gain between them", async () => {
+    mockApi()
+    renderTab()
+    await waitFor(async () => expect(amount((await oneYearRow())[3])).toBe(67_000))
+    const value = figure(tile(/^Value in 10 years$/))
+    const moneyIn = figure(tile('Money in'))
+    const gains = figure(tile('Gains'))
+    // Ten years is the default horizon; 1,000 a month on 55,000 paid in.
+    expect(value).toBe(moneyIn + gains)
+    expect(moneyIn).toBe(55_000 + 1_000 * 120)
+  })
+
+  it('dashes money in and gains when the baseline failed, and keeps the value', async () => {
+    mockApi({ contributions: new Error('backend down') })
+    renderTab()
+    await screen.findByRole('alert')
+    expect(tile('Money in').textContent).toContain('—')
+    expect(tile('Gains').textContent).toContain('—')
+    expect(figure(tile(/^Value in 10 years$/))).toBeGreaterThan(72_000)
+  })
+})

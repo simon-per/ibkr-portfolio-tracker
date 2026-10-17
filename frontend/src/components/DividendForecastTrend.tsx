@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight } from 'lucide-react'
+import { ChartSpline, ChevronRight } from 'lucide-react'
 import {
   CartesianGrid,
   Line,
@@ -11,6 +11,8 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '@/lib/api'
+import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
+import { IconChip } from '@/components/ui/IconChip'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
@@ -92,14 +94,14 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
   return (
     <section
       aria-label="Dividend forecast over time"
-      className="rounded-xl bg-muted/50"
+      className="rounded-xl border border-border/70 bg-raised"
     >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={contentId}
-        className="flex w-full select-none flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-4 py-3 text-left ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="flex w-full select-none flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl px-4 py-3 text-left ring-offset-background transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <ChevronRight
           aria-hidden="true"
@@ -108,11 +110,13 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
             open && 'rotate-90',
           )}
         />
+        <IconChip icon={ChartSpline} />
         <span className="text-xs font-medium text-muted-foreground">Next 12 months</span>
         <span className="text-sm font-semibold tabular-nums">
           {dividendAmount(trend.latest, curSym)}
         </span>
         <DeltaChip
+          variant="pill"
           pct={trend.sincePct}
           label={`since ${shortDay(trend.start)}`}
           flatBand={0}
@@ -173,7 +177,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   type="monotone"
                   dataKey="received"
                   name="Received"
-                  stroke="hsl(var(--muted-foreground))"
+                  stroke={NEUTRAL_COLOR}
                   strokeWidth={1.5}
                   strokeOpacity={0.7}
                   dot={false}
@@ -184,7 +188,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   type="monotone"
                   dataKey="value"
                   name="Next 12 months"
-                  stroke="hsl(var(--primary))"
+                  stroke={chartColor(0)}
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 5 }}

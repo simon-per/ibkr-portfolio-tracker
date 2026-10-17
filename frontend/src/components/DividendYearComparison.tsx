@@ -1,7 +1,10 @@
+import { ChartColumn } from 'lucide-react'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendAmount } from '@/lib/dividendFormat'
 import { realizedOnlyYears } from '@/lib/dividendGrowth'
+import { cn } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
+import { DividendSubheading } from './DividendSubheading'
 import type { DividendAnnualRow } from '@/lib/api'
 
 interface DividendYearComparisonProps {
@@ -30,9 +33,9 @@ export function DividendYearComparison({
   const amount = (v: number) => dividendAmount(v, curSym)
 
   return (
-    <div className="space-y-2">
-      <div className="text-sm font-medium">Per year</div>
-      <div className="space-y-1.5">
+    <section aria-label="Dividends per year" className="space-y-3">
+      <DividendSubheading title="Per year" icon={ChartColumn} />
+      <div className="space-y-1">
         {annual.map(row => {
           const actualPct = (row.net_eur / max) * 100
           const forecastPct = (row.forecast_net_eur / max) * 100
@@ -44,10 +47,10 @@ export function DividendYearComparison({
               type="button"
               onClick={() => onSelectYear(row.year)}
               aria-pressed={isSelected}
-              className={
-                'flex w-full items-center gap-3 rounded px-2 py-1.5 text-left transition-colors '
-                + (isSelected ? 'bg-accent' : 'hover:bg-accent/50')
-              }
+              className={cn(
+                'flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors',
+                isSelected ? 'bg-accent ring-1 ring-border' : 'hover:bg-accent/50',
+              )}
               title={
                 `${row.year}: ${formatCurrency(row.net_eur)} received`
                 + (row.forecast_net_eur > 0
@@ -55,7 +58,10 @@ export function DividendYearComparison({
                   : '')
               }
             >
-              <span className="w-11 shrink-0 text-sm tabular-nums text-muted-foreground">
+              <span className={cn(
+                'w-11 shrink-0 text-sm tabular-nums',
+                isSelected ? 'font-semibold text-foreground' : 'text-muted-foreground',
+              )}>
                 {row.year}
               </span>
 
@@ -65,13 +71,13 @@ export function DividendYearComparison({
                   Hidden below `sm`: the year, amount and chip columns are fixed
                   width, so at 390px the bar was squeezed to a 2px sliver that
                   carried no information while still taking the row's height. */}
-              <span className="hidden h-5 min-w-0 flex-1 items-center overflow-hidden rounded-sm bg-muted/40 sm:flex">
+              <span className="hidden h-5 min-w-0 flex-1 items-center overflow-hidden rounded-md bg-muted/50 sm:flex">
                 <span
-                  className="h-full bg-primary/80"
+                  className="h-full rounded-l-md bg-primary/85"
                   style={{ width: `${actualPct}%` }}
                 />
                 <span
-                  className="h-full border-y border-r border-dashed border-primary/60 bg-primary/25"
+                  className="h-full rounded-r-md border-y border-r border-dashed border-primary/60 bg-primary/20"
                   style={{ width: `${forecastPct}%` }}
                 />
               </span>
@@ -89,6 +95,7 @@ export function DividendYearComparison({
 
               <span className="w-28 shrink-0 text-right sm:w-32">
                 <DeltaChip
+                  variant="pill"
                   pct={row.yoy_pct}
                   projected={row.yoy_includes_forecast}
                   title={
@@ -102,6 +109,6 @@ export function DividendYearComparison({
           )
         })}
       </div>
-    </div>
+    </section>
   )
 }

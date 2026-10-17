@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ChartColumnStacked, HandCoins, ListOrdered } from 'lucide-react'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { SectionHeader } from '@/components/ui/SectionHeader'
 import { api } from '@/lib/api'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -8,8 +10,9 @@ import {
   buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, legendEntries, OTHER,
 } from '@/lib/dividendChart'
 import { dividendColor, hasIdentity } from '@/lib/dividendColors'
-import type { LiveForecast } from '@/lib/dividendForecastTrend'
-import { payoutChanges } from '@/lib/dividendGrowth'
+import { forecastTrend, type LiveForecast } from '@/lib/dividendForecastTrend'
+import { deltaColor } from '@/lib/delta'
+import { payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
 import {
   DEFAULT_DIVIDEND_SORT, initialDirection, sortDividendRows, type DividendSortKey,
 } from '@/lib/dividendTable'
@@ -18,7 +21,8 @@ import { DeltaChip } from './DeltaChip'
 import { DividendCalendar } from './DividendCalendar'
 import { DividendForecastTrend } from './DividendForecastTrend'
 import { DividendGrowthPace } from './DividendGrowthPace'
-import { DividendKpiCards } from './DividendKpiCards'
+import { DividendKpiCards, type DividendKpiTrend } from './DividendKpiCards'
+import { DividendSubheading } from './DividendSubheading'
 import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
@@ -189,7 +193,12 @@ function dividendColumns(deps: {
       header: 'Growth',
       shortHeader: 'Payout growth',
       align: 'right',
-      cellClassName: 'text-muted-foreground',
+      // Toned by the same flat band the "raised · cut" count above the table uses, so a
+      // green row and that count cannot disagree about what a raise is.
+      tone: (row) =>
+        row.per_share_growth_pct != null
+          ? deltaColor(row.per_share_growth_pct, RAISE_BAND_PCT)
+          : 'text-muted-foreground',
       hint: { description: 'Payout per share vs a year earlier' },
       cell: (row) =>
         row.per_share_growth_pct != null
@@ -338,6 +347,21 @@ export function DividendsTab() {
     [data],
   )
 
+  // The KPI sparklines: the forecast history's two series, ending on `live`. Same query key
+  // as the forecast card, so the two share one request and one cache entry.
+  const { data: forecastHistory } = useQuery({
+    queryKey: ['dividends', 'forecast-history'],
+    queryFn: () => api.getDividendForecastHistory(),
+  })
+  const kpiTrend = useMemo<DividendKpiTrend | null>(() => {
+    const trend = forecastTrend(forecastHistory, live)
+    if (!trend) return null
+    return {
+      received: trend.points.map((p) => p.received),
+      forecast: trend.points.map((p) => p.value),
+    }
+  }, [forecastHistory, live])
+
   // A ticker listed on two venues is two securities and two rows; only the table
   // needs the venue, and only where it actually disambiguates.
   const duplicated = useMemo(() => duplicatedSymbols(securities), [securities])
@@ -398,12 +422,15 @@ export function DividendsTab() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <CardTitle>Dividends</CardTitle>
-            <CardDescription>
-              {data && hasAnything ? (
+      {/* The title half is SectionHeader's; the controls are a wrapping row of their own, not
+          its `aside` — four controls are wider than a phone, and the aside does not shrink. */}
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-x-4 gap-y-3 space-y-0">
+      <SectionHeader
+        variant="bare"
+        icon={HandCoins}
+        title="Dividends"
+        description={
+              data && hasAnything ? (
                 <>
                   Received {formatCurrency(data.total_net_eur)} net
                   {year === '24m' && data.months.length > 0 && (
@@ -415,10 +442,10 @@ export function DividendsTab() {
                 </>
               ) : (
                 'Net dividend income by month and stock'
-              )}
-            </CardDescription>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+              )
+        }
+      />
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <SegmentedControl
               label="Dividend chart view"
               value={chartMode}
@@ -465,7 +492,6 @@ export function DividendsTab() {
               Forecast
             </button>
           </div>
-        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {isError ? (
@@ -478,6 +504,7 @@ export function DividendsTab() {
               <DividendKpiCards
                 growth={data?.growth}
                 isLoading={isLoading}
+                trend={kpiTrend}
               />
             )}
 
@@ -509,6 +536,8 @@ export function DividendsTab() {
                     activeSymbol={activeSymbol}
                   />
                 ) : (
+                  <section aria-label="Monthly dividends" className="space-y-3">
+                  <DividendSubheading title="Monthly by holding" icon={ChartColumnStacked} />
                   <DividendStackChart
                     data={chartData}
                     stackSymbols={stackSymbols}
@@ -519,6 +548,7 @@ export function DividendsTab() {
                     tooltipFooter={monthlyTooltipFooter}
                     activeSymbol={activeSymbol}
                   />
+                  </section>
                 )}
 
                 {/* The three qualifier explanations used to live in `title=`, which no
@@ -531,7 +561,7 @@ export function DividendsTab() {
                     chart cannot show — which is free now that colour no longer follows rank.
                     Real buttons, so isolating a holding works from the keyboard and on a
                     touch device, where a hover-only affordance does not exist at all. */}
-                <div className="-mx-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+                <div className="-mx-2 flex flex-wrap items-center gap-x-0.5 gap-y-0.5 text-xs text-muted-foreground">
                   {legend.map(({ symbol, total }) => {
                     const dimmed = activeSymbol != null && activeSymbol !== symbol
                     const isOther = symbol === OTHER
@@ -552,13 +582,13 @@ export function DividendsTab() {
                         aria-expanded={isOther ? otherOpen : undefined}
                         title={`${symbol}: ${formatCurrency(total)} in this range`}
                         className={cn(
-                          'inline-flex items-center gap-1.5 rounded px-1 py-0.5 transition-opacity hover:bg-accent',
+                          'inline-flex items-center gap-1.5 rounded-full border border-transparent px-2 py-0.5 transition-opacity hover:bg-accent',
                           dimmed && 'opacity-40',
-                          !isOther && pinnedVisible === symbol && 'bg-accent font-medium text-foreground',
+                          !isOther && pinnedVisible === symbol && 'border-border bg-accent font-medium text-foreground',
                         )}
                       >
                         <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
                           style={{ backgroundColor: colorOf(symbol) }}
                         />
                         {isOther
@@ -621,13 +651,20 @@ export function DividendsTab() {
                   />
                 </div>
 
-                <div className="space-y-2 border-t border-border pt-5">
-                  {changes && (
-                    <p aria-label="Payout changes" className="text-xs tabular-nums text-muted-foreground">
-                      <span className="font-medium">Payouts</span>
-                      {' · '}{changes.raised} raised · {changes.cut} cut
-                    </p>
-                  )}
+                <div className="space-y-3 border-t border-border pt-5">
+                  <DividendSubheading
+                    title="By position"
+                    icon={ListOrdered}
+                    aside={changes ? (
+                      <p aria-label="Payout changes" className="text-xs tabular-nums text-muted-foreground">
+                        <span className="font-medium">Payouts</span>
+                        {' · '}
+                        <span className={cn(changes.raised > 0 && 'font-medium text-gain')}>{changes.raised} raised</span>
+                        {' · '}
+                        <span className={cn(changes.cut > 0 && 'font-medium text-loss')}>{changes.cut} cut</span>
+                      </p>
+                    ) : undefined}
+                  />
                   <DataTable
                     rows={sortedSecurities}
                     columns={columns}

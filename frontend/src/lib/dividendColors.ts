@@ -13,54 +13,35 @@
  * `dividend_service.get_dividend_breakdown`). This is the rule `sectorColors.ts` and
  * `benchmarkColors.ts` already state: colour follows the entity, never its rank.
  *
- * The hexes live in `index.css` as `--viz-series-*`, with the measurements behind them; this
- * module owns only the assignment, so there is one place that decides "the third-biggest
- * payer is slot 3" and one place that decides what slot 3 looks like in each theme. That
- * also means no theme is read in JavaScript: a `var()` fill repaints itself.
+ * The colours are the app's one categorical palette (`lib/chartPalette.ts`, 2026-10-17): ten
+ * hues, then the Other grey. This module owns only the assignment and the fold; what slot 3
+ * looks like in each theme, and the measurements behind it, belong to the palette. It used to
+ * carry its own eight hues plus a five-step muted ramp (`--viz-series-*`) — thirteen
+ * identities, but the ramp read as near-black bars in light mode and was a second palette
+ * beside the app's. Ten distinct hues for a slightly larger fold is the trade taken.
  *
  * The order does move as the book grows — a holding overtaking another swaps two slots
  * between sessions. That is the same caveat `benchmarkColors.ts` carries, and the only
  * alternative that never moves (ordering by first payment date) hands the hues to the oldest
  * payers rather than the biggest, which is not what a reader is looking for.
  */
+import { CHART_OTHER, CHART_SLOTS, chartColorFor } from './chartPalette'
 
-/** Ranks 1..8 get a hue of their own. */
-export const SERIES_HUES = 8
-/**
- * Ranks 9..13 get a lightness step instead.
- *
- * Five, not seven, and that is measured rather than chosen: several hues collapse toward a
- * neutral under CVD (`--viz-sector-3` becomes L*64 C*4 under deuteranopia), which forbids the
- * lightness bands they land in, and a fill needs 3:1 against its own card to be visible at
- * all. What is left fits five steps >= ΔE 6.2 apart. Seven would have to be spaced ~4.5,
- * below what the ramp is for.
- */
-export const SERIES_MUTED = 5
-/** Ranks 1..13 are drawn as themselves. Everything after folds into Other. */
-export const SERIES_IDENTITIES = SERIES_HUES + SERIES_MUTED
+/** Ranks 1..10 are drawn as themselves. Everything after folds into Other. */
+export const SERIES_IDENTITIES = CHART_SLOTS
 
-const HUES = Array.from({ length: SERIES_HUES }, (_, i) => `var(--viz-series-${i + 1})`)
-const MUTED = Array.from({ length: SERIES_MUTED }, (_, i) => `var(--viz-series-muted-${i + 1})`)
-
-export const OTHER_COLOR = 'var(--viz-series-other)'
+export const OTHER_COLOR = CHART_OTHER
 
 /**
  * A key's colour, by its position in an identity order the server computed.
  *
- * Generalised from `dividendColor` on 2026-09-28 for the crypto donut, whose order is
- * `color_order` — valued coins by CoinStats' market-cap rank, which belongs to the coin and
- * not to its size in the portfolio. Same palette, same folding rule, one implementation:
- * a second copy of this assignment is exactly how two charts come to disagree about which
- * colour a thing is.
- *
- * Anything the order does not carry falls to the Other grey rather than throwing, which is
- * the honest answer for a key with no place in the ranking.
+ * Shared with the crypto donut, whose order is `color_order` — valued coins by CoinStats'
+ * market-cap rank, which belongs to the coin and not to its size in the portfolio. It IS
+ * `chartColorFor`, not a copy of it: a second copy of this assignment is exactly how two
+ * charts come to disagree about which colour a thing is. Anything the order does not carry
+ * falls to Other rather than throwing.
  */
-export function seriesColor(key: string, order: readonly string[]): string {
-  const rank = order.indexOf(key)
-  if (rank < 0 || rank >= SERIES_IDENTITIES) return OTHER_COLOR
-  return rank < SERIES_HUES ? HUES[rank] : MUTED[rank - SERIES_HUES]
-}
+export const seriesColor: (key: string, order: readonly string[]) => string = chartColorFor
 
 /**
  * A symbol's colour, by its rank in the response's `stack_order`.

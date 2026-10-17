@@ -175,7 +175,7 @@ describe('a holding cannot change colour when the view changes', () => {
 
   const ranges: Record<string, DividendBreakdownResponse> = {
     all: response(
-      [{ month: '2024-06', actual: { GOOG: 2, AVGO: 3, NVDA: 1 } },
+      [{ month: '2024-06', actual: { GOOG: 2, '2330': 3, GOOGL: 1 } },
        { month: '2025-03', actual: { 'ASML (AEB)': 5, CRM: 1, META: 4 } },
        { month: '2026-02', actual: { VT: 40, QQQM: 19, SPGI: 16 }, forecast: { MA: 6 } }],
       [{ month: '2026-02', actual: { VT: 40, QQQM: 19 }, partial: true }],
@@ -185,7 +185,7 @@ describe('a holding cannot change colour when the view changes', () => {
       [{ month: '2025-03', actual: { 'ASML (AEB)': 5, CRM: 1, META: 4 } }], [], ORDER,
     ),
     '2024': response(
-      [{ month: '2024-06', actual: { GOOG: 2, AVGO: 3, NVDA: 1 } }], [], ORDER,
+      [{ month: '2024-06', actual: { GOOG: 2, '2330': 3, GOOGL: 1 } }], [], ORDER,
     ),
   }
 

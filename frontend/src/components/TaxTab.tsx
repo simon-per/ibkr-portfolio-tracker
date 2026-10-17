@@ -1,12 +1,19 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Download, Loader2 } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Building2, Download, Globe, HandCoins, Landmark, Loader2, PiggyBank, ReceiptText, TriangleAlert,
+  Wallet,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import type { Tone } from '@/lib/tone'
 import { displayName } from '@/lib/securityName'
 import {
   includedEstimatesTag, withheld, withholdingTotalLabel, type Money,
@@ -27,8 +34,37 @@ function gainClass(amount: number): string {
   return 'text-muted-foreground'
 }
 
+/** The same three-way split as {@link gainClass}, for a KPI's tone. */
+function gainTone(amount: number): Tone {
+  return amount > 0 ? 'positive' : amount < 0 ? 'negative' : 'muted'
+}
+
 function signed(money: Money, amount: number): string {
   return `${amount >= 0 ? '+' : ''}${money(amount)}`
+}
+
+/** A small rounded tag in a card header: `est.`, a source, an as-at date. */
+const TAG = 'rounded-full px-2.5 py-1 text-xs font-medium'
+
+/** The word on every totals row, quiet so the figures beside it carry the weight. */
+const TOTAL_LABEL = (
+  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total</span>
+)
+
+/**
+ * The symbol cell: logo (or monogram) plus ticker in the table, the ticker alone as the
+ * phone card's title. Only the dividend rows carry an ISIN; the realized and holdings rows
+ * carry neither it nor a security id, so they keep the monogram.
+ */
+function symbolCell(symbol: string | null, isin: string | null, view: 'table' | 'cards') {
+  if (!symbol) return '—'
+  if (view === 'cards') return symbol
+  return (
+    <span className="flex items-center gap-2.5">
+      <TickerAvatar symbol={symbol} isin={isin} className="h-7 w-7 text-[10px]" />
+      <span>{symbol}</span>
+    </span>
+  )
 }
 type DividendIncomeRow = TaxReport['dividend_income'][number]
 type ByCountryRow = TaxReport['dividend_by_country'][number]
@@ -52,7 +88,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (d) => d.symbol ?? '—',
+    cell: (d, view) => symbolCell(d.symbol, d.isin, view),
   },
   {
     key: 'description',
@@ -159,7 +195,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (r) => r.symbol ?? '—',
+    cell: (r, view) => symbolCell(r.symbol, null, view),
   },
   {
     key: 'trade_date',
@@ -211,7 +247,7 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (h) => h.symbol ?? '—',
+    cell: (h, view) => symbolCell(h.symbol, null, view),
   },
   {
     key: 'market_value',
@@ -260,7 +296,7 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
       label="Dividend income"
       density="compact"
       footer={[
-        { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: 'Total' },
+        { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: TOTAL_LABEL },
         { key: 'gross', spans: ['gross'], align: 'right', content: withTag(money(data.dividend_totals.gross)) },
         {
           key: 'withholding',
@@ -280,6 +316,64 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
         { key: 'net', spans: ['net'], align: 'right', content: withTag(money(data.dividend_totals.net)) },
       ]}
     />
+  )
+}
+
+/**
+ * The year in four figures, each one a totals row from a table below, printed with the same
+ * honesty marks that row carries: `incl. N est.` / `excl. N est.` on the dividend figures,
+ * `est.` on realized gains from closed lots, and a dash — never 0.00 — for a withholding
+ * nothing recorded or a wealth-tax base that could not be built.
+ */
+function TaxSummary({ data, money }: { data: TaxReport; money: Money }) {
+  const totals = data.dividend_totals
+  const hasDividends = data.dividend_income.length > 0
+  // Some rows estimated: the footer's own tag. All of them: the card's `est.` badge.
+  const allEstimated = hasDividends && totals.estimated_rows >= data.dividend_income.length
+  const estimateTag = allEstimated
+    ? 'est.'
+    : includedEstimatesTag(totals.estimated_rows, data.dividend_income.length)
+  const withholding = withholdingTotalLabel(money, totals.withholding, totals.estimated_rows)
+  const sales = data.realized_gains.length
+  const gain = data.realized_totals.gain_loss
+  const base = data.holdings_snapshot_error ? null : data.holdings_snapshot_total
+  return (
+    <KpiPanel columns={4}>
+      <KpiCard
+        tile
+        icon={HandCoins}
+        label="Dividends, net"
+        value={money(totals.net)}
+        sub={hasDividends
+          ? [estimateTag, `gross ${money(totals.gross)}`].filter(Boolean).join(' · ')
+          : undefined}
+      />
+      <KpiCard
+        tile
+        icon={Landmark}
+        label="Withheld"
+        value={totals.withholding == null ? null : withholding.amount}
+        sub={withholding.excluded ?? undefined}
+      />
+      <KpiCard
+        tile
+        icon={ReceiptText}
+        label="Realized gains"
+        tone={sales > 0 ? gainTone(gain) : 'neutral'}
+        iconTone={sales > 0 ? gainTone(gain) : 'neutral'}
+        value={sales > 0 ? signed(money, gain) : money(0)}
+        sub={sales > 0
+          ? `${sales} ${sales === 1 ? 'sale' : 'sales'}${data.realized_source === 'trades' ? '' : ' · est.'}`
+          : 'No sales'}
+      />
+      <KpiCard
+        tile
+        icon={Wallet}
+        label="Steuerwert"
+        value={base == null ? null : money(base)}
+        sub={`as at ${data.holdings_as_of}`}
+      />
+    </KpiPanel>
   )
 }
 
@@ -314,12 +408,11 @@ export function TaxTab() {
     <div className="space-y-6">
       {/* Header: year selector + CSV download */}
       <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle>Tax Report</CardTitle>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+        <SectionHeader
+          icon={Landmark}
+          title="Tax Report"
+          aside={
+            <>
               <label htmlFor="tax-year" className="text-sm text-muted-foreground">
                 Year
               </label>
@@ -345,9 +438,9 @@ export function TaxTab() {
                 <Download className="h-4 w-4" />
                 Download CSV
               </a>
-            </div>
-          </div>
-        </CardHeader>
+            </>
+          }
+        />
       </Card>
 
       {isLoading ? (
@@ -365,36 +458,39 @@ export function TaxTab() {
           {/* A warning rides on a *successful* report — an omitted row or a
               missing wealth-tax base is invisible unless it is rendered. */}
           {data.warnings && data.warnings.length > 0 && (
-            <Card className="border-amber-300 dark:border-amber-900/60">
-              <CardContent className="space-y-1.5 py-4 text-sm text-amber-800 dark:text-amber-200">
-                {data.warnings.map((warning, i) => (
-                  <p key={i}>{warning}</p>
-                ))}
+            <Card className="border-warn/40 bg-warn-soft">
+              <CardContent className="flex gap-3 py-4 text-sm text-warn">
+                <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="space-y-1.5">
+                  {data.warnings.map((warning, i) => (
+                    <p key={i}>{warning}</p>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
 
+          <TaxSummary data={data} money={money} />
+
           {/* --- Pillar 3a --- Leads: it is what is *absent* from every section below. */}
           {data.pillar3a && (
             <Card>
-              <CardHeader>
-                <CardTitle>Pillar 3a</CardTitle>
-              </CardHeader>
+              <SectionHeader icon={PiggyBank} title="Pillar 3a" />
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <div className="text-2xl font-semibold tabular-nums">
+                  <div className="rounded-xl border border-border/70 bg-raised p-4">
+                    <div className="text-2xl font-semibold tracking-tight">
                       {money(data.pillar3a.contributions)}
                     </div>
-                    <div className="text-sm text-muted-foreground">
+                    <div className="mt-1 text-sm text-muted-foreground">
                       Contributions in {data.year} · deductible
                     </div>
                   </div>
-                  <div>
-                    <div className="text-2xl font-semibold tabular-nums text-muted-foreground">
+                  <div className="rounded-xl border border-border/70 bg-raised p-4">
+                    <div className="text-2xl font-semibold tracking-tight text-muted-foreground">
                       {money(data.pillar3a.holdings_value)}
                     </div>
-                    <div className="text-sm text-muted-foreground">
+                    <div className="mt-1 text-sm text-muted-foreground">
                       Assets held
                     </div>
                   </div>
@@ -405,15 +501,17 @@ export function TaxTab() {
 
           {/* --- Dividend income + withholding (DA-1) --- */}
           <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
+            <SectionHeader
+              icon={HandCoins}
+              title="Dividend income & withholding (DA-1)"
+              aside={
+                <>
                 {/* Only the `est.` mark survives (owner, 2026-10-14): which feed a figure came
                     from is not the reader's business, whether it is an estimate is. And only
                     over figures — an empty year has nothing to be an estimate of. */}
                 {data.dividend_source !== 'ibkr' && data.dividend_income.length > 0 && (
                   <span
-                    className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                    className={cn(TAG, 'bg-muted text-muted-foreground')}
                     title={data.dividend_source === 'mixed' && data.dividend_ibkr_from
                       ? `Broker figures from ${data.dividend_ibkr_from}`
                       : undefined}
@@ -421,8 +519,9 @@ export function TaxTab() {
                     {data.dividend_source === 'mixed' ? 'Partly est.' : 'est.'}
                   </span>
                 )}
-              </div>
-            </CardHeader>
+                </>
+              }
+            />
             <CardContent>
               {data.dividend_income.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
@@ -437,9 +536,7 @@ export function TaxTab() {
           {/* --- Withholding by country (DA-1 is filed per source country) --- */}
           {data.dividend_by_country.length > 0 && (
             <Card>
-              <CardHeader>
-                <CardTitle>Withholding by country (DA-1)</CardTitle>
-              </CardHeader>
+              <SectionHeader icon={Globe} title="Withholding by country (DA-1)" />
               <CardContent>
                 <DataTable
                   rows={data.dividend_by_country}
@@ -454,19 +551,19 @@ export function TaxTab() {
 
           {/* --- Realized capital gains --- */}
           <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Realized capital gains</CardTitle>
+            <SectionHeader
+              icon={ReceiptText}
+              title="Realized capital gains"
+              aside={
+                <>
                 {/* Where the figures came from, so only when there are figures: a year with
                     no sale reports the fallback source, and "Estimated" over "No realized
                     sales" reads as a caveat about nothing. */}
                 {data.realized_gains.length > 0 && (
                   <span
                     className={cn(
-                      'rounded-full px-2.5 py-1 text-xs font-medium',
-                      data.realized_source === 'trades'
-                        ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                      TAG,
+                      data.realized_source === 'trades' ? 'bg-info-soft text-info' : 'bg-warn-soft text-warn',
                     )}
                     title={
                       data.realized_source === 'trades'
@@ -477,8 +574,9 @@ export function TaxTab() {
                     {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
                   </span>
                 )}
-              </div>
-            </CardHeader>
+                </>
+              }
+            />
             <CardContent>
               {data.realized_gains.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
@@ -492,7 +590,7 @@ export function TaxTab() {
                   label="Realized capital gains"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol', 'trade_date'], content: 'Total' },
+                    { key: 'label', spans: ['symbol', 'trade_date'], content: TOTAL_LABEL },
                     { key: 'proceeds', spans: ['proceeds'], align: 'right', content: money(data.realized_totals.proceeds) },
                     { key: 'cost_basis', spans: ['cost_basis'], align: 'right', content: money(data.realized_totals.cost_basis) },
                     {
@@ -510,17 +608,15 @@ export function TaxTab() {
 
           {/* --- Holdings snapshot (wealth tax) --- */}
           <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Holdings snapshot (wealth tax / Steuerwert)</CardTitle>
-                <span
-                  className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                  title="Steuerwert date"
-                >
+            <SectionHeader
+              icon={Building2}
+              title="Holdings snapshot (wealth tax / Steuerwert)"
+              aside={
+                <span className={cn(TAG, 'bg-muted text-muted-foreground')} title="Steuerwert date">
                   as at {data.holdings_as_of}
                 </span>
-              </div>
-            </CardHeader>
+              }
+            />
             <CardContent>
               {data.holdings_snapshot_error ? (
                 // A failure and an empty portfolio are different answers, and the
@@ -540,7 +636,7 @@ export function TaxTab() {
                   label="Holdings snapshot"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol'], content: 'Total' },
+                    { key: 'label', spans: ['symbol'], content: TOTAL_LABEL },
                     {
                       key: 'market_value',
                       spans: ['market_value'],

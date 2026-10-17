@@ -1,6 +1,9 @@
 import { useMemo } from 'react'
+import { CalendarClock } from 'lucide-react'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendUpcomingPayment } from '@/lib/api'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { DividendSubheading } from './DividendSubheading'
 
 interface DividendCalendarProps {
   upcoming: DividendUpcomingPayment[]
@@ -36,6 +39,9 @@ function monthHeading(iso: string): string {
  * A `pending` row is the one this exists for: gone ex, cash overdue, in none of the
  * totals. It is badged **on the surface** rather than in a `title=`, which a touch
  * device cannot reach — the lesson this tab already learned once.
+ *
+ * Each row leads with the date as a chip and the holding's logo; the small swatch beside
+ * the logo is the holding's chart colour, so a row can still be matched to its segment.
  */
 export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   const groups = useMemo(() => {
@@ -52,18 +58,19 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   if (upcoming.length === 0) return null
 
   return (
-    <div className="space-y-2">
-      <div className="text-sm font-medium">Expected next</div>
+    <section aria-label="Expected dividends" className="space-y-3">
+      <DividendSubheading title="Expected next" icon={CalendarClock} />
 
       {/* Bounded height: 12 months of a 20-payer portfolio is ~60 rows, which
           would otherwise push the position table off the page. */}
-      <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
+      <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
         {groups.map(([month, rows]) => {
           const monthTotal = rows.reduce((s, r) => s + r.net_eur, 0)
           return (
             <div key={month}>
-              <div className="mb-1 flex items-baseline justify-between border-b border-border/60 pb-0.5">
-                <span className="text-xs font-medium text-muted-foreground">
+              {/* Sticky inside the scroller, so a long month keeps its heading and total. */}
+              <div className="sticky top-0 z-[1] mb-1 flex items-baseline justify-between border-b border-border/60 bg-card pb-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {monthHeading(month)}
                 </span>
                 <MonthTotal total={monthTotal} />
@@ -72,25 +79,28 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                 {rows.map(p => (
                   <li
                     key={`${p.date}-${p.security_id}`}
-                    className="flex items-center gap-2 text-sm"
+                    className="-mx-1.5 flex items-center gap-2.5 rounded-lg px-1.5 py-1 text-sm transition-colors hover:bg-muted/40"
                   >
-                    <span className="w-14 shrink-0 tabular-nums text-xs text-muted-foreground">
+                    <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap rounded-md bg-muted px-1.5 py-0.5 text-center text-xs font-medium tabular-nums text-muted-foreground">
                       {dayLabel(p.date)}
                     </span>
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-sm"
-                      style={{ backgroundColor: colorOf(p.symbol) }}
-                      aria-hidden="true"
-                    />
+                    <span className="relative shrink-0">
+                      <TickerAvatar symbol={p.symbol} securityId={p.security_id} className="h-7 w-7 text-[10px]" />
+                      <span
+                        className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-card"
+                        style={{ backgroundColor: colorOf(p.symbol) }}
+                        aria-hidden="true"
+                      />
+                    </span>
                     {/* Wraps rather than truncates as a whole: at 390px the notes
                         and the badge did not fit beside the symbol, and one `truncate`
                         over all of them clipped "payment pending" — the one live
                         warning on the row — first. Only the symbol truncates now; the
                         badge sits right after it and the notes wrap under. */}
                     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                      <span className="min-w-0 max-w-full truncate">{p.symbol}</span>
+                      <span className="min-w-0 max-w-full truncate font-medium">{p.symbol}</span>
                       {p.pending && (
-                        <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.7rem] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-warn-soft px-1.5 py-0.5 text-[0.7rem] font-medium text-warn">
                           payment pending
                         </span>
                       )}
@@ -119,15 +129,14 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
           )
         })}
       </div>
-
-    </div>
+    </section>
   )
 }
 
 function MonthTotal({ total }: { total: number }) {
   const formatCurrency = useFormatCurrency()
   return (
-    <span className="text-xs tabular-nums text-muted-foreground">
+    <span className="text-xs font-medium tabular-nums text-muted-foreground">
       {formatCurrency(total)}
     </span>
   )
@@ -135,5 +144,5 @@ function MonthTotal({ total }: { total: number }) {
 
 function Amount({ value }: { value: number }) {
   const formatCurrency = useFormatCurrency()
-  return <span className="shrink-0 tabular-nums">{formatCurrency(value)}</span>
+  return <span className="shrink-0 font-medium tabular-nums">{formatCurrency(value)}</span>
 }

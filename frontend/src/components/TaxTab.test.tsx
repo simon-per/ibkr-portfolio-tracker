@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, within } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TaxTab } from './TaxTab'
 import { includedEstimatesTag, withholdingTotalLabel } from '@/lib/taxTotals'
@@ -227,5 +227,72 @@ describe('TaxTab', () => {
     renderTab()
     await tableWithHeader('Country')
     expect(screen.queryByText(/ISIN prefix/)).toBeNull()
+  })
+})
+
+describe('the year summary', () => {
+  /** A KPI tile: the summary panel's direct child holding `label`. */
+  function tile(label: string): HTMLElement {
+    let el: HTMLElement = screen.getByText(label)
+    while (el.parentElement && !el.parentElement.className.includes('gap-px')) el = el.parentElement
+    return el
+  }
+
+  it('repeats each totals row with the marks that row carries', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    renderTab()
+    await tableWithHeader('Pay date')
+    expect(tile('Dividends, net').textContent).toMatch(/CHF\s115\.00/)
+    expect(tile('Dividends, net').textContent).toContain('incl. 1 est.')
+    expect(tile('Withheld').textContent).toMatch(/-CHF\s35\.00/)
+    expect(tile('Withheld').textContent).toContain('excl. 1 est.')
+    expect(tile('Realized gains').textContent).toMatch(/-CHF\s10\.00/)
+    expect(tile('Realized gains').textContent).toContain('1 sale')
+    expect(tile('Steuerwert').textContent).toContain('as at 2026-10-14')
+  })
+
+  it('dashes what is unknown rather than printing a zero', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        dividend_source: 'yfinance_estimate',
+        dividend_income: [row({ withholding: null, net: 100, source: 'yfinance_estimate' })],
+        dividend_totals: { gross: 100, withholding: null, net: 100, estimated_rows: 1 },
+        holdings_snapshot_error: true,
+        holdings_snapshot_total: null,
+      }),
+    )
+    renderTab()
+    await tableWithHeader('Pay date')
+    expect(tile('Withheld').textContent).toContain('—')
+    expect(tile('Withheld').textContent).not.toContain('0.00')
+    expect(tile('Steuerwert').textContent).toContain('—')
+    expect(tile('Steuerwert').textContent).not.toContain('0.00')
+    // Every row an estimate: the figure is one, whole.
+    expect(tile('Dividends, net').textContent).toContain('est.')
+  })
+
+  it('says a year without sales has none, rather than signing a zero', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({ realized_gains: [], realized_totals: { proceeds: 0, cost_basis: 0, gain_loss: 0 } }),
+    )
+    renderTab()
+    await tableWithHeader('Pay date')
+    expect(tile('Realized gains').textContent).toContain('No sales')
+    expect(tile('Realized gains').textContent).not.toContain('+')
+  })
+})
+
+describe('logos in the tax tables', () => {
+  it('draws the dividend row by its ISIN, and the rows without one as a monogram', async () => {
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: { CH0038863350: 'v1' } })
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    renderTab()
+    const income = await tableWithHeader('Pay date')
+    await waitFor(() => expect(income.querySelectorAll('img').length).toBeGreaterThan(0))
+    expect(income.querySelector('img')!.getAttribute('src')).toContain('CH0038863350')
+    // Realized rows carry no ISIN and no security id: a monogram, never a broken image.
+    const realized = await tableWithHeader('Trade date')
+    expect(realized.querySelectorAll('img')).toHaveLength(0)
+    expect(within(realized).getByText('LO')).toBeTruthy()
   })
 })

@@ -711,3 +711,32 @@ theme's bright one). Attribution bars take `GAIN_COLOR`/`LOSS_COLOR`, Money In p
 `chartColor(0)`. Not migrated, deliberately: `BENCHMARK_COLORS`/`PORTFOLIO_SERIES_COLORS` keep
 their measured hexes — they were picked by a max-separation search against each other, which a
 re-point onto the general palette would have to redo, and the section above still describes them.
+
+### Dividends, Forecast, Tax (2026-10-17)
+
+- **The dividend stack is on the palette.** `dividendColors.ts` assigns `chartColor(rank)` over
+  `stack_order`; `seriesColor` *is* `chartColorFor`, so the crypto donut moved too. Ten identities
+  instead of thirteen (the old five-step muted ramp is gone), Other is `--chart-other`.
+  `dividendColors.test.ts` pins rank *n* → `var(--chart-n)` and the fold; the measuring is
+  `chartPalette.test.ts`'s. Details in [dividends.md](dividends.md). This supersedes the
+  `--viz-series-*` paragraph under *Colour by identity* above.
+- **Growth is the Dividends headline.** The four KPIs are a `KpiPanel` with icons and delta pills
+  (all at the dividend flat band, `FLAT_BAND_PCT`, so a pill agrees with every other chip on the
+  tab). *Last 12 months* and *Next 12 months* draw sparklines from the forecast history
+  (`forecastTrend(history, live)` — unwindowed like the tiles, ending on the live figure); a
+  sparkline from the selected range would move under a figure that does not. The DividendsTab
+  and the forecast card share the `['dividends', 'forecast-history']` query.
+- **Inside the Dividends card**, blocks take `DividendSubheading` (small well, `text-sm`), one
+  step below the card's `SectionHeader`. The card's controls sit in their own wrapping row, not in
+  `SectionHeader`'s `aside`: the aside is `shrink-0`, and four controls wider than a phone pushed
+  the page into horizontal scroll at 390.
+- **Calendar rows** lead with a date chip and the holding's `TickerAvatar` (by `security_id`),
+  the chart-colour swatch as a dot on the avatar. The per-position *Growth* column is toned at
+  `RAISE_BAND_PCT`, the band the "raised · cut" count uses.
+- **Forecast** has a horizon `KpiPanel` (value with sparkline, money in, gains — the chart's last
+  point, so the tiles and the line end on one number); the chart reads `chartColor(0)` /
+  `NEUTRAL_COLOR`; the scenarios are `KpiCard` tiles.
+- **Tax** has a year summary `KpiPanel` — each tile a totals row from a table below, with that
+  row's marks (`incl./excl. N est.`, `est.`, a dash for an unrecorded withholding or an unbuilt
+  Steuerwert, never 0.00). Dividend rows show logos by ISIN; realized and holdings rows carry no
+  ISIN or security id in `/api/tax/report`, so they show monograms.

@@ -147,8 +147,8 @@ describe('allocationSlices', () => {
       holdings: [holding('solana', 700, 70), holding('bitcoin', 200, 20)],
       color_order: ['bitcoin', 'solana'],
     }))
-    expect(slices.find(s => s.key === 'bitcoin')?.color).toBe('var(--viz-series-1)')
-    expect(slices.find(s => s.key === 'solana')?.color).toBe('var(--viz-series-2)')
+    expect(slices.find(s => s.key === 'bitcoin')?.color).toBe('var(--chart-1)')
+    expect(slices.find(s => s.key === 'solana')?.color).toBe('var(--chart-2)')
   })
 
   it('folds the tail into Other and never draws an unpriced coin', () => {
