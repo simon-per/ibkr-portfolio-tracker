@@ -7,6 +7,24 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — the Yahoo request diet (#11)
+
+Issue #11, rule 1: six passes paid for requests whose content was already in hand.
+(a) Dividends ride on the price chart `history()` already returns: one row builder
+(`yahoo_dividend_rows`) for both paths, and the full-history `.dividends` read
+(`dividends_checked_at`) only on bootstrap, a 30-day re-verify, a mapping change or a split
+— ~40 → ~9 full-history requests a week. (b) `growth_estimates` dropped: EPS growth from the
+`earningsTrend` `revenue_estimate` already caches; one PEG resolver (`peg_ratio.resolve_peg`),
+`trailingPegRatio` first since `.info` pays for it — **PEG figures change**. (c) The 05:00
+fundamentals pass fills sector/country/asset type from its `.info`; a mutual fund now reads as
+ETF. (d) Watchlist estimates on a weekly sub-cadence (`estimates_synced_at`, migration
+`b8e5d2f0a4c7`); a held ticker's RSI from stored closes. (e) Analyst ratings skip funds. (f)
+yfinance's tz/cookie/ISIN cache persists in `data/yf-cache/`, so a deploy no longer re-learns
+every ticker's timezone. `.info` is three requests, not one; the budgets in docs and comments
+are corrected. Verified: 2295 backend tests green without the marker filter; checked against
+the installed yfinance 1.1.0 — the deployed one floats (`>=1.1.0`), and the private
+`_analysis._earnings_trend` read is pinned by a test CI runs against whatever it installs.
+
 ## Shipped 2026-10-17 (night) — no weekend market-data passes but Saturday 08:00 (#9)
 
 Issue #9, rule 1. The six market-data slots and the 18:00 `full_sync` ran seven days a week,

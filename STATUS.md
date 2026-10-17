@@ -12,7 +12,7 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#10 and #12 shipped the same night (logos need the key on the VPS); #11 next.
+#2–#12 all shipped the same night; no issue is open.
 
 ---
 
@@ -104,6 +104,12 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **The Yahoo diet after #11 (migration `b8e5d2f0a4c7`):** `backend/data/yf-cache/` appears on
+  the VPS and survives the next deploy; dividend estimates arrive from the price passes (new
+  ex-dates within a day, not a week); Tuesday's 05:00 `fundamentals_refresh` reports
+  `allocations_updated` and ratings `funds_not_asked`; PEG on Fundamentals, the watchlist and
+  the buy score now prefers Yahoo's `trailingPegRatio` — a changed figure is expected, a blank
+  one is not. The first watchlist run fetches every item in full.
 - **The weekend schedule after #9:** Sunday 2026-10-18 shows no `market_data_only` rows and an
   18:00 `full_sync` whose `market_result` writes few or no rows; Saturday 2026-10-24 shows only
   the 08:00 `market_data_only`. Weekday slots unchanged.
