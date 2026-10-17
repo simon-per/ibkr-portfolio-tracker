@@ -167,6 +167,23 @@ Four rules, three of which restate rules this feature already has:
   once. Pinned by `test_does_not_reuse_one_phrase_for_two_meanings`.
 - **A zero total draws nothing**, not an empty frame. Same refusal as `concentrationPct`.
 
+### The insight strip and constituent logos
+
+Under the Coverage row, a second panel of four figures (`lib/lookthroughInsights.ts`, pure,
+from the rows already loaded): **Largest exposure**, **Top 10**, **Largest via funds only** (the
+biggest company reached through funds alone) and **Held both ways** (companies held directly and
+through funds, with what the funds add). Every share is the rows' own `pct_of_portfolio` — of the
+whole book, summed and never divided. An unpriced book or an empty ranking gives dashes. **No
+sector figure, deliberately**: a "largest sector" headline would be the portfolio-level rollup
+the next section declines. The first two are decided inside the top 25 rows, so the Top 25/50/100
+control never moves them; the last two read the loaded rows and can change with it.
+
+Each company wears its logo by ISIN (`ConstituentAvatar` → `TickerAvatar isin`): a folded
+company carries several ISINs and the store may hold a mark for any one, so the first with a
+stored logo wins (`lib/lookthroughIdentity.ts`), else the monogram of its first ticker or name.
+Table rows, the treemap tooltip and the strip use the same component. Logos are filled ahead
+from the fund baskets ([logos.md](logos.md)), so most constituents have one.
+
 ### Grouping the treemap by sector, and the one prohibition it narrows
 
 Tiles cluster **by sector**, not by whether the exposure was chosen directly. The owner asked
@@ -196,32 +213,40 @@ Three things make it more than a display change:
   both sides say so; `country` stays unserved for its own reason (it is a country, and every
   geographic bucket in the app is a region).
 
-**The palette is the first in this app that is *chosen* per theme rather than one set of hexes
-taking its chances against both surfaces.** `--viz-*` in `index.css`, two sets, each run through
-a CVD/contrast validator against the surface it actually renders on (`#ffffff` / `#020817`) on
-the **all-pairs** pairlist, because a treemap can seat any tile next to any other. Four details
-are load-bearing:
+**The treemap draws on the app's one categorical palette** (`lib/chartPalette.ts`, since
+2026-10-17); `lib/sectorColors.ts` owns only the assignment and `lib/chartPaint.ts` the label
+inks and the neutrals. It used its own `--viz-sector-*` set before. Four details are load-bearing:
 
-- **Only four sectors get a hue; the rest fold into `Other sectors`.** Not a shortcut — the
-  all-pairs pairlist is brutal, and brute-forcing all 256 subsets of the eight-slot categorical
-  order found that **only four** of them clear it simultaneously (slots 1, 4, 5 and 6). Five
-  hues cannot be made to pass by re-stepping. Four covers 68% of this book by value and the
-  fold is where the 8-hue ceiling would have bitten anyway.
+- **A sector's slot is its position in `CANONICAL_SECTORS`, and a sector is grouped exactly when
+  it has a slot.** Ten hues, so Utilities (eleventh) and `Unknown` fold into `Other sectors`,
+  drawn in the palette's Other. This replaced the old rule — *only four sectors get a hue*, the
+  largest set of the old eight-hue order that cleared CVD separation **all-pairs**. The shared
+  palette is tuned for adjacent pairs and its first three all-pairs; measured, no subset of more
+  than three of its slots clears all-pairs (slot 1 blue against slot 4 violet is ΔE 1.4 under
+  CVD). Three hues would have greyed most of the chart, so the owner's colour request was met
+  with identity carried twice over instead: every tile wide enough carries its name, the tooltip
+  names the company and its sector, and the legend lists every group with its share. The cost is
+  that two non-adjacent slots can be hard to tell apart for a colour-blind reader where tiles
+  meet; the labels are what make that acceptable.
 - **`AllocationTab` and the treemap share `lib/sectorColors.ts`**, so a sector is one colour
-  across both tabs. The old `SECTOR_COLORS` failed validation outright: `#3b82f6` Technology
-  against `#8b5cf6` Communications measures **ΔE 1.3 deuteran** — the two largest groups here,
-  indistinguishable to a deuteranope. `Unknown` also took a *positional* fallback colour and
-  moved whenever the chart reordered; it has a fixed grey now, because colour follows the
-  entity and never its rank.
-- **Every fill carries its own ink.** Dark-mode `--viz-sector-2` measures 2.94:1 against white,
-  so one hardcoded label colour makes one group unreadable in exactly one theme — which nobody
-  testing the other will see. Re-stepping that swatch to fix the contrast broke its CVD
-  separation from green instead (ΔE 4.1), so the *ink* was flipped rather than the fill.
-- **`sectorPaint` must consult both the sector record and the structural one.** It looked at
-  only the first, so `unattributed` and `other_companies` both fell through to the `Other
-  sectors` grey: three meanings, one colour, three identical legend swatches, and nothing
-  failed — falling back *is* correct for a genuinely unknown group. Found by sampling pixels
-  out of a screenshot, pinned now by a test that fails on the mutant.
+  across both tabs — pinned by `sectorColors.test.ts`. The old `SECTOR_COLORS` once failed
+  this outright (`#3b82f6` Technology against `#8b5cf6` Communications, ΔE 1.3 deuteran), and
+  `Unknown` took a *positional* fallback colour that moved whenever the chart reordered.
+- **Every fill carries its own ink, per slot and fixed across themes.** White on seven slots,
+  near-black on the three light ones (lime, sky, amber); the neutrals take the theme's
+  foreground. `chartPaint.test.ts` reads `index.css` and holds every pair at 3:1 in both themes,
+  so a palette re-step that makes a tile label unreadable fails there. The percentage line is
+  drawn at full ink — an opacity would quietly spend that margin.
+- **Three neutrals, three meanings.** `Not attributed` is the strong one (the caveat, and the
+  same value as the composition bar's `Not attributed` segment, so the same fill), the
+  truncated tail the faint one, the sector fold the palette's Other — mixed from
+  `--chart-other` with `color-mix` toward the ink and the card. `sectorPaint` consults the
+  structural record before the sectors: it once looked only at sectors, so all three fell
+  through to one grey and the legend showed three identical swatches with nothing failing.
+
+The composition bar takes slots one and two (held directly, through funds — an all-pairs-safe
+pair) and the strong neutral. Its blue is the treemap's Technology blue; harmless, because the bar
+carries no sector and the treemap no holding mode.
 
 **Only depth 2 is drawn, and that is a finding rather than a shortcut.** The first version
 painted a frame and a header strip at depth 1 to delimit each sector; neither ever appeared,

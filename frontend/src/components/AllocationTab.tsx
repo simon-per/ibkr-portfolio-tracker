@@ -1,56 +1,29 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { AllocationCategory } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { RefreshCw, X } from 'lucide-react'
+import { Blocks, Globe, RefreshCw, Shapes, X, type LucideIcon } from 'lucide-react'
 import { RebalanceCard } from './RebalanceCard'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
-import { allocationSectorPaint, neutralPaint, type SectorPaint } from '@/lib/sectorColors'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import {
+  allocationSectorPaint, assetTypePaint, regionPaint, type SectorPaint,
+} from '@/lib/sectorColors'
+import { TONE_CHIP } from '@/lib/tone'
 import { displayName } from '@/lib/securityName'
 
 /**
- * Sector colours now come from `lib/sectorColors.ts`, shared with the Look-through treemap so
- * one sector is one colour across the app.
- *
- * The eighteen-entry map that used to live here was measurably broken: `#8b5cf6` Communications
- * against `#a855f7` Basic Materials scored **ΔE 0.3 under protanopia and 5.1 with full colour
- * vision** — indistinguishable, on the chart whose only job is to distinguish. Half its keys
- * were dead anyway, because `mergeAllocation` renames `Information Technology` to `Technology`
- * *before* the colour lookup runs, so the GICS spellings were never reached.
+ * Colours come from `lib/sectorColors.ts` — palette slots by a fixed identity order per
+ * breakdown, shared with the look-through treemap so one sector is one colour across the app.
+ * The region map that used to live here also keyed countries (`US`, `Germany`) the chart can
+ * never show: `regionOf` folds every country into its region before a colour is asked for.
  */
-const REGION_COLORS: Record<string, string> = {
-  'North America': '#3b82f6',
-  'United States': '#3b82f6',
-  'US': '#3b82f6',
-  'USA': '#3b82f6',
-  'Europe': '#10b981',
-  'Asia Pacific': '#f59e0b',
-  'Emerging Markets': '#ef4444',
-  'Latin America': '#8b5cf6',
-  'Middle East & Africa': '#f97316',
-  'Canada': '#06b6d4',
-  'China': '#ec4899',
-  'Japan': '#eab308',
-  'South Korea': '#14b8a6',
-  'Korea': '#14b8a6',
-  'United Kingdom': '#22c55e',
-  'UK': '#22c55e',
-  'Germany': '#84cc16',
-  'Switzerland': '#a855f7',
-  'Ireland': '#6366f1',
-}
-
-/** Two real classes plus the bucket for "nobody has run the allocation sync against this yet". */
-const ASSET_TYPE_COLORS: Record<string, string> = {
-  Stock: 'var(--viz-sector-1)',
-  ETF: 'var(--viz-sector-4)',
-}
 
 // Normalize sector names for consistency
 const SECTOR_MAPPING: Record<string, string> = {
@@ -108,22 +81,6 @@ function regionOf(name: string): string {
  * identity, so a literal here would close the panel on every parent re-render.
  */
 const NO_ALLOCATION: Record<string, AllocationCategory> = {}
-
-/**
- * Colour by identity, never by row position.
- *
- * This used to fall back to `FALLBACK_COLORS[index % 15]`, so any category the map did not
- * cover — `Unknown` on the sector and region charts among them — changed colour whenever the
- * ordering changed. A reader who learned "Unknown is orange" was misled by the next sync.
- */
-function mappedColor(colorMap: Record<string, string>) {
-  return (name: string): SectorPaint => {
-    const fill = colorMap[name]
-    // The mapped region and asset-type hexes are all mid-to-dark, so white carries them; the
-    // neutral ramp supplies its own ink for the same reason.
-    return fill ? { fill, ink: '#ffffff' } : neutralPaint(name)
-  }
-}
 
 // Merge allocation categories that share the same normalized name
 function mergeAllocation(
@@ -208,7 +165,7 @@ function drillDownColumns(deps: {
       mobile: 'badge',
       cell: (pos) =>
         pos.is_etf_contribution ? (
-          <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
+          <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONE_CHIP.neutral}`}>
             ETF est.
           </span>
         ) : null,
@@ -220,28 +177,36 @@ function drillDownColumns(deps: {
 function DrillDownPanel({
   categoryName,
   category,
+  fill,
   onClose,
 }: {
   categoryName: string
   category: AllocationCategory
+  fill: string
   onClose: () => void
 }) {
   const formatCurrency = useFormatCurrency()
   return (
-    <Card className="mt-4 border-primary/20">
-      <CardHeader className="pb-3">
-        <div className="flex justify-between items-center">
-          <div>
-            <CardTitle className="text-lg">{categoryName}</CardTitle>
-            <CardDescription>
-              {category.percentage.toFixed(1)}% of portfolio · {formatCurrency(category.market_value_eur)}
-            </CardDescription>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+    <Card className="mt-4 bg-raised shadow-raised">
+      <SectionHeader
+        className="pb-3"
+        title={
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: fill }} />
+            {categoryName}
+          </span>
+        }
+        description={
+          <span className="tabular-nums">
+            {category.percentage.toFixed(1)}% of portfolio · {formatCurrency(category.market_value_eur)}
+          </span>
+        }
+        aside={
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label={`Close ${categoryName}`}>
             <X className="h-4 w-4" />
           </Button>
-        </div>
-      </CardHeader>
+        }
+      />
       <CardContent>
         <DataTable
           rows={category.positions}
@@ -265,11 +230,13 @@ function DrillDownPanel({
  */
 function AllocationBreakdown({
   title,
+  icon,
   allocation,
   colorFor,
   isLoading,
 }: {
   title: string
+  icon: LucideIcon
   allocation: Record<string, AllocationCategory>
   colorFor: (name: string) => SectorPaint
   isLoading: boolean
@@ -289,9 +256,7 @@ function AllocationBreakdown({
   if (isLoading) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-        </CardHeader>
+        <SectionHeader title={title} icon={icon} />
         <CardContent>
           <div className="flex h-64 items-center justify-center text-muted-foreground">Loading…</div>
         </CardContent>
@@ -302,9 +267,7 @@ function AllocationBreakdown({
   if (entries.length === 0) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-        </CardHeader>
+        <SectionHeader title={title} icon={icon} />
         <CardContent>
           <div className="flex h-64 items-center justify-center text-muted-foreground">
             No data yet.
@@ -325,9 +288,7 @@ function AllocationBreakdown({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
+      <SectionHeader title={title} icon={icon} />
       <CardContent>
         <div className="flex flex-col items-center gap-5">
           <div className="relative h-[190px] w-[190px] shrink-0">
@@ -358,9 +319,9 @@ function AllocationBreakdown({
                     if (!payload || payload.length === 0) return null
                     const d = payload[0].payload
                     return (
-                      <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-lg">
+                      <div className="rounded-xl border border-border bg-card px-3 py-2 text-sm shadow-raised">
                         <p className="font-semibold">{d.name}</p>
-                        <p className="text-muted-foreground">
+                        <p className="tabular-nums text-muted-foreground">
                           {d.value?.toFixed(1)}% · {formatCurrency(d.market_value_eur)}
                         </p>
                       </div>
@@ -388,14 +349,15 @@ function AllocationBreakdown({
                 }`}
               >
                 <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
                   style={{ backgroundColor: colorFor(name).fill }}
                 />
                 <span className="min-w-0 flex-1 truncate">{name}</span>
                 <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
                   {formatCurrency(cat.market_value_eur)}
                 </span>
-                <span className="w-14 text-right font-medium tabular-nums">{cat.percentage.toFixed(1)}%</span>
+                <span className="w-14 text-right font-semibold tabular-nums">{cat.percentage.toFixed(1)}%</span>
               </button>
             ))}
           </div>
@@ -406,6 +368,7 @@ function AllocationBreakdown({
           <DrillDownPanel
             categoryName={selected}
             category={allocation[selected]}
+            fill={colorFor(selected).fill}
             onClose={() => setSelected(null)}
           />
         )}
@@ -484,9 +447,9 @@ export function AllocationTab() {
       {/* A fetch error must not impersonate empty allocation data — the
           treemaps below just render blank when the backend isn't answering. */}
       {(allocationError || statusError) && (
-        <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
+        <Card className="border-loss/30 bg-loss-soft">
           <CardContent className="pt-6">
-            <p className="text-sm text-red-800 dark:text-red-200">
+            <p className="text-sm text-loss">
               Couldn't load allocation data — the server didn't respond. It retries automatically.
             </p>
           </CardContent>
@@ -532,11 +495,11 @@ export function AllocationTab() {
 
       {/* Sync Status */}
       {needsSync && (
-        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950">
+        <Card className="border-warn/30 bg-warn-soft">
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                <p className="text-sm font-medium text-warn">
                   {status.securities_without_data}{' '}
                   {status.securities_without_data === 1 ? 'holding has' : 'holdings have'} no sector or region yet
                 </p>
@@ -564,9 +527,9 @@ export function AllocationTab() {
       )}
 
       {syncMutation.isSuccess && (
-        <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950">
+        <Card className="border-gain/30 bg-gain-soft">
           <CardContent className="pt-6">
-            <p className="text-sm text-green-800 dark:text-green-200">
+            <p className="text-sm text-gain">
               Updated {syncMutation.data.securities_updated}{' '}
               {syncMutation.data.securities_updated === 1 ? 'holding' : 'holdings'}
             </p>
@@ -575,9 +538,9 @@ export function AllocationTab() {
       )}
 
       {syncMutation.isError && (
-        <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
+        <Card className="border-loss/30 bg-loss-soft">
           <CardContent className="pt-6">
-            <p className="text-sm text-red-800 dark:text-red-200">
+            <p className="text-sm text-loss">
               Sync failed
               {syncMutation.error instanceof Error ? ` — ${syncMutation.error.message}` : ''}.
               Try again in a while.
@@ -593,20 +556,23 @@ export function AllocationTab() {
       <div className="grid gap-6 [&>*]:min-w-0 lg:grid-cols-3">
         <AllocationBreakdown
           title="Sectors"
+          icon={Shapes}
           allocation={sectorAllocation}
           colorFor={allocationSectorPaint}
           isLoading={isLoading}
         />
         <AllocationBreakdown
           title="Regions"
+          icon={Globe}
           allocation={geoAllocation}
-          colorFor={mappedColor(REGION_COLORS)}
+          colorFor={regionPaint}
           isLoading={isLoading}
         />
         <AllocationBreakdown
           title="Asset types"
+          icon={Blocks}
           allocation={assetAllocation}
-          colorFor={mappedColor(ASSET_TYPE_COLORS)}
+          colorFor={assetTypePaint}
           isLoading={isLoading}
         />
       </div>

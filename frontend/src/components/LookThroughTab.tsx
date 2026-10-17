@@ -1,20 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Boxes, Building2, ChartBarStacked, CircleHelp, Combine, Crown, LayoutGrid, ListOrdered,
+  PackageOpen, ScanSearch,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { SectionHeader } from '@/components/ui/SectionHeader'
 import { api } from '@/lib/api'
-import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
+import type { LookthroughCompanyRow, LookthroughFundCoverage, LookthroughResponse } from '@/lib/api'
 import { displayName } from '@/lib/securityName'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
+import { ConstituentAvatar } from './ConstituentAvatar'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
+import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
+import { listingTickers } from '@/lib/lookthroughIdentity'
 import { formatCount } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { unresolvedTone } from '@/lib/lookthroughTone'
+import { TONE_CHIP } from '@/lib/tone'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -70,8 +79,23 @@ export function lookthroughColumns(deps: {
       header: 'Company',
       shortHeader: 'Company',
       mobile: 'title',
-      cellClassName: 'font-medium max-w-[260px] truncate',
-      cell: (row) => displayName(row.name),
+      cellClassName: 'font-medium',
+      // The constituent's logo by ISIN, falling back to a monogram. Table only: a phone card's
+      // title is the name, as on Positions.
+      cell: (row, view) =>
+        view === 'table' ? (
+          <div className="flex items-center gap-3">
+            <ConstituentAvatar
+              isins={row.isins}
+              listings={row.listings}
+              name={displayName(row.name)}
+              className="h-8 w-8 text-[10px]"
+            />
+            <span className="max-w-[240px] truncate" title={row.name}>{displayName(row.name)}</span>
+          </div>
+        ) : (
+          displayName(row.name)
+        ),
     },
     {
       key: 'listings',
@@ -81,10 +105,7 @@ export function lookthroughColumns(deps: {
       cellClassName: 'text-muted-foreground text-xs max-w-[200px] truncate',
       hint: { description: 'Directly-held listings' },
       // Tickers only: the listing keys carry their exchange ("GOOG@NASDAQ") for identity.
-      cell: (row) =>
-        row.listings.length
-          ? [...new Set(row.listings.map((l) => l.split('@')[0]))].join(', ')
-          : null,
+      cell: (row) => (row.listings.length ? listingTickers(row.listings).join(', ') : null),
     },
     {
       key: 'value',
@@ -155,11 +176,9 @@ function fundColumns(deps: {
       // thing this badge exists to say. Amber, naming the fund it borrowed from.
       cell: (row) => (
         <span
-          className={
-            row.status === 'looked_through' && !row.proxy_for_symbol
-              ? 'text-xs rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-              : 'text-xs rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-          }
+          className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
+            TONE_CHIP[row.status === 'looked_through' && !row.proxy_for_symbol ? 'positive' : 'warning']
+          }`}
         >
           {row.proxy_for_symbol
             ? `Via ${row.proxy_for_symbol}`
@@ -271,6 +290,72 @@ function CompanyBreakdown({
   )
 }
 
+/** A company named under a figure: its avatar and display name, on one truncating line. */
+function CompanyLine({ company }: { company: CompanyHighlight }) {
+  const name = displayName(company.name)
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <ConstituentAvatar
+        isins={company.isins}
+        listings={company.listings}
+        name={name}
+        className="h-5 w-5 text-[8px]"
+      />
+      <span className="min-w-0 truncate" title={company.name}>{name}</span>
+    </span>
+  )
+}
+
+/**
+ * Concentration at a glance, from the rows already loaded (`lib/lookthroughInsights.ts`): every
+ * share is of the whole book. Figures and a name, nothing else.
+ */
+function InsightStrip({
+  data,
+  formatCurrency,
+}: {
+  data: LookthroughResponse
+  formatCurrency: (v: number) => string
+}) {
+  const insights = useMemo(() => lookthroughInsights(data), [data])
+  const pct = (v: number, digits: number) => `${v.toFixed(digits)}%`
+  return (
+    <KpiPanel columns={4}>
+      <KpiCard
+        tile
+        icon={Crown}
+        label="Largest exposure"
+        value={insights.largest ? pct(insights.largest.pct, 2) : null}
+        sub={insights.largest ? <CompanyLine company={insights.largest} /> : undefined}
+      />
+      <KpiCard
+        tile
+        icon={ListOrdered}
+        label={insights.top && insights.top.count < 10 ? `Top ${insights.top.count}` : 'Top 10'}
+        value={insights.top ? pct(insights.top.pct, 1) : null}
+      />
+      <KpiCard
+        tile
+        icon={PackageOpen}
+        label="Largest via funds only"
+        value={insights.largestViaFunds ? pct(insights.largestViaFunds.pct, 2) : null}
+        sub={insights.largestViaFunds ? <CompanyLine company={insights.largestViaFunds} /> : undefined}
+      />
+      <KpiCard
+        tile
+        icon={Combine}
+        label="Held both ways"
+        value={insights.heldBothWays ? formatCount(insights.heldBothWays.count) : null}
+        sub={
+          insights.heldBothWays && insights.heldBothWays.count > 0
+            ? `+${formatCurrency(insights.heldBothWays.viaFundsValue)} via funds`
+            : undefined
+        }
+      />
+    </KpiPanel>
+  )
+}
+
 export function LookThroughTab() {
   const [limit, setLimit] = useState<LimitOption>(50)
   const [selected, setSelected] = useState<string | null>(null)
@@ -348,9 +433,7 @@ export function LookThroughTab() {
   if (isError) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Look-through exposure</CardTitle>
-        </CardHeader>
+        <SectionHeader title="Look-through exposure" icon={LayoutGrid} iconTone="muted" />
         <CardContent>
           <p className="py-8 text-center text-sm text-muted-foreground">
             Couldn't load look-through exposure — the server didn't respond. It retries
@@ -364,9 +447,14 @@ export function LookThroughTab() {
   return (
     <div className="space-y-6">
       {isLoading || !data ? (
-        <KpiPanel columns={4}>
-          <KpiCardSkeleton tile count={4} />
-        </KpiPanel>
+        <>
+          <KpiPanel columns={4}>
+            <KpiCardSkeleton tile count={4} />
+          </KpiPanel>
+          <KpiPanel columns={4}>
+            <KpiCardSkeleton tile count={4} />
+          </KpiPanel>
+        </>
       ) : (
         <>
           {/* Above the KPI row and outside every collapsible — see the module docstring.
@@ -392,6 +480,7 @@ export function LookThroughTab() {
           <KpiPanel columns={showUnidentified ? 4 : 3} fillLastRow>
             <KpiCard
               tile
+              icon={Building2}
               label="Companies"
               value={data.company_count_total > 0 ? data.company_count_total.toLocaleString('en-US') : null}
             />
@@ -408,6 +497,7 @@ export function LookThroughTab() {
             */}
             <KpiCard
               tile
+              icon={ScanSearch}
               label="Coverage"
               value={
                 data.total_market_value_eur > 0 && data.coverage_pct != null
@@ -423,6 +513,7 @@ export function LookThroughTab() {
             />
             <KpiCard
               tile
+              icon={Boxes}
               label="In funds"
               value={
                 data.total_market_value_eur > 0
@@ -441,6 +532,7 @@ export function LookThroughTab() {
             {showUnidentified && (
               <KpiCard
                 tile
+                icon={CircleHelp}
                 label="Unidentified"
                 value={formatCurrency(data.identity.unresolved_value_eur)}
                 tone="warning"
@@ -448,6 +540,8 @@ export function LookThroughTab() {
               />
             )}
           </KpiPanel>
+
+          <InsightStrip data={data} formatCurrency={formatCurrency} />
 
           {/*
             The itemised `warnings[]` used to render here as a `role="alert"` block. They are
@@ -463,9 +557,7 @@ export function LookThroughTab() {
           */}
           {partition.length > 0 && (
             <Card>
-              <CardHeader>
-                <CardTitle>Where the value sits</CardTitle>
-              </CardHeader>
+              <SectionHeader title="Where the value sits" icon={ChartBarStacked} />
               <CardContent>
                 <CompositionBar segments={partition} formatCurrency={formatCurrency} />
               </CardContent>
@@ -473,16 +565,19 @@ export function LookThroughTab() {
           )}
 
           <Card>
-            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
-              <CardTitle>Company exposure</CardTitle>
-              <SegmentedControl<LimitOption>
-                label="How many companies to show"
-                variant="buttons"
-                value={limit}
-                onChange={setLimit}
-                options={LIMITS.map(option => ({ value: option, label: `Top ${option}` }))}
-              />
-            </CardHeader>
+            <SectionHeader
+              title="Company exposure"
+              icon={LayoutGrid}
+              aside={
+                <SegmentedControl<LimitOption>
+                  label="How many companies to show"
+                  variant="buttons"
+                  value={limit}
+                  onChange={setLimit}
+                  options={LIMITS.map(option => ({ value: option, label: `Top ${option}` }))}
+                />
+              }
+            />
             <CardContent className="space-y-4">
               {data.companies.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
@@ -552,6 +647,7 @@ export function LookThroughTab() {
                 open={coverageOpen}
                 onToggle={() => setCoverageOpen((o) => !o)}
                 title="Fund coverage"
+                icon={Boxes}
                 description={fundSummary}
                 contentId="lookthrough-fund-coverage"
               />

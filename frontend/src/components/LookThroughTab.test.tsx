@@ -27,6 +27,8 @@ afterEach(() => {
 
 // `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.
 beforeEach(() => {
+  // Every company avatar reads the logo manifest; none stored unless a test says otherwise.
+  vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
   if (!('ResizeObserver' in globalThis)) {
     globalThis.ResizeObserver = class {
       observe() {}
@@ -138,6 +140,56 @@ async function openFundCoverage() {
   fireEvent.click(await screen.findByRole('button', { name: /Fund coverage/ }))
 }
 
+/**
+ * The KPI tile a label sits in: the child of the panel's grid. Climbing a fixed number of
+ * parents broke the day the tile gained an icon well around its label.
+ */
+function kpiTile(label: HTMLElement): HTMLElement {
+  let el: HTMLElement = label
+  while (el.parentElement && !el.parentElement.classList.contains('grid')) el = el.parentElement
+  return el
+}
+
+describe('LookThroughTab insight strip', () => {
+  it('shows concentration as shares of the whole book, never of the covered part', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+
+    // Two companies at 44.23% and 23.08% of a book that is only 67% covered: the top-N share
+    // is their sum, 67.3%, not 100%.
+    expect(within(kpiTile(await screen.findByText('Largest exposure'))).getByText('44.23%')).toBeTruthy()
+    expect(within(kpiTile(screen.getByText('Top 2'))).getByText('67.3%')).toBeTruthy()
+    const viaFunds = kpiTile(screen.getByText('Largest via funds only'))
+    expect(within(viaFunds).getByText('23.08%')).toBeTruthy()
+    expect(within(viaFunds).getByText('NVIDIA')).toBeTruthy()
+    const both = kpiTile(screen.getByText('Held both ways'))
+    expect(within(both).getByText('1')).toBeTruthy()
+    expect(within(both).getByText(/via funds/)).toBeTruthy()
+  })
+
+  it('shows dashes, not zeros, for a book with nothing to rank', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response({ total_market_value_eur: 0 }))
+    withProviders(<LookThroughTab />)
+
+    const largest = kpiTile(await screen.findByText('Largest exposure'))
+    expect(largest.textContent).toContain('—')
+    expect(largest.textContent).not.toContain('%')
+  })
+})
+
+describe('LookThroughTab constituent logos', () => {
+  it('shows a company logo by whichever of its ISINs has one stored', async () => {
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: { US02079K3059: 'v1' } })
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    const { container } = withProviders(<LookThroughTab />)
+
+    await waitFor(() => {
+      const srcs = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src') ?? '')
+      expect(srcs.some((src) => src.includes('/api/logos/isin/US02079K3059?v=v1'))).toBe(true)
+    })
+  })
+})
+
 describe('LookThroughTab', () => {
   it('keeps the qualifier on the Coverage card and the itemised notes in the collapsed card', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
@@ -160,7 +212,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     const companies = screen.getByText('Company exposure')
     const coverage = screen.getByRole('button', { name: /Fund coverage/ })
     // DOCUMENT_POSITION_FOLLOWING: the coverage header comes after the company card's title.
@@ -171,12 +223,12 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     // One row, naming all three listings that were folded into it.
     expect(screen.getByText('ABEA, GOOG, GOOGL')).toBeTruthy()
     expect(screen.getAllByText('44.23%').length).toBeGreaterThan(0)
     // A fund-only company has no direct value and says so with a dash, not a zero.
-    expect(screen.getByText('NVIDIA')).toBeTruthy()
+    expect(screen.getAllByText('NVIDIA').length).toBeGreaterThan(0)
   })
 
   /**
@@ -193,7 +245,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     const rows = () => Array.from(document.querySelectorAll('tbody tr'))
     expect(rows().some((r) => r.textContent?.includes('Held directly as'))).toBe(false)
 
@@ -211,7 +263,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('NVIDIA')
+    await screen.findAllByText('NVIDIA')
     const rows = () => Array.from(document.querySelectorAll('tbody tr'))
     const nvidiaRow = rows().find((r) => r.textContent?.includes('NVIDIA'))!
     fireEvent.click(within(nvidiaRow as HTMLElement).getByRole('button', { name: 'Breakdown' }))
@@ -229,7 +281,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     const rowFor = (name: string) =>
       Array.from(document.querySelectorAll('tbody tr')).find((r) =>
         r.textContent?.includes(name),
@@ -247,7 +299,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     expect(screen.getByText(/\+38 more/)).toBeTruthy()
   })
 
@@ -255,7 +307,7 @@ describe('LookThroughTab', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     expect(screen.queryByText(/folded on an ISIN alone/)).toBeNull()
   })
 
@@ -346,7 +398,7 @@ describe('LookThroughTab', () => {
     const spy = vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
 
-    await screen.findByText('Alphabet')
+    await screen.findAllByText('Alphabet')
     expect(spy).toHaveBeenCalledWith(50)
     expect(screen.getByRole('button', { name: 'Top 100' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Top 25' })).toBeTruthy()
@@ -421,7 +473,7 @@ describe('LookThroughTab coverage tone', () => {
     withProviders(<LookThroughTab />)
 
     const label = await screen.findByText('Unidentified')
-    expect(label.closest('div')?.parentElement?.querySelector('.text-yellow-600')).toBeTruthy()
+    expect(kpiTile(label).querySelector('.text-yellow-600')).toBeTruthy()
   })
 
   it('decides the Unresolved tone on the share of the book', () => {
@@ -432,9 +484,7 @@ describe('LookThroughTab coverage tone', () => {
   })
 
   function coverageCard() {
-    const label = screen.getByText('Coverage')
-    // KpiCard renders label and value as siblings inside the card body.
-    return label.closest('div')?.parentElement as HTMLElement
+    return kpiTile(screen.getByText('Coverage'))
   }
 
   it('is not green while any fund has no basket, however high the percentage', async () => {

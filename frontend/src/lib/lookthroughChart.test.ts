@@ -117,12 +117,12 @@ describe('buildExposureGroups', () => {
   })
 
   it('folds a sector with no hue of its own into one Other sectors group', () => {
-    // Healthcare is a real canonical sector and deliberately has no colour slot — only four
-    // hues clear the colourblind gate all-pairs, so everything past the first four folds.
+    // Utilities is a real canonical sector past the palette's ten slots, so it has no colour
+    // of its own; Unknown never has one. Both fold.
     const groups = buildExposureGroups(
       response({
         companies: [
-          company({ company_key: 'K1', sector: 'Healthcare', value_eur: 400, pct_of_portfolio: 40 }),
+          company({ company_key: 'K1', sector: 'Unknown', value_eur: 400, pct_of_portfolio: 40 }),
           company({ company_key: 'K2', sector: 'Utilities', value_eur: 250, pct_of_portfolio: 25 }),
         ],
       }),
@@ -133,15 +133,15 @@ describe('buildExposureGroups', () => {
   })
 
   it('keeps each company its real sector for the tooltip, not the group it folded into', () => {
-    // Otherwise the fold reads as missing data: a healthcare company inside "Other sectors"
+    // Otherwise the fold reads as missing data: a utility inside "Other sectors"
     // with no way to say what it is.
     const groups = buildExposureGroups(
       response({
-        companies: [company({ company_key: 'K1', sector: 'Healthcare', value_eur: 400 })],
+        companies: [company({ company_key: 'K1', sector: 'Utilities', value_eur: 400 })],
       }),
     )
     const tile = allTiles(groups).find((t) => t.key === 'K1')
-    expect(tile?.sector).toBe('Healthcare')
+    expect(tile?.sector).toBe('Utilities')
   })
 
   it('puts a company nothing classified into Other sectors rather than dropping it', () => {

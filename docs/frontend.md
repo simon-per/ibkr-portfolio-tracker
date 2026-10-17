@@ -775,3 +775,29 @@ re-point onto the general palette would have to redo, and the section above stil
   allocation donut is on `lib/chartPalette.ts` (`chartColorFor` over `color_order`, ten slots, the
   rest Other) and no longer uses `dividendColors.seriesColor` — whose comment still names the
   crypto donut, and which the dividends now use alone.
+
+### Look-through and Allocation (2026-10-17)
+
+- **Both tabs are on the palette.** `lib/sectorColors.ts` assigns by a fixed identity order per
+  breakdown — `CANONICAL_SECTORS` (Utilities, eleventh, takes Other), `REGION_ORDER`,
+  `ASSET_TYPE_ORDER` — through `bucketPaint(name, order)`. `Cash`, the unclassified buckets
+  (`Unknown`, the region chart's `Other`) and the palette's tail are three different neutrals,
+  checked before the order so no order can hand them a hue. `allocationSectorPaint` and
+  `neutralPaint` keep their signatures (AnalyticsTab reads them). The hex maps
+  (`REGION_COLORS`, `ASSET_TYPE_COLORS`), the seven-step neutral ramp and `UNKNOWN_FILL` are gone.
+- **`lib/chartPaint.ts` is the label half of the palette**: `chartPaint(i)` → `{ fill, ink }`, the
+  ink fixed per slot across themes (white, near-black on lime/sky/amber), and `NEUTRAL_PAINT`
+  (`tail` = `--chart-other`, `faint`/`strong` = `color-mix` toward the card/the ink, inked
+  with the foreground). `chartPaint.test.ts` re-measures every ink at 3:1 in both themes and the
+  neutrals' separation. Use it for any chart that writes on its own marks.
+- **The treemap groups every sector with a hue**, not the first four; the measured trade-off is in
+  [lookthrough.md](lookthrough.md). The composition bar is slots 1–2 plus the strong neutral.
+- **Look-through gained an insight strip** (`lib/lookthroughInsights.ts`; largest exposure, top 10,
+  largest via funds only, held both ways — shares of the whole book, no sector figure) and
+  constituent logos by ISIN (`ConstituentAvatar`), in the company table, the treemap tooltip and
+  the strip. KPI tiles carry icons; every card title is a `SectionHeader`.
+- **Allocation**: icon headers (Sectors `Shapes`, Regions `Globe`, Asset types `Blocks`); square
+  swatches like the look-through legends; the drill-down header names
+  its colour; status cards on the `*-soft` state tokens.
+- **Tests that climb a KPI tile** use `kpiTile(label)` in `LookThroughTab.test.tsx` (up to the
+  panel grid's child) — a fixed number of `parentElement` hops broke when the label gained a well.

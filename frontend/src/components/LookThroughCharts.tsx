@@ -6,6 +6,8 @@ import type {
   PartitionSegment,
 } from '@/lib/lookthroughChart'
 import { sectorPaint } from '@/lib/sectorColors'
+import { NEUTRAL_PAINT, chartPaint, type ChartPaint } from '@/lib/chartPaint'
+import { ConstituentAvatar } from './ConstituentAvatar'
 
 /**
  * The two look-through charts. Their arithmetic lives in `lib/lookthroughChart.ts`; this file
@@ -24,10 +26,15 @@ import { sectorPaint } from '@/lib/sectorColors'
  * touch device would mean gated behind nothing at all.
  */
 
-const SEGMENT_FILL: Record<PartitionSegment['key'], string> = {
-  direct: 'var(--viz-direct)',
-  via_funds: 'var(--viz-via-funds)',
-  unattributed: 'var(--viz-unattributed)',
+/**
+ * The composition bar's paint, by segment identity. Held directly and through funds take the
+ * palette's first two slots (an all-pairs-safe pair); the unattributed remainder is the same
+ * strong neutral as the treemap's 'Not attributed' block, because it is the same value.
+ */
+const SEGMENT_PAINT: Record<PartitionSegment['key'], ChartPaint> = {
+  direct: chartPaint(0),
+  via_funds: chartPaint(1),
+  unattributed: NEUTRAL_PAINT.strong,
 }
 
 /** Chart height as a module constant so the chart and its empty state cannot drift apart. */
@@ -37,7 +44,7 @@ function Swatch({ fill }: { fill: string }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+      className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]"
       style={{ backgroundColor: fill }}
     />
   )
@@ -78,7 +85,7 @@ export function CompositionBar({
             className="flex min-w-0 items-center justify-center"
             style={{
               width: `${segment.pct}%`,
-              backgroundColor: SEGMENT_FILL[segment.key],
+              backgroundColor: SEGMENT_PAINT[segment.key].fill,
             }}
             title={`${segment.label}: ${formatCurrency(segment.value)} (${segment.pct.toFixed(1)}%)`}
           >
@@ -87,7 +94,7 @@ export function CompositionBar({
             {segment.pct >= 12 && (
               <span
                 className="truncate px-1 text-[11px] font-semibold"
-                style={{ color: 'hsl(var(--foreground))' }}
+                style={{ color: SEGMENT_PAINT[segment.key].ink }}
               >
                 {segment.pct.toFixed(1)}%
               </span>
@@ -100,7 +107,7 @@ export function CompositionBar({
         {segments.map((segment) => (
           <div key={segment.key} className="min-w-0 text-xs">
             <dt className="flex items-center gap-1.5 font-medium">
-              <Swatch fill={SEGMENT_FILL[segment.key]} />
+              <Swatch fill={SEGMENT_PAINT[segment.key].fill} />
               <span className="truncate">{segment.label}</span>
               <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
                 {segment.pct.toFixed(1)}%
@@ -202,7 +209,9 @@ function TileContent(props: TileContentProps) {
           dominantBaseline="central"
           fill={paint.ink}
           fontSize={11}
-          opacity={0.85}
+          // Full ink, no fade: `chartPaint.test.ts` measures the ink at 3:1 on its fill, and
+          // an opacity would quietly spend that margin.
+          fontWeight={500}
           className="pointer-events-none"
         >
           {pct.toFixed(pct >= 1 ? 1 : 2)}%
@@ -252,9 +261,19 @@ export function ExposureTreemap({
                 if (!payload || payload.length === 0) return null
                 const tile = payload[0].payload as ExposureTile
                 return (
-                  <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-lg">
-                    <p className="font-semibold">{tile.name}</p>
-                    <p className="text-muted-foreground">
+                  <div className="max-w-xs rounded-xl border border-border bg-card px-3 py-2.5 text-sm shadow-raised">
+                    <div className="flex items-center gap-2.5">
+                      {tile.companyKey && (
+                        <ConstituentAvatar
+                          isins={tile.isins}
+                          listings={tile.listings}
+                          name={tile.name}
+                          className="h-7 w-7 text-[10px]"
+                        />
+                      )}
+                      <p className="min-w-0 font-semibold">{tile.name}</p>
+                    </div>
+                    <p className="mt-1 tabular-nums text-muted-foreground">
                       {formatCurrency(tile.value)} · {tile.pct.toFixed(2)}% of the portfolio
                     </p>
                     {/* The company's REAL sector, which for a folded row is not the group it was
@@ -280,12 +299,12 @@ export function ExposureTreemap({
         an in-chart header cannot survive Recharts' paint order (see `TileContent`). It carries
         the share too, which is what a header would have said.
       */}
-      <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
         {groups.map((group) => (
           <li key={group.key} className="flex items-center gap-1.5">
             <Swatch fill={sectorPaint(group.paintKey).fill} />
-            <span>{group.name}</span>
-            <span className="tabular-nums opacity-80">{group.pct.toFixed(1)}%</span>
+            <span className="text-foreground/90">{group.name}</span>
+            <span className="tabular-nums text-muted-foreground">{group.pct.toFixed(1)}%</span>
           </li>
         ))}
       </ul>

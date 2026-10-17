@@ -36,6 +36,9 @@ export interface ExposureTile {
   pct: number
   /** The company's real sector, for the tooltip — not the group it was folded into. */
   sector: string
+  /** The company's ISINs and listing keys, for its avatar; empty for a structural tile. */
+  isins: string[]
+  listings: string[]
   /** Set only for real companies, so a click can open the existing drill-down. */
   companyKey: string | null
   /** Recharts sizes a Treemap by a numeric dataKey; this is that key. */
@@ -89,6 +92,8 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
       // The row's own sector, not `group` — a company folded into `Other sectors` must still be
       // able to say what it actually is, or the fold looks like missing data.
       sector: row.sector || UNKNOWN_SECTOR,
+      isins: row.isins,
+      listings: row.listings,
       companyKey: row.company_key,
       size: row.value_eur,
     }
@@ -124,6 +129,8 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
       value,
       pct: pctOf(value),
       sector: '',
+      isins: [],
+      listings: [],
       companyKey: null,
       size: value,
     }
