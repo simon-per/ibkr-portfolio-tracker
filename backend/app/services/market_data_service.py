@@ -625,7 +625,8 @@ class MarketDataService:
         self,
         security: Security,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        refresh_provisional: bool = True,
     ) -> int:
         """
         Fetch price data and cache in database.
@@ -640,6 +641,8 @@ class MarketDataService:
             security: Security object with symbol, exchange, and currency
             start_date: Start date (defaults to 1 year ago)
             end_date: End date (defaults to today)
+            refresh_provisional: False skips re-fetching cached recent closes
+                (`get_missing_dates`) — the weekend full sync
 
         Returns:
             Number of prices written — new rows plus provisional ones re-stated. It
@@ -676,7 +679,7 @@ class MarketDataService:
         # What we are missing outright, plus the trailing days whose cached row may
         # still be a mid-session price rather than a close (PROVISIONAL_PRICE_DAYS).
         missing_dates = await self.market_price_repo.get_missing_dates(
-            security.id, start_date, end_date
+            security.id, start_date, end_date, refresh_provisional=refresh_provisional,
         )
 
         if not missing_dates:
@@ -781,7 +784,9 @@ class MarketDataService:
     # NAV had not yet seen.
     SIBLING_ANCHOR_LOOKBACK_DAYS = 7
 
-    async def sync_sibling_prices(self, security: Security, days_back: int = 730) -> int:
+    async def sync_sibling_prices(
+        self, security: Security, days_back: int = 730, refresh_provisional: bool = True,
+    ) -> int:
         """
         Price a security from a sibling share class: statement NAV × sibling return.
 
@@ -851,6 +856,7 @@ class MarketDataService:
             d for d in await self.market_price_repo.get_missing_dates(
                 security.id, start_date, end_date,
                 sources=[PRICE_ROW_SOURCE_SIBLING_SCALED],
+                refresh_provisional=refresh_provisional,
             )
             if d not in statement_dates
         ]
@@ -921,6 +927,7 @@ class MarketDataService:
         self,
         securities: List[Security],
         days_back: int = 730,
+        refresh_provisional: bool = True,
     ) -> Dict:
         """
         Fetch each security's missing and provisional prices, stopping on a rate limit.
@@ -954,6 +961,9 @@ class MarketDataService:
           `price_backoff_until` says so, and counted in `skipped_backoff`.
 
         `planned` is how many it set out to ask, which is what "N of M" means.
+
+        `refresh_provisional=False` asks only for dates with no row at all, so a warm
+        security costs no request — the weekend full sync (GitHub issue #9).
         """
         total_prices = 0
         processed = 0
@@ -1007,13 +1017,20 @@ class MarketDataService:
                     + (f" up to its last close {repair_end}" if repair_end else "") + "..."
                 )
                 if sibling:
-                    count = await self.sync_sibling_prices(security, days_back=days_back)
+                    count = await self.sync_sibling_prices(
+                        security, days_back=days_back,
+                        refresh_provisional=refresh_provisional,
+                    )
                 elif repair_end is not None:
                     count = await self.sync_security_prices(
-                        security, days_back=days_back, end_date=repair_end
+                        security, days_back=days_back, end_date=repair_end,
+                        refresh_provisional=refresh_provisional,
                     )
                 else:
-                    count = await self.sync_security_prices(security, days_back=days_back)
+                    count = await self.sync_security_prices(
+                        security, days_back=days_back,
+                        refresh_provisional=refresh_provisional,
+                    )
                 total_prices += count
                 processed += 1
                 logger.info(f"Wrote {count} price rows for {security.symbol}")
@@ -1161,6 +1178,7 @@ class MarketDataService:
         security: Security,
         days_back: int = 730,
         end_date: Optional[date] = None,
+        refresh_provisional: bool = True,
     ) -> int:
         """
         Sync historical prices for a security (fetch missing dates).
@@ -1170,6 +1188,7 @@ class MarketDataService:
             days_back: How many days back to fetch (default: 730 = 2 years)
             end_date: Last date to fetch (default today) — a sold security's last close
                 when only its held span is wanted
+            refresh_provisional: see `fetch_and_cache_prices`
 
         Returns:
             Number of price rows written — new plus provisional ones restated.
@@ -1183,5 +1202,6 @@ class MarketDataService:
         start_date = date.today() - timedelta(days=days_back)
 
         return await self.fetch_and_cache_prices(
-            security, start_date, end_date or date.today()
+            security, start_date, end_date or date.today(),
+            refresh_provisional=refresh_provisional,
         )

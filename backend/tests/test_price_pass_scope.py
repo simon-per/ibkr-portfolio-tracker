@@ -221,6 +221,28 @@ async def test_a_sold_security_with_a_gap_in_its_held_span_is_fetched_to_its_las
     assert len(up.yahoo) == 2
 
 
+@pytest.mark.asyncio
+async def test_the_weekend_full_sync_asks_only_about_what_has_no_row(db, monkeypatch):
+    """
+    GitHub issue #9: on a Berlin weekend the 18:00 pass runs missing-only. A warm holding
+    and a sold security with a complete span cost nothing; a security first seen in
+    Saturday's statement still gets its history. A trading-day pass asks all three.
+    """
+    up = Upstream(monkeypatch, served={"HLD", "SLD", "NEW"})
+    await _security(db, 1, "HLD", prices=(740, 0))
+    await _security(db, 2, "SLD", closed_days_ago=60, prices=(740, 0))
+    await _security(db, 3, "NEW", opened_days_ago=1)
+    securities = list((await db.execute(select(Security).order_by(Security.id))).scalars())
+
+    await MarketDataService(db).sync_securities(
+        securities, days_back=LONG, refresh_provisional=False,
+    )
+    assert [r[0] for r in up.yahoo] == ["NEW"]
+
+    await MarketDataService(db).sync_securities(securities, days_back=LONG)
+    assert [r[0] for r in up.yahoo[1:]] == ["HLD", "SLD", "NEW"]
+
+
 # --- back-off -----------------------------------------------------------------------------
 
 

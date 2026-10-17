@@ -3,9 +3,10 @@ Scheduler Service
 Handles automated daily synchronization of IBKR data and market prices.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
@@ -25,6 +26,7 @@ from app.services.flex_generation import (
     flex_window_days,
     generation_already_spent,
     generation_brings_new_trading_day,
+    is_trading_day,
     next_generation_opens_at,
     next_new_trading_day_generation_opens_at,
     oldest_uncovered_trading_day,
@@ -230,6 +232,16 @@ FULL_SYNC_HOUR = 18
 # by the IBKR move — only which job performs the 08:00 and 18:00 touches changed, so
 # 08:00 is now a plain 7-day pass and the 730-day one rides with the 18:00 full sync.
 MARKET_DATA_HOURS = (8, 11, 13, 15, 20, 22)
+# On trading days only (GitHub issue #9). No exchange the book holds trades on a
+# weekend, yet every weekend pass re-asked Yahoo for each security, because
+# PROVISIONAL_PRICE_DAYS keeps Wed-Fri (Saturday) or Thu-Fri (Sunday) "missing" even
+# when cached — ~650 redundant requests a weekend against an IP-based limit (rule 1).
+MARKET_DATA_DAYS = 'mon-fri'
+# The one weekend pass that changes anything: Saturday 08:00 settles Friday's US
+# close, which the 22:00 pass wrote seconds after the bell. Monday 08:00 would settle
+# it too, but the weekend would show the provisional price until then.
+MARKET_DATA_SETTLE_HOUR = 8
+MARKET_DATA_SETTLE_DAYS = 'mon-sat'
 # The slots the portfolio itself is synced at: IBKR, FX, prices.
 PORTFOLIO_SYNC_HOURS = tuple(sorted({FULL_SYNC_HOUR, *IBKR_ONLY_HOURS, *MARKET_DATA_HOURS}))
 
@@ -295,6 +307,21 @@ UPKEEP_JOB_GROUP = "upkeep"
 # "last sync" means the newest of these, never a crypto run that finished later.
 SCHEDULED_JOB_TYPES = ("full_sync", "market_data_only", "ibkr_sync")
 
+# The timezone every CronTrigger here is written in.
+BERLIN = ZoneInfo('Europe/Berlin')
+
+
+def is_berlin_trading_day(moment: Optional[datetime] = None) -> bool:
+    """
+    Whether the Berlin calendar date of `moment` (naive UTC, default now) is a trading
+    day — `flex_generation.is_trading_day`, so US holidays stay unmodelled in one place.
+
+    Berlin rather than ET because it answers "does this slot fall on a day the market
+    moved", and the slots are Berlin hours: the IBKR half keys on ET for its own reason.
+    """
+    aware = (moment or utcnow()).replace(tzinfo=timezone.utc)
+    return is_trading_day(aware.astimezone(BERLIN).date())
+
 
 def _collect_warnings(job_result: dict, *step_results) -> None:
     """
@@ -317,10 +344,12 @@ class SchedulerService:
     """
     Service for scheduling automated data synchronization tasks.
 
-    Runs 8 times daily (Europe/Berlin):
-    - 08:00, 11:00, 13:00, 15:00, 20:00, 22:00: Market data only (7 days)
+    Runs 8 times each weekday (Europe/Berlin):
+    - 08:00, 11:00, 13:00, 15:00, 20:00, 22:00: Market data only (7 days); weekends
+      only Saturday 08:00, which settles Friday's US close (MARKET_DATA_DAYS)
     - 18:00: Full sync (IBKR + 730 days market data + look-through upkeep) — fills
-      historical gaps gradually and refreshes any stale issuer basket
+      historical gaps gradually and refreshes any stale issuer basket. Daily; on a
+      Berlin weekend its price pass asks only for dates with no row at all
     - 00:00: IBKR + FX only — no Yahoo
 
     **Only one of the two IBKR slots can ever succeed in a day.** IBKR generates this
@@ -519,13 +548,17 @@ class SchedulerService:
             logger.warning(f"Could not check ETF basket freshness: {e}")
         return diagnostics
 
-    async def sync_market_data(self, days_back: int = 730) -> dict:
+    async def sync_market_data(
+        self, days_back: int = 730, refresh_provisional: bool = True,
+    ) -> dict:
         """
         Sync market prices from Yahoo Finance for all securities.
         Only fetches missing dates (incremental sync).
 
         Args:
             days_back: Number of days to look back (default 730 = 2 years)
+            refresh_provisional: False asks only for dates with no row at all — the
+                weekend full sync, when no cached close can still change
 
         Returns:
             Summary of synced data
@@ -555,7 +588,8 @@ class SchedulerService:
                 # the trailing few whose cached close may still be a mid-session price,
                 # and stops early if Yahoo rate-limits.
                 swept = await market_data_service.sync_securities(
-                    securities, days_back=days_back
+                    securities, days_back=days_back,
+                    refresh_provisional=refresh_provisional,
                 )
                 total_prices = swept["total_prices"]
                 processed = swept["processed"]
@@ -1352,7 +1386,7 @@ class SchedulerService:
         2. Market data sync (prices for all securities) — runs whether or not step 1
            succeeded, because IBKR refusing a statement says nothing about Yahoo. The
            ordering still matters on the days step 1 works: a security created there
-           must exist before this prices it.
+           must exist before this prices it. Missing dates only on a Berlin weekend.
         3. Dividend sync (Yahoo Finance ex-dates + EUR income)
         """
         return await self._gated_job("full_sync", self._full_sync_job_locked)
@@ -1391,11 +1425,24 @@ class SchedulerService:
         # 730-day window is not 730 days of download — it starts a few days before
         # min(missing), so a security already backfilled re-requests almost nothing.
         # A newly bought one pulls its whole history, which is the point.
+        #
+        # On a Berlin weekend, missing dates only (GitHub issue #9): no cached close can
+        # still change, and re-fetching the provisional ones was a request per security
+        # for nothing. A security new in Saturday's statement, or a split purge, still
+        # gets its history. Keyed on the calendar, never on the IBKR result above —
+        # gating this half on that was a silent outage (see above).
         logger.info("Syncing market data (730 days)...")
-        market_result = await self.sync_market_data(days_back=730)
+        market_result = await self.sync_market_data(
+            days_back=730, refresh_provisional=is_berlin_trading_day(),
+        )
         logger.info(f"Market Data Sync Result: {market_result}")
 
         # Step 4: Sync dividends (always — yfinance-based, computes against existing tax lots)
+        #
+        # Weekends included, on purpose: the pass asks only about securities due their
+        # weekly check (`needs_dividend_check`), so skipping it would not save a request,
+        # only move them to Monday — or to a weekend dashboard load, since
+        # `GET /api/dividends/summary` enqueues a pass while anything is due.
         logger.info("Syncing dividends...")
         div_result = await self.sync_dividends()
         logger.info(f"Dividend Sync Result: {div_result}")
@@ -1801,7 +1848,8 @@ class SchedulerService:
         Start the scheduler with 8 daily stock syncs (Europe/Berlin):
         - 18:00: Full sync (IBKR + 730 days market data) — the day's one generation
         - 00:00: IBKR only — the recovery attempt, a no-op unless 18:00 failed
-        - MARKET_DATA_HOURS: market data only (7 days), through both sessions
+        - MARKET_DATA_HOURS: market data only (7 days), through both sessions, on
+          MARKET_DATA_DAYS (Monday to Friday, and Saturday at 08:00)
 
         plus the crypto sync at the same eight slots (CRYPTO_SYNC_HOURS), in its own
         job group, and the watchlist refresh on a slot of its own
@@ -1899,7 +1947,7 @@ class SchedulerService:
                 CronTrigger(hour=hour, minute=0, timezone='Europe/Berlin'),
                 f'IBKR-only Sync ({hour:02d}:00 Europe/Berlin)',
             )
-        # Market data runs seven times a day, and five of those are *inside* a
+        # Market data runs seven times a trading day, and five of those are *inside* a
         # session on purpose — the portfolio was only ever repriced at 08:00, 15:00
         # and 22:00, so a figure looked at mid-morning was up to seven hours old.
         #
@@ -1915,7 +1963,7 @@ class SchedulerService:
         # Berlin hours against the sessions they serve (both EU and US shift with
         # DST together, so the coverage holds year-round):
         #
-        #     08:00  full sync; settles yesterday's US close and Asia's
+        #     08:00  settles yesterday's US close and Asia's (also Saturdays)
         #     11:00  Xetra/Euronext/LSE ~2h in — also settles Tokyo and Korea,
         #            whose closes the 08:00 run catches mid-session
         #     13:00  Europe ~4h in
@@ -1937,10 +1985,18 @@ class SchedulerService:
         # cheaply rename, so encoding a schedule in it guarantees a lie on the next
         # change. `market_sync_eu_close` / `market_sync_us_close` were exactly that
         # — the first named itself after a close it ran 2.5 hours before.
+        #
+        # Weekdays only, plus Saturday 08:00 — see MARKET_DATA_DAYS. A persisted job
+        # with the old daily trigger is replaced on the next start: `_add_or_keep`
+        # compares `str(trigger)`, which includes `day_of_week`.
         for index, hour in enumerate(MARKET_DATA_HOURS, start=1):
+            days = (
+                MARKET_DATA_SETTLE_DAYS if hour == MARKET_DATA_SETTLE_HOUR
+                else MARKET_DATA_DAYS
+            )
             self._add_or_keep(
                 f'market_sync_{index}', market_data_only_sync_job_entry,
-                CronTrigger(hour=hour, minute=0, timezone='Europe/Berlin'),
+                CronTrigger(day_of_week=days, hour=hour, minute=0, timezone='Europe/Berlin'),
                 f'Market Data Sync ({hour:02d}:00 Europe/Berlin)',
             )
 

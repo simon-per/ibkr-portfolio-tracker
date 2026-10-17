@@ -18,7 +18,7 @@ Also covers the stale-price detector, which exists because a price that simply n
 arrives is otherwise silent: the position is valued at 0.00 and the portfolio total drops
 with nothing reporting it (SBI@TSE, -446.93 CHF, 2026-07-27).
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -37,6 +37,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import settings
 from app.services.scheduler_service import (
     ALL_SYNC_HOURS,
+    BERLIN,
     CRYPTO_JOB_GROUP,
     CRYPTO_SYNC_HOURS,
     FULL_SYNC_HOUR,
@@ -44,6 +45,7 @@ from app.services.scheduler_service import (
     FUNDAMENTALS_REFRESH_HOUR,
     IBKR_ONLY_HOURS,
     MARKET_DATA_HOURS,
+    MARKET_DATA_SETTLE_HOUR,
     MISFIRE_GRACE_SECONDS,
     PORTFOLIO_SYNC_HOURS,
     STALE_PRICE_DAYS,
@@ -54,6 +56,7 @@ from app.services.scheduler_service import (
     SchedulerService,
     _collect_warnings,
     crypto_sync_job_entry,
+    is_berlin_trading_day,
     full_sync_job_entry,
     fundamentals_refresh_job_entry,
     ibkr_only_sync_job_entry,
@@ -292,7 +295,7 @@ async def test_a_yahoo_rate_limit_abandons_the_rest_of_the_pass(monkeypatch):
 
         attempted = []
 
-        async def _fetch(self, security, days_back=730):
+        async def _fetch(self, security, days_back=730, **_kw):
             attempted.append(security.symbol)
             if len(attempted) == 2:
                 self.rate_limited = True     # Yahoo said 429 on the second security
@@ -339,7 +342,7 @@ async def test_every_market_data_sweep_stops_on_a_rate_limit():
     svc.rate_limited = False
     attempted = []
 
-    async def _fetch(security, days_back=730):
+    async def _fetch(security, days_back=730, **_kw):
         attempted.append(security.symbol)
         if len(attempted) == 2:
             svc.rate_limited = True
@@ -564,7 +567,8 @@ async def test_scheduler_registers_every_declared_job(jobstore_url):
 async def test_the_registered_slots_are_exactly_the_declared_ones(jobstore_url):
     """
     ALL_SYNC_HOURS is what `ops/auto-deploy.sh` is checked against, so it has to be
-    what actually runs rather than a comment that agrees with the code today.
+    what actually runs (on trading days — the weekend drops some slots, never adds
+    one) rather than a comment that agrees with the code today.
 
     This is the half `test_deploy_guard_hours.py` cannot see: that file compares the
     shell script to the constant, and this one compares the constant to the triggers
@@ -597,7 +601,8 @@ async def test_market_data_repriced_at_least_every_three_hours_intraday(jobstore
 
     Asserted as a coverage property rather than as a list of hours, so re-timing a slot
     stays free while quietly dropping back to two-a-day does not. 09:00-22:00 Berlin
-    spans the European session and the US session end to end.
+    spans the European session and the US session end to end, on trading days — the
+    weekend has no session to cover (see the test below).
     """
     svc = SchedulerService()
     try:
@@ -619,6 +624,157 @@ async def test_market_data_repriced_at_least_every_three_hours_intraday(jobstore
         assert any(h >= 22 for h in market_hours), "no slot at or after the US close"
     finally:
         svc.shutdown()
+
+
+# --- the weekend (GitHub issue #9) -------------------------------------------------------
+#
+# No exchange the book holds trades on a weekend, yet every weekend pass re-asked Yahoo
+# for each security, because PROVISIONAL_PRICE_DAYS keeps Wed-Fri (Saturday) or Thu-Fri
+# (Sunday) "missing" even when cached: 14 passes x ~50 securities, ~650 of them redundant.
+
+
+def _trigger_days(job):
+    """A cron trigger's `day_of_week` as a set of day names, or None for every day."""
+    text = str(job.trigger)
+    if "day_of_week='" not in text:
+        return None
+    return _cron_days(text.split("day_of_week='")[1].split("'")[0])
+
+
+@pytest.mark.asyncio
+async def test_market_data_runs_on_trading_days_and_saturday_morning_only(jobstore_url):
+    """
+    Saturday 08:00 is the one weekend pass that changes anything: it settles Friday's US
+    close, which the 22:00 pass wrote seconds after the bell. The full sync stays daily
+    (Saturday's IBKR half brings Friday's trades) and so does the crypto sync.
+    """
+    assert MARKET_DATA_SETTLE_HOUR in MARKET_DATA_HOURS
+    svc = SchedulerService()
+    try:
+        svc.start()
+        jobs = svc.scheduler.get_jobs()
+        market = [j for j in jobs if j.id.startswith('market_sync_')]
+        for job in market:
+            days = _trigger_days(job)
+            assert days is not None, f"{job.id} runs every day of the week"
+            assert 'sun' not in days
+            assert ('sat' in days) == (_trigger_hour(job) == MARKET_DATA_SETTLE_HOUR)
+        for job in jobs:
+            if job.id == 'full_sync_job' or job.id.startswith('crypto_sync_'):
+                assert _trigger_days(job) is None, f"{job.id} must stay daily"
+
+        # As fire times: from Friday 22:30 Berlin, the next market-data pass before
+        # Monday 08:00 is Saturday 08:00 and nothing else.
+        friday_night = datetime(2026, 10, 16, 22, 30, tzinfo=BERLIN)
+        monday_morning = datetime(2026, 10, 19, 8, 0, tzinfo=BERLIN)
+        fires = []
+        for job in market:
+            fire = job.trigger.get_next_fire_time(None, friday_night)
+            while fire is not None and fire < monday_morning:
+                fires.append(fire)
+                fire = job.trigger.get_next_fire_time(fire, fire + timedelta(seconds=1))
+        assert fires == [datetime(2026, 10, 17, 8, 0, tzinfo=BERLIN)]
+    finally:
+        svc.shutdown()
+
+
+def _pin_berlin(monkeypatch, day: date, hour: int) -> None:
+    moment = (
+        datetime(day.year, day.month, day.day, hour, tzinfo=BERLIN)
+        .astimezone(timezone.utc).replace(tzinfo=None)
+    )
+    monkeypatch.setattr('app.services.scheduler_service.utcnow', lambda: moment)
+
+
+def test_the_trading_day_is_the_berlin_one():
+    # Friday 22:30 UTC is Saturday 00:30 in Berlin (CEST).
+    assert not is_berlin_trading_day(datetime(2026, 10, 16, 22, 30))
+    assert is_berlin_trading_day(datetime(2026, 10, 16, 21, 30))
+    # Sunday 23:30 UTC in winter is Monday 00:30 in Berlin (CET).
+    assert is_berlin_trading_day(datetime(2026, 11, 1, 23, 30))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("day, trading", [
+    (date(2026, 10, 16), True),    # Friday
+    (date(2026, 10, 17), False),   # Saturday
+    (date(2026, 10, 18), False),   # Sunday
+])
+async def test_the_weekend_full_sync_prices_missing_dates_only(spy, monkeypatch, day, trading):
+    """
+    The full sync stays daily — Saturday's IBKR half brings Friday's trades; FX, the
+    look-through, the forecast and the diagnostics are wanted on Sunday too — but on a
+    Berlin weekend its price pass skips the provisional re-fetch. Keyed on the calendar,
+    never on the IBKR result: gating the price half on that was a silent outage.
+
+    The dividend step still runs: it asks only about securities due their weekly check
+    (issue #6), so skipping it would move those requests, not save them.
+    """
+    svc, s = spy
+    asked = []
+
+    async def market(*args, **kwargs):
+        s.called.append('market_data')
+        asked.append(kwargs)
+        return {"status": "success"}
+
+    monkeypatch.setattr(svc, 'sync_market_data', market)
+    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+    _pin_berlin(monkeypatch, day, FULL_SYNC_HOUR)
+
+    await svc.full_sync_job()
+
+    assert asked == [{"days_back": 730, "refresh_provisional": trading}]
+    assert {'ibkr', 'fx', 'market_data', 'dividends', 'dividend_forecast',
+            'lookthrough'} <= set(s.called)
+
+
+@pytest.mark.asyncio
+async def test_a_missing_only_pass_still_runs_the_diagnostics(monkeypatch):
+    """The Flex-gap alarm and the stale-price check hang off the price pass, and the
+    weekend 18:00 run is the only one on a Sunday — so it must still reach them."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", maker)
+
+    try:
+        async with maker() as seed:
+            seed.add(Security(
+                id=1, isin="US0000000001", symbol="S1", description="S1",
+                currency="USD", conid=1001, asset_category="STK", exchange="NASDAQ",
+            ))
+            await seed.commit()
+
+        swept_with = []
+
+        async def _sweep(self, securities, **kwargs):
+            swept_with.append(kwargs)
+            return {"total_prices": 0, "processed": 1, "planned": 1, "errors": [],
+                    "rate_limited_after": None, "skipped_sold": 0, "skipped_backoff": 0}
+
+        monkeypatch.setattr(
+            "app.services.market_data_service.MarketDataService.sync_securities", _sweep,
+        )
+        svc = SchedulerService()
+
+        async def _diagnostics(db):
+            return ["Flex gap"]
+
+        monkeypatch.setattr(svc, "collect_market_data_diagnostics", _diagnostics)
+
+        result = await svc.sync_market_data(days_back=730, refresh_provisional=False)
+
+        assert swept_with == [{"days_back": 730, "refresh_provisional": False}]
+        assert result["warnings"] == ["Flex gap"]
+    finally:
+        await engine.dispose()
 
 
 # Every job that reaches IBKR. Market-data jobs are excluded: they touch Yahoo, not Flex.

@@ -119,7 +119,7 @@ class _FakePriceRepo:
         self._missing = missing
         self.written = []
 
-    async def get_missing_dates(self, _security_id, _start, _end):
+    async def get_missing_dates(self, _security_id, _start, _end, **_kw):
         return list(self._missing)
 
     async def bulk_create(self, rows):

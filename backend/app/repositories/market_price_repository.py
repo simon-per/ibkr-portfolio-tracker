@@ -92,6 +92,7 @@ class MarketPriceRepository:
         self, security_id: int, start_date: date, end_date: date,
         as_of: Optional[date] = None,
         sources: Optional[Collection[str]] = None,
+        refresh_provisional: bool = True,
     ) -> List[date]:
         """
         Dates in range that need fetching: no cached price, or a provisional one.
@@ -107,6 +108,8 @@ class MarketPriceRepository:
         cached**, because a row written during a live session holds a mid-session
         price rather than a close. The two rules cannot collide: the holiday rule
         needs a date older than 30 days and this one needs it newer than 3.
+        ``refresh_provisional=False`` drops this rule — the weekend full sync, when no
+        cached close can still change (GitHub issue #9).
 
         ``sources`` narrows which rows count as cached, for a security whose rows
         do not all come from the feed being asked. A sibling-priced fund's statement
@@ -149,7 +152,7 @@ class MarketPriceRepository:
                     )
                     if not (interior and current_date < holiday_cutoff):
                         missing_dates.append(current_date)
-                elif current_date >= provisional_from:
+                elif refresh_provisional and current_date >= provisional_from:
                     # Cached, but recent enough that the row may be a mid-session
                     # price. Re-fetch so the settled close replaces it.
                     missing_dates.append(current_date)

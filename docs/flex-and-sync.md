@@ -446,10 +446,10 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 
 | Time | ET | Job | Touches Yahoo? |
 |---|---|---|---|
-| 08:00, 11:00, 13:00, 15:00, 20:00, 22:00 | | `market_data_only_sync_job` (7d) + benchmark warm-up (first slot after a session only) | yes |
-| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
+| 08:00, 11:00, 13:00, 15:00, 20:00, 22:00, **Mon–Fri**; 08:00 also Saturday | | `market_data_only_sync_job` (7d) + benchmark warm-up (first slot after a session only) | yes |
+| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data (missing dates only on a Berlin weekend) + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
-| every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
+| every hour above, daily | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
 | 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
 
@@ -509,10 +509,44 @@ day — so the deploy guard already covers it; it runs under its own
 `crypto-sync` gate (never `SYNC_PIPELINE`), in its own job group — which is what keeps it out of
 the public `/api/scheduler/status` list and "last sync" — and never touches `last_sync_result`.
 
-**Yahoo is repriced at seven hours — 8, 11, 13, 15, 18, 20, 22 — and that set has not
-changed** since the 2026-08-04 widening. What moved on 2026-08-08 is only *which job* makes the
-08:00 and 18:00 touches: the 730-day pass travelled with IBKR to 18:00, and 08:00 became a plain
+**Yahoo is repriced at seven hours on a trading day — 8, 11, 13, 15, 18, 20, 22 — and that set
+has not changed** since the 2026-08-04 widening. What moved on 2026-08-08 is only *which job* makes
+the 08:00 and 18:00 touches: the 730-day pass travelled with IBKR to 18:00, and 08:00 became a plain
 7-day slot. Don't read the reshuffle as a change in pricing coverage.
+
+**On a weekend Yahoo is repriced once, at Saturday 08:00** (GitHub issue #9, 2026-10-17). Every pass
+used to run seven days a week, and on a weekend each one re-asked about every security:
+`PROVISIONAL_PRICE_DAYS` keeps Wed–Fri (Saturday) or Thu–Fri (Sunday) "missing" even when cached, so
+production's weekend passes reported `51 of 51` and rewrote the same ~140 rows, ~7 minutes each. Now:
+
+- **`market_sync_{n}` run Monday to Friday** (`MARKET_DATA_DAYS`), **the 08:00 one also on Saturday**
+  (`MARKET_DATA_SETTLE_HOUR` / `MARKET_DATA_SETTLE_DAYS`): it settles Friday's US close, which the
+  22:00 pass wrote seconds after the bell. Monday 08:00 would settle it too; Saturday's makes the
+  weekend show the real close. The ids stay numbered; `_add_or_keep` compares `str(trigger)`, which
+  includes `day_of_week`, so a persisted daily job is rescheduled on the next start.
+- **`full_sync` stays daily** — Saturday's IBKR half (ET Saturday) is the generation that brings
+  Friday's trades, and FX, the look-through, the forecast and the diagnostics are wanted on Sunday.
+  On a **Berlin** non-trading day (`is_berlin_trading_day`, i.e. `flex_generation.is_trading_day` on
+  the Berlin date of `utcnow()`) its price pass runs **missing-only**: `refresh_provisional=False`
+  through `sync_market_data` → `sync_securities` → `fetch_and_cache_prices` / `sync_sibling_prices` →
+  `get_missing_dates`. A warm security costs no request; one new in Saturday's statement, or a split
+  purge, still gets its history. It is keyed on the calendar, never on the IBKR result — that gate
+  was a silent outage. `collect_market_data_diagnostics` still runs at its end.
+- **The dividend step is unchanged on weekends.** Since issue #6 it asks only about securities due
+  their weekly check, so skipping it saves nothing: the due ones would be asked on Monday instead, or
+  sooner by a weekend dashboard load, since `GET /api/dividends/summary` enqueues a pass while
+  anything is due.
+- **The deploy guard is unchanged**: same hours, fewer days, and the crypto jobs still run at every
+  one of those hours on a weekend. In `/api/scheduler/history` a weekend now shows one
+  `market_data_only` row (Saturday 08:00) instead of six a day.
+
+*Budget*, worked from the code with *H* held (or just-sold) securities and *S* other sold ones:
+a weekend cost `14H + 2S` price requests (seven passes a day, each re-fetching provisional rows),
+now `H` (Saturday 08:00) plus only what has no row at the two 18:00 runs — at 51 held securities,
+714 + 2S → 51. Tests: `test_market_data_runs_on_trading_days_and_saturday_morning_only`
+(fire times, Friday 22:30 to Monday 08:00), `test_the_weekend_full_sync_prices_missing_dates_only`,
+`test_the_weekend_full_sync_asks_only_about_what_has_no_row` (`test_price_pass_scope.py`) and
+`test_missing_only_asks_nothing_on_a_warm_saturday` (`test_provisional_price_refresh.py`).
 
 **Only one IBKR slot can succeed per ET day, so the second one now asks first.**
 `app/services/flex_generation.py` holds the rule: `last_generation_today()` reports whether a
@@ -559,12 +593,13 @@ was never captured at all: the job named "after EU close" ran at 15:00, 2.5 hour
 close. The worst gap inside either session is now ~2.5h. **This is only correct because a recent
 close is re-fetched** (`PROVISIONAL_PRICE_DAYS`, below) — without it an earlier slot freezes an
 *earlier* price and makes the number worse rather than fresher, so the two changes cannot be
-separated. Coverage is pinned as a property (`≤3h between slots, plus one after each close`) rather
-than as a list of hours, so re-timing a slot stays free while dropping back to two a day does not.
+separated. Coverage is pinned as a property (`≤3h between slots, plus one after each close`, on
+trading days) rather than as a list of hours, so re-timing a slot stays free while dropping back to
+two a day does not.
 
 Cost, since rule 1 makes this the question: **one Yahoo request per security per pass either way** —
 the refresh only widens a range on a request already being made. 40 securities × 7 passes ≈ 280
-requests/day at ≤48 in any hour, against a documented ~500–2,000/hour, and the ~7.5s per-security
+requests per trading day (one pass on a weekend, above) at ≤48 in any hour, against a documented ~500–2,000/hour, and the ~7.5s per-security
 pacing keeps a pass at ~8 requests/minute, under the ~10–20 burst tolerance. Slots are ≥2h apart, so
 two passes never share an hour. The 40 are what each pass is *allowed* to ask about, below.
 
@@ -779,7 +814,8 @@ the fix.** A single failed 12:00 ET is not that signal.
 18:00 Berlin `full_sync`'s IBKR half and the 00:00 Berlin recovery return `status="skipped"`,
 `reason="no_new_trading_day"` — recorded like `already_generated_today`, with
 `next_attempt_after` at Tuesday 00:00 ET. The rest of `full_sync` (FX, the 730-day market data,
-dividends, look-through) runs as on any day. The manual `POST /api/sync/ibkr` does not consult the
+dividends, look-through) runs as on any day, except that on a Berlin weekend the market data asks
+only for dates with no row (*Sync schedule*, above). The manual `POST /api/sync/ibkr` does not consult the
 rule — pressing Sync is the owner's call — and `force=True` bypasses it like the daily guard.
 `POST /api/scheduler/trigger` runs `full_sync_job`, so its IBKR half skips on those days too.
 
@@ -810,7 +846,8 @@ measured.
 **What it does cost is margin under a narrow window.** A trade on day T is reachable from T+1…T+N.
 At N=3 a Friday trade used to have Saturday, Sunday and Monday; now it has Saturday's two slots
 only. That is why the gap alarm counts the way it does (below): a Friday success with a failed
-Saturday warns on Sunday morning at N=3, while the manual Sync is still there to recover it. At the
+Saturday warns on Sunday at 18:00 Berlin at N=3 — the full sync's price pass, since Sunday has no
+market-data slot (GitHub issue #9) — while the manual Sync is still there to recover it. At the
 live 30 a trade loses eight or nine of its thirty attempt days (the Sundays and Mondays among them)
 and keeps twenty-one or more.
 

@@ -123,6 +123,31 @@ async def test_fridays_close_is_still_provisional_on_monday():
 
 
 @pytest.mark.asyncio
+async def test_missing_only_asks_nothing_on_a_warm_saturday():
+    """
+    The weekend full sync's mode (GitHub issue #9). On a Saturday the window re-reports
+    Wednesday to Friday even when cached, so every weekend pass cost a request per
+    security for rows no exchange could still move. `refresh_provisional=False` drops
+    the window and keeps the gap rules: a weekday with no row is still missing.
+    """
+    wed, thu, fri, sat = (date(2026, 10, 14) + timedelta(days=i) for i in range(4))
+    assert sat.weekday() == 5
+    engine, session, repo = await _repo_with([wed, thu, fri])
+    try:
+        assert await repo.get_missing_dates(1, wed, sat, as_of=sat) == [wed, thu, fri]
+        assert await repo.get_missing_dates(
+            1, wed, sat, as_of=sat, refresh_provisional=False,
+        ) == []
+        # A new security, or a purge, still gets its history.
+        assert await repo.get_missing_dates(
+            1, wed - timedelta(days=2), sat, as_of=sat, refresh_provisional=False,
+        ) == [wed - timedelta(days=2), wed - timedelta(days=1)]
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_the_refresh_window_cannot_resurrect_an_old_holiday():
     """
     The two rules are disjoint by construction — the holiday rule needs a date older
