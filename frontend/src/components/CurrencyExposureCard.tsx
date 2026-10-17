@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
@@ -9,6 +9,7 @@ import {
   foreignQuotedPct,
   type CurrencyExposureInput,
 } from '@/lib/currencyExposure'
+import { useRememberedOpen } from '@/lib/storage'
 
 interface CurrencyExposureCardProps {
   positions: CurrencyExposureInput[] | undefined
@@ -29,7 +30,7 @@ export function CurrencyExposureCard({
 }: CurrencyExposureCardProps) {
   const curSym = useCurrencySymbol()
   const { baseCurrency } = useBaseCurrency()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useRememberedOpen('currency-exposure')
 
   const exposure = useMemo(
     () => computeCurrencyExposure(positions ?? [], fundSymbols),

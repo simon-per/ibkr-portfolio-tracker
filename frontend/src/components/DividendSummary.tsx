@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import type { DividendSummaryResponse } from '@/lib/api'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
+import { useRememberedOpen } from '@/lib/storage'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -34,7 +35,7 @@ function formatEur(amount: number): string {
 
 export function DividendSummary() {
   const curSym = useCurrencySymbol()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useRememberedOpen('dividend-income')
 
   const { data, isLoading, isError } = useQuery<DividendSummaryResponse>({
     queryKey: ['dividends', 'summary'],

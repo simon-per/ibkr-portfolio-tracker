@@ -22,8 +22,7 @@ import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
-  CHART_TOOLTIP_STYLE,
-} from '@/lib/chartTooltip'
+  CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
 import { formatDate, tooltipValue, formatAxisMoney } from '@/lib/utils'
 import { dateAxis } from '@/lib/dateAxis'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
@@ -105,7 +104,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
         <div className={`w-full ${CHART_BOX}`}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: isCompact ? 8 : 24, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <CartesianGrid {...CHART_GRID_PROPS} />
               <XAxis
                 dataKey="date"
                 className="text-xs"

@@ -167,14 +167,22 @@ describe('formatShortDateTime', () => {
     // Local time, so the digits depend on the host zone; the SHAPE does not. The three
     // sites this replaces passed `undefined` as the locale and followed the runtime —
     // "09.08.26, 06:00" on a German machine for the same instant.
-    expect(formatShortDateTime('2026-08-09T04:00:00+00:00')).toMatch(
-      /^\d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)$/,
+    expect(formatShortDateTime('2026-08-09T04:00:00+00:00', new Date(2026, 9, 1))).toMatch(
+      /^Aug \d{1,2}, \d{1,2}:\d{2}\s(AM|PM)$/,
     )
   })
 
   it('accepts a Date as given', () => {
     // `\s` rather than a literal space: recent ICU separates the meridiem with U+202F.
-    expect(formatShortDateTime(new Date(2026, 7, 9, 6, 0))).toMatch(/^8\/9\/26, 6:00\sAM$/)
+    expect(formatShortDateTime(new Date(2026, 7, 9, 6, 0), new Date(2026, 9, 1))).toMatch(
+      /^Aug 9, 6:00\sAM$/,
+    )
+  })
+
+  it('names the year only when it is not the current one', () => {
+    expect(formatShortDateTime(new Date(2025, 11, 30, 18, 5), new Date(2026, 0, 2))).toMatch(
+      /^Dec 30, 2025, 6:05\sPM$/,
+    )
   })
 })
 

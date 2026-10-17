@@ -17,7 +17,8 @@ import { useIsCompact } from '@/lib/useMediaQuery'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { rangeProfitAnchorUnpriced, rangeProfitSeries } from '@/lib/rangeProfit'
-import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
+import { CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
+import { PORTFOLIO_SERIES_COLORS } from '@/lib/benchmarkColors'
 
 /**
  * One height for the chart and its three placeholder states, so a range switch or a
@@ -26,7 +27,7 @@ import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 const CHART_BOX = 'h-[260px] sm:h-[340px] lg:h-[400px]'
 
 /** The value series' blue, which the area's gradient is drawn from. */
-const VALUE_COLOR = '#3b82f6'
+const VALUE_COLOR = PORTFOLIO_SERIES_COLORS.value
 
 /**
  * How far below zero the Y axis may extend, in the **base currency** (EUR/CHF/USD — the
@@ -119,12 +120,12 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
       // Total Value carries the primary blue; Money In is the quiet reference line it is
       // read against; cash and profit take the two secondary hues. Hex rather than CSS
       // variables because the legend chips derive an alpha background from the string.
-      { ...baseline, color: '#94a3b8', show: showBaseline, toggle: () => setShowBaseline(v => !v) },
+      { ...baseline, color: PORTFOLIO_SERIES_COLORS.moneyIn, show: showBaseline, toggle: () => setShowBaseline(v => !v) },
       { ...value, color: VALUE_COLOR, show: showValue, toggle: () => setShowValue(v => !v) },
       ...(cashTracked
-        ? [{ key: 'cash_eur', name: 'Cash', color: '#14b8a6', show: showCash, toggle: () => setShowCash(v => !v) }]
+        ? [{ key: 'cash_eur', name: 'Cash', color: PORTFOLIO_SERIES_COLORS.cash, show: showCash, toggle: () => setShowCash(v => !v) }]
         : []),
-      { key: 'profit_eur', name: 'Profit/Loss', color: '#10b981', show: showProfit, toggle: () => setShowProfit(v => !v) },
+      { key: 'profit_eur', name: 'Profit/Loss', color: PORTFOLIO_SERIES_COLORS.profit, show: showProfit, toggle: () => setShowProfit(v => !v) },
     ]
   }, [cashTracked, showBaseline, showValue, showCash, showProfit])
 
@@ -393,7 +394,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
               <stop offset="100%" stopColor={VALUE_COLOR} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+          <CartesianGrid {...CHART_GRID_PROPS} />
           <XAxis
             dataKey="date"
             className="text-xs"

@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { Download, ArrowLeftRight, Banknote, Coins, Split } from 'lucide-react'
-import { cn, formatCount } from '@/lib/utils'
+import { cn, formatCount, formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { rangeFor, type TimeRange } from '@/lib/dateRanges'
 import type { ActivityKind, ActivityRow } from '@/lib/api'
 
@@ -128,10 +128,13 @@ function detailOf(row: ActivityRow): string | null {
  * The desktop table can print an em dash in a cell; a card cannot.
  */
 function activityColumns(deps: {
-  curSym: string
+  /** The response's own base currency: the amounts were converted into it. */
   baseCurrency: string
 }): Column<ActivityRow>[] {
-  const { curSym, baseCurrency } = deps
+  const { baseCurrency } = deps
+  // Through `formatCurrency`, so a debit reads "-CHF 163.58" like every other figure in the
+  // app; the hand-built `${symbol}${number}` printed "CHF -163.58".
+  const money = (n: number) => formatCurrency(n, baseCurrency)
   return [
     {
       key: 'symbol',
@@ -169,8 +172,8 @@ function activityColumns(deps: {
       header: 'Date',
       shortHeader: 'Date',
       mobile: 'meta',
-      cellClassName: 'whitespace-nowrap tabular-nums',
-      cell: (row) => row.date,
+      cellClassName: 'whitespace-nowrap',
+      cell: (row) => formatDate(row.date),
     },
     {
       key: 'description',
@@ -197,13 +200,13 @@ function activityColumns(deps: {
     },
     {
       key: 'amount',
-      header: `Amount (${baseCurrency})`,
-      shortHeader: `Amount (${baseCurrency})`,
+      header: 'Amount',
+      shortHeader: 'Amount',
       align: 'right',
       mobile: 'value',
       tone: (row) => signClass(row.amount_base),
       cellClassName: 'font-medium',
-      cell: (row) => (row.amount_base == null ? '—' : `${curSym}${num(row.amount_base)}`),
+      cell: (row) => (row.amount_base == null ? '—' : money(row.amount_base)),
     },
     {
       key: 'realized',
@@ -217,7 +220,7 @@ function activityColumns(deps: {
       cell: (row, view) =>
         row.realized_pnl_base == null
           ? view === 'table' ? '—' : null
-          : `${curSym}${num(row.realized_pnl_base)}`,
+          : money(row.realized_pnl_base),
     },
     {
       key: 'quantity',
@@ -245,7 +248,7 @@ function activityColumns(deps: {
  * reads cash flows — while none of them had any read surface at all.
  */
 export function ActivityTab() {
-  const curSym = useCurrencySymbol()
+  const { baseCurrency } = useBaseCurrency()
   const [range, setRange] = useState<TimeRange>('1Y')
   const [kinds, setKinds] = useState<ActivityKind[]>([])
   const [symbol, setSymbol] = useState('')
@@ -297,8 +300,8 @@ export function ActivityTab() {
   )
 
   const columns = useMemo(
-    () => activityColumns({ curSym, baseCurrency: data?.base_currency ?? '' }),
-    [curSym, data?.base_currency]
+    () => activityColumns({ baseCurrency: data?.base_currency || baseCurrency }),
+    [baseCurrency, data?.base_currency]
   )
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1
@@ -383,7 +386,7 @@ export function ActivityTab() {
                 value={symbolDraft}
                 onChange={e => setSymbolDraft(e.target.value)}
                 placeholder="Ticker"
-                className="h-9 w-28 rounded-lg border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="h-9 w-28 rounded-lg border border-input bg-card px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
               <Button type="submit" size="sm" variant="outline">
                 Filter

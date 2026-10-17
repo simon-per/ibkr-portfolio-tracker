@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ABSENT, cn } from '@/lib/utils'
@@ -6,6 +6,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { monthlyReturnRows, type MonthReturn } from '@/lib/monthlyReturns'
 import type { PortfolioValuePoint } from '@/lib/api'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
+import { useRememberedOpen } from '@/lib/storage'
 
 interface MonthlyReturnsHeatmapProps {
   data: PortfolioValuePoint[] | undefined
@@ -86,7 +87,7 @@ export function MonthlyReturnsHeatmap({
   data, rangeStart, isLoading, isError, runningMonth = localMonth(),
 }: MonthlyReturnsHeatmapProps) {
   const money = useFormatCurrency()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useRememberedOpen('monthly-returns')
 
   // Each month runs from the previous month's last point, and YTD is the months
   // compounded — see `monthlyReturnRows`. A year without a single month return has

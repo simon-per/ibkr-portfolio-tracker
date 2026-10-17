@@ -71,7 +71,7 @@ export function DividendWithholdingControl({ appliedPct }: DividendWithholdingCo
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               aria-invalid={!valid}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 pr-8 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 w-full rounded-lg border border-input bg-card px-3 pr-8 text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
               %

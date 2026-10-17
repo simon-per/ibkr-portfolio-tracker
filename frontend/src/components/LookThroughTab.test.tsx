@@ -20,6 +20,8 @@ import type { LookthroughResponse } from '@/lib/api'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  // Sections remember being opened (`useRememberedOpen`); each test starts closed.
+  localStorage.clear()
 })
 
 // `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.

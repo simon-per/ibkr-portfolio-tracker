@@ -74,8 +74,7 @@ import { allocationSectorPaint, neutralPaint } from '@/lib/sectorColors'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
-  CHART_TOOLTIP_STYLE,
-} from '@/lib/chartTooltip'
+  CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
 import { formatDate, formatAxisMoney } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
@@ -92,7 +91,6 @@ const LEG_COLORS: Record<LegKey, string> = {
   unsplit_eur: '#8b5cf6',
   unexplained_eur: '#94a3b8',
 }
-const GRID = 'hsl(var(--border))'
 const AXIS = 'hsl(var(--muted-foreground))'
 
 /** One wrapper height per chart, shared by the chart and its empty/loading states. */
@@ -354,7 +352,7 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
             <div className={CHART_CLASS}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={rolling} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+                  <CartesianGrid {...CHART_GRID_PROPS} />
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(d: string) => formatDate(d)} minTickGap={48} interval="preserveStartEnd" />
                   <YAxis yAxisId="ratio" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" />
                   <YAxis yAxisId="vol" orientation="right" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
@@ -448,7 +446,7 @@ function Waterfall({
       <div className={CHART_CLASS}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 20, right: 8, left: 0, bottom: 0 }} barCategoryGap="28%">
-            <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+            <CartesianGrid {...CHART_GRID_PROPS} />
             <XAxis
               dataKey="name"
               tick={{ fontSize: compact ? 10 : 11, fill: AXIS }}
@@ -523,7 +521,7 @@ function YearlyLegs({
       <div className={CHART_CLASS}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="22%" barGap={2}>
-            <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+            <CartesianGrid {...CHART_GRID_PROPS} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} />
             <YAxis tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={compactMoney} />
             <Tooltip {...tooltipProps} formatter={(v, n) => [v === null ? ABSENT : formatCurrency(Number(v)), String(n)]} />
@@ -645,7 +643,7 @@ function SegmentsCard({
             <div style={{ height: chartHeight }} className="w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }} barCategoryGap="25%">
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                  <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
                   <YAxis type="category" dataKey="name" width={compact ? 110 : 170} tick={{ fontSize: compact ? 10 : 11, fill: AXIS }} tickLine={false} axisLine={false} interval={0} />
                   <Tooltip {...tooltipProps} formatter={(v) => [v === null ? ABSENT : formatCurrency(Number(v)), 'Gain']} />
@@ -773,7 +771,7 @@ function ClosedPositionsCard({
               <div style={{ height: chartHeight }} className="w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartRows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }} barCategoryGap="25%">
-                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                    <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
                     <YAxis type="category" dataKey="symbol" width={compact ? 70 : 90} tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} interval={0} />
                     <Tooltip {...tooltipProps} formatter={(v) => [v === null ? ABSENT : formatCurrency(Number(v)), 'Realized']} />

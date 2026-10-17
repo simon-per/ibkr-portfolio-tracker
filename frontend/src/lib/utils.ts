@@ -117,8 +117,10 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
- * A timestamp as a short local date and time — "8/9/26, 6:00 AM" — pinned to `en-US`
- * like every other formatter here.
+ * A timestamp as a short local date and time — "Aug 9, 6:00 AM", with the year only when
+ * it is not this one ("Dec 30, 2025, 6:00 AM") — pinned to `en-US` like every other
+ * formatter here. The month is spelled because "8/9/26" is 9 August to an American and
+ * 8 September to most other readers of a product in CHF and EUR.
  *
  * Three sites (the sync header's last/next run, and `SyncStatusMessage`'s skip notice)
  * called `toLocaleString(undefined, …)` inline, which follows the viewer's runtime
@@ -126,9 +128,15 @@ export function formatDate(date: string | Date): string {
  * names a real instant, so `new Date(iso)` is the right parse — `parseLocalDate` is for
  * the API's date-only strings.
  */
-export function formatShortDateTime(iso: string | Date): string {
+export function formatShortDateTime(iso: string | Date, now: Date = new Date()): string {
   const d = typeof iso === "string" ? new Date(iso) : iso
-  return d.toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== now.getFullYear() && { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  })
 }
 
 /**

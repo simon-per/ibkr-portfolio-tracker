@@ -4,7 +4,7 @@ import { cashIsTracked } from '@/lib/portfolioCash'
 import type { PortfolioSummary } from '@/lib/api'
 import type { PeriodChange } from '@/lib/portfolioKpis'
 import type { TimeRange } from '@/lib/dateRanges'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
 import { cn } from '@/lib/utils'
 
 /** What the selected range is called beside the period's gain. */
@@ -22,6 +22,37 @@ const RANGE_LABEL: Record<TimeRange, string> = {
 
 const GAIN = 'text-green-600 dark:text-green-400'
 const LOSS = 'text-red-600 dark:text-red-400'
+/** The period-gain pill: the gain's own colour on a wash of it. */
+const GAIN_PILL = 'bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400'
+const LOSS_PILL = 'bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400'
+
+/**
+ * The headline amount with its currency and cents a step quieter than the whole units,
+ * the way banking apps set a balance: the eye reads "144,022" first. A screen reader gets
+ * the amount as one string from the `sr-only` copy, not three fragments of it.
+ */
+function HeroAmount({ value, currency }: { value: number; currency: string }) {
+  const parts = new Intl.NumberFormat('en-US', {
+    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).formatToParts(value)
+  const whole = parts.findIndex((p) => p.type === 'integer')
+  const cents = parts.findIndex((p) => p.type === 'decimal')
+  const text = (from: number, to?: number) => parts.slice(from, to).map((p) => p.value).join('')
+  return (
+    <span className="inline-flex items-baseline">
+      <span className="sr-only">{text(0)}</span>
+      <span aria-hidden="true" className="mr-1 text-[0.55em] font-medium text-muted-foreground">
+        {text(0, whole).trim()}
+      </span>
+      <span aria-hidden="true">{text(whole, cents === -1 ? undefined : cents)}</span>
+      {cents !== -1 && (
+        <span aria-hidden="true" className="text-[0.55em] font-medium text-muted-foreground">
+          {text(cents)}
+        </span>
+      )}
+    </span>
+  )
+}
 
 interface PortfolioHeroProps {
   summary: PortfolioSummary | undefined
@@ -49,6 +80,7 @@ export function PortfolioHero({
   summary, isLoading, isError, period, range, controls, children,
 }: PortfolioHeroProps) {
   const formatCurrency = useFormatCurrency()
+  const { baseCurrency } = useBaseCurrency()
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${formatCurrency(n)}`
   const signedPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 
@@ -94,19 +126,30 @@ export function PortfolioHero({
               {hasCash || !summary ? 'Total value' : 'Market value'}
             </p>
             {headline === null ? (
-              <div className="mt-2 h-10 w-56 animate-pulse rounded-lg bg-muted" />
+              <div className="mt-2 h-12 w-64 animate-pulse rounded-lg bg-muted" />
             ) : (
-              <p className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
-                {formatCurrency(headline)}
+              // The one hero figure on the page: 48px from `sm` up, proportional digits.
+              <p className="mt-1 text-[2.5rem] font-semibold leading-none tracking-tight sm:text-5xl">
+                <HeroAmount value={headline} currency={baseCurrency} />
               </p>
             )}
             {/* Absent rather than `+0.00%` while the range is unknown or held nothing. */}
             {period && (
-              <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-sm">
-                <span className={cn('font-semibold', period.periodGain >= 0 ? GAIN : LOSS)}>
-                  <span aria-hidden="true">{period.periodGain >= 0 ? '▲' : '▼'} </span>
-                  {signed(period.periodGain)}
-                  {period.periodGainPercent !== null && ` (${signedPct(period.periodGainPercent)})`}
+              <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold',
+                    period.periodGain >= 0 ? GAIN_PILL : LOSS_PILL,
+                  )}
+                >
+                  <span aria-hidden="true" className="text-[0.7em]">{period.periodGain >= 0 ? '▲' : '▼'}</span>
+                  <span>{signed(period.periodGain)}</span>
+                  {period.periodGainPercent !== null && (
+                    <>
+                      <span aria-hidden="true" className="opacity-50">·</span>
+                      <span>{signedPct(period.periodGainPercent)}</span>
+                    </>
+                  )}
                 </span>
                 <span className="text-muted-foreground">{RANGE_LABEL[range]}</span>
               </p>
@@ -163,9 +206,9 @@ export function PortfolioHero({
 
 function Stat({ label, value, tone, sub }: { label: string; value: string; tone?: string; sub?: string }) {
   return (
-    <div className="px-[var(--card-padding)] py-3 sm:py-4">
+    <div className="px-[var(--card-padding)] py-3.5 sm:py-4">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold sm:text-lg">
+      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold tracking-tight sm:text-lg">
         <span className={tone}>{value}</span>
         {sub && <span className={cn('text-xs font-medium', tone)}>{sub}</span>}
       </dd>

@@ -6,6 +6,7 @@ import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendMonthLabel, FC } from '@/lib/dividendChart'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { formatAxisMoney } from '@/lib/utils'
+import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
 /**
  * One height for the chart and every placeholder that stands in for it, so a mode
@@ -121,7 +122,7 @@ export function DividendStackChart({
     <div className={DIVIDEND_CHART_BOX}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+          <CartesianGrid {...CHART_GRID_PROPS} />
           <XAxis
             dataKey="month"
             tickFormatter={(m: string) => dividendMonthLabel(m, multiYear)}

@@ -435,7 +435,7 @@ export function Dashboard() {
           label is the "there is more" cue. `justify-start` matters: a centred flex row
           wider than its scroller overflows on both sides, and the leading overflow is
           unreachable. */}
-      <div className="sticky top-0 z-30 border-b border-border/70 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+      <div className="sticky top-0 z-30 border-b border-border/80 bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <TabsList
           label="Portfolio sections"
           className="mx-auto w-full max-w-[1400px] justify-start overflow-x-auto px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"

@@ -30,6 +30,8 @@ import type { ContributionsResponse, ContributionWindow, ContributionMonthlyItem
  */
 
 afterEach(cleanup)
+// Sections remember being opened (`useRememberedOpen`); each test starts closed.
+beforeEach(() => localStorage.clear())
 
 // "This month" is the reader's calendar month, so the clock is pinned to mid-July 2026.
 beforeEach(() => {

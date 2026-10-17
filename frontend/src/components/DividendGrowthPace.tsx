@@ -24,7 +24,7 @@ export function DividendGrowthPace({ pace }: DividendGrowthPaceProps) {
   return (
     <section
       aria-label="Dividend income growth"
-      className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg border border-border bg-card/50 px-4 py-3"
+      className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-xl bg-muted/50 px-4 py-3"
     >
       <span className="text-xs font-medium text-muted-foreground">Income growth</span>
       {/* flatBand 0 on both — the default band mutes lumpy series, and a rolling

@@ -10,15 +10,35 @@
  * categories: colour by identity, never by row position.
  */
 export const BENCHMARK_COLORS = [
-  '#3b82f6', // blue
-  '#ec4899', // pink
-  '#f97316', // orange
-  '#06b6d4', // cyan
-  '#a855f7', // purple
-  '#14b8a6', // teal
-  '#ef4444', // red
-  '#84cc16', // lime
+  '#7a3e9d', // purple   S&P 500
+  '#a61e4d', // crimson  Nasdaq
+  '#a9710f', // ochre    MSCI World
+  '#c2378f', // berry
+  '#7f4f24', // brown
+  '#e34948', // red
+  '#d6336c', // rose
+  '#b5452f', // rust
 ]
+
+/**
+ * The value chart's own lines, which no benchmark may share a hue with.
+ *
+ * Slot 0 of the old benchmark palette was the portfolio line's own blue and slot 5 the
+ * Cash line's teal, so comparing against the S&P 500 drew it in the portfolio's colour,
+ * and Cash and Profit/Loss (teal beside emerald, ΔE 5 for full colour vision) could not be
+ * told apart either. Value and Cash are the app's validated viz hues (`--viz-series-1` and
+ * `-4` in index.css), Profit/Loss a green stepped to clear both and the neutral Money In. The benchmarks were then picked by
+ * a greedy max-separation search against them — the first three, which the picker's
+ * three-at-a-time cap makes the likeliest trio, clear ΔE 15 from each other and from every
+ * line here; the rest keep clear of the portfolio's lines and lean on their dashes and
+ * names. `benchmarkColors.test.ts` measures both.
+ */
+export const PORTFOLIO_SERIES_COLORS = {
+  value: '#2a78d6',
+  moneyIn: '#94a3b8',
+  cash: '#eda100',
+  profit: '#2f9e5b',
+} as const
 
 /**
  * For a key the list does not carry — a stored selection naming a benchmark the backend

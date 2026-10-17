@@ -8,9 +8,9 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      // Surface, not outline: the canvas is a step darker than the card, so a soft
-      // border and no shadow is what reads as "a panel" on both themes.
-      "rounded-xl border border-border/70 bg-card text-card-foreground",
+      // Surface, not outline: the canvas is a step darker than the card, so a hairline
+      // border plus the theme's soft elevation (none in dark) reads as "a panel".
+      "rounded-2xl border border-border/80 bg-card text-card-foreground shadow-card",
       className
     )}
     {...props}

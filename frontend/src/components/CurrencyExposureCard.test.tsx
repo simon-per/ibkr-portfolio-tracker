@@ -17,6 +17,8 @@ import type { CurrencyExposureInput } from '@/lib/currencyExposure'
  */
 
 afterEach(cleanup)
+// Sections remember being opened (`useRememberedOpen`); each test starts closed.
+beforeEach(() => localStorage.clear())
 
 beforeEach(() => {
   if (!('ResizeObserver' in globalThis)) {

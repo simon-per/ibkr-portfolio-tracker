@@ -136,9 +136,9 @@ export interface FooterCell {
 export type Density = 'compact' | 'normal' | 'roomy' | 'comfortable'
 
 const DENSITY: Record<Density, string> = {
-  compact: 'px-2 py-1.5',
-  normal: 'px-2 py-2',
-  roomy: 'px-3 py-2',
+  compact: 'px-2 py-2',
+  normal: 'px-2 py-2.5',
+  roomy: 'px-3 py-2.5',
   comfortable: 'px-2 py-3',
 }
 
@@ -345,7 +345,9 @@ function WideTable<Row, SortKey extends string>({
       <table className={cn('w-full text-sm', minWidthClassName)}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
-          <tr className="border-b text-muted-foreground">
+          {/* Headers a step smaller and quieter than the figures, so the eye lands on
+              the data; the rule under them is the one full-strength line in the table. */}
+          <tr className="border-b border-border text-xs text-muted-foreground">
             {visible.map(col => {
               const align = col.align ?? 'left'
               if (col.sortKey && sort) {
@@ -391,7 +393,12 @@ function WideTable<Row, SortKey extends string>({
               <React.Fragment key={key}>
                 {/* The border moves to the expansion when there is one, so the panel
                     reads as part of its row rather than as a detached band below a rule. */}
-                <tr className={cn(!expansion && 'border-b last:border-0')}>
+                <tr
+                  className={cn(
+                    'transition-colors hover:bg-muted/40',
+                    !expansion && 'border-b border-border/60 last:border-0',
+                  )}
+                >
                   {visible.map(col => (
                     <td
                       key={col.key}
@@ -409,7 +416,7 @@ function WideTable<Row, SortKey extends string>({
                   {rowActions && <td className={pad}>{rowActions(row)}</td>}
                 </tr>
                 {expansion && (
-                  <tr className="border-b last:border-0">
+                  <tr className="border-b border-border/60 last:border-0">
                     {/* `columnCount` rather than a literal: it already counts the
                         rowActions column, and a hardcoded span is what the footer code
                         below records as lying silently once a column is added. */}
@@ -424,7 +431,7 @@ function WideTable<Row, SortKey extends string>({
         </tbody>
         {footer && footer.length > 0 && (
           <tfoot>
-            <tr className="border-t font-medium">
+            <tr className="border-t border-border font-semibold">
               {/* Each cell under the columns it names; the gaps are padding. */}
               {footerLayout(footer, visible.map(c => c.key), columnCount).map((slot, i) =>
                 slot.cell ? (
@@ -638,7 +645,7 @@ function CompactSortControl<Row, SortKey extends string>({
         id={id}
         value={sort.column ?? ''}
         onChange={e => sort.onSort(e.target.value as SortKey)}
-        className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm font-medium"
+        className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-card px-3 text-sm font-medium"
       >
         {sortable.map(col => (
           <option key={col.key} value={col.sortKey}>
@@ -650,7 +657,7 @@ function CompactSortControl<Row, SortKey extends string>({
         type="button"
         onClick={() => sort.column && sort.onSort(sort.column)}
         aria-label={`Sort ${sort.direction === 'asc' ? 'descending' : 'ascending'}`}
-        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-card ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         {sort.direction === 'asc' ? (
           <ArrowUp aria-hidden="true" className="h-4 w-4" />

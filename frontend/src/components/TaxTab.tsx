@@ -356,7 +356,7 @@ export function TaxTab() {
                 id="tax-year"
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium"
+                className="h-9 rounded-lg border border-input bg-card px-3 text-sm font-medium"
               >
                 {years.map((y) => (
                   <option key={y} value={y}>
@@ -368,7 +368,7 @@ export function TaxTab() {
                 href={api.getTaxReportCsvUrl(year)}
                 download={`tax_report_${year}.csv`}
                 className={cn(
-                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                 )}
               >
                 <Download className="h-4 w-4" />
@@ -485,21 +485,26 @@ export function TaxTab() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Realized capital gains</CardTitle>
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-1 text-xs font-medium',
-                    data.realized_source === 'trades'
-                      ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
-                  )}
-                  title={
-                    data.realized_source === 'trades'
-                      ? 'IBKR trades, FIFO'
-                      : 'Closed lots at close-date price'
-                  }
-                >
-                  {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
-                </span>
+                {/* Where the figures came from, so only when there are figures: a year with
+                    no sale reports the fallback source, and "Estimated" over "No realized
+                    sales" reads as a caveat about nothing. */}
+                {data.realized_gains.length > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-xs font-medium',
+                      data.realized_source === 'trades'
+                        ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                    )}
+                    title={
+                      data.realized_source === 'trades'
+                        ? 'IBKR trades, FIFO'
+                        : 'Closed lots at close-date price'
+                    }
+                  >
+                    {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
+                  </span>
+                )}
               </div>
             </CardHeader>
             <CardContent>

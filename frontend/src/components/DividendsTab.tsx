@@ -437,7 +437,7 @@ export function DividendsTab() {
               onChange={(e) => setYear(
                 e.target.value === 'all' || e.target.value === '24m' ? e.target.value : Number(e.target.value),
               )}
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium"
+              className="h-9 rounded-lg border border-input bg-card px-3 text-sm font-medium"
             >
               <option value="all">All time</option>
               <option value="24m">Last 24 months</option>
@@ -455,8 +455,8 @@ export function DividendsTab() {
               className={cn(
                 'inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors',
                 showForecast
-                  ? 'border-transparent bg-primary text-primary-foreground'
-                  : 'border-input bg-background hover:bg-accent hover:text-accent-foreground'
+                  ? 'border-primary/30 bg-primary/10 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
               title="Show projected payments"
               aria-label="Toggle forecast overlay"

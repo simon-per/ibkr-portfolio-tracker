@@ -50,3 +50,21 @@ describe('compact money labels', () => {
     expect(offenders).toEqual([])
   })
 })
+
+/** Every chart draws one grid — see `CHART_GRID_PROPS`. */
+describe('chart grids', () => {
+  it('all spread the shared grid props', () => {
+    const sources = import.meta.glob('./**/*.tsx', { query: '?raw', import: 'default', eager: true })
+    const offenders: string[] = []
+    let grids = 0
+    for (const [path, src] of Object.entries(sources)) {
+      if (path.endsWith('.test.tsx')) continue
+      for (const match of (src as string).matchAll(/<CartesianGrid\b[\s\S]*?\/>/g)) {
+        grids += 1
+        if (!match[0].includes('{...CHART_GRID_PROPS}')) offenders.push(`${path}: ${match[0]}`)
+      }
+    }
+    expect(offenders).toEqual([])
+    expect(grids).toBeGreaterThanOrEqual(10)
+  })
+})

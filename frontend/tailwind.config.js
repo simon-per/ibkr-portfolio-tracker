@@ -56,6 +56,12 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      // Theme-aware elevation from index.css: a soft lift in light mode, none in dark,
+      // where a lighter surface carries it instead.
+      boxShadow: {
+        card: "var(--shadow-card)",
+        pop: "var(--shadow-pop)",
+      },
     },
   },
   plugins: [],

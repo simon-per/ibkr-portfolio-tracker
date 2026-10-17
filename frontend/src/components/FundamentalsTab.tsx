@@ -35,35 +35,40 @@ function formatRatio(value: number | null): string {
   return value.toFixed(1)
 }
 
-// Color coding helpers
+// Color coding helpers. Only the two ends are coloured: the middle band is plain ink,
+// the watchlist's rule (`colorClass`, `rsiColorClass`). A third, yellow band put a colour
+// on nearly every cell of the table, and a signal on every cell is no signal.
+const GOOD = 'text-green-600 dark:text-green-400'
+const POOR = 'text-red-600 dark:text-red-400'
+
 function peColor(value: number | null): string {
   if (value === null) return ''
   // A negative P/E is a loss, not a bargain — the `< 15` branch painted it green.
-  if (value <= 0) return 'text-red-600 dark:text-red-400'
-  if (value < 15) return 'text-green-600 dark:text-green-400'
-  if (value < 25) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value <= 0) return POOR
+  if (value < 15) return GOOD
+  if (value < 25) return ''
+  return POOR
 }
 
 function pegColor(value: number | null): string {
   if (value === null) return ''
-  if (value < 1) return 'text-green-600 dark:text-green-400'
-  if (value < 2) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value < 1) return GOOD
+  if (value < 2) return ''
+  return POOR
 }
 
 function growthColor(value: number | null): string {
   if (value === null) return ''
-  if (value > 0.15) return 'text-green-600 dark:text-green-400'
-  if (value > 0) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value > 0.15) return GOOD
+  if (value > 0) return ''
+  return POOR
 }
 
 function marginColor(value: number | null): string {
   if (value === null) return ''
-  if (value > 0.20) return 'text-green-600 dark:text-green-400'
-  if (value > 0.10) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value > 0.20) return GOOD
+  if (value > 0.10) return ''
+  return POOR
 }
 
 function surpriseColor(result: string | null): string {

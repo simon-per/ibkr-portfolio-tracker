@@ -69,21 +69,27 @@ export function displayName(raw: string | null | undefined): string {
   let name = raw.trim()
 
   // Registered/bearer-share tails on European listings ("NESTLE SA-REG", "ROCHE HOLDING
-  // AG-GENUSSCHEIN"), and the Nordic legal form, whose slash the domicile rule below would
-  // otherwise read as one ("NOVO NORDISK A/S-B" became "Novo Nordisk A").
+  // AG-GENUSSCHEIN").
   name = name.replace(/-(REG|REGISTERED|BR|BEARER|GENUSSCHEIN|NAMEN)$/i, '')
+
+  // The share class first, with IBKR's hyphen ("ALPHABET INC-CL C") or without it, as the
+  // fund issuers' holdings files write it ("ALPHABET INC CLASS C") — so the legal-form and
+  // domicile rules below see the name's real end. Set aside to survive the legal-suffix
+  // strip ("ALPHABET INC Class A").
+  name = name.replace(/(\s*-\s*|\s+)(CL|CLASS)\s+([A-Z])(\s+(SHARES|SHS))?$/i, ' Class $3')
+  const classTail = name.match(/ Class [A-Z]$/)?.[0] ?? ''
+  if (classTail) name = name.slice(0, -classTail.length)
+
+  // The Nordic legal form, whose slash the domicile rule below would otherwise read as one
+  // ("NOVO NORDISK A/S-B" became "Novo Nordisk A").
   name = name.replace(/\s+A\/S(\s*-\s*[A-Z])?$/i, '')
 
-  // A domicile after a slash ("LTD/CAYMAN ISL-A") and IBKR's share-class tails.
+  // A domicile after a slash ("LTD/CAYMAN ISL-A") and IBKR's other listing tails.
   name = name.replace(/\/[A-Z .]+(-[A-Z])?$/, '')
-  name = name.replace(/\s*-\s*(CL|CLASS)\s+([A-Z])(\s+(SHARES|SHS))?$/i, ' Class $2')
   name = name.replace(/\s+-\s+([A-Z])$/, '')
   name = name.replace(/\s+(REG SHS|NV-NY REG SHS|SPON ADR|SPONS ADR|-SPON ADR|ADR)$/i, '')
   name = name.replace(/\s+NV-NY$/i, '')
 
-  // The class tail must survive the legal-suffix strip ("ALPHABET INC Class A").
-  const classTail = name.match(/ Class [A-Z]$/)?.[0] ?? ''
-  if (classTail) name = name.slice(0, -classTail.length)
   for (let i = 0; i < 3 && LEGAL_SUFFIX.test(name); i++) {
     name = name.replace(LEGAL_SUFFIX, '').replace(DANGLING_JOIN, '')
   }

@@ -32,6 +32,11 @@ describe('displayName', () => {
     ['ROCHE HOLDING AG-GENUSSCHEIN', 'Roche Holding'],
     ['NOVO NORDISK A/S-B', 'Novo Nordisk'],
     ['VISA INC-CLASS A SHARES', 'Visa Class A'],
+    // Issuer holdings files write the class without IBKR's hyphen.
+    ['ALPHABET INC CLASS C', 'Alphabet Class C'],
+    ['BERKSHIRE HATHAWAY INC CLASS B', 'Berkshire Hathaway Class B'],
+    ['NOVO NORDISK A/S CLASS B', 'Novo Nordisk Class B'],
+    ['META PLATFORMS INC CLASS A', 'Meta Platforms Class A'],
     // Index and brand names keep their casing.
     ['VANGUARD FTSE ALL-WORLD UCITS ETF USD ACC', 'Vanguard FTSE All-World UCITS ETF USD Acc'],
     ['ISHARES CORE MSCI EM IMI UCITS ETF USD ACC', 'iShares Core MSCI EM IMI UCITS ETF USD Acc'],

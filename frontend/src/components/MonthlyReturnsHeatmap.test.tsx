@@ -16,6 +16,8 @@ import type { PortfolioValuePoint } from '@/lib/api'
  */
 
 afterEach(cleanup)
+// Sections remember being opened (`useRememberedOpen`); each test starts closed.
+beforeEach(() => localStorage.clear())
 
 // `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.
 beforeEach(() => {

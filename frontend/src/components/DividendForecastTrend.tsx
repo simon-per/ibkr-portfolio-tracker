@@ -14,8 +14,7 @@ import { api } from '@/lib/api'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
-  CHART_TOOLTIP_STYLE,
-} from '@/lib/chartTooltip'
+  CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendAmount } from '@/lib/dividendFormat'
 import { forecastTrend, fromBuysLabel, type LiveForecast } from '@/lib/dividendForecastTrend'
@@ -80,14 +79,14 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
   return (
     <section
       aria-label="Dividend forecast over time"
-      className="rounded-lg border border-border bg-card/50"
+      className="rounded-xl bg-muted/50"
     >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={contentId}
-        className="flex w-full select-none flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-4 py-3 text-left ring-offset-background transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="flex w-full select-none flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-4 py-3 text-left ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <ChevronRight
           aria-hidden="true"
@@ -126,7 +125,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
           <div className="h-[120px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trend.points} margin={{ top: 4, right: isCompact ? 8 : 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
+                <CartesianGrid {...CHART_GRID_PROPS} />
                 <XAxis
                   dataKey="date"
                   className="text-xs"

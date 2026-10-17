@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { PerformanceAttribution } from './PerformanceAttribution'
 import type { PerformanceAttributionResponse } from '@/lib/api'
@@ -16,6 +16,8 @@ import type { PerformanceAttributionResponse } from '@/lib/api'
  */
 
 afterEach(cleanup)
+// Sections remember being opened (`useRememberedOpen`); each test starts closed.
+beforeEach(() => localStorage.clear())
 
 function data(over: Partial<PerformanceAttributionResponse> = {}): PerformanceAttributionResponse {
   return {
