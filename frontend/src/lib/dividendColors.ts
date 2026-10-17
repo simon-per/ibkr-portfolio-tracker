@@ -35,11 +35,10 @@ export const OTHER_COLOR = CHART_OTHER
 /**
  * A key's colour, by its position in an identity order the server computed.
  *
- * Shared with the crypto donut, whose order is `color_order` — valued coins by CoinStats'
- * market-cap rank, which belongs to the coin and not to its size in the portfolio. It IS
- * `chartColorFor`, not a copy of it: a second copy of this assignment is exactly how two
- * charts come to disagree about which colour a thing is. Anything the order does not carry
- * falls to Other rather than throwing.
+ * It IS `chartColorFor`, not a copy of it — the crypto donut calls that directly with its own
+ * `color_order` — because a second copy of this assignment is exactly how two charts come to
+ * disagree about which colour a thing is. Anything the order does not carry falls to Other
+ * rather than throwing.
  */
 export const seriesColor: (key: string, order: readonly string[]) => string = chartColorFor
 

@@ -415,13 +415,10 @@ taxonomy, a server-supplied list, a canonical position plus a ramp, and a server
 a ramp have different tails, and one signature covering all four would carry every tail as an
 option. The shared thing is written here instead, and the family question is asked per module.
 
-`--viz-series-1..8`, `--viz-series-muted-1..5` and `--viz-series-other` in `index.css` are the
-dividend stack's palette, and the crypto donut's; slots 1, 4, 5 and 6 **are** `--viz-sector-1..4`, which is why re-stepping
-it left the Allocation and look-through tabs alone. The measurements behind the hexes are asserted
-by `lib/dividendColors.test.ts`, which reads them back out of `index.css` — including each card
-surface, so a theme re-step that makes a muted step invisible fails there. Its ramp is five steps
-and `sectorColors.ts`'s is seven; one set sized for both would be spaced for neither, so they stay
-separate.
+The dividend stack and the crypto donut draw from the categorical palette (`--chart-1..10`,
+`--chart-other`; *Design foundation* below), whose measurements `lib/chartPalette.test.ts` asserts
+by reading the values back out of `index.css`. The old `--viz-series-*` set was removed on
+2026-10-17.
 
 ---
 
@@ -620,11 +617,10 @@ is the shared measuring code (`benchmarkColors.test.ts` uses it too).
   lumpy series so the bar agrees with its `DeltaChip`.
 
 **Adopting it in an existing colour module.** The `var()` strings work as Recharts `fill`/`stroke`
-and repaint on a theme flip with no JS. Not yet migrated (each area's own call): `--viz-sector-*`
-and `--viz-series-*` (sectors, look-through, dividends, crypto donut — each pinned by
-`dividendColors.test.ts`, so re-pointing them means updating its bars), `BENCHMARK_COLORS` and
-`PORTFOLIO_SERIES_COLORS` (measured by `benchmarkColors.test.ts`), the Allocation donuts, and
-AnalyticsTab's literal `GAIN`/`LOSS` hexes. When a module moves onto the palette, delete its hexes
+and repaint on a theme flip with no JS. Migrated on 2026-10-17: the dividend stack and the
+crypto donut (subsections below). Kept deliberately: `BENCHMARK_COLORS` and
+`PORTFOLIO_SERIES_COLORS` (measured against each other by `benchmarkColors.test.ts`). Not yet
+migrated: AnalyticsTab's literal `GAIN`/`LOSS` hexes (the tab is hidden). When a module moves onto the palette, delete its hexes
 and its measurement block rather than keeping both.
 
 ### Tone (`lib/tone.ts`)
@@ -718,8 +714,7 @@ re-point onto the general palette would have to redo, and the section above stil
   `stack_order`; `seriesColor` *is* `chartColorFor`, so the crypto donut moved too. Ten identities
   instead of thirteen (the old five-step muted ramp is gone), Other is `--chart-other`.
   `dividendColors.test.ts` pins rank *n* → `var(--chart-n)` and the fold; the measuring is
-  `chartPalette.test.ts`'s. Details in [dividends.md](dividends.md). This supersedes the
-  `--viz-series-*` paragraph under *Colour by identity* above.
+  `chartPalette.test.ts`'s. Details in [dividends.md](dividends.md).
 - **Growth is the Dividends headline.** The four KPIs are a `KpiPanel` with icons and delta pills
   (all at the dividend flat band, `FLAT_BAND_PCT`, so a pill agrees with every other chip on the
   tab). *Last 12 months* and *Next 12 months* draw sparklines from the forecast history

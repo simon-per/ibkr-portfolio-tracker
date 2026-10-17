@@ -26,8 +26,8 @@ export const BENCHMARK_COLORS = [
  * Slot 0 of the old benchmark palette was the portfolio line's own blue and slot 5 the
  * Cash line's teal, so comparing against the S&P 500 drew it in the portfolio's colour,
  * and Cash and Profit/Loss (teal beside emerald, ΔE 5 for full colour vision) could not be
- * told apart either. Value and Cash are the app's validated viz hues (`--viz-series-1` and
- * `-4` in index.css), Profit/Loss a green stepped to clear both and the neutral Money In. The benchmarks were then picked by
+ * told apart either. Value and Cash are the app's validated viz hues (the old
+ * `--viz-series-1` and `-4`, kept here as hexes), Profit/Loss a green stepped to clear both and the neutral Money In. The benchmarks were then picked by
  * a greedy max-separation search against them — the first three, which the picker's
  * three-at-a-time cap makes the likeliest trio, clear ΔE 15 from each other and from every
  * line here; the rest keep clear of the portfolio's lines and lean on their dashes and

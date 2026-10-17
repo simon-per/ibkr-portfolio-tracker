@@ -325,7 +325,7 @@ What the figures mean:
   and the not-itemised gap — they belonged to CoinStats' books, not to this formula.
 
 **Colour identity.** Coins are coloured by `color_order` — CoinStats' market-cap rank — through
-the `--viz-series-*` palette, so a sync that reorders the holdings by value cannot repaint the
+the app's categorical palette (`chartColorFor` in `lib/chartPalette.ts`), so a sync that reorders the holdings by value cannot repaint the
 chart (`docs/frontend.md`, *colour by identity*).
 
 **Chart ranges**: 1W · MTD · 1M · 3M · 6M · YTD · 1Y · ALL, all counted back from the latest point
