@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — the benchmark warm-up reaches Yahoo (#4), /status's stale count
+
+Issue #4: the scheduled warm-up ran inside its job's `SYNC_PIPELINE` gate and re-entered it,
+so every benchmark was refused and counted as synced — benchmark prices only ever came from
+chart loads. It now declares `gate_held=True`, asks through the last finished session, once per
+benchmark per session, and stops on the 429 latch it now reads; the upstream memo is stamped
+after the gate, so a refused fetch no longer throttles the next. `test_gate_reentry_family`
+walks the call graph from every gate holder. Also: `/api/fundamentals/status` counted sold
+positions' rows as stale forever since the held-only sync (50 beside 35 holdings); both stale
+queries now share one held-and-eligible criterion. Verified: 2057 backend tests green (no
+deploy-script marker); the warm-up's first real run is under STATUS.md *Watch after the next
+deploy*.
+
 ## Shipped 2026-10-17 (evening) — the copies of one job, the base currency in use, lint (same branch)
 
 The backlog items a review named, closed on the same branch. **One EUR conversion rule**

@@ -87,6 +87,9 @@ Only what is still unverified.
   does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
   read off the API, not the database.
 - **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
+- **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
+  Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
+  later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
 - **The first `fundamentals_refresh`, Tuesday 2026-10-20 05:00 Berlin** (the weekly Sunday run is
   gone): a success row in `/api/scheduler/history`, no rate-limit warning, the Fundamentals as-of
   line within a day; Wednesday's pass refreshes every held row again (20-hour rule).
