@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.earnings_event import EarningsEvent
+from app.models.security import Security
+from app.repositories.security_repository import held
+from app.services.yahoo_eligibility import yahoo_eligible
 
 #: How old a metrics row has to be before a sync will refresh it.
 #:
@@ -46,9 +49,7 @@ class FundamentalsRepository:
         self, older_than: timedelta = STALE_AFTER
     ) -> List[FundamentalMetrics]:
         result = await self.session.execute(
-            select(FundamentalMetrics).where(
-                FundamentalMetrics.last_updated < self._stale_cutoff(older_than)
-            )
+            select(FundamentalMetrics).where(self._stale(older_than))
         )
         return list(result.scalars().all())
 
@@ -59,15 +60,23 @@ class FundamentalsRepository:
         two came to use different thresholds.
         """
         result = await self.session.execute(
-            select(func.count(FundamentalMetrics.id)).where(
-                FundamentalMetrics.last_updated < self._stale_cutoff(older_than)
-            )
+            select(func.count(FundamentalMetrics.id)).where(self._stale(older_than))
         )
         return int(result.scalar() or 0)
 
     @staticmethod
-    def _stale_cutoff(older_than: timedelta):
-        return utcnow() - older_than
+    def _stale(older_than: timedelta):
+        """
+        A row a sync would refresh: older than `older_than`, of a security the sync walks
+        (held and Yahoo-eligible). Without the scope, a sold position's row — never
+        refreshed since 2026-10-17 — stayed in the count forever.
+        """
+        return and_(
+            FundamentalMetrics.last_updated < utcnow() - older_than,
+            FundamentalMetrics.security_id.in_(
+                select(Security.id).where(yahoo_eligible(), held())
+            ),
+        )
 
     async def upsert_metrics(self, data: dict) -> FundamentalMetrics:
         existing = await self.get_metrics_by_security_id(data['security_id'])

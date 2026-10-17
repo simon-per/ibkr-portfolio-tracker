@@ -180,8 +180,10 @@ async def test_status_counts_exactly_what_a_sync_would_refresh(db, fetched):
 
     add_security(db, 1, "AAA")
     add_security(db, 2, "BBB")
+    add_security(db, 3, "SOLD", held=False)
     add_metrics(db, 1, age_days=3)      # stale under 20 hours, fresh under the old 7 days
     add_metrics(db, 2, age_days=0)      # genuinely fresh
+    add_metrics(db, 3, age_days=30)     # stale, but sold: no sync refreshes it, so not counted
     await db.commit()
 
     counted = await FundamentalsRepository(db).count_stale_metrics()
