@@ -72,6 +72,9 @@ class ActivityRow:
     kind: str
     subtype: str                      # BUY/SELL, DEPOSITWITHDRAW, FORWARDSPLIT, ibkr...
     symbol: Optional[str]
+    # The holding the row is about, for the client's logo lookup; None for a cash flow
+    # and for a trade or action IBKR sent before its security was known.
+    security_id: Optional[int]
     description: str
     quantity: Optional[float]
     price: Optional[float]
@@ -217,6 +220,7 @@ class ActivityService:
                 kind=TRADE,
                 subtype=t.buy_sell or "",
                 symbol=t.symbol,
+                security_id=t.security_id,
                 description=" ".join(filter(None, [
                     t.buy_sell or "TRADE", _qty(abs(t.quantity)), t.symbol
                 ])),
@@ -245,6 +249,7 @@ class ActivityService:
                 kind=CASH_FLOW,
                 subtype=f.flow_type,
                 symbol=None,
+                security_id=None,
                 description=f.description or f.flow_type,
                 quantity=None,
                 price=None,
@@ -269,6 +274,7 @@ class ActivityService:
                 kind=CORPORATE_ACTION,
                 subtype=a.action_type,
                 symbol=a.symbol,
+                security_id=a.security_id,
                 # The raw actionDescription is the useful text (ratios, new symbols);
                 # fall back to the enum name when IBKR sent none.
                 description=a.description or a.action_type,
@@ -361,6 +367,7 @@ class ActivityService:
                 kind=DIVIDEND,
                 subtype=p.source or "",
                 symbol=symbols.get(p.security_id),
+                security_id=p.security_id,
                 description=(
                     f"Dividend {symbols.get(p.security_id) or ''}".strip()
                     + (f" (withholding {withholding})" if withholding else "")

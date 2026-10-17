@@ -149,7 +149,7 @@ function activityColumns(deps: {
         return (
           <div className="flex items-center gap-3">
             {row.symbol ? (
-              <TickerAvatar symbol={row.symbol} className="h-8 w-8 text-[10px]" />
+              <TickerAvatar symbol={row.symbol} securityId={row.security_id ?? undefined} className="h-8 w-8 text-[10px]" />
             ) : (
               <span aria-hidden="true" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <Banknote className="h-4 w-4" />

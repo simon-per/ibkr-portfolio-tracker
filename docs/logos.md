@@ -5,8 +5,8 @@
 
 Each holding's round avatar (`frontend/src/components/ui/TickerAvatar.tsx`) shows the company's
 logo **mark** — Google's "G", not the "Google" wordmark — when one is stored, and the ticker
-monogram otherwise. Positions and Dividends pass a `securityId`; Activity rows carry none and
-keep the monogram.
+monogram otherwise. Positions, Dividends and Activity pass a `securityId` (`/api/portfolio/activity`
+rows carry `security_id`, null for a cash flow).
 
 ## The privacy decision (owner, 2026-10-17)
 

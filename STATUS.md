@@ -24,7 +24,7 @@ docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one w
 
 - **Holding logos (#12): look at them.** Every held ISIN has a logo (2026-10-17): 33 from
   logo.dev, the two Swisscanto pillar 3a funds imported by hand (`manual`, logo.dev's
-  `swisscanto.com` mark). Look at Positions and Dividends — the avatar styling (white circle,
+  `swisscanto.com` mark). Look at Positions, Dividends and Activity — the avatar styling (white circle,
   hairline ring) was never seen with real logos.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**

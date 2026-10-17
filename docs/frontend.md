@@ -500,7 +500,7 @@ text. What that settled, so the next change keeps it:
   hashed from the ticker. Logos since 2026-10-17 at the owner's request, reversing "never a
   fetched logo": logo.dev learns the held ISINs (trade-off accepted), but the server fetches and
   stores them, so the browser loads them from `/api/logos` and the CSP stays `img-src 'self'`.
-  Pass `securityId` to get the logo (Positions and Dividends do; Activity rows have none). No
+  Pass `securityId` to get the logo (Positions, Dividends and Activity do; a cash-flow row has none). No
   attribution or source text on screen. Fetching, the manual import and the routes:
   [logos.md](logos.md).
 - **No definitions on screen**, which removed the `DataTable` glossary popover; a column `hint` is

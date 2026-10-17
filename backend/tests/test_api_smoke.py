@@ -673,6 +673,11 @@ def test_the_shapes_that_broke_production_serialize(client):
     # The fixture's SELL carries IBKR's own realized P&L through to the row.
     sell = next(r for r in act["items"] if r["ib_key"] == "T1")
     assert sell["realized_pnl_base"] is not None
+    # The holding's id rides on every security row, for the client's logo; a cash flow
+    # has none.
+    assert sell["security_id"] == 3
+    assert deposit["security_id"] is None
+    assert all(r["security_id"] is not None for r in act["items"] if r["kind"] == "dividend")
 
     # The ledger is era-spliced like every reader that computes a figure. Without this
     # it listed the same dividend twice — the yfinance estimate under its ex-date and the

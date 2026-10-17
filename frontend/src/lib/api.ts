@@ -1258,6 +1258,8 @@ export interface ActivityRow {
   /** BUY/SELL, DEPOSITWITHDRAW/TRANSFER_IN, FORWARDSPLIT, ibkr/yfinance_estimate. */
   subtype: string;
   symbol: string | null;
+  /** The holding, for its logo; null for a cash flow. */
+  security_id: number | null;
   description: string;
   quantity: number | null;
   price: number | null;
