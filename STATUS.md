@@ -12,7 +12,9 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#12 all shipped the same night; no issue is open.
+#2–#12 all shipped the same night; no issue is open. A fintech UI pass is landing in waves:
+the design foundation (tokens, chart palette, tab icons, KPI icon/delta/sparkline) is on `main`
+(docs/frontend.md *Design foundation*); the per-tab adoption follows.
 
 ---
 
@@ -73,6 +75,10 @@ docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one w
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **The design foundation in a real browser** (2026-10-17; screenshots from a routed preview
+  only): the tab pills scroll cleanly on a phone, the sticky strip's shadow appears on scroll,
+  both themes.
 
 - **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
