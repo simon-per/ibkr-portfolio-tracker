@@ -15,7 +15,8 @@ by a new route.
 
 No network: fetch and parse are injected, and the identity providers are patched out.
 """
-from datetime import date, timedelta
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import List
 
@@ -29,6 +30,7 @@ import app.models  # noqa: F401
 from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.repositories import etf_basket_repository as basket_repo_mod
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.services import etf_basket_refresh as refresh_mod
 from app.services.etf_basket_parsers import ConstituentRow, ParsedBasket
@@ -40,7 +42,12 @@ from app.services.etf_basket_refresh import (
     stale_basket_verdicts,
 )
 from app.services.identity_service import IdentityService
-from app.services.lookthrough_service import LookthroughService, stale_after_days
+from app.services.lookthrough_service import (
+    ADAPTER_FETCH_DAYS,
+    LookthroughService,
+    fetch_after_days,
+    stale_after_days,
+)
 from app.services.scheduler_service import SchedulerService
 
 # Real registry entries, because the point is the registry's own rules.
@@ -189,15 +196,186 @@ async def test_a_stale_fetchable_basket_is_refetched_and_replaced(db):
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_basket_is_left_alone(db):
+async def test_a_daily_basket_is_fetched_long_before_it_warns(db):
+    """
+    GitHub #8: one threshold meant "fetch" and "warn" at once, so a daily feed was fetched
+    only at eight days old — weekly, and only after the warning had fired. Two days old is
+    a fetch now, and still nothing anyone is told about.
+    """
     await _hold(db, 1, IWDA, "IWDA")
     await _basket(db, IWDA, "blackrock", age_days=2)
+    assert await SchedulerService().find_stale_etf_baskets(db, as_of=TODAY) == []
+    fetcher = _Fetcher()
+
+    result = await _run(db, fetcher)
+
+    assert fetcher.calls == [IWDA]
+    assert result["due"] == ["IWDA"] and result["stale"] == []
+    assert [r["symbol"] for r in result["refreshed"]] == ["IWDA"]
+
+
+@pytest.mark.asyncio
+async def test_a_basket_dated_today_is_left_alone(db):
+    await _hold(db, 1, IWDA, "IWDA")
+    await _basket(db, IWDA, "blackrock", age_days=0)
     fetcher = _Fetcher()
 
     result = await _run(db, fetcher)
 
     assert fetcher.calls == []
-    assert result["refreshed"] == [] and result["stale"] == []
+    assert result["refreshed"] == [] and result["due"] == [] and result["stale"] == []
+
+
+@pytest.mark.parametrize("adapter", sorted(ADAPTER_FETCH_DAYS))
+def test_every_adapter_is_fetched_before_it_warns(adapter):
+    """Fetch-after at or past warn-after would put the always-present warning back."""
+    after, every = fetch_after_days(adapter)
+    assert after + every <= stale_after_days(adapter), (
+        f"{adapter}: a stalled basket would warn before the refresh had asked again"
+    )
+
+
+# ── Each fund is asked at most once per interval, whatever the answer ───────────────
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """The repository's stamp clock, set to the evening each `_evening` runs on."""
+    state = {"now": datetime.combine(TODAY, time(16, 0))}
+    monkeypatch.setattr(basket_repo_mod, "utcnow", lambda: state["now"])
+    return state
+
+
+async def _evening(db, clock, day: date, fetcher, parser):
+    clock["now"] = datetime.combine(day, time(16, 0))
+    return await _run(db, fetcher, parser=parser, as_of=day)
+
+
+async def _holding_ids(db, isin):
+    return [h.id for h in (await EtfBasketRepository(db).get_holdings([isin]))[isin]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failed", "refused", "unchanged"])
+async def test_a_fund_asked_today_is_not_asked_again_until_its_interval(db, clock, outcome):
+    await _hold(db, 1, IWDA, "IWDA")
+    old = 3
+    await _basket(db, IWDA, "blackrock", age_days=old)
+    if outcome == "unchanged":
+        # Store the file once, so the next fetch of it is the identical file.
+        await _evening(db, clock, TODAY - timedelta(days=1), _Fetcher(),
+                       _parser(as_of=TODAY - timedelta(days=2)))
+    fetcher = _Fetcher(fail=[IWDA] if outcome == "failed" else [])
+    parser = _parser(as_of=TODAY - timedelta(days=old + 10 if outcome == "refused" else 2))
+
+    first = await _evening(db, clock, TODAY, fetcher, parser)
+    assert fetcher.calls == [IWDA]
+    assert len(first[outcome]) == 1
+
+    again = await _evening(db, clock, TODAY, fetcher, parser)
+    assert fetcher.calls == [IWDA], "asked twice inside one fetch interval"
+    assert again["due"] == []
+
+    await _evening(db, clock, TODAY + timedelta(days=1), fetcher, parser)
+    assert fetcher.calls == [IWDA, IWDA], "the next interval must ask again"
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_basket_is_not_rewritten_and_starts_no_identity_pass(
+    db, clock, monkeypatch
+):
+    constituents = []
+
+    async def _constituents(self, limit=None):
+        constituents.append(limit)
+        return {"holdings_updated": 0}
+
+    monkeypatch.setattr(IdentityService, "resolve_constituent_identifiers", _constituents)
+    monkeypatch.setattr(refresh_mod, "new_client", _Client)
+    monkeypatch.setattr(refresh_mod, "fetch_bodies", _Fetcher())
+    await _hold(db, 1, IWDA, "IWDA")
+    await _basket(db, IWDA, "blackrock", age_days=3)
+    file_date = TODAY - timedelta(days=2)
+    monkeypatch.setattr(refresh_mod, "parse_bodies", _parser(as_of=file_date))
+
+    clock["now"] = datetime.combine(TODAY, time(16, 0))
+    first = await refresh_lookthrough_data(db, TODAY)
+    assert [r["symbol"] for r in first["baskets"]["refreshed"]] == ["IWDA"]
+    assert constituents == [SCHEDULED_IDENTITY_LIMIT]
+    ids = await _holding_ids(db, IWDA)
+
+    # The same file the next evening: nothing rewritten, no CINS/SEDOL pass.
+    clock["now"] = datetime.combine(TODAY + timedelta(days=1), time(16, 0))
+    second = await refresh_lookthrough_data(db, TODAY + timedelta(days=1))
+    assert second["baskets"]["refreshed"] == []
+    assert [r["symbol"] for r in second["baskets"]["unchanged"]] == ["IWDA"]
+    assert await _holding_ids(db, IWDA) == ids, "an identical basket was rewritten"
+    assert constituents == [SCHEDULED_IDENTITY_LIMIT]
+    assert await _as_of(db, IWDA) == file_date
+
+    # A changed file is still a replacement, and still starts the pass.
+    monkeypatch.setattr(refresh_mod, "parse_bodies", _parser(as_of=file_date, rows=3))
+    clock["now"] = datetime.combine(TODAY + timedelta(days=2), time(16, 0))
+    third = await refresh_lookthrough_data(db, TODAY + timedelta(days=2))
+    assert [r["symbol"] for r in third["baskets"]["refreshed"]] == ["IWDA"]
+    assert await _holding_ids(db, IWDA) != ids
+    assert constituents == [SCHEDULED_IDENTITY_LIMIT, SCHEDULED_IDENTITY_LIMIT]
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_file_moves_only_an_issuer_stated_as_of(db):
+    """A stood-in date (DWS, clamped Defiance) stays put on an unchanged file: erring older."""
+    repo = EtfBasketRepository(db)
+    first = _parsed(IWDA, "blackrock", as_of=TODAY - timedelta(days=3))
+    await repo.replace_basket(first)
+
+    stood_in = _parsed(IWDA, "blackrock", as_of=TODAY)
+    stood_in.as_of_is_issuer_stated = False
+    assert (await repo.replace_basket(stood_in)).unchanged
+    assert await _as_of(db, IWDA) == TODAY - timedelta(days=3)
+
+    stated = _parsed(IWDA, "blackrock", as_of=TODAY - timedelta(days=1))
+    assert (await repo.replace_basket(stated)).unchanged
+    assert await _as_of(db, IWDA) == TODAY - timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_requests_per_evening_for_a_daily_feed_and_a_stalled_month_end_fund(db, clock):
+    """
+    The budget the fix buys, measured through the refresh itself. A daily feed whose file
+    changes every day is asked once an evening (it was asked once a week, at eight days
+    old). VT stuck on one month-end file past its fetch-after is asked every third evening
+    and rewritten once (it was asked and rewritten every evening once past 75 days).
+    """
+    await _hold(db, 1, IWDA, "IWDA")
+    await _hold(db, 2, VT, "VT")
+    await _basket(db, IWDA, "blackrock", age_days=2)
+    vt_after, _ = fetch_after_days("vanguard_us")
+    vt_as_of = TODAY - timedelta(days=vt_after + 1)
+    await _basket(db, VT, "vanguard_us", age_days=vt_after + 1)
+
+    fetcher = _Fetcher()
+
+    def parse(fund_isin, bodies, adapter, symbol, fetched_on):
+        if fund_isin == VT:
+            return _parsed(VT, adapter, as_of=vt_as_of)
+        # A new file each day, dated the day before.
+        basket = _parsed(fund_isin, adapter, as_of=fetched_on - timedelta(days=1))
+        basket.rows[0] = replace(basket.rows[0], weight_pct=Decimal(fetched_on.day))
+        return basket
+
+    replaced = {IWDA: 0, VT: 0}
+    for n in range(14):
+        result = await _evening(db, clock, TODAY + timedelta(days=n), fetcher, parse)
+        for r in result["refreshed"]:
+            replaced[r["fund_isin"]] += 1
+        assert result["failed"] == [] and result["refused"] == []
+        assert result["stale"] == []
+
+    assert fetcher.calls.count(IWDA) == 14
+    assert replaced[IWDA] == 14
+    assert fetcher.calls.count(VT) == 5      # evenings 0, 3, 6, 9, 12
+    assert replaced[VT] == 1                 # the stored rows predate the fingerprint
 
 
 @pytest.mark.asyncio
@@ -384,15 +562,15 @@ async def test_identities_are_resolved_after_a_refresh_and_bounded(db, monkeypat
     monkeypatch.setattr(refresh_mod, "fetch_bodies", _Fetcher())
     monkeypatch.setattr(refresh_mod, "parse_bodies", _parser())
 
-    # Nothing stale: the ISIN pass still runs, bounded; the CINS/SEDOL pass does not.
+    # Nothing due: the ISIN pass still runs, bounded; the CINS/SEDOL pass does not.
     await _hold(db, 1, IWDA, "IWDA")
-    await _basket(db, IWDA, "blackrock", age_days=1)
+    await _basket(db, IWDA, "blackrock", age_days=0)
     await refresh_lookthrough_data(db, TODAY)
     assert calls["resolve"] == [SCHEDULED_IDENTITY_LIMIT]
     assert calls["constituents"] == []
 
-    # A basket was replaced: the CINS/SEDOL pass runs, because a re-import clears them —
-    # and it runs *bounded*, with the same limit as the ISIN pass.
+    # A basket was replaced: the CINS/SEDOL pass runs, because a replacement is the only
+    # thing that brings new identifiers — and it runs *bounded*, with the ISIN pass's limit.
     await db.execute(
         EtfBasket.__table__.update().values(as_of_date=TODAY - timedelta(days=40))
     )

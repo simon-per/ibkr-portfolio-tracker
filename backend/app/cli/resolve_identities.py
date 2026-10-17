@@ -28,9 +28,12 @@ asked as `ID_CUSIP` a CINS returns zero rows, silently.
 
 Re-running is cheap and safe. A positive answer is cached forever (LEIs do not change) and a
 definitive "no record" is cached too, so a second run asks about nothing. A *failed*
-request is not cached, so it is retried. The one exception is a constituent identifier that
-resolves to nothing, which is re-asked — a hundred-odd identifiers behind two small funds, two
-requests with a key.
+request is not cached, so it is retried. A constituent identifier that resolves to nothing is
+re-asked after `IDENTIFIER_MISS_RECHECK_DAYS`.
+
+**Every answered batch is committed as it lands**, so a run killed part-way through GLEIF —
+up to ~45 minutes at one ISIN per ~1.1 s — keeps what it learned, and the next run asks only
+about the rest.
 
 **Set `OPENFIGI_API_KEY` before asking about constituents.** It is free and self-service, and
 takes the batch from 10 identifiers per request to 100.
@@ -51,7 +54,6 @@ from typing import Optional
 from app.clock import utcnow
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.identity_service import GLEIF_MIN_INTERVAL_S, IdentityService, held_isins
 from app.services.lookthrough_service import LookthroughService
@@ -96,7 +98,7 @@ async def resolve_identities(
             # Fund constituents whose issuer published a CINS or a SEDOL instead of an ISIN.
             # A separate question with a separate answer, so it is counted separately.
             pending_ids = (
-                await EtfBasketRepository(db).unresolved_identifiers() if constituents else []
+                await service.pending_constituent_identifiers() if constituents else []
             )
             asking_lei = min(len(pending_lei), limit) if limit else len(pending_lei)
             print(
@@ -129,10 +131,12 @@ async def resolve_identities(
                 print("Every held ISIN has already been asked about. Nothing to do.")
                 return 0
 
-            summary = await service.resolve(targets, limit=limit)
+            summary = await service.resolve(targets, limit=limit, on_batch=db.commit)
             if constituents:
                 summary.update(
-                    await service.resolve_constituent_identifiers(limit=limit)
+                    await service.resolve_constituent_identifiers(
+                        limit=limit, on_batch=db.commit
+                    )
                 )
             await db.commit()
 

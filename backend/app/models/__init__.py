@@ -28,7 +28,7 @@ from app.models.sync_run import SyncRun
 # These two were missing, so `import app.models` left Base.metadata incomplete — Alembic
 # discovery and any create_all() silently skipped them.
 from app.models.ticker_mapping import TickerMapping
-from app.models.etf_basket import EtfBasket, EtfHolding
+from app.models.etf_basket import EtfBasket, EtfHolding, ConstituentIdentifierMiss
 from app.models.isin_identity import IsinIdentity
 from app.models.security_logo import SecurityLogo
 # The crypto book (docs/crypto.md): its own tables, read by nothing on the stock side.
@@ -61,6 +61,7 @@ __all__ = [
     "TickerMapping",
     "EtfBasket",
     "EtfHolding",
+    "ConstituentIdentifierMiss",
     "IsinIdentity",
     "SecurityLogo",
     "CryptoSnapshot",

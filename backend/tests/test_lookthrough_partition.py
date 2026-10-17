@@ -583,6 +583,25 @@ async def test_a_stale_basket_is_served_but_warned_about(session):
 
 
 @pytest.mark.asyncio
+async def test_a_daily_basket_due_a_fetch_is_not_badged(session):
+    """
+    The evening refresh asks a daily issuer once a basket is a day old (fetch-after); the badge
+    waits for warn-after. Badging at fetch-after would be the always-present warning again.
+    """
+    session.add_all([
+        _security(4, "XNAS", XNAS_ISIN, "IBIS2"), _lot(4, "10", "900"), _price(4, "100")
+    ])
+    stored = _basket(XNAS_ISIN, "100", as_of=TODAY - timedelta(days=2))
+    stored.adapter = "blackrock"
+    session.add_all([stored, _holding(XNAS_ISIN, 1, NVIDIA_ISIN, "NVIDIA CORP", "100")])
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough()
+    assert _fund(report, "XNAS")["stale"] is False
+    assert not any("days old" in w for w in report["warnings"])
+
+
+@pytest.mark.asyncio
 async def test_a_basket_whose_issuer_publishes_no_date_says_so(session):
     session.add_all([
         _security(4, "XNAS", XNAS_ISIN, "IBIS2"), _lot(4, "10", "900"), _price(4, "100")

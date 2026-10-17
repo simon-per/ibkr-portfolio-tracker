@@ -16,7 +16,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean, Date, DateTime, Integer, Numeric, String, UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -78,7 +80,17 @@ class EtfBasket(Base):
         Boolean, nullable=False, default=True
     )
 
+    # When the stored rows were written.
     fetched_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+    # When the issuer was last asked for this basket, whatever came back — new, unchanged,
+    # refused or an error. The evening refresh asks a fund at most once per its fetch
+    # interval (`lookthrough_service.ADAPTER_FETCH_DAYS`) off this stamp, so an as-of that
+    # stalls costs one request per interval rather than one per evening. NULL: never asked
+    # since the column arrived, which reads as due.
+    checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # SHA-256 over what the parse produced (`basket_fingerprint`), so a re-fetch of identical
+    # content is recognised and nothing is rewritten. NULL on a basket stored before it.
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -132,9 +144,10 @@ class EtfHolding(Base):
     # `constituent_isin` to make the fold work would put an invented identifier in the column
     # every other reader trusts, which is the SBI failure in a new place.
     #
-    # Wiped by a re-import along with everything else on the row, which is correct: it is
-    # re-derivable from two OpenFIGI requests, and a cached identity outliving the basket row
-    # it described is the harder thing to reason about.
+    # **Carried over by a re-import** (`replace_basket` reads `resolved_figis` first): a CINS
+    # or SEDOL names one security for good, so OpenFIGI's earlier answer still holds. Clearing
+    # it on every replace undid the Invesco funds' resolutions faster than the bounded evening
+    # pass restored them (2026-09-12 → 2026-10-15).
     constituent_share_class_figi: Mapped[Optional[str]] = mapped_column(
         String(12), nullable=True
     )
@@ -179,3 +192,20 @@ class EtfHolding(Base):
             f"<EtfHolding {self.fund_isin}#{self.line_no} "
             f"{self.constituent_isin or self.constituent_ticker} {self.weight_pct}%>"
         )
+
+
+class ConstituentIdentifierMiss(Base):
+    """
+    A CINS or SEDOL that OpenFIGI answered with nothing, and when.
+
+    `isin_identities` remembers a definitive "no" for an ISIN; this is the same split for the
+    identifiers on `etf_holdings`, which until 2026-10-17 were re-asked on every pass
+    (GitHub #8). `resolve_constituent_identifiers` skips one asked within
+    `IDENTIFIER_MISS_RECHECK_DAYS` and deletes the row once it resolves. Misses only: a found
+    FIGI lives on the holdings rows, and a second copy here would be one more place to drift.
+    A failed request writes nothing, so it is asked again.
+    """
+    __tablename__ = "constituent_identifier_misses"
+
+    identifier: Mapped[str] = mapped_column(String(20), primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

@@ -14,15 +14,22 @@ stays pure DB: a public GET that reaches seven third-party sites on a cache miss
 denial-of-service vector aimed at somebody else's servers, and entering `SYNC_PIPELINE`
 from a read would bump the shared last-start clock every other route's cooldown reads.
 Once a day, from the job that already holds the gate, is the right cadence for issuers
-that publish once a day.
+that publish once a day — and since 2026-10-17 it really is daily. Until then one threshold
+meant both "go fetch" and "warn", so a daily feed was fetched only once it was a week old,
+and the stale-basket warning sat on every refresh day by construction (GitHub #8).
 
-Three rules carry it:
+Four rules carry it:
 
 - **The refresh consumes the detector's verdict, never a second definition of "stale".**
-  `stale_basket_verdicts` is the one predicate; `find_stale_etf_baskets` formats it into
-  warnings and this module fetches from it. Two implementations of "which basket is
-  stale" would be CLAUDE.md's dominant failure mode, and the detector had already been
-  wrong once about which basket a proxied fund reads.
+  `stale_basket_verdicts` is the one predicate and carries two flags: `due` (fetch-after,
+  `lookthrough_service.fetch_after_days`) is what this module fetches, `stale` (warn-after,
+  `stale_after_days`) is what `find_stale_etf_baskets` formats into warnings. Two
+  implementations of "which basket is stale" would be CLAUDE.md's dominant failure mode,
+  and the detector had already been wrong once about which basket a proxied fund reads.
+- **Every fund is asked at most once per its fetch interval**, whatever the answer:
+  `etf_baskets.checked_at` is stamped on a new, an unchanged, a refused and a failed fetch
+  alike, so an as-of that stalls costs one request per interval rather than one per evening.
+  An unchanged file rewrites nothing and is not a replacement (`replace_basket`).
 - **Every refusal the CLI makes, this makes.** `replace_basket` still refuses a row-count
   collapse and a backwards as-of, a parse failure still stores nothing, and the previous
   basket stays in use either way. A scheduled path that could half-apply what the CLI
@@ -31,10 +38,10 @@ Three rules carry it:
   changes a URL takes its own fund stale and nothing else; the IBKR and Yahoo halves of
   the job never see it.
 
-Identity follows the baskets, in two bounded pieces. A re-import clears the CINS/SEDOL
-resolutions on purpose (see `EtfBasketRepository.replace_basket`), so the OpenFIGI pass
-that restores them runs whenever a basket was replaced — that is the second half of every
-GRID or QTUM import, and forgetting it is what the old warning text spent a clause on. And a
+Identity follows the baskets, in two bounded pieces. A replacement carries over every
+CINS/SEDOL already resolved (`EtfBasketRepository.replace_basket`), so the OpenFIGI pass
+runs only when a basket was actually replaced — the new identifiers it brought are the only
+new work — and skips the misses it already knows (`constituent_identifier_misses`). And a
 bounded ISIN pass (`SCHEDULED_IDENTITY_LIMIT` per evening) walks the held securities and
 the material constituents that have never been asked about: GLEIF has no batch form and
 costs ~1.1 s per ISIN, so the bound keeps the step to under a minute and the set converges
@@ -66,7 +73,11 @@ from app.services.etf_basket_fetch import (
     parse_bodies,
 )
 from app.services.identity_service import IdentityService, held_isins
-from app.services.lookthrough_service import LookthroughService, stale_after_days
+from app.services.lookthrough_service import (
+    LookthroughService,
+    fetch_after_days,
+    stale_after_days,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +90,17 @@ SCHEDULED_IDENTITY_LIMIT = 25
 @dataclass(frozen=True)
 class StaleBasket:
     """
-    One held fund whose basket is missing or older than its issuer's cadence.
+    One held fund whose basket is missing, due a fetch, or older than its issuer's cadence.
 
     `source_isin` is the basket the fund actually *reads* — itself, or the fund it borrows
     from (`FundSource.basket_proxy_isin`) — and `adapter` is the declared route for that
     source, which is what a refresh would fetch with. `basket_adapter` is the adapter the
     stored basket came from, which is what the staleness threshold was judged against;
     the two differ for a basket somebody imported by hand under `--adapter manual`.
+
+    `due` means the refresh should ask the issuer now; `stale` means the age is worth a
+    warning. A missing basket is both. A daily feed is due long before it is stale, which
+    is the point.
     """
     held_isin: str
     name: str
@@ -95,6 +110,8 @@ class StaleBasket:
     as_of_date: Optional[date]
     age_days: Optional[int]
     limit_days: Optional[int]
+    due: bool = True
+    stale: bool = True
 
     @property
     def missing(self) -> bool:
@@ -142,11 +159,13 @@ async def stale_basket_verdicts(
     db: AsyncSession, as_of: Optional[date] = None
 ) -> List[StaleBasket]:
     """
-    Held funds whose constituent basket is missing or older than its issuer's cadence.
+    Held funds whose constituent basket is missing, due a fetch, or past its warn threshold.
 
     The one predicate behind both `SchedulerService.find_stale_etf_baskets` (which formats
-    these into `warnings[]`) and `refresh_stale_baskets` (which fetches from them). Four
-    rules, each of which would be wrong the other way:
+    the `stale` ones into `warnings[]`) and `refresh_stale_baskets` (which fetches the `due`
+    ones). Due is `lookthrough_service.fetch_after_days`: older than the adapter's
+    fetch-after, and not asked within its interval (`checked_at`). Four rules, each of which
+    would be wrong the other way:
 
     - **Held funds only.** A basket for a fund nobody holds moves no figure.
     - **The basket a fund actually reads comes from
@@ -195,20 +214,39 @@ async def stale_basket_verdicts(
 
         limit = stale_after_days(basket.adapter)
         age = (as_of - basket.as_of_date).days
-        if age <= limit:
-            continue
         source_isin = (basket.fund_isin or isin).strip().upper()
         declared = source_for_fund_isin(source_isin)
+        route = declared.adapter if declared else None
+        # Judged by the route, since that is what a fetch would ask: a hand-imported file
+        # for a fetchable fund is still refreshed at its issuer's cadence.
+        after, every = fetch_after_days(route or basket.adapter)
+        asked_recently = (
+            basket.checked_at is not None
+            and (as_of - basket.checked_at.date()).days < every
+        )
+        due = age > after and not asked_recently
+        stale = age > limit
+        if not (due or stale):
+            continue
         verdicts.append(StaleBasket(
-            held_isin=isin, name=name, source_isin=source_isin,
-            adapter=declared.adapter if declared else None,
+            held_isin=isin, name=name, source_isin=source_isin, adapter=route,
             basket_adapter=basket.adapter, as_of_date=basket.as_of_date,
-            age_days=age, limit_days=limit,
+            age_days=age, limit_days=limit, due=due, stale=stale,
         ))
     return verdicts
 
 
 FetchFn = Callable[[object, str, FundSource], Awaitable[Sequence[bytes]]]
+
+
+async def _stamp_attempt(db: AsyncSession, repo: EtfBasketRepository, fund_isin: str) -> None:
+    """Record a failed or refused attempt so the fund waits out its interval; never raises."""
+    try:
+        await repo.mark_checked(fund_isin)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"Could not stamp the basket attempt for {fund_isin}: {e}")
 
 
 async def refresh_stale_baskets(
@@ -220,12 +258,14 @@ async def refresh_stale_baskets(
     parse=None,
 ) -> Dict:
     """
-    Fetch, parse and store a fresh basket for every stale verdict that has a route.
+    Fetch, parse and store a fresh basket for every due verdict that has a route.
 
-    One fetch per *source* basket: VWCE and VT stale together is one Vanguard walk, and the
+    One fetch per *source* basket: VWCE and VT due together is one Vanguard walk, and the
     result names every held fund it served. The previous basket survives every failure
     mode — a fetch error, a parse refusal, or `replace_basket` declining a collapse — and
-    each is reported as a warning against the fund rather than failing the pass. The
+    each is reported as a warning against the fund rather than failing the pass. Every
+    attempt stamps `checked_at`, and a file identical to the stored one lands in
+    `unchanged`, not `refreshed`, so it does not trigger the CINS/SEDOL pass. The
     `fetch`/`parse`/`client_factory` seams exist for tests; production callers pass nothing.
     """
     # Resolved at call time rather than as default values, so a test can patch the module
@@ -238,18 +278,22 @@ async def refresh_stale_baskets(
     verdicts = await stale_basket_verdicts(db, as_of)
     result: Dict = {
         "status": "success",
-        "stale": sorted(v.name for v in verdicts),
+        "due": sorted(v.name for v in verdicts if v.due and v.fetchable),
+        "stale": sorted(v.name for v in verdicts if v.stale),
         "refreshed": [],
+        "unchanged": [],
         "refused": [],
         "failed": [],
-        "needs_hand_download": sorted(v.name for v in verdicts if not v.fetchable),
+        "needs_hand_download": sorted(
+            v.name for v in verdicts if v.stale and not v.fetchable
+        ),
         "warnings": [],
     }
 
     # Group by the basket to fetch, keeping the names of the held funds that read it.
     targets: Dict[str, List[str]] = {}
     for v in verdicts:
-        if v.fetchable:
+        if v.due and v.fetchable:
             targets.setdefault(v.source_isin, []).append(v.name)
     if not targets:
         return result
@@ -269,6 +313,7 @@ async def refresh_stale_baskets(
                 await db.commit()
             except BasketReplaceRefused as e:
                 await db.rollback()
+                await _stamp_attempt(db, repo, source_isin)
                 result["refused"].append({"symbol": symbol, "for": sorted(served), "reason": str(e)})
                 result["warnings"].append(
                     f"{symbol}: the freshly fetched basket was refused and the previous one is "
@@ -277,6 +322,7 @@ async def refresh_stale_baskets(
                 continue
             except Exception as e:
                 await db.rollback()
+                await _stamp_attempt(db, repo, source_isin)
                 result["failed"].append({
                     "symbol": symbol, "for": sorted(served),
                     "error": f"{type(e).__name__}: {e}",
@@ -287,6 +333,16 @@ async def refresh_stale_baskets(
                     f"`python -m app.cli.fetch_etf_baskets {symbol} --out /tmp/baskets` by hand "
                     f"— the saved body is what makes the failure debuggable"
                 )
+                continue
+
+            if stored.unchanged:
+                result["unchanged"].append({
+                    "symbol": symbol, "for": sorted(served),
+                    "as_of_date": (
+                        stored.previous_as_of.isoformat() if stored.previous_as_of else None
+                    ),
+                })
+                logger.info(f"Basket unchanged: {symbol}; nothing rewritten")
                 continue
 
             result["refreshed"].append({
@@ -315,9 +371,10 @@ async def resolve_pending_identities(
     The two identity passes the look-through needs, bounded for a scheduled run.
 
     The CINS/SEDOL pass (`resolve_constituent_identifiers`) runs only after a basket was
-    replaced, because that is the only event that creates work for it — a replace carries
-    over every identifier already resolved, so what is pending is the new ones and the
-    misses — and it is a handful of OpenFIGI batches. The ISIN pass
+    replaced — an unchanged re-fetch is not one — because that is the only event that
+    creates work for it: a replace carries over every identifier already resolved and a
+    known miss waits out `IDENTIFIER_MISS_RECHECK_DAYS`, so what is pending is the new
+    ones, and it is a handful of OpenFIGI batches. The ISIN pass
     runs every evening but asks each provider about at most `limit` ISINs, so a newly bought
     security folds with its fund exposure within a day and a rebalance's worth of new
     constituents converges over a few.
@@ -330,10 +387,9 @@ async def resolve_pending_identities(
 
     summary = await service.resolve(targets, limit=limit)
     if after_refresh:
-        # Bounded like the ISIN pass. This method does not cache a miss, which its
-        # docstring accepts only for a hand-run CLI — scheduled and unbounded, the
-        # permanently unresolvable identifiers were re-asked of OpenFIGI every evening
-        # a basket was replaced, growing with each new fund.
+        # Bounded like the ISIN pass. It ran unbounded and without a miss cache for four
+        # days in 2026-09, and every permanently unresolvable identifier was re-asked of
+        # OpenFIGI on every evening a basket was replaced.
         summary.update(await service.resolve_constituent_identifiers(limit=limit))
     await db.commit()
     return summary

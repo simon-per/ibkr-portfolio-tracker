@@ -10,9 +10,10 @@ Every OpenFIGI fact here was measured against the live API on 2026-08-16 rather 
 `ID_CINS G29183103` returns 104 venue rows sharing shareClassFIGI `BBG001S5QZ45`, the same
 value `ID_ISIN IE00B8KQN827` returns; the identical job asked as `ID_CUSIP` returns **zero**.
 
-Offline: the network is never reached — `_resolve_openfigi`'s HTTP half is not exercised here.
+Offline: the network is never reached. The request loops run against a fake `httpx` where a
+test needs them (`_FakeProviders`).
 """
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -147,8 +148,8 @@ async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(ses
     """
     Until 2026-10-15 a replace dropped the FIGI, on the grounds that it was re-derivable from
     one request. That stopped holding once the evening pass was capped at
-    `SCHEDULED_IDENTITY_LIMIT` while the Invesco baskets are replaced every evening: each night
-    undid more than the pass restored, and ASML stood as three companies. A CINS names one
+    `SCHEDULED_IDENTITY_LIMIT` while the Invesco baskets were replaced on every refresh: each
+    replacement undid more than the pass restored, and ASML stood as three companies. A CINS names one
     security for good, so OpenFIGI's earlier answer is still the answer. A new identifier in
     the fresher basket is still pending, and the raw identifier is never dropped.
     """
@@ -309,3 +310,161 @@ async def test_nothing_pending_makes_no_request_and_says_so(session):
 
     assert summary["identifiers_pending"] == 0
     assert summary["holdings_updated"] == 0
+
+
+# --------------------------------------------------------------- remembering a miss
+#
+# The providers are faked at the module's `httpx`, so the request loop itself runs —
+# batching, positional alignment, what gets stamped — with nothing leaving the machine.
+
+ASML_CINS = "N07059210"
+
+
+class _Response:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeProviders:
+    """Stands in for `httpx.AsyncClient`: OpenFIGI by `idValue`, GLEIF by ISIN."""
+
+    def __init__(self, figis=None, leis=None, fail=()):
+        self.figis = figis or {}
+        self.leis = leis or {}
+        self.fail = set(fail)
+        self.asked = []
+
+    def AsyncClient(self, *a, **k):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, json):
+        values = [job["idValue"] for job in json]
+        self.asked.append(values)
+        if self.fail & set(values):
+            raise ConnectionError("openfigi unreachable")
+        return _Response([
+            {"data": [{"shareClassFIGI": self.figis[v]}]} if v in self.figis
+            else {"warning": "No identifier found."}
+            for v in values
+        ])
+
+    async def get(self, url, params):
+        isin = params["filter[isin]"]
+        self.asked.append(isin)
+        answer = self.leis.get(isin)
+        if isinstance(answer, BaseException):
+            raise answer
+        return _Response({"data": [{"id": answer}] if answer else []})
+
+
+@pytest.fixture
+def providers(monkeypatch):
+    from app.services import identity_service
+
+    fake = _FakeProviders()
+    monkeypatch.setattr(identity_service, "httpx", fake)
+    monkeypatch.setattr(identity_service, "OPENFIGI_MIN_INTERVAL_S", 0)
+    monkeypatch.setattr(identity_service, "GLEIF_MIN_INTERVAL_S", 0)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_a_known_miss_is_not_re_asked_until_the_recheck_interval(
+    session, providers, monkeypatch
+):
+    from app.services import identity_service
+    from app.services.identity_service import IDENTIFIER_MISS_RECHECK_DAYS
+
+    await EtfBasketRepository(session).replace_basket(basket([
+        row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
+        row(2, "ASML Holding NV", "40", identifier=ASML_CINS),
+    ]))
+    providers.figis = {EATON_CINS: EATON_FIGI}
+    service = IdentityService(session)
+
+    first = await service.resolve_constituent_identifiers()
+    assert providers.asked == [[EATON_CINS, ASML_CINS]]
+    assert first["identifiers_resolved"] == 1 and first["identifiers_not_found"] == 1
+
+    second = await service.resolve_constituent_identifiers()
+    assert providers.asked == [[EATON_CINS, ASML_CINS]], "a known miss was asked again"
+    assert second["identifiers_pending"] == 0
+    assert await service.pending_constituent_identifiers() == []
+
+    later = identity_service.utcnow() + timedelta(days=IDENTIFIER_MISS_RECHECK_DAYS + 1)
+    monkeypatch.setattr(identity_service, "utcnow", lambda: later)
+    providers.figis[ASML_CINS] = "BBG000C1HM48"
+    third = await service.resolve_constituent_identifiers()
+    assert providers.asked[-1] == [ASML_CINS]
+    assert third["identifiers_resolved"] == 1
+    assert await EtfBasketRepository(session).identifier_misses_since(datetime.min) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_request_is_not_remembered_as_a_miss(session, providers):
+    await EtfBasketRepository(session).replace_basket(basket([
+        row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
+    ]))
+    providers.fail = {ASML_CINS}
+    service = IdentityService(session)
+
+    summary = await service.resolve_constituent_identifiers()
+
+    assert summary["identifiers_errors"] == 1
+    assert await service.pending_constituent_identifiers() == [ASML_CINS]
+
+
+# ------------------------------------------------------- a killed CLI run keeps its work
+
+@pytest.mark.asyncio
+async def test_a_cli_run_killed_mid_gleif_keeps_every_answer_already_given(providers, monkeypatch):
+    """
+    GLEIF is one ISIN per ~1.1 s, so a full run is up to ~45 minutes, and it used to commit
+    once at the end: killed late, it re-asked everything next time. Each batch commits now.
+    """
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import create_async_engine as _engine
+
+    from app.cli import resolve_identities as cli
+    from app.models.isin_identity import IsinIdentity
+
+    apple, microsoft = "US0378331005", "US5949181045"
+    engine = _engine(
+        "sqlite+aiosqlite:///:memory:", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def _held(db, include_funds=False):
+        return [apple, microsoft]
+
+    monkeypatch.setattr(cli, "AsyncSessionLocal",
+                        lambda: AsyncSession(engine, expire_on_commit=False))
+    monkeypatch.setattr(cli, "held_isins", _held)
+    providers.figis = {apple: "BBG001S5N8V8", microsoft: "BBG001S5TD05"}
+    providers.leis = {apple: "HWUPKR0MPOU8FGXBT394", microsoft: asyncio.CancelledError()}
+
+    with pytest.raises(asyncio.CancelledError):
+        await cli.resolve_identities()
+
+    async with AsyncSession(engine) as db:
+        rows = {r.isin: r for r in (await db.execute(select(IsinIdentity))).scalars()}
+    await engine.dispose()
+
+    assert rows[apple].figi_checked_at and rows[microsoft].figi_checked_at
+    assert rows[apple].lei == "HWUPKR0MPOU8FGXBT394"
+    assert rows[microsoft].lei_checked_at is None, "the unanswered ISIN must stay unasked"

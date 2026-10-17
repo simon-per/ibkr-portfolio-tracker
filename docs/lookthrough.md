@@ -290,7 +290,8 @@ exactly as documented. A badge that can never clear is the always-present-Flex-b
 A future quarterly source (SEC N-PORT arrives 75–136 days old) needs its own entry rather than a
 raised default. One observation against the ~6-week figure: the **2026-09-30** as-of was already
 being served on **2026-10-17**, a 17-day lag. Recorded, not acted on — the 75-day threshold stays
-until more month-ends say the lag has really shortened. Staleness deliberately **does not reduce
+until more month-ends say the lag has really shortened. This is **warn-after** only; when the
+evening refresh asks again is a separate table (see *fetch-after* below). Staleness deliberately **does not reduce
 `coverage_pct`** — the percentage answers
 "how much is attributed", not "how current is it" — which is exactly why the age has to be surfaced
 on the card rather than only in the fund table.
@@ -303,9 +304,10 @@ keeps rediscovering. The data was always one keyless HTTP call away and `etf_bas
 cache; what was missing was the trigger. `app/services/etf_basket_refresh.py` is that trigger, hung
 off the 18:00 job as its last step, and four things about it are load-bearing:
 
-- **It fetches from the detector's verdict.** `stale_basket_verdicts` is the one predicate;
-  `find_stale_etf_baskets` formats it into `warnings[]` and the refresh fetches from it. The
-  detector's message now says the evening run will fix it and names the CLI only as the fallback.
+- **It fetches from the detector's verdict.** `stale_basket_verdicts` is the one predicate and
+  carries two flags: the refresh fetches the `due` ones and `find_stale_etf_baskets` formats the
+  `stale` ones into `warnings[]`. One predicate, two thresholds — see *Fetch-after is not
+  warn-after* below.
 - **It refuses everything the CLI refuses**, through the same functions: the fetchers and the parser
   dispatch moved to `app/services/etf_basket_fetch.py` and both the CLIs and the job call them. A
   fetch error, a parse failure, a row-count collapse or a backwards as-of each leave the previous
@@ -315,16 +317,18 @@ off the 18:00 job as its last step, and four things about it are load-bearing:
   reached seven third-party sites on a cache miss would be a denial-of-service vector aimed at
   somebody else's servers, and entering `SYNC_PIPELINE` from a read would bump the clock every
   other route's cooldown reads. Once a day, from the job that already holds the gate, matches
-  issuers that publish once a day.
+  issuers that publish once a day — and since 2026-10-17 a daily feed really is asked daily.
 - **Identity follows the baskets, bounded — both passes.** The OpenFIGI pass for CINS/SEDOL rows
-  runs whenever a basket was replaced, **with the same `SCHEDULED_IDENTITY_LIMIT`** (since
-  2026-09-12: it ran unbounded for four days, and `resolve_constituent_identifiers` does not cache a
-  miss, so every permanently unresolvable identifier was re-asked of OpenFIGI on every evening a
-  basket changed — the docstring's "acceptable only as a manual CLI step" precondition had quietly
-  stopped holding).
+  runs whenever a basket was replaced (an unchanged re-fetch is not a replacement), **with the
+  same `SCHEDULED_IDENTITY_LIMIT`** (since 2026-09-12: it ran unbounded for four days and every
+  permanently unresolvable identifier was re-asked of OpenFIGI on every evening a basket changed).
+  **A miss is remembered** since 2026-10-17: `constituent_identifier_misses` stamps OpenFIGI's
+  "no match" and the pass skips it for `IDENTIFIER_MISS_RECHECK_DAYS` (30) — the same
+  `*_checked_at` split `isin_identities` makes. A failed request stamps nothing; a later hit
+  deletes the row. Misses only: a found FIGI lives on the holdings, not in a second copy.
 
   **The cap and the reset together starved it, 2026-09-12 → 2026-10-15.** `replace_basket` cleared
-  every FIGI ("re-derivable from one request"), the Invesco feeds are replaced every evening, and the
+  every FIGI ("re-derivable from one request"), the Invesco feeds were replaced on every refresh, and the
   capped pass asked `pending[:25]` of a sorted list — the same alphabetically-first identifiers each
   night, everything after them never. ASML's CINS `N07059210`, which OpenFIGI resolves at once,
   stayed unasked in SOXQ and QQQM, so ASML read as three companies; NXP, Tower, Nebius, Prysmian and
@@ -337,9 +341,37 @@ off the 18:00 job as its last step, and four things about it are load-bearing:
   its fund exposure within a day and a rebalance converges over a few. `unresolved_value_eur` still
   shows what is left.
 
-Two clocks matter: the six daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck)
-go stale within a week and Vanguard US publishes **month-end with a ~6-week lag** (75 days), so a
-normal evening refreshes nothing and a busy one refreshes the six. The CLIs remain the by-hand route
+**Fetch-after is not warn-after (2026-10-17, GitHub #8).** Until then one threshold
+(`ADAPTER_STALE_DAYS`) meant both "go fetch" and "warn", so a daily feed was fetched only once it
+was eight days old — weekly, and only *after* the warning had fired, which put the stale-basket
+warning on every refresh day by construction (measured: GRID/IQQ/QQQM/SOXQ refreshed on four
+consecutive Thursdays, each new as-of exactly seven days after the stored one).
+`ADAPTER_FETCH_DAYS` beside it in `lookthrough_service.py` is `(after, every)` per adapter: due
+once the basket is more than `after` days old, and asked at most once per `every` days off
+`etf_baskets.checked_at`, which is stamped on **every** attempt — new, unchanged, refused or
+failed. The six daily feeds (Xtrackers, iShares, Invesco, First Trust, Defiance, VanEck) are
+`(0, 1)`: anything older than today, once an evening. Vanguard US is `(60, 3)`: month-end files
+with a 2–6 week lag, probed every third evening from day 61 so the next file lands before day 75.
+`test_every_adapter_is_fetched_before_it_warns` pins `after + every <= warn-after`.
+
+Three things make the daily fetch cheap:
+
+- **An unchanged file rewrites nothing.** `replace_basket` compares `basket_fingerprint` (SHA-256
+  of the parsed rows, not the as-of) with `etf_baskets.content_sha256`; on a match only
+  `checked_at` moves, no delete+insert, and the result lands in `unchanged`, not `refreshed`, so
+  no CINS/SEDOL pass runs. An issuer-stated as-of may move forward on an unchanged file; a stood-in
+  one (DWS, a clamped Defiance) stays where it was, because erring older is the safe direction.
+  The refusals run first and are unchanged.
+- **A stalled as-of costs one request per interval**, not one per evening plus a ~10k-row rewrite
+  (VT on 2026-10-15/16). A fund with no basket row has nothing to stamp, so a new fund whose fetch
+  fails is asked again the next evening.
+- **The CINS/SEDOL pass skips known misses** (above).
+
+Budget, from `test_requests_per_evening_for_a_daily_feed_and_a_stalled_month_end_fund`: a daily
+feed is one request an evening (was one a week); a fund whose as-of stalls is asked once per
+`every` and rewritten once. About eight single-GET issuer fetches an evening for the held source
+baskets, and weekend evenings take the unchanged path. A warning therefore means the refresh has
+failed, or the issuer has served nothing newer, for the whole warn-after window. The CLIs remain the by-hand route
 — a file an issuer only publishes by email (VWCE), a first import ahead of the evening, or a fund
 whose refresh keeps failing, where the saved body is what makes the failure debuggable.
 
@@ -354,7 +386,8 @@ Flex is refusing. Four rules carry it, and each is wrong the other way round:
   from. For a proxied fund that is the *source's*, which is also where the threshold comes from.
 - **The threshold is `stale_after_days`**, the same per-adapter table the tab badges on. A second
   constant here would be the third definition of "stale", after the one that already badged Vanguard
-  permanently.
+  permanently. The fetch-after table is not a second definition of stale: it lives beside it and is
+  read by the same predicate, which reports both flags.
 - **Nothing unclearable warns.** A fund excluded by design, and one whose only route is a hand
   download *with nothing to borrow*, stay silent — the tab's fund table names them instead. But
   **"has a route" follows the proxy**: VWCE's own adapter is `manual` while VT is fetchable, so a
@@ -612,7 +645,10 @@ and the CLI says when it is missing. **GLEIF is what actually bounds a run**, th
 batch form for an ISIN filter, so it costs ~1.1s per ISIN — about 45 minutes at
 `IDENTITY_MAX_ISINS` (2500) against a couple of minutes for OpenFIGI's share. Hence the runtime
 estimate printed before the first request, and `--limit`: a definitive answer is cached either
-way, so three bounded runs come to the same thing as one long one.
+way, so three bounded runs come to the same thing as one long one. **Each answered batch is
+committed as it lands** (`on_batch=db.commit`; one OpenFIGI request, one GLEIF ISIN) since
+2026-10-17 — it committed once at the end before, so a run killed forty minutes in re-asked
+everything on the next one.
 
 Tests: `test_company_identity.py`, `test_lookthrough_partition.py`, `test_etf_source_registry.py`,
 `test_etf_basket_import.py` and `test_us_issuer_adapters.py` (the poison fixtures),

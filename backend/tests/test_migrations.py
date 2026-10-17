@@ -177,8 +177,9 @@ def test_the_migration_engine_sets_a_busy_timeout():
     `alembic upgrade head && uvicorn ...`. Without a timeout, a write lock held by
     something else makes alembic fail instantly, the `&&` short-circuits, and the
     container never serves — an outage rather than a pause. That overlap is not
-    hypothetical: `resolve_identities` commits once at the end of a ~37-minute run, and
-    auto-deploy ticks every ten minutes knowing nothing about CLI runs.
+    hypothetical: `resolve_identities` writes and commits after every answered batch
+    through a run of up to ~45 minutes, and auto-deploy ticks every ten minutes knowing
+    nothing about CLI runs.
 
     Comments are stripped first. A paragraph explaining the pragma satisfies a naive
     substring check, which is how the deploy tests in this repository first passed

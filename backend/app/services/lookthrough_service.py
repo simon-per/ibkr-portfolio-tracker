@@ -96,6 +96,35 @@ def stale_after_days(adapter: Optional[str]) -> int:
     """How old this adapter's basket may get before the age is worth reporting."""
     return ADAPTER_STALE_DAYS.get((adapter or "").strip().lower(), BASKET_STALE_DAYS)
 
+
+# **Fetch-after is not warn-after.** `ADAPTER_STALE_DAYS` says when an age is worth telling the
+# user about; this says when the evening refresh should ask the issuer again. They were one
+# number until 2026-10-17, so a daily feed was fetched only once it was already a week old —
+# weekly, and only after the warning had fired, which put the stale-basket warning on every
+# refresh day by construction (GitHub #8). Each entry is `(after, every)`: the basket is due
+# once it is more than `after` days old, and a fund is asked at most once per `every` days
+# whatever the answer was (`etf_baskets.checked_at`), so an as-of that stalls costs one request
+# per interval rather than one per evening. `after` must stay below the warn threshold, or the
+# warning comes back before the fetch has had a chance (`test_etf_basket_refresh` pins it).
+ADAPTER_FETCH_DAYS = {
+    # Every business day: anything older than today is worth one request, once a day.
+    "dws": (0, 1),
+    "blackrock": (0, 1),
+    "invesco": (0, 1),
+    "first_trust": (0, 1),
+    "defiance": (0, 1),
+    "vaneck": (0, 1),
+    # Month-end files with a 2-6 week lag: start probing well before day 75, every few days,
+    # so the next file lands before the warning would.
+    "vanguard_us": (60, 3),
+}
+
+
+def fetch_after_days(adapter: Optional[str]) -> Tuple[int, int]:
+    """`(after, every)` for this adapter's basket; an unlisted one is fetched when it is stale."""
+    key = (adapter or "").strip().lower()
+    return ADAPTER_FETCH_DAYS.get(key, (stale_after_days(key), 1))
+
 # The API will not return more rows than this however large a `limit` is asked for.
 COMPANY_LIMIT_MAX = 200
 

@@ -32,7 +32,8 @@ which is correct and merely less complete.
 """
 import asyncio
 import logging
-from typing import Dict, Iterable, List, Optional, Tuple
+from datetime import timedelta
+from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -81,6 +82,11 @@ GLEIF_MIN_INTERVAL_S = 1.1
 
 REQUEST_TIMEOUT_S = 20.0
 
+# How long OpenFIGI's "no match" for a CINS/SEDOL is believed before it is asked again. Not
+# forever, unlike an ISIN miss: a newly listed security's identifier can be missing from
+# OpenFIGI for a while and then appear.
+IDENTIFIER_MISS_RECHECK_DAYS = 30
+
 
 def rotating_window(items: List[str], limit: int, turn: int) -> List[str]:
     """
@@ -114,13 +120,20 @@ class IdentityService:
         return ({}, OPENFIGI_BATCH, OPENFIGI_MIN_INTERVAL_S)
 
     async def resolve(
-        self, isins: Iterable[str], limit: Optional[int] = None
+        self,
+        isins: Iterable[str],
+        limit: Optional[int] = None,
+        on_batch: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> Dict:
         """
         Ask each provider about the ISINs it has never been asked about.
 
-        Returns a summary suitable for a `sync_runs.details` payload. Writes are flushed
-        but not committed — the caller owns the transaction, as everywhere else here.
+        Returns a summary suitable for a `sync_runs.details` payload. Each provider batch is
+        upserted as soon as it is answered — one OpenFIGI request, one GLEIF ISIN — and
+        `on_batch` runs after each: `resolve_identities` passes `db.commit`, so a GLEIF run
+        killed forty minutes in keeps every answer it already had instead of re-asking them
+        all. Without it writes are flushed but not committed — the caller owns the
+        transaction, as everywhere else here.
         """
         wanted = sorted({i.strip().upper() for i in isins if i and i.strip()})
         need_figi = await self.repo.unchecked(wanted, "openfigi")
@@ -142,22 +155,29 @@ class IdentityService:
             "gleif_errors": 0,
         }
 
-        rows: Dict[str, Dict] = {}
+        written: Set[str] = set()
 
         if need_figi:
-            await self._resolve_openfigi(need_figi, rows, summary)
+            await self._resolve_openfigi(need_figi, summary, written, on_batch)
         if need_lei:
-            await self._resolve_gleif(need_lei, rows, summary)
+            await self._resolve_gleif(need_lei, summary, written, on_batch)
 
-        if rows:
-            await self.repo.upsert_many(list(rows.values()))
-        summary["rows_written"] = len(rows)
+        summary["rows_written"] = len(written)
         return summary
+
+    async def _persist(self, rows: List[Dict], written: Set[str], on_batch) -> None:
+        """Upsert one batch's answers. Each provider writes only its own columns."""
+        if not rows:
+            return
+        await self.repo.upsert_many(rows)
+        written.update(row["isin"] for row in rows)
+        if on_batch is not None:
+            await on_batch()
 
     # ----------------------------------------------------------------------- OpenFIGI
 
     async def _resolve_openfigi(
-        self, isins: List[str], rows: Dict[str, Dict], summary: Dict
+        self, isins: List[str], summary: Dict, written: Set[str], on_batch=None
     ) -> None:
         extra, batch_size, interval = self._openfigi_pacing
         headers = {"Content-Type": "application/json", "User-Agent": user_agent(), **extra}
@@ -192,24 +212,43 @@ class IdentityService:
                     continue
 
                 stamp = utcnow()
+                rows: List[Dict] = []
                 for isin, block in zip(batch, payload):
                     scfigi, composite, name = self._pick_figi(block)
-                    row = rows.setdefault(isin, {"isin": isin})
-                    row.update(
-                        share_class_figi=scfigi,
-                        composite_figi=composite,
-                        figi_name=name,
-                        figi_source="openfigi_api",
-                        figi_checked_at=stamp,
-                    )
+                    rows.append({
+                        "isin": isin,
+                        "share_class_figi": scfigi,
+                        "composite_figi": composite,
+                        "figi_name": name,
+                        "figi_source": "openfigi_api",
+                        "figi_checked_at": stamp,
+                    })
                     if scfigi:
                         summary["openfigi_resolved"] += 1
                     else:
                         summary["openfigi_not_found"] += 1
+                await self._persist(rows, written, on_batch)
 
     # ------------------------------------------------------- CINS / SEDOL -> ISIN
 
-    async def resolve_constituent_identifiers(self, limit: Optional[int] = None) -> Dict:
+    async def pending_constituent_identifiers(self) -> List[str]:
+        """
+        Identifiers with no ISIN and no FIGI, less those OpenFIGI answered "no match" for
+        within `IDENTIFIER_MISS_RECHECK_DAYS`. The one definition of what this pass would
+        ask, shared with the CLI's count.
+        """
+        repo = EtfBasketRepository(self.db)
+        unresolved = await repo.unresolved_identifiers()
+        known_misses = await repo.identifier_misses_since(
+            utcnow() - timedelta(days=IDENTIFIER_MISS_RECHECK_DAYS)
+        )
+        return [i for i in unresolved if i not in known_misses]
+
+    async def resolve_constituent_identifiers(
+        self,
+        limit: Optional[int] = None,
+        on_batch: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> Dict:
         """
         Give a shareClassFIGI to fund constituents whose issuer published no ISIN.
 
@@ -229,23 +268,23 @@ class IdentityService:
         must go as `ID_CINS`, and a SEDOL as `ID_SEDOL`. Both verified live before this was
         written.
 
-        A row that resolves to nothing is re-asked on the next run rather than remembered, which
-        the codebase normally refuses (`isin_identities`' `*_checked_at` split exists to stop
-        exactly that loop). It was acceptable while this was a manual CLI step over a hundred
-        or so identifiers. Since 2026-09-08 the evening basket refresh also calls it, so every
-        scheduled caller **must pass `limit`** (`etf_basket_refresh` passes
-        `SCHEDULED_IDENTITY_LIMIT`) — that bounds the re-ask the way the ISIN pass is bounded.
-        Caching the misses is the durable fix and needs a column; do it if the pending set
-        grows past a few hundred.
+        **A miss is remembered** (`constituent_identifier_misses`, since 2026-10-17) and asked
+        again only after `IDENTIFIER_MISS_RECHECK_DAYS` — the same `*_checked_at` split
+        `isin_identities` makes, and for the same reason: until then a permanent miss was
+        re-asked on every pass, which the daily basket refresh would have made every evening.
+        A failed request stamps nothing, so it is asked again. Scheduled callers still pass
+        `limit` (`etf_basket_refresh` passes `SCHEDULED_IDENTITY_LIMIT`), which bounds one
+        evening's pass the way the ISIN pass is bounded.
 
         **The bounded window rotates by day** (`rotating_window`). It was `pending[:limit]` of
         a sorted list until 2026-10-15, so the same alphabetically-first identifiers were asked
         every evening and everything after them never: ASML's CINS `N07059210` sat unasked in
-        SOXQ and QQQM while OpenFIGI resolves it at once, and ASML read as three companies. A
-        permanent miss now costs its slot one evening in `ceil(pending / limit)`, not forever.
+        SOXQ and QQQM while OpenFIGI resolves it at once, and ASML read as three companies.
+
+        Answers are written per OpenFIGI batch and `on_batch` runs after each, as in `resolve`.
         """
         repo = EtfBasketRepository(self.db)
-        pending = await repo.unresolved_identifiers()
+        pending = await self.pending_constituent_identifiers()
         if limit is not None:
             pending = rotating_window(pending, limit, utcnow().date().toordinal())
 
@@ -266,7 +305,6 @@ class IdentityService:
                 by_kind.setdefault(id_type, []).append(value)
             # Anything else was never an identifier; it is left alone rather than guessed at.
 
-        found: Dict[str, str] = {}
         extra, batch_size, interval = self._openfigi_pacing
         headers = {"Content-Type": "application/json", "User-Agent": user_agent(), **extra}
         async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
@@ -300,16 +338,24 @@ class IdentityService:
                         )
                         continue
 
+                    found: Dict[str, str] = {}
+                    missed: List[str] = []
                     for value, block in zip(batch, payload):
                         scfigi, _, _ = self._pick_figi(block)
                         if scfigi:
                             found[value] = scfigi
                             summary["identifiers_resolved"] += 1
                         else:
+                            missed.append(value)
                             summary["identifiers_not_found"] += 1
 
-        if found:
-            summary["holdings_updated"] = await repo.apply_resolved_identifiers(found)
+                    if found:
+                        summary["holdings_updated"] += await repo.apply_resolved_identifiers(found)
+                        await repo.forget_identifier_misses(found)
+                    if missed:
+                        await repo.record_identifier_misses(missed, utcnow())
+                    if on_batch is not None:
+                        await on_batch()
         return summary
 
     @staticmethod
@@ -341,7 +387,7 @@ class IdentityService:
     # -------------------------------------------------------------------------- GLEIF
 
     async def _resolve_gleif(
-        self, isins: List[str], rows: Dict[str, Dict], summary: Dict
+        self, isins: List[str], summary: Dict, written: Set[str], on_batch=None
     ) -> None:
         headers = {
             "Accept": "application/vnd.api+json",
@@ -361,13 +407,13 @@ class IdentityService:
                     continue
 
                 lei, name, ambiguous = self._pick_lei(payload)
-                row = rows.setdefault(isin, {"isin": isin})
-                row.update(
-                    lei=lei,
-                    issuer_name=name,
-                    lei_source="gleif_api" if lei else None,
-                    lei_checked_at=utcnow(),
-                )
+                await self._persist([{
+                    "isin": isin,
+                    "lei": lei,
+                    "issuer_name": name,
+                    "lei_source": "gleif_api" if lei else None,
+                    "lei_checked_at": utcnow(),
+                }], written, on_batch)
                 if ambiguous:
                     summary["gleif_ambiguous"] += 1
                     logger.warning(

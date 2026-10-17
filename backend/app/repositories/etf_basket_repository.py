@@ -1,15 +1,18 @@
 """Repository for EtfBasket / EtfHolding — stored fund constituent baskets."""
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.models.etf_basket import EtfBasket, EtfHolding
+from app.models.etf_basket import ConstituentIdentifierMiss, EtfBasket, EtfHolding
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,29 @@ class ReplaceResult:
     stored_rows: int
     previous_rows: int
     previous_as_of: Optional[date]
+    # The parse matched the stored basket exactly, so no row was rewritten.
+    unchanged: bool = False
+
+
+def basket_fingerprint(parsed) -> str:
+    """
+    SHA-256 over everything a parse contributes to the stored rows, except its as-of.
+
+    The as-of is left out on purpose: DWS and a clamped Defiance stand the fetch date in for
+    one, so the same file fetched on two days must still read as the same file.
+    """
+    payload = [
+        parsed.source, parsed.adapter, parsed.source_rows, parsed.skipped_rows,
+        parsed.asset_class_available,
+        [
+            [r.line_no, r.isin, r.identifier, r.ticker, r.name, str(r.weight_pct),
+             r.asset_class, r.sector, r.country]
+            for r in parsed.rows
+        ],
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class EtfBasketRepository:
@@ -157,6 +183,52 @@ class EtfBasketRepository:
         await self.session.flush()
         return updated
 
+    async def identifier_misses_since(self, since: datetime) -> Set[str]:
+        """Identifiers OpenFIGI answered with nothing at or after `since`."""
+        rows = (
+            await self.session.execute(
+                select(ConstituentIdentifierMiss.identifier)
+                .where(ConstituentIdentifierMiss.checked_at >= since)
+            )
+        ).scalars().all()
+        return set(rows)
+
+    async def record_identifier_misses(self, identifiers: Iterable[str], at: datetime) -> None:
+        """Remember a definitive "no match", restamping one already known. Flushed only."""
+        rows = [{"identifier": i, "checked_at": at} for i in sorted(set(identifiers))]
+        for start in range(0, len(rows), self.INSERT_CHUNK):
+            stmt = sqlite_insert(ConstituentIdentifierMiss).values(
+                rows[start:start + self.INSERT_CHUNK]
+            )
+            await self.session.execute(stmt.on_conflict_do_update(
+                index_elements=["identifier"], set_={"checked_at": stmt.excluded.checked_at},
+            ))
+        await self.session.flush()
+
+    async def forget_identifier_misses(self, identifiers: Iterable[str]) -> None:
+        """Drop the miss for identifiers that have since resolved. Flushed only."""
+        wanted = sorted(set(identifiers))
+        for start in range(0, len(wanted), self.SELECT_CHUNK):
+            chunk = wanted[start:start + self.SELECT_CHUNK]
+            await self.session.execute(
+                delete(ConstituentIdentifierMiss)
+                .where(ConstituentIdentifierMiss.identifier.in_(chunk))
+            )
+        await self.session.flush()
+
+    async def mark_checked(self, fund_isin: str) -> None:
+        """
+        Stamp an attempt that stored nothing — a fetch error, a parse failure, a refusal — so
+        the fund waits out its fetch interval like any other. A fund with no basket row has
+        nothing to stamp and is asked again next evening. Flushed only.
+        """
+        await self.session.execute(
+            update(EtfBasket)
+            .where(EtfBasket.fund_isin == fund_isin.strip().upper())
+            .values(checked_at=utcnow())
+        )
+        await self.session.flush()
+
     async def replace_basket(self, parsed, force: bool = False) -> ReplaceResult:
         """
         Replace one fund's basket wholesale, or refuse and change nothing.
@@ -172,6 +244,13 @@ class EtfBasketRepository:
         - **An as-of that moves backwards.** Re-importing an older saved file would regress
           the basket while looking like a successful refresh. Equal as-of is allowed, so
           re-running an import is idempotent.
+
+        **Identical content is not rewritten** (`basket_fingerprint` matches the stored one):
+        only `checked_at` moves, and `unchanged` tells the caller there is nothing new for
+        the CINS/SEDOL pass. The daily refresh meets this every weekend and holiday. The as-of
+        moves forward only when the issuer states it; a stood-in date (DWS, a clamped
+        Defiance) stays where it was, because erring older is the safe direction for a
+        staleness alarm.
         """
         fund_isin = parsed.fund_isin.strip().upper()
         previous = (await self.get_baskets([fund_isin])).get(fund_isin)
@@ -197,6 +276,18 @@ class EtfBasketRepository:
                     f"figure silently shrinks, so nothing was written — pass --force if the "
                     f"fund genuinely shrank."
                 )
+
+        fingerprint = basket_fingerprint(parsed)
+        if previous is not None and previous.content_sha256 == fingerprint:
+            previous.checked_at = utcnow()
+            if parsed.as_of_is_issuer_stated and parsed.as_of_date > previous.as_of_date:
+                previous.as_of_date = parsed.as_of_date
+                previous.as_of_is_issuer_stated = True
+            await self.session.flush()
+            return ReplaceResult(
+                fund_isin=fund_isin, stored_rows=previous_rows, previous_rows=previous_rows,
+                previous_as_of=previous_as_of, unchanged=True,
+            )
 
         # Read before the delete, which removes this fund's own earlier answers.
         known_figis = await self.resolved_figis(row.identifier for row in parsed.rows)
@@ -247,6 +338,8 @@ class EtfBasketRepository:
             "identifier_coverage_pct": parsed.identifier_coverage_pct,
             "asset_class_available": parsed.asset_class_available,
             "fetched_at": utcnow(),
+            "checked_at": utcnow(),
+            "content_sha256": fingerprint,
         }
         if previous is None:
             self.session.add(EtfBasket(fund_isin=fund_isin, **fields))

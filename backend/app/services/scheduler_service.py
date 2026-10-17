@@ -958,22 +958,25 @@ class SchedulerService:
         reason: those slots succeed while Flex is refusing.
 
         **The verdict comes from `etf_basket_refresh.stale_basket_verdicts`, the same
-        list the 18:00 refresh fetches from.** This method only formats it. Two
-        definitions of "stale" — one that warns and one that acts — would be this
-        codebase's dominant failure mode, and the version that lived here had already
-        been wrong once about which basket a proxied fund reads. The four rules (held
-        funds only, the proxy source's file and cadence, the per-adapter threshold,
-        nothing unclearable) are documented on the predicate.
+        list the 18:00 refresh fetches from.** This method only formats its `stale` half;
+        the refresh fetches its `due` half. Two definitions of "stale" — one that warns
+        and one that acts — would be this codebase's dominant failure mode, and the
+        version that lived here had already been wrong once about which basket a proxied
+        fund reads. The four rules (held funds only, the proxy source's file and cadence,
+        the per-adapter threshold, nothing unclearable) are documented on the predicate.
 
-        Since the refresh exists, a warning here means one of three things and says
-        which: the basket went stale today and this evening's run will refresh it; the
-        refresh ran and failed, in which case the 18:00 run's own warning names the
-        error; or the fund has no automated route and needs a hand download.
+        The refresh asks a daily issuer every day, long before the warn threshold, so a
+        warning here means one of three things and says which: a newly held fund the
+        next evening will fetch; a fund whose refresh has kept failing or whose issuer
+        has published nothing newer for the whole threshold, in which case the 18:00
+        run's own warning names any error; or a fund with no automated route.
         """
         from app.services.etf_basket_refresh import stale_basket_verdicts
 
         warnings = []
         for v in await stale_basket_verdicts(db, as_of):
+            if not v.stale:
+                continue  # due a fetch, not yet worth telling anyone about
             if v.missing:
                 warnings.append(
                     f"{v.name}: no constituent basket has ever been fetched, so its whole "
@@ -987,11 +990,12 @@ class SchedulerService:
                     f"{v.name}: its basket is dated {v.as_of_date:%Y-%m-%d} ({v.age_days} "
                     f"days old against a {v.limit_days}-day expectation for "
                     f"{v.basket_adapter}), so every company figure it contributes describes "
-                    f"an older index. The 18:00 full sync refreshes it automatically; if "
-                    f"this persists past a day, re-run "
-                    f"`python -m app.cli.fetch_etf_baskets --all` plus the import lines, "
-                    f"then `python -m app.cli.resolve_identities --constituents` — a "
-                    f"re-import clears the CINS/SEDOL resolutions on purpose"
+                    f"an older index. The 18:00 full sync asks its issuer for it on a "
+                    f"schedule, so either that fetch keeps failing (its warning names the "
+                    f"error) or the issuer has published nothing newer. To look, run "
+                    f"`python -m app.cli.fetch_etf_baskets --all` and the import lines it "
+                    f"prints, then `python -m app.cli.resolve_identities --constituents` "
+                    f"for any new CINS/SEDOL rows"
                 )
             else:
                 warnings.append(

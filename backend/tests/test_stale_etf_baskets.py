@@ -91,14 +91,15 @@ async def test_a_daily_feed_gone_a_week_stale_is_reported_with_its_age(db):
     assert len(warnings) == 1
     assert "IWDA" in warnings[0]
     assert f"{stale_after_days('blackrock') + 5} days old" in warnings[0]
-    # The recovery is two CLI steps in a specific order, and the order is the part
-    # people get wrong: a re-import clears the CINS/SEDOL resolutions on purpose.
+    # The recovery is two CLI steps in a specific order: the import brings the new
+    # CINS/SEDOL rows that the identity pass then resolves.
     assert "fetch_etf_baskets" in warnings[0]
     assert warnings[0].index("fetch_etf_baskets") < warnings[0].index("resolve_identities")
 
 
 @pytest.mark.asyncio
 async def test_a_fresh_basket_is_not_reported(db):
+    """Two days old is a fetch for a daily feed (fetch-after), not a warning (warn-after)."""
     await _hold(db, 1, IWDA, "IWDA")
     await _basket(db, IWDA, "blackrock", age_days=2)
 

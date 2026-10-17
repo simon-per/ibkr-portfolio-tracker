@@ -165,12 +165,16 @@ async def import_basket(
             print(f"FAILED - nothing was written: {e}", file=sys.stderr)
             return 1
 
-        print(
-            f"Stored {result.stored_rows} constituent(s)"
-            + (f", replacing {result.previous_rows} from {result.previous_as_of}"
-               if result.previous_rows else "")
-            + "."
-        )
+        if result.unchanged:
+            print(f"Unchanged: identical to the stored basket "
+                  f"({result.stored_rows} constituent(s)); nothing rewritten.")
+        else:
+            print(
+                f"Stored {result.stored_rows} constituent(s)"
+                + (f", replacing {result.previous_rows} from {result.previous_as_of}"
+                   if result.previous_rows else "")
+                + "."
+            )
         await SyncRunRepository(db).record(
             sync_type=SYNC_TYPE,
             status="success",
@@ -186,6 +190,7 @@ async def import_basket(
                 "as_of_is_issuer_stated": basket.as_of_is_issuer_stated,
                 "stored_rows": result.stored_rows,
                 "previous_rows": result.previous_rows,
+                "unchanged": result.unchanged,
                 "source_rows": basket.source_rows,
                 "total_weight_pct": float(basket.total_weight_pct),
                 "equity_weight_pct": float(basket.equity_weight_pct),
