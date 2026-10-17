@@ -7,6 +7,21 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — holding logos via logo.dev (#12)
+
+Issue #12, the owner's 2026-10-17 ask, reversing "never a fetched logo". A new
+`security_logos` table (ISIN key, image bytes, sha256, source, fetched/checked stamps;
+migration `a7d3c9e5f1b2`) is filled by a bounded logo pass inside the 05:00 Tue–Sat
+`fundamentals_refresh` job: held ISINs with no row or a check older than 90 days, at most 30
+lookups a pass, paced, stopping on 401/402/403/429, a no-op without `LOGO_DEV_SECRET_KEY`.
+Images are refused whole unless PNG/JPEG/WebP by magic bytes and ≤ 100 KB, and served from our
+origin (`/api/logos`, `/api/logos/{id}?v=`, ETag, immutable when versioned). `TickerAvatar`
+shows the logo with the monogram as fallback. `app.cli.import_logo` stores a hand-picked file
+(e.g. from Flaticon) as `source='manual'`, which the pass never overwrites. The paced GET moved
+from `crypto_http` to a neutral `paced_http`, so no stock-side module imports crypto code.
+Verified: 2205 backend and 951 frontend tests green, the build; no request to logo.dev — the key
+is not set yet (STATUS.md *Needs a human*).
+
 ## Shipped 2026-10-17 (night) — sold and delisted securities leave the price passes (#10)
 
 Issue #10, rule 1. Every price pass asked Yahoo about every security ever owned, and a delisted

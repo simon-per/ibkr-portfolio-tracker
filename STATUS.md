@@ -11,13 +11,20 @@
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
-docs/shipped-log.md 2026-10-17. Next: holding logos via logo.dev — §3 of
-`plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the open GitHub
-issues (#2–#7 and #10 done).
+docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
+#2–#7, #10 and #12 shipped the same night (logos need the key on the VPS); #8, #9 and #11 next.
 
 ---
 
 ## Needs a human
+
+- **Holding logos (#12): set `LOGO_DEV_SECRET_KEY` on the VPS.** Until then the logo pass is a
+  no-op and every avatar stays a monogram. A logo.dev account's **secret** key (`sk_…`) into
+  `/root/IBKR_investment_tracker/backend/.env`, then `docker compose up -d` with `GIT_COMMIT`
+  exported, then `docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
+  --dry-run` and the same without `--dry-run`; misses by hand with `app.cli.import_logo`
+  (docs/logos.md). Then look at Positions and Dividends — the avatar styling (white circle,
+  hairline ring) was never seen with real logos.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
