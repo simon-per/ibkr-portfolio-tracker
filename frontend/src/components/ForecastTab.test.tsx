@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ForecastTab } from './ForecastTab'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import type { ContributionsResponse, PortfolioSummary } from '@/lib/api'
 

@@ -7,26 +7,16 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-17.** Dividend raises, the resizable forecast chart, base-currency market
-caps and daily held-only fundamentals are deployed (`5c66d04`, docs/shipped-log.md 2026-10-17);
-the forecast backfill and the `/root/auto-deploy.sh` refresh are owed (*Needs a human*). Next:
-holding logos via logo.dev — the plan is §3 of
-`plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md`. Another session's branch
-`ccr-7289b752-aev50c` (from `e1b9a83`) conflicts with this in five files and must merge `main`
-before it lands.
+**Last updated: 2026-10-17.** Both of the day's branches are on `main`: the owner's batch
+(dividend raises, resizable forecast chart, base-currency market caps, daily held-only
+fundamentals; deployed, backfill run) and the web session's fintech pass
+(`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
+docs/shipped-log.md 2026-10-17. Next: holding logos via logo.dev — §3 of
+`plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the GitHub issues.
 
 ---
 
 ## Needs a human
-
-- **Refresh `/root/auto-deploy.sh` from `ops/`** by atomic rename (docs/deployment.md): the
-  05:00 fundamentals slot is deployed and the host copy guards nine hours, not ten, so a deploy
-  can restart the container in the middle of a 05:00 pass, losing that day's run; the next day
-  recovers it.
-
-- **Run the dividend forecast backfill** (offline, no Yahoo or Flex), after `/root/backup-db.sh`:
-  `backfill_dividend_forecast --from 2026-08-28 --dry-run`, then without `--dry-run`. Until then
-  raises before 2026-10-17 read as timing and the forecast lines carry no level.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
@@ -75,6 +65,17 @@ before it lands.
 
 Only what is still unverified.
 
+- **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
+  report's totals under their own columns in all four tables; the hero's 1Y return close to the
+  XIRR card; Fundamentals and `/api/fundamentals/status` listing held securities only; the
+  benchmark lines in their new colours; the bundled font and card shadows under the production
+  CSP (`e2e/csp.mjs`). On the estimate-era years (2025 and the boundary year): estimated rows'
+  withholding blank in the CSV, `excl. N est.` / `incl. N est.` on the totals, and `excl. est.`
+  only on the countries that hold estimates. `e2e/ledger.mjs` and `e2e/axis.mjs` against a
+  snapshot — both were rewritten against the synthetic book. `/api/settings`
+  `base_currency_unavailable` is `null` (production has EUR→CHF rates), and no ingest log line
+  reports a dividend or trade skipped for a missing currency.
+
 - **The product pass on production** (verified only on a local build proxied to the live API):
   the bundled Inter font loads under the production CSP (`e2e/csp.mjs`), the favicon renders, and
   the Dividend Income card and benchmark lines — aborted in the local check because they can
@@ -118,49 +119,32 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The test suite writes into the developer's database.** `tests/conftest.py:42` blanks only the
-   job store; the scheduler-job spy tests and the WAL-lifespan test write through
-   `AsyncSessionLocal` into whatever `DATABASE_URL` names, and under xdist N workers share one
-   file (a plausible cause of the one flaky run). Fix: a per-worker temp DB before `settings` is
-   imported. Until then never run the suite against a snapshot you still need.
-2. **Pin what every production build re-resolves:** `yfinance`, `lxml`, `pyxirr` float in
+1. **Pin what every production build re-resolves:** `yfinance`, `lxml`, `pyxirr` float in
    `backend/requirements.txt` and `deploy.sh` builds `--no-cache`. A constraints file.
-3. **Copies of one job.** `_to_eur` ×3 (`dividend_service`, `tax_service`, `finpension_ingest` —
-   the last swallows errors) plus an inline FX path with a `"USD"` placeholder
-   (`dividend_service.py:471`); the CLI security resolver ×3, and **`manage_mappings.py:79-83`
-   takes `.first()` without refusing ambiguity**; `_pct` drifted (look-through 0.0, analytics
-   None); the crypto clients' `_pace`/`_get`. Extract and test the family.
-4. **`BaseFx.convert` returns the EUR amount when no rate exists** (`base_fx.py:58-60`), under ~57
-   call sites; only crypto guards it.
-5. **Tax report estimated rows, backend half:** no per-country estimate count, `to_csv()` writes an
-   estimate's withholding as 0, and a mixed year's net total includes estimates.
-6. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
+2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-7. **Four nulls-last sort comparators** (`FundamentalsTab`, `cryptoColumns`, `WatchlistTab`,
-   `lib/dividendTable.ts`) and `ABSENT` in both `lib/utils.ts` and `ui/KpiCard.tsx` — one helper
-   each, with a family test.
-8. **Tooling.** ESLint red (19, incl. four setState-in-effect in `FundamentalsTab.tsx`), ruff
-   unconfigured; neither in CI. `alembic check` fails on naming drift only. The `ResizeObserver`
-   stub is in 17 test files (belongs in `setupFiles`). CI pins Node 20 (EOL).
-9. **`coverage_pct` reads 0.0 on an empty book** (`lookthrough_service.py:853`).
-10. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
-    chip, Period Gain %, dividend chips); MoM/YoY chips in the dividend tooltip; XIRR annualised
+3. **Tooling.** ESLint is clean; `positionColumns` and `lookthroughColumns` are its one named
+   exception (`eslint.config.js`). Ruff unconfigured; neither in CI. `alembic check` fails on
+   naming drift only. The `ResizeObserver` stub is in 17 test files — `src/testSetup.ts` is now
+   the place for it. CI pins Node 20 (EOL).
+4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
+    chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
     "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
-11. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
+5. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost
     events at read time; **do not** make the portfolio convert per date (breaks the contributions
     identity).
-12. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
+6. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-13. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
+7. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
     estimates (needs a country→region map); exact World ex CH; nested funds; an identity detector.
     Researched future sources (N-PORT, commercial APIs — do not re-shop) are in docs/lookthrough.md.
-14. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-15. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-16. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
@@ -168,13 +152,14 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-10-17 (owner's batch)** — raises/timing, resizable forecast chart, base-currency market
-  caps, daily held-only fundamentals; deployed; logos next.
+- **2026-10-17 (merge)** — the fintech pass merged into `main` over the owner's batch; two
+  held helpers made one (`security_repository.held`).
+- **2026-10-17 (owner's batch)** — raises/timing (funds' changes are timing), resizable forecast
+  chart, base-currency market caps, daily held-only fundamentals; deployed; logos next.
+- **2026-10-17 (fintech pass, web session)** — surfaces, hero figure, quiet tables, one chart
+  look; tax footers, held-only fundamentals, period return, tax estimates, base currency, test
+  DB, CLI lookup, the copies of one job and ESLint closed; every e2e script green.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
   date axis, regions, leftover text; the look-through CINS starvation found and fixed.
-- **2026-10-14 (docs trim)** — STATUS.md cut to a snapshot (rough edges → troubleshooting, traps →
-  local-development), CLAUDE.md slimmed, AGENTS.md made a pointer.
-- **2026-10-14 (agent-team wave)** — growth/forecast pack, KPI fixes, ET Sun/Mon IBKR skip, weekly
-  fundamentals refresh, STATUS pruned; browser sweep on production.

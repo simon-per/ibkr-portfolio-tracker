@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readStored, writeStored } from './storage'
+import { act, renderHook } from '@testing-library/react'
+import { SECTION_OPEN_PREFIX, readStored, useRememberedOpen, writeStored } from './storage'
 
 /**
  * The guard, and the rule that there is exactly one of it.
@@ -61,5 +62,31 @@ describe('every localStorage access goes through this module', () => {
       .filter(([, source]) => /\blocalStorage\s*[.[]/.test(source))
       .map(([path]) => path)
     expect(offenders).toEqual([])
+  })
+})
+
+describe('useRememberedOpen', () => {
+  it('starts at the section default and remembers a change for the next mount', () => {
+    const first = renderHook(() => useRememberedOpen('demo'))
+    expect(first.result.current[0]).toBe(false)
+    act(() => first.result.current[1](true))
+    expect(first.result.current[0]).toBe(true)
+    first.unmount()
+
+    const again = renderHook(() => useRememberedOpen('demo'))
+    expect(again.result.current[0]).toBe(true)
+  })
+
+  it('reads anything but 1 or 0 as the default, never as an answer', () => {
+    localStorage.setItem(`${SECTION_OPEN_PREFIX}demo`, 'yes')
+    expect(renderHook(() => useRememberedOpen('demo', true)).result.current[0]).toBe(true)
+    expect(renderHook(() => useRememberedOpen('demo', false)).result.current[0]).toBe(false)
+  })
+
+  it('takes a functional update, as a toggle passes one', () => {
+    const { result } = renderHook(() => useRememberedOpen('demo', () => true))
+    act(() => result.current[1]((open) => !open))
+    expect(result.current[0]).toBe(false)
+    expect(localStorage.getItem(`${SECTION_OPEN_PREFIX}demo`)).toBe('0')
   })
 })

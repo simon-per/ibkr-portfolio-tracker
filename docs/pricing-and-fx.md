@@ -70,8 +70,16 @@ docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set CH
   until 2026-07-30, which is how SBI's poisoned estimates outlived its mapping fix.
 - `--dry-run` on both mutating commands; every edit records a `sync_runs` row (`manual_mapping`),
   because a mapping change being invisible is why SBI went unnoticed for months.
+- **An ambiguous `SYMBOL EXCHANGE` is refused** (2026-10-17). `securities` is unique on
+  (isin, exchange), not (symbol, exchange), so an ISIN change can leave two rows on one ticker; a
+  mapping applies to both, and `.first()` checked the currency of whichever SQLite returned first
+  and let `--purge-prices` delete one row's prices on a guess. `set` and `disable` now refuse,
+  naming each id, and `list` flags `AMBIGUOUS: N securities`. The lookup is the one every CLI uses
+  (`app/cli/security_lookup.py`; `import_prices` and `purge_dividend_estimates` take `--security-id`
+  to settle it), and `tests/test_cli_security_lookup.py` fails a CLI that queries `Security.symbol`
+  itself.
 
-Tests: `tests/test_mapping_cli.py`.
+Tests: `tests/test_mapping_cli.py`, `tests/test_cli_security_lookup.py`.
 
 **Currency** — Frankfurter at `https://api.frankfurter.dev/v1` (`.app` now 301-redirects here).
 Batch-fetches date ranges (one call per ~30 days) and carries the last known rate forward across
@@ -129,5 +137,26 @@ currency nothing is held in is fetched only once its newest rate is `QUOTED_REFR
 not on each of the day's slots.
 
 Tests: `tests/test_currency_fallback.py`, `tests/test_fundamentals_market_cap.py`.
+
+**A base-currency switch the app cannot convert into is refused** (2026-10-17). `BaseFx.convert`
+hands back the EUR amount when it holds no EUR→base rate at all, so a switch accepted while
+Frankfurter was down printed every figure in the app as EUR under a CHF or USD label. `PUT
+/api/settings/base-currency` now validates the code (`normalize_base_currency`), backfills, asks the
+read path's own loader (`load_base_fx(..., backfill=False)`) whether it would find a rate, and only
+then writes the setting; with none it answers 503 and the base stays where it was (the header says
+*Currency change failed — still showing the previous currency*). One stored rate is enough: `BaseFx`
+carries the nearest one forward and back, so the worst case is a stale rate, never a mislabelled
+figure.
+
+**And a stored base with no rate behind it is not used** (same day). The one way left into the
+mislabel was a database whose base was chosen before the refusal existed, or whose rates are gone.
+`AppSettingsRepository.get_base_currency()` — which every reader asks: the portfolio, look-through,
+fundamentals and crypto services and `/api/settings` — now answers the stored base only while an
+EUR→base rate exists, and EUR otherwise; `get_stored_base_currency()` keeps the choice, and
+`/api/settings` serves it as `base_currency_unavailable` while it cannot be used, which the header
+turns into a one-line warning. So `BaseFx.convert`'s EUR fallback can no longer meet a non-EUR
+label: a base is in use only with a rate to convert by. The scheduler refreshes EUR→CHF and EUR→USD
+daily, so on a running install the check passes and costs one indexed lookup per request.
+Tests: `tests/test_base_currency_switch.py`.
 
 ---

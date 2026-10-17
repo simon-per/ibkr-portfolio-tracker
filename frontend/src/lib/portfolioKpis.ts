@@ -104,6 +104,32 @@ export function externalFlow(prev: ValueSeriesPoint, curr: ValueSeriesPoint): nu
 }
 
 /**
+ * A window's Modified Dietz **average invested capital**: its opening value plus each
+ * external flow weighted by the share of the window it was at work, and the net flow.
+ *
+ * The denominator of `computeModifiedDietzReturn` (each heatmap month) and of the hero's
+ * period return, written once. The weights count points, not calendar days — a flow on
+ * point `i` of `n` worked `(n − 1 − i) / (n − 1)` of the window — which is the convention
+ * the heatmap has always used.
+ */
+export function modifiedDietzCapital(window: ValueSeriesPoint[]): {
+  averageCapital: number
+  netFlow: number
+} {
+  const totalDays = window.length - 1
+  let netFlow = 0
+  let weighted = 0
+  for (let i = 1; i < window.length; i++) {
+    const cf = externalFlow(window[i - 1], window[i])
+    if (cf !== 0) {
+      netFlow += cf
+      weighted += cf * ((totalDays - i) / totalDays)
+    }
+  }
+  return { averageCapital: (window[0]?.market_value_eur ?? 0) + weighted, netFlow }
+}
+
+/**
  * Modified-Dietz daily returns, each tagged with the date it lands on.
  *
  * The dates matter because `dailyReturns` **drops** days with nothing to divide
@@ -272,7 +298,10 @@ export interface PeriodChange {
   startDate: string
   endDate: string
   periodGain: number
-  /** `periodGain` over the opening cost basis; `null` when nothing had been invested. */
+  /**
+   * `periodGain` over the range's Modified Dietz average invested capital; `null` when
+   * nothing was held or the capital is not positive. See {@link periodChange}.
+   */
   periodGainPercent: number | null
 }
 
@@ -291,6 +320,16 @@ export interface PeriodChange {
  * it: that figure counts a realized gain, while the local fallback — the change in
  * *unrealized* profit — drops when a winner is sold, because the gain leaves the
  * unrealized pool and shows up nowhere.
+ *
+ * **`periodGainPercent` divides that gain by the capital that earned it**: the opening
+ * value plus every purchase and sale weighted by the share of the range it was at work
+ * (`modifiedDietzCapital`), from the first point that held anything. It divided by the
+ * *opening cost basis* until 2026-10-17, which overstated every range that money was paid
+ * into: a year of monthly deposits earns a gain on all of them, and only the money held at
+ * the start was in the denominator — the 1Y figure ran several points above the same
+ * year's XIRR. A cost denominator also mis-sized a book carrying old gains, which earn on
+ * their value, not on what they cost. Same sign as the gain by construction, and on 1Y
+ * close to the XIRR card.
  *
  * `null` for the whole thing when no point in the range is measurable, because a line
  * built from unpriced days is the fabricated-loss shape this exists to remove.
@@ -313,9 +352,14 @@ export function periodChange(
   const startProfit = first.market_value_eur - first.cost_basis_eur
   const currentProfit = last.market_value_eur - last.cost_basis_eur
   const periodGain = attributionPnl ?? currentProfit - startProfit
-  // Cost basis as the denominator: a return on what was invested, not profit-on-profit.
-  const startCostBasis = first.cost_basis_eur
-  const periodGainPercent = startCostBasis > 0 ? (periodGain / startCostBasis) * 100 : null
+
+  // The measurable span with its interior intact — an interior day's flow still happened
+  // even when its value could not be read — from the first point that held anything.
+  const span = series.slice(series.indexOf(first), series.lastIndexOf(last) + 1)
+  const seed = span.findIndex((p) => p.market_value_eur > 0)
+  const window = seed === -1 ? [] : span.slice(seed)
+  const capital = window.length >= 2 ? modifiedDietzCapital(window).averageCapital : 0
+  const periodGainPercent = capital > 0 ? (periodGain / capital) * 100 : null
 
   return {
     startValue,

@@ -74,15 +74,19 @@ padding taken as a share of the whole range, rounded out to a full negative step
 the plot permanently blank. `niceTicks.test.ts` pins the arithmetic; this pins the render at a real
 viewport, which is the part that was wrong on screen.
 
-It compares the axis against the **live data** rather than a fixed number, so it stays correct if the
-portfolio does go negative: a real value below the −5k floor must still be shown, because that floor
-is soft by design. Consequently it needs *real* data, not merely populated data — a fixture whose
+It compares the axis against **what the chart draws** rather than a fixed number, so it stays correct
+if the portfolio does go negative: a real value below the −5k floor must still be shown, because that
+floor is soft by design. Both sides come from the SVG — the lines' extent from their geometry, the axis
+bottom from the plot area's clip rect, converted to money through the tick labels' positions. Until
+2026-10-17 it took the minimum from the API's all-time series instead, which the chart never plots:
+the profit line is rebased to 0 on the range's first point, so the check failed two of eight against a
+correct chart. Consequently it needs *real* data, not merely populated data — a fixture whose
 minimum happens to be negative exercises the other branch. Two selectors are used for the tick
 labels because this recharts version renders them in a sibling group rather than under
 `.recharts-yAxis`; the obvious selector returns zero nodes, which reads exactly like a chart that
 never rendered.
 
-`ledger.mjs` asserts against real account shapes — transfers badged *not money in*, fractional
+`ledger.mjs` asserts against real account shapes — transfers badged *Transfer*, never *Deposit*, fractional
 quantities, a deposit row. The local `backend/portfolio.db` predates trades, cash flows and the IBKR
 dividend era, so every assertion in it fails there. Take a snapshot with `sqlite3 .backup` on the
 VPS, point `DATABASE_URL` at it, and **delete it afterwards**: it is real account data.

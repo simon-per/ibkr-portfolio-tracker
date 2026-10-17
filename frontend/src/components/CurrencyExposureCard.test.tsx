@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
-import { CurrencyProvider } from '@/lib/CurrencyContext'
+import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import type { CurrencyExposureInput } from '@/lib/currencyExposure'
 
 /**
@@ -17,6 +17,8 @@ import type { CurrencyExposureInput } from '@/lib/currencyExposure'
  */
 
 afterEach(cleanup)
+// Sections remember being opened (`useRememberedOpen`); each test starts closed.
+beforeEach(() => localStorage.clear())
 
 beforeEach(() => {
   if (!('ResizeObserver' in globalThis)) {
@@ -109,7 +111,7 @@ describe('CurrencyExposureCard', () => {
       renderCard(book, new Set(['SXR8']))
       expand()
       expect(screen.getByText(/20.0% of the book sits in 1 fund,/)).toBeTruthy()
-      expect(screen.getByText(/need not be its economic exposure/)).toBeTruthy()
+      expect(screen.getByText(/economic exposure can differ/)).toBeTruthy()
     })
 
     it('explains that the rows are not re-attributed', () => {
@@ -117,7 +119,7 @@ describe('CurrencyExposureCard', () => {
       // the reason has to be on screen rather than in the source.
       renderCard(book, new Set(['SXR8']))
       expand()
-      expect(screen.getByText(/maps regions, not\s+currencies/)).toBeTruthy()
+      expect(screen.getByText(/counted in the currency they trade in/)).toBeTruthy()
     })
 
     it('is absent when nothing held is a fund', () => {

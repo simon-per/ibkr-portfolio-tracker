@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useCallback, useState, useMemo } from 'react'
+import { compareNullsLast } from '@/lib/nullsLast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,8 +22,11 @@ export function WatchlistTab() {
   const formatBase = useFormatCurrency()
   // Per-row data_currency via the shared formatter's override; a row with no
   // currency falls back to the base currency rather than a hardcoded USD.
-  const formatCurrency = (value: number | null, currency: string | null): string =>
-    value === null ? ABSENT : formatBase(value, currency ?? undefined)
+  const formatCurrency = useCallback(
+    (value: number | null, currency: string | null): string =>
+      value === null ? ABSENT : formatBase(value, currency ?? undefined),
+    [formatBase],
+  )
   const [tickerInput, setTickerInput] = useState('')
   const [sortColumn, setSortColumn] = useState<SortColumn>('buy_score')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -101,29 +105,16 @@ export function WatchlistTab() {
 
   const sortedItems = useMemo(() => {
     if (!items) return []
-    return [...items].sort((a, b) => {
-      const aVal = a[sortColumn]
-      const bVal = b[sortColumn]
-      if (aVal === null && bVal === null) return 0
-      if (aVal === null) return 1
-      if (bVal === null) return -1
-      // A rating is an enum, not a word: `localeCompare` ranked `strong_sell` above
-      // `strong_buy` because "se" sorts after "bu", so descending led with the worst.
-      // Scored on the shared conviction scale instead, so descending means strongest
-      // first — the order the positions table gives the same ratings.
-      if (sortColumn === 'analyst_rating') {
-        const diff = getRatingScore(aVal as string) - getRatingScore(bVal as string)
-        return sortDirection === 'asc' ? diff : -diff
-      }
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return sortDirection === 'asc'
-          ? aVal.localeCompare(bVal)
-          : bVal.localeCompare(aVal)
-      }
-      return sortDirection === 'asc'
-        ? (aVal as number) - (bVal as number)
-        : (bVal as number) - (aVal as number)
-    })
+    // A rating is an enum, not a word: `localeCompare` ranked `strong_sell` above
+    // `strong_buy` because "se" sorts after "bu", so descending led with the worst.
+    // Scored on the shared conviction scale instead, so descending means strongest
+    // first — the order the positions table gives the same ratings.
+    const sortable = (item: (typeof items)[number]): number | string | null | undefined => {
+      const v = item[sortColumn]
+      if (v == null) return v
+      return sortColumn === 'analyst_rating' ? getRatingScore(v as string) : (v as number | string)
+    }
+    return [...items].sort((a, b) => compareNullsLast(sortable(a), sortable(b), sortDirection))
   }, [items, sortColumn, sortDirection])
 
   const currencySymbol = useCurrencySymbol()
@@ -174,7 +165,7 @@ export function WatchlistTab() {
                 rows={3}
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-none"
+                className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm resize-none"
                 placeholder="Add notes..."
               />
             </div>
@@ -188,7 +179,7 @@ export function WatchlistTab() {
                 step="0.01"
                 value={editTargetPrice}
                 onChange={(e) => setEditTargetPrice(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm"
                 placeholder="0.00"
               />
             </div>
@@ -275,7 +266,7 @@ export function WatchlistTab() {
               value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)}
               placeholder="Ticker, e.g. NVDA or ASML.AS"
-              className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm"
+              className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-input bg-card text-sm"
             />
             <Button type="submit" disabled={addMutation.isPending || !tickerInput.trim()} size="sm">
               <Plus className="h-4 w-4 mr-1" />

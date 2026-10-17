@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   BarChart,
   Bar,
@@ -16,6 +15,9 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { displayName } from '@/lib/securityName'
+import { formatAxisMoney } from '@/lib/utils'
+import { useRememberedOpen } from '@/lib/storage'
+import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
 interface PerformanceAttributionProps {
   data: PerformanceAttributionResponse | undefined
@@ -26,7 +28,7 @@ interface PerformanceAttributionProps {
 export function PerformanceAttribution({ data, isLoading, isError }: PerformanceAttributionProps) {
   const formatCurrency = useFormatCurrency()
   const isCompact = useIsCompact()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useRememberedOpen('performance-attribution')
 
   // Build summary text for the header
   let summaryText: React.ReactNode = 'P&L contribution by security'
@@ -109,15 +111,10 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                 layout="vertical"
                 margin={{ top: 5, right: isCompact ? 8 : 30, left: 0, bottom: 5 }}
               >
-                <CartesianGrid horizontal={false} stroke="hsl(var(--border))" />
+                <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
                 <XAxis
                   type="number"
-                  tickFormatter={(value: number) => {
-                    if (Math.abs(value) >= 1000) {
-                      return `${(value / 1000).toFixed(1)}k`
-                    }
-                    return value.toFixed(0)
-                  }}
+                  tickFormatter={(value: number) => formatAxisMoney(value)}
                   fontSize={12}
                 />
                 <YAxis

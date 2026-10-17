@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -23,8 +24,9 @@ import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_STYLE,
+  CHART_GRID_PROPS,
 } from '@/lib/chartTooltip'
-import { formatDate, tooltipValue } from '@/lib/utils'
+import { formatDate, tooltipValue, formatAxisMoney } from '@/lib/utils'
 import { dateAxis } from '@/lib/dateAxis'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -70,11 +72,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
   }, [data, metric, isCompact])
 
   const xAxis = useMemo(() => dateAxis(data.map((p) => p.date)), [data])
-  const formatYAxisTick = (value: number) => {
-    const abs = Math.abs(value)
-    if (abs >= 1000) return `${value < 0 ? '-' : ''}${curSym}${(abs / 1000).toFixed(abs >= 10_000 ? 0 : 1)}k`
-    return `${value < 0 ? '-' : ''}${curSym}${abs.toFixed(0)}`
-  }
+  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym)
 
   return (
     <div className="space-y-3">
@@ -108,11 +106,18 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
       ) : (
         <div className={`w-full ${CHART_BOX}`}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: isCompact ? 8 : 24, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            <ComposedChart data={data} margin={{ top: 5, right: isCompact ? 8 : 24, left: 0, bottom: 5 }}>
+              <defs>
+                <linearGradient id="crypto-value-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.18} />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid {...CHART_GRID_PROPS} />
               <XAxis
                 dataKey="date"
                 className="text-xs"
+                tickMargin={8}
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}
                 ticks={xAxis.ticks}
                 tickFormatter={xAxis.tickFormatter}
@@ -139,18 +144,35 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
                 }}
                 formatter={(value: number | undefined) => tooltipValue(value, formatCurrency)}
               />
-              <Line
-                type="monotone"
-                dataKey="y"
-                name={metric === 'value' ? 'Value' : 'P&L'}
-                stroke="hsl(var(--primary))"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 5 }}
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-            </LineChart>
+              {/* The value as the stock chart draws its headline series — one soft area —
+                  and P&L as a plain line read against the zero rule. */}
+              {metric === 'value' ? (
+                <Area
+                  type="monotone"
+                  dataKey="y"
+                  name="Value"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                  fill="url(#crypto-value-fill)"
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                />
+              ) : (
+                <Line
+                  type="monotone"
+                  dataKey="y"
+                  name="P&L"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                />
+              )}
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}

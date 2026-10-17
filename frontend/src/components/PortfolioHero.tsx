@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
+import { LineChart } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { PortfolioSummary } from '@/lib/api'
 import type { PeriodChange } from '@/lib/portfolioKpis'
 import type { TimeRange } from '@/lib/dateRanges'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
 import { cn } from '@/lib/utils'
 
 /** What the selected range is called beside the period's gain. */
@@ -22,6 +23,37 @@ const RANGE_LABEL: Record<TimeRange, string> = {
 
 const GAIN = 'text-green-600 dark:text-green-400'
 const LOSS = 'text-red-600 dark:text-red-400'
+/** The period-gain pill: the gain's own colour on a wash of it. */
+const GAIN_PILL = 'bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400'
+const LOSS_PILL = 'bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400'
+
+/**
+ * The headline amount with its currency and cents a step quieter than the whole units,
+ * the way banking apps set a balance: the eye reads "144,022" first. A screen reader gets
+ * the amount as one string from the `sr-only` copy, not three fragments of it.
+ */
+function HeroAmount({ value, currency }: { value: number; currency: string }) {
+  const parts = new Intl.NumberFormat('en-US', {
+    style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).formatToParts(value)
+  const whole = parts.findIndex((p) => p.type === 'integer')
+  const cents = parts.findIndex((p) => p.type === 'decimal')
+  const text = (from: number, to?: number) => parts.slice(from, to).map((p) => p.value).join('')
+  return (
+    <span className="inline-flex items-baseline">
+      <span className="sr-only">{text(0)}</span>
+      <span aria-hidden="true" className="mr-1 text-[0.55em] font-medium text-muted-foreground">
+        {text(0, whole).trim()}
+      </span>
+      <span aria-hidden="true">{text(whole, cents === -1 ? undefined : cents)}</span>
+      {cents !== -1 && (
+        <span aria-hidden="true" className="text-[0.55em] font-medium text-muted-foreground">
+          {text(cents)}
+        </span>
+      )}
+    </span>
+  )
+}
 
 interface PortfolioHeroProps {
   summary: PortfolioSummary | undefined
@@ -49,6 +81,7 @@ export function PortfolioHero({
   summary, isLoading, isError, period, range, controls, children,
 }: PortfolioHeroProps) {
   const formatCurrency = useFormatCurrency()
+  const { baseCurrency } = useBaseCurrency()
   const signed = (n: number) => `${n >= 0 ? '+' : ''}${formatCurrency(n)}`
   const signedPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 
@@ -56,17 +89,35 @@ export function PortfolioHero({
     return (
       <Card>
         <CardContent className="py-10 text-center text-muted-foreground">
-          Couldn't load the portfolio. It retries automatically.
+          Couldn't load the portfolio — the server didn't respond. It retries automatically.
         </CardContent>
       </Card>
     )
   }
 
-  if (!isLoading && !summary) {
+  // Nothing imported yet: no position held or ever sold and no cash ledger. The summary
+  // still answers — with zeros — and a "€0.00" headline over "+€0.00 (+0.00%)" is a set of
+  // stand-ins for "nothing to measure yet", which is what a new account sees first.
+  const untouched =
+    !!summary &&
+    summary.num_positions === 0 &&
+    summary.num_closed_positions === 0 &&
+    !cashIsTracked(summary)
+  if ((!isLoading && !summary) || untouched) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-muted-foreground">
-          No portfolio data yet — sync your account to get started.
+        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+          <span
+            aria-hidden="true"
+            className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary"
+          >
+            <LineChart className="h-6 w-6" />
+          </span>
+          {/* e2e/errors.mjs asserts this phrase never shows during an outage. */}
+          <p className="text-lg font-semibold">No portfolio data yet</p>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Press Sync to import your Interactive Brokers positions, trades, dividends and cash.
+          </p>
         </CardContent>
       </Card>
     )
@@ -94,19 +145,30 @@ export function PortfolioHero({
               {hasCash || !summary ? 'Total value' : 'Market value'}
             </p>
             {headline === null ? (
-              <div className="mt-2 h-10 w-56 animate-pulse rounded-lg bg-muted" />
+              <div className="mt-2 h-12 w-64 animate-pulse rounded-lg bg-muted" />
             ) : (
-              <p className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
-                {formatCurrency(headline)}
+              // The one hero figure on the page: 48px from `sm` up, proportional digits.
+              <p className="mt-1 text-[2.5rem] font-semibold leading-none tracking-tight sm:text-5xl">
+                <HeroAmount value={headline} currency={baseCurrency} />
               </p>
             )}
             {/* Absent rather than `+0.00%` while the range is unknown or held nothing. */}
             {period && (
-              <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-sm">
-                <span className={cn('font-semibold', period.periodGain >= 0 ? GAIN : LOSS)}>
-                  <span aria-hidden="true">{period.periodGain >= 0 ? '▲' : '▼'} </span>
-                  {signed(period.periodGain)}
-                  {period.periodGainPercent !== null && ` (${signedPct(period.periodGainPercent)})`}
+              <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold',
+                    period.periodGain >= 0 ? GAIN_PILL : LOSS_PILL,
+                  )}
+                >
+                  <span aria-hidden="true" className="text-[0.7em]">{period.periodGain >= 0 ? '▲' : '▼'}</span>
+                  <span>{signed(period.periodGain)}</span>
+                  {period.periodGainPercent !== null && (
+                    <>
+                      <span aria-hidden="true" className="opacity-50">·</span>
+                      <span>{signedPct(period.periodGainPercent)}</span>
+                    </>
+                  )}
                 </span>
                 <span className="text-muted-foreground">{RANGE_LABEL[range]}</span>
               </p>
@@ -146,7 +208,8 @@ export function PortfolioHero({
             label="Unrealized gain"
             value={signed(summary.total_gain_loss_eur)}
             tone={summary.total_gain_loss_eur >= 0 ? GAIN : LOSS}
-            sub={signedPct(summary.total_gain_loss_percent)}
+            // A percentage of a zero cost basis is undefined, not +0.00%.
+            sub={summary.total_cost_basis_eur > 0 ? signedPct(summary.total_gain_loss_percent) : undefined}
           />
           <Stat
             label="Realized gain"
@@ -163,9 +226,9 @@ export function PortfolioHero({
 
 function Stat({ label, value, tone, sub }: { label: string; value: string; tone?: string; sub?: string }) {
   return (
-    <div className="px-[var(--card-padding)] py-3 sm:py-4">
+    <div className="px-[var(--card-padding)] py-3.5 sm:py-4">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold sm:text-lg">
+      <dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold tracking-tight sm:text-lg">
         <span className={tone}>{value}</span>
         {sub && <span className={cn('text-xs font-medium', tone)}>{sub}</span>}
       </dd>

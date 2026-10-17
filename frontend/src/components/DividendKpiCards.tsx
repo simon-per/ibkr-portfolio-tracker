@@ -33,9 +33,9 @@ function Tile({
   title?: string
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card/50 p-4" title={title}>
+    <div className="bg-card p-4 sm:p-5" title={title}>
       <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold leading-none tracking-tight tabular-nums">
+      <div className="mt-1.5 text-lg font-semibold leading-tight tracking-tight sm:text-[1.375rem]">
         {value}
       </div>
       {/* Wraps: in the 2-up mobile grid a tile is ~155px of usable width, and a
@@ -67,7 +67,7 @@ export function DividendKpiCards({ growth, isLoading }: DividendKpiCardsProps) {
     return (
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[0, 1, 2, 3].map(i => (
-          <div key={i} className="h-[104px] animate-pulse rounded-lg bg-muted" />
+          <div key={i} className="h-[104px] animate-pulse rounded-xl bg-muted" />
         ))}
       </div>
     )
@@ -82,7 +82,9 @@ export function DividendKpiCards({ growth, isLoading }: DividendKpiCardsProps) {
   const prior = (value: number | null) => (value != null ? ` · prior: ${formatCurrency(value)}` : '')
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    // One hairline panel, the Performance tab's KPI look (`KpiPanel`): the tiles paint the
+    // card colour and the 1px seams between them show the border colour beneath.
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border/80 bg-border/70 xl:grid-cols-4">
       <Tile
         label={`${thisYear} so far`}
         value={dividendAmount(ytd.net_eur, curSym)}

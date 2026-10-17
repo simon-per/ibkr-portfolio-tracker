@@ -18,13 +18,14 @@ profit and loss and was unreliable before 2026.
 |---|---|
 | `app/services/coinstats_client.py` | the only CoinStats caller: headers, pacing, credit costs, typed errors |
 | `app/services/coingecko_client.py` | the only CoinGecko caller: the Demo key header, pacing, typed errors |
+| `app/services/crypto_http.py` | the paced GET both clients share (`PacedGet`): one request at a time, spaced from when the last *finished*, transport failures as the provider's transient error; each client keeps its own status mapping (2026-10-17, `tests/test_crypto_http.py`) |
 | `app/services/crypto_book.py` | the formula, pure: holdings timeline, prices, the peg table, closes |
 | `app/services/crypto_service.py` | `CryptoSyncService` (sync, price fill) and `CryptoService` (reads) |
 | `app/models/crypto.py` | `crypto_snapshots`, `crypto_holdings`, `crypto_daily` (migration `w6f3b0c7d1e2`); `crypto_daily_holdings`, `crypto_coin_prices`, `crypto_coin_ids` (migration `x7a3c9e1f5b2d`) |
 | `app/routers/crypto.py`, `app/schemas/crypto.py` | `/api/crypto/{portfolio,history,status,sync}` |
 | `app/cli/coinstats_probe.py` | prints the *shape* of every CoinStats answer, never a value |
 | `app/cli/crypto_rebuild_holdings.py` | one-off: rebuilds the daily holdings backwards from CoinStats' transactions |
-| `frontend/src/components/Crypto*.tsx`, `lib/cryptoChart.ts`, `lib/portfolioMode.tsx` | the Crypto mode |
+| `frontend/src/components/Crypto*.tsx`, `lib/cryptoChart.ts`, `lib/portfolioMode.tsx`, `lib/ModeProvider.tsx` | the Crypto mode |
 
 ## Separate by construction, not by filter
 
@@ -285,8 +286,11 @@ earlier is computed, fetched or drawn.
 A GET must not reach the network or take SQLite's write lock. `CryptoService` converts through
 the same `NativeToBase` every reader uses, over `fx_preload.PreloadedRates`: one query for the
 window, then a bounded (14-day) forward-fill. `BaseFx` is loaded from a fortnight before the
-window with `backfill=False`, and when there is no EUR→base rate at all the figure is reported
-unconvertible rather than served as euros under another currency's label.
+window with `backfill=False`, and when its window holds no EUR→base rate the figure is reported
+unconvertible rather than served as euros under another currency's label. A base with no EUR→base
+rate stored *anywhere* never gets this far: the whole app reports in EUR then
+(`AppSettingsRepository.get_base_currency`, docs/pricing-and-fx.md), so the book reads exactly as
+under EUR, labelled EUR.
 `tests/test_crypto_read.py` seeds weekday-only rates, takes the snapshot on a Sunday and replaces
 every network path (FX, CoinStats, CoinGecko) with a raiser.
 

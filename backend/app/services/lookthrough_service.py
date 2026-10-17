@@ -50,6 +50,7 @@ from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
 from app.etf_sources import ISSUER_OVERRIDES, basket_proxy_for, source_for_fund_isin
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
+from app.services.percentages import share_pct
 from app.services.company_identity import IdentityMember, company_groups
 from app.services.etf_basket_parsers import counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
@@ -360,7 +361,9 @@ class LookthroughService:
             ),
             "nested_fund_eur": self._q(nested_total),
             "uncovered_fund_eur": self._q(uncovered_total),
-            "coverage_pct": self._pct(covered, total),
+            # A share of nothing is not 0%: with no valued book there is no coverage to
+            # state, and a 0.0 reads as "nothing could be looked through" (`share_pct`).
+            "coverage_pct": share_pct(covered, total),
             "companies": [self._present_row(r, total) for r in shown],
             "companies_shown": len(shown),
             "company_count_total": len(rows_out),
@@ -759,7 +762,7 @@ class LookthroughService:
                 )
             )
             out.append(
-                f"{self._pct(uncovered, total):.1f}% of the portfolio sits in funds whose "
+                f"{share_pct(uncovered, total):.1f}% of the portfolio sits in funds whose "
                 f"constituents are not known ({names}), so every company figure below "
                 f"excludes whatever those funds hold."
             )
@@ -804,9 +807,6 @@ class LookthroughService:
             - round(uncovered, 2)
         )
 
-    @staticmethod
-    def _pct(part: Decimal, whole: Decimal) -> float:
-        return float(round(part / whole * HUNDRED, 2)) if whole else 0.0
 
     def _present_row(self, row: Dict, total: Decimal) -> Dict:
         return {
@@ -814,7 +814,7 @@ class LookthroughService:
             "value_eur": self._q(row["value_eur"]),
             "direct_value_eur": self._q(row["direct_value_eur"]),
             "via_funds_value_eur": self._q(row["via_funds_value_eur"]),
-            "pct_of_portfolio": self._pct(row["value_eur"], total),
+            "pct_of_portfolio": share_pct(row["value_eur"], total),
             "via_funds": [
                 {
                     "symbol": f["symbol"],
@@ -850,7 +850,7 @@ class LookthroughService:
             "fund_residual_eur": 0.0,
             "nested_fund_eur": 0.0,
             "uncovered_fund_eur": 0.0,
-            "coverage_pct": 0.0,
+            "coverage_pct": None,
             "companies": [],
             "companies_shown": 0,
             "company_count_total": 0,

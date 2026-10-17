@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
-import { readStored, writeStored } from './storage'
+import { createContext, useContext } from 'react'
+import { readStored } from './storage'
 
 /**
  * Which book the app is showing: the stock portfolio (IBKR + pillar 3a) or the crypto one
@@ -21,27 +21,17 @@ export function readStoredMode(): PortfolioMode {
   return readStored(MODE_STORAGE_KEY) === 'crypto' ? 'crypto' : 'stocks'
 }
 
-interface ModeContextValue {
+export interface ModeContextValue {
   mode: PortfolioMode
   setMode: (mode: PortfolioMode) => void
 }
 
-const ModeContext = createContext<ModeContextValue>({
+/** Read by `useMode`; provided by `ModeProvider.tsx` (a component module of its own, for
+ *  React Fast Refresh). */
+export const ModeContext = createContext<ModeContextValue>({
   mode: 'stocks',
   setMode: () => {},
 })
-
-export function ModeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<PortfolioMode>(readStoredMode)
-
-  const setMode = useCallback((next: PortfolioMode) => {
-    setModeState(next)
-    writeStored(MODE_STORAGE_KEY, next)
-  }, [])
-
-  const value = useMemo(() => ({ mode, setMode }), [mode, setMode])
-  return <ModeContext.Provider value={value}>{children}</ModeContext.Provider>
-}
 
 export function useMode(): ModeContextValue {
   return useContext(ModeContext)

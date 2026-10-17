@@ -4,36 +4,40 @@
 
 /**
  * Theme tokens — restyled 2026-09-13 at the owner's request ("make it look way cleaner,
- * like modern portfolio tracking apps").
+ * like modern portfolio tracking apps"), and tightened 2026-10-17 for a product other
+ * people would use: ink one step darker, hairlines one step lighter, fills one step
+ * quieter, and a soft elevation (`--shadow-card`) so a white card lifts off the grey canvas
+ * without a heavy outline.
  *
  * The page is no longer white-on-white / black-on-black: the canvas is a soft grey (light)
  * or deep navy (dark) and cards sit one step lighter on it with a low-contrast border, so
  * structure comes from surfaces rather than from lines. The primary is a blue rather than
- * near-black, which also becomes the value line on every chart. Radius went from 8 to 12px.
- * Every existing `hsl(var(--x))` reference keeps working; only the values moved.
+ * near-black. Every existing `hsl(var(--x))` reference keeps working; only the values moved.
  */
 @layer base {
   :root {
     --background: 220 20% 97%;
-    --foreground: 224 30% 10%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 224 30% 10%;
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 30% 10%;
+    --popover-foreground: 222 47% 11%;
     --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 16% 94%;
-    --secondary-foreground: 224 30% 10%;
-    --muted: 220 16% 94%;
-    --muted-foreground: 220 10% 44%;
-    --accent: 220 16% 94%;
-    --accent-foreground: 224 30% 10%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
     --destructive: 350 89% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 14% 89%;
-    --input: 220 14% 89%;
+    --border: 220 13% 91%;
+    --input: 220 13% 88%;
     --ring: 221 83% 53%;
     --radius: 0.75rem;
+    --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.03);
+    --shadow-pop: 0 12px 32px -8px rgb(16 24 40 / 0.16), 0 4px 8px -4px rgb(16 24 40 / 0.06);
   }
 
   .dark {
@@ -56,6 +60,9 @@
     --border: 223 18% 17%;
     --input: 223 18% 19%;
     --ring: 217 91% 62%;
+    /* Elevation reads as a lighter surface on a dark canvas, not as a shadow. */
+    --shadow-card: 0 0 0 0 transparent;
+    --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.55);
   }
 }
 
@@ -77,16 +84,17 @@
   :root {
     /* 390px: the page gutter plus 16px each side leaves ~324px of card interior. */
     --card-padding: 1rem;
-    --card-title-size: 1.125rem;
+    --card-title-size: 1rem;
   }
 
   @media (min-width: 640px) {
     /* Tailwind's stock `sm` — see src/lib/breakpoints.ts, which pins the same number
        from the JS side and fails the suite if tailwind.config.js ever overrides it.
-       Titles are 18px at every width: a section heading, not a page heading. */
+       Titles are 16px at every width: a section heading inside a dense dashboard, set
+       apart by weight rather than size. */
     :root {
       --card-padding: 1.5rem;
-      --card-title-size: 1.125rem;
+      --card-title-size: 1rem;
     }
   }
 
@@ -259,9 +267,15 @@
 }
 
 /* Every chart's axis ticks at one small size; Recharts sets none of its own. Axis rules
-   and tick marks go: the grid already carries the scale, and the lines only add ink. */
+   and tick marks go: the grid already carries the scale, and the lines only add ink.
+   Tabular digits so a column of tick values aligns on its last digit. */
 .recharts-cartesian-axis-tick-value {
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+/* The grid is a hairline one step off the surface: present, never louder than the data. */
+.recharts-cartesian-grid line {
+  stroke-opacity: 0.8;
 }
 .recharts-cartesian-axis-line,
 .recharts-cartesian-axis-tick-line {

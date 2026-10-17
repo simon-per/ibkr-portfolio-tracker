@@ -189,10 +189,11 @@ function CryptoBook({
       )}
 
       <section aria-label="Crypto totals" className="space-y-2">
+        {/* Four equal tiles: a two-track hero in a four-column panel left three empty
+            cells on every width (one row of three plus a stray "Coins"). */}
         <KpiPanel columns={4}>
           <KpiCard
             tile
-            hero
             label="Total value"
             value={money(portfolio.total_value)}
             sub={portfolio.no_price_symbols.length === 0

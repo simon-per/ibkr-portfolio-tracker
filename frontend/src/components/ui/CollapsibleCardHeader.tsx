@@ -1,4 +1,4 @@
-import { ChevronRight } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -47,22 +47,26 @@ export function CollapsibleCardHeader({
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={contentId}
-        // Same padding token as CardHeader, since this button *is* the header's
-        // padded box — hardcoding `p-6` here would leave one collapsible card at
-        // desktop padding on a phone while every other card shrank.
-        className="flex w-full select-none items-center gap-2 rounded-lg p-[var(--card-padding)] text-left ring-offset-background transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        // Same horizontal token as CardHeader, since this button *is* the header's
+        // padded box — hardcoding `px-6` here would leave one collapsible card at
+        // desktop padding on a phone while every other card shrank. Vertically a
+        // closed row is a list item, not a panel, so it sits a little tighter.
+        // Title and summary lead; the chevron sits at the far edge in a quiet round well,
+        // the way a disclosure row reads in most finance apps.
+        className="group flex w-full select-none items-center justify-between gap-3 rounded-2xl px-[var(--card-padding)] py-4 text-left sm:py-5 ring-offset-background transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        <ChevronRight
-          aria-hidden="true"
-          className={cn(
-            'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200',
-            open && 'rotate-90'
-          )}
-        />
-        <div className="min-w-0 space-y-1.5">
+        <div className="min-w-0 space-y-1">
           <CardTitle>{title}</CardTitle>
           {description !== undefined && <CardDescription>{description}</CardDescription>}
         </div>
+        <span
+          aria-hidden="true"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border/80 text-muted-foreground transition-colors group-hover:bg-muted group-hover:text-foreground"
+        >
+          <ChevronDown
+            className={cn('h-4 w-4 transition-transform duration-200', open && 'rotate-180')}
+          />
+        </span>
       </button>
     </CardHeader>
   )

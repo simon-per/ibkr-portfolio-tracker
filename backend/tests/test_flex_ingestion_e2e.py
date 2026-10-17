@@ -206,7 +206,9 @@ async def test_tax_report_uses_ingested_trades_and_withholding():
         assert report["dividend_source"] == "ibkr"
         assert report["realized_source"] == "trades"
 
-        assert report["dividend_totals"] == {"gross": 42.5, "withholding": 6.38, "net": 36.12}
+        assert report["dividend_totals"] == {
+            "gross": 42.5, "withholding": 6.38, "net": 36.12, "estimated_rows": 0,
+        }
         assert len(report["dividend_income"]) == 1
         assert report["dividend_income"][0]["pay_date"] == "2026-05-02"
 

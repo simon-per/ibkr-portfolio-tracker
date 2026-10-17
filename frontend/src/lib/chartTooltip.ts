@@ -29,3 +29,16 @@ export const CHART_TOOLTIP_LABEL_STYLE: CSSProperties = {
   color: 'hsl(var(--muted-foreground))',
   marginBottom: 4,
 }
+
+/**
+ * The one grid every chart draws: solid hairlines in the border colour, along the value
+ * axis only. Spread it into `<CartesianGrid>`; a horizontal bar chart flips the two flags.
+ *
+ * Six charts had drifted into three looks — dashed `stroke-muted`, solid border, and the
+ * crypto chart's dashed lines in both directions — which read as six different products.
+ * `chartAxisFamily.test.ts` refuses a `<CartesianGrid>` that does not spread this.
+ */
+export const CHART_GRID_PROPS = {
+  stroke: 'hsl(var(--border))',
+  vertical: false,
+} as const

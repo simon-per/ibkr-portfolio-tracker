@@ -7,6 +7,68 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (evening) — the copies of one job, the base currency in use, lint (same branch)
+
+The backlog items a review named, closed on the same branch. **One EUR conversion rule**
+(`eur_conversion.to_eur_or_none`) replaces `TaxService._to_eur`, `DividendService._to_eur`,
+finpension's silent copy and the inline estimate conversion; a row with **no currency** is now
+unconvertible everywhere — it had meant EUR in some places and USD in others, about ten guesses in
+all, `NativeToBase` included — and is skipped and counted, never converted on a guess. **One share
+of a whole** (`percentages.share_pct`, None for a share of nothing) replaces the look-through and
+analytics `_pct`s, which disagreed about a zero whole. **One paced GET** (`crypto_http.PacedGet`)
+for both crypto clients. **One missing-last sort** (`lib/nullsLast.ts`) for four tables, two of which
+sorted `undefined` as a value; `ABSENT` defined once. **The base currency in use:**
+`AppSettingsRepository.get_base_currency()` answers EUR while the stored base has no EUR→base rate
+at all, so `BaseFx`'s EUR fallback can no longer meet a CHF/USD label; `/api/settings` names the
+unusable choice and the header says *No CHF rate yet — showing EUR.* (docs/pricing-and-fx.md). The
+Fundamentals sync fetches held securities only. **ESLint is clean**: providers apart from their
+hooks, storage readers in `lib/`, the two table descriptors the one documented exception. Each
+extraction has a family test that fails a new copy. **Verified, on the synthetic book:** backend
+2025 passed, 2 skipped; frontend 932; ESLint 0; every e2e script green; the header warning seen in
+the browser with a base that has no rate. Not verified on real data (network policy).
+
+## Shipped 2026-10-17 (afternoon) — the fintech pass, second half (same branch)
+
+Closing what the morning's write-up left open, on the same branch. **Calculations:** the tax
+report's estimated dividends are honest in the API and the CSV, not only on screen — an estimate's
+withholding is `null` and blank in the CSV, the totals and each country carry estimate counts, and
+the tab tags only the countries that hold estimates (docs/tax.md); a base-currency switch with no
+EUR→base rate is refused instead of printing EUR under a CHF/USD label (docs/pricing-and-fx.md);
+look-through `coverage_pct` is `null` on an empty book; `manage_mappings` refuses an ambiguous
+symbol@exchange through one CLI resolver shared with `import_prices` and `purge_dividend_estimates`.
+**Checks:** the suite gets its own database per process, so it can no longer write into a
+snapshot named in `backend/.env` (proved with a canary URL that was never created);
+`e2e/axis.mjs` measures the drawn series instead of the API's all-time minimum, `e2e/ledger.mjs`
+asserts the *Transfer* badge the product pass kept, and `e2e/errors.mjs` counts the eight surfaces
+the merged hero left — the hero now says *the server didn't respond* like every panel. The one
+unexplained frontend failure was not reproducible in eight more runs, six under the backend suite's
+load; Testing Library's async wait is 4 s now instead of 1 s (`src/testSetup.ts`). ESLint went from
+22 problems to 11, all the dev-only fast-refresh rule. **Verified, on the synthetic book:** backend
+2014 passed, 2 skipped; frontend 925; every e2e script green (sweep 18, mobile 50, a11y 17, axis 16,
+ledger 8, CSP 4, chunks 37, outage 18). Not verified on real data: the session's network policy does
+not reach the production host.
+
+## Shipped 2026-10-17 — the fintech pass (branch `ccr-7289b752-aev50c`, merged into `main` the same evening)
+
+The owner's goal: a clean, slick, fintech-looking app that could be shipped to other people,
+with every insight kept and every calculation and filter checked. Kept off `main` at the owner's
+request (they had local changes of their own), so nothing here is deployed. **Look:** one
+surface system (grey canvas, white cards with a soft shadow, one white app bar), the headline
+figure set like a balance with the range's gain as a pill, a first-run card for an account that
+has never synced, hairline KPI panels on every tab, quieter tables, one grid and one money-axis
+label on every chart, the value chart's lines and the benchmarks re-coloured by identity, the
+crypto value drawn as the stock chart's area, collapsible sections that remember being opened.
+**Fixed:** three of four tax tables printed each total under a neighbour's header (`footerLayout`);
+Fundamentals listed every security ever traded (held only now, no extra Yahoo request); the hero's
+period return divided by the opening cost basis (now the Modified Dietz capital the heatmap uses);
+seven hand-rolled axis formatters ("CHF 1000k" for a million); the realized badge and `est.` mark
+showing on empty tax tables; an unrealized % over a zero cost basis. Rules in docs/frontend.md,
+*The fintech pass*; the copies in docs/failure-modes.md. **Verified on a local stack seeded with
+a synthetic book, with every non-loopback connection refused** — no production data, no Yahoo,
+no Flex: every tab at 1440 and 390 in both themes, Activity's filters summing to the unfiltered
+count, the tax year's realized total equal to the hero's, `e2e/mobile.mjs` and `e2e/a11y.mjs`
+green. `e2e/axis.mjs` fails two checks on a stale assumption (STATUS.md *Worth doing next*).
+
 ## Shipped 2026-10-17 — dividend raises, a resizable forecast chart, base-currency market caps, daily fundamentals
 
 Four of the owner's five 2026-10-17 asks (`bdb5758`, `e41f03c`, `ad7607f`, `5c66d04`; logos are

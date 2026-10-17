@@ -117,8 +117,10 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
- * A timestamp as a short local date and time — "8/9/26, 6:00 AM" — pinned to `en-US`
- * like every other formatter here.
+ * A timestamp as a short local date and time — "Aug 9, 6:00 AM", with the year only when
+ * it is not this one ("Dec 30, 2025, 6:00 AM") — pinned to `en-US` like every other
+ * formatter here. The month is spelled because "8/9/26" is 9 August to an American and
+ * 8 September to most other readers of a product in CHF and EUR.
  *
  * Three sites (the sync header's last/next run, and `SyncStatusMessage`'s skip notice)
  * called `toLocaleString(undefined, …)` inline, which follows the viewer's runtime
@@ -126,9 +128,15 @@ export function formatDate(date: string | Date): string {
  * names a real instant, so `new Date(iso)` is the right parse — `parseLocalDate` is for
  * the API's date-only strings.
  */
-export function formatShortDateTime(iso: string | Date): string {
+export function formatShortDateTime(iso: string | Date, now: Date = new Date()): string {
   const d = typeof iso === "string" ? new Date(iso) : iso
-  return d.toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== now.getFullYear() && { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  })
 }
 
 /**
@@ -159,6 +167,38 @@ export function tooltipValue<T>(
  */
 export function formatCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value)
+}
+
+/**
+ * A money amount on a chart axis: "CHF 150k", "€1.2M", "-$2.5k", "CHF 0".
+ *
+ * Every chart wrote its own — seven `(value / 1000).toFixed(…)k` variants, three with the
+ * symbol and four without — and each was wrong somewhere: the Forecast axis printed
+ * "CHF 1000k" for a million and "CHF 0k" for zero, the value chart rounded a 12,500 tick
+ * to "13k", and the dividend chart printed "1.0k". One decimal at most, trailing ".0"
+ * dropped, the sign before the symbol as `formatCurrency` puts it. `symbol` is optional
+ * for the axes whose card already names the currency.
+ */
+export function formatAxisMoney(value: number, symbol: string = ""): string {
+  const abs = Math.abs(value)
+  const sign = value < 0 && abs >= 0.5 ? "-" : ""
+  return `${sign}${symbol}${compactBody(abs)}`
+}
+
+const AXIS_UNITS: readonly [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "k"], [1, ""]]
+
+/** `abs` in the largest unit it reaches *after* rounding, so 999,950 is "1M", not "1000k". */
+function compactBody(abs: number): string {
+  // Whole units below a thousand; one decimal from there up.
+  const round = (i: number) => {
+    const size = AXIS_UNITS[i][0]
+    return size === 1 ? Math.round(abs) : Math.round((abs / size) * 10) / 10
+  }
+  let i = AXIS_UNITS.findIndex(([size]) => abs >= size)
+  if (i === -1) i = AXIS_UNITS.length - 1
+  let rounded = round(i)
+  if (rounded >= 1000 && i > 0) rounded = round(--i)
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}${AXIS_UNITS[i][1]}`
 }
 
 /**

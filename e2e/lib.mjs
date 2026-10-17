@@ -10,9 +10,10 @@ export const CSP =
   "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
   "frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
+/** In strip order — `Dashboard.tsx`'s, the owner's since 2026-09-13; a11y.mjs walks it with the arrow keys. */
 export const TABS = [
-  'Performance', 'Activity', 'Allocation', 'Look-through', 'Dividends',
-  'Fundamentals', 'Watchlist', 'Forecast', 'Tax',
+  'Performance', 'Dividends', 'Look-through', 'Allocation', 'Activity',
+  'Fundamentals', 'Watchlist', 'Tax', 'Forecast',
 ]
 
 export function reporter() {

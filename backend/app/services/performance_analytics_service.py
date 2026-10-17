@@ -48,6 +48,7 @@ from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.market_price_repository import MarketPriceRepository
+from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.dividend_service import DividendService
 from app.services.lookthrough_service import LookthroughService
@@ -72,12 +73,6 @@ def _f(value: Optional[Decimal], places: int = 2) -> Optional[float]:
     if value is None:
         return None
     return round(float(value), places)
-
-
-def _pct(part: Decimal, whole: Decimal) -> Optional[float]:
-    if whole == 0:
-        return None
-    return round(float(part / whole * HUNDRED), 2)
 
 
 class PerformanceAnalyticsService:
@@ -275,7 +270,7 @@ class PerformanceAnalyticsService:
         # denominator is not positive — a window starting from nothing has no base to
         # measure a percentage against.
         denominator = start_tv + net_flows / 2
-        gain_pct = _pct(gain, denominator) if denominator > 0 else None
+        gain_pct = share_pct(gain, denominator) if denominator > 0 else None
 
         return {
             "start_date": eff_start.isoformat(),
@@ -426,12 +421,12 @@ class PerformanceAnalyticsService:
                     "pnl_eur": _f(b["pnl"]),
                     "price_effect_eur": _f(b["price"]) if has_split else None,
                     "fx_effect_eur": _f(b["fx"]) if has_split else None,
-                    "share_of_gain_pct": _pct(b["pnl"], total_pnl),
+                    "share_of_gain_pct": share_pct(b["pnl"], total_pnl),
                     "start_value_eur": _f(b["start"]),
                     "end_value_eur": _f(b["end"]),
-                    "start_weight_pct": _pct(b["start"], start_total),
-                    "end_weight_pct": _pct(b["end"], end_total),
-                    "via_funds_pct": _pct(b["via_funds"], b["end"]) if b["end"] else None,
+                    "start_weight_pct": share_pct(b["start"], start_total),
+                    "end_weight_pct": share_pct(b["end"], end_total),
+                    "via_funds_pct": share_pct(b["via_funds"], b["end"]) if b["end"] else None,
                 })
             out.sort(key=lambda s: -abs(s["pnl_eur"] or 0))
             return out
@@ -523,7 +518,7 @@ class PerformanceAnalyticsService:
                 continue
             gain = await to_base.convert(
                 t.realized_pnl if t.realized_pnl is not None else ZERO,
-                t.currency or "EUR", t.trade_date,
+                t.currency, t.trade_date,
             )
             if gain is None:
                 trade_fx_missing.add(t.security_id)
@@ -560,7 +555,7 @@ class PerformanceAnalyticsService:
             holding_days = (
                 int(g["weighted_days"] / g["cost"]) if g["cost"] > 0 else None
             )
-            return_pct = _pct(realized, g["cost"]) if g["cost"] > 0 else None
+            return_pct = share_pct(realized, g["cost"]) if g["cost"] > 0 else None
 
             # Compared in the QUOTE currency, from the price history itself: the last
             # close on or before the sale date against the newest close after it. The
@@ -579,7 +574,7 @@ class PerformanceAnalyticsService:
                     ref is not None and ref.close_price and ref.close_price > 0
                     and ref.currency == latest.currency
                 ):
-                    post_sale_pct = _pct(latest.close_price - ref.close_price, ref.close_price)
+                    post_sale_pct = share_pct(latest.close_price - ref.close_price, ref.close_price)
                     post_sale_days = (latest.date - g["last_close"]).days
 
             positions.append({
@@ -630,7 +625,7 @@ class PerformanceAnalyticsService:
                 "closed_securities": len(positions),
                 "winners": len(winners),
                 "losers": len(losers),
-                "hit_rate_pct": _pct(Decimal(len(winners)), Decimal(len(judged))) if judged else None,
+                "hit_rate_pct": share_pct(Decimal(len(winners)), Decimal(len(judged))) if judged else None,
                 "total_realized_eur": _f(sum((Decimal(str(p["realized_pnl_eur"])) for p in judged), ZERO)) if judged else None,
                 "total_cost_eur": _f(total_cost),
                 "avg_holding_days": int(weighted_days / total_cost) if total_cost > 0 else None,

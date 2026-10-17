@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -277,8 +277,13 @@ function AllocationBreakdown({
   const formatCurrency = useFormatCurrency()
   const [selected, setSelected] = useState<string | null>(null)
 
-  // Reset selection when allocation data changes
-  useEffect(() => { setSelected(null) }, [allocation])
+  // Clear the selection when the allocation data changes — adjusted while rendering,
+  // React's pattern for state that follows a prop, not in an effect that renders twice.
+  const [selectedIn, setSelectedIn] = useState(allocation)
+  if (selectedIn !== allocation) {
+    setSelectedIn(allocation)
+    setSelected(null)
+  }
 
   const entries = Object.entries(allocation).sort(([, a], [, b]) => b.percentage - a.percentage)
   if (isLoading) {
@@ -366,7 +371,9 @@ function AllocationBreakdown({
             </ResponsiveContainer>
             {/* The largest slice, named in the hole. */}
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span className="text-2xl font-semibold tabular-nums">{lead.percentage.toFixed(0)}%</span>
+              {/* The legend's precision: "37%" in the middle beside "36.5%" in the
+                  legend read as two different answers. */}
+              <span className="text-2xl font-semibold tabular-nums">{lead.percentage.toFixed(1)}%</span>
               <span className="max-w-[7rem] truncate text-xs text-muted-foreground">{leadName}</span>
             </div>
           </div>

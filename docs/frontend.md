@@ -34,7 +34,10 @@ rather than one absent value.
 **And `e2e/errors.mjs` shows how it hid.** Its count of panels reporting the failure went **8 → 10**
 when these were fixed: the two surfaces it existed to cover had never been in its own tally, under an
 assertion (`hits >= 4`) loose enough not to notice. A floor that far below the real count cannot fail,
-which is the same "passes vacuously" shape as the Sharpe clamp test. It is `>= 10` now.
+which is the same "passes vacuously" shape as the Sharpe clamp test. It was `>= 10` until the
+product pass merged five summary cards and the chart card into one hero and dropped the
+contributions strip; it is `>= 8` since 2026-10-17 — fewer surfaces, each still reporting, and the
+hero says *the server didn't respond* in the same words as the panels under it.
 
 ### Risk metrics (`portfolioKpis.ts`)
 
@@ -114,6 +117,14 @@ from one dominant one.
   seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
   bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
   so it is latent here and live on any younger account or after a backfill.
+- **The hero's period return divides by the capital that earned the gain** (2026-10-17):
+  `periodGainPercent` is the range's gain over its Modified Dietz average invested capital
+  (`modifiedDietzCapital`, the denominator each heatmap month already used), walked from the first
+  valued point of the measurable span. It divided by the *opening cost basis* before, which
+  overstated every range money was paid into — a year of monthly deposits earns on all of them,
+  and only what was held at the start was in the denominator — and mis-sized a book carrying old
+  gains, which earn on their value, not their cost. Same sign as the gain by construction; on 1Y
+  it sits near the XIRR card. `null` when that capital is not positive, never a stand-in.
 - **Sortino's two nulls are told apart** (`sortinoDetail`, 2026-10-14). Too few returns and no
   downside deviation both returned `null`, and the card captioned every null *"No down days"* — a
   claim about the range, made over a window too short to have measured it. Only `no_downside` may
@@ -284,6 +295,8 @@ figures; `KpiPanel` contains `tile` cards for dense metric rows, with one panel 
 hairline dividers. A hero consumes two grid tracks, so any explicit desktop grid must count occupied
 tracks rather than cards: five summary cards need six tracks and the Analytics hero plus five detail
 cards need seven. Loading states use the same rendering and track count as the data they replace.
+A panel whose tile count is odd on a two-column phone grid passes `fillLastRow`, which widens the
+last tile across the row rather than leaving a blank cell beside it.
 
 ---
 
@@ -386,6 +399,15 @@ by CoinStats' market-cap rank, so a coin overtaking another by value cannot repa
 palette first, and each was found the same way — something that should have kept its colour did
 not: deselecting a benchmark recoloured the other two, a sync that reordered the chart moved
 `Unknown`, and changing the Dividends range repainted most of the stack.
+
+The value chart's own lines are a sixth, and the simplest: `PORTFOLIO_SERIES_COLORS` in
+`benchmarkColors.ts` gives Value, Money In, Cash and Profit/Loss one fixed hue each (2026-10-17).
+Before, the benchmark palette's first slot was the portfolio line's own blue and its sixth the
+Cash line's teal — comparing against the S&P 500 drew it in the portfolio's colour — and Cash and
+Profit/Loss sat ΔE 5 apart for full colour vision. The benchmark palette was then re-picked by a
+greedy max-separation search against those four, so the three a reader can select at once clear
+ΔE 15 from each other and from every portfolio line; `benchmarkColors.test.ts` measures both
+sets, and a re-step that brings any pair closer fails there.
 
 They are deliberately **not** one helper. What they share is the rule, not the code: a fixed
 taxonomy, a server-supplied list, a canonical position plus a ramp, and a server-supplied rank plus
@@ -496,3 +518,57 @@ text. What that settled, so the next change keeps it:
   reveal one line; a horizontally scrolling `SegmentedControl` keeps its selected option centred.
 - **Font**: Inter, bundled via `@fontsource-variable/inter` and served from our origin, which is
   what the CSP's `font-src 'self'` allows.
+
+## The fintech pass (2026-10-17)
+
+The owner asked for a clean, slick interface that other people could be handed, keeping every
+insight. What that settled, on top of the product pass:
+
+- **Structure comes from surfaces, not lines.** A grey canvas, white cards one step up with a
+  hairline border and a soft `--shadow-card` (none in dark mode, where elevation is the lighter
+  surface),
+  and one white app bar: `AppHeader` with the section strip under it in the stock view, closing
+  itself with `bordered` in the crypto view, which has no strip. Ink is one step darker and
+  hairlines one step lighter than before; every `hsl(var(--x))` reference kept working.
+- **The headline figure is set like a balance** (`HeroAmount` in `PortfolioHero.tsx`): whole
+  units at full weight, currency and cents a step quieter, one `sr-only` string for a screen
+  reader. The range's gain is a pill in its own colour. An account that has never synced gets one
+  first-run card ("No portfolio data yet" — `e2e/errors.mjs` asserts the phrase never shows during
+  an outage, so keep the outage and the empty book apart) instead of a hero of zeros.
+- **Every metric row is one hairline panel** — `KpiPanel` on Performance, Look-through and Crypto,
+  its look where a row has its own layout (the Dividends tiles, the hero's strip) — so a figure
+  looks the same on every tab: label, value, an optional chip, nothing else.
+- **Tables are quiet.** `DataTable` has three densities, hairline row rules, a hover wash, and a
+  footer placed by `footerLayout`: each total sits under the columns its `spans` name, whatever
+  order the footer array lists it in, and spans that are not adjacent or that overlap throw
+  rather than draw a total under a neighbour's header ([failure-modes.md](failure-modes.md)).
+- **One chart look, enforced.** Every `<CartesianGrid>` spreads `CHART_GRID_PROPS` (solid
+  hairlines along the value axis) and every money axis label goes through `formatAxisMoney`
+  ("CHF 150k", "€1.2M", one decimal at most); `components/chartAxisFamily.test.ts` refuses a hand
+  rolled copy of either. The value series is the one gradient area, and the crypto chart now draws
+  its value the same way. Portfolio lines and benchmarks are coloured by identity (*Colour by
+  identity* above).
+- **A collapsible section remembers being opened** on this browser (`useRememberedOpen` in
+  `lib/storage.ts`, keys under `section-open:`). A per-viewer convenience, so `localStorage` is the
+  right home; anything but a stored `1`/`0` is the section's own default. A component test that
+  renders a collapsible card clears `localStorage` in `beforeEach`.
+- **Fundamentals colour only the two ends** of each metric's range, like the watchlist; the
+  middle band is plain ink. A third, yellow band put a colour on nearly every cell.
+- **Fundamentals list what is held.** The table, both earnings lists and `/api/fundamentals/status`
+  read open lots only (`security_repository.held`); a sold position was a row of dashes counted as
+  "no data yet". The sync fetches held securities only too, which only removes Yahoo requests
+  (a sold security comes back with the next sync after it is bought again).
+- **Copy stays figure-first.** A conditional caveat is one muted line (the currency-exposure fund
+  caveat), never a paragraph, and the empty and error states say what is missing in a sentence.
+- **A component module exports components only** (ESLint `react-refresh/only-export-components`,
+  green since 2026-10-17). Providers sit apart from their hooks (`CurrencyProvider.tsx` beside
+  `CurrencyContext.tsx`, `ModeProvider.tsx` beside `portfolioMode.tsx`, `useTheme.ts` beside
+  `ThemeProvider.tsx`) and storage readers live in `lib/` (`benchmarkSelection.ts`,
+  `rebalanceTargets.ts`, `lookthroughTone.ts`). The two table descriptors, `positionColumns` and
+  `lookthroughColumns`, are the named exception in `eslint.config.js`: each closes over helpers its
+  component renders with, and the table family test imports the exact array the component
+  renders; editing either file reloads the page instead of hot-swapping it.
+- **A chosen base currency the server cannot use is named, not hidden.** With no EUR→base rate
+  stored, `/api/settings` answers `base_currency: EUR` and `base_currency_unavailable: CHF`
+  (docs/pricing-and-fx.md); the header shows *No CHF rate yet — showing EUR.* and every figure is
+  labelled EUR, because it is EUR.

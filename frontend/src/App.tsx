@@ -3,8 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Dashboard } from './components/Dashboard'
 import { CryptoDashboard } from './components/CryptoDashboard'
 import { ThemeProvider } from './components/ThemeProvider'
-import { CurrencyProvider } from './lib/CurrencyContext'
-import { ModeProvider, useMode } from './lib/portfolioMode'
+import { CurrencyProvider } from './lib/CurrencyProvider'
+import { useMode } from './lib/portfolioMode'
+import { ModeProvider } from './lib/ModeProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: {

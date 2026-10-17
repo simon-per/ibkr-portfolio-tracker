@@ -240,12 +240,13 @@ class LookthroughResponse(BaseModel):
     uncovered_fund_eur: float = Field(
         ..., description="Funds with no usable basket. Named in `funds`, never dropped."
     )
-    coverage_pct: float = Field(
+    coverage_pct: Optional[float] = Field(
         ...,
         description=(
             "Share of the portfolio actually attributed to companies. THE figure to read "
             "before any row: at 79%, 'Nvidia 6.1%' omits the Nvidia inside every "
-            "undecomposed fund, and a plausible understatement invites no doubt."
+            "undecomposed fund, and a plausible understatement invites no doubt. `null` "
+            "when nothing in the book could be valued — a share of nothing is not 0%."
         ),
     )
 

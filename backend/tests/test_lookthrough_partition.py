@@ -656,7 +656,8 @@ async def test_an_empty_portfolio_is_not_a_failure(session):
     report = await LookthroughService(session).get_lookthrough()
     assert report["companies"] == []
     assert report["total_market_value_eur"] == 0.0
-    assert report["coverage_pct"] == 0.0
+    # Absent, not 0%: there is no book to have covered (an unknown is never a stand-in).
+    assert report["coverage_pct"] is None
     assert report["warnings"] == []
 
 

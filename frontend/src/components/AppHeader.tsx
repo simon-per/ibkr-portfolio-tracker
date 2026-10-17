@@ -5,6 +5,7 @@ import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { ThemeToggle } from './ThemeToggle'
 import { AdminKeyButton } from './AdminKeyButton'
 import { ModeToggle } from './ModeToggle'
+import { cn } from '@/lib/utils'
 
 interface AppHeaderProps {
   /** Under the title at every width: the view's last sync and its warnings. */
@@ -13,6 +14,11 @@ interface AppHeaderProps {
   actions?: ReactNode
   /** Under the whole row: the outcome of the last sync press. */
   below?: ReactNode
+  /**
+   * Close the bar with its own rule. The stock view's section strip draws the rule under
+   * both; the crypto view has no strip, so its header ends the bar itself.
+   */
+  bordered?: boolean
 }
 
 /**
@@ -24,10 +30,11 @@ interface AppHeaderProps {
  * feed them and this component knows nothing about IBKR or CoinStats. The markup is the
  * one `Dashboard` rendered, moved verbatim, plus the mode toggle before the theme toggle.
  */
-export function AppHeader({ status, actions, below }: AppHeaderProps) {
+export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) {
   const {
     baseCurrency, supportedCurrencies, setBaseCurrency,
     isUpdating: currencyUpdating, updateError: currencyError, currencyIsAssumed,
+    unavailableBase,
   } = useBaseCurrency()
 
   // Same key and staleTime as the footer's read, so it is one request per session.
@@ -38,14 +45,16 @@ export function AppHeader({ status, actions, below }: AppHeaderProps) {
   })
 
   return (
-    <div className="bg-background">
-      <div className="mx-auto w-full max-w-[1400px] px-4 pb-3 pt-4 sm:px-6 sm:pt-5">
+    // One white app bar with the section strip under it (the strip is the sticky half):
+    // the canvas below stays grey, so the bar reads as chrome and the cards as content.
+    <div className={cn('bg-card', bordered && 'border-b border-border/80')}>
+      <div className={cn('mx-auto w-full max-w-[1400px] px-4 pt-3 sm:px-6 sm:pt-4', bordered ? 'pb-3 sm:pb-4' : 'pb-2')}>
         {/* Wraps below `sm`: the brand and the controls cannot share a 358px row. */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           <div className="flex min-w-0 items-center gap-3">
             <BrandMark />
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold leading-tight tracking-tight sm:text-xl">Portfolio Analyzer</h1>
+              <h1 className="text-base font-semibold leading-tight tracking-tight sm:text-lg">Portfolio Analyzer</h1>
               {status}
             </div>
           </div>
@@ -58,7 +67,7 @@ export function AppHeader({ status, actions, below }: AppHeaderProps) {
               onChange={(e) => setBaseCurrency(e.target.value)}
               disabled={currencyUpdating}
               title="Base currency"
-              className="h-9 rounded-lg border border-input bg-card px-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-accent disabled:opacity-50"
+              className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               {supportedCurrencies.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -76,6 +85,14 @@ export function AppHeader({ status, actions, below }: AppHeaderProps) {
             {currencyIsAssumed && !currencyError && (
               <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
                 Couldn't read your display currency — showing {baseCurrency}, which may not be it.
+              </span>
+            )}
+            {/* The chosen base has no exchange rate behind it, so the server reports in
+                EUR (`AppSettingsRepository.get_base_currency`) — said here, or the
+                choice would look ignored. */}
+            {unavailableBase && !currencyError && !currencyIsAssumed && (
+              <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
+                No {unavailableBase} rate yet — showing {baseCurrency}.
               </span>
             )}
             <ModeToggle />

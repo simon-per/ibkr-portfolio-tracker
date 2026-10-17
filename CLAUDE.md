@@ -227,7 +227,7 @@ cd frontend && npx tsc -b && npm run test && npm run build
 
 - The local `backend/portfolio.db` exercises none of the interesting shapes. Use a `sqlite3
   .backup` snapshot from the VPS and **delete it afterwards** — it is real account data. The test
-  suite writes into whatever `DATABASE_URL` names (STATUS.md *Worth doing next* 1).
+  suite never touches it: `tests/conftest.py` gives each test process its own temporary database.
 - `tests/test_api_smoke.py` runs every read endpoint through the real HTTP stack. **Add a case
   there when a response shape changes.**
 - Repo files are CRLF in the working tree (git autocrlf); an edit script must preserve line endings.

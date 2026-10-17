@@ -15,7 +15,9 @@ It exists because all four tables were ingested, reconciled and depended on — 
 `trades`, the contributions splice reads `cash_flows`, `reconcile_taxlots` reads `corporate_actions` —
 with **no read surface at all**. The sharpest consequence: the transfer audit this file prescribes
 before trusting any money-added figure was `manage_cash_flows list` over ssh. Every cash row now
-carries `counts_as_money_in`, badged *Transfer · not money in*.
+carries `counts_as_money_in`; a transfer is badged *Transfer* (amber) against *Deposit* (blue) —
+it read *Transfer · not money in* until the product pass (2026-10-16) cut the explanatory tail, and
+`e2e/ledger.mjs` now asserts that no transfer row is badged Deposit or Withdrawal.
 
 Five rules, each of which would be a bug the other way:
 

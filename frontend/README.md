@@ -1,73 +1,29 @@
-# React + TypeScript + Vite
+# Portfolio Analyzer — web app
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript + Vite, TanStack Query, Recharts, Tailwind. The backend is the
+FastAPI service in `../backend`; this app only reads and renders what it serves.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+npm run dev          # http://localhost:5173, /api proxied to localhost:8000
+npx tsc -b           # typecheck
+npm run test         # vitest: pure lib tests in node, component tests in jsdom
+npm run build        # production bundle in dist/
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Read `../docs/local-development.md` before pointing a dev server at real data — two
+read endpoints can reach Yahoo — and `../docs/frontend.md` before changing anything here.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Where things are
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+| Path | What |
+|---|---|
+| `src/index.css` | Theme tokens (light and dark), the chart palettes, global chart CSS |
+| `src/components/ui/` | The primitives every tab is built from: `Card`, `KpiCard`/`KpiPanel`, `DataTable` (one column description, a table on desktop and cards on a phone), `SegmentedControl`, `CollapsibleCardHeader`, `TickerAvatar` |
+| `src/components/` | One file per tab and per panel; `Dashboard.tsx` assembles the stock view, `CryptoDashboard.tsx` the crypto one |
+| `src/lib/` | Pure logic with tests beside it: KPIs and returns, forecasting, rebalancing, colours, formatting, the API client |
+
+Formatting goes through `src/lib/utils.ts` (currency, dates, axis labels — all pinned to
+`en-US`), and a chart's grid and tooltip through `src/lib/chartTooltip.ts`. Several
+`*.test.ts` files scan the source for hand-rolled copies of these, so a new chart or table
+that rolls its own fails the suite.

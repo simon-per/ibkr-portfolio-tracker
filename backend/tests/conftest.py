@@ -19,11 +19,32 @@ The CoinStats credentials are blanked so a developer's real key and share token 
 `backend/.env` can never make a test spend credits: with them empty, every crypto path
 short-circuits as "not configured" unless a test deliberately configures fakes and
 injects a mock transport.
-"""
-import pytest
 
-from app import rate_limit
-from app.config import settings
+**The suite gets a database of its own, one per process** (2026-10-17). Most tests build
+an in-memory engine, but anything that enters the real lifespan (`with TestClient(app)`:
+`create_all`, the default ticker-mapping seed, the WAL checkpoint) or reaches the module
+`AsyncSessionLocal` wrote into whatever `DATABASE_URL` named — in a developer's checkout
+that is `backend/.env`'s, which may be a production snapshot they still need, and under
+xdist every worker wrote into the same file at once. `settings` is built once, at import,
+so the variable is set here, before anything below imports `app.config`; an environment
+variable outranks `.env` in pydantic-settings. A test that wants a particular file still
+patches `settings.database_url` itself (`test_migrations.py`). Each process — the xdist
+controller and every worker — gets its own directory, removed when it exits.
+"""
+import atexit
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+_TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="ibkr-tests-"))
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(_TEST_DB_DIR / 'test.db').as_posix()}"
+atexit.register(shutil.rmtree, _TEST_DB_DIR, ignore_errors=True)
+
+import pytest  # noqa: E402
+
+from app import rate_limit  # noqa: E402
+from app.config import settings  # noqa: E402
 
 
 def pytest_configure(config):

@@ -1,4 +1,5 @@
 import type { DividendSecurityRow } from './api'
+import { compareNullsLast } from './nullsLast'
 
 /**
  * Sorting for the per-position dividend table.
@@ -54,15 +55,10 @@ export function sortDividendRows(
   direction: DividendSortDirection,
   showForecast: boolean,
 ): DividendSecurityRow[] {
-  const sign = direction === 'asc' ? 1 : -1
-  return [...rows].sort((a, b) => {
-    const va = sortValue(a, column, showForecast)
-    const vb = sortValue(b, column, showForecast)
-    if (va != null && vb == null) return -1
-    if (va == null && vb != null) return 1
-    if (va != null && vb != null && va !== vb) return (va < vb ? -1 : 1) * sign
-    return a.symbol.localeCompare(b.symbol) || a.security_id - b.security_id
-  })
+  return [...rows].sort((a, b) =>
+    compareNullsLast(sortValue(a, column, showForecast), sortValue(b, column, showForecast), direction)
+      || a.symbol.localeCompare(b.symbol) || a.security_id - b.security_id,
+  )
 }
 
 /** A new column starts in the direction a reader wants first: names A–Z, figures biggest. */

@@ -6,11 +6,14 @@ import { cn, formatShortDateTime, marketCapParts } from '@/lib/utils'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
-import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } from '@/lib/api'
+import type {
+  FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem, FundamentalsStatus,
+} from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
 import { RefreshCw } from 'lucide-react'
 import { displayName } from '@/lib/securityName'
+import { compareNullsLast } from '@/lib/nullsLast'
 
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
@@ -36,35 +39,40 @@ function formatRatio(value: number | null): string {
   return value.toFixed(1)
 }
 
-// Color coding helpers
+// Color coding helpers. Only the two ends are coloured: the middle band is plain ink,
+// the watchlist's rule (`colorClass`, `rsiColorClass`). A third, yellow band put a colour
+// on nearly every cell of the table, and a signal on every cell is no signal.
+const GOOD = 'text-green-600 dark:text-green-400'
+const POOR = 'text-red-600 dark:text-red-400'
+
 function peColor(value: number | null): string {
   if (value === null) return ''
   // A negative P/E is a loss, not a bargain — the `< 15` branch painted it green.
-  if (value <= 0) return 'text-red-600 dark:text-red-400'
-  if (value < 15) return 'text-green-600 dark:text-green-400'
-  if (value < 25) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value <= 0) return POOR
+  if (value < 15) return GOOD
+  if (value < 25) return ''
+  return POOR
 }
 
 function pegColor(value: number | null): string {
   if (value === null) return ''
-  if (value < 1) return 'text-green-600 dark:text-green-400'
-  if (value < 2) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value < 1) return GOOD
+  if (value < 2) return ''
+  return POOR
 }
 
 function growthColor(value: number | null): string {
   if (value === null) return ''
-  if (value > 0.15) return 'text-green-600 dark:text-green-400'
-  if (value > 0) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value > 0.15) return GOOD
+  if (value > 0) return ''
+  return POOR
 }
 
 function marginColor(value: number | null): string {
   if (value === null) return ''
-  if (value > 0.20) return 'text-green-600 dark:text-green-400'
-  if (value > 0.10) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
+  if (value > 0.20) return GOOD
+  if (value > 0.10) return ''
+  return POOR
 }
 
 function surpriseColor(result: string | null): string {
@@ -74,15 +82,6 @@ function surpriseColor(result: string | null): string {
   return 'bg-muted text-muted-foreground'
 }
 
-// Sort comparator that handles nulls (nulls last)
-function compareValues(a: number | string | null, b: number | string | null, dir: SortDir): number {
-  if (a === null && b === null) return 0
-  if (a === null) return 1
-  if (b === null) return -1
-  if (a < b) return dir === 'asc' ? -1 : 1
-  if (a > b) return dir === 'asc' ? 1 : -1
-  return 0
-}
 
 function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
   if (etfs.length === 0) return null
@@ -280,7 +279,7 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
     // ranks nothing.
     const sortValue = (row: FundamentalMetrics) =>
       sortKey === 'market_cap' ? row.market_cap_base : row[sortKey]
-    return [...stocks].sort((a, b) => compareValues(sortValue(a), sortValue(b), sortDir))
+    return [...stocks].sort((a, b) => compareNullsLast(sortValue(a), sortValue(b), sortDir))
   }, [stocks, sortKey, sortDir])
 
   const currencySymbol = useCurrencySymbol()
@@ -315,8 +314,13 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
   const PAGE_SIZE = 10
   const [page, setPage] = useState(0)
 
-  // Reset to first page when data changes
-  useEffect(() => { setPage(0) }, [data])
+  // Back to the first page when the data changes — adjusted while rendering, React's
+  // pattern for state that follows a prop, rather than in an effect that renders twice.
+  const [pageOf, setPageOf] = useState(data)
+  if (pageOf !== data) {
+    setPageOf(data)
+    setPage(0)
+  }
 
   if (data.length === 0) {
     return (
@@ -448,7 +452,12 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
 
 function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistoryItem[], pageSize?: number }) {
   const [page, setPage] = useState(0)
-  useEffect(() => { setPage(0) }, [pageSize])
+  // Back to the first page when the page size changes (see `EarningsCalendar`).
+  const [pageFor, setPageFor] = useState(pageSize)
+  if (pageFor !== pageSize) {
+    setPageFor(pageSize)
+    setPage(0)
+  }
   const totalPages = Math.ceil(data.length / pageSize)
   const pageData = data.slice(page * pageSize, (page + 1) * pageSize)
 
@@ -489,7 +498,6 @@ function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistor
 export function FundamentalsTab() {
   const queryClient = useQueryClient()
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null)
-  const isSyncing = syncStartedAt !== null
 
   // Each query captures isError: every empty state on this tab used to read as "no
   // data yet — click Sync Now", which is a statement about the *portfolio*. When the
@@ -527,21 +535,27 @@ export function FundamentalsTab() {
     queryFn: () => api.getEarningsHistory(365),
   })
 
+  // A background sync is finished once the newest row is newer than the moment it was
+  // started. Derived while rendering: clearing `syncStartedAt` from an effect cost a
+  // second render on every status poll (react-hooks/set-state-in-effect).
+  const syncFinished = (s: FundamentalsStatus | undefined) =>
+    syncStartedAt !== null && s?.newest_update != null && new Date(s.newest_update) > syncStartedAt
+
   const { data: status } = useQuery({
     queryKey: ['fundamentals', 'status'],
     queryFn: () => api.getFundamentalsStatus(),
-    refetchInterval: isSyncing ? 5000 : false,
+    refetchInterval: (query) =>
+      syncStartedAt !== null && !syncFinished(query.state.data) ? 5000 : false,
   })
 
-  // Detect when background sync completes: newest_update advances past syncStartedAt
+  const syncDone = syncFinished(status)
+  const isSyncing = syncStartedAt !== null && !syncDone
+
+  // The one side effect of finishing: refetch what the sync wrote. Once per sync — the
+  // flag stays true until the next sync moves `syncStartedAt`.
   useEffect(() => {
-    if (!isSyncing || !status || !syncStartedAt) return
-    const newestUpdate = status.newest_update ? new Date(status.newest_update) : null
-    if (newestUpdate && newestUpdate > syncStartedAt) {
-      setSyncStartedAt(null)
-      queryClient.invalidateQueries({ queryKey: ['fundamentals'] })
-    }
-  }, [status, isSyncing, syncStartedAt, queryClient])
+    if (syncDone) queryClient.invalidateQueries({ queryKey: ['fundamentals'] })
+  }, [syncDone, queryClient])
 
   const handleSyncSuccess = (data: { status: string }) => {
     if (data.status === 'started') {
@@ -573,11 +587,12 @@ export function FundamentalsTab() {
   // arithmetic was wrong twice over there.
   const sideBySide = useIsSideBySide()
 
+  // Stacked, the measured size does not apply; the default is used without being stored,
+  // so nothing is set synchronously inside the effect below.
+  const effectiveHistoryPageSize = sideBySide ? historyPageSize : DEFAULT_HISTORY_PAGE_SIZE
+
   useEffect(() => {
-    if (!sideBySide) {
-      setHistoryPageSize(DEFAULT_HISTORY_PAGE_SIZE)
-      return
-    }
+    if (!sideBySide) return
     const leftCard = leftCardRef.current
     if (!leftCard) return
     const update = () => {
@@ -725,7 +740,7 @@ export function FundamentalsTab() {
                 Couldn't load earnings history — the server didn't respond.
               </div>
             ) : (
-              <EarningsSurpriseHistory data={earningsHistory || []} pageSize={historyPageSize} />
+              <EarningsSurpriseHistory data={earningsHistory || []} pageSize={effectiveHistoryPageSize} />
             )}
           </CardContent>
         </Card>

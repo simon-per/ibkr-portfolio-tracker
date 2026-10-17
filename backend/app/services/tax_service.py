@@ -26,6 +26,7 @@ from app.models.trade import Trade
 from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
+from app.services.eur_conversion import to_eur_or_none
 from app.services.dividend_service import DividendService
 from app.services.native_amounts import cash_flow_in_base
 from app.services.portfolio_service import PortfolioService
@@ -37,34 +38,6 @@ class TaxService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.currency_service = CurrencyService(db)
-
-    async def _to_eur(
-        self, amount: Decimal, currency: str, on_date: date
-    ) -> Optional[Decimal]:
-        """
-        Convert to EUR, or return None when no rate can be resolved.
-
-        It used to return the *unconverted* amount on failure, which reports a
-        foreign figure as base currency — a TWD sale would read ~35x high in a
-        filing aid still badged realized_source='trades', the badge that means
-        authoritative. Every other FX consumer skips the row with a warning
-        instead (sync_helper, portfolio_service, benchmark_service); this one
-        silently produced a number, and logged nothing at all.
-        """
-        if not amount:
-            return Decimal("0")
-        if (currency or "EUR") == "EUR":
-            return amount
-        try:
-            return await self.currency_service.convert_to_eur(
-                amount=amount, from_currency=currency, target_date=on_date
-            )
-        except Exception as e:
-            logger.warning(
-                f"No {currency}->EUR rate for {on_date} ({e}); "
-                f"skipping the row rather than reporting {currency} as EUR"
-            )
-            return None
 
     async def get_tax_report(self, year: int) -> Dict:
         start = date(year, 1, 1)
@@ -113,6 +86,7 @@ class TaxService:
         dividend_income: List[Dict] = []
         sources_seen: set = set()
         div_gross = div_wht = div_net = Decimal("0")
+        estimated_rows = 0
         # DA-1 is filed per source country, so accumulate a per-country breakdown as we go.
         by_country: Dict[str, Dict] = {}
         for dp, sec in rows:
@@ -131,10 +105,20 @@ class TaxService:
             gross = base_fx.convert(gross_e, on_date)
             wht = base_fx.convert(wht_e, on_date)
             net = base_fx.convert(net_e, on_date)
+            row_source = "ibkr" if dp.source == "ibkr" else "yfinance_estimate"
+            # An estimate has no withholding on record: `compute_dividend_income` stores
+            # 0 because yfinance carries none, so its 0 means "not known", never "nothing
+            # withheld". It is absent here, and the withholding total is the RECORDED
+            # withholding only — the count below says how many rows it leaves out. The
+            # net keeps the gross fallback (`_net_eur`), so real income is not dropped,
+            # and is counted the same way.
+            estimated = row_source == "yfinance_estimate"
+            if estimated:
+                estimated_rows += 1
+                wht = Decimal("0")
             div_gross += gross
             div_wht += wht
             div_net += net
-            row_source = "ibkr" if dp.source == "ibkr" else "yfinance_estimate"
             sources_seen.add(row_source)
             dividend_income.append({
                 "symbol": sec.symbol,
@@ -142,7 +126,7 @@ class TaxService:
                 "isin": sec.isin,
                 "pay_date": on_date.isoformat(),
                 "gross": round(float(gross), 2),
-                "withholding": round(float(wht), 2),
+                "withholding": None if estimated else round(float(wht), 2),
                 "net": round(float(net), 2),
                 "source": row_source,
             })
@@ -153,30 +137,40 @@ class TaxService:
             bucket = by_country.setdefault(country or "??", {
                 "country": country or "??",
                 "gross": Decimal("0"), "withholding": Decimal("0"), "net": Decimal("0"),
-                "symbols": set(),
+                "symbols": set(), "payments": 0, "estimated_payments": 0,
             })
             bucket["gross"] += gross
             bucket["withholding"] += wht
             bucket["net"] += net
+            bucket["payments"] += 1
+            if estimated:
+                bucket["estimated_payments"] += 1
             if sec.symbol:
                 bucket["symbols"].add(sec.symbol)
 
         dividend_income.sort(key=lambda d: d["pay_date"])
 
-        dividend_by_country = sorted(
-            (
-                {
-                    "country": b["country"],
-                    "gross": round(float(b["gross"]), 2),
-                    "withholding": round(float(b["withholding"]), 2),
-                    "net": round(float(b["net"]), 2),
-                    "positions": len(b["symbols"]),
-                }
-                for b in by_country.values()
-            ),
-            key=lambda d: d["withholding"],
-            reverse=True,
-        )
+        dividend_by_country = [
+            {
+                "country": b["country"],
+                "gross": round(float(b["gross"]), 2),
+                # Absent when every payment from the country is an estimate: there is
+                # no withholding on record to report, and 0.00 would read as none.
+                "withholding": (
+                    None if b["estimated_payments"] == b["payments"]
+                    else round(float(b["withholding"]), 2)
+                ),
+                "net": round(float(b["net"]), 2),
+                "positions": len(b["symbols"]),
+                # DA-1 is filed per country, so which countries' withholding is
+                # incomplete is said per country, not once for the year.
+                "payments": b["payments"],
+                "estimated_payments": b["estimated_payments"],
+            }
+            # Sorted on the recorded amount, so an all-estimate country sorts as nothing
+            # recorded rather than failing to compare.
+            for b in sorted(by_country.values(), key=lambda b: b["withholding"], reverse=True)
+        ]
 
         # --- Realized capital gains (per SELL trade) ---
         # Filtered on `Trade.account`, NOT on the joined security. The join is an
@@ -203,8 +197,16 @@ class TaxService:
         for t, sec in trade_rows:
             if (t.buy_sell or "").upper() != "SELL":
                 continue
-            proceeds_e = await self._to_eur(t.proceeds or Decimal("0"), t.currency, t.trade_date)
-            gain_e = await self._to_eur(t.realized_pnl or Decimal("0"), t.currency, t.trade_date)
+            # Through the one shared rule (`eur_conversion`). It returned the
+            # *unconverted* amount on failure until 2026-07-30, reporting a foreign
+            # figure as base currency — a TWD sale ~35x high in a filing aid badged
+            # realized_source='trades', the badge that means authoritative.
+            proceeds_e = await to_eur_or_none(
+                self.currency_service, t.proceeds or Decimal("0"), t.currency, t.trade_date
+            )
+            gain_e = await to_eur_or_none(
+                self.currency_service, t.realized_pnl or Decimal("0"), t.currency, t.trade_date
+            )
             if proceeds_e is None or gain_e is None:
                 # Reporting the raw foreign amount would be worse than omitting
                 # it: the figure looks plausible and the badge says authoritative.
@@ -386,8 +388,14 @@ class TaxService:
             "dividend_country_note": "Country from the ISIN prefix — verify ADRs and funds.",
             "dividend_totals": {
                 "gross": round(float(div_gross), 2),
-                "withholding": round(float(div_wht), 2),
+                # Recorded withholding only; `estimated_rows` is what it leaves out, and
+                # what `gross` and `net` include. Absent when every row is an estimate.
+                "withholding": (
+                    None if dividend_income and estimated_rows == len(dividend_income)
+                    else round(float(div_wht), 2)
+                ),
                 "net": round(float(div_net), 2),
+                "estimated_rows": estimated_rows,
             },
             "realized_gains": realized_gains,
             "realized_source": realized_source,
@@ -462,21 +470,32 @@ class TaxService:
                 f"Estimates before {report['dividend_ibkr_from']}; "
                 f"IBKR actuals with real withholding from there on"
             ])
+        # An estimate's withholding is a blank cell, never 0.00: a reader filing DA-1
+        # from this sheet must not read "nothing withheld" into "not known".
         w.writerow(["Symbol", "Description", "ISIN", "Pay date",
-                    f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})"])
+                    f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})", "Estimate"])
         for d in report["dividend_income"]:
+            estimated = d["source"] == "yfinance_estimate"
             w.writerow([d["symbol"], d["description"], d["isin"], d["pay_date"],
-                        d["gross"], d["withholding"], d["net"]])
+                        d["gross"], "" if d["withholding"] is None else d["withholding"],
+                        d["net"], "est." if estimated else ""])
         dt = report["dividend_totals"]
-        w.writerow(["TOTAL", "", "", "", dt["gross"], dt["withholding"], dt["net"]])
+        n_est = dt.get("estimated_rows", 0)
+        w.writerow(["TOTAL", "", "", "", dt["gross"],
+                    "" if dt["withholding"] is None else dt["withholding"],
+                    dt["net"],
+                    f"withholding excludes, gross and net include {n_est} est." if n_est else ""])
         w.writerow([])
 
         # DA-1 is filed per source country.
         w.writerow(["Withholding by country (DA-1)"])
         w.writerow(["Country", "Positions",
-                    f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})"])
+                    f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})",
+                    "Estimated payments"])
         for c in report.get("dividend_by_country", []):
-            w.writerow([c["country"], c["positions"], c["gross"], c["withholding"], c["net"]])
+            w.writerow([c["country"], c["positions"], c["gross"],
+                        "" if c["withholding"] is None else c["withholding"], c["net"],
+                        c.get("estimated_payments") or ""])
         w.writerow([])
 
         w.writerow([f"Realized capital gains (source: {report.get('realized_source', 'trades')})"])

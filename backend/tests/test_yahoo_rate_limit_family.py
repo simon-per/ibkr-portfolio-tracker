@@ -19,6 +19,8 @@ Offline: no network. Every fetch is replaced by a raiser.
 """
 
 import ast
+from datetime import date
+from decimal import Decimal
 import inspect
 import pathlib
 from datetime import date

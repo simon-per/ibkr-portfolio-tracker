@@ -229,13 +229,15 @@ export function watchlistColumns(deps: {
       cell: (i) => {
         const upside = analystUpside(i)
         return (
-          <div>
+          // `whitespace-nowrap`: "Strong Buy" over "+35% upside" broke into three and four
+          // lines in a column that only needs the width of its longest phrase.
+          <div className="whitespace-nowrap">
             <div className={`text-xs font-medium ${ratingColorClass(i.analyst_rating)}`}>
               {i.analyst_rating ? RATING_LABELS[i.analyst_rating] || i.analyst_rating : ABSENT}
             </div>
             {upside !== null && (
               <div
-                className={`text-[10px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+                className={`text-[11px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
               >
                 {upside >= 0 ? '+' : ''}
                 {upside.toFixed(0)}% upside

@@ -57,6 +57,7 @@ export function CryptoDashboard() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <AppHeader
+        bordered
         status={<CryptoStatusLine access={access} status={statusQuery.data} />}
         actions={
           <Button

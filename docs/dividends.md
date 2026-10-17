@@ -978,7 +978,8 @@ that it keeps growing, and have the breakdown available without it being the lou
   every security `is_known_etf_isin` names — the one fundness predicate — and the rule
   above puts its change in `timing`. Read time, not write time: the stored level stays,
   so the rule needs no backfill and changes no stored row. A fund missing from
-  `ETF_ALLOCATIONS` is treated as a company, as everywhere else.
+  `ETF_ALLOCATIONS` is treated as a company, as everywhere else. Measured on production the
+  same evening: `raises` +3.40 since `growth_from`, the funds' −6.50 now in `timing`.
 - **Levels on the days stored before 2026-10-17 come from the backfill.**
   `backfill_dividend_forecast --from <growth_from>` restates the replayed days with their
   levels, restates the replayed lines of the recorded days that have no recorded lines

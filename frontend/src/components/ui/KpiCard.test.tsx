@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { ABSENT, KpiCard, KpiCardSkeleton, KpiPanel } from './KpiCard'
+import { KpiCard, KpiCardSkeleton, KpiPanel } from './KpiCard'
+import { ABSENT } from '@/lib/utils'
 
 // Explicit, because there is no vitest setup file — jsdom is opted into per file, so
 // testing-library's auto-cleanup is never registered and renders otherwise accumulate
@@ -80,12 +81,12 @@ describe('KpiCard', () => {
     // columns, so it keeps the large size.
     const { unmount } = render(<KpiCard label="Cost Basis" value="CHF 48,561" />)
     expect(screen.getByText('CHF 48,561').className).toContain('text-lg')
-    expect(screen.getByText('CHF 48,561').className).toContain('sm:text-xl')
+    expect(screen.getByText('CHF 48,561').className).toContain('sm:text-[1.375rem]')
     unmount()
 
     render(<KpiCard hero label="Market Value" value="CHF 65,024" />)
     const hero = screen.getByText('CHF 65,024')
-    expect(hero.className).toContain('text-2xl')
+    expect(hero.className).toContain('text-[1.75rem]')
     expect(hero.className).not.toContain('text-lg')
   })
 
@@ -127,7 +128,7 @@ describe('KpiCard', () => {
     )
     const panel = container.firstElementChild
     const grid = panel?.firstElementChild
-    expect(panel?.className).toContain('rounded-xl')
+    expect(panel?.className).toContain('rounded-2xl')
     expect(grid?.className).toContain('grid-cols-2')
     expect(grid?.children).toHaveLength(2)
     expect(grid?.children[0]?.className).toContain('p-4')

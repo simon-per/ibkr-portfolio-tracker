@@ -1,14 +1,15 @@
-import { CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
+import { CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
 import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { formatCount } from '@/lib/utils'
+import { formatCount, formatAxisMoney } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { readStored, writeStored } from '@/lib/storage'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 const STORAGE_KEYS = {
   /** Written only when the owner types a contribution; absent means "follow my real pace". */
@@ -269,7 +270,7 @@ export function ForecastTab() {
                   type="range"
                   value={forecastYears}
                   onChange={(e) => setForecastYears(Number(e.target.value))}
-                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-[hsl(var(--primary))]"
                   min="1"
                   max="30"
                   step="1"
@@ -294,7 +295,7 @@ export function ForecastTab() {
                     }
                   }}
                   aria-label="Monthly Contribution"
-                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
                   max={MAX_CONTRIBUTION}
                   step="100"
@@ -310,7 +311,7 @@ export function ForecastTab() {
                   className={`rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
                     followingPace
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-background hover:bg-accent hover:text-accent-foreground'
+                      : 'bg-card hover:bg-muted'
                   }`}
                 >
                   My pace · {curSym}{formatCount(pace)}
@@ -333,7 +334,7 @@ export function ForecastTab() {
                       setExpectedReturn(val)
                     }
                   }}
-                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
                   max="30"
                   step="0.5"
@@ -347,28 +348,23 @@ export function ForecastTab() {
               <label className="text-sm font-medium">
                 Starting Point
               </label>
-              <div className="flex items-center gap-2 h-10">
-                <button
-                  onClick={() => setStartFromZero(false)}
-                  className={`h-full min-w-0 flex-1 truncate rounded-lg border px-2 text-sm font-medium transition-colors ${
-                    !startFromZero
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background hover:bg-accent hover:text-accent-foreground'
-                  }`}
-                >
-                  Current ({summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(current.startValue))}`})
-                </button>
-                <button
-                  onClick={() => setStartFromZero(true)}
-                  className={`h-full min-w-0 flex-1 truncate rounded-lg border px-2 text-sm font-medium transition-colors ${
-                    startFromZero
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background hover:bg-accent hover:text-accent-foreground'
-                  }`}
-                >
-                  {curSym}0
-                </button>
-              </div>
+              {/* The app's one toggle group (`SegmentedControl`): the pair was two bare
+                  buttons with no pressed state for assistive technology, split 50/50 so the
+                  amount truncated to "Current (CHF 144…". Each option now takes its width. */}
+              <SegmentedControl<'current' | 'zero'>
+                label="Starting point"
+                value={startFromZero ? 'zero' : 'current'}
+                onChange={(v) => setStartFromZero(v === 'zero')}
+                className="flex h-10 w-full"
+                buttonClassName="h-9 flex-auto whitespace-nowrap"
+                options={[
+                  {
+                    value: 'current',
+                    label: `Current (${summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(current.startValue))}`})`,
+                  },
+                  { value: 'zero', label: `${curSym}0` },
+                ]}
+              />
             </div>
           </div>
         </CardContent>
@@ -389,11 +385,11 @@ export function ForecastTab() {
             <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="forecast-value-fill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.02} />
+                  <stop offset="0%" stopColor="#2a78d6" stopOpacity={0.25} />
+                  <stop offset="100%" stopColor="#2a78d6" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+              <CartesianGrid {...CHART_GRID_PROPS} />
               <XAxis
                 dataKey="year"
                 axisLine={false}
@@ -407,7 +403,7 @@ export function ForecastTab() {
               <YAxis
                 domain={yAxisConfig.domain}
                 ticks={yAxisConfig.ticks}
-                tickFormatter={(value) => `${curSym}${(value / 1000).toFixed(0)}k`}
+                tickFormatter={(value: number) => formatAxisMoney(value, curSym)}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}
@@ -444,7 +440,7 @@ export function ForecastTab() {
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="#3b82f6"
+                stroke="#2a78d6"
                 strokeWidth={2.25}
                 fill="url(#forecast-value-fill)"
                 name="Portfolio Value"

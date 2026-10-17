@@ -3,7 +3,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
-import { readStored, writeStored } from '@/lib/storage'
+import { readStored, writeStored, useRememberedOpen } from '@/lib/storage'
+import { TARGETS_KEY, readTargets } from '@/lib/rebalanceTargets'
 import { formatCount } from '@/lib/utils'
 import {
   DEFAULT_BAND_PP,
@@ -15,37 +16,7 @@ import {
 } from '@/lib/rebalance'
 import { displayName } from '@/lib/securityName'
 
-const TARGETS_KEY = 'allocationTargets'
 const BAND_KEY = 'allocationBandPp'
-
-/**
- * Targets live in localStorage, following `ForecastTab`'s precedent for
- * user-set parameters. Deliberately not a table and an endpoint: `/api/` is
- * proxied publicly and every write is auth-gated, so a new mutating route is a
- * bigger surface than this feature earns. It also means switching machines
- * loses them, which is the trade being made.
- */
-export function readTargets(): TargetMap {
-  try {
-    const raw = readStored(TARGETS_KEY)
-    if (!raw) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null) return {}
-    const out: TargetMap = {}
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const id = Number(key)
-      // A stored target that is not a usable percent is dropped rather than
-      // coerced: a NaN would propagate into every drift on the page.
-      if (!Number.isInteger(id) || typeof value !== 'number') continue
-      if (!Number.isFinite(value) || value < 0 || value > 100) continue
-      out[id] = value
-    }
-    return out
-  } catch {
-    // Corrupt JSON must not take the Allocation tab down with it.
-    return {}
-  }
-}
 
 function pct(value: number | null, digits = 1): string {
   return value === null ? '—' : `${value.toFixed(digits)}%`
@@ -79,7 +50,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
   })
   // Open for someone who has already set targets, collapsed for someone who
   // has not — the panel is secondary to the treemaps above it.
-  const [open, setOpen] = useState(() => Object.keys(readTargets()).length > 0)
+  const [open, setOpen] = useRememberedOpen('target-allocation', () => Object.keys(readTargets()).length > 0)
 
   useEffect(() => {
     writeStored(TARGETS_KEY, JSON.stringify(targets))
@@ -192,7 +163,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
             value={row.targetPct ?? ''}
             onChange={(e) => setTarget(row.securityId, e.target.value)}
             placeholder="—"
-            className="w-20 rounded border bg-background px-2 py-1 text-right tabular-nums"
+            className="w-20 rounded-md border border-input bg-card px-2 py-1 text-right tabular-nums"
             aria-label={`Target weight for ${row.symbol}`}
           />
         ),
@@ -273,7 +244,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
                       const v = Number(e.target.value)
                       if (Number.isFinite(v) && v > 0 && v <= 50) setBandPp(v)
                     }}
-                    className="w-16 rounded border bg-background px-2 py-1 text-right"
+                    className="w-16 rounded-md border border-input bg-card px-2 py-1 text-right"
                     aria-label="Tolerance band in percentage points"
                   />
                   <span className="text-muted-foreground">pp</span>

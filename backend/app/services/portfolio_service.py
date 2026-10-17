@@ -855,7 +855,7 @@ class PortfolioService:
         for t in trades:
             if (t.buy_sell or "").upper() != "SELL":
                 continue
-            currency = t.currency or "EUR"
+            currency = t.currency
             proceeds = t.proceeds if t.proceeds is not None else Decimal("0")
             gain = t.realized_pnl if t.realized_pnl is not None else Decimal("0")
 

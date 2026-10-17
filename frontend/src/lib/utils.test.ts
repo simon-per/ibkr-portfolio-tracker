@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatAxisMoney,
   cn,
   currencySymbol,
   formatCurrency,
@@ -187,14 +188,22 @@ describe('formatShortDateTime', () => {
     // Local time, so the digits depend on the host zone; the SHAPE does not. The three
     // sites this replaces passed `undefined` as the locale and followed the runtime —
     // "09.08.26, 06:00" on a German machine for the same instant.
-    expect(formatShortDateTime('2026-08-09T04:00:00+00:00')).toMatch(
-      /^\d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)$/,
+    expect(formatShortDateTime('2026-08-09T04:00:00+00:00', new Date(2026, 9, 1))).toMatch(
+      /^Aug \d{1,2}, \d{1,2}:\d{2}\s(AM|PM)$/,
     )
   })
 
   it('accepts a Date as given', () => {
     // `\s` rather than a literal space: recent ICU separates the meridiem with U+202F.
-    expect(formatShortDateTime(new Date(2026, 7, 9, 6, 0))).toMatch(/^8\/9\/26, 6:00\sAM$/)
+    expect(formatShortDateTime(new Date(2026, 7, 9, 6, 0), new Date(2026, 9, 1))).toMatch(
+      /^Aug 9, 6:00\sAM$/,
+    )
+  })
+
+  it('names the year only when it is not the current one', () => {
+    expect(formatShortDateTime(new Date(2025, 11, 30, 18, 5), new Date(2026, 0, 2))).toMatch(
+      /^Dec 30, 2025, 6:05\sPM$/,
+    )
   })
 })
 
@@ -223,7 +232,7 @@ describe('cn', () => {
   })
 
   it('drops falsy entries', () => {
-    expect(cn('a', false && 'b', undefined, 'c')).toBe('a c')
+    expect(cn('a', false, null, undefined, 'c')).toBe('a c')
   })
 
   it('lets a later Tailwind class win over an earlier conflicting one', () => {
@@ -262,5 +271,36 @@ describe('formatQuantity', () => {
   it('keeps a small balance visible rather than rounding it to 0', () => {
     expect(formatQuantity(0.00000123)).toBe('0.00000123')
     expect(formatQuantity(0.000123456789)).toBe('0.000123457')
+  })
+})
+
+describe('formatAxisMoney', () => {
+  it('scales to k, M and B with at most one decimal and no trailing .0', () => {
+    expect(formatAxisMoney(150_000, 'CHF\u00a0')).toBe('CHF\u00a0150k')
+    expect(formatAxisMoney(12_500, '€')).toBe('€12.5k')
+    expect(formatAxisMoney(1_000, '€')).toBe('€1k')
+    expect(formatAxisMoney(1_000_000, 'CHF\u00a0')).toBe('CHF\u00a01M')
+    expect(formatAxisMoney(1_250_000, '$')).toBe('$1.3M')
+    expect(formatAxisMoney(2_000_000_000, '$')).toBe('$2B')
+  })
+
+  it('prints zero as zero, not "0k"', () => {
+    expect(formatAxisMoney(0, 'CHF\u00a0')).toBe('CHF\u00a00')
+    expect(formatAxisMoney(-0.2, '€')).toBe('€0')
+  })
+
+  it('keeps small amounts whole and puts the sign before the symbol', () => {
+    expect(formatAxisMoney(950, '€')).toBe('€950')
+    expect(formatAxisMoney(-2_500, 'CHF\u00a0')).toBe('-CHF\u00a02.5k')
+    expect(formatAxisMoney(-40, '$')).toBe('-$40')
+  })
+
+  it('moves up a unit when rounding reaches a thousand', () => {
+    expect(formatAxisMoney(999_950, '€')).toBe('€1M')
+    expect(formatAxisMoney(999.6)).toBe('1k')
+  })
+
+  it('omits the symbol when none is given', () => {
+    expect(formatAxisMoney(4_500)).toBe('4.5k')
   })
 })

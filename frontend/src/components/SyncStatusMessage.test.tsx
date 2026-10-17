@@ -87,8 +87,8 @@ describe('SyncStatusMessage', () => {
     // en-US; the times here go through `formatShortDateTime` now.
     render(<SyncStatusMessage data={SKIPPED} error={null} isPending={false} onForce={() => {}} />)
     const line = screen.getByText(/Next statement available/).textContent ?? ''
-    expect(line).toMatch(/available \d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)/)
-    expect(line).toMatch(/last synced \d{1,2}\/\d{1,2}\/\d{2}, \d{1,2}:\d{2}\s(AM|PM)/)
+    expect(line).toMatch(/available [A-Z][a-z]{2} \d{1,2}(, \d{4})?, \d{1,2}:\d{2}\s(AM|PM)/)
+    expect(line).toMatch(/last synced [A-Z][a-z]{2} \d{1,2}(, \d{4})?, \d{1,2}:\d{2}\s(AM|PM)/)
   })
 
   it('does not offer a force override while a sync is already running', () => {

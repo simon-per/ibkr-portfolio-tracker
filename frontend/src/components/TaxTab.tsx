@@ -8,6 +8,9 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { displayName } from '@/lib/securityName'
+import {
+  includedEstimatesTag, withheld, withholdingTotalLabel, type Money,
+} from '@/lib/taxTotals'
 
 /**
  * Only the first-paint fallback for the year picker. The real floor is the year of the
@@ -24,42 +27,8 @@ function gainClass(amount: number): string {
   return 'text-muted-foreground'
 }
 
-type Money = (n: number) => string
-
-/** Withholding is a deduction, so a recorded amount prints with its minus. */
-function withheld(money: Money, amount: number): string {
-  return amount ? `-${money(amount)}` : money(0)
-}
-
 function signed(money: Money, amount: number): string {
   return `${amount >= 0 ? '+' : ''}${money(amount)}`
-}
-
-/**
- * How many dividend rows are estimates. An estimate has a guessed gross and *no*
- * withholding on record — its 0 is "not known", not "nothing withheld" — so its
- * withholding cell is absent and a total built over it says how many it left out.
- */
-export function estimatedDividendRows(rows: TaxReport['dividend_income']): number {
-  return rows.filter((d) => d.source === 'yfinance_estimate').length
-}
-
-/**
- * The withholding total's cell. The backend's sum carries every estimate as 0, so it is
- * the recorded withholding only: absent when every row is an estimate, and tagged with
- * the count it excludes when some are.
- */
-export function withholdingTotalLabel(
-  money: Money,
-  total: number,
-  rowCount: number,
-  estimatedRows: number,
-): { amount: string; excluded: string | null } {
-  if (rowCount > 0 && estimatedRows === rowCount) return { amount: '—', excluded: null }
-  return {
-    amount: withheld(money, total),
-    excluded: estimatedRows > 0 ? `excl. ${estimatedRows} est.` : null,
-  }
 }
 type DividendIncomeRow = TaxReport['dividend_income'][number]
 type ByCountryRow = TaxReport['dividend_by_country'][number]
@@ -122,19 +91,16 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Withholding',
     align: 'right',
     cellClassName: 'text-muted-foreground',
-    cell: (d) => (d.source === 'yfinance_estimate' ? '—' : withheld(money, d.withholding)),
+    cell: (d) => (d.withholding == null ? '—' : withheld(money, d.withholding)),
   },
 ]
 
 /**
- * A country row does not say which of its payments were estimates, so the column
- * follows the report's era: absent in an estimate-only year, tagged in the boundary
- * year, where its sum is the recorded withholding only.
+ * Each country row says how many of its payments were estimates, so only the countries
+ * whose withholding is incomplete are tagged: absent when all of a country's payments
+ * are estimates, the recorded sum with `excl. est.` when some are.
  */
-const BY_COUNTRY_COLUMNS = (
-  money: Money,
-  dividendSource: TaxReport['dividend_source'],
-): Column<ByCountryRow>[] => [
+const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
   {
     key: 'country',
     header: 'Country',
@@ -173,9 +139,9 @@ const BY_COUNTRY_COLUMNS = (
     shortHeader: 'Withholding',
     align: 'right',
     cell: (c) =>
-      dividendSource === 'yfinance_estimate' ? (
+      c.withholding == null ? (
         '—'
-      ) : dividendSource === 'mixed' ? (
+      ) : c.estimated_payments > 0 ? (
         <>
           {withheld(money, c.withholding)}
           <span className="ml-1 text-xs text-muted-foreground">excl. est.</span>
@@ -275,11 +241,16 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
 
 function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money }) {
   const rows = data.dividend_income
-  const withholding = withholdingTotalLabel(
-    money,
-    data.dividend_totals.withholding,
-    rows.length,
-    estimatedDividendRows(rows),
+  const estimated = data.dividend_totals.estimated_rows
+  const withholding = withholdingTotalLabel(money, data.dividend_totals.withholding, estimated)
+  const included = includedEstimatesTag(estimated, rows.length)
+  const withTag = (amount: string) => (
+    <>
+      {amount}
+      {included && (
+        <span className="ml-1 text-xs font-normal text-muted-foreground">{included}</span>
+      )}
+    </>
   )
   return (
     <DataTable
@@ -290,7 +261,7 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
       density="compact"
       footer={[
         { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: 'Total' },
-        { key: 'gross', spans: ['gross'], align: 'right', content: money(data.dividend_totals.gross) },
+        { key: 'gross', spans: ['gross'], align: 'right', content: withTag(money(data.dividend_totals.gross)) },
         {
           key: 'withholding',
           spans: ['withholding'],
@@ -306,7 +277,7 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
             </>
           ),
         },
-        { key: 'net', spans: ['net'], align: 'right', content: money(data.dividend_totals.net) },
+        { key: 'net', spans: ['net'], align: 'right', content: withTag(money(data.dividend_totals.net)) },
       ]}
     />
   )
@@ -356,7 +327,7 @@ export function TaxTab() {
                 id="tax-year"
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium"
+                className="h-9 rounded-lg border border-input bg-card px-3 text-sm font-medium"
               >
                 {years.map((y) => (
                   <option key={y} value={y}>
@@ -368,7 +339,7 @@ export function TaxTab() {
                 href={api.getTaxReportCsvUrl(year)}
                 download={`tax_report_${year}.csv`}
                 className={cn(
-                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-background px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                  'inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                 )}
               >
                 <Download className="h-4 w-4" />
@@ -438,8 +409,9 @@ export function TaxTab() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
                 {/* Only the `est.` mark survives (owner, 2026-10-14): which feed a figure came
-                    from is not the reader's business, whether it is an estimate is. */}
-                {data.dividend_source !== 'ibkr' && (
+                    from is not the reader's business, whether it is an estimate is. And only
+                    over figures — an empty year has nothing to be an estimate of. */}
+                {data.dividend_source !== 'ibkr' && data.dividend_income.length > 0 && (
                   <span
                     className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
                     title={data.dividend_source === 'mixed' && data.dividend_ibkr_from
@@ -471,7 +443,7 @@ export function TaxTab() {
               <CardContent>
                 <DataTable
                   rows={data.dividend_by_country}
-                  columns={BY_COUNTRY_COLUMNS(money, data.dividend_source)}
+                  columns={BY_COUNTRY_COLUMNS(money)}
                   getRowKey={(c) => c.country}
                   label="Withholding by country"
                   density="compact"
@@ -485,21 +457,26 @@ export function TaxTab() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Realized capital gains</CardTitle>
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-1 text-xs font-medium',
-                    data.realized_source === 'trades'
-                      ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
-                  )}
-                  title={
-                    data.realized_source === 'trades'
-                      ? 'IBKR trades, FIFO'
-                      : 'Closed lots at close-date price'
-                  }
-                >
-                  {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
-                </span>
+                {/* Where the figures came from, so only when there are figures: a year with
+                    no sale reports the fallback source, and "Estimated" over "No realized
+                    sales" reads as a caveat about nothing. */}
+                {data.realized_gains.length > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2.5 py-1 text-xs font-medium',
+                      data.realized_source === 'trades'
+                        ? 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                    )}
+                    title={
+                      data.realized_source === 'trades'
+                        ? 'IBKR trades, FIFO'
+                        : 'Closed lots at close-date price'
+                    }
+                  >
+                    {data.realized_source === 'trades' ? 'IBKR actual' : 'Estimated (closed lots)'}
+                  </span>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -515,7 +492,7 @@ export function TaxTab() {
                   label="Realized capital gains"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol', 'trade_date', 'quantity'], content: 'Total' },
+                    { key: 'label', spans: ['symbol', 'trade_date'], content: 'Total' },
                     { key: 'proceeds', spans: ['proceeds'], align: 'right', content: money(data.realized_totals.proceeds) },
                     { key: 'cost_basis', spans: ['cost_basis'], align: 'right', content: money(data.realized_totals.cost_basis) },
                     {
@@ -563,7 +540,7 @@ export function TaxTab() {
                   label="Holdings snapshot"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol', 'quantity'], content: 'Total' },
+                    { key: 'label', spans: ['symbol'], content: 'Total' },
                     {
                       key: 'market_value',
                       spans: ['market_value'],

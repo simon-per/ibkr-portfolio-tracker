@@ -15,7 +15,7 @@
  */
 import type { ReactNode } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { ABSENT, cn } from '@/lib/utils'
 
 export type KpiTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'muted'
 
@@ -33,11 +33,9 @@ const TONE_CLASS: Record<KpiTone, string> = {
  */
 /* No `tabular-nums` on a lone figure: Inter gives the hyphen a full figure width under it,
    which opened a gap in every negative value, and one figure has nothing to align with. */
-const VALUE_CLASS = 'text-lg font-semibold tracking-tight sm:text-xl'
-const HERO_VALUE_CLASS = 'text-2xl font-semibold tracking-tight sm:text-3xl'
+const VALUE_CLASS = 'text-lg font-semibold leading-tight tracking-tight sm:text-[1.375rem]'
+const HERO_VALUE_CLASS = 'text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-[2rem]'
 const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
-
-export const ABSENT = '—'
 
 export interface KpiCardProps {
   label: ReactNode
@@ -136,16 +134,36 @@ export function KpiCardSkeleton({ count, tile }: { count: number; tile?: boolean
  * The phone keeps two columns, so a six-metric row is three rows of two.
  */
 export function KpiPanel({
-  children, columns = 6, className,
-}: { children: ReactNode; columns?: 4 | 5 | 6; className?: string }) {
+  children, columns = 6, fillLastRow, className,
+}: {
+  children: ReactNode
+  columns?: 3 | 4 | 5 | 6
+  /**
+   * Let an odd last tile span the phone's two columns. A seam-divided panel shows its
+   * background through an empty cell — a grey block, not whitespace — so a panel whose
+   * tile count is odd asks for this. Off by default: a full-width notice inside the grid
+   * (the XIRR alert) changes the parity, and the panel cannot see that.
+   */
+  fillLastRow?: boolean
+  className?: string
+}) {
   const cols = {
+    3: 'md:grid-cols-3',
     4: 'md:grid-cols-2 lg:grid-cols-4',
     5: 'md:grid-cols-3 lg:grid-cols-5',
     6: 'md:grid-cols-3 lg:grid-cols-6',
   }[columns]
   return (
-    <div className={cn('overflow-hidden rounded-xl border border-border/70 bg-border/60', className)}>
-      <div className={cn('grid grid-cols-2 gap-px [&>*]:bg-card', cols)}>{children}</div>
+    <div className={cn('overflow-hidden rounded-2xl border border-border/80 bg-border/70 shadow-card', className)}>
+      <div
+        className={cn(
+          'grid grid-cols-2 gap-px [&>*]:bg-card',
+          cols,
+          fillLastRow && '[&>*:last-child:nth-child(odd)]:col-span-2 md:[&>*:last-child:nth-child(odd)]:col-span-1',
+        )}
+      >
+        {children}
+      </div>
     </div>
   )
 }

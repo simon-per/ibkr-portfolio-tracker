@@ -34,6 +34,11 @@ Traps when pointing a browser at a local stack:
   `DATABASE_URL` pointed at it (the local `backend/portfolio.db` predates trades, cash flows and
   the IBKR dividend era, so it exercises none of the interesting shapes). Delete the copy afterwards —
   `*.db` is gitignored, but it is real account data.
+- **The test suite runs on its own database** (since 2026-10-17), so a snapshot named in
+  `backend/.env` is safe while you run it. `tests/conftest.py` sets `DATABASE_URL` to a temporary file
+  per process — the xdist controller and each worker — before `settings` is built, and removes it on
+  exit; `tests/test_suite_database_isolation.py` pins that the app's engine is bound to it. Before
+  that, the lifespan tests and the module `AsyncSessionLocal` wrote into whatever `.env` named.
 - **Locally the database is still `backend/portfolio.db`** (`config.py`'s default). Only the
   container uses `backend/data/portfolio.db`, which `docker-compose.yml` sets; running the compose
   stack locally therefore needs the file there (or `ALLOW_NEW_DATABASE=1` for an empty one), because
@@ -148,6 +153,14 @@ lose time to.
   result is a dev server quietly answering from the *previous* config. Kill by PID:
   `netstat -ano | grep ':8000 ' | grep LISTENING` then `taskkill //F //PID <pid>` (double slashes —
   MSYS eats single ones).
+- **On Linux (a cloud session), `pkill -f <pattern>` can kill the shell that runs it.** The
+  agent's shell command line contains the pattern too, so `pkill -f run_demo_backend.py` ended
+  its own shell (exit 144) and left the server running. Find the PID with
+  `ps -eo pid,args | grep '[r]un_demo_backend'` and `kill <pid>`.
+- **In a cloud container the preinstalled Chromium (`/opt/pw-browsers/chromium`) may not be the
+  build `e2e/`'s Playwright expects**, and `playwright install` is off-limits there. The e2e
+  scripts take no browser option, so preload a module that wraps `chromium.launch` to pass
+  `executablePath: '/opt/pw-browsers/chromium'`, and run `node --import ./preload.mjs mobile.mjs`.
 - **A dev server against a prod snapshot must run on port 5173.** `frontend/.env` points
   `VITE_API_URL` at `localhost:8000`, so the browser calls the backend cross-origin and only the
   ports in `CORS_ORIGINS` work. Any other port fails every request with a CORS error and looks like
@@ -166,6 +179,11 @@ lose time to.
   fault. The e2e script then reports `ERR_CONNECTION_REFUSED` and a shrunken panel, which reads exactly
   like a regression in whatever you just wrote. **Confirm `/health` still answers before believing an
   e2e failure.**
+- **Testing Library's async queries wait 4 s here, not the library's 1 s** (`frontend/src/testSetup.ts`,
+  2026-10-17). One component test failed once in nine runs that overlapped the backend suite, and the
+  slowest measured 3 s under that load; a `findBy*` racing the scheduler is a flake, not a finding.
+  A genuinely missing element still fails, inside vitest's 5 s test timeout. Put shared jsdom setup
+  in that file rather than in each test.
 - **A test helper with a default parameter swallows an explicitly-passed `undefined`**, so
   `renderCard(undefined)` renders the default fixture and any "backend down" assertion silently tests the
   loaded state instead. `CurrencyExposureCard.test.tsx` keeps a separate `renderUnloaded()` for this.

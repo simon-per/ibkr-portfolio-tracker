@@ -4,6 +4,7 @@ import { ABSENT, cn } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { ScrollableTable } from './ScrollableTable'
 import { SortableTh, type SortDirection } from './SortableTh'
+import { footerLayout } from './footerLayout'
 
 /**
  * One table, described once, rendered as a table on a laptop and as a list of cards on
@@ -115,10 +116,11 @@ export interface SortState<SortKey extends string> {
 export interface FooterCell {
   key: string
   /**
-   * Column keys this cell covers. Drives `colSpan` on desktop — better than the literal
-   * `colSpan={3}` the tax tables carry today, which lies silently once a column is
-   * added. On the phone a cell spanning several columns is the footer row's heading and
-   * a cell spanning one becomes a label/value pair.
+   * Column keys this cell covers, which must be adjacent. They decide **where** the cell
+   * sits as well as how wide it is: `footerLayout` places each cell under its own
+   * columns whatever its position in the array, and pads the columns nobody names. On
+   * the phone a cell spanning several columns — or the title column — is the footer
+   * row's heading, and any other cell becomes a label/value pair.
    */
   spans: readonly string[]
   content: React.ReactNode
@@ -135,9 +137,9 @@ export interface FooterCell {
 export type Density = 'compact' | 'normal' | 'roomy' | 'comfortable'
 
 const DENSITY: Record<Density, string> = {
-  compact: 'px-2 py-1.5',
-  normal: 'px-2 py-2',
-  roomy: 'px-3 py-2',
+  compact: 'px-2 py-2',
+  normal: 'px-2 py-2.5',
+  roomy: 'px-3 py-2.5',
   comfortable: 'px-2 py-3',
 }
 
@@ -288,7 +290,9 @@ function WideTable<Row, SortKey extends string>({
       <table className={cn('w-full text-sm', minWidthClassName)}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
-          <tr className="border-b text-muted-foreground">
+          {/* Headers a step smaller and quieter than the figures, so the eye lands on
+              the data; the rule under them is the one full-strength line in the table. */}
+          <tr className="border-b border-border text-xs text-muted-foreground">
             {visible.map(col => {
               const align = col.align ?? 'left'
               if (col.sortKey && sort) {
@@ -334,7 +338,12 @@ function WideTable<Row, SortKey extends string>({
               <React.Fragment key={key}>
                 {/* The border moves to the expansion when there is one, so the panel
                     reads as part of its row rather than as a detached band below a rule. */}
-                <tr className={cn(!expansion && 'border-b last:border-0')}>
+                <tr
+                  className={cn(
+                    'transition-colors hover:bg-muted/40',
+                    !expansion && 'border-b border-border/60 last:border-0',
+                  )}
+                >
                   {visible.map(col => (
                     <td
                       key={col.key}
@@ -352,7 +361,7 @@ function WideTable<Row, SortKey extends string>({
                   {rowActions && <td className={pad}>{rowActions(row)}</td>}
                 </tr>
                 {expansion && (
-                  <tr className="border-b last:border-0">
+                  <tr className="border-b border-border/60 last:border-0">
                     {/* `columnCount` rather than a literal: it already counts the
                         rowActions column, and a hardcoded span is what the footer code
                         below records as lying silently once a column is added. */}
@@ -367,28 +376,25 @@ function WideTable<Row, SortKey extends string>({
         </tbody>
         {footer && footer.length > 0 && (
           <tfoot>
-            <tr className="border-t font-medium">
-              {footer.map(cell => (
-                <td
-                  key={cell.key}
-                  colSpan={cell.spans.length}
-                  className={cn(
-                    pad,
-                    ALIGN_CELL[cell.align ?? 'left'],
-                    (cell.align ?? 'left') === 'right' && 'tabular-nums',
-                    cell.tone,
-                  )}
-                >
-                  {cell.content}
-                </td>
-              ))}
-              {/* Pads the row out to the full width when the spans do not cover every
-                  column, which is what the tax tables' trailing empty `<td>` was. */}
-              {footer.reduce((n, c) => n + c.spans.length, 0) < columnCount && (
-                <td
-                  className={pad}
-                  colSpan={columnCount - footer.reduce((n, c) => n + c.spans.length, 0)}
-                />
+            <tr className="border-t border-border font-semibold">
+              {/* Each cell under the columns it names; the gaps are padding. */}
+              {footerLayout(footer, visible.map(c => c.key), columnCount).map((slot, i) =>
+                slot.cell ? (
+                  <td
+                    key={slot.cell.key}
+                    colSpan={slot.colSpan}
+                    className={cn(
+                      pad,
+                      ALIGN_CELL[slot.cell.align ?? 'left'],
+                      (slot.cell.align ?? 'left') === 'right' && 'tabular-nums',
+                      slot.cell.tone,
+                    )}
+                  >
+                    {slot.cell.content}
+                  </td>
+                ) : (
+                  <td key={`pad-${i}`} className={pad} colSpan={slot.colSpan} />
+                ),
               )}
             </tr>
           </tfoot>
@@ -523,8 +529,18 @@ function CompactFooterRow<Row, SortKey extends string>({
   columns: readonly Column<Row, SortKey>[]
 }) {
   const byKey = new Map(columns.map(c => [c.key, c]))
-  const heading = footer.filter(c => c.spans.length > 1)
-  const pairs = footer.filter(c => c.spans.length <= 1)
+  // The cell over the card's title column is the footer's heading even when it spans
+  // that column alone — a "Total" there is the row's name, not a "Symbol: Total" pair.
+  const titleKey = columns.find(c => c.mobile === 'title')?.key
+  const isHeading = (c: FooterCell) =>
+    c.spans.length > 1 || (titleKey !== undefined && c.spans.includes(titleKey))
+  // In column order, like the desktop row, so the pairs read in the table's order.
+  const order = new Map(columns.map((c, i) => [c.key, i]))
+  const position = (c: FooterCell) =>
+    Math.min(...c.spans.map(k => order.get(k) ?? Number.MAX_SAFE_INTEGER))
+  const sorted = [...footer].sort((a, b) => position(a) - position(b))
+  const heading = sorted.filter(isHeading)
+  const pairs = sorted.filter(c => !isHeading(c))
 
   return (
     <li className="bg-muted/40 py-3 font-medium">
@@ -574,7 +590,7 @@ function CompactSortControl<Row, SortKey extends string>({
         id={id}
         value={sort.column ?? ''}
         onChange={e => sort.onSort(e.target.value as SortKey)}
-        className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm font-medium"
+        className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-card px-3 text-sm font-medium"
       >
         {sortable.map(col => (
           <option key={col.key} value={col.sortKey}>
@@ -586,7 +602,7 @@ function CompactSortControl<Row, SortKey extends string>({
         type="button"
         onClick={() => sort.column && sort.onSort(sort.column)}
         aria-label={`Sort ${sort.direction === 'asc' ? 'descending' : 'ascending'}`}
-        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-card ring-offset-background hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         {sort.direction === 'asc' ? (
           <ArrowUp aria-hidden="true" className="h-4 w-4" />

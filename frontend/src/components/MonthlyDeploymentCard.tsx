@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   BarChart,
   Bar,
@@ -14,6 +13,9 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
+import { formatAxisMoney } from '@/lib/utils'
+import { useRememberedOpen } from '@/lib/storage'
+import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
 interface MonthlyDeploymentCardProps {
   data: ContributionsResponse | undefined
@@ -79,7 +81,7 @@ function monthKey(date: Date): string {
 export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeploymentCardProps) {
   const curSym = useCurrencySymbol()
   const isCompact = useIsCompact()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useRememberedOpen('money-in-per-month')
 
   const monthly = data?.monthly ?? []
   const chartData: ChartRow[] = monthly.map(m => ({ ...m, label: monthLabel(m.month) }))
@@ -190,7 +192,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
               <div className="h-[240px] w-full sm:h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 5, right: 8, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <CartesianGrid {...CHART_GRID_PROPS} />
                     <XAxis
                       dataKey="label"
                       fontSize={12}
@@ -201,12 +203,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                     <YAxis
                       fontSize={12}
                       width="auto"
-                      tickFormatter={(value: number) => {
-                        if (Math.abs(value) >= 1000) {
-                          return `${(value / 1000).toFixed(1)}k`
-                        }
-                        return value.toFixed(0)
-                      }}
+                      tickFormatter={(value: number) => formatAxisMoney(value)}
                     />
                     <Tooltip content={<DeploymentTooltip hasMoneyIn={hasMoneyIn} />} />
                     {/* No legend: exactly one series is ever drawn, and a one-item legend

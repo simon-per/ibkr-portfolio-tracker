@@ -47,10 +47,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select
-
 from app.database import AsyncSessionLocal
 from app.models.security import Security
+from app.cli.security_lookup import resolve_security
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 
@@ -113,30 +112,10 @@ def parse_payload(raw: dict) -> Tuple[Dict, List[Dict]]:
 
 async def _resolve_security(db, target: Dict, security_id_override: Optional[int]) -> Security:
     security_id = security_id_override or target.get("security_id")
-    if security_id:
-        result = await db.execute(select(Security).where(Security.id == int(security_id)))
-        security = result.scalar_one_or_none()
-        if not security:
-            raise PriceImportError(f"No security with id={security_id}")
-        return security
-
     symbol, exchange = target.get("symbol"), target.get("exchange")
-    if not symbol:
+    if not security_id and not symbol:
         raise PriceImportError("Provide 'security_id' (or --security-id), or 'symbol' + 'exchange'")
-
-    stmt = select(Security).where(Security.symbol == symbol)
-    if exchange:
-        stmt = stmt.where(Security.exchange == exchange)
-    matches = list((await db.execute(stmt)).scalars().all())
-
-    if not matches:
-        raise PriceImportError(f"No security matches symbol={symbol!r} exchange={exchange!r}")
-    if len(matches) > 1:
-        # The same stock on two exchanges is two rows by design (ASML on NASDAQ and
-        # AEB), so an ambiguous match must be resolved by the caller, not guessed.
-        found = ", ".join(f"id={s.id} {s.symbol}@{s.exchange}" for s in matches)
-        raise PriceImportError(f"symbol={symbol!r} matches {len(matches)} securities: {found}")
-    return matches[0]
+    return await resolve_security(db, symbol, exchange, security_id, PriceImportError)
 
 
 async def import_prices(

@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { DataTable, type Column, type FooterCell } from './DataTable'
+import { footerLayout } from './footerLayout'
 
 /**
  * The point of this file is the anti-drift assertion, not the markup.
@@ -221,6 +222,41 @@ describe('the awkward shapes', () => {
     expect(spanned).toBe(COLUMNS.length)
   })
 
+  it('places each footer cell under the columns it names, whatever the array order', () => {
+    // The tax tables' totals sat under their neighbours' headers because the footer was
+    // laid out in array order. Listing the cells backwards must change nothing.
+    const footer: FooterCell[] = [
+      { key: 'cost', spans: ['cost'], content: 'C-TOTAL', align: 'right' },
+      { key: 'value', spans: ['value'], content: 'V-TOTAL', align: 'right' },
+      { key: 'label', spans: ['symbol', 'name'], content: 'Total' },
+    ]
+    const { tableView } = renderBoth({ footer })
+    const headers = Array.from(tableView.querySelectorAll('thead th')).map(th => th.textContent)
+    let column = 0
+    const under: Record<string, string | null | undefined> = {}
+    for (const td of Array.from(tableView.querySelectorAll('tfoot td'))) {
+      if (td.textContent) under[td.textContent] = headers[column]
+      column += Number(td.getAttribute('colspan') ?? 1)
+    }
+    expect(column).toBe(COLUMNS.length)
+    expect(under['Total']).toContain('Symbol')
+    expect(under['V-TOTAL']).toContain('Market Value')
+    expect(under['C-TOTAL']).toContain('Cost Basis')
+  })
+
+  it('makes a total over the title column the phone footer heading', () => {
+    const { cardView } = renderBoth({
+      footer: [
+        { key: 'label', spans: ['symbol'], content: 'Total' },
+        { key: 'value', spans: ['value'], content: '8010.65', align: 'right' },
+      ],
+    })
+    const last = cardView.querySelector('li:last-child')!
+    // A heading, not a "Symbol: Total" label/value pair.
+    expect(last.querySelector('dl')?.textContent).not.toContain('Total')
+    expect(last.firstElementChild?.textContent).toBe('Total')
+  })
+
   it('discloses the details beyond detailLimit', () => {
     render(
       <DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="t" detailLimit={1} mode="cards" />,
@@ -316,5 +352,50 @@ describe('the column hint', () => {
   it('renders no definitions on screen (owner, 2026-10-14: figures, not explanations)', () => {
     render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="t" mode="cards" />)
     expect(screen.queryByText('Share of total portfolio market value.')).toBeNull()
+  })
+})
+
+describe('footerLayout', () => {
+  const keys = ['a', 'b', 'c', 'd', 'e']
+
+  it('pads the columns no cell names, before, between and after', () => {
+    const slots = footerLayout(
+      [
+        { key: 'd', spans: ['d'], content: 'D' },
+        { key: 'b', spans: ['b'], content: 'B' },
+      ],
+      keys,
+    )
+    expect(slots.map(s => [s.cell?.key ?? null, s.colSpan])).toEqual([
+      [null, 1], ['b', 1], [null, 1], ['d', 1], [null, 1],
+    ])
+  })
+
+  it('counts a trailing actions column in the width it pads to', () => {
+    const slots = footerLayout([{ key: 'x', spans: ['a', 'b'], content: 'X' }], keys, 6)
+    expect(slots.reduce((n, s) => n + s.colSpan, 0)).toBe(6)
+  })
+
+  it('refuses spans that are not adjacent, rather than drawing the total elsewhere', () => {
+    expect(() =>
+      footerLayout([{ key: 'x', spans: ['a', 'c'], content: 'X' }], keys),
+    ).toThrow(/not adjacent/)
+  })
+
+  it('refuses two cells over one column', () => {
+    expect(() =>
+      footerLayout(
+        [
+          { key: 'x', spans: ['a', 'b'], content: 'X' },
+          { key: 'y', spans: ['b'], content: 'Y' },
+        ],
+        keys,
+      ),
+    ).toThrow(/overlaps/)
+  })
+
+  it('drops a cell whose columns are all hidden on this rendering', () => {
+    const slots = footerLayout([{ key: 'x', spans: ['zz'], content: 'X' }], keys)
+    expect(slots).toEqual([{ cell: null, colSpan: 5 }])
   })
 })

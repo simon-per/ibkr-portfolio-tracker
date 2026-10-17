@@ -7,12 +7,14 @@ import { api } from '@/lib/api'
 import type { LookthroughCompanyRow, LookthroughFundCoverage } from '@/lib/api'
 import { displayName } from '@/lib/securityName'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
+import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
-import { cn, formatCount } from '@/lib/utils'
+import { formatCount } from '@/lib/utils'
+import { useRememberedOpen } from '@/lib/storage'
+import { unresolvedTone } from '@/lib/lookthroughTone'
 
 /**
  * True company-level exposure: direct holdings plus every held fund decomposed into the
@@ -48,19 +50,6 @@ import { cn, formatCount } from '@/lib/utils'
 
 const LIMITS = [25, 50, 100] as const
 type LimitOption = (typeof LIMITS)[number]
-
-/**
- * The share of the book, in percent, at which identity-unresolved value turns the Unresolved
- * card amber. A handful of ISINs no provider resolves is the normal state (about 0.3% of the
- * book), and a card amber at any value above zero was amber always — the always-present
- * warning that teaches the reader to skip it. Below this it is a neutral figure.
- */
-export const UNRESOLVED_WARN_PCT = 1
-
-export function unresolvedTone(unresolvedValue: number, totalValue: number): 'warning' | 'neutral' {
-  if (!(unresolvedValue > 0) || !(totalValue > 0)) return 'neutral'
-  return (unresolvedValue / totalValue) * 100 >= UNRESOLVED_WARN_PCT ? 'warning' : 'neutral'
-}
 
 /** How a fund's status reads, and whether it counts against coverage. */
 const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
@@ -286,7 +275,7 @@ export function LookThroughTab() {
   const [limit, setLimit] = useState<LimitOption>(50)
   const [selected, setSelected] = useState<string | null>(null)
   // Collapsed by default — see the module docstring for why the notes live in here.
-  const [coverageOpen, setCoverageOpen] = useState(false)
+  const [coverageOpen, setCoverageOpen] = useRememberedOpen('fund-coverage')
   const formatCurrency = useFormatCurrency()
 
   const { data, isLoading, isError } = useQuery({
@@ -375,7 +364,9 @@ export function LookThroughTab() {
   return (
     <div className="space-y-6">
       {isLoading || !data ? (
-        <KpiCardSkeleton count={4} />
+        <KpiPanel columns={4}>
+          <KpiCardSkeleton tile count={4} />
+        </KpiPanel>
       ) : (
         <>
           {/* Above the KPI row and outside every collapsible — see the module docstring.
@@ -398,13 +389,9 @@ export function LookThroughTab() {
             </div>
           )}
 
-          <div
-            className={cn(
-              'grid grid-cols-2 gap-3',
-              showUnidentified ? 'sm:grid-cols-4' : 'sm:grid-cols-3',
-            )}
-          >
+          <KpiPanel columns={showUnidentified ? 4 : 3} fillLastRow>
             <KpiCard
+              tile
               label="Companies"
               value={data.company_count_total > 0 ? data.company_count_total.toLocaleString('en-US') : null}
             />
@@ -420,9 +407,12 @@ export function LookThroughTab() {
               correctly goes amber again the day a fund is bought that has no basket yet.
             */}
             <KpiCard
+              tile
               label="Coverage"
               value={
-                data.total_market_value_eur > 0 ? `${data.coverage_pct.toFixed(1)}%` : null
+                data.total_market_value_eur > 0 && data.coverage_pct != null
+                  ? `${data.coverage_pct.toFixed(1)}%`
+                  : null
               }
               tone={
                 unresolvedFunds.length === 0 && proxiedFunds.length === 0
@@ -432,6 +422,7 @@ export function LookThroughTab() {
               sub={coverageSub}
             />
             <KpiCard
+              tile
               label="In funds"
               value={
                 data.total_market_value_eur > 0
@@ -449,13 +440,14 @@ export function LookThroughTab() {
                 state, and a card that always shows a count teaches the reader to skip it. */}
             {showUnidentified && (
               <KpiCard
+                tile
                 label="Unidentified"
                 value={formatCurrency(data.identity.unresolved_value_eur)}
                 tone="warning"
                 sub={`${data.identity.unresolved_isins.toLocaleString('en-US')} securities`}
               />
             )}
-          </div>
+          </KpiPanel>
 
           {/*
             The itemised `warnings[]` used to render here as a `role="alert"` block. They are
@@ -514,6 +506,9 @@ export function LookThroughTab() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        // An action, so it looks like one: primary ink, which a ghost button's
+                        // plain foreground did not — it read as one more cell of text.
+                        className="text-primary hover:bg-primary/10 hover:text-primary"
                         aria-expanded={selected === row.company_key}
                         onClick={() =>
                           setSelected(
