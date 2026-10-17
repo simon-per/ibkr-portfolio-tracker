@@ -21,22 +21,28 @@ the CSP stays `img-src 'self' data:` (`backend/frontend-nginx.conf`).
 From logo.dev's docs and terms, read 2026-10-17:
 
 - `GET https://api.logo.dev/v2/brands/logo?isin=…` (or `ticker=…`) with
-  `Authorization: Bearer <secret key sk_…>` returns a signed `url` (valid ~24 h). The download
-  takes `size` (max 800), `format` (jpg/png/webp) and `theme`. We ask `size=128&format=png`: the
-  square mark on a transparent background, 2x+ the 32–36 px avatar.
-- "On every plan, you can store anything the Logo.dev API returns." The **CDN**
-  (`img.logo.dev`) must not be copied or proxied — we never touch it.
+  `Authorization: Bearer <secret key sk_…>` answers in a `{data, metadata}` envelope: the
+  signed download URL is **`data.url`** (valid ~24 h, sent with no key), `data.status` is
+  `ready`. The first live pass (2026-10-17) read a top-level `url`, found none, and stored
+  nothing; `test_the_lookup_reads_the_documented_envelope` pins the documented body. The
+  download takes `size` (max 800), `format` (jpg/png/webp; jpg without one) and `theme`. We ask
+  `size=128&format=png`: the square mark on a transparent background, 2x+ the 32–36 px avatar.
+- "On every plan, you can store anything the Logo.dev API returns." The signed `data.url` is
+  the documented way to fetch that image; the plain CDN (`img.logo.dev/<domain>?token=…`) must
+  not be copied or proxied, and we never call it.
 - No attribution is needed for a personal project that earns nothing — so the UI carries none.
-- Unknown identifier: 404 `not_found` (not billed). Not indexed yet: 202 with `Retry-After`.
-  Brand found but no image: 404 (billed).
-- A logo download costs about $0.02; the free Community plan carries $5 of API credits a month
-  and 100 requests a minute. Spent credits answer 402.
+- Unknown identifier: 404 `not_found`, free. Not indexed yet: 202 with `Retry-After: 30`, free;
+  usually ready within a minute. Brand found but no logo: 404, billed.
+- **Billing:** the lookup costs 2 credits, once per brand per 24 hours; the download from
+  `data.url` is free. The free Community plan carries $5 of API credits a month and 100
+  requests a minute. Spent credits answer 402.
 - **Rejected: Brandfetch.** Its free Logo API forbids downloading or caching ("hotlink… don't
   download, cache, or re-host"), and our CSP cannot hotlink.
 
-Unverified until the first real run: whether ETF ISINs resolve to the issuer's mark, and whether
-the Taiwanese and Korean ISINs resolve at all. The run prints each ISIN's outcome; for a miss,
-use the manual import below.
+The first real run (2026-10-17) resolved every US, Dutch, German, Cayman, Korean and
+Taiwanese ISIN and the US and Irish ETFs to a brand; the two pillar 3a funds (`CH…`) were
+`not_found` under both ISIN and ticker, and SBI was still indexing. Whether an ETF's mark is
+the issuer's is a visual check. For a miss, use the manual import below.
 
 ## Storage — `security_logos`
 

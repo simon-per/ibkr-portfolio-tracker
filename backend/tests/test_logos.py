@@ -32,6 +32,8 @@ from app.services import logo_service
 from app.services.logo_service import (
     MAX_LOGO_BYTES,
     MAX_LOOKUPS_PER_PASS,
+    LogoDevClient,
+    LogoDevError,
     LogoRefused,
     LogoService,
     validate_logo,
@@ -138,7 +140,10 @@ class FakeLogoDev:
                 return httpx.Response(429)
             status = self.answers.get((field, value), 404)
             if status == 200:
-                return httpx.Response(200, json={"url": SIGNED, "etag": "e1"})
+                return httpx.Response(200, json={
+                    "data": {"object": "image", "status": "ready", "url": SIGNED, "etag": "e1"},
+                    "metadata": {"request_id": "r1"},
+                })
             return httpx.Response(status, json={"error": "x"})
         # The signed download: another host, and the key must never travel there.
         assert "authorization" not in request.headers
@@ -488,3 +493,40 @@ def test_a_matching_etag_answers_304(client):
 @pytest.mark.parametrize("security_id", [3, 99])
 def test_no_logo_is_a_404(client, security_id):
     assert client.get(f"/api/logos/{security_id}").status_code == 404
+
+
+# --------------------------------------------------------------------- the reply shape
+
+# logo.dev's documented 200 for `GET /v2/brands/logo` (its v2 reference, 2026-10-17): the
+# image sits in a `{data, metadata}` envelope. The first live pass read a top-level `url`,
+# found none, and stored nothing for 25 brands it had found.
+DOCUMENTED_LOOKUP = {
+    "data": {
+        "object": "image", "kind": "logo", "brand_id": "brand_x", "status": "ready",
+        "url": "https://img.logo.dev/assets/SEALED_TOKEN", "etag": "9f2c1e7a4b8d3f60",
+        "source": {"width": 512, "height": 512, "format": "svg"},
+        "expires_at": "2026-10-18T13:00:00Z",
+    },
+    "metadata": {"request_id": "r", "resolution": {"type": "isin", "value": "US0000000001"}},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body, expected", [
+    (DOCUMENTED_LOOKUP, ("found", "https://img.logo.dev/assets/SEALED_TOKEN")),
+    ({"data": {"object": "image", "status": "not_indexed"}}, ("not_indexed", None)),
+])
+async def test_the_lookup_reads_the_documented_envelope(body, expected):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    async with LogoDevClient(KEY, transport=transport) as client:
+        assert await client.lookup("isin", "US0000000001") == expected
+
+
+@pytest.mark.asyncio
+async def test_a_bare_top_level_url_is_not_the_documented_shape():
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"url": "https://img.logo.dev/x"})
+    )
+    async with LogoDevClient(KEY, transport=transport) as client:
+        with pytest.raises(LogoDevError):
+            await client.lookup("isin", "US0000000001")

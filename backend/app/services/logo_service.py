@@ -182,7 +182,15 @@ class LogoDevClient(PacedGet):
             body = response.json()
         except ValueError as e:
             raise LogoDevError("lookup answered with a body that is not JSON") from e
-        url = body.get("url") if isinstance(body, dict) else None
+        # The image sits inside the `{data, metadata}` envelope: `data.url` is the signed
+        # download URL and `data.status` says whether it is ready (logo.dev's v2 reference,
+        # read 2026-10-17 — the first live pass found no top-level `url`).
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
+            raise LogoDevError("lookup answered without a data object")
+        if data.get("status") not in (None, "ready"):
+            return "not_indexed", None
+        url = data.get("url")
         if not isinstance(url, str) or not url:
             raise LogoDevError("lookup answered without a url")
         return "found", url
