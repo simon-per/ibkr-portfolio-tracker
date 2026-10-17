@@ -12,11 +12,15 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#8, #10 and #12 shipped the same night (logos need the key on the VPS); #9 and #11 next.
+#2–#10 and #12 shipped the same night (logos need the key on the VPS); #11 next.
 
 ---
 
 ## Needs a human
+
+- **Tell the `ibkr-sync-validator` routine about the weekend schedule (#9).** Its prompt lives
+  outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
+  `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
 - **Holding logos (#12): set `LOGO_DEV_SECRET_KEY` on the VPS.** Until then the logo pass is a
   no-op and every avatar stays a monogram. A logo.dev account's **secret** key (`sk_…`) into
@@ -103,6 +107,9 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **The weekend schedule after #9:** Sunday 2026-10-18 shows no `market_data_only` rows and an
+  18:00 `full_sync` whose `market_result` writes few or no rows; Saturday 2026-10-24 shows only
+  the 08:00 `market_data_only`. Weekday slots unchanged.
 - **Look-through after #8 (migration `a7d4c1e9f3b8`):** the first 18:00 `full_sync` fetches and
   rewrites every held basket once (no stamps or fingerprints yet) and runs the CINS pass; from
   the next evening `lookthrough_result.baskets` lists most funds under `unchanged` or

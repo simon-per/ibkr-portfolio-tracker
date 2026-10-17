@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — no weekend market-data passes but Saturday 08:00 (#9)
+
+Issue #9, rule 1. The six market-data slots and the 18:00 `full_sync` ran seven days a week,
+each re-fetching the provisional Wed–Fri closes, which cannot change on a weekend. The
+`market_sync_{n}` slots now run Mon–Fri, the 08:00 one also Saturday (it settles Friday's US
+close; ids kept, so persisted jobs reschedule on start). `full_sync` stays daily — Saturday's
+IBKR half brings Friday's trades — but on a Berlin weekend its price pass asks only for dates
+with no row (`refresh_provisional=False`). The dividend step is deliberately not skipped: since
+#6 it asks only what is due, and skipping it would move the requests to Monday or to a weekend
+dashboard load. Worked from the code: ~714 weekend price requests at 51 securities → ~51.
+Verified: 2250 backend tests green without the marker filter (deploy scripts included).
+
 ## Shipped 2026-10-17 (night) — look-through baskets fetched daily, warned about only when overdue (#8)
 
 Issue #8. One threshold (`ADAPTER_STALE_DAYS`) meant both "go fetch" and "warn", so the daily
