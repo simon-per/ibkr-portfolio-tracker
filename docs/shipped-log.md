@@ -52,7 +52,8 @@ not reach the production host.
 
 The owner's goal: a clean, slick, fintech-looking app that could be shipped to other people,
 with every insight kept and every calculation and filter checked. Kept off `main` at the owner's
-request (they had local changes of their own), so nothing here is deployed. **Look:** one
+request while they had local changes of their own; merged and deployed the same evening
+(`efa9b98`, PR #1). **Look:** one
 surface system (grey canvas, white cards with a soft shadow, one white app bar), the headline
 figure set like a balance with the range's gain as a pill, a first-run card for an account that
 has never synced, hairline KPI panels on every tab, quieter tables, one grid and one money-axis
