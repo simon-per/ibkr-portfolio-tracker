@@ -1430,7 +1430,10 @@ export interface CryptoSyncResponse {
 
 /** `/api/logos`: `security_id` -> logo version, for the securities that have a logo. */
 export interface LogoManifest {
+  /** `security_id` -> version. */
   logos: Record<string, string>;
+  /** ISIN -> version, every stored image — constituents no security carries included. */
+  isins: Record<string, string>;
 }
 
 /** `/health`. Identifies the running build so a deploy can be confirmed from the UI. */
@@ -1846,6 +1849,11 @@ class ApiClient {
   /** An `<img src>`: versioned, so the server can let the browser cache it for good. */
   logoUrl(securityId: number, version: string): string {
     return `${this.baseUrl}/api/logos/${securityId}?v=${encodeURIComponent(version)}`;
+  }
+
+  /** The same image by ISIN, for a row that carries no security (a look-through constituent). */
+  isinLogoUrl(isin: string, version: string): string {
+    return `${this.baseUrl}/api/logos/isin/${encodeURIComponent(isin)}?v=${encodeURIComponent(version)}`;
   }
 
   // Health check

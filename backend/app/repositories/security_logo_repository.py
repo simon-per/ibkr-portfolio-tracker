@@ -110,6 +110,24 @@ class SecurityLogoRepository:
         )
         return {sid: sha[:VERSION_CHARS] for sid, sha in rows.all()}
 
+    async def isin_manifest(self) -> Dict[str, str]:
+        """`isin -> version` for every stored image, held or not — a fund's constituents
+        filled ahead from its basket included, which no security carries."""
+        rows = await self.session.execute(
+            select(SecurityLogo.isin, SecurityLogo.sha256)
+            .where(SecurityLogo.image.is_not(None))
+        )
+        return {isin: sha[:VERSION_CHARS] for isin, sha in rows.all()}
+
+    async def for_isin(self, isin: str) -> Optional[SecurityLogo]:
+        """The stored logo row of an ISIN, when it has an image."""
+        return (
+            await self.session.execute(
+                select(SecurityLogo)
+                .where(SecurityLogo.isin == _norm(isin), SecurityLogo.image.is_not(None))
+            )
+        ).scalars().first()
+
     async def for_security(self, security_id: int) -> Optional[SecurityLogo]:
         """The stored logo row of a security, when it has an image."""
         return (

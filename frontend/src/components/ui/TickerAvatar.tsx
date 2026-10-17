@@ -32,8 +32,10 @@ function monogram(symbol: string): string {
 
 interface AvatarProps {
   symbol: string
-  /** Without it (activity rows carry none) the avatar is always the monogram. */
+  /** Without it or `isin` (a cash flow carries neither) the avatar is always the monogram. */
   securityId?: number
+  /** For a row that carries no security — a look-through constituent, a watchlist entry. */
+  isin?: string | null
   className?: string
 }
 
@@ -53,15 +55,19 @@ function Monogram({ symbol, className }: AvatarProps) {
   )
 }
 
-function LogoAvatar({ symbol, securityId, className }: AvatarProps & { securityId: number }) {
-  const version = useLogos()[String(securityId)]
+function LogoAvatar({ symbol, securityId, isin, className }: AvatarProps) {
+  const manifest = useLogos()
+  const byId = securityId != null ? manifest.logos[String(securityId)] : undefined
+  const key = isin?.trim().toUpperCase()
+  const byIsin = !byId && key ? manifest.isins[key] : undefined
+  const version = byId ?? byIsin
   // The version that failed to load, so a replaced logo gets its own try.
   const [failed, setFailed] = useState<string | null>(null)
   if (!version || failed === version) return <Monogram symbol={symbol} className={className} />
   return (
     <span aria-hidden="true" className={cn(BOX, 'overflow-hidden bg-white ring-1 ring-border', className)}>
       <img
-        src={api.logoUrl(securityId, version)}
+        src={byId ? api.logoUrl(securityId!, byId) : api.isinLogoUrl(key!, version)}
         alt=""
         loading="lazy"
         decoding="async"
@@ -72,10 +78,12 @@ function LogoAvatar({ symbol, securityId, className }: AvatarProps & { securityI
   )
 }
 
-export function TickerAvatar({ symbol, securityId, className }: AvatarProps) {
+export function TickerAvatar({ symbol, securityId, isin, className }: AvatarProps) {
   // A table rendered outside a QueryClientProvider (its own unit tests) keeps the
   // monogram: decoration must never be what breaks a table.
   const hasQueryClient = useContext(QueryClientContext) !== undefined
-  if (securityId == null || !hasQueryClient) return <Monogram symbol={symbol} className={className} />
-  return <LogoAvatar symbol={symbol} securityId={securityId} className={className} />
+  if ((securityId == null && !isin) || !hasQueryClient) {
+    return <Monogram symbol={symbol} className={className} />
+  }
+  return <LogoAvatar symbol={symbol} securityId={securityId} isin={isin} className={className} />
 }

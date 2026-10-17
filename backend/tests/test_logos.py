@@ -449,6 +449,9 @@ def client():
                                  currency="EUR", conid=sid, exchange=exchange))
         await SecurityLogoRepository(session).store(
             "NL0010273215", PNG, "image/png", LOGO_SOURCE_LOGO_DEV, utcnow())
+        # Filled ahead from a basket: no security carries it.
+        await SecurityLogoRepository(session).store(
+            "US5949181045", PNG, "image/png", LOGO_SOURCE_LOGO_DEV, utcnow())
         # Asked, nothing there: not in the manifest.
         await SecurityLogoRepository(session).mark_checked(
             "US0378331005", LOGO_SOURCE_LOGO_DEV, utcnow())
@@ -472,7 +475,17 @@ VERSION = hashlib.sha256(PNG).hexdigest()[:12]
 
 
 def test_the_manifest_lists_every_listing_with_an_image(client):
-    assert client.get("/api/logos").json() == {"logos": {"1": VERSION, "2": VERSION}}
+    assert client.get("/api/logos").json() == {
+        "logos": {"1": VERSION, "2": VERSION},
+        "isins": {"NL0010273215": VERSION, "US5949181045": VERSION},
+    }
+
+
+def test_an_isin_no_security_carries_is_served_by_isin(client):
+    r = client.get(f"/api/logos/isin/US5949181045?v={VERSION}")
+    assert r.status_code == 200 and r.content == PNG
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert client.get("/api/logos/isin/US0378331005").status_code == 404
 
 
 def test_a_versioned_image_is_served_immutable_and_unsniffable(client):

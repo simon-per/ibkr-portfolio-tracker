@@ -17,7 +17,7 @@ function withClient(node: React.ReactNode) {
 
 describe('TickerAvatar', () => {
   it('shows the stored logo, versioned, in place of the monogram', async () => {
-    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc123def456' } })
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc123def456' }, isins: {} })
     const { container } = withClient(<TickerAvatar symbol="GOOGL" securityId={7} />)
     const img = await waitFor(() => {
       const found = container.querySelector('img')
@@ -30,7 +30,7 @@ describe('TickerAvatar', () => {
   })
 
   it('keeps the monogram for a security without a logo', async () => {
-    const getLogos = vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '8': 'x' } })
+    const getLogos = vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '8': 'x' }, isins: {} })
     const { container } = withClient(<TickerAvatar symbol="GOOGL" securityId={7} />)
     await waitFor(() => expect(getLogos).toHaveBeenCalled())
     expect(screen.getByText('GO')).toBeTruthy()
@@ -38,7 +38,7 @@ describe('TickerAvatar', () => {
   })
 
   it('falls back to the monogram when the image fails to load', async () => {
-    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc' } })
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc' }, isins: {} })
     const { container } = withClient(<TickerAvatar symbol="GOOGL" securityId={7} />)
     const img = await waitFor(() => {
       const found = container.querySelector('img')
@@ -50,7 +50,18 @@ describe('TickerAvatar', () => {
     expect(container.querySelector('img')).toBeNull()
   })
 
-  it('never asks for the manifest without a security id', () => {
+  it('draws a row without a security by its ISIN', async () => {
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: { US0378331005: 'f00' } })
+    const { container } = withClient(<TickerAvatar symbol="AAPL" isin="us0378331005" />)
+    const img = await waitFor(() => {
+      const found = container.querySelector('img')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(img.getAttribute('src')).toMatch(/\/api\/logos\/isin\/US0378331005\?v=f00$/)
+  })
+
+  it('never asks for the manifest without a security id or ISIN', () => {
     const getLogos = vi.spyOn(api, 'getLogos')
     withClient(<TickerAvatar symbol="AMZN" />)
     expect(screen.getByText('AM')).toBeTruthy()

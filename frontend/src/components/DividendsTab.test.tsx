@@ -77,7 +77,7 @@ function response(year: number | undefined, period?: '24m'): DividendBreakdownRe
 
 function mount() {
   // The avatars read the logo manifest; none here, so every row keeps its monogram.
-  vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {} })
+  vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(<QueryClientProvider client={client}><DividendsTab /></QueryClientProvider>)
 }

@@ -98,6 +98,7 @@ READ_ENDPOINTS = [
     "/api/performance/closed-positions",
     "/api/logos",
     "/api/logos/2",
+    "/api/logos/isin/NL0010273215",
 ]
 
 # The crypto book's reads need the admin key (docs/crypto.md), so they run through
@@ -350,11 +351,16 @@ def test_read_endpoint_responds(client, path):
 
 def test_logos_serve_both_listings_of_an_isin_through_the_real_stack(client):
     version = hashlib.sha256(SMOKE_LOGO).hexdigest()[:12]
-    assert client.get("/api/logos").json() == {"logos": {"1": version, "2": version}}
+    assert client.get("/api/logos").json() == {
+        "logos": {"1": version, "2": version}, "isins": {"NL0010273215": version},
+    }
     r = client.get(f"/api/logos/1?v={version}")
     assert r.content == SMOKE_LOGO and r.headers["content-type"] == "image/png"
     assert "immutable" in r.headers["cache-control"]
     assert client.get("/api/logos/3").status_code == 404
+    r = client.get(f"/api/logos/isin/nl0010273215?v={version}")
+    assert r.content == SMOKE_LOGO and "immutable" in r.headers["cache-control"]
+    assert client.get("/api/logos/isin/US0378331005").status_code == 404
 
 
 @pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)

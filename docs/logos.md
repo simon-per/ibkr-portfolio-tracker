@@ -99,14 +99,18 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
 
 ## Serving — `app/routers/logos.py`
 
-- `GET /api/logos` → `{"logos": {"<security_id>": "<sha256[:12]>"}}` for every security whose
-  ISIN has an image. The browser never asks for a logo that does not exist.
+- `GET /api/logos` → `{"logos": {"<security_id>": "<sha256[:12]>"}, "isins": {"<isin>": "…"}}`:
+  every security whose ISIN has an image, and every stored image by ISIN — a look-through
+  constituent filled ahead from a basket, or a watchlist row, carries an ISIN but no security.
+  The browser never asks for a logo that does not exist.
+- `GET /api/logos/isin/{isin}?v=<version>` → the same bytes and caching by ISIN.
 - `GET /api/logos/{security_id}?v=<version>` → the bytes with `ETag` (the sha256),
   `X-Content-Type-Options: nosniff`, and `Cache-Control: public, max-age=31536000, immutable`
   **only when `v` is the current version** (`no-cache` otherwise, so a replaced logo is never
   pinned under its old URL); `If-None-Match` answers 304; 404 without an image.
 - Reads are open and rate-limited like every `/api/` read; only a first visit spends requests.
-- Frontend: `lib/useLogos.ts` (TanStack Query, `staleTime` 1 h) and `TickerAvatar`: the image
+- Frontend: `lib/useLogos.ts` (TanStack Query, `staleTime` 1 h) and `TickerAvatar`
+  (`securityId`, else `isin`): the image
   `object-contain` on a white circle with a hairline ring, in the monogram's box (no layout
   shift); `onError` falls back to the monogram. Outside a `QueryClientProvider` (a table's own
   unit tests) the avatar is the monogram.

@@ -52,7 +52,7 @@ describe('ActivityTab row keys', () => {
   it('gives two estimated dividends on one day distinct keys', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
-    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {} })
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
     vi.spyOn(api, 'getActivity').mockResolvedValue({
       items: [estimatedDividend('AAA'), estimatedDividend('BBB')],
       total: 2, limit: 100, offset: 0, base_currency: 'EUR',
@@ -70,7 +70,7 @@ describe('ActivityTab row keys', () => {
 describe('ActivityTab logos', () => {
   it("shows a holding's stored logo in its row, and the monogram where there is none", async () => {
     vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
-    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc123' } })
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: { '7': 'abc123' }, isins: {} })
     vi.spyOn(api, 'getActivity').mockResolvedValue({
       items: [estimatedDividend('LOGO', 7), estimatedDividend('BARE', 8)],
       total: 2, limit: 100, offset: 0, base_currency: 'EUR',
