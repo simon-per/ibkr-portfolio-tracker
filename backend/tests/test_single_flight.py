@@ -118,17 +118,16 @@ async def _watchlist_session():
     from sqlalchemy.pool import StaticPool
     from app.database import Base
     import app.models  # noqa: F401
-    from app.models.watchlist_item import WatchlistItem
 
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+    # Every table, not just `watchlist_items`: each response now carries the base-currency
+    # market cap (`app/services/market_cap.py`), which reads the settings and the rates.
     async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(c, tables=[WatchlistItem.__table__])
-        )
+        await conn.run_sync(Base.metadata.create_all)
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 
