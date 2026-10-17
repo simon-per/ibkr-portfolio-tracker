@@ -360,7 +360,9 @@ class LookthroughService:
             ),
             "nested_fund_eur": self._q(nested_total),
             "uncovered_fund_eur": self._q(uncovered_total),
-            "coverage_pct": self._pct(covered, total),
+            # A share of nothing is not 0%: with no valued book there is no coverage to
+            # state, and a 0.0 reads as "nothing could be looked through".
+            "coverage_pct": self._pct(covered, total) if total else None,
             "companies": [self._present_row(r, total) for r in shown],
             "companies_shown": len(shown),
             "company_count_total": len(rows_out),
@@ -850,7 +852,7 @@ class LookthroughService:
             "fund_residual_eur": 0.0,
             "nested_fund_eur": 0.0,
             "uncovered_fund_eur": 0.0,
-            "coverage_pct": 0.0,
+            "coverage_pct": None,
             "companies": [],
             "companies_shown": 0,
             "company_count_total": 0,

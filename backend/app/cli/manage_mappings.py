@@ -37,6 +37,7 @@ from typing import Optional, Tuple
 import yfinance as yf
 from sqlalchemy import func, select
 
+from app.cli.security_lookup import ambiguity, matching_securities
 from app.database import AsyncSessionLocal
 from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
@@ -77,10 +78,19 @@ def implied_currency(service: MarketDataService, yahoo_ticker: str) -> Optional[
 
 
 async def _find_security(db, symbol: str, exchange: str) -> Optional[Security]:
-    result = await db.execute(
-        select(Security).where(Security.symbol == symbol, Security.exchange == exchange)
-    )
-    return result.scalars().first()
+    """
+    The one security `symbol@exchange` names, or None while none does yet (a mapping can
+    be pinned ahead of the statement that brings the security). Refuses two: a mapping
+    applies to every security on its symbol@exchange, so checking or purging one of them
+    would be a guess (`security_lookup`).
+    """
+    matches = await matching_securities(db, symbol, exchange)
+    if len(matches) > 1:
+        raise MappingError(
+            f"{ambiguity(symbol, matches)} on {exchange} — resolve which row is wrong "
+            f"before changing the mapping both of them use"
+        )
+    return matches[0] if matches else None
 
 
 async def cmd_list(db) -> int:
@@ -120,12 +130,15 @@ async def cmd_list(db) -> int:
     disagreements = []
     predating = []
     for m in mappings:
-        security = await _find_security(db, m.ibkr_symbol, m.ibkr_exchange)
+        # Read-only, so an ambiguous symbol@exchange is flagged rather than refused —
+        # and no one row's currency or counts stand in for the others'.
+        matches = await matching_securities(db, m.ibkr_symbol, m.ibkr_exchange)
+        security = matches[0] if len(matches) == 1 else None
         sec_ccy = (security.currency if security else None) or "-"
         tkr_ccy = implied_currency(service, m.yahoo_ticker) or "-"
         n = counts.get(security.id, 0) if security else 0
 
-        flag = ""
+        flag = f"  <-- AMBIGUOUS: {len(matches)} securities" if len(matches) > 1 else ""
         if security and tkr_ccy != "-" and sec_ccy != tkr_ccy:
             flag = "  <-- CURRENCY DISAGREEMENT"
             disagreements.append((m, sec_ccy, tkr_ccy))

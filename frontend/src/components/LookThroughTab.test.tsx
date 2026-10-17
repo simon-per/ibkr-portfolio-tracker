@@ -321,10 +321,15 @@ describe('LookThroughTab', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('shows a dash rather than a confident 0.0% coverage on an empty book', async () => {
+  // The server publishes `null` for an empty book since 2026-10-17 and `0` before it; both
+  // must read as absent, never as a confident "nothing could be attributed".
+  it.each([
+    ['null', null],
+    ['0 (an older server)', 0],
+  ])('shows a dash rather than a confident 0.0%% coverage on an empty book, coverage %s', async (_label, coverage) => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
       response({
-        total_market_value_eur: 0, coverage_pct: 0, companies: [], companies_shown: 0,
+        total_market_value_eur: 0, coverage_pct: coverage, companies: [], companies_shown: 0,
         company_count_total: 0, funds: [], warnings: [],
       }),
     )

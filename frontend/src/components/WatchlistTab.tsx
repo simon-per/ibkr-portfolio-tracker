@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useCallback, useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,8 +21,11 @@ export function WatchlistTab() {
   const formatBase = useFormatCurrency()
   // Per-row data_currency via the shared formatter's override; a row with no
   // currency falls back to the base currency rather than a hardcoded USD.
-  const formatCurrency = (value: number | null, currency: string | null): string =>
-    value === null ? ABSENT : formatBase(value, currency ?? undefined)
+  const formatCurrency = useCallback(
+    (value: number | null, currency: string | null): string =>
+      value === null ? ABSENT : formatBase(value, currency ?? undefined),
+    [formatBase],
+  )
   const [tickerInput, setTickerInput] = useState('')
   const [sortColumn, setSortColumn] = useState<SortColumn>('buy_score')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')

@@ -80,7 +80,9 @@ async def test_tax_report_dividends_and_realized_for_year():
         assert report["base_currency"] == "EUR"
         assert report["dividend_source"] == "ibkr"
 
-        assert report["dividend_totals"] == {"gross": 100.0, "withholding": 15.0, "net": 85.0}
+        assert report["dividend_totals"] == {
+            "gross": 100.0, "withholding": 15.0, "net": 85.0, "estimated_rows": 0,
+        }
         assert len(report["dividend_income"]) == 1
 
         # Only the 2025 sell counts.
@@ -270,7 +272,46 @@ async def test_dividend_source_is_decided_per_year_not_globally():
 
         current = await TaxService(session).get_tax_report(2026)
         assert current["dividend_source"] == "ibkr"
-        assert current["dividend_totals"] == {"gross": 100.0, "withholding": 15.0, "net": 85.0}
+        assert current["dividend_totals"] == {
+            "gross": 100.0, "withholding": 15.0, "net": 85.0, "estimated_rows": 0,
+        }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_estimate_only_year_states_no_withholding_anywhere():
+    """
+    Every payment an estimate: no withholding is on record, so none is reported — not
+    0.00 per row, per country, in the total, or in the CSV a DA-1 is filled from. A zero
+    there reads as "nothing was withheld", which is a reclaim of nothing.
+    """
+    engine, session = await _make_session()
+    try:
+        await DividendRepository(session).upsert_payment({
+            "security_id": 1, "ex_date": date(2025, 5, 2), "pay_date": date(2025, 5, 2),
+            "currency": "EUR", "shares_held": Decimal("10"),
+            "gross_amount_eur": Decimal("40"), "withholding_tax_eur": Decimal("0"),
+            "net_amount_eur": Decimal("40"), "source": "yfinance_estimate",
+            "last_computed": datetime.now(),
+        })
+        await session.commit()
+
+        report = await TaxService(session).get_tax_report(2025)
+
+        assert report["dividend_income"][0]["withholding"] is None
+        assert report["dividend_totals"]["withholding"] is None
+        assert report["dividend_totals"]["estimated_rows"] == 1
+        (country,) = report["dividend_by_country"]
+        assert country["withholding"] is None
+        assert (country["payments"], country["estimated_payments"]) == (1, 1)
+
+        lines = TaxService(session).to_csv(report).splitlines()
+        total = next(l for l in lines if l.startswith("TOTAL,") and "est." in l)
+        assert total.startswith("TOTAL,,,,40.0,,40.0,"), total
+        us = next(l for l in lines if l.startswith("US,"))
+        assert us == "US,1,40.0,,40.0,1", us
     finally:
         await session.close()
         await engine.dispose()
@@ -434,11 +475,24 @@ async def test_the_boundary_year_keeps_pre_ibkr_estimates_and_labels_mixed():
             ["2026-01-15", "2026-03-01"]
         assert [r["source"] for r in report["dividend_income"]] == \
             ["yfinance_estimate", "ibkr"]
-        assert report["dividend_totals"] == {"gross": 140.0, "withholding": 15.0, "net": 125.0}
+        # Gross and net include the estimate (its net falls back to its gross); the
+        # withholding is the recorded one, and the count says what it leaves out.
+        assert report["dividend_totals"] == {
+            "gross": 140.0, "withholding": 15.0, "net": 125.0, "estimated_rows": 1,
+        }
+        # The estimate's withholding is not known, so it is absent rather than 0.00.
+        assert [r["withholding"] for r in report["dividend_income"]] == [None, 15.0]
+        (country,) = report["dividend_by_country"]
+        assert (country["payments"], country["estimated_payments"]) == (2, 1)
+        assert country["withholding"] == 15.0
 
         csv_text = TaxService(session).to_csv(report)
         assert "source: mixed" in csv_text
         assert "Estimates before 2026-03-01" in csv_text
+        lines = csv_text.splitlines()
+        estimate_line = next(l for l in lines if l.startswith("AAA,") and "2026-01-15" in l)
+        assert estimate_line.endswith(",40.0,,40.0,est."), estimate_line
+        assert any("withholding excludes, gross and net include 1 est." in l for l in lines)
     finally:
         await session.close()
         await engine.dispose()

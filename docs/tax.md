@@ -67,13 +67,30 @@ block. Tests: `tests/test_tax_service.py`, plus the shape assertions in `tests/t
 
 Frontend: `TaxTab.tsx`. It's a filing aid, not tax advice.
 
-**An estimated row's withholding is absent, not 0.00** (2026-10-14). A yfinance estimate carries a
-guessed gross and no withholding on record, so its `0` means "not known" — and on a DA-1 aid a
-`0.00` reads as "nothing was withheld", a claim against the reclaim. The tab reads each row's
-`source`: an estimate's cell is `—`; the withholding total is `—` when every row is an estimate and
-otherwise carries `excl. N est.`; the by-country column (whose rows do not say which payments were
-estimates) is `—` in an estimate-only year and tagged `excl. est.` in the boundary year. The CSV
-still writes the estimate's `0` (`to_csv()`), and `dividend_country_note` is still served but no
-longer rendered.
+**An estimated row's withholding is absent, not 0.00** (2026-10-14; the backend half 2026-10-17).
+A yfinance estimate carries a guessed gross and no withholding on record — `compute_dividend_income`
+stores `0` because yfinance has none — so its `0` means "not known", and on a DA-1 aid a `0.00` reads
+as "nothing was withheld", a claim against the reclaim. So the **service** says it, and every reader
+inherits it:
+
+- an estimate's `withholding` is `null`; its `net` keeps the gross fallback (`_net_eur`), so real
+  income is not dropped;
+- `dividend_totals.withholding` is the recorded withholding only, `null` when every row is an
+  estimate, and `dividend_totals.estimated_rows` counts what it leaves out — and what `gross` and
+  `net` include;
+- each `dividend_by_country` row carries `payments` and `estimated_payments`, and its withholding is
+  `null` when all of that country's payments are estimates. DA-1 is filed per country, so which
+  countries are incomplete is said per country, not once for the year (the tab used to tag every
+  country in a boundary year, complete or not);
+- `to_csv()` leaves an unknown withholding blank, marks each estimate `est.` in its own column, says
+  on the TOTAL row how many estimates the totals exclude or include, and gives each country its
+  estimated-payment count.
+
+The tab reads those fields instead of recounting rows: `—` for an absent withholding, `excl. N est.`
+on the withholding total, `incl. N est.` on gross and net when only some rows are estimates (an
+estimate-only year has the card's `est.` badge), and `excl. est.` on just the countries with
+estimates. `dividend_country_note` is still served but no longer rendered. Tests:
+`tests/test_tax_service.py` (`test_an_estimate_only_year_states_no_withholding_anywhere`, the
+boundary-year test) and `TaxTab.test.tsx`.
 
 ---

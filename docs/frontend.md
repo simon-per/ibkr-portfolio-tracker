@@ -34,7 +34,10 @@ rather than one absent value.
 **And `e2e/errors.mjs` shows how it hid.** Its count of panels reporting the failure went **8 → 10**
 when these were fixed: the two surfaces it existed to cover had never been in its own tally, under an
 assertion (`hits >= 4`) loose enough not to notice. A floor that far below the real count cannot fail,
-which is the same "passes vacuously" shape as the Sharpe clamp test. It is `>= 10` now.
+which is the same "passes vacuously" shape as the Sharpe clamp test. It was `>= 10` until the
+product pass merged five summary cards and the chart card into one hero and dropped the
+contributions strip; it is `>= 8` since 2026-10-17 — fewer surfaces, each still reporting, and the
+hero says *the server didn't respond* in the same words as the panels under it.
 
 ### Risk metrics (`portfolioKpis.ts`)
 

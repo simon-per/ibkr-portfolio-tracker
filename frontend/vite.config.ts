@@ -18,6 +18,7 @@ export default defineConfig({
     // startup for all of them to suit the few component tests is the wrong default.
     environment: 'node',
     globals: false,
+    setupFiles: ['./src/testSetup.ts'],
   },
   build: {
     rollupOptions: {

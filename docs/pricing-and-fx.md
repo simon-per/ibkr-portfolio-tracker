@@ -70,8 +70,16 @@ docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set CH
   until 2026-07-30, which is how SBI's poisoned estimates outlived its mapping fix.
 - `--dry-run` on both mutating commands; every edit records a `sync_runs` row (`manual_mapping`),
   because a mapping change being invisible is why SBI went unnoticed for months.
+- **An ambiguous `SYMBOL EXCHANGE` is refused** (2026-10-17). `securities` is unique on
+  (isin, exchange), not (symbol, exchange), so an ISIN change can leave two rows on one ticker; a
+  mapping applies to both, and `.first()` checked the currency of whichever SQLite returned first
+  and let `--purge-prices` delete one row's prices on a guess. `set` and `disable` now refuse,
+  naming each id, and `list` flags `AMBIGUOUS: N securities`. The lookup is the one every CLI uses
+  (`app/cli/security_lookup.py`; `import_prices` and `purge_dividend_estimates` take `--security-id`
+  to settle it), and `tests/test_cli_security_lookup.py` fails a CLI that queries `Security.symbol`
+  itself.
 
-Tests: `tests/test_mapping_cli.py`.
+Tests: `tests/test_mapping_cli.py`, `tests/test_cli_security_lookup.py`.
 
 **Currency** — Frankfurter at `https://api.frankfurter.dev/v1` (`.app` now 301-redirects here).
 Batch-fetches date ranges (one call per ~30 days) and carries the last known rate forward across
@@ -118,5 +126,16 @@ affordable. Without it, TWD only got a rate on days a lot happened to need one, 
 window once meant the lot was skipped forever. Extending the list is one edit and no extra request.
 
 Tests: `tests/test_currency_fallback.py`.
+
+**A base-currency switch the app cannot convert into is refused** (2026-10-17). `BaseFx.convert`
+hands back the EUR amount when it holds no EUR→base rate at all, so a switch accepted while
+Frankfurter was down printed every figure in the app as EUR under a CHF or USD label. `PUT
+/api/settings/base-currency` now validates the code (`normalize_base_currency`), backfills, asks the
+read path's own loader (`load_base_fx(..., backfill=False)`) whether it would find a rate, and only
+then writes the setting; with none it answers 503 and the base stays where it was (the header says
+*Currency change failed — still showing the previous currency*). One stored rate is enough: `BaseFx`
+carries the nearest one forward and back, so the worst case is a stale rate, never a mislabelled
+figure. The fallback inside `convert` stays for a database whose base was set before this existed.
+Tests: `tests/test_base_currency_switch.py`.
 
 ---

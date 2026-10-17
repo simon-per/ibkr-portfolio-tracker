@@ -124,7 +124,7 @@ function detailOf(row: ActivityRow): string | null {
  * The ledger's eight columns, described once for both renderings.
  *
  * Note the title: a cash flow has no symbol at all, so it falls back to its own badge
- * text ("Deposit", "Transfer · not money in") rather than leaving the card headless.
+ * text ("Deposit", "Transfer") rather than leaving the card headless.
  * The desktop table can print an em dash in a cell; a card cannot.
  */
 function activityColumns(deps: {

@@ -8,6 +8,9 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { displayName } from '@/lib/securityName'
+import {
+  includedEstimatesTag, withheld, withholdingTotalLabel, type Money,
+} from '@/lib/taxTotals'
 
 /**
  * Only the first-paint fallback for the year picker. The real floor is the year of the
@@ -24,42 +27,8 @@ function gainClass(amount: number): string {
   return 'text-muted-foreground'
 }
 
-type Money = (n: number) => string
-
-/** Withholding is a deduction, so a recorded amount prints with its minus. */
-function withheld(money: Money, amount: number): string {
-  return amount ? `-${money(amount)}` : money(0)
-}
-
 function signed(money: Money, amount: number): string {
   return `${amount >= 0 ? '+' : ''}${money(amount)}`
-}
-
-/**
- * How many dividend rows are estimates. An estimate has a guessed gross and *no*
- * withholding on record — its 0 is "not known", not "nothing withheld" — so its
- * withholding cell is absent and a total built over it says how many it left out.
- */
-export function estimatedDividendRows(rows: TaxReport['dividend_income']): number {
-  return rows.filter((d) => d.source === 'yfinance_estimate').length
-}
-
-/**
- * The withholding total's cell. The backend's sum carries every estimate as 0, so it is
- * the recorded withholding only: absent when every row is an estimate, and tagged with
- * the count it excludes when some are.
- */
-export function withholdingTotalLabel(
-  money: Money,
-  total: number,
-  rowCount: number,
-  estimatedRows: number,
-): { amount: string; excluded: string | null } {
-  if (rowCount > 0 && estimatedRows === rowCount) return { amount: '—', excluded: null }
-  return {
-    amount: withheld(money, total),
-    excluded: estimatedRows > 0 ? `excl. ${estimatedRows} est.` : null,
-  }
 }
 type DividendIncomeRow = TaxReport['dividend_income'][number]
 type ByCountryRow = TaxReport['dividend_by_country'][number]
@@ -122,19 +91,16 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Withholding',
     align: 'right',
     cellClassName: 'text-muted-foreground',
-    cell: (d) => (d.source === 'yfinance_estimate' ? '—' : withheld(money, d.withholding)),
+    cell: (d) => (d.withholding == null ? '—' : withheld(money, d.withholding)),
   },
 ]
 
 /**
- * A country row does not say which of its payments were estimates, so the column
- * follows the report's era: absent in an estimate-only year, tagged in the boundary
- * year, where its sum is the recorded withholding only.
+ * Each country row says how many of its payments were estimates, so only the countries
+ * whose withholding is incomplete are tagged: absent when all of a country's payments
+ * are estimates, the recorded sum with `excl. est.` when some are.
  */
-const BY_COUNTRY_COLUMNS = (
-  money: Money,
-  dividendSource: TaxReport['dividend_source'],
-): Column<ByCountryRow>[] => [
+const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
   {
     key: 'country',
     header: 'Country',
@@ -173,9 +139,9 @@ const BY_COUNTRY_COLUMNS = (
     shortHeader: 'Withholding',
     align: 'right',
     cell: (c) =>
-      dividendSource === 'yfinance_estimate' ? (
+      c.withholding == null ? (
         '—'
-      ) : dividendSource === 'mixed' ? (
+      ) : c.estimated_payments > 0 ? (
         <>
           {withheld(money, c.withholding)}
           <span className="ml-1 text-xs text-muted-foreground">excl. est.</span>
@@ -275,11 +241,16 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
 
 function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money }) {
   const rows = data.dividend_income
-  const withholding = withholdingTotalLabel(
-    money,
-    data.dividend_totals.withholding,
-    rows.length,
-    estimatedDividendRows(rows),
+  const estimated = data.dividend_totals.estimated_rows
+  const withholding = withholdingTotalLabel(money, data.dividend_totals.withholding, estimated)
+  const included = includedEstimatesTag(estimated, rows.length)
+  const withTag = (amount: string) => (
+    <>
+      {amount}
+      {included && (
+        <span className="ml-1 text-xs font-normal text-muted-foreground">{included}</span>
+      )}
+    </>
   )
   return (
     <DataTable
@@ -290,7 +261,7 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
       density="compact"
       footer={[
         { key: 'label', spans: ['symbol', 'description', 'pay_date'], content: 'Total' },
-        { key: 'gross', spans: ['gross'], align: 'right', content: money(data.dividend_totals.gross) },
+        { key: 'gross', spans: ['gross'], align: 'right', content: withTag(money(data.dividend_totals.gross)) },
         {
           key: 'withholding',
           spans: ['withholding'],
@@ -306,7 +277,7 @@ function DividendIncomeTable({ data, money }: { data: TaxReport; money: Money })
             </>
           ),
         },
-        { key: 'net', spans: ['net'], align: 'right', content: money(data.dividend_totals.net) },
+        { key: 'net', spans: ['net'], align: 'right', content: withTag(money(data.dividend_totals.net)) },
       ]}
     />
   )
@@ -472,7 +443,7 @@ export function TaxTab() {
               <CardContent>
                 <DataTable
                   rows={data.dividend_by_country}
-                  columns={BY_COUNTRY_COLUMNS(money, data.dividend_source)}
+                  columns={BY_COUNTRY_COLUMNS(money)}
                   getRowKey={(c) => c.country}
                   label="Withholding by country"
                   density="compact"

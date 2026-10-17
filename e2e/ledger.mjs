@@ -63,9 +63,17 @@ log(
   `the Cash filter narrowed the ledger to cash rows (${cashRows.length} rows)`
 )
 
-log(/Transfer/.test(cash), 'a Transfer row is visible in the ledger')
-log(/not money in/.test(cash), 'transfers are badged "not money in"')
-log(/Deposit/.test(cash), 'a Deposit row is visible')
+// A transfer must read as a transfer, never as a deposit: booked as one, it is a
+// portfolio-sized fake contribution. The badge said "Transfer · not money in" until the
+// product pass (2026-10-16) cut every explanatory tail; the distinction is now the badge
+// itself — "Transfer" in amber against "Deposit" in blue — so that is what is asserted.
+const transferRows = cashRows.filter((r) => /\bTransfer\b/.test(r))
+log(transferRows.length > 0, `a Transfer row is visible in the ledger (${transferRows.length})`)
+log(
+  transferRows.length > 0 && transferRows.every((r) => !/\b(Deposit|Withdrawal)\b/.test(r)),
+  'transfers are badged Transfer, never Deposit or Withdrawal'
+)
+log(cashRows.some((r) => /\bDeposit\b/.test(r)), 'a Deposit row is visible')
 
 log(errors.length === 0, `no console errors (${errors.length}): ${errors.slice(0, 3).join(' | ')}`)
 

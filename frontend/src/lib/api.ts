@@ -594,7 +594,7 @@ export interface LookthroughResponse {
   nested_fund_eur: number;
   uncovered_fund_eur: number;
   /** Share of the portfolio attributed to companies. Read this before any row. */
-  coverage_pct: number;
+  coverage_pct: number | null;
   companies: LookthroughCompanyRow[];
   companies_shown: number;
   company_count_total: number;
@@ -1147,8 +1147,9 @@ export interface TaxDividendRow {
   isin: string | null;
   pay_date: string;
   gross: number;
-  /** 0 on an estimated row means "not recorded", not "none withheld". */
-  withholding: number;
+  /** `null` on an estimated row: nothing is on record, which is not "none withheld". */
+  withholding: number | null;
+  /** An estimate's net is its gross (no withholding is known); the totals count it. */
   net: number;
   /** Per-row era: an estimate carries a guessed gross and no withholding at all. */
   source: 'ibkr' | 'yfinance_estimate';
@@ -1159,8 +1160,12 @@ export interface TaxCountryRow {
   country: string;
   positions: number;
   gross: number;
-  withholding: number;
+  /** Recorded withholding only; `null` when every payment from the country is an estimate. */
+  withholding: number | null;
   net: number;
+  /** Payments from the country, and how many of them are estimates. */
+  payments: number;
+  estimated_payments: number;
 }
 
 export interface TaxRealizedRow {
@@ -1189,7 +1194,16 @@ export interface TaxReport {
   /** Withholding grouped by source country — DA-1 is filed per country. */
   dividend_by_country: TaxCountryRow[];
   dividend_country_note: string;
-  dividend_totals: { gross: number; withholding: number; net: number };
+  /**
+   * `withholding` is the recorded withholding only (`null` when every row is an
+   * estimate); `estimated_rows` is what it leaves out and what `gross` and `net` include.
+   */
+  dividend_totals: {
+    gross: number;
+    withholding: number | null;
+    net: number;
+    estimated_rows: number;
+  };
   realized_gains: TaxRealizedRow[];
   realized_source: 'trades' | 'closed_lot_estimate';
   /** Date the holdings snapshot is valued at — 31 Dec for past years, today otherwise. */

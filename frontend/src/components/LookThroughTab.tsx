@@ -422,7 +422,9 @@ export function LookThroughTab() {
               tile
               label="Coverage"
               value={
-                data.total_market_value_eur > 0 ? `${data.coverage_pct.toFixed(1)}%` : null
+                data.total_market_value_eur > 0 && data.coverage_pct != null
+                  ? `${data.coverage_pct.toFixed(1)}%`
+                  : null
               }
               tone={
                 unresolvedFunds.length === 0 && proxiedFunds.length === 0

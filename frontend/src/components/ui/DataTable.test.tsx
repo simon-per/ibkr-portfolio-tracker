@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
-import { DataTable, footerLayout, type Column, type FooterCell } from './DataTable'
+import { DataTable, type Column, type FooterCell } from './DataTable'
+import { footerLayout } from './footerLayout'
 
 /**
  * The point of this file is the anti-drift assertion, not the markup.

@@ -7,6 +7,27 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (afternoon) — the fintech pass, second half (same branch, not on `main`)
+
+Closing what the morning's write-up left open, on the same branch. **Calculations:** the tax
+report's estimated dividends are honest in the API and the CSV, not only on screen — an estimate's
+withholding is `null` and blank in the CSV, the totals and each country carry estimate counts, and
+the tab tags only the countries that hold estimates (docs/tax.md); a base-currency switch with no
+EUR→base rate is refused instead of printing EUR under a CHF/USD label (docs/pricing-and-fx.md);
+look-through `coverage_pct` is `null` on an empty book; `manage_mappings` refuses an ambiguous
+symbol@exchange through one CLI resolver shared with `import_prices` and `purge_dividend_estimates`.
+**Checks:** the suite gets its own database per process, so it can no longer write into a
+snapshot named in `backend/.env` (proved with a canary URL that was never created);
+`e2e/axis.mjs` measures the drawn series instead of the API's all-time minimum, `e2e/ledger.mjs`
+asserts the *Transfer* badge the product pass kept, and `e2e/errors.mjs` counts the eight surfaces
+the merged hero left — the hero now says *the server didn't respond* like every panel. The one
+unexplained frontend failure was not reproducible in eight more runs, six under the backend suite's
+load; Testing Library's async wait is 4 s now instead of 1 s (`src/testSetup.ts`). ESLint went from
+22 problems to 11, all the dev-only fast-refresh rule. **Verified, on the synthetic book:** backend
+2014 passed, 2 skipped; frontend 925; every e2e script green (sweep 18, mobile 50, a11y 17, axis 16,
+ledger 8, CSP 4, chunks 37, outage 18). Not verified on real data: the session's network policy does
+not reach the production host.
+
 ## Shipped 2026-10-17 — the fintech pass (on branch `ccr-7289b752-aev50c`, not yet on `main`)
 
 The owner's goal: a clean, slick, fintech-looking app that could be shipped to other people,

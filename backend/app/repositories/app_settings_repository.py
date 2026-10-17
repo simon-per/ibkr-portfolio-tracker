@@ -19,6 +19,23 @@ BASE_CURRENCY_KEY = "base_currency"
 DEFAULT_BASE_CURRENCY = "EUR"
 SUPPORTED_BASE_CURRENCIES = ["EUR", "CHF", "USD"]
 
+
+def normalize_base_currency(currency: Optional[str]) -> str:
+    """The supported spelling of a requested base currency, or `ValueError`.
+
+    Separate from `set_base_currency` so the settings route can validate a request
+    before it does anything else — it must refuse a switch it cannot convert into
+    without having written it first.
+    """
+    normalized = (currency or "").upper()
+    if normalized not in SUPPORTED_BASE_CURRENCIES:
+        raise ValueError(
+            f"Unsupported base currency '{normalized}'. "
+            f"Choose from: {', '.join(SUPPORTED_BASE_CURRENCIES)}"
+        )
+    return normalized
+
+
 # Read-time forecast policy. Yahoo publishes gross dividends per share; this factor
 # turns them into an estimated net amount without rewriting the stored gross history.
 DIVIDEND_FORECAST_NET_FACTOR_KEY = "dividend_forecast_net_factor"
@@ -77,12 +94,7 @@ class AppSettingsRepository:
         return await self.get(BASE_CURRENCY_KEY, DEFAULT_BASE_CURRENCY)
 
     async def set_base_currency(self, currency: str) -> str:
-        currency = (currency or "").upper()
-        if currency not in SUPPORTED_BASE_CURRENCIES:
-            raise ValueError(
-                f"Unsupported base currency '{currency}'. "
-                f"Choose from: {', '.join(SUPPORTED_BASE_CURRENCIES)}"
-            )
+        currency = normalize_base_currency(currency)
         await self.set(BASE_CURRENCY_KEY, currency)
         return currency
 

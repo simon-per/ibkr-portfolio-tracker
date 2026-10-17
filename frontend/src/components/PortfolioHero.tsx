@@ -89,7 +89,7 @@ export function PortfolioHero({
     return (
       <Card>
         <CardContent className="py-10 text-center text-muted-foreground">
-          Couldn't load the portfolio. It retries automatically.
+          Couldn't load the portfolio — the server didn't respond. It retries automatically.
         </CardContent>
       </Card>
     )

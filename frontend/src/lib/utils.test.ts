@@ -211,7 +211,7 @@ describe('cn', () => {
   })
 
   it('drops falsy entries', () => {
-    expect(cn('a', false && 'b', undefined, 'c')).toBe('a c')
+    expect(cn('a', false, null, undefined, 'c')).toBe('a c')
   })
 
   it('lets a later Tailwind class win over an earlier conflicting one', () => {

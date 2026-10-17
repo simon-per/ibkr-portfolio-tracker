@@ -120,3 +120,18 @@ describe('a new account', () => {
     expect(screen.queryByText('+0.00%')).toBeNull()
   })
 })
+
+describe('an outage', () => {
+  // `e2e/errors.mjs` counts "didn't respond" across the Performance tab; the hero is the
+  // tab's largest surface, so it says it in the same words as every panel under it.
+  it('says the server did not respond instead of showing a balance', () => {
+    render(
+      <PortfolioHero summary={undefined} isError period={null} range="1Y" controls={null}>
+        <div />
+      </PortfolioHero>,
+    )
+    expect(screen.getByText(/Couldn't load the portfolio — the server didn't respond/)).toBeTruthy()
+    expect(screen.queryByText(/No portfolio data yet/)).toBeNull()
+    expect(screen.queryByText(/0\.00/)).toBeNull()
+  })
+})

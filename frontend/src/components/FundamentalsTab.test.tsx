@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { FundamentalsTab } from './FundamentalsTab'
 import { api } from '@/lib/api'
@@ -141,4 +141,39 @@ describe('FundamentalsTab figures', () => {
     renderWith([metrics({ last_updated: '2026-09-30T02:05:00+00:00' })])
     expect((await screen.findByText(/^Data as of /)).className).toContain('text-amber')
   })
+})
+
+describe('FundamentalsTab background sync', () => {
+  // The banner's end is derived from the status poll (no state cleared in an effect): a
+  // sync is finished once the newest row is newer than the moment it started, and the
+  // table is fetched once more. Real timers — the poll runs every 5 s — hence the timeout.
+  it('polls until a row newer than the sync appears, then clears the banner and refetches', async () => {
+    let newest: string | null = '2026-10-01T00:00:00Z'
+    const rows = vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue([metrics({})])
+    vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([])
+    vi.spyOn(api, 'getEarningsHistory').mockResolvedValue([])
+    vi.spyOn(api, 'getFundamentalsStatus').mockImplementation(async () => ({
+      ...STATUS,
+      newest_update: newest,
+    }))
+    vi.spyOn(api, 'syncFundamentals').mockResolvedValue(
+      { status: 'started' } as Awaited<ReturnType<typeof api.syncFundamentals>>,
+    )
+    withProviders(<FundamentalsTab />)
+    await screen.findAllByText('AAA')
+
+    // Every holding has data, so the button offers a forced refresh.
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByText(/Updating — the table refreshes/)).toBeTruthy()
+    const fetchesBefore = rows.mock.calls.length
+
+    // The sync writes a row; the next poll sees it.
+    newest = new Date(Date.now() + 60_000).toISOString()
+    await waitFor(
+      () => expect(screen.queryByText(/Updating — the table refreshes/)).toBeNull(),
+      { timeout: 9000 },
+    )
+    await waitFor(() => expect(rows.mock.calls.length).toBeGreaterThan(fetchesBefore))
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy()
+  }, 20_000)
 })

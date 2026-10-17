@@ -18,8 +18,13 @@ deploy. The agent-team wave's scheduled halves are under *Watch after the next d
 
 - **Merge the fintech pass** (`ccr-7289b752-aev50c`) into `main` once your local changes are
   reconciled with it. It touches most of `frontend/src` (tokens, cards, tables, charts, the hero)
-  and two backend reads (Fundamentals held-only). It was checked only against a synthetic book, so
-  look at it on a production snapshot before pushing `main`, which deploys within 5 minutes.
+  and a few backend paths: Fundamentals held-only, the base-currency switch's refusal, the tax
+  report's estimate fields (`estimated_rows`, `payments`/`estimated_payments`, `null`
+  withholding), look-through `coverage_pct: null` on an empty book, the shared CLI security
+  lookup, and the test suite's own database. Every check ran against a synthetic book only — the
+  cloud session's network policy does not reach the production host — so look at it on a
+  production snapshot (or a local build proxied to the live API) before pushing `main`, which
+  deploys within 5 minutes.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
@@ -72,7 +77,10 @@ Only what is still unverified.
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
   XIRR card; Fundamentals and `/api/fundamentals/status` listing held securities only; the
   benchmark lines in their new colours; the bundled font and card shadows under the production
-  CSP (`e2e/csp.mjs`).
+  CSP (`e2e/csp.mjs`). On the estimate-era years (2025 and the boundary year): estimated rows'
+  withholding blank in the CSV, `excl. N est.` / `incl. N est.` on the totals, and `excl. est.`
+  only on the countries that hold estimates. `e2e/ledger.mjs` and `e2e/axis.mjs` against a
+  snapshot — both were rewritten against the synthetic book.
 
 - **The product pass on production** (verified only on a local build proxied to the live API):
   the bundled Inter font loads under the production CSP (`e2e/csp.mjs`), the favicon renders, and
@@ -111,56 +119,49 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The test suite writes into the developer's database.** `tests/conftest.py:42` blanks only the
-   job store; the scheduler-job spy tests and the WAL-lifespan test write through
-   `AsyncSessionLocal` into whatever `DATABASE_URL` names, and under xdist N workers share one
-   file (a plausible cause of the one flaky run). Fix: a per-worker temp DB before `settings` is
-   imported. Until then never run the suite against a snapshot you still need.
-2. **Pin what every production build re-resolves:** `yfinance`, `lxml`, `pyxirr` float in
+1. **Pin what every production build re-resolves:** `yfinance`, `lxml`, `pyxirr` float in
    `backend/requirements.txt` and `deploy.sh` builds `--no-cache`. A constraints file.
-3. **Copies of one job.** `_to_eur` ×3 (`dividend_service`, `tax_service`, `finpension_ingest` —
+2. **Copies of one job.** `_to_eur` ×3 (`dividend_service`, `tax_service`, `finpension_ingest` —
    the last swallows errors) plus an inline FX path with a `"USD"` placeholder
-   (`dividend_service.py:471`); the CLI security resolver ×3, and **`manage_mappings.py:79-83`
-   takes `.first()` without refusing ambiguity**; `_pct` drifted (look-through 0.0, analytics
-   None); the crypto clients' `_pace`/`_get`. Extract and test the family.
-4. **`BaseFx.convert` returns the EUR amount when no rate exists** (`base_fx.py:58-60`), under ~57
-   call sites; only crypto guards it.
-5. **Tax report estimated rows, backend half:** no per-country estimate count, `to_csv()` writes an
-   estimate's withholding as 0, and a mixed year's net total includes estimates.
-6. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
+   (`dividend_service.py:471`); `_pct` drifted (look-through 0.0 for a share of nothing,
+   analytics None); the crypto clients' `_pace`/`_get`. Extract and test the family.
+3. **`BaseFx.convert` still returns the EUR amount when it has no rate at all** (`base_fx.py`),
+   under ~57 call sites. The base switch now refuses to enter that state (docs/pricing-and-fx.md),
+   so it is reachable only on a database whose base was set before 2026-10-17 and has no rates; a
+   read-time flag on the responses would close it.
+4. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-7. **Four nulls-last sort comparators** (`FundamentalsTab`, `cryptoColumns`, `WatchlistTab`,
+5. **Four nulls-last sort comparators** (`FundamentalsTab`, `cryptoColumns`, `WatchlistTab`,
    `lib/dividendTable.ts`) and `ABSENT` in both `lib/utils.ts` and `ui/KpiCard.tsx` — one helper
    each, with a family test.
-8. **Tooling.** ESLint red (19, incl. four setState-in-effect in `FundamentalsTab.tsx`), ruff
-   unconfigured; neither in CI. `alembic check` fails on naming drift only. The `ResizeObserver`
-   stub is in 17 test files (belongs in `setupFiles`). CI pins Node 20 (EOL).
-9. **`coverage_pct` reads 0.0 on an empty book** (`lookthrough_service.py:853`).
-10. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
+6. **Tooling.** ESLint has 11 problems, all `react-refresh/only-export-components`: hooks and
+   column factories exported beside their components (`CurrencyContext`, `portfolioMode`,
+   `ThemeProvider`, `PositionsList`, `LookThroughTab`, `RebalanceCard`, `Dashboard`). Dev-only (a
+   full reload instead of a hot swap); moving them touches every import site, so do it on `main`
+   in one go. Ruff unconfigured; neither in CI. `alembic check` fails on naming drift only. The
+   `ResizeObserver` stub is in 17 test files — `src/testSetup.ts` is now the place for it. CI pins
+   Node 20 (EOL).
+7. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
     "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
-11. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
+8. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost
     events at read time; **do not** make the portfolio convert per date (breaks the contributions
     identity).
-12. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
+9. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-13. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
+10. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
     estimates (needs a country→region map); exact World ex CH; nested funds; an identity detector.
     Researched future sources (N-PORT, commercial APIs — do not re-shop) are in docs/lookthrough.md.
-14. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+11. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-15. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-16. **`e2e/axis.mjs` fails two of eight checks on a stale assumption**: it expects the value
-    chart's axis floor from the API's unrebased market − cost, while the chart draws the
-    range-rebased P/L and extends its domain to the drawn minimum. Rewrite the check against the
-    drawn series; the chart is right.
-17. **The fundamentals sync still fetches sold securities** — the reads are held-only
+12. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+13. **The fundamentals sync still fetches sold securities** — the reads are held-only
     (`held_security_ids`), the sync scope is not. Narrowing `sync_fundamentals_data` /
     `sync_stale_fundamentals` to it would only remove Yahoo requests.
-18. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+14. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
@@ -169,7 +170,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-10-17 (fintech pass)** — surfaces, hero figure, quiet tables, one chart look; tax
-  footers, held-only fundamentals, period-return denominator fixed; on a branch, not `main`.
+  footers, held-only fundamentals, period return, tax estimates, base switch, test DB, CLI lookup
+  fixed; every e2e script green; on a branch, not `main`.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,

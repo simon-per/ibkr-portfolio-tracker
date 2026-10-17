@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button'
 import { cn, formatMarketCap, formatShortDateTime } from '@/lib/utils'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
-import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } from '@/lib/api'
+import type {
+  FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem, FundamentalsStatus,
+} from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
 import { RefreshCw } from 'lucide-react'
@@ -320,8 +322,13 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
   const PAGE_SIZE = 10
   const [page, setPage] = useState(0)
 
-  // Reset to first page when data changes
-  useEffect(() => { setPage(0) }, [data])
+  // Back to the first page when the data changes — adjusted while rendering, React's
+  // pattern for state that follows a prop, rather than in an effect that renders twice.
+  const [pageOf, setPageOf] = useState(data)
+  if (pageOf !== data) {
+    setPageOf(data)
+    setPage(0)
+  }
 
   if (data.length === 0) {
     return (
@@ -453,7 +460,12 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
 
 function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistoryItem[], pageSize?: number }) {
   const [page, setPage] = useState(0)
-  useEffect(() => { setPage(0) }, [pageSize])
+  // Back to the first page when the page size changes (see `EarningsCalendar`).
+  const [pageFor, setPageFor] = useState(pageSize)
+  if (pageFor !== pageSize) {
+    setPageFor(pageSize)
+    setPage(0)
+  }
   const totalPages = Math.ceil(data.length / pageSize)
   const pageData = data.slice(page * pageSize, (page + 1) * pageSize)
 
@@ -494,7 +506,6 @@ function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistor
 export function FundamentalsTab() {
   const queryClient = useQueryClient()
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null)
-  const isSyncing = syncStartedAt !== null
 
   // Each query captures isError: every empty state on this tab used to read as "no
   // data yet — click Sync Now", which is a statement about the *portfolio*. When the
@@ -532,21 +543,27 @@ export function FundamentalsTab() {
     queryFn: () => api.getEarningsHistory(365),
   })
 
+  // A background sync is finished once the newest row is newer than the moment it was
+  // started. Derived while rendering: clearing `syncStartedAt` from an effect cost a
+  // second render on every status poll (react-hooks/set-state-in-effect).
+  const syncFinished = (s: FundamentalsStatus | undefined) =>
+    syncStartedAt !== null && s?.newest_update != null && new Date(s.newest_update) > syncStartedAt
+
   const { data: status } = useQuery({
     queryKey: ['fundamentals', 'status'],
     queryFn: () => api.getFundamentalsStatus(),
-    refetchInterval: isSyncing ? 5000 : false,
+    refetchInterval: (query) =>
+      syncStartedAt !== null && !syncFinished(query.state.data) ? 5000 : false,
   })
 
-  // Detect when background sync completes: newest_update advances past syncStartedAt
+  const syncDone = syncFinished(status)
+  const isSyncing = syncStartedAt !== null && !syncDone
+
+  // The one side effect of finishing: refetch what the sync wrote. Once per sync — the
+  // flag stays true until the next sync moves `syncStartedAt`.
   useEffect(() => {
-    if (!isSyncing || !status || !syncStartedAt) return
-    const newestUpdate = status.newest_update ? new Date(status.newest_update) : null
-    if (newestUpdate && newestUpdate > syncStartedAt) {
-      setSyncStartedAt(null)
-      queryClient.invalidateQueries({ queryKey: ['fundamentals'] })
-    }
-  }, [status, isSyncing, syncStartedAt, queryClient])
+    if (syncDone) queryClient.invalidateQueries({ queryKey: ['fundamentals'] })
+  }, [syncDone, queryClient])
 
   const handleSyncSuccess = (data: { status: string }) => {
     if (data.status === 'started') {
@@ -578,11 +595,12 @@ export function FundamentalsTab() {
   // arithmetic was wrong twice over there.
   const sideBySide = useIsSideBySide()
 
+  // Stacked, the measured size does not apply; the default is used without being stored,
+  // so nothing is set synchronously inside the effect below.
+  const effectiveHistoryPageSize = sideBySide ? historyPageSize : DEFAULT_HISTORY_PAGE_SIZE
+
   useEffect(() => {
-    if (!sideBySide) {
-      setHistoryPageSize(DEFAULT_HISTORY_PAGE_SIZE)
-      return
-    }
+    if (!sideBySide) return
     const leftCard = leftCardRef.current
     if (!leftCard) return
     const update = () => {
@@ -730,7 +748,7 @@ export function FundamentalsTab() {
                 Couldn't load earnings history — the server didn't respond.
               </div>
             ) : (
-              <EarningsSurpriseHistory data={earningsHistory || []} pageSize={historyPageSize} />
+              <EarningsSurpriseHistory data={earningsHistory || []} pageSize={effectiveHistoryPageSize} />
             )}
           </CardContent>
         </Card>

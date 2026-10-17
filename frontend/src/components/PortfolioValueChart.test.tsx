@@ -69,7 +69,11 @@ describe('the incomplete-valuation notice', () => {
   it('stays hidden when the backend does not report the field at all', () => {
     // Older than 2026-08-05: absent must read as complete, not as unmeasurable, or every
     // chart would carry a permanent warning.
-    const noField = HEALTHY.map(({ unpriced_holdings, ...rest }) => rest as PortfolioValuePoint)
+    const noField = HEALTHY.map((p) => {
+      const rest: Partial<PortfolioValuePoint> = { ...p }
+      delete rest.unpriced_holdings
+      return rest as PortfolioValuePoint
+    })
     render(<PortfolioValueChart data={noField} />)
     expect(screen.queryByRole('alert')).toBeNull()
   })

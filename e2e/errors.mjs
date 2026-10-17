@@ -47,14 +47,20 @@ const hits = (opened.match(/didn't respond/g) || []).length
 // it should be a deliberate edit, because that is what a surface losing its error state
 // looks like.
 //
+// Lowered to 8 deliberately on 2026-10-17: the product pass (2026-10-16) merged five
+// summary cards and the chart card into one `PortfolioHero` and removed the contributions
+// strip, so there are fewer surfaces, not fewer that report. The eight: the hero, the two
+// KPI panels, the four collapsible cards opened above, and the positions table.
+//
 // Note this counts within the PERFORMANCE panel only, so a new *tab* never raises it — a
 // tab needs its own assertion further down instead. Raising this to 11 for the
 // Look-through tab was exactly that mistake, caught by the check failing.
-log(hits >= 10, `${hits} panels report the backend failure explicitly`)
+log(hits >= 8, `${hits} panels report the backend failure explicitly`)
 log(!/Not enough data to compute/.test(opened), 'Monthly Returns does not claim "not enough data"')
 log(!/No contribution history yet/.test(opened), 'Money In per Month does not claim "no history"')
 log(!/No dividend data available/.test(opened), 'Dividend Income does not claim "no dividends"')
-log(/Avg Monthly unavailable/.test(opened), 'the contributions strip says unavailable instead of vanishing')
+// The hero is the tab's headline: during an outage it must say so, not show a balance.
+log(/Couldn't load the portfolio/.test(opened), 'the hero says it could not load instead of showing a balance')
 
 await page.getByRole('tab', { name: 'Activity' }).click()
 await page.waitForTimeout(9000)

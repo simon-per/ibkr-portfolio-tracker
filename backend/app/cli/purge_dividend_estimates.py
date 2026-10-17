@@ -42,10 +42,9 @@ import sys
 from app.clock import utcnow
 from typing import Optional
 
-from sqlalchemy import select
-
 from app.database import AsyncSessionLocal
 from app.models.security import Security
+from app.cli.security_lookup import resolve_security
 from app.repositories.dividend_repository import DividendRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 
@@ -61,31 +60,10 @@ class PurgeError(Exception):
 async def _resolve_security(
     db, symbol: Optional[str], exchange: Optional[str], security_id: Optional[int]
 ) -> Security:
-    """Same resolution rules as import_prices: explicit id wins, ambiguity refuses."""
-    if security_id:
-        security = (await db.execute(
-            select(Security).where(Security.id == int(security_id))
-        )).scalar_one_or_none()
-        if not security:
-            raise PurgeError(f"No security with id={security_id}")
-        return security
-
-    if not symbol:
+    """The shared CLI rules (`security_lookup`): explicit id wins, ambiguity refuses."""
+    if not security_id and not symbol:
         raise PurgeError("Provide SYMBOL [EXCHANGE], or --security-id")
-
-    stmt = select(Security).where(Security.symbol == symbol)
-    if exchange:
-        stmt = stmt.where(Security.exchange == exchange)
-    matches = list((await db.execute(stmt)).scalars().all())
-
-    if not matches:
-        raise PurgeError(f"No security matches symbol={symbol!r} exchange={exchange!r}")
-    if len(matches) > 1:
-        # The same stock on two exchanges is two rows by design (ASML on NASDAQ
-        # and AEB), so an ambiguous match is refused rather than guessed.
-        found = ", ".join(f"id={s.id} {s.symbol}@{s.exchange}" for s in matches)
-        raise PurgeError(f"symbol={symbol!r} matches {len(matches)} securities: {found}")
-    return matches[0]
+    return await resolve_security(db, symbol, exchange, security_id, PurgeError)
 
 
 async def purge(
