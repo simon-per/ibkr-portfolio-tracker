@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LazyTabPanel } from '@/components/ui/LazyTabPanel'
 import { PortfolioValueChart } from './PortfolioValueChart'
 import { PortfolioHero } from './PortfolioHero'
+import { PerformanceInsights } from './PerformanceInsights'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { PerformanceMetricsCards } from './PerformanceMetricsCards'
 import { RiskMetricsCards } from './RiskMetricsCards'
@@ -480,6 +481,14 @@ export function Dashboard() {
                 isError={chartError}
               />
             </PortfolioHero>
+
+            <PerformanceInsights
+              attribution={attribution}
+              positions={positions}
+              cash={summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined}
+              upcoming={dividendBreakdown?.upcoming}
+              range={selectedRange}
+            />
 
             {/* Return and risk, over the selected range. */}
             <PerformanceMetricsCards
