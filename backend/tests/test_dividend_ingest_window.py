@@ -95,8 +95,12 @@ async def test_dividends_before_the_first_lot_are_not_ingested(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_security_with_no_lots_yet_keeps_its_whole_history(monkeypatch):
-    """No lots means no cutoff to infer — keep everything rather than guess."""
+async def test_a_security_with_no_lots_yet_is_not_asked(monkeypatch):
+    """
+    No lot means nothing to earn and no cutoff to infer. It used to keep the whole
+    history; since issue #6 the pass asks only about held securities, so it is not
+    asked at all until its first lot lands (an unstamped holding is due at once).
+    """
     engine, session = await _session(with_lot=False)
     try:
         _patch_yf(monkeypatch, HISTORY)
@@ -105,8 +109,8 @@ async def test_a_security_with_no_lots_yet_keeps_its_whole_history(monkeypatch):
 
         result = await DividendService(session).sync_dividend_data()
 
-        assert len(await _stored(session)) == len(HISTORY)
-        assert result["pre_ownership_skipped"] == 0
+        assert await _stored(session) == []
+        assert result["securities_processed"] == 0
     finally:
         await session.close()
         await engine.dispose()

@@ -578,6 +578,21 @@ every exception, so the loop reads `BenchmarkService.rate_limited` after each ti
 missing is checked, not fetched. Tests: `tests/test_benchmark_warmup.py`, which drives the real job
 gate and the real fetch with only `yf.Ticker` stubbed.
 
+**The dividend pass asks about each held security at most once a week** (GitHub issue #6,
+2026-10-17). It runs in the 18:00 `full_sync_job`, and `GET /api/dividends/summary` can enqueue it.
+Before, its 7-day guard read the newest `dividend_payments.created_at`, which is set on insert only,
+so a non-payer or a payer between ex-dates was asked on every pass, sold positions included; and the
+summary enqueued a pass whenever the card's `last_updated` was a day old, a timestamp only a Flex
+re-delivery moves. On a week with no dividend in the Flex window that was five passes a day, about
+one request per security ever owned each time. Now every answer from Yahoo stamps
+`securities.dividends_checked_at`: data, an empty series, or an error that is not a rate limit.
+`needs_dividend_check()` (`dividend_service.py`) selects Yahoo-eligible, held
+(`security_repository.held`), unstamped-or-week-old securities, and both the loop and the summary
+route use it. *Budget*: one request per held security per week, plus one for each new purchase at
+the next pass. A rate limit stamps nothing from the 429 on, so the next pass resumes there.
+`tests/test_dividend_check_budget.py` counts the stubbed requests over a simulated week of
+dashboard loads and 18:00 passes: 105 before, 2 after, for two holdings and one sold position.
+
 **A rate limit now abandons the rest of the pass.** This file already credited
 `market_data_service.py` with "rate-limit detection that aborts the run" and it only ever aborted the
 ticker *variations* for the security in hand — the caller logged a failure and moved on to the next of
@@ -922,6 +937,9 @@ handler answer 429 honestly instead of replying `"started"` to a run the backgro
 runs, a gate entered with no cooldown — and was the one bulk Yahoo route the 2026-07 rollout left
 out; it mirrors the fundamentals route since 2026-09-12 (`SYNC_COOLDOWN_SECONDS = 300`). The
 `GET /summary` auto-trigger was already throttled (6h); the unthrottled path was the explicit one.
+Since GitHub issue #6 it also enqueues only while `needs_dividend_check` selects a security — the
+pass's own predicate (below, under *Sync schedule*) — so a dashboard load right after a pass starts
+nothing.
 
 **Errors are redacted before they are stored or served (`app/redact.py`).** Flex sends the token as a
 `t=` URL parameter and `requests` transport errors stringify with the full URL, so a plain `str(e)` from

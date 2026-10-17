@@ -1,9 +1,10 @@
 from typing import List, Optional
-from datetime import date, datetime
-from sqlalchemy import select, and_, delete, func
+from datetime import date
+from sqlalchemy import select, and_, delete, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dividend_payment import DividendPayment
+from app.models.security import Security
 
 YFINANCE_SOURCE = "yfinance_estimate"
 
@@ -39,6 +40,11 @@ class DividendRepository:
         been wrong they are the poisoned half — see the SBI case, where two rows
         from a bare-ticker US listing survived the mapping fix and the price purge,
         and went on defining a gold miner's dividend schedule.
+
+        Also clears ``securities.dividends_checked_at``, so the next dividend pass asks
+        through the corrected mapping instead of waiting out the week the old answer
+        was trusted for. Here rather than at each caller: both purge CLIs delete
+        through this, and an estimate deleted without the re-arm stays missing a week.
         """
         result = await self.session.execute(
             delete(DividendPayment).where(
@@ -47,6 +53,11 @@ class DividendRepository:
                     DividendPayment.source == YFINANCE_SOURCE,
                 )
             )
+        )
+        await self.session.execute(
+            update(Security)
+            .where(Security.id == security_id)
+            .values(dividends_checked_at=None)
         )
         return result.rowcount or 0
 
@@ -205,10 +216,3 @@ class DividendRepository:
             ).order_by(DividendPayment.ex_date.asc())
         )
         return list(result.scalars().all())
-
-    async def get_last_fetch_time(self, security_id: int) -> Optional[datetime]:
-        result = await self.session.execute(
-            select(func.max(DividendPayment.created_at))
-            .where(DividendPayment.security_id == security_id)
-        )
-        return result.scalar_one_or_none()

@@ -14,8 +14,9 @@ from statistics import median
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 import yfinance as yf
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.clock import utcnow
 from app.etf_mappings import is_known_etf_isin
@@ -26,6 +27,7 @@ from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
 )
 from app.repositories.dividend_repository import DividendRepository
+from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
@@ -51,6 +53,34 @@ logger = logging.getLogger(__name__)
 # none of its own; three years is several cycles of any real schedule while
 # still discarding the decades yfinance returns.
 PRE_OWNERSHIP_HISTORY_YEARS = 3
+
+# How long Yahoo's answer about a security's dividends is trusted before the pass asks
+# again. A new ex-date is announced weeks ahead and IBKR's ledger books the real
+# payment, so a week costs the forecast nothing.
+DIVIDENDS_RECHECK_AFTER = timedelta(days=7)
+
+
+def needs_dividend_check() -> ColumnElement[bool]:
+    """
+    The one SQL predicate for "the dividend pass should ask Yahoo about this security".
+
+    Yahoo-eligible, held (an open lot — a sold position earns nothing to forecast), and
+    unanswered for `DIVIDENDS_RECHECK_AFTER`. The pass selects with it and
+    `GET /api/dividends/summary` counts it before enqueueing a pass, so the route can
+    never call a pass due that the loop would then skip (GitHub issue #6: the route read
+    the card's `last_computed`, which the Yahoo pass never moves, and the loop read the
+    newest row's `created_at`, which a non-payer never gets). `IS NULL` is the half
+    `needs_allocation_refresh` records losing: a security never asked is due.
+    """
+    cutoff = utcnow() - DIVIDENDS_RECHECK_AFTER
+    return and_(
+        yahoo_eligible(),
+        held(),
+        or_(
+            Security.dividends_checked_at.is_(None),
+            Security.dividends_checked_at < cutoff,
+        ),
+    )
 
 # Below this many days held inside the trailing year, a trailing-12M yield divides
 # a partial year's income by a full position value and so reads low. 350 rather
@@ -280,16 +310,33 @@ class DividendService:
         )
         return {sid: first for sid, first in rows.all() if first}
 
+    async def pending_dividend_checks(self) -> int:
+        """How many securities the next pass would ask Yahoo about — `needs_dividend_check`."""
+        result = await self.db.execute(
+            select(func.count()).select_from(Security).where(needs_dividend_check())
+        )
+        return int(result.scalar() or 0)
+
+    async def _stamp_checked(self, security_id: int) -> None:
+        """Record that Yahoo answered for this security. Never call it on a rate limit."""
+        security = await self.db.get(Security, security_id)
+        if security is not None:
+            security.dividends_checked_at = utcnow()
+
     async def sync_dividend_data(self) -> Dict:
-        """Fetch dividend ex-dates from yfinance for all securities."""
-        # yahoo_eligible(). The breakdown reader below deliberately does not filter:
-        # it must name every holding, including ones Yahoo cannot price.
-        result = await self.db.execute(select(Security).where(yahoo_eligible()))
+        """Fetch dividend ex-dates from yfinance for the securities `needs_dividend_check` selects."""
+        # Held, Yahoo-eligible and unanswered for a week. The breakdown reader below
+        # deliberately does not filter: it must name every holding, including ones
+        # Yahoo cannot price.
+        result = await self.db.execute(
+            select(Security).where(needs_dividend_check()).order_by(Security.id)
+        )
         securities = list(result.scalars().all())
 
         if not securities:
             return {'securities_processed': 0, 'dividends_added': 0, 'errors': 0,
-                    'message': 'No securities found'}
+                    'rate_limited': False,
+                    'message': 'No security is due a dividend check'}
 
         logger.info(f"Syncing dividends for {len(securities)} securities")
 
@@ -310,7 +357,6 @@ class DividendService:
 
         dividends_added = 0
         errors = 0
-        skipped = 0
         pre_ownership_skipped = 0
         # Securities this pass actually asked Yahoo about. `len(securities) - skipped`
         # was reported instead, which on a pass abandoned at 5 of 40 claimed 40 — a
@@ -330,11 +376,6 @@ class DividendService:
                 security = await self.db.get(Security, security_id)
                 if security is None:
                     continue
-                # Staleness check: skip if we fetched dividends < 7 days ago
-                last_fetch = await self.repo.get_last_fetch_time(security.id)
-                if last_fetch and (utcnow() - last_fetch) < timedelta(days=7):
-                    skipped += 1
-                    continue
 
                 yahoo_ticker = await self._get_yahoo_ticker(security)
                 processed += 1
@@ -349,12 +390,17 @@ class DividendService:
 
                 dividends_series = await asyncio.to_thread(_fetch)
 
+                # An empty series is an answer too. Unstamped, a non-payer — an
+                # accumulating ETF — was asked on every pass forever (issue #6).
+                await self._stamp_checked(security_id)
+
                 if dividends_series is None or dividends_series.empty:
                     logger.info(f"No dividends found for {security.symbol}")
+                    await self.db.commit()
                     continue
 
-                # No lots at all yet (a security whose statement arrived before any
-                # purchase) → keep everything rather than guess a cutoff.
+                # Every security here is held, so it has a first lot; the fallback
+                # keeps everything rather than guess a cutoff if one ever has none.
                 owned_from = first_lot.get(security.id)
                 keep_from = owned_from - history_lookback if owned_from else None
 
@@ -380,9 +426,11 @@ class DividendService:
                 symbol = security.symbol
                 errors += 1
                 await self.db.rollback()
-                # Rule 1: stop on a rate limit. The 7-day staleness check at the top of
-                # this loop means a security this pass never reached simply stays stale
-                # and the next run fetches it, so abandoning costs nothing but freshness.
+                # Rule 1: stop on a rate limit, and stamp nothing — checked BEFORE the
+                # stamp below, as the allocation sync does. A security this pass never
+                # reached (or was refused on) keeps its old stamp, `needs_dividend_check`
+                # still selects it, and the next run fetches it, so abandoning costs
+                # nothing but freshness.
                 if is_rate_limit(e):
                     self.rate_limited = True
                     logger.warning(
@@ -391,17 +439,24 @@ class DividendService:
                     )
                     break
                 logger.error(f"Error fetching dividends for {symbol}: {e}")
+                # Any other failure is stamped, so a ticker Yahoo cannot serve is
+                # re-asked once a week rather than on every pass.
+                try:
+                    await self._stamp_checked(security_id)
+                    await self.db.commit()
+                except Exception as stamp_error:
+                    await self.db.rollback()
+                    logger.error(f"Could not stamp the dividend check for {symbol}: {stamp_error}")
                 continue
 
         logger.info(
-            f"Dividend sync complete: added={dividends_added}, skipped={skipped}, "
+            f"Dividend sync complete: added={dividends_added}, asked={processed}, "
             f"pre_ownership_skipped={pre_ownership_skipped}, errors={errors}, "
             f"rate_limited={self.rate_limited}"
         )
         result = {
             'securities_processed': processed,
             'dividends_added': dividends_added,
-            'skipped': skipped,
             'pre_ownership_skipped': pre_ownership_skipped,
             'errors': errors,
             'rate_limited': self.rate_limited,

@@ -60,6 +60,10 @@ class Security(Base):
     country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     asset_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="Stock")  # Stock, ETF, etc.
     allocation_last_updated: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    # When the dividend pass last had an answer from Yahoo for this security — data,
+    # an empty series or an error, never a rate limit. `needs_dividend_check` in
+    # dividend_service.py reads it; purging the estimates clears it.
+    dividends_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

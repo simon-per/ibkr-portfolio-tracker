@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from app.clock import utcnow
 from typing import Literal, Optional
 
@@ -28,11 +28,10 @@ _sync_in_progress = False
 # this was the one bulk Yahoo route without it.
 SYNC_COOLDOWN_SECONDS = 300
 
-# Auto-refresh tuning for the dividend summary endpoint.
-# Data is considered stale if the newest computed payment is older than this.
-_STALE_AFTER = timedelta(hours=24)
-# Don't auto-trigger more often than this, so repeated card loads within the stale
-# window don't enqueue a background task on every request.
+# The summary enqueues a pass only while `needs_dividend_check` selects a security —
+# the loop's own predicate — and no more often than this. The interval is a backstop
+# (in-process, so a restart resets it): a pass stamps what it asked, so after one
+# nothing is due until a holding is new, a week old, or was cut off by a rate limit.
 _AUTO_SYNC_MIN_INTERVAL = timedelta(hours=6)
 _last_auto_sync: Optional[datetime] = None
 
@@ -41,9 +40,9 @@ async def _run_dividend_sync_background() -> None:
     """
     Run dividend sync + compute in background with its own DB session.
 
-    Holds the shared pipeline gate, not just the module flag: the 08:00
-    full_sync_job runs sync_dividends() too, and a dashboard load that finds the
-    card stale would otherwise start a second yfinance pass straight through it.
+    Holds the shared pipeline gate, not just the module flag: the 18:00 Berlin
+    full_sync_job runs sync_dividends() too, and a dashboard load that finds a
+    security due would otherwise start a second yfinance pass straight through it.
     """
     global _sync_in_progress
     try:
@@ -63,40 +62,31 @@ async def _run_dividend_sync_background() -> None:
         logger.info(f"Dividend sync skipped: {e}")
 
 
-def _is_summary_stale(summary: dict) -> bool:
-    """Stale if there's no data, or the newest computed payment is older than _STALE_AFTER."""
-    if not summary.get("monthly"):
-        return True
-    last_updated = summary.get("last_updated")
-    if not last_updated:
-        return True
-    try:
-        last = datetime.fromisoformat(last_updated)
-        if last.tzinfo is None:
-            # Rows serialized before the utc_iso fix are naive UTC.
-            last = last.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - last) > _STALE_AFTER
-    except ValueError:
-        return True
-
-
 @router.get("/summary", response_model=DividendSummaryResponse)
 async def get_dividend_summary(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return dividend summary. Triggers a background sync if data is missing or stale."""
+    """
+    Return dividend summary. Triggers a background sync while a held security is due a
+    dividend check (`needs_dividend_check`), throttled.
+
+    It used to trigger on the card's `last_updated`, the newest `last_computed` among
+    the era-spliced rows — moved by a Flex re-delivery, never by the Yahoo pass — so on
+    every day without a dividend in the Flex window each load past the throttle started
+    another near-full pass, up to four a day (GitHub issue #6).
+    """
     global _last_auto_sync
 
     service = DividendService(db)
     summary = await service.get_dividend_summary()
     summary["sync_in_progress"] = _sync_in_progress
 
-    # Auto-refresh when empty or stale, throttled so we don't enqueue on every load.
-    if not _sync_in_progress and _is_summary_stale(summary):
+    # Auto-refresh while something is due, throttled so we don't enqueue on every load.
+    if not _sync_in_progress:
         now = utcnow()
         throttled = _last_auto_sync is not None and (now - _last_auto_sync) < _AUTO_SYNC_MIN_INTERVAL
-        if not throttled:
+        if not throttled and await service.pending_dividend_checks() > 0:
             _last_auto_sync = now
             background_tasks.add_task(_run_dividend_sync_background)
             summary["sync_in_progress"] = True

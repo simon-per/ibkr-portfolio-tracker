@@ -1238,8 +1238,9 @@ class SchedulerService:
         Sync dividend ex-dates from Yahoo Finance and compute EUR income.
 
         Independent of IBKR (yfinance-based); computes against existing tax lots.
-        Cheap to run daily: DividendService applies a 7-day per-security staleness
-        guard that skips already-fetched securities before any network call.
+        Cheap to run daily: the pass asks only about held, Yahoo-eligible securities
+        whose `dividends_checked_at` is NULL or a week old (`needs_dividend_check`),
+        so most days it asks nothing.
 
         Returns:
             Summary of the dividend sync + compute steps

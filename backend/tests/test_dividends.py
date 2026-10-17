@@ -135,23 +135,6 @@ async def test_last_updated_is_serialized_with_an_explicit_utc_offset():
         await engine.dispose()
 
 
-def test_staleness_check_reads_aware_and_legacy_naive_timestamps():
-    """The router's parser must survive both serialization eras without a 500."""
-    from datetime import datetime, timedelta, timezone
-
-    from app.routers.dividends import _is_summary_stale
-
-    fresh_aware = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    old_aware = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
-    old_naive = (datetime.now(timezone.utc) - timedelta(days=3)).replace(tzinfo=None).isoformat()
-
-    base = {"monthly": [{"month": "2026-03", "amount_eur": 5.0}]}
-    assert _is_summary_stale({**base, "last_updated": fresh_aware}) is False
-    assert _is_summary_stale({**base, "last_updated": old_aware}) is True
-    assert _is_summary_stale({**base, "last_updated": old_naive}) is True
-    assert _is_summary_stale({**base, "last_updated": "not-a-date"}) is True
-
-
 # ── The summary card's provenance flag ──────────────────────────────────
 #
 # The card's figures are NET and era-spliced, but it reported a flat

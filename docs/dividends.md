@@ -233,8 +233,9 @@ and a declared-but-unsupplied one silently takes its default (0.00 withholding, 
 provenance). Add a key to the service and you must add it to the model.
 
 **Only dividends that could have been earned are ingested.** `sync_dividend_data()` skips ex-dates
-before the security's earliest lot `open_date` (reported as `pre_ownership_skipped`); a security with no
-lots yet keeps its whole history, since there is no cutoff to infer. Before that, yfinance's full
+before the security's earliest lot `open_date` (reported as `pre_ownership_skipped`). A security with no
+lots is not asked at all, since the pass selects held securities only (*The Yahoo pass* below); it
+keeps a whole-history fallback in case one ever has none. Before that, yfinance's full
 history meant **1355 of 1446 rows** on this account were zero rows reaching back to 1985 — the reason
 the card once reported 439 months, and the reason relaxing one read-side filter broke
 `/api/dividends/breakdown` outright. Both readers still filter via `DividendService._is_income()`
@@ -253,9 +254,43 @@ ignore" — true when written, false once the forecast became a reader of them. 
 additionally bounded by **the ingest window it should always have mirrored**: a row goes only when it
 is older than `PRE_OWNERSHIP_HISTORY_YEARS` before the security's first lot, i.e. exactly what
 `sync_dividend_data` would no longer create. A security with **no lots** is left entirely alone,
-matching ingest's own refusal to guess a cutoff. Rows awaiting computation
+since there is no cutoff to infer. Rows awaiting computation
 (`shares_held IS NULL`) are still never touched. Tests:
 `tests/test_prune_preserves_forecast_basis.py`.
+
+### The Yahoo pass — each holding at most once a week
+
+`sync_dividend_data()` asks Yahoo only about the securities `needs_dividend_check()` selects:
+Yahoo-eligible, **held** (an open lot, `security_repository.held`), and with
+`securities.dividends_checked_at` NULL or older than `DIVIDENDS_RECHECK_AFTER` (7 days). Every answer
+stamps it: data, an **empty series** (a non-payer such as an accumulating ETF) and an error that is not
+a rate limit. A **rate limit stamps nothing**: `is_rate_limit` is checked before the stamp, as in the
+allocation sync, so a pass cut short at 5 of 40 leaves the other 35 due and the next pass resumes there.
+Fixed 2026-10-17 (GitHub issue #6). Before, the guard read `max(dividend_payments.created_at)`, which is
+set on insert only, so a security was skipped only for the week after a *new* row landed. Non-payers
+and payers between ex-dates were asked on every pass, and so was every sold position.
+
+- **Held only.** A sold position has nothing to earn or forecast. Pre-ownership history is unaffected:
+  a held security still keeps `PRE_OWNERSHIP_HISTORY_YEARS` before its first lot. A new purchase has
+  a NULL stamp and is asked at the next pass. A re-buy after more than a week is due anyway, and one
+  inside the week was asked while it was still held.
+- **A purge re-arms the check.** `DividendRepository.delete_estimates_for_security`, the one path
+  both `purge_dividend_estimates` and `manage_mappings disable --purge-prices` delete through, clears
+  the stamp in the same transaction. The corrected ticker is asked at the next pass instead of a
+  week later.
+- **The summary card enqueues a pass only while something is due.** `GET /api/dividends/summary`
+  counts `needs_dividend_check()`, the loop's own expression, and enqueues
+  `_run_dividend_sync_background` only when the count is above 0 and the 6-hour in-process throttle
+  allows it. It used to read the card's `last_updated`, the newest `last_computed` among the
+  era-spliced rows. The splice drops new estimates, and `sync_dividends_from_cash_transactions`
+  re-stamps IBKR rows on every Flex re-delivery, so that timestamp tracked the Flex window and never
+  the Yahoo pass. On every day with no dividend inside the window, and across each ET Sunday/Monday
+  skip, each load past the throttle started another near-full pass, up to four a day on top of
+  18:00's. After a pass nothing is due until a holding is new or a week old, or a rate limit cut the
+  pass short. The throttle is the backstop for that last case.
+
+Tests: `tests/test_dividend_check_budget.py`, which counts the stubbed requests over a simulated week
+(105 before, 2 after), plus the rate-limit, error, sold, new-purchase, purge and summary cases.
 
 ### A wrong mapping poisons dividends too, and only prices were ever purged
 
