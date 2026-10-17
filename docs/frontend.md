@@ -506,9 +506,8 @@ text. What that settled, so the next change keeps it:
   NAV badges, the dividends table's Source column and the tax report's feed badge are gone; the
   `est.` mark is the one survivor. Server `warnings[]` paragraphs (look-through fund coverage) stay
   in the API, not on the page.
-- **Allocation is three donuts** with a value legend that is also the drill-down. The palette is
-  unchanged: `--viz-sector-*` and the neutral ramp are pinned by colour-distance tests
-  (`lib/dividendColors.test.ts`), and every softer green tried failed them against the orange slot.
+- **Allocation is three donuts** with a value legend that is also the drill-down. Since 2026-10-17 the
+  donuts draw from the categorical palette (*Look-through and Allocation* below).
 - **Charts share one look**: no axis rules or tick marks (global CSS in `index.css`), horizontal
   grid only, a themed hover band, the value series as the one gradient area. Bar-chart labels use
   `interval={0}` so a long list does not silently drop every other name.
@@ -617,8 +616,9 @@ is the shared measuring code (`benchmarkColors.test.ts` uses it too).
   lumpy series so the bar agrees with its `DeltaChip`.
 
 **Adopting it in an existing colour module.** The `var()` strings work as Recharts `fill`/`stroke`
-and repaint on a theme flip with no JS. Migrated on 2026-10-17: the dividend stack and the
-crypto donut (subsections below). Kept deliberately: `BENCHMARK_COLORS` and
+and repaint on a theme flip with no JS. Migrated on 2026-10-17: the dividend stack, the
+crypto donut, the treemap and the Allocation donuts (subsections below); every `--viz-*` token is
+gone. Kept deliberately: `BENCHMARK_COLORS` and
 `PORTFOLIO_SERIES_COLORS` (measured against each other by `benchmarkColors.test.ts`). Not yet
 migrated: AnalyticsTab's literal `GAIN`/`LOSS` hexes (the tab is hidden). When a module moves onto the palette, delete its hexes
 and its measurement block rather than keeping both.
@@ -773,8 +773,8 @@ re-point onto the general palette would have to redo, and the section above stil
 - **Crypto**: KPI tiles with icons, Today's change as the `delta` pill, a one-month sparkline on
   Total value from `/history` (gaps stay gaps); section headers on every card and notice. The
   allocation donut is on `lib/chartPalette.ts` (`chartColorFor` over `color_order`, ten slots, the
-  rest Other) and no longer uses `dividendColors.seriesColor` — whose comment still names the
-  crypto donut, and which the dividends now use alone.
+  rest Other) and no longer uses `dividendColors.seriesColor`, which the dividends now use
+  alone.
 
 ### Look-through and Allocation (2026-10-17)
 
