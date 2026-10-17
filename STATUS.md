@@ -22,13 +22,11 @@ docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one w
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
-- **Holding logos (#12): set `LOGO_DEV_SECRET_KEY` on the VPS.** Until then the logo pass is a
-  no-op and every avatar stays a monogram. A logo.dev account's **secret** key (`sk_…`) into
-  `/root/IBKR_investment_tracker/backend/.env`, then `docker compose up -d` with `GIT_COMMIT`
-  exported, then `docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
-  --dry-run` and the same without `--dry-run`; misses by hand with `app.cli.import_logo`
-  (docs/logos.md). Then look at Positions and Dividends — the avatar styling (white circle,
-  hairline ring) was never seen with real logos.
+- **Holding logos (#12): the two pillar 3a funds by hand, then a look.** The key is set and 33
+  of 35 held ISINs have a logo (2026-10-17). `CH0117044948` and `CH1529078078` are `not_found`
+  at logo.dev: a PNG ≤ 100 KB through `app.cli.import_logo` (recipe in docs/logos.md). Then
+  look at Positions and Dividends — the avatar styling (white circle, hairline ring) was never
+  seen with real logos.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
