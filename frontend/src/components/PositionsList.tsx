@@ -155,7 +155,7 @@ export function positionColumns(deps: {
         const name = displayName(p.description) || p.symbol
         return view === 'table' ? (
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={p.symbol} />
+            <TickerAvatar symbol={p.symbol} securityId={p.security_id} />
             <div className="min-w-0">
               <div className="max-w-[16rem] truncate font-medium" title={p.description}>
                 {name}

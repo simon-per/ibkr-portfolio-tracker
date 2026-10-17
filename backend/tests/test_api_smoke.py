@@ -16,6 +16,7 @@ quietly spend the rate-limit budget (CLAUDE.md rule 1).
 
 POST routes are deliberately not exercised — they start real syncs.
 """
+import hashlib
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -46,6 +47,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.market_price import MarketPrice
 from app.models.security import Security
+from app.models.security_logo import SecurityLogo
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.models.watchlist_item import WatchlistItem
@@ -94,6 +96,8 @@ READ_ENDPOINTS = [
     f"/api/performance/decomposition?start_date={START}&end_date={TODAY}",
     f"/api/performance/segments?start_date={START}&end_date={TODAY}",
     "/api/performance/closed-positions",
+    "/api/logos",
+    "/api/logos/2",
 ]
 
 # The crypto book's reads need the admin key (docs/crypto.md), so they run through
@@ -104,6 +108,7 @@ CRYPTO_READ_ENDPOINTS = [
     "/api/crypto/status",
 ]
 SMOKE_ADMIN_TOKEN = "smoke-admin-token-long-enough"
+SMOKE_LOGO = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
 
 def _weekdays(start: date, end: date):
@@ -132,6 +137,11 @@ async def _seed(session: AsyncSession) -> None:
     ]
     for s in securities:
         session.add(s)
+    # A logo for ASML's ISIN, so both of its listings serve it (docs/logos.md).
+    session.add(SecurityLogo(isin="NL0010273215", image=SMOKE_LOGO, content_type="image/png",
+                             sha256=hashlib.sha256(SMOKE_LOGO).hexdigest(), source="logo.dev",
+                             fetched_at=datetime.combine(TODAY, time(5)),
+                             checked_at=datetime.combine(TODAY, time(5))))
 
     lots = [
         (1, START, "10", "1000", None),
@@ -336,6 +346,15 @@ def client(monkeypatch):
 def test_read_endpoint_responds(client, path):
     r = client.get(path)
     assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:400]}"
+
+
+def test_logos_serve_both_listings_of_an_isin_through_the_real_stack(client):
+    version = hashlib.sha256(SMOKE_LOGO).hexdigest()[:12]
+    assert client.get("/api/logos").json() == {"logos": {"1": version, "2": version}}
+    r = client.get(f"/api/logos/1?v={version}")
+    assert r.content == SMOKE_LOGO and r.headers["content-type"] == "image/png"
+    assert "immutable" in r.headers["cache-control"]
+    assert client.get("/api/logos/3").status_code == 404
 
 
 @pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)

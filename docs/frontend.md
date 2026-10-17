@@ -496,8 +496,13 @@ text. What that settled, so the next change keeps it:
   upper-case too. Display only: sorting by name sorts the display name, and every lookup, export
   and `title=` keeps the raw string. A name that already has lower-case letters keeps its casing.
   Extend `KEEP_UPPER` / `EXPAND` there rather than special-casing a table.
-- **`TickerAvatar`** is a monogram on a tint hashed from the ticker, never a fetched logo: the CSP
-  allows images from our origin only, and a logo service would learn every holding.
+- **`TickerAvatar`** shows the holding's logo mark when one is stored, else a monogram on a tint
+  hashed from the ticker. Logos since 2026-10-17 at the owner's request, reversing "never a
+  fetched logo": logo.dev learns the held ISINs (trade-off accepted), but the server fetches and
+  stores them, so the browser loads them from `/api/logos` and the CSP stays `img-src 'self'`.
+  Pass `securityId` to get the logo (Positions and Dividends do; Activity rows have none). No
+  attribution or source text on screen. Fetching, the manual import and the routes:
+  [logos.md](logos.md).
 - **No definitions on screen**, which removed the `DataTable` glossary popover; a column `hint` is
   a header `title=` of a few words. No provenance either: the positions table's sibling/statement
   NAV badges, the dividends table's Source column and the tax report's feed badge are gone; the

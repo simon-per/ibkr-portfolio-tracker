@@ -66,7 +66,7 @@ function dividendColumns(deps: {
         ) : null
         return view === 'table' ? (
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={row.symbol} className="h-8 w-8 text-[10px]" />
+            <TickerAvatar symbol={row.symbol} securityId={row.security_id} className="h-8 w-8 text-[10px]" />
             <div className="min-w-0">
               <div className="max-w-[15rem] truncate font-medium" title={row.description}>
                 {displayName(row.description) || row.symbol}

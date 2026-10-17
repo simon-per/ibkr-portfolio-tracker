@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 import httpx
 
 from app.config import settings
-from app.services.crypto_http import PacedGet, json_body
+from app.services.paced_http import PacedGet, json_body
 
 logger = logging.getLogger(__name__)
 

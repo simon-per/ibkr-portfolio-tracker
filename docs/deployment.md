@@ -26,7 +26,8 @@ before believing it.
 - Secrets live only in `/root/IBKR_investment_tracker/backend/.env` (`IBKR_TOKEN`, `IBKR_QUERY_ID`,
   `API_ADMIN_TOKEN`, `OPENFIGI_API_KEY`, and for the crypto book `COIN_STATS_API_KEY`,
   `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE`, `COINGECKO_API_KEY` — see
-  [crypto.md](crypto.md)); every setting is listed in `backend/.env.example`
+  [crypto.md](crypto.md) — and `LOGO_DEV_SECRET_KEY` for holding logos, see
+  [logos.md](logos.md)); every setting is listed in `backend/.env.example`
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
 - Backups: `/root/ibkr-backups/<date>/`, 30 days, at least 10 kept. `/root/auto-deploy.sh` and

@@ -18,7 +18,7 @@ profit and loss and was unreliable before 2026.
 |---|---|
 | `app/services/coinstats_client.py` | the only CoinStats caller: headers, pacing, credit costs, typed errors |
 | `app/services/coingecko_client.py` | the only CoinGecko caller: the Demo key header, pacing, typed errors |
-| `app/services/crypto_http.py` | the paced GET both clients share (`PacedGet`): one request at a time, spaced from when the last *finished*, transport failures as the provider's transient error; each client keeps its own status mapping (2026-10-17, `tests/test_crypto_http.py`) |
+| `app/services/paced_http.py` | the paced GET both clients share (`PacedGet`): one request at a time, spaced from when the last *finished*, transport failures as the provider's transient error; each client keeps its own status mapping (2026-10-17, `tests/test_crypto_http.py`). Neutral, not a crypto module: the logo.dev client uses it too, and crypto imports it as shared infrastructure |
 | `app/services/crypto_book.py` | the formula, pure: holdings timeline, prices, the peg table, closes |
 | `app/services/crypto_service.py` | `CryptoSyncService` (sync, price fill) and `CryptoService` (reads) |
 | `app/models/crypto.py` | `crypto_snapshots`, `crypto_holdings`, `crypto_daily` (migration `w6f3b0c7d1e2`); `crypto_daily_holdings`, `crypto_coin_prices`, `crypto_coin_ids` (migration `x7a3c9e1f5b2d`) |

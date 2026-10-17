@@ -1426,6 +1426,11 @@ export interface CryptoSyncResponse {
   timestamp: string | null;
 }
 
+/** `/api/logos`: `security_id` -> logo version, for the securities that have a logo. */
+export interface LogoManifest {
+  logos: Record<string, string>;
+}
+
 /** `/health`. Identifies the running build so a deploy can be confirmed from the UI. */
 export interface HealthResponse {
   status: string;
@@ -1829,6 +1834,16 @@ class ApiClient {
   /** Reaches CoinStats: a 409 means it is not configured, a 429 that a run is in flight or cooling down. */
   async syncCrypto(): Promise<CryptoSyncResponse> {
     return this.request<CryptoSyncResponse>('/api/crypto/sync', { method: 'POST' });
+  }
+
+  // Holding logos (docs/logos.md)
+  async getLogos(): Promise<LogoManifest> {
+    return this.request<LogoManifest>('/api/logos');
+  }
+
+  /** An `<img src>`: versioned, so the server can let the browser cache it for good. */
+  logoUrl(securityId: number, version: string): string {
+    return `${this.baseUrl}/api/logos/${securityId}?v=${encodeURIComponent(version)}`;
   }
 
   // Health check

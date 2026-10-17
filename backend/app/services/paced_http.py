@@ -1,5 +1,5 @@
 """
-The paced GET both crypto clients make, written once.
+The paced GET every third-party API client makes, written once.
 
 `CoinStatsClient` and `CoinGeckoClient` each carried the same `_pace` and the same first
 half of `_get`, line for line: one request at a time, spaced from when the previous one
@@ -7,9 +7,15 @@ half of `_get`, line for line: one request at a time, spaced from when the previ
 failure raised as the provider's own transient error with the type and message only — the
 URL in it carries no secret by construction, the keys travel in headers. What follows a
 response is genuinely each provider's: CoinStats answers 409 while a portfolio is still
-syncing and charges credits per endpoint, CoinGecko's 4xx is a request error. So the
-status mapping stays in each client, and this module owns only the half they shared.
-`tests/test_crypto_http.py` fails a crypto client that defines its own `_pace` again.
+syncing and charges credits per endpoint, CoinGecko's 4xx is a request error, logo.dev's
+404 is "no such brand". So the status mapping stays in each client, and this module owns
+only the half they shared.
+
+Neutral on purpose (moved out of the crypto-only `crypto_http` on 2026-10-17, when the
+logo.dev client became the third user): transport only, no table, no figure, so the crypto
+book may import it (`tests/test_crypto_isolation.py`, `ALLOWED_SHARED`) and a stock-side
+client may too without importing crypto code. `tests/test_crypto_http.py` fails any module
+that defines its own `_pace` again.
 """
 from typing import Any, Dict, Optional, Type
 

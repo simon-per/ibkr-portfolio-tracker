@@ -1607,3 +1607,72 @@ async def test_the_fundamentals_job_yields_to_a_running_pipeline(monkeypatch):
     assert calls == []
     assert result["status"] == "skipped" and result["reason"] == "pipeline_busy"
     assert recorded[0]["type"] == "fundamentals_refresh"
+
+
+def _fake_logos(monkeypatch, outcome):
+    """Stand `outcome` in for the logo pass (docs/logos.md); returns the calls made."""
+    calls = []
+
+    class FakeLogoService:
+        def __init__(self, db):
+            pass
+
+        async def refresh(self):
+            calls.append("logos")
+            if isinstance(outcome, Exception):
+                raise outcome
+            return dict(outcome)
+
+    import app.services.logo_service as logo_module
+    monkeypatch.setattr(logo_module, "LogoService", FakeLogoService)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_without_a_key_the_logo_step_is_skipped_silently(monkeypatch):
+    """The real service: no LOGO_DEV_SECRET_KEY (conftest blanks it) is no warning."""
+    svc = SchedulerService()
+    _fake_fundamentals(monkeypatch, _OK_FUNDAMENTALS, _OK_RATINGS)
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert result["logos_result"] == {"status": "skipped", "message": "skipped: not configured"}
+    assert "warnings" not in result
+
+
+@pytest.mark.asyncio
+async def test_the_logo_step_runs_after_a_yahoo_rate_limit_and_appends_its_warnings(monkeypatch):
+    """logo.dev is not Yahoo, so a Yahoo 429 does not skip it, and its warnings join the
+    passes' rather than replacing them."""
+    svc = SchedulerService()
+    calls = _fake_fundamentals(monkeypatch, {
+        "errors": 1, "rate_limited": True, "message": "Synced 1/4 fundamentals",
+        "warnings": ["Yahoo Finance rate limit reached; the rest of this pass was abandoned."],
+    }, _OK_RATINGS)
+    logo_calls = _fake_logos(monkeypatch, {
+        "status": "success", "message": "Logos: 0 stored",
+        "warnings": ["logo.dev answered HTTP 429; the logo pass stopped."],
+    })
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals"] and logo_calls == ["logos"]
+    assert result["warnings"][0].startswith("Yahoo Finance rate limit reached")
+    assert result["warnings"][-1].startswith("logo.dev answered HTTP 429")
+
+
+@pytest.mark.asyncio
+async def test_a_crashed_logo_step_is_a_warning_never_the_jobs_status(monkeypatch):
+    svc = SchedulerService()
+    _fake_fundamentals(monkeypatch, _OK_FUNDAMENTALS, _OK_RATINGS)
+    _fake_logos(monkeypatch, RuntimeError("database is locked"))
+    recorded = _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert result["status"] == "success"
+    assert result["logos_result"]["status"] == "error"
+    assert any("Logo pass failed" in w for w in result["warnings"])
+    assert recorded == [result]

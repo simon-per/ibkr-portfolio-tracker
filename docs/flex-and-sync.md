@@ -451,7 +451,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
-| 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, own job group | **yes** |
+| 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
 
 **The watchlist has a slot of its own, away from the portfolio's** (2026-10-13, at the owner's
 request — nothing scheduled it before, so it aged until someone pressed *Refresh All*). It is the
@@ -476,7 +476,10 @@ learn it. The job is `FundamentalsService.sync_stale_fundamentals` then
 `yahoo_eligible()` filter (`price_source` honoured) and abandon-on-429 latch; **a rate limit in
 the fundamentals pass skips the ratings pass** (same IP). It records a `fundamentals_refresh`
 row; a security Yahoo cannot serve is a warning, never the status. Same upkeep group as the
-watchlist.
+watchlist. **Its third step is the logo pass** (`LogoService.refresh`, [logos.md](logos.md)):
+logo.dev, not Yahoo, so it runs after a Yahoo rate limit or a crashed fundamentals pass too; at
+most 30 lookups, none without `LOGO_DEV_SECRET_KEY` or when nothing is due; its failure is a
+warning on the row (`logos_result`), never the status.
 
 - **Held only.** `security_repository.held()` (an open tax lot in any account) bounds both loops,
   the manual *Refresh* and the all-securities ratings sync, and the tab's listing

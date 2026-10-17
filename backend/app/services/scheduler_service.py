@@ -1544,7 +1544,8 @@ class SchedulerService:
         Under `SYNC_PIPELINE` like every Yahoo job and the tab's own Sync buttons. The
         loops are the services' stale passes — their pacing, held-and-`yahoo_eligible()`
         filter and abandon-on-429 latch — and nothing here re-implements any of them. A rate
-        limit in the fundamentals pass skips the ratings pass: it is the same IP.
+        limit in the fundamentals pass skips the ratings pass: it is the same IP. The logo
+        pass (`LogoService.refresh`, logo.dev) follows either way.
         """
         return await self._gated_job("fundamentals_refresh", self._fundamentals_refresh_locked)
 
@@ -1594,6 +1595,24 @@ class SchedulerService:
                 ratings_result=ratings_result,
             )
             _collect_warnings(result, fundamentals_result, ratings_result)
+
+        # Holding logos (docs/logos.md): logo.dev, not Yahoo, so it runs after a Yahoo rate
+        # limit or a crashed fundamentals pass too, and its own failure is a warning, never
+        # this job's status. No key, or nothing due, makes no request.
+        from app.services.logo_service import LogoService
+        try:
+            async with AsyncSessionLocal() as db:
+                logos_result = await LogoService(db).refresh()
+        except Exception as e:
+            logger.error(f"Logo pass failed: {e}", exc_info=True)
+            logos_result = {
+                "status": "error", "message": f"Logo pass failed: {type(e).__name__}: {e}",
+                "warnings": [f"Logo pass failed: {type(e).__name__}: {e}"],
+            }
+        result["logos_result"] = logos_result
+        # Appended, not `_collect_warnings`, which would replace the passes' warnings above.
+        if logos_result.get("warnings"):
+            result.setdefault("warnings", []).extend(logos_result["warnings"])
 
         # Not `self.last_sync_result` either: that is the portfolio's "last sync".
         await self._record_run(result, started_at)

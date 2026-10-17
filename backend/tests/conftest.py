@@ -18,7 +18,7 @@ relative to the working directory, so a test that starts a scheduler would drop 
 The CoinStats credentials are blanked so a developer's real key and share token in
 `backend/.env` can never make a test spend credits: with them empty, every crypto path
 short-circuits as "not configured" unless a test deliberately configures fakes and
-injects a mock transport.
+injects a mock transport. The logo.dev key likewise: blank, the logo pass is `skipped`.
 
 **The suite gets a database of its own, one per process** (2026-10-17). Most tests build
 an in-memory engine, but anything that enters the real lifespan (`with TestClient(app)`:
@@ -65,6 +65,7 @@ def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "coin_stats_share_token", "", raising=False)
     monkeypatch.setattr(settings, "coin_stats_share_passcode", "", raising=False)
     monkeypatch.setattr(settings, "coingecko_api_key", "", raising=False)
+    monkeypatch.setattr(settings, "logo_dev_secret_key", "", raising=False)
     rate_limit.reset()
     yield
     rate_limit.reset()

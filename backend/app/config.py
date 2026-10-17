@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # holdings, records a warning, and every value it cannot price reads as unknown.
     coingecko_api_key: str = ""
 
+    # logo.dev's *secret* key (`sk_…`), for holding logos (docs/logos.md). Sent only in the
+    # `Authorization` header to logo.dev's API, server-side, and masked by app/redact.py.
+    # Optional: without it the logo pass is skipped and every avatar stays a monogram.
+    logo_dev_secret_key: str = ""
+
     # Database Configuration. The default is local development's backend/portfolio.db.
     # The container never uses it: docker-compose.yml sets DATABASE_URL to
     # /app/data/portfolio.db (the directory mount) in `environment:`, which overrides
