@@ -221,7 +221,11 @@ daily jobs, indefinitely, against an IP-based rate limit. An **interior** weekda
 both sides) older than `HOLIDAY_GRACE_DAYS` (30) now counts as a holiday: every sync since has already
 failed to fill it. Younger holes stay missing so late data can arrive, and **leading/trailing gaps stay
 missing at any age** — which is exactly what a purge-and-refill repair looks like, so `--purge-prices`
-and the split invalidation above still heal normally. `BenchmarkService` applies the same rule via its
+and the split invalidation above still heal normally. A trailing gap that can never close — a
+delisted ticker — is bounded by the price loop instead: a sold security leaves the intraday passes
+after `SOLD_PRICE_GRACE_DAYS`, its held span is fetched only up to its last close, and an empty
+answer from every provider backs it off for up to 30 days (`price_backoff_until`;
+[flex-and-sync.md](flex-and-sync.md), *Sync schedule*). `BenchmarkService` applies the same rule via its
 own `_missing_business_days()`, shared by its price *and* FX paths. Tests:
 `tests/test_missing_dates_holidays.py`, `tests/test_benchmark_fx_window.py`.
 

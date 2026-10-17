@@ -13,12 +13,15 @@ import random
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow
 from app.config import settings
 from app.repositories.market_price_repository import MarketPriceRepository
+from app.repositories.security_repository import held
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
-from sqlalchemy import select
+from sqlalchemy import func, select
 from app.models.market_price import MarketPrice, PRICE_ROW_SOURCE_SIBLING_SCALED
 from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
 
@@ -28,6 +31,45 @@ logger = logging.getLogger(__name__)
 # is start-inclusive but a split or a holiday near the edge can shift what it
 # returns, so a few days of overlap costs nothing and closes that gap.
 PRICE_FETCH_BUFFER_DAYS = 5
+
+# How long after its last lot closes a sold security stays in the short (7-day) price
+# passes. Nothing reads a sold security's price intraday; valuation reads one on or
+# shortly before the close date (`realized_rows_from_closed_lots` looks back
+# `portfolio_service.PRICE_LOOKBACK_DAYS`, 14), and that close must have time to settle
+# (`PROVISIONAL_PRICE_DAYS`). 14 is spelled out because portfolio_service imports this
+# module; `tests/test_price_pass_scope.py` pins the sum. After the grace a sold security
+# is priced by the long 18:00 pass only (`sync_securities`).
+SOLD_PRICE_GRACE_DAYS = MarketPriceRepository.PROVISIONAL_PRICE_DAYS + 14
+
+# Back-off after every provider came back empty for a sold security's missing dates: one
+# day, doubling per consecutive miss, capped at 30 days. Less a few hours of slack so a
+# security stamped during a pass is due again at the same slot a day later, not the one
+# after (the fundamentals' 20-hour STALE_AFTER, for the same reason). A held security
+# never backs off: Yahoo soft-throttling with empty answers rather than a 429 would
+# otherwise freeze every holding's price for a day, and a holding with a broken mapping
+# is already surfaced by the stale-price warning.
+PRICE_MISS_BACKOFF_SOLD_CAP_DAYS = 30
+PRICE_MISS_BACKOFF_SLACK = timedelta(hours=4)
+
+# Alpha Vantage's free tier serves `outputsize=compact` only: the latest 100 trading
+# days, which span at least 137 calendar days. A gap reaching further back than this
+# cannot be filled by it, so the fallback is not asked at all.
+ALPHA_VANTAGE_COMPACT_REACH_DAYS = 130
+
+
+def price_backoff_until(security: Security, is_held: bool) -> Optional[datetime]:
+    """When the price loop may next ask about `security`, or None when it is not backing off."""
+    misses = security.price_miss_count or 0
+    if is_held or security.price_checked_at is None or misses < 1:
+        return None
+    days = min(2 ** min(misses - 1, 10), PRICE_MISS_BACKOFF_SOLD_CAP_DAYS)
+    return security.price_checked_at + timedelta(days=days) - PRICE_MISS_BACKOFF_SLACK
+
+
+def clear_price_backoff(security: Security) -> None:
+    """A row was written or the mapping changed: the next pass asks again."""
+    security.price_checked_at = None
+    security.price_miss_count = None
 
 
 class MarketDataService:
@@ -50,6 +92,10 @@ class MarketDataService:
     # never-initialised attribute would fail there rather than in production — a shape
     # that turns a safety net into a crash in the one place it is exercised.
     rate_limited = False
+    # The same latch for the Alpha Vantage fallback: set when AV answers with a `Note` or
+    # `Information` notice (its daily cap, or a premium-only parameter), so no later
+    # security in the pass spends a call on it. Per instance, so per pass.
+    alpha_vantage_capped = False
 
     # Mapping of IBKR exchange codes to Yahoo Finance suffixes
     EXCHANGE_SUFFIXES = {
@@ -121,6 +167,7 @@ class MarketDataService:
         # day; not at seven. The flag lives on the instance, and a pass builds its
         # own, so it is per-run state and never leaks into a later job.
         self.rate_limited = False
+        self.alpha_vantage_capped = False
 
         # yfinance 1.1.0+ handles sessions and User-Agent headers internally
         # No need to create a custom session
@@ -472,15 +519,21 @@ class MarketDataService:
     async def fetch_prices_from_alpha_vantage(
         self,
         security: Security,
-        outputsize: str = "full"
+        outputsize: str = "compact"
     ) -> List[Dict]:
         """
         Fetch prices from Alpha Vantage API (fallback).
         Note: Free tier primarily supports US stocks.
 
+        Asks about a security at most once a UTC day (`alpha_vantage_asked_at`, so the
+        limit survives a restart) and not at all once AV has said its cap is reached
+        this pass. "full" is premium-only: on a free key AV answers it with an
+        `Information` notice and no data, which is what the only caller asked for
+        until 2026-10-17 (GitHub issue #10).
+
         Args:
             security: Security object
-            outputsize: "compact" or "full"
+            outputsize: "compact" (the free tier's latest 100 days) or "full"
 
         Returns:
             List of dicts with date, close_price, currency
@@ -500,6 +553,16 @@ class MarketDataService:
                 f"security is {security.currency}, which cannot be verified from the response"
             )
             return []
+
+        if self.alpha_vantage_capped:
+            logger.info(f"Skipping Alpha Vantage for {security.symbol}: its cap was reached this run")
+            return []
+        asked = security.alpha_vantage_asked_at
+        if asked is not None and asked.date() == utcnow().date():
+            logger.info(f"Skipping Alpha Vantage for {security.symbol}: already asked today")
+            return []
+        # Stamped before the request: the free tier counts a call whatever it answers.
+        security.alpha_vantage_asked_at = utcnow()
 
         params = {
             "function": "TIME_SERIES_DAILY",
@@ -521,11 +584,20 @@ class MarketDataService:
                     logger.error(f"Alpha Vantage error: {data['Error Message']}")
                     return []
 
-                if "Note" in data:
-                    logger.warning(f"Alpha Vantage rate limit: {data['Note']}")
-                    return []
+                # `Note` is the older rate-limit notice, `Information` the current one —
+                # the daily cap, or a premium-only parameter. Either way AV will answer
+                # the next security the same, so stop asking it for the rest of the pass.
+                for notice in ("Note", "Information"):
+                    if notice in data:
+                        logger.warning(
+                            f"Alpha Vantage {notice} for {security.symbol}: {data[notice]} "
+                            f"— not asking it again this run"
+                        )
+                        self.alpha_vantage_capped = True
+                        return []
 
                 if "Time Series (Daily)" not in data:
+                    logger.warning(f"Alpha Vantage returned no daily series for {security.symbol}")
                     return []
 
                 time_series = data["Time Series (Daily)"]
@@ -640,11 +712,29 @@ class MarketDataService:
             and not self.rate_limited
             and security.exchange in ['NASDAQ', 'NYSE', 'ARCA', 'AMEX']
         ):
-            logger.info(f"Yahoo Finance failed for {security.symbol}, trying Alpha Vantage...")
-            prices_data = await self.fetch_prices_from_alpha_vantage(security)
+            # The free tier's `compact` reaches ~100 trading days back; an older gap is
+            # beyond it, and `full` is premium-only, so the call would be spent for nothing.
+            if (date.today() - min(missing_dates)).days > ALPHA_VANTAGE_COMPACT_REACH_DAYS:
+                logger.info(
+                    f"Not asking Alpha Vantage for {security.symbol}: the gap starts "
+                    f"{min(missing_dates)}, beyond what its free tier serves"
+                )
+            else:
+                logger.info(f"Yahoo Finance failed for {security.symbol}, trying Alpha Vantage...")
+                prices_data = await self.fetch_prices_from_alpha_vantage(
+                    security, outputsize="compact"
+                )
 
         if not prices_data:
             logger.warning(f"Could not fetch any price data for {security.symbol}")
+            # Every provider answered with nothing for dates we are missing: stamp it, so
+            # `sync_securities` backs off instead of re-asking at every pass — a delisted
+            # ticker's trailing gap never closes. Never on a rate limit: that is not an
+            # answer about this security, and the next pass must resume it.
+            if not self.rate_limited:
+                security.price_miss_count = (security.price_miss_count or 0) + 1
+                security.price_checked_at = utcnow()
+                await self.db.commit()
             # Add delay before moving to next security
             await asyncio.sleep(random.uniform(3.0, 6.0))
             return 0
@@ -671,6 +761,7 @@ class MarketDataService:
         # Bulk insert
         if prices_to_cache:
             count = await self.market_price_repo.bulk_create(prices_to_cache)
+            clear_price_backoff(security)
             await self.db.commit()
             logger.info(f"Cached {count} new prices for {security.symbol}")
 
@@ -848,15 +939,38 @@ class MarketDataService:
         Securities whose prices do not come from Yahoo are skipped and counted in
         `skipped_not_yahoo` rather than dropped silently -- a loop that quietly
         processes fewer than it was handed reads as coverage it does not have.
+
+        **Scope** (GitHub issue #10), decided here so both callers inherit it:
+
+        - A short pass (`days_back` within `SOLD_PRICE_GRACE_DAYS` — the six 7-day
+          slots) asks only about securities `held(closed_within_days=...)`: an open lot,
+          or one closed inside the grace. Others are counted in `skipped_sold`.
+        - The long pass (18:00, 730 days) also takes every security sold before that.
+          One whose held span (first open .. last close, inside the window) still has a
+          gap — first seen already closed, a split invalidation, `--purge-prices` — is
+          fetched up to its last close only. One with a complete span is priced to
+          today, for `post_sale_pct`: one request a day rather than seven.
+        - A security every provider last came back empty for is skipped while
+          `price_backoff_until` says so, and counted in `skipped_backoff`.
+
+        `planned` is how many it set out to ask, which is what "N of M" means.
         """
         total_prices = 0
         processed = 0
         skipped_not_yahoo = 0
+        skipped_sold = 0
+        skipped_backoff = 0
         errors: List[str] = []
         rate_limited_after: Optional[str] = None
 
         logger.info(f"Syncing market data for {len(securities)} securities...")
 
+        held_ids, recent_ids, spans = await self._price_scope(securities)
+        long_pass = days_back > SOLD_PRICE_GRACE_DAYS
+        window_start = date.today() - timedelta(days=days_back)
+        now = utcnow()
+
+        plan = []
         for security in securities:
             sibling = is_sibling_priced(security)
             if not sibling and not is_yahoo_eligible(security):
@@ -866,12 +980,38 @@ class MarketDataService:
                     f"price_source={security.price_source}, not a Yahoo instrument"
                 )
                 continue
+            repair_end: Optional[date] = None
+            if security.id not in recent_ids:
+                if not long_pass:
+                    skipped_sold += 1
+                    continue
+                first_open, last_close = spans.get(security.id, (None, None))
+                if not sibling and last_close is not None and await self.market_price_repo.get_missing_dates(
+                    security.id, max(window_start, first_open or window_start), last_close
+                ):
+                    repair_end = last_close
+            until = price_backoff_until(security, security.id in held_ids)
+            if until is not None and now < until:
+                skipped_backoff += 1
+                logger.debug(
+                    f"Skipping {security.symbol}@{security.exchange}: every provider came "
+                    f"back empty {security.price_miss_count}x running; next ask after {until}"
+                )
+                continue
+            plan.append((security, sibling, repair_end))
+
+        for security, sibling, repair_end in plan:
             try:
                 logger.info(
-                    f"Fetching prices for {security.symbol} ({security.exchange})..."
+                    f"Fetching prices for {security.symbol} ({security.exchange})"
+                    + (f" up to its last close {repair_end}" if repair_end else "") + "..."
                 )
                 if sibling:
                     count = await self.sync_sibling_prices(security, days_back=days_back)
+                elif repair_end is not None:
+                    count = await self.sync_security_prices(
+                        security, days_back=days_back, end_date=repair_end
+                    )
                 else:
                     count = await self.sync_security_prices(security, days_back=days_back)
                 total_prices += count
@@ -890,17 +1030,45 @@ class MarketDataService:
                 rate_limited_after = security.symbol
                 logger.error(
                     f"Yahoo rate-limited at {security.symbol}; abandoning the "
-                    f"remaining {len(securities) - processed} securities this run"
+                    f"remaining {len(plan) - processed} securities this run"
                 )
                 break
 
         return {
             "total_prices": total_prices,
             "processed": processed,
+            "planned": len(plan),
             "skipped_not_yahoo": skipped_not_yahoo,
+            "skipped_sold": skipped_sold,
+            "skipped_backoff": skipped_backoff,
             "errors": errors,
             "rate_limited_after": rate_limited_after,
         }
+
+    async def _price_scope(self, securities: List[Security]):
+        """
+        What `sync_securities` needs about the lots, for the securities it was handed:
+        the ids `held()` selects, the ids `held(closed_within_days=SOLD_PRICE_GRACE_DAYS)`
+        selects, and each security's (first open date, last close date).
+        """
+        ids = [s.id for s in securities]
+
+        async def _ids(criterion):
+            rows = await self.db.execute(
+                select(Security.id).where(Security.id.in_(ids), criterion)
+            )
+            return set(rows.scalars().all())
+
+        spans = await self.db.execute(
+            select(TaxLot.security_id, func.min(TaxLot.open_date), func.max(TaxLot.close_date))
+            .where(TaxLot.security_id.in_(ids))
+            .group_by(TaxLot.security_id)
+        )
+        return (
+            await _ids(held()),
+            await _ids(held(closed_within_days=SOLD_PRICE_GRACE_DAYS)),
+            {sid: (first_open, last_close) for sid, first_open, last_close in spans.all()},
+        )
 
     async def get_price_for_date(
         self,
@@ -991,7 +1159,8 @@ class MarketDataService:
     async def sync_security_prices(
         self,
         security: Security,
-        days_back: int = 730
+        days_back: int = 730,
+        end_date: Optional[date] = None,
     ) -> int:
         """
         Sync historical prices for a security (fetch missing dates).
@@ -999,6 +1168,8 @@ class MarketDataService:
         Args:
             security: Security to sync prices for
             days_back: How many days back to fetch (default: 730 = 2 years)
+            end_date: Last date to fetch (default today) — a sold security's last close
+                when only its held span is wanted
 
         Returns:
             Number of price rows written — new plus provisional ones restated.
@@ -1009,7 +1180,8 @@ class MarketDataService:
             act on. The docstring already promised writes; now it tells the truth. A
             warm cache legitimately returns 0 and no caller treats that as a failure.
         """
-        end_date = date.today()
-        start_date = end_date - timedelta(days=days_back)
+        start_date = date.today() - timedelta(days=days_back)
 
-        return await self.fetch_and_cache_prices(security, start_date, end_date)
+        return await self.fetch_and_cache_prices(
+            security, start_date, end_date or date.today()
+        )

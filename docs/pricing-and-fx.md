@@ -70,6 +70,10 @@ docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set CH
   until 2026-07-30, which is how SBI's poisoned estimates outlived its mapping fix.
 - `--dry-run` on both mutating commands; every edit records a `sync_runs` row (`manual_mapping`),
   because a mapping change being invisible is why SBI went unnoticed for months.
+- **`set` and `disable` end the security's price back-off** (`clear_price_backoff`, 2026-10-17).
+  A security every provider came back empty for is skipped for up to 30 days
+  ([flex-and-sync.md](flex-and-sync.md), *Sync schedule*); empty answers under the old ticker say
+  nothing about the new one, so the next pass asks again.
 - **An ambiguous `SYMBOL EXCHANGE` is refused** (2026-10-17). `securities` is unique on
   (isin, exchange), not (symbol, exchange), so an ISIN change can leave two rows on one ticker; a
   mapping applies to both, and `.first()` checked the currency of whichever SQLite returned first

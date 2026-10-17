@@ -282,6 +282,12 @@ async def test_a_yahoo_rate_limit_abandons_the_rest_of_the_pass(monkeypatch):
                     currency="USD", conid=1000 + i, asset_category="STK",
                     exchange="NASDAQ",
                 ))
+                # Held: a 7-day pass asks about nothing else (issue #10).
+                seed.add(TaxLot(
+                    security_id=i, open_date=date(2025, 1, 2), quantity=Decimal("1"),
+                    cost_basis=Decimal("100"), price_per_unit=Decimal("100"),
+                    currency="USD", cost_basis_eur=Decimal("90"), is_open=True,
+                ))
             await seed.commit()
 
         attempted = []
@@ -340,7 +346,17 @@ async def test_every_market_data_sweep_stops_on_a_rate_limit():
         return 3
 
     svc.sync_security_prices = _fetch
-    securities = [SimpleNamespace(symbol=f"S{i}", exchange="NASDAQ") for i in range(1, 6)]
+    securities = [
+        SimpleNamespace(id=i, symbol=f"S{i}", exchange="NASDAQ",
+                        price_checked_at=None, price_miss_count=None)
+        for i in range(1, 6)
+    ]
+
+    async def _all_held(_securities):
+        ids = {s.id for s in _securities}
+        return ids, ids, {}
+
+    svc._price_scope = _all_held
 
     swept = await svc.sync_securities(securities, days_back=7)
 

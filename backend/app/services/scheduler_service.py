@@ -567,9 +567,13 @@ class SchedulerService:
 
                 result = {
                     "status": "success" if not (errors or rate_limited_after) else "partial_success",
-                    "message": f"Synced market data for {processed} of {len(securities)} securities",
+                    "message": f"Synced market data for {processed} of {swept['planned']} securities",
                     "securities_processed": processed,
                     "prices_fetched": total_prices,
+                    # Not asked this pass by design (issue #10): sold outside the short
+                    # passes' grace, or backing off after every provider came back empty.
+                    "securities_skipped_sold": swept["skipped_sold"],
+                    "securities_backing_off": swept["skipped_backoff"],
                     "timestamp": utc_iso(utcnow())
                 }
 
@@ -581,7 +585,7 @@ class SchedulerService:
                     result["rate_limited"] = True
                     result["warnings"] = [
                         f"Yahoo rate-limited this run at {rate_limited_after}; "
-                        f"{len(securities) - processed} securities were skipped and "
+                        f"{swept['planned'] - processed} securities were skipped and "
                         f"keep their previous prices. Do not trigger a manual sync — "
                         f"the next scheduled slot resumes"
                     ]

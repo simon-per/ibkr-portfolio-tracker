@@ -14,7 +14,7 @@ than waiting to be noticed in the portfolio total.
 Offline: no Yahoo, no IBKR, no network at all.
 """
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from types import SimpleNamespace
@@ -211,6 +211,21 @@ async def test_disable_stops_the_lookup_but_keeps_the_row(db):
     # ...while what was tried survives for the next person to read.
     rows = await _mappings(db, "SBI")
     assert len(rows) == 1 and rows[0].is_active is False
+
+
+@pytest.mark.asyncio
+async def test_a_mapping_change_ends_the_price_back_off(db):
+    """Empty answers under the old ticker say nothing about the new one, so neither `set`
+    nor `disable` may leave the price loop backing off (issue #10)."""
+    security = await db.get(Security, 1)
+    for argv in (("set", "SBI", "TSE", "SBI.TO"), ("disable", "SBI", "TSE")):
+        security.price_checked_at = datetime(2026, 10, 1)
+        security.price_miss_count = 4
+        await db.commit()
+
+        assert await cli.run(args(*argv)) == 0
+
+        assert security.price_checked_at is None and security.price_miss_count is None, argv
 
 
 @pytest.mark.asyncio

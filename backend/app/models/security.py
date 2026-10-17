@@ -64,6 +64,14 @@ class Security(Base):
     # an empty series or an error, never a rate limit. `needs_dividend_check` in
     # dividend_service.py reads it; purging the estimates clears it.
     dividends_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    # When every price provider last came back empty for this security's missing
+    # dates, and how many times running — never on a rate limit, cleared by any row
+    # written and by a mapping change. `price_backoff_until` in market_data_service.py
+    # reads them, so a delisted ticker is not re-asked at every pass forever.
+    price_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    price_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # When the Alpha Vantage fallback was last asked about it: at most once a UTC day.
+    alpha_vantage_asked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

@@ -133,10 +133,13 @@ both cases, so `return_pct` is against what was paid. Holding days are cost-weig
 `post_sale_pct` compares two rows of the security's **own price history in its quote
 currency** — the last close on or before the sale date against the newest close after it.
 Base-currency proceeds cannot serve as the reference (they carry FX), and a quote in a
-different currency is refused rather than compared. It is `None` without a later price. The
-market-data sync prices every row in `securities`, sold ones included
-(`scheduler_service.sync_market_data` takes `get_all`), so on production every sold security
-had one when this was verified (2026-09-13); the summary says how many were judged.
+different currency is refused rather than compared. It is `None` without a later price. Since
+2026-10-17 (GitHub issue #10) the market-data sync prices a sold security in the six 7-day
+passes only for `SOLD_PRICE_GRACE_DAYS` after its last close, and after that **once a day, in
+the 18:00 pass** — kept for this figure, at one request a day instead of seven; dropping it would
+freeze the figure at the grace. A security every provider comes back empty for (delisted) backs
+off for up to 30 days, so its figure stops at the last price Yahoo gave
+([flex-and-sync.md](flex-and-sync.md), *Sync schedule*). The summary says how many were judged.
 
 ## Client-side: rolling risk and the drawdown ledger
 

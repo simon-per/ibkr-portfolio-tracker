@@ -35,6 +35,8 @@ async def sync_market_data(
     3. Caches prices in the database
 
     Uses Yahoo Finance as the primary data source with exchange-specific tickers.
+    Which securities a pass asks about (sold ones, ones backing off after empty
+    answers) is `MarketDataService.sync_securities`'s, shared with the scheduler.
 
     Returns:
         Summary of synced data including counts and any errors
@@ -90,10 +92,12 @@ async def _sync_market_data_locked(days_back: int, db: AsyncSession):
     result = {
         "status": "success" if not (errors or rate_limited_after) else "partial_success",
         "message": (
-            f"Synced market data for {swept['processed']} of {len(securities)} securities"
+            f"Synced market data for {swept['processed']} of {swept['planned']} securities"
         ),
         "securities_processed": swept["processed"],
         "prices_fetched": swept["total_prices"],
+        "securities_skipped_sold": swept["skipped_sold"],
+        "securities_backing_off": swept["skipped_backoff"],
     }
 
     if errors:
@@ -104,7 +108,7 @@ async def _sync_market_data_locked(days_back: int, db: AsyncSession):
         result["rate_limited"] = True
         result["warnings"] = [
             f"Yahoo rate-limited this run at {rate_limited_after}; "
-            f"{len(securities) - swept['processed']} securities were skipped and keep "
+            f"{swept['planned'] - swept['processed']} securities were skipped and keep "
             f"their previous prices. Do not retry — wait for the next scheduled slot"
         ]
 

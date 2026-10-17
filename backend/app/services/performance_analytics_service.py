@@ -486,10 +486,10 @@ class PerformanceAnalyticsService:
         (`source: closed_lots`). Cost is the closed lots' cost basis in both cases, so
         the return percentage is against what was actually paid.
 
-        `post_sale_pct` needs a price *after* the last close, which a fully sold
-        security usually stops receiving — the market-data sync only prices open
-        positions. It is None then, with `post_sale_days` saying how far the record
-        reaches, rather than a 0 that would claim the price stood still.
+        `post_sale_pct` needs a price *after* the last close. The market-data sync
+        prices a sold security once a day, in the 18:00 pass, and backs off one every
+        provider comes back empty for — a delisted ticker — so it is None for those,
+        rather than a 0 that would claim the price stood still.
         """
         base_fx = await self.portfolio._load_base_fx()
         rows = await self.portfolio.realized_rows_from_closed_lots(base_fx)
@@ -613,9 +613,8 @@ class PerformanceAnalyticsService:
             )
         if positions and not post_judged:
             warnings.append(
-                "No sold position has a price after its last sale on record — the "
-                "market-data sync prices open positions only — so post-sale performance "
-                "is unmeasurable for all of them."
+                "No sold position has a price after its last sale on record, so "
+                "post-sale performance is unmeasurable for all of them."
             )
 
         return {

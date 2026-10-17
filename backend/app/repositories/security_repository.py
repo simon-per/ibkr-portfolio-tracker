@@ -2,8 +2,9 @@
 Security Repository
 Handles database operations for Securities.
 """
+from datetime import date, timedelta
 from typing import List, Optional
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.sql.elements import ColumnElement
@@ -12,7 +13,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 
 
-def held() -> ColumnElement[bool]:
+def held(closed_within_days: Optional[int] = None) -> ColumnElement[bool]:
     """
     SQLAlchemy criterion: securities with at least one open tax lot, in any account.
 
@@ -20,10 +21,15 @@ def held() -> ColumnElement[bool]:
     list feeds a Yahoo loop. A subquery rather than a join, so it composes without
     multiplying rows by lots. The daily fundamentals and ratings passes are bounded by
     it: a sold position costs ~6 Yahoo requests a pass and is shown nowhere.
+
+    ``closed_within_days`` widens it to a lot closed on or after that many days ago,
+    for a reader that still needs a just-sold security for a while — the intraday
+    price passes (`market_data_service.SOLD_PRICE_GRACE_DAYS`).
     """
-    return Security.id.in_(
-        select(TaxLot.security_id).where(TaxLot.is_open == True)  # noqa: E712 — SQL comparison
-    )
+    lots = TaxLot.is_open == True  # noqa: E712 — SQL comparison
+    if closed_within_days is not None:
+        lots = or_(lots, TaxLot.close_date >= date.today() - timedelta(days=closed_within_days))
+    return Security.id.in_(select(TaxLot.security_id).where(lots))
 
 
 class SecurityRepository:

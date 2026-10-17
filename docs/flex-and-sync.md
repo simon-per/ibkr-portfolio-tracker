@@ -54,6 +54,14 @@ reader checking only for `yfinance` will miss it. Two things about it are load-b
   no currency to read back, so unlike Yahoo there is nothing to verify a label against. Stamping the
   security's own currency onto a USD quote is exactly how SBI was carried 61% high; that path was
   fixed for Yahoo in July and not here. Don't "restore" the fallback for non-USD listings.
+- **It asks for `outputsize=compact`, at most once per security per UTC day, and stops for the
+  pass on a notice** (GitHub issue #10, 2026-10-17). Until then the only caller asked for `full`,
+  which AV reserves for premium keys and answers on a free one with an `Information` notice and no
+  data; nothing logged it, and every pass where Yahoo came back empty asked again. `compact` is the
+  latest 100 trading days, so a gap starting more than `ALPHA_VANTAGE_COMPACT_REACH_DAYS` (130)
+  back is not sent to AV at all. `securities.alpha_vantage_asked_at` is stamped before each call
+  (the free tier counts it whatever it answers) and survives a restart. A `Note` or `Information`
+  body is logged and latches `alpha_vantage_capped`, so no later security in the pass asks.
 
 ### 2. Never loop the IBKR Flex sync
 IBKR allows **1 request/second and 10 requests/minute per token**, and one `ibflex.client.download()`
@@ -555,7 +563,49 @@ Cost, since rule 1 makes this the question: **one Yahoo request per security per
 the refresh only widens a range on a request already being made. 40 securities × 7 passes ≈ 280
 requests/day at ≤48 in any hour, against a documented ~500–2,000/hour, and the ~7.5s per-security
 pacing keeps a pass at ~8 requests/minute, under the ~10–20 burst tolerance. Slots are ≥2h apart, so
-two passes never share an hour.
+two passes never share an hour. The 40 are what each pass is *allowed* to ask about, below.
+
+**A price pass asks about what is held, and a sold security once a day** (GitHub issue #10,
+2026-10-17). Every pass used to price every row in `securities`. A sold but listed security cost a
+request a pass for prices nothing reads intraday, and a delisted one more: its trailing gap never
+closes (`get_missing_dates` keeps trailing gaps missing on purpose), so every pass retried the mapped
+ticker, each variation and, for a US listing, Alpha Vantage — 21 requests a day for a German
+listing, 7 plus 7 AV calls for a US one, with nothing in `warnings[]`. `MarketDataService.sync_securities`
+owns the scope, so the scheduled pass and `POST /api/market-data/sync` share it:
+
+- **The six 7-day passes** ask only about `security_repository.held(closed_within_days=SOLD_PRICE_GRACE_DAYS)`:
+  an open lot, or one closed in the last 17 days, in any account. The grace is
+  `PROVISIONAL_PRICE_DAYS` plus the 14-day lookback `realized_rows_from_closed_lots` reads near a
+  close date, so the close-date price settles before the security leaves (`test_price_pass_scope.py`
+  pins the sum).
+- **The 18:00 pass (730 days) also takes every other sold security.** While its held span (first
+  open to last close, inside the window) has a gap — first seen already closed, a split
+  invalidation, `--purge-prices` — it is fetched to the last close only. Once complete it is priced
+  to today, one request a day, for `post_sale_pct` (the owner's call on the issue: 18:00 only rather
+  than letting that figure stop at the grace).
+- **An empty answer from every provider backs the security off.** `fetch_and_cache_prices` stamps
+  `securities.price_checked_at` and increments `price_miss_count` when Yahoo (every variation) and
+  the AV fallback all came back empty for a non-empty missing range; `price_backoff_until` then
+  skips a **sold** security for one day, doubling per consecutive miss, capped at **30 days**, less
+  four hours so a security stamped during a pass is due at the same slot. **A held security never
+  backs off**: Yahoo soft-throttling with empty answers instead of a 429 would otherwise freeze
+  every holding's price for a day, and a holding with a broken mapping already shows as a stale
+  price. **A rate
+  limit stamps nothing**; any row written clears both, and so do `manage_mappings set` and
+  `disable`. A delisted security is then asked on days 0, 1, 3, 7, 15 and every 30 days after.
+- "N of M" in the pass message counts what the pass set out to ask; `securities_skipped_sold` and
+  `securities_backing_off` on the result count the rest.
+
+*Budget*: one request per held (or just-sold) security per pass, plus one per other sold security
+at 18:00. `tests/test_price_pass_scope.py` simulates thirty days of the seven passes: a holding 7 a
+day, a sold listed security 1 a day (210 → 30), a delisted German listing 15 in the month (630
+before), a delisted US listing 5 Yahoo plus 5 AV (210 + 210 before).
+
+The empty answer is literally empty, not "nothing new written": after a Monday holiday, an 08:00
+pass's missing dates are Monday and Tuesday and Yahoo has a bar for neither yet, and suspending every
+holding for a day on that would freeze Tuesday's prices. The cost is the rare delisted ticker whose
+old bars Yahoo still serves: it is never stamped, so it stays at one request a day at 18:00, the
+same as a sold listed one.
 
 **The scheduled benchmark warm-up costs one request per warm benchmark per finished session, at the
 first slot after it, and none at the others** (`SchedulerService.sync_benchmark_prices`). Until

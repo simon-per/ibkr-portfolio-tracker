@@ -53,7 +53,7 @@ from app.services.finpension_ingest import (
     PRICE_SOURCE_STATEMENT,
     purge_carried_prices,
 )
-from app.services.market_data_service import MarketDataService
+from app.services.market_data_service import MarketDataService, clear_price_backoff
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -482,6 +482,10 @@ async def cmd_set(
         ibkr_symbol=symbol, ibkr_exchange=exchange, yahoo_ticker=yahoo_ticker,
         source="manual", notes=notes,
     )
+    # A new ticker is a new question: the empty answers the old one earned must not
+    # keep the price loop backing off from it (up to 30 days for a sold security).
+    if security:
+        clear_price_backoff(security)
     # Only a *verified* mapping hands the security to the price loop. Saving the row
     # without this leaves it inert -- `sync_securities` skips a manual security -- so
     # the flip is the second half of the same action, and it deliberately happens
@@ -561,6 +565,9 @@ async def cmd_disable(
     # Soft delete: get_mapping() already filters on is_active, so the row stops being
     # consulted while the record of what was tried survives.
     mapping.is_active = False
+    # Back to the suffix logic, which deserves its own first ask (see cmd_set).
+    if security:
+        clear_price_backoff(security)
     await db.flush()
 
     deleted = 0
