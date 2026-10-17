@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — FX asks Frankfurter only for what is missing (#2)
+
+Issue #2. Every sync re-downloaded a 7- or 30-day window per ECB currency, plus two requests
+for EUR→CHF/USD. The warm-up now makes one EUR-based request for every pair, from its newest
+published day, and none once each pair is current to the ECB's last publication day
+(weekdays, after 16:00 UTC, fixed TARGET holidays). `X→EUR` is stored as the inverse of the
+ECB quote: v1 rounds a non-EUR base to five decimals, so KRW→EUR had been stored as 0.00067
+against 0.00066711. Published rows are never rewritten, so each weak currency's history has a
+one-time step at the switch (KRW ~0.4%, JPY ~0.06%). The market-cap currencies' 3-day stop-gap
+(`QUOTED_REFRESH_DAYS`) is gone. Measured offline: first sync 1 Frankfurter request, second 0;
+before, 8 in the same setup. v2 was checked (TWD history exists, but blends providers unless
+`providers=ecb` is pinned) and not adopted. Verified: 2144 backend tests green.
+
 ## Shipped 2026-10-17 (night) — CoinStats /portfolio/value once a day (#3)
 
 Issue #3. Every one of the eight daily crypto slots asked `/portfolio/value` (10 credits) before
