@@ -22,11 +22,10 @@ docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one w
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
-- **Holding logos (#12): the two pillar 3a funds by hand, then a look.** The key is set and 33
-  of 35 held ISINs have a logo (2026-10-17). `CH0117044948` and `CH1529078078` are `not_found`
-  at logo.dev: a PNG ≤ 100 KB through `app.cli.import_logo` (recipe in docs/logos.md). Then
-  look at Positions and Dividends — the avatar styling (white circle, hairline ring) was never
-  seen with real logos.
+- **Holding logos (#12): look at them.** Every held ISIN has a logo (2026-10-17): 33 from
+  logo.dev, the two Swisscanto pillar 3a funds imported by hand (`manual`, logo.dev's
+  `swisscanto.com` mark). Look at Positions and Dividends — the avatar styling (white circle,
+  hairline ring) was never seen with real logos.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
