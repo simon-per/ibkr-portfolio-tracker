@@ -145,7 +145,7 @@ describe('FundamentalsTab figures', () => {
     expect(table.getByText(/GBp/)).toBeTruthy()
   })
 
-  it('states how old the data is, and turns amber once a weekly pass was missed', async () => {
+  it('states how old the data is, and turns amber once a daily pass was missed', async () => {
     renderWith([metrics({}), metrics({ security_id: 2, symbol: 'BBB', last_updated: null })])
     const line = await screen.findByText(/^Data as of /)
     expect(line.className).not.toContain('text-amber')

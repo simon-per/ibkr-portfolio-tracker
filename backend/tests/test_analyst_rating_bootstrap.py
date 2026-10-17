@@ -15,7 +15,8 @@ on 2026-08-05; see `tests/test_fundamentals_bootstrap.py`.
 Offline: `fetch_rating_for_security` is faked, so yfinance is never reached.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -27,6 +28,7 @@ from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.analyst_rating import AnalystRating
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.services import analyst_rating_service as ars_mod
 from app.services.analyst_rating_service import AnalystRatingService
 
@@ -57,13 +59,20 @@ def _no_delays(monkeypatch):
     monkeypatch.setattr(ars_mod.random, "uniform", lambda *_a: 0)
 
 
-def add_security(session, security_id: int, symbol: str) -> Security:
+def add_security(session, security_id: int, symbol: str, held: bool = True) -> Security:
+    """A security with one lot: open while held, closed once sold."""
     security = Security(
         id=security_id, isin=f"US000000000{security_id}", symbol=symbol,
         description=symbol, currency="USD", conid=security_id,
         asset_category="STK", exchange="NASDAQ",
     )
     session.add(security)
+    session.add(TaxLot(
+        security_id=security_id, open_date=date(2025, 1, 2),
+        close_date=None if held else date(2026, 1, 2), is_open=held,
+        quantity=Decimal("10"), cost_basis=Decimal("1000"),
+        price_per_unit=Decimal("100"), currency="USD", cost_basis_eur=Decimal("900"),
+    ))
     return security
 
 
@@ -155,6 +164,21 @@ async def test_it_fetches_only_what_needs_it(db, fetched):
     await AnalystRatingService(db).sync_stale_ratings()
 
     assert sorted(fetched) == ["NEVER", "STALE"]
+
+
+@pytest.mark.asyncio
+async def test_a_sold_position_is_not_rated(db, fetched):
+    """The scope of the fundamentals pass this runs after: held securities only."""
+    add_security(db, 1, "HELD")
+    add_security(db, 2, "SOLD", held=False)
+    add_security(db, 3, "SOLD_STALE", held=False)
+    add_rating(db, 3, age_days=9)
+    await db.commit()
+
+    await AnalystRatingService(db).sync_stale_ratings()
+    await AnalystRatingService(db).sync_ratings_for_securities()
+
+    assert fetched == ["HELD", "HELD"]
 
 
 # --- "no rating" is an answer, and it is stamped -----------------------------------

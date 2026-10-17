@@ -1494,19 +1494,21 @@ def _cron_days(spec: str) -> set:
 
 
 @pytest.mark.asyncio
-async def test_the_fundamentals_refresh_takes_the_watchlist_hour_on_a_day_it_is_free(jobstore_url):
+async def test_the_fundamentals_refresh_runs_daily_an_hour_after_the_watchlist(jobstore_url):
     """
-    The watchlist's hour — already in ALL_SYNC_HOURS, so the deploy guard and its three
-    shell copies need no new hour — on a day the watchlist does not run, so two
-    five-endpoint Yahoo loops never share a pass. Weekly, in the upkeep group: never the
-    portfolio's "last sync" and not in the public status list.
+    Once after each US close, on the watchlist's days but never its hour, so two
+    five-endpoint Yahoo loops never share a pass (they share the SYNC_PIPELINE gate, so
+    an overlap would cost a day), and clear of every portfolio slot. Its hour is in
+    ALL_SYNC_HOURS, which is what the deploy guard is checked against. In the upkeep
+    group: never the portfolio's "last sync" and not in the public status list.
     """
-    assert FUNDAMENTALS_REFRESH_HOUR == WATCHLIST_REFRESH_HOUR
+    assert FUNDAMENTALS_REFRESH_HOUR != WATCHLIST_REFRESH_HOUR
+    assert FUNDAMENTALS_REFRESH_HOUR not in PORTFOLIO_SYNC_HOURS
     assert FUNDAMENTALS_REFRESH_HOUR in ALL_SYNC_HOURS
-    assert ALL_SYNC_HOURS == tuple(sorted({*PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR}))
-    days = _cron_days(FUNDAMENTALS_REFRESH_DAYS)
-    assert len(days) == 1, "weekly"
-    assert not days & _cron_days(WATCHLIST_REFRESH_DAYS)
+    assert ALL_SYNC_HOURS == tuple(sorted({
+        *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
+    }))
+    assert _cron_days(FUNDAMENTALS_REFRESH_DAYS) == _cron_days(WATCHLIST_REFRESH_DAYS)
 
     svc = SchedulerService()
     try:

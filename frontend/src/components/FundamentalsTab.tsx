@@ -20,11 +20,11 @@ type SortDir = 'asc' | 'desc'
 const ABSENT = '—'
 
 /**
- * Past this the as-of line turns amber. Eight days: the scheduled refresh is weekly
- * (`FUNDAMENTALS_REFRESH_DAYS` in `scheduler_service.py`), so a week-old row is on time
- * and one that missed a whole pass is not.
+ * Past this the as-of line turns amber. Four days: the scheduled refresh runs Tuesday to
+ * Saturday (`FUNDAMENTALS_REFRESH_DAYS` in `scheduler_service.py`), so Saturday's rows
+ * are on time until Tuesday's pass, and a row that missed one more pass is not.
  */
-const FUNDAMENTALS_STALE_AFTER_DAYS = 8
+const FUNDAMENTALS_STALE_AFTER_DAYS = 4
 
 function formatPct(value: number | null): string {
   if (value === null) return ABSENT

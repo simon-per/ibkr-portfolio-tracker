@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.repositories.fundamentals_repository import FundamentalsRepository
+from app.repositories.security_repository import held
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
@@ -183,11 +184,15 @@ class FundamentalsService:
         return events
 
     async def sync_fundamentals_data(self, force_refresh: bool = False) -> Dict:
-        """Sync fundamental metrics and earnings for all securities."""
+        """Sync fundamental metrics and earnings for every held security."""
         # yahoo_eligible(): ~5 Yahoo endpoints per security, the most expensive loop
-        # in the app. Its sibling `get_fundamentals_for_portfolio` deliberately does
-        # NOT filter -- that one reads stored rows and must show every holding.
-        result = await self.db.execute(select(Security).where(yahoo_eligible()))
+        # in the app. held(): a sold position is not on the tab, and the daily pass
+        # would otherwise refetch it forever. Its sibling `get_fundamentals_for_portfolio`
+        # filters on held() only -- it reads stored rows and must show every holding,
+        # including those Yahoo cannot serve.
+        result = await self.db.execute(
+            select(Security).where(yahoo_eligible(), held())
+        )
         securities = list(result.scalars().all())
 
         if not securities:
@@ -216,7 +221,7 @@ class FundamentalsService:
                 if s.id not in existing_ids or s.id in stale_ids
             ]
             if not needs_update:
-                logger.info("All fundamentals are fresh (< 1 day old)")
+                logger.info("All fundamentals are fresh")
                 return {
                     'securities_processed': 0,
                     'metrics_updated': 0,
@@ -333,7 +338,7 @@ class FundamentalsService:
 
     async def sync_stale_fundamentals(self) -> Dict:
         """
-        Sync fundamentals that are stale (> 1 day old) **or missing entirely**.
+        Sync fundamentals that are stale (older than `STALE_AFTER`) **or missing entirely**.
 
         A thin delegate on purpose. `sync_fundamentals_data(force_refresh=False)` already
         builds the right work list — `s.id not in existing_ids or s.id in stale_ids` — and
@@ -356,8 +361,10 @@ class FundamentalsService:
         return await self.sync_fundamentals_data(force_refresh=False)
 
     async def get_fundamentals_for_portfolio(self) -> List[Dict]:
-        """Return fundamental metrics joined with security info for all securities."""
-        result = await self.db.execute(select(Security))
+        """Return fundamental metrics joined with security info for every held security."""
+        # Held only: a sold position's row is no longer refreshed, so listing it would
+        # age the tab's as-of line for nothing. Its stored row stays.
+        result = await self.db.execute(select(Security).where(held()))
         securities = list(result.scalars().all())
 
         all_metrics = await self.repo.get_all_metrics()

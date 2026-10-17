@@ -6,8 +6,24 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.security import Security
+from app.models.taxlot import TaxLot
+
+
+def held() -> ColumnElement[bool]:
+    """
+    SQLAlchemy criterion: securities with at least one open tax lot, in any account.
+
+    Use as ``select(Security).where(held())``, beside ``yahoo_eligible()`` where the
+    list feeds a Yahoo loop. A subquery rather than a join, so it composes without
+    multiplying rows by lots. The daily fundamentals and ratings passes are bounded by
+    it: a sold position costs ~6 Yahoo requests a pass and is shown nowhere.
+    """
+    return Security.id.in_(
+        select(TaxLot.security_id).where(TaxLot.is_open == True)  # noqa: E712 — SQL comparison
+    )
 
 
 class SecurityRepository:

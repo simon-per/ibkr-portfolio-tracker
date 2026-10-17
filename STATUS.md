@@ -13,15 +13,21 @@ wave's scheduled halves are under *Watch after the next deploy*.
 
 **In progress, not on `main`:** branch `worktree-moonlit-drifting-matsumoto`.
 - Done: dividend raises split out of the forecast's payout change, a resizable forecast chart,
-  and market caps in the base currency.
-- Still to build: daily fundamentals at 05:00 Tue–Sat for held securities only, and holding
-  logos via logo.dev.
-- Before merging: a forecast backfill on the VPS after the deploy.
+  market caps in the base currency, and daily fundamentals at 05:00 Tue–Sat for held securities
+  only.
+- Still to build: holding logos via logo.dev.
+- After the deploy: a forecast backfill on the VPS, and `/root/auto-deploy.sh` refreshed from
+  `ops/` (*Needs a human*).
 - Everything is in `plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md`.
 
 ---
 
 ## Needs a human
+
+- **Once the 05:00 fundamentals slot is deployed, refresh `/root/auto-deploy.sh` from `ops/`**
+  by atomic rename (docs/deployment.md). Until then the host copy guards nine hours, not ten, and
+  a deploy can restart the container in the middle of a 05:00 pass, losing that day's run; the
+  next day recovers it.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
@@ -81,9 +87,11 @@ Only what is still unverified.
   does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
   read off the API, not the database.
 - **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
-- **The first `fundamentals_refresh`, Sunday 2026-10-18 04:00 Berlin:** a success row in
-  `/api/scheduler/history`, no rate-limit warning, the Fundamentals as-of within a week (it reads
-  2026-08-25 until then).
+- **The first `fundamentals_refresh` runs Sunday 2026-10-18 04:00 Berlin, on `main`'s weekly
+  schedule, then daily Tue–Sat 05:00 once the branch deploys:** a success row in
+  `/api/scheduler/history`, no rate-limit warning, sold positions gone from the Fundamentals tab
+  and its as-of line within a day. The next day's pass should refresh every held row again
+  (20-hour rule), not every other one.
 - **The ET Sunday/Monday IBKR skip (`b88faa9`):** Berlin Sun 18:00, Mon 00:00 and 18:00, Tue 00:00
   read `skipped` / `no_new_trading_day` with no Flex request; the 18:00 runs still carry
   `market_result`; Tue 18:00 generates. The daily validator will see no IBKR success Sat–Tue ET
@@ -158,7 +166,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-10-17 (owner's batch, branch `worktree-moonlit-drifting-matsumoto`)** — raises/timing,
-  resizable forecast chart, base-currency market caps; fundamentals and logos handed off.
+  resizable forecast chart, base-currency market caps, daily held-only fundamentals; logos next.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,

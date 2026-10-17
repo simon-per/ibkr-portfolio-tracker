@@ -73,7 +73,9 @@ MIGRATIONS_DIR="backend/alembic/versions"
 #
 # 04:00 joined on 2026-10-13: the watchlist's own Yahoo refresh (Tuesday to Saturday;
 # guarded every day, because this guard reasons in hours and a deferred deploy is cheap).
-SYNC_HOURS="0 4 8 11 13 15 18 20 22"
+# 05:00 joined on 2026-10-17: the daily fundamentals and analyst-ratings refresh, an hour
+# after the watchlist on the same days.
+SYNC_HOURS="0 4 5 8 11 13 15 18 20 22"
 # Minutes either side of a slot to stay clear of. A rebuild takes ~2-5 minutes and
 # APScheduler is in-process, so a deploy overlapping a slot loses that run. The
 # persistent job store (2026-08-01) recovers a misfire up to 30 minutes late, so this

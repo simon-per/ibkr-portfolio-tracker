@@ -85,8 +85,8 @@ slot_guard() {
   # 00:00/06:00, so the guard both waved pushes through the two live overnight slots
   # and blocked them at two that no longer ran. Only auto-deploy.sh was under test.
   # tests/test_deploy_guard_hours.py now reads all three against ALL_SYNC_HOURS.
-  # 00:00  04:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
-  for slot in 0 240 480 660 780 900 1080 1200 1320; do
+  # 00:00  04:00  05:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
+  for slot in 0 240 300 480 660 780 900 1080 1200 1320; do
     local delta=$(( now_min - slot ))
     [ "$delta" -lt 0 ] && delta=$(( -delta ))
     # Wrap around midnight, or 23:55 is measured as 1435 minutes from the 00:00 slot

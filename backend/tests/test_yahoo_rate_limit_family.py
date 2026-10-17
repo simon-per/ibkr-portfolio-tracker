@@ -21,6 +21,8 @@ Offline: no network. Every fetch is replaced by a raiser.
 import ast
 import inspect
 import pathlib
+from datetime import date
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -30,6 +32,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.models.watchlist_item import WatchlistItem
 import app.services.analyst_rating_service as ratings_module
 from app.services.analyst_rating_service import AnalystRatingService
@@ -87,10 +90,18 @@ def _no_delays(monkeypatch):
 
 
 async def _seed_securities(db, n=6):
+    """`n` held securities: the fundamentals and ratings loops walk held ones only."""
     for i in range(n):
-        db.add(Security(
+        security = Security(
             isin=f"US000000000{i}", symbol=f"SEC{i}", description=f"Security {i}",
             currency="USD", conid=1000 + i, asset_category="STK", exchange="NASDAQ",
+        )
+        db.add(security)
+        await db.flush()
+        db.add(TaxLot(
+            security_id=security.id, open_date=date(2025, 1, 2), is_open=True,
+            quantity=Decimal("10"), cost_basis=Decimal("1000"),
+            price_per_unit=Decimal("100"), currency="USD", cost_basis_eur=Decimal("900"),
         ))
     await db.commit()
 

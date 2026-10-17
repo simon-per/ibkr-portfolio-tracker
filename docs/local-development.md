@@ -133,8 +133,9 @@ lose time to.
 - **The base currency is whatever the user last picked** (`/api/settings`, EUR/CHF/USD). Every money
   figure moves with it, so never compare a number across sessions without checking it — hold it
   fixed by comparing payloads built from one snapshot, or ratios inside one payload.
-- **Don't push within ~10 minutes of a Berlin sync slot** — nine of them, on the hour at
-  00/04/08/11/13/15/18/20/22 (`ALL_SYNC_HOURS`; 04:00 is the watchlist's, Tuesday to Saturday).
+- **Don't push within ~10 minutes of a Berlin sync slot** — ten of them, on the hour at
+  00/04/05/08/11/13/15/18/20/22 (`ALL_SYNC_HOURS`; 04:00 is the watchlist's and 05:00 the
+  fundamentals', Tuesday to Saturday).
   Since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the seconds of
   `down`/`up`, it waits out a running sync, and the persistent job store recovers a slot missed by
   under 30 minutes. `ops/finish-deploy.*` checks the window for you.

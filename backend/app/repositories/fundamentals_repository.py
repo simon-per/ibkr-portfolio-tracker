@@ -16,10 +16,12 @@ from app.models.earnings_event import EarningsEvent
 #: sync would in fact refresh nearly every row — a status figure that did not describe the
 #: behaviour it was reporting on. The `/sync-stale` docstring claimed 7 days too.
 #:
-#: A day is short because fundamentals have no scheduled job: every pass is user-triggered
-#: and costs ~5 Yahoo requests per security, so the threshold decides how much a manual
-#: click spends rather than how often a timer fires.
-STALE_AFTER_DAYS = 1
+#: Twenty hours, not a day, because the scheduled refresh runs daily at a fixed hour
+#: (`FUNDAMENTALS_REFRESH_HOUR`): a row written at 05:02 is 23 h 58 m old at the next
+#: 05:00, so a one-day rule would refresh each security only every other pass. Twenty
+#: hours still leaves a manual Refresh pressed the same day spending nothing on rows the
+#: morning pass already wrote — each costs ~6 Yahoo requests.
+STALE_AFTER = timedelta(hours=20)
 
 
 class FundamentalsRepository:
@@ -41,16 +43,16 @@ class FundamentalsRepository:
         return list(result.scalars().all())
 
     async def get_stale_metrics(
-        self, days_old: int = STALE_AFTER_DAYS
+        self, older_than: timedelta = STALE_AFTER
     ) -> List[FundamentalMetrics]:
         result = await self.session.execute(
             select(FundamentalMetrics).where(
-                FundamentalMetrics.last_updated < self._stale_cutoff(days_old)
+                FundamentalMetrics.last_updated < self._stale_cutoff(older_than)
             )
         )
         return list(result.scalars().all())
 
-    async def count_stale_metrics(self, days_old: int = STALE_AFTER_DAYS) -> int:
+    async def count_stale_metrics(self, older_than: timedelta = STALE_AFTER) -> int:
         """
         How many rows a sync would refresh. Exists so `/status` cannot answer that
         question with a different query than the sync asks — which is exactly how the
@@ -58,14 +60,14 @@ class FundamentalsRepository:
         """
         result = await self.session.execute(
             select(func.count(FundamentalMetrics.id)).where(
-                FundamentalMetrics.last_updated < self._stale_cutoff(days_old)
+                FundamentalMetrics.last_updated < self._stale_cutoff(older_than)
             )
         )
         return int(result.scalar() or 0)
 
     @staticmethod
-    def _stale_cutoff(days_old: int):
-        return utcnow() - timedelta(days=days_old)
+    def _stale_cutoff(older_than: timedelta):
+        return utcnow() - older_than
 
     async def upsert_metrics(self, data: dict) -> FundamentalMetrics:
         existing = await self.get_metrics_by_security_id(data['security_id'])

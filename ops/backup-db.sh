@@ -9,8 +9,11 @@
 #     cp ops/backup-db.sh /root/backup-db.sh.new && chmod 755 /root/backup-db.sh.new \
 #         && mv -f /root/backup-db.sh.new /root/backup-db.sh
 #
-# and run it daily from root's crontab at an hour clear of every Europe/Berlin sync
-# slot (cron on the VPS runs in UTC; 03:17 UTC = 05:17 Berlin, which no slot uses):
+# and run it daily from root's crontab at an hour clear of the portfolio's Europe/Berlin
+# sync slots (cron on the VPS runs in UTC; 03:17 UTC = 05:17 Berlin in summer, 04:17 in
+# winter). Since 2026-10-17 that can fall inside the 04:00 watchlist or the 05:00
+# fundamentals pass on Tuesday to Saturday, which is harmless: `src.backup()` below is
+# sqlite's online backup, consistent while the app writes:
 #
 #     17 3 * * * /root/backup-db.sh daily >/dev/null
 #

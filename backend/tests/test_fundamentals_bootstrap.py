@@ -17,7 +17,8 @@ file, and its own opening paragraph repeats the claim.
 
 Offline: `_fetch_yahoo_data` is faked, so yfinance is never reached.
 """
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -29,6 +30,7 @@ from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.services import fundamentals_service as fs_mod
 from app.services.fundamentals_service import FundamentalsService
 
@@ -59,20 +61,28 @@ def _no_delays(monkeypatch):
     monkeypatch.setattr(fs_mod.random, "uniform", lambda *_a: 0)
 
 
-def add_security(session, security_id: int, symbol: str) -> Security:
+def add_security(session, security_id: int, symbol: str, held: bool = True) -> Security:
+    """A security with one lot: open while held, closed once sold."""
     security = Security(
         id=security_id, isin=f"US000000000{security_id}", symbol=symbol,
         description=symbol, currency="USD", conid=security_id,
         asset_category="STK", exchange="NASDAQ",
     )
     session.add(security)
+    session.add(TaxLot(
+        security_id=security_id, open_date=date(2025, 1, 2),
+        close_date=None if held else date(2026, 1, 2), is_open=held,
+        quantity=Decimal("10"), cost_basis=Decimal("1000"),
+        price_per_unit=Decimal("100"), currency="USD", cost_basis_eur=Decimal("900"),
+    ))
     return security
 
 
-def add_metrics(session, security_id: int, age_days: int) -> FundamentalMetrics:
+def add_metrics(session, security_id: int, age_days: float = 0, age_hours: float = 0
+                ) -> FundamentalMetrics:
     metrics = FundamentalMetrics(
         security_id=security_id, trailing_pe=20.0, quote_type="EQUITY",
-        last_updated=utcnow() - timedelta(days=age_days),
+        last_updated=utcnow() - timedelta(days=age_days, hours=age_hours),
     )
     session.add(metrics)
     return metrics
@@ -164,13 +174,13 @@ async def test_status_counts_exactly_what_a_sync_would_refresh(db, fetched):
     """
     The anti-drift assertion: the number `/status` reports and the work the sync does
     have to come from one threshold. A row three days old is stale under the real
-    (1-day) rule and was invisible to the old 7-day count.
+    (20-hour) rule and was invisible to the old 7-day count.
     """
     from app.repositories.fundamentals_repository import FundamentalsRepository
 
     add_security(db, 1, "AAA")
     add_security(db, 2, "BBB")
-    add_metrics(db, 1, age_days=3)      # stale under 1 day, fresh under the old 7
+    add_metrics(db, 1, age_days=3)      # stale under 20 hours, fresh under the old 7 days
     add_metrics(db, 2, age_days=0)      # genuinely fresh
     await db.commit()
 
@@ -189,17 +199,17 @@ async def test_the_threshold_lives_in_one_place(db):
     """
     import inspect
     from app.repositories.fundamentals_repository import (
-        FundamentalsRepository, STALE_AFTER_DAYS,
+        FundamentalsRepository, STALE_AFTER,
     )
     from app.services import fundamentals_service as fs
 
     default = inspect.signature(
         FundamentalsRepository.get_stale_metrics
-    ).parameters["days_old"].default
-    assert default == STALE_AFTER_DAYS
+    ).parameters["older_than"].default
+    assert default == STALE_AFTER
     assert inspect.signature(
         FundamentalsRepository.count_stale_metrics
-    ).parameters["days_old"].default == STALE_AFTER_DAYS
+    ).parameters["older_than"].default == STALE_AFTER
     # And no call site may reintroduce a literal of its own. Checked by AST, not by a
     # text scan: the first version of this assertion matched the *docstring* that
     # explains the old bug, which quotes `get_stale_metrics(days_old=1)` verbatim.
@@ -212,6 +222,50 @@ async def test_the_threshold_lives_in_one_place(db):
             if (isinstance(node, ast.Call)
                     and getattr(node.func, "attr", "") in
                     ("get_stale_metrics", "count_stale_metrics")
-                    and any(k.arg == "days_old" for k in node.keywords)):
+                    and (node.args or node.keywords)):
                 offenders.append(f"{module.__name__}:{node.lineno}")
     assert not offenders, f"a call site passes its own staleness threshold: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# The daily pass (`FUNDAMENTALS_REFRESH_HOUR`, Tuesday to Saturday): stale has to mean
+# "written before this morning's pass", and only what is held is asked about.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_row_written_by_yesterdays_pass_is_stale_at_todays(db, fetched):
+    """
+    Under a one-day rule a row written at 05:02 is 23 h 58 m old at the next 05:00 and
+    was skipped, so each security refreshed only every other day.
+    """
+    add_security(db, 1, "YDAY")
+    add_security(db, 2, "TODAY")
+    add_metrics(db, 1, age_hours=23.9)
+    add_metrics(db, 2, age_hours=19)    # a manual Refresh the same day spends nothing
+    await db.commit()
+
+    await FundamentalsService(db).sync_stale_fundamentals()
+
+    assert fetched == ["YDAY"]
+
+
+@pytest.mark.asyncio
+async def test_a_sold_position_is_neither_fetched_nor_listed(db, fetched):
+    """
+    Held only: the daily pass would otherwise spend ~6 Yahoo requests a day on every
+    position ever sold, and the tab would list rows nothing refreshes any more.
+    """
+    add_security(db, 1, "HELD")
+    add_security(db, 2, "SOLD", held=False)
+    add_metrics(db, 2, age_days=30)
+    await db.commit()
+
+    await FundamentalsService(db).sync_fundamentals_data(force_refresh=True)
+    listed = await FundamentalsService(db).get_fundamentals_for_portfolio()
+
+    assert fetched == ["HELD"]
+    assert [row["symbol"] for row in listed] == ["HELD"]
+    # Its stored row stays: buying it back shows the old figures until the next pass.
+    from app.repositories.fundamentals_repository import FundamentalsRepository
+    assert await FundamentalsRepository(db).get_metrics_by_security_id(2) is not None

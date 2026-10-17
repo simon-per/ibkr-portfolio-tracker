@@ -65,7 +65,7 @@ async def sync_stale_analyst_ratings(db: AsyncSession = Depends(get_db)):
     """
     Sync only analyst ratings that are stale (older than 3 days) or missing.
 
-    The scheduler runs the same pass weekly (`fundamentals_refresh`). It only fetches
+    The scheduler runs the same pass daily (`fundamentals_refresh`). It only fetches
     ratings that haven't been updated recently, reducing API calls and respecting rate
     limits.
 

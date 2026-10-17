@@ -249,16 +249,19 @@ WATCHLIST_REFRESH_DAYS = 'tue-sat'
 # ── The fundamentals' slot ────────────────────────────────────────────────────
 #
 # The Fundamentals tab and the analyst ratings refreshed only on a click until
-# 2026-10-14, and had sat untouched since 2026-08-25. Weekly is enough for both:
-# ratios move with prices the tab does not claim to track, and the statements and
-# estimates behind them change a few times a quarter. One pass is roughly six Yahoo
-# requests per company and two per fund (docs/flex-and-sync.md, *Sync schedule*).
+# 2026-10-14, then weekly; since 2026-10-17 daily, at the owner's request — the tab's
+# ratios are read beside prices that move every day. One pass is roughly six Yahoo
+# requests per company and two per fund, **held securities only**
+# (`security_repository.held`), and only rows older than `STALE_AFTER`
+# (docs/flex-and-sync.md, *Sync schedule*).
 #
-# The watchlist's hour on a day the watchlist does not run, so the two never share a
-# pass and the deploy guard learns no new hour. Sunday: no market has moved since the
-# last pass of the week, and it is the furthest day from every IBKR concern.
-FUNDAMENTALS_REFRESH_HOUR = WATCHLIST_REFRESH_HOUR
-FUNDAMENTALS_REFRESH_DAYS = 'sun'
+# Tuesday to Saturday, once after each US close, like the watchlist — and an hour after
+# it, so the two five-endpoint loops never share a pass (a watchlist pass takes minutes,
+# and the shared SYNC_PIPELINE gate would turn an overlap into a skipped day). 05:00
+# still leaves three quiet hours before the 08:00 repricing. A new hour, so the deploy
+# guard's copies in ops/ carry it too (`tests/test_deploy_guard_hours.py`).
+FUNDAMENTALS_REFRESH_HOUR = 5
+FUNDAMENTALS_REFRESH_DAYS = 'tue-sat'
 
 # Every hour at which anything is registered, and so what the deploy guard is checked
 # against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
@@ -281,7 +284,7 @@ CRYPTO_SYNC_HOURS = PORTFOLIO_SYNC_HOURS
 # validator counts the jobs — while `/api/crypto/status` reads the crypto group. The
 # upkeep group is the watchlist refresh: it is not a sync of the portfolio, so it is in
 # neither list and never becomes "the last sync" (it is absent from SCHEDULED_JOB_TYPES
-# and never sets `last_sync_result`). The weekly fundamentals refresh sits there too.
+# and never sets `last_sync_result`). The daily fundamentals refresh sits there too.
 STOCK_JOB_GROUP = "stock"
 CRYPTO_JOB_GROUP = "crypto"
 UPKEEP_JOB_GROUP = "upkeep"
@@ -1513,12 +1516,12 @@ class SchedulerService:
 
     async def fundamentals_refresh_job(self) -> Optional[dict]:
         """
-        The weekly fundamentals and analyst-ratings refresh, at FUNDAMENTALS_REFRESH_HOUR
+        The daily fundamentals and analyst-ratings refresh, at FUNDAMENTALS_REFRESH_HOUR
         on FUNDAMENTALS_REFRESH_DAYS (Europe/Berlin).
 
         Under `SYNC_PIPELINE` like every Yahoo job and the tab's own Sync buttons. The
-        loops are the services' stale passes — their pacing, `yahoo_eligible()` filter
-        and abandon-on-429 latch — and nothing here re-implements any of them. A rate
+        loops are the services' stale passes — their pacing, held-and-`yahoo_eligible()`
+        filter and abandon-on-429 latch — and nothing here re-implements any of them. A rate
         limit in the fundamentals pass skips the ratings pass: it is the same IP.
         """
         return await self._gated_job("fundamentals_refresh", self._fundamentals_refresh_locked)
@@ -1757,8 +1760,8 @@ class SchedulerService:
 
         plus the crypto sync at the same eight slots (CRYPTO_SYNC_HOURS), in its own
         job group, and the watchlist refresh on a slot of its own
-        (WATCHLIST_REFRESH_HOUR, Tuesday to Saturday), in a third — beside the weekly
-        fundamentals refresh (FUNDAMENTALS_REFRESH_HOUR, Sunday).
+        (WATCHLIST_REFRESH_HOUR, Tuesday to Saturday), in a third — beside the daily
+        fundamentals refresh (FUNDAMENTALS_REFRESH_HOUR, Tuesday to Saturday).
 
         Jobs are persisted to `settings.scheduler_jobstore_url` so a restart that
         overlaps a slot recovers it instead of losing it — see MISFIRE_GRACE_SECONDS.
@@ -1917,15 +1920,15 @@ class SchedulerService:
             f'Watchlist Refresh ({WATCHLIST_REFRESH_HOUR:02d}:00 Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
-        # Fundamentals and analyst ratings, weekly, on the watchlist's hour but never
-        # its day — see FUNDAMENTALS_REFRESH_HOUR.
+        # Fundamentals and analyst ratings, on the watchlist's days an hour after it —
+        # see FUNDAMENTALS_REFRESH_HOUR.
         self._add_or_keep(
             'fundamentals_refresh', fundamentals_refresh_job_entry,
             CronTrigger(
                 day_of_week=FUNDAMENTALS_REFRESH_DAYS, hour=FUNDAMENTALS_REFRESH_HOUR,
                 minute=0, timezone='Europe/Berlin',
             ),
-            f'Fundamentals Refresh ({FUNDAMENTALS_REFRESH_HOUR:02d}:00 Europe/Berlin, weekly)',
+            f'Fundamentals Refresh ({FUNDAMENTALS_REFRESH_HOUR:02d}:00 Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
 

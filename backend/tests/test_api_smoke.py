@@ -785,13 +785,14 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     to arrive in a form the browser cannot misread.
     """
     rows = {r["security_id"]: r for r in client.get("/api/fundamentals/portfolio").json()}
-    # USD -> EUR (0.9) -> CHF (0.94), from cached rates only.
-    assert rows[3]["market_cap_base"] == int(3_000_000_000_000 * 0.9 * 0.94)
+    # Held securities only: AAPL was sold, and its stored row is no longer refreshed.
+    assert set(rows) == {1, 2, 4}
+    # EUR -> CHF (0.94), from cached rates only; USD is the watchlist case below.
     assert rows[1]["market_cap_base"] == int(250_000_000_000 * 0.94)
     # No cached TWD rate: absent, never the unconverted figure.
     assert rows[4]["market_cap_base"] is None
     assert rows[2]["market_cap_base"] is None and rows[2]["last_updated"] is None
-    assert rows[3]["last_updated"].endswith("+00:00")
+    assert rows[1]["last_updated"].endswith("+00:00")
 
     status = client.get("/api/fundamentals/status").json()
     assert status["newest_update"].endswith("+00:00")

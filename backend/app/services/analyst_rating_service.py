@@ -1,8 +1,8 @@
 """
 Analyst Rating Service
 Fetches analyst recommendations from Yahoo Finance using yfinance library.
-Refreshed weekly by the scheduler's `fundamentals_refresh` job (FUNDAMENTALS_REFRESH_DAYS
-in `scheduler_service.py`), and on demand.
+Refreshed for held securities by the scheduler's daily `fundamentals_refresh` job
+(FUNDAMENTALS_REFRESH_DAYS in `scheduler_service.py`), and on demand.
 """
 from typing import List, Dict, Optional
 import logging
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
+from app.repositories.security_repository import held
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.analyst_rating import AnalystRating
@@ -200,17 +201,18 @@ class AnalystRatingService:
 
     async def sync_ratings_for_securities(self, security_ids: Optional[List[int]] = None) -> Dict:
         """
-        Sync analyst ratings for specified securities or all securities.
+        Sync analyst ratings for specified securities or every held security.
 
         Args:
-            security_ids: List of security IDs to sync. If None, syncs all.
+            security_ids: List of security IDs to sync. If None, syncs every held one.
 
         Returns:
             Dict with sync statistics
         """
         # Get securities
         # yahoo_eligible() on both branches, including the explicit-ids one: a
-        # caller passing an id is not asserting Yahoo covers it.
+        # caller passing an id is not asserting Yahoo covers it. "All" means all held,
+        # the scope of the scheduled pass.
         if security_ids:
             result = await self.db.execute(
                 select(Security).where(
@@ -219,7 +221,7 @@ class AnalystRatingService:
             )
         else:
             result = await self.db.execute(
-                select(Security).where(yahoo_eligible())
+                select(Security).where(yahoo_eligible(), held())
             )
 
         securities = list(result.scalars().all())
@@ -355,8 +357,11 @@ class AnalystRatingService:
         """
         # yahoo_eligible(): this builds the candidate list for a Yahoo fetch, so an
         # ineligible security must never enter it -- otherwise it is "missing a
-        # rating" forever and re-queued on every pass.
-        result = await self.db.execute(select(Security).where(yahoo_eligible()))
+        # rating" forever and re-queued on every pass. held(): the same scope as the
+        # fundamentals pass it runs after, so a sold position is not re-rated daily.
+        result = await self.db.execute(
+            select(Security).where(yahoo_eligible(), held())
+        )
         all_securities = list(result.scalars().all())
 
         rated_ids = {r.security_id for r in await self.rating_repo.get_all()}
