@@ -1063,35 +1063,21 @@ class SchedulerService:
                 today = date.today()
 
                 # And the currencies a market cap is quoted in (`market_cap.py`): every
-                # read converts them from the cache only, so they must be in it — but only
-                # once theirs is a few days old, not on each of the day's slots.
-                from app.services.market_cap import quoted_currencies_to_warm
-                quoted = await quoted_currencies_to_warm(
-                    db, today, held | currency_service.WARM_CURRENCIES
-                )
+                # read converts them from the cache only, so they must be in it.
+                from app.services.market_cap import quoted_currencies
+                quoted = await quoted_currencies(db)
                 currencies = held | currency_service.WARM_CURRENCIES | quoted
 
                 logger.info(f"Syncing exchange rates for currencies: {sorted(currencies)}")
 
+                # The EUR->base rates for the selectable base currencies (CHF/USD) ride in
+                # the same request, so switching the display currency is instant. Every
+                # ECB pair costs one request between them, and none once current.
                 warmed = await currency_service.warm_rates(
-                    currencies, target_date=today, days_back=days_back
+                    currencies, target_date=today, days_back=days_back,
+                    extra_pairs=[("EUR", base) for base in ("CHF", "USD")],
                 )
                 total_rates = warmed["frankfurter"] + warmed["fallback"]
-
-                # Also keep EUR->base rates fresh for the selectable base currencies
-                # (CHF/USD) so switching the display currency is instant.
-                for base in ("CHF", "USD"):
-                    try:
-                        await currency_service._batch_fetch_rates(
-                            from_currency="EUR",
-                            target_date=today,
-                            to_currency=base,
-                            days_back=days_back
-                        )
-                        logger.info(f"Fetched EUR->{base} exchange rates")
-                        total_rates += 1
-                    except Exception as e:
-                        logger.error(f"Failed to fetch EUR->{base} rates: {e}")
 
                 await db.commit()
 

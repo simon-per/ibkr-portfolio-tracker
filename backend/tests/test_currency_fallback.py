@@ -83,10 +83,15 @@ def install_fake_http(monkeypatch, payload=FALLBACK_PAYLOAD, status_code=200):
     return calls
 
 
-def frankfurter_range_payload(rate, on=None):
-    """Shaped like Frankfurter's /start..end range reply: {rates: {date: {CUR: rate}}}."""
+def frankfurter_range_payload(rate, on=None, currencies=("USD", "CHF")):
+    """
+    Shaped like Frankfurter's EUR-based /start..end range reply, {rates: {date: {CUR:
+    EUR->CUR}}}, which is how every pair is asked for. ``rate`` is the CUR->EUR figure a
+    test expects back, so the reply quotes its inverse.
+    """
     on = on or date.today()
-    return {"rates": {on.isoformat(): {"EUR": rate}}}
+    eur_to_x = float(Decimal(1) / Decimal(str(rate)))
+    return {"rates": {on.isoformat(): {c: eur_to_x for c in currencies}}}
 
 
 def install_routed_http(monkeypatch, frankfurter, fallback):

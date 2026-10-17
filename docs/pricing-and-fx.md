@@ -85,6 +85,42 @@ Tests: `tests/test_mapping_cli.py`, `tests/test_cli_security_lookup.py`.
 Batch-fetches date ranges (one call per ~30 days) and carries the last known rate forward across
 weekends/holidays.
 
+**Every Frankfurter request is EUR-based, and every pair is derived from it** (2026-10-17, issue
+#2). `_fetch_ecb_range` asks `/{start}..{end}?from=EUR&to=A,B,…` — the ECB's own figures — and
+stores each pair in the direction readers match exactly: `X -> EUR` as the inverse, `EUR -> CHF`
+as quoted, any other pair as `table[to] / table[from]`, rounded to the column's 8 decimals.
+`_batch_fetch_rates` is a one-pair call of it, so the warm-up and the on-demand path cannot store
+different numbers for one row. It is also more exact than what it replaced: asked with `X` as the
+base, v1 rounds to **five decimals**, so KRW->EUR came back as `0.00067` against the ECB's
+1/1499.01 = 0.00066711 (JPY `0.00562`, IDR `0.00005`). Rows stored before then keep the rounded
+figure — a published row is never rewritten — so a weak currency's series steps once at the
+switch-over (KRW ~0.4%, JPY ~0.06%); a backfill that overwrote them would be a separate,
+deliberate job.
+
+**The warm-up asks only for what is missing, in one request** (`warm_rates` →
+`_refresh_ecb_pairs`). For each ECB pair — every warmed currency to EUR, plus the `EUR -> CHF/USD`
+rows the base-currency switch reads (`extra_pairs`) — it takes the newest **published** row (a
+fallback row or a carried copy does not count: it is what a fetch must still replace). A pair whose
+newest row is the ECB's last publication day (`_last_ecb_publication_day`: weekdays, not before
+16:00 UTC on the day itself, not on the fixed-date TARGET closing days) is current; if every pair
+is, **no request is made**. Otherwise one request spans from the oldest stale pair's newest day —
+re-asked on purpose, so a reply is never empty while the next day is not out yet and a pair missing
+from it still means "nothing for this currency" — to the target date. A pair with no published row,
+or whose history does not reach the window's start within `WARM_REACH_SLACK_DAYS` (7), gets the
+whole `days_back` window: that is how the crypto book's long backfill still happens. Good Friday and
+Easter Monday are not modelled, so on those two days each slot asks once and gets nothing new. A
+failed request sends every warmed currency to the fallback as before (`frankfurter_failed`, which
+names a failed extra pair as `EUR->CHF`); `frankfurter_requests` in the summary records 0 or 1.
+Before this, each slot sent one 7- or 30-day request per ECB currency plus two for CHF/USD, nearly
+all re-downloading stored rows. Tests: `tests/test_fx_incremental_warm.py`.
+
+**Frankfurter v2 is not used, and is not a drop-in.** Checked 2026-10-17: `/v2/rates` serves daily
+**history** for TWD, CNH, AED and many other non-ECB currencies (`/v2/currencies` lists ~160), so
+it could replace the latest-only fallback for `WARM_CURRENCIES`. But its default answer blends
+providers — KRW on 2026-10-15 was 1504.36 there against the ECB's 1508.48 — so moving the ECB
+currencies would need `providers=ecb` pinned, the non-ECB ones a chosen provider, and the reply
+shape changes to a flat `[{date, base, quote, rate}]` array. A deliberate change, not a URL swap.
+
 Frankfurter republishes the **ECB reference rates**, so its list is fixed at the ECB's 30 + EUR and will
 never include TWD, RUB, QAR or SAR. That is not cosmetic: an unconvertible currency makes
 `reconcile_taxlots()` skip the lot, so the holding vanishes from the portfolio *and* the tax report
@@ -103,12 +139,13 @@ refuses older dates rather than backdating a current rate onto an old tax lot. N
   approximation over a weekend. It preserves the source tag of the row it copies, plus
   `+carried`.
 - **A stand-in gives way to the published quote.** A fallback row or a carried copy fills a date
-  before the ECB has published it; when a later Frankfurter range fetch (the warm-up runs at every
-  slot, 30 days back) returns that date, `_store_published_rate` overwrites the stand-in. Any
+  before the ECB has published it; when a later Frankfurter range fetch returns that date (the
+  warm-up, at every slot, spans from the pair's newest *published* day, so every stand-in after it
+  is covered), `_store_published_rate` overwrites the stand-in. Any
   other row — a hand-loaded rate, an earlier quote — is left alone. Until 2026-10-01 nothing was
   ever replaced: a fallback CHF→EUR of 1.05918 stored for 09-28 (ECB: 1.0566) was carried onto
   09-30 and stayed, and a CHF 4,500 withdrawal read CHF 4,517.50. Rows carried before the tag
-  existed say `frankfurter` and are not recognised; they age out of the 30-day window. Amounts
+  existed say `frankfurter`, count as published, and are never replaced. Amounts
   already persisted at a stand-in rate (`cash_flows.amount_eur`, a lot's `cost_basis_eur`) move
   only when a sync re-writes them.
 - The fallback now also covers currencies that *are* in `SUPPORTED_CURRENCIES` when Frankfurter
@@ -131,10 +168,10 @@ EUR on the newest cached rate only and refuses a stale rate or a minor-unit quot
 page shows the listing's own figure with its code. `tests/test_market_cap_family.py` holds both
 surfaces to it. The rates it needs come from `sync_exchange_rates`, which also warms the **quoted
 currencies** (`quoted_currencies`): every fundamentals row's and watchlist item's `data_currency`,
-plus the owner's safety set `MARKET_CAP_CURRENCIES` (JPY, CNY, HKD, KRW, TWD, GBP). Frankfurter
-costs one request per currency per call and a cap moves far more than a few days of FX, so a quoted
-currency nothing is held in is fetched only once its newest rate is `QUOTED_REFRESH_DAYS` (3) old,
-not on each of the day's slots.
+plus the owner's safety set `MARKET_CAP_CURRENCIES` (JPY, CNY, HKD, KRW, TWD, GBP). They join the
+normal pass at every slot: the warm-up costs one request for all ECB currencies and none once they
+are current, so the `QUOTED_REFRESH_DAYS` throttle that briefly held them to every third day is
+gone.
 
 Tests: `tests/test_currency_fallback.py`, `tests/test_fundamentals_market_cap.py`.
 

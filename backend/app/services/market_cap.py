@@ -16,9 +16,8 @@ None, not a guess, for a minor-unit quote (`GBp`, `ZAc`, `ILA`): whether Yahoo s
 a listing's `marketCap` in the minor or the major unit is unverified here, and the two
 readings are a factor of 100 apart.
 """
-from datetime import date
 from decimal import Decimal
-from typing import Awaitable, Callable, Dict, Iterable, Optional, Set
+from typing import Awaitable, Callable, Dict, Optional, Set
 
 from sqlalchemy import select
 
@@ -30,11 +29,6 @@ MarketCapToBase = Callable[[Optional[int], Optional[str]], Awaitable[Optional[in
 # (the owner, 2026-10-17): the large Asian markets and London, so a name added to the
 # watchlist has a rate the day it lands rather than after the next FX pass notices it.
 MARKET_CAP_CURRENCIES = frozenset({"JPY", "CNY", "HKD", "KRW", "TWD", "GBP"})
-
-# A market cap moves far more in a few days than its exchange rate does, and Frankfurter
-# costs one request per currency per call, so a quoted currency nothing is held in is
-# refreshed once its newest cached rate is this old — not on each of the day's slots.
-QUOTED_REFRESH_DAYS = 3
 
 
 async def market_cap_to_base(db) -> MarketCapToBase:
@@ -93,22 +87,4 @@ async def quoted_currencies(db) -> Set[str]:
             if len(code) == 3 and not MarketDataService._minor_unit(code):
                 out.add(code.upper())
     out.discard("EUR")
-    return out
-
-
-async def quoted_currencies_to_warm(db, today: date, warmed_anyway: Iterable[str]) -> Set[str]:
-    """
-    The quoted currencies `sync_exchange_rates` should add to its pass: those not in
-    ``warmed_anyway`` (held, or warmed on spec) whose newest cached rate to EUR is
-    missing or `QUOTED_REFRESH_DAYS` old.
-    """
-    from app.services.currency_service import CurrencyService
-
-    currency_service = CurrencyService(db)
-    skip = {c.upper() for c in warmed_anyway}
-    out = set()
-    for code in sorted(await quoted_currencies(db) - skip):
-        recent = await currency_service._get_most_recent_rate(code, today, "EUR")
-        if recent is None or (today - recent[2]).days >= QUOTED_REFRESH_DAYS:
-            out.add(code)
     return out

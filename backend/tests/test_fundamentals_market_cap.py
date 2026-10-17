@@ -24,10 +24,8 @@ from app.models.security import Security
 from app.models.watchlist_item import WatchlistItem
 from app.services.market_cap import (
     MARKET_CAP_CURRENCIES,
-    QUOTED_REFRESH_DAYS,
     market_cap_to_base,
     quoted_currencies,
-    quoted_currencies_to_warm,
 )
 
 
@@ -118,21 +116,3 @@ async def test_the_quoted_currencies_are_every_served_cap_plus_the_safety_set(db
     assert MARKET_CAP_CURRENCIES <= quoted
     assert "EUR" not in quoted
     assert "GBp" not in quoted                      # a minor unit is never converted
-
-
-@pytest.mark.asyncio
-async def test_a_quoted_currency_is_warmed_only_when_its_rate_is_days_old(db):
-    """Frankfurter is one request per currency per call: a cap's currency nothing is
-    held in must not cost one on each of the day's slots."""
-    await _quoted_rows(db)
-    today = utcnow().date()
-    _rate(db, "AUD", "EUR", "0.6")                                   # fresh
-    _rate(db, "JPY", "EUR", "0.006", age_days=QUOTED_REFRESH_DAYS)   # due
-    await db.commit()
-
-    to_warm = await quoted_currencies_to_warm(db, today, warmed_anyway={"KRW", "TWD"})
-
-    assert "AUD" not in to_warm
-    assert "JPY" in to_warm
-    assert "CNY" in to_warm                                          # never fetched yet
-    assert not {"KRW", "TWD"} & to_warm                              # warmed anyway
