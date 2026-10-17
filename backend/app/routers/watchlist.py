@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float
 from app.services.watchlist_service import WatchlistService
@@ -22,7 +23,7 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
     """Get all watchlist items."""
     service = WatchlistService(db)
     items = await service.get_all_items()
-    return [_item_to_response(item) for item in items]
+    return await _responses(db, items)
 
 
 @router.post("", response_model=WatchlistItemResponse, status_code=201)
@@ -57,7 +58,7 @@ async def add_to_watchlist(
 
     # Re-fetch with cached data
     item = await repo.get_by_id(item.id)
-    return _item_to_response(item)
+    return (await _responses(db, [item]))[0]
 
 
 @router.patch("/{item_id}", response_model=WatchlistItemResponse)
@@ -88,7 +89,7 @@ async def update_watchlist_item(
         await db.commit()
         await db.refresh(item)
 
-    return _item_to_response(item)
+    return (await _responses(db, [item]))[0]
 
 
 @router.delete("/{item_id}")
@@ -154,7 +155,17 @@ def _compute_peg(item):
     )
 
 
-def _item_to_response(item) -> WatchlistItemResponse:
+async def _responses(db: AsyncSession, items) -> list[WatchlistItemResponse]:
+    """The items as served, each market cap also in the base currency (`market_cap.py`):
+    a KRW or JPY cap printed bare reads like a dollar figure."""
+    to_base = await market_cap_to_base(db)
+    return [
+        _item_to_response(item, await to_base(item.market_cap, item.data_currency))
+        for item in items
+    ]
+
+
+def _item_to_response(item, market_cap_base=None) -> WatchlistItemResponse:
     return WatchlistItemResponse(
         id=item.id,
         yahoo_ticker=item.yahoo_ticker,
@@ -171,6 +182,7 @@ def _item_to_response(item) -> WatchlistItemResponse:
         fwd_eps_growth=item.fwd_eps_growth,
         profit_margins=item.profit_margins,
         market_cap=item.market_cap,
+        market_cap_base=market_cap_base,
         week52_high=item.week52_high,
         week52_low=item.week52_low,
         pct_from_52w_high=item.pct_from_52w_high,

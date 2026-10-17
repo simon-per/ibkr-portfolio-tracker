@@ -117,6 +117,17 @@ forward — an ECB rate is retrievable at any time, so warming it would be waste
 affordable. Without it, TWD only got a rate on days a lot happened to need one, so missing the 7-day
 window once meant the lot was skipped forever. Extending the list is one edit and no extra request.
 
-Tests: `tests/test_currency_fallback.py`.
+**Market caps** (since 2026-10-17). The Fundamentals tab and the Watchlist show a cap in the base
+currency through **one** converter, `app/services/market_cap.market_cap_to_base`. It works through
+EUR on the newest cached rate only and refuses a stale rate or a minor-unit quote, in which case the
+page shows the listing's own figure with its code. `tests/test_market_cap_family.py` holds both
+surfaces to it. The rates it needs come from `sync_exchange_rates`, which also warms the **quoted
+currencies** (`quoted_currencies`): every fundamentals row's and watchlist item's `data_currency`,
+plus the owner's safety set `MARKET_CAP_CURRENCIES` (JPY, CNY, HKD, KRW, TWD, GBP). Frankfurter
+costs one request per currency per call and a cap moves far more than a few days of FX, so a quoted
+currency nothing is held in is fetched only once its newest rate is `QUOTED_REFRESH_DAYS` (3) old,
+not on each of the day's slots.
+
+Tests: `tests/test_currency_fallback.py`, `tests/test_fundamentals_market_cap.py`.
 
 ---

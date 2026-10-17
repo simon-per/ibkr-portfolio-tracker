@@ -11,6 +11,7 @@ import {
   parseLocalDate,
   tooltipValue,
   formatMarketCap,
+  marketCapParts,
   ABSENT,
 } from './utils'
 
@@ -23,6 +24,26 @@ describe('formatMarketCap', () => {
   it('keeps its T / B / M scale', () => {
     expect(formatMarketCap(2.5e12)).toBe('2.5T')
     expect(formatMarketCap(850_000)).toBe('850,000')
+  })
+})
+
+describe('marketCapParts', () => {
+  it('prints the base-currency figure under the base prefix, with no native code', () => {
+    expect(marketCapParts(
+      { market_cap: 1.2e15, market_cap_base: 8.1e11, data_currency: 'KRW' }, 'CHF ',
+    )).toEqual({ figure: 'CHF 810.0B', code: null })
+  })
+
+  it('falls back to the listing’s own figure, labelled, never under the base prefix', () => {
+    expect(marketCapParts(
+      { market_cap: 9e11, market_cap_base: null, data_currency: 'GBp' }, 'CHF ',
+    )).toEqual({ figure: '900.0B', code: 'GBp' })
+  })
+
+  it('is absent when there is no figure at all', () => {
+    expect(marketCapParts(
+      { market_cap: null, market_cap_base: null, data_currency: null }, '€',
+    )).toEqual({ figure: ABSENT, code: null })
   })
 })
 

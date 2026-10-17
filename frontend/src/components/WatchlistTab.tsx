@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { getRatingScore } from '@/lib/analystRating'
 import { ABSENT, cn, formatShortDateTime } from '@/lib/utils'
 import { watchlistFreshness } from '@/lib/watchlistFreshness'
@@ -126,7 +126,11 @@ export function WatchlistTab() {
     })
   }, [items, sortColumn, sortDirection])
 
-  const columns = useMemo(() => watchlistColumns({ formatCurrency }), [formatCurrency])
+  const currencySymbol = useCurrencySymbol()
+  const columns = useMemo(
+    () => watchlistColumns({ formatCurrency, currencySymbol }),
+    [formatCurrency, currencySymbol],
+  )
 
   /**
    * Edit and delete, as one render function used by both the table and the cards —

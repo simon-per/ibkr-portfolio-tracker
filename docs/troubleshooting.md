@@ -205,7 +205,9 @@ decision; read the entry before "fixing" one.
 - **US market holidays are not modelled** by the ET Sunday/Monday IBKR skip: the day after one is
   still attempted, as before.
 - **`market_cap_base` is null for minor-unit quotes** (GBp/ZAc/ILA) until Yahoo's `marketCap`
-  scale for them is verified, so those rows sort last on the Fundamentals tab.
+  scale for them is verified. Those rows show their own figure with the code and sort last, on the
+  Fundamentals tab and the Watchlist alike. So does a cap whose currency has no rate cached in the
+  last 30 days, e.g. a watchlist name added since the last FX pass.
 - **The monthly heatmap's YTD changed method on 2026-10-14**: it is now the months compounded,
   each measured from the previous month-end, so it differs from earlier reads by design.
 - **A heatmap month or YTD cut by the selected range is unmarked on the surface** (owner,

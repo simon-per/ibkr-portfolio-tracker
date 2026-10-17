@@ -19,7 +19,16 @@ from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.app_settings import AppSetting
 from app.models.exchange_rate import ExchangeRate
-from app.services.fundamentals_service import FundamentalsService
+from app.models.fundamental_metrics import FundamentalMetrics
+from app.models.security import Security
+from app.models.watchlist_item import WatchlistItem
+from app.services.market_cap import (
+    MARKET_CAP_CURRENCIES,
+    QUOTED_REFRESH_DAYS,
+    market_cap_to_base,
+    quoted_currencies,
+    quoted_currencies_to_warm,
+)
 
 
 @pytest_asyncio.fixture
@@ -53,7 +62,7 @@ async def test_converts_through_eur_into_the_base(db):
     _rate(db, "EUR", "CHF", "0.94")
     await db.commit()
 
-    to_base = await FundamentalsService(db)._market_cap_to_base()
+    to_base = await market_cap_to_base(db)
 
     assert await to_base(1_000, "USD") == 846
     assert await to_base(1_000, "EUR") == 940
@@ -67,7 +76,7 @@ async def test_a_minor_unit_listing_is_absent_not_guessed(db, currency):
     _rate(db, "GBP", "EUR", "1.17")
     await db.commit()
 
-    to_base = await FundamentalsService(db)._market_cap_to_base()
+    to_base = await market_cap_to_base(db)
 
     assert await to_base(1_000, currency) is None
 
@@ -77,9 +86,53 @@ async def test_a_missing_or_stale_rate_is_absent(db):
     _rate(db, "JPY", "EUR", "0.006", age_days=45)
     await db.commit()
 
-    to_base = await FundamentalsService(db)._market_cap_to_base()
+    to_base = await market_cap_to_base(db)
 
     assert await to_base(1_000, "TWD") is None
     assert await to_base(1_000, "JPY") is None
     assert await to_base(None, "USD") is None
     assert await to_base(1_000, None) is None
+
+
+# ---- The currencies the converter needs, kept in the cache (`sync_exchange_rates`) ----
+
+async def _quoted_rows(db):
+    db.add(Security(id=1, isin="KR7005930003", symbol="005930", description="Samsung",
+                    currency="KRW", conid=1, asset_category="STK", exchange="KSE"))
+    db.add(Security(id=2, isin="GB0000000001", symbol="LSE", description="London",
+                    currency="GBP", conid=2, asset_category="STK", exchange="LSE"))
+    db.add(FundamentalMetrics(security_id=1, data_currency="KRW", last_updated=utcnow()))
+    db.add(FundamentalMetrics(security_id=2, data_currency="GBp", last_updated=utcnow()))
+    db.add(WatchlistItem(yahoo_ticker="BHP.AX", data_currency="AUD"))
+    db.add(WatchlistItem(yahoo_ticker="SAP.DE", data_currency="EUR"))
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_quoted_currencies_are_every_served_cap_plus_the_safety_set(db):
+    await _quoted_rows(db)
+
+    quoted = await quoted_currencies(db)
+
+    assert {"KRW", "AUD"} <= quoted
+    assert MARKET_CAP_CURRENCIES <= quoted
+    assert "EUR" not in quoted
+    assert "GBp" not in quoted                      # a minor unit is never converted
+
+
+@pytest.mark.asyncio
+async def test_a_quoted_currency_is_warmed_only_when_its_rate_is_days_old(db):
+    """Frankfurter is one request per currency per call: a cap's currency nothing is
+    held in must not cost one on each of the day's slots."""
+    await _quoted_rows(db)
+    today = utcnow().date()
+    _rate(db, "AUD", "EUR", "0.6")                                   # fresh
+    _rate(db, "JPY", "EUR", "0.006", age_days=QUOTED_REFRESH_DAYS)   # due
+    await db.commit()
+
+    to_warm = await quoted_currencies_to_warm(db, today, warmed_anyway={"KRW", "TWD"})
+
+    assert "AUD" not in to_warm
+    assert "JPY" in to_warm
+    assert "CNY" in to_warm                                          # never fetched yet
+    assert not {"KRW", "TWD"} & to_warm                              # warmed anyway

@@ -1053,11 +1053,18 @@ class SchedulerService:
                 # rate every day. Warming them costs one extra request for the whole set,
                 # and it is what lets a position in a new currency be valued from the day
                 # its statement lands rather than from the day we happen to notice.
-                currencies = held | currency_service.WARM_CURRENCIES
+                today = date.today()
+
+                # And the currencies a market cap is quoted in (`market_cap.py`): every
+                # read converts them from the cache only, so they must be in it — but only
+                # once theirs is a few days old, not on each of the day's slots.
+                from app.services.market_cap import quoted_currencies_to_warm
+                quoted = await quoted_currencies_to_warm(
+                    db, today, held | currency_service.WARM_CURRENCIES
+                )
+                currencies = held | currency_service.WARM_CURRENCIES | quoted
 
                 logger.info(f"Syncing exchange rates for currencies: {sorted(currencies)}")
-
-                today = date.today()
 
                 warmed = await currency_service.warm_rates(
                     currencies, target_date=today, days_back=days_back
@@ -1086,6 +1093,7 @@ class SchedulerService:
                     "currencies_synced": total_rates,
                     "currencies": sorted(currencies),
                     "held_currencies": sorted(held),
+                    "quoted_currencies": sorted(quoted),
                     "timestamp": utc_iso(utcnow())
                 }
                 logger.info(f"Exchange rate sync completed: {total_rates} currencies updated")

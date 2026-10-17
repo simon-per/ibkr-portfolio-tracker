@@ -74,6 +74,7 @@ const SPARSE_WATCHLIST = {
   fwd_eps_growth: null,
   profit_margins: null,
   market_cap: null,
+  market_cap_base: null,
   analyst_target: null,
   analyst_rating: null,
   analyst_count: null,
@@ -131,7 +132,7 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
     }) as never,
     SPARSE_POSITION,
   ],
-  ['Watchlist', watchlistColumns({ formatCurrency: moneyOrDash }) as never, SPARSE_WATCHLIST],
+  ['Watchlist', watchlistColumns({ formatCurrency: moneyOrDash, currencySymbol: '€' }) as never, SPARSE_WATCHLIST],
   [
     'Look-through',
     lookthroughColumns({ formatCurrency: money }) as never,

@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { cn, formatMarketCap, formatShortDateTime } from '@/lib/utils'
+import { cn, formatShortDateTime, marketCapParts } from '@/lib/utils'
+import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
 import type { FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem } from '@/lib/api'
@@ -118,7 +119,7 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
  * The five `title=` explanations that used to sit on the headers are `hint`s now, so
  * they reach the phone through the glossary instead of dying with the hover.
  */
-function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
+function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, SortKey>[] {
   const peg = (row: FundamentalMetrics) =>
     row.peg_ratio ??
     (row.trailing_pe && row.fwd_eps_growth && row.fwd_eps_growth > 0
@@ -157,20 +158,18 @@ function metricsColumns(): Column<FundamentalMetrics, SortKey>[] {
       sortKey: 'market_cap',
       align: 'right',
       mobile: 'value',
-      cell: (row) =>
-        row.market_cap === null ? (
-          ABSENT
-        ) : (
+      cell: (row) => {
+        // In the base currency; the listing's own figure and code only when it cannot be
+        // converted (`marketCapParts`).
+        const { figure, code } = marketCapParts(row, currencySymbol)
+        return (
           <>
-            {formatMarketCap(row.market_cap)}
+            {figure}
             {/* A text space, not a margin: the copied and read-aloud text was "1191.1TKRW". */}
-            {row.data_currency ? (
-              <span className="text-muted-foreground text-xs">&nbsp;{row.data_currency}</span>
-            ) : (
-              ''
-            )}
+            {code ? <span className="text-muted-foreground text-xs">&nbsp;{code}</span> : ''}
           </>
-        ),
+        )
+      },
     },
     {
       key: 'trailing_pe',
@@ -277,14 +276,15 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
   }
 
   const sorted = useMemo(() => {
-    // Market cap sorts on the base-currency figure: the displayed one is in each
-    // listing's own currency, and ranking raw USD against TWD ranks nothing.
+    // Market cap sorts on the base-currency figure it shows: ranking raw USD against TWD
+    // ranks nothing.
     const sortValue = (row: FundamentalMetrics) =>
       sortKey === 'market_cap' ? row.market_cap_base : row[sortKey]
     return [...stocks].sort((a, b) => compareValues(sortValue(a), sortValue(b), sortDir))
   }, [stocks, sortKey, sortDir])
 
-  const columns = useMemo(() => metricsColumns(), [])
+  const currencySymbol = useCurrencySymbol()
+  const columns = useMemo(() => metricsColumns(currencySymbol), [currencySymbol])
 
   return (
     <>

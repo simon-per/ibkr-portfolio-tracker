@@ -643,8 +643,10 @@ export interface FundamentalMetrics {
   profit_margins: number | null;
   gross_margins: number | null;
   operating_margins: number | null;
+  /** In the listing's own currency (`data_currency`). */
   market_cap: number | null;
-  /** `market_cap` in the base currency, for sorting; null when it cannot be converted. */
+  /** `market_cap` in the base currency, shown and sorted on; null when it cannot be
+   *  converted, and the native figure with its code is shown instead. */
   market_cap_base: number | null;
   number_of_analysts: number | null;
   target_mean_price: number | null;
@@ -710,7 +712,10 @@ export interface WatchlistItem {
   fwd_revenue_growth: number | null;
   fwd_eps_growth: number | null;
   profit_margins: number | null;
+  /** In the listing's own currency (`data_currency`). */
   market_cap: number | null;
+  /** `market_cap` in the base currency; null when it cannot be converted. */
+  market_cap_base: number | null;
   analyst_target: number | null;
   analyst_rating: string | null;
   analyst_count: number | null;

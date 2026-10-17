@@ -1,5 +1,5 @@
 import { displayName } from '@/lib/securityName'
-import { ABSENT, formatMarketCap } from '@/lib/utils'
+import { ABSENT, formatMarketCap, marketCapParts } from '@/lib/utils'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
 
@@ -38,6 +38,7 @@ export type WatchlistSortColumn =
   | 'fwd_revenue_growth'
   | 'fwd_eps_growth'
   | 'profit_margins'
+  | 'market_cap_base'
 
 export const RATING_LABELS: Record<string, string> = {
   strong_buy: 'Strong Buy',
@@ -113,8 +114,10 @@ const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : ABSENT)
 
 export function watchlistColumns(deps: {
   formatCurrency: (value: number | null, currency: string | null) => string
+  /** The base currency's prefix, for the market cap (`useCurrencySymbol`). */
+  currencySymbol: string
 }): Column<WatchlistItem, WatchlistSortColumn>[] {
-  const { formatCurrency } = deps
+  const { formatCurrency, currencySymbol } = deps
 
   return [
     {
@@ -384,13 +387,17 @@ export function watchlistColumns(deps: {
       key: 'market_cap',
       header: 'Mkt Cap',
       shortHeader: 'Market cap',
-      // Not sortable, as before — and its definition used to be `onMouseEnter`-only on
-      // a non-focusable <th>, so it was unreachable by keyboard as well as by touch.
+      // Shown and sorted in the base currency, so a KRW cap no longer reads like dollars;
+      // the listing's own figure and code only when it cannot be converted.
+      sortKey: 'market_cap_base',
       hint: {
-        description: 'Market cap, native currency',
+        description: 'In the base currency',
       },
       cellClassName: 'text-muted-foreground',
-      cell: (i) => formatMarketCap(i.market_cap),
+      cell: (i) => {
+        const { figure, code } = marketCapParts(i, currencySymbol)
+        return code ? `${figure} ${code}` : figure
+      },
     },
   ]
 }

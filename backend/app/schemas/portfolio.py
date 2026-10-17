@@ -351,7 +351,10 @@ class FundamentalMetricsResponse(BaseModel):
     profit_margins: Optional[float] = None
     gross_margins: Optional[float] = None
     operating_margins: Optional[float] = None
-    market_cap: Optional[int] = None
+    market_cap: Optional[int] = None            # the listing's own currency
+    # `market_cap` in the base currency (`app.services.market_cap`); None when no fresh
+    # cached rate exists or the quote is in a minor unit.
+    market_cap_base: Optional[int] = None
     number_of_analysts: Optional[int] = None
     target_mean_price: Optional[float] = None
     target_high_price: Optional[float] = None
@@ -409,7 +412,8 @@ class WatchlistItemResponse(BaseModel):
     fwd_revenue_growth: Optional[float] = None
     fwd_eps_growth: Optional[float] = None
     profit_margins: Optional[float] = None
-    market_cap: Optional[int] = None
+    market_cap: Optional[int] = None            # the listing's own currency
+    market_cap_base: Optional[int] = None       # the same in the base currency, or None
     analyst_target: Optional[float] = None
     analyst_rating: Optional[str] = None
     analyst_count: Optional[int] = None

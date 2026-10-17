@@ -177,3 +177,21 @@ export function formatMarketCap(value: number | null): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`
   return formatCount(value)
 }
+
+/**
+ * A market cap as a table prints it: in the base currency when the server could convert
+ * it (`market_cap_base`, `app/services/market_cap.py`), else the listing's own figure
+ * with its currency code beside it — never a native number under the base currency's
+ * symbol, and never a bare one (a KRW cap printed bare read like dollars). One rule for
+ * the Fundamentals tab and the Watchlist.
+ */
+export function marketCapParts(
+  cap: { market_cap: number | null; market_cap_base: number | null; data_currency: string | null },
+  currencySymbol: string,
+): { figure: string; code: string | null } {
+  if (cap.market_cap_base != null) {
+    return { figure: `${currencySymbol}${formatMarketCap(cap.market_cap_base)}`, code: null }
+  }
+  if (cap.market_cap == null) return { figure: ABSENT, code: null }
+  return { figure: formatMarketCap(cap.market_cap), code: cap.data_currency }
+}

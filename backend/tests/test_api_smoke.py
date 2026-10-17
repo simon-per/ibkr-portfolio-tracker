@@ -48,6 +48,7 @@ from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
+from app.models.watchlist_item import WatchlistItem
 
 TODAY = date.today()
 START = TODAY - timedelta(days=200)
@@ -214,6 +215,10 @@ async def _seed(session: AsyncSession) -> None:
     session.add(FundamentalMetrics(security_id=4, quote_type="EQUITY",
                                    market_cap=10_000_000_000, data_currency="TWD",
                                    last_updated=now))
+    # A watchlist name quoted in USD: its cap is served in the base currency too.
+    session.add(WatchlistItem(yahoo_ticker="NVDA", symbol="NVDA", company_name="NVIDIA",
+                              market_cap=4_000_000_000_000, data_currency="USD",
+                              currency="USD"))
 
     session.add(CashFlow(
         ib_key="C1", flow_date=START + timedelta(days=1), flow_type=DEPOSIT_WITHDRAW,
@@ -790,6 +795,12 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
 
     status = client.get("/api/fundamentals/status").json()
     assert status["newest_update"].endswith("+00:00")
+
+    # The watchlist serves the same conversion (`app/services/market_cap.py`), so a cap
+    # in another currency no longer reaches the page as a bare native number.
+    (nvda,) = client.get("/api/watchlist").json()
+    assert nvda["market_cap"] == 4_000_000_000_000
+    assert nvda["market_cap_base"] == int(4_000_000_000_000 * 0.9 * 0.94)
     ratings = client.get("/api/analyst-ratings/status").json()
     assert ratings["newest_update"].endswith("+00:00")
     assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")

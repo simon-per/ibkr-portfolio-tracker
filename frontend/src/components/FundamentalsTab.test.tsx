@@ -131,6 +131,20 @@ describe('FundamentalsTab figures', () => {
     expect(bodySymbols()).toEqual(['USA', 'TWN', 'GBX'])
   })
 
+  it('shows the market cap in the base currency, and its own figure only when it cannot convert', async () => {
+    renderWith([
+      metrics({ security_id: 1, symbol: 'TWN', market_cap: 1e12, data_currency: 'TWD', market_cap_base: 2.6e10 }),
+      metrics({ security_id: 3, symbol: 'GBX', market_cap: 9e11, data_currency: 'GBp', market_cap_base: null }),
+    ])
+    const table = within((await screen.findAllByRole('table'))[0])
+    // Converted: the base currency's prefix, and no native code beside it.
+    expect(table.getByText('€26.0B')).toBeTruthy()
+    expect(table.queryByText(/TWD/)).toBeNull()
+    // Not convertible: the listing's own figure, labelled with its own code.
+    expect(table.getByText('900.0B')).toBeTruthy()
+    expect(table.getByText(/GBp/)).toBeTruthy()
+  })
+
   it('states how old the data is, and turns amber once a weekly pass was missed', async () => {
     renderWith([metrics({}), metrics({ security_id: 2, symbol: 'BBB', last_updated: null })])
     const line = await screen.findByText(/^Data as of /)

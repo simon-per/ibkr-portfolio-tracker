@@ -1,6 +1,5 @@
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
-from decimal import Decimal
 from app.clock import utcnow
 from app.repositories.sync_run_repository import utc_iso
 import logging
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.repositories.fundamentals_repository import FundamentalsRepository
+from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
@@ -355,56 +355,6 @@ class FundamentalsService:
         """
         return await self.sync_fundamentals_data(force_refresh=False)
 
-    async def _market_cap_to_base(self):
-        """
-        A converter from ``(market_cap, data_currency)`` to the base currency, or None.
-
-        Exists so the tab can **sort** market caps: the stored figure is in each listing's
-        own currency, and ordering 3 trillion USD against 400 billion TWD by the raw
-        number is a ranking of nothing. Two steps through EUR like every other read path
-        (`native_amounts`), on the newest **cached** rate only — a GET must never reach a
-        provider — and refused past `CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS`.
-
-        None, not a guess, for a minor-unit quote (`GBp`, `ZAc`, `ILA`): whether Yahoo
-        states such a listing's `marketCap` in the minor or the major unit is unverified
-        here, and the two readings are a factor of 100 apart.
-        """
-        from app.repositories.app_settings_repository import AppSettingsRepository
-        from app.services.currency_service import CurrencyService
-        from app.services.market_data_service import MarketDataService
-
-        base = await AppSettingsRepository(self.db).get_base_currency()
-        currency_service = CurrencyService(self.db)
-        today = utcnow().date()
-        memo: Dict[tuple, Optional[Decimal]] = {}
-
-        async def cached_rate(from_currency: str, to_currency: str) -> Optional[Decimal]:
-            if from_currency == to_currency:
-                return Decimal(1)
-            key = (from_currency, to_currency)
-            if key not in memo:
-                recent = await currency_service._get_most_recent_rate(
-                    from_currency, today, to_currency
-                )
-                fresh = recent is not None and (
-                    (today - recent[2]).days <= CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS
-                )
-                memo[key] = recent[0] if fresh and recent[0] else None
-            return memo[key]
-
-        async def to_base(market_cap: Optional[int], currency: Optional[str]) -> Optional[int]:
-            if market_cap is None or not currency or MarketDataService._minor_unit(currency):
-                return None
-            if currency == base:
-                return market_cap
-            to_eur = await cached_rate(currency, "EUR")
-            eur_to_base = await cached_rate("EUR", base)
-            if to_eur is None or eur_to_base is None:
-                return None
-            return int(Decimal(market_cap) * to_eur * eur_to_base)
-
-        return to_base
-
     async def get_fundamentals_for_portfolio(self) -> List[Dict]:
         """Return fundamental metrics joined with security info for all securities."""
         result = await self.db.execute(select(Security))
@@ -412,7 +362,8 @@ class FundamentalsService:
 
         all_metrics = await self.repo.get_all_metrics()
         metrics_map = {m.security_id: m for m in all_metrics}
-        market_cap_to_base = await self._market_cap_to_base()
+        # The tab shows and sorts the base-currency figure (`market_cap.py`).
+        to_base = await market_cap_to_base(self.db)
 
         portfolio_data = []
         for sec in securities:
@@ -440,7 +391,7 @@ class FundamentalsService:
                     'gross_margins': m.gross_margins,
                     'operating_margins': m.operating_margins,
                     'market_cap': m.market_cap,
-                    'market_cap_base': await market_cap_to_base(m.market_cap, m.data_currency),
+                    'market_cap_base': await to_base(m.market_cap, m.data_currency),
                     'number_of_analysts': m.number_of_analysts,
                     'target_mean_price': m.target_mean_price,
                     'target_high_price': m.target_high_price,
