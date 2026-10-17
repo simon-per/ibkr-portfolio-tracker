@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
-import { deltaArrow, deltaColor, formatDelta, FLAT_BAND_PCT } from '@/lib/delta'
+import { deltaArrow, deltaColor, deltaTone, formatDelta, FLAT_BAND_PCT } from '@/lib/delta'
 
-interface DeltaChipProps {
+export interface DeltaChipProps {
   /** null renders a dash: the backend says there was no base to grow from. */
   pct: number | null | undefined
   /** What the percentage is measured against, e.g. "vs 2025". */
@@ -18,8 +18,19 @@ interface DeltaChipProps {
    * signal, such as a portfolio's period return.
    */
   flatBand?: number
+  /**
+   * `text` (default) is bare coloured text; `pill` sets the same figure on a soft wash of
+   * its own colour, for a delta that sits beside a headline figure (`KpiCard`'s `delta`).
+   */
+  variant?: 'text' | 'pill'
   title?: string
   className?: string
+}
+
+const PILL: Record<'up' | 'down' | 'flat', string> = {
+  up: 'bg-gain-soft',
+  down: 'bg-loss-soft',
+  flat: 'bg-muted',
 }
 
 /**
@@ -29,7 +40,7 @@ interface DeltaChipProps {
  * because dividend income is lumpy enough that a few percent is noise.
  */
 export function DeltaChip({
-  pct, label, projected, flatBand = FLAT_BAND_PCT, title, className,
+  pct, label, projected, flatBand = FLAT_BAND_PCT, variant = 'text', title, className,
 }: DeltaChipProps) {
   const arrow = deltaArrow(pct, flatBand)
   const hasValue = pct != null && Number.isFinite(pct)
@@ -39,6 +50,7 @@ export function DeltaChip({
       className={cn(
         'inline-flex flex-wrap items-center gap-x-1 text-xs tabular-nums [&>span]:whitespace-nowrap',
         hasValue ? deltaColor(pct, flatBand) : 'text-muted-foreground',
+        variant === 'pill' && ['rounded-full px-2 py-0.5', PILL[deltaTone(pct, flatBand)]],
         className,
       )}
       title={title}

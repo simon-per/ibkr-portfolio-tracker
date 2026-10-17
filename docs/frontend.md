@@ -287,7 +287,8 @@ The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, 
 
 The dashboard canvas and surface colours live in `index.css`; semantic gain, loss and warning text
 keeps using `green-*`, `red-*` and `yellow-*`, with the accessible emerald, rose and amber aliases
-owned by `tailwind.config.js`. Chart series that need literal hex values follow the same palette.
+owned by `tailwind.config.js` — `text-gain` / `text-loss` / `text-warn` are the same steps in one
+class (*Design foundation* below). New chart series take `lib/chartPalette.ts`.
 The page shell is centred at `max-w-[1400px]` so the wide desktop layout remains readable.
 
 `ui/KpiCard.tsx` owns both KPI renderings. A standalone `KpiCard` is used for the summary and hero
@@ -577,3 +578,113 @@ insight. What that settled, on top of the product pass:
   stored, `/api/settings` answers `base_currency: EUR` and `base_currency_unavailable: CHF`
   (docs/pricing-and-fx.md); the header shows *No CHF rate yet — showing EUR.* and every figure is
   labelled EUR, because it is EUR.
+
+## Design foundation (2026-10-17)
+
+The owner asked for a fintech look with icons and colour, keeping every figure. This is the shared
+layer the per-tab restyles build on. **Adopt it rather than re-deriving it**: a hex for a series, a
+hand-rolled icon well or a second gain green is the duplication this repo keeps writing down.
+
+### Tokens (`index.css`, wired in `tailwind.config.js`)
+
+| token | Tailwind | use |
+|---|---|---|
+| `--background` / `--card` / `--raised` | `bg-background` / `bg-card` / `bg-raised` | page, card, one step above a card |
+| `--border` / `--border-strong` | `border-border` / `border-border-strong` | hairline / emphasis |
+| `--shadow-card` / `--shadow-raised` | `shadow-card` / `shadow-raised` | dark mode is an inset top highlight, not a drop shadow |
+| `--gain` `--loss` `--warn` `--info` | `text-gain`, `bg-loss`, … (opacity modifiers work) | state ink |
+| `--gain-soft` … `--info-soft` | `bg-gain-soft`, … | chip and icon-well backgrounds |
+| `--chart-1..10`, `--chart-other` | `bg-chart-1` … `bg-chart-other` (hex: no `/alpha`) | categorical series |
+
+**`text-gain` is `text-green-600 dark:text-green-400` in one class** — same colour, pinned equal
+(with loss = red, warn = yellow) by `lib/chartPalette.test.ts` reading the config itself. The
+older pair stays valid at its ~70 call sites; new code may use either. Every soft well keeps its
+ink >= 4:1 (rose-600 is 4.7:1 on white, so 4.5 is unreachable under any visible wash).
+
+### The chart palette (`lib/chartPalette.ts`)
+
+Ten slots: blue, teal, orange, violet, lime, sky, rose, amber, pink, green. The opening is cool and
+calm; rose and green — which a finance reader takes as down and up — sit at seven and ten.
+Measured with the dataviz skill's model (OKLab ΔE×100, Machado-2009): every adjacent pair clears
+CVD 8 / normal 15 in both themes, the first three clear it all-pairs, all slots sit in the OKLCH
+band. Light lime, sky and amber are 2.2–2.4:1 on white, so a chart using them carries a legend
+(all do). `chartPalette.test.ts` re-measures the values out of `index.css`; `lib/colorScience.ts`
+is the shared measuring code (`benchmarkColors.test.ts` uses it too).
+
+- `chartColor(i)` → `var(--chart-<i+1>)`; past slot ten, negative or non-integer → `CHART_OTHER`.
+  **It never cycles**: an eleventh series in slot one's colour would claim to be the first.
+- `chartColorFor(key, order)` — the key's position in a **stable identity order**, never its rank
+  in the current view (*Colour by identity* above). A key not in the order → Other.
+- `GAIN_COLOR`, `LOSS_COLOR`, `WARN_COLOR`, `INFO_COLOR`, `NEUTRAL_COLOR` (`hsl(var(--…))`) and
+  `signColor(value, flatBand = 0)` for a mark coloured by direction; pass `FLAT_BAND_PCT` for a
+  lumpy series so the bar agrees with its `DeltaChip`.
+
+**Adopting it in an existing colour module.** The `var()` strings work as Recharts `fill`/`stroke`
+and repaint on a theme flip with no JS. Not yet migrated (each area's own call): `--viz-sector-*`
+and `--viz-series-*` (sectors, look-through, dividends, crypto donut — each pinned by
+`dividendColors.test.ts`, so re-pointing them means updating its bars), `BENCHMARK_COLORS` and
+`PORTFOLIO_SERIES_COLORS` (measured by `benchmarkColors.test.ts`), the Allocation donuts, and
+AnalyticsTab's literal `GAIN`/`LOSS` hexes. When a module moves onto the palette, delete its hexes
+and its measurement block rather than keeping both.
+
+### Tone (`lib/tone.ts`)
+
+`Tone = 'neutral' | 'positive' | 'negative' | 'warning' | 'muted'` (`KpiTone` is the same type).
+`TONE_TEXT` (value ink), `TONE_CHIP` (well: `bg-*-soft text-*`; neutral is the brand blue, because
+a grey well reads as disabled), `TONE_MARK` (one `text-*` token for an SVG drawn in
+`currentColor`). Use these maps rather than writing the classes again.
+
+### `KpiCard` (`components/ui/KpiCard.tsx`)
+
+Every prop added here is optional; no call site moved.
+
+| prop | type | notes |
+|---|---|---|
+| `label`, `value` | `ReactNode` | `value={null}` renders the dash, muted, ignoring `tone` |
+| `tone` | `Tone` | value ink |
+| `icon` | `LucideIcon \| ReactNode` | **a component** (`icon={Wallet}`) → tinted well before the label, card *and* tile. An **element** (`icon={<Wallet …/>}`, the old form) → drawn as before, top right of a card, not in a tile |
+| `iconTone` | `Tone` | well tint; defaults to `tone` (muted when the value is absent) |
+| `delta` | `{ pct, label?, projected?, flatBand?, title? }` | a `DeltaChip` pill beside the value. `flatBand` **defaults to 0** here; pass `FLAT_BAND_PCT` for dividends |
+| `sparkline` | `(number \| null)[]` | oldest first; `null` breaks the line; < 2 points draws nothing. Stroke takes the series' own direction (last vs first) |
+| `hero` | `boolean` | the emphasis level: larger figure, two grid tracks, taller sparkline |
+| `tile` | `boolean` | inside a `KpiPanel` |
+| `sub` / `footer` / `title` / `className` | | unchanged |
+
+`Sparkline` (`ui/Sparkline.tsx`, geometry in `lib/sparkline.ts`) is usable alone: `values`,
+`tone?` (omit for direction), `area?` (default on), `label?` (an accessible name; decorative
+without one). Plain SVG, no Recharts — it may sit on the eager Performance tab.
+
+`DeltaChip` gained `variant: 'text' | 'pill'`; the pill's wash and the text colour both read
+`deltaTone(pct, band)` in `lib/delta.ts`, the one up/down/flat decision.
+
+### `SectionHeader` and `CollapsibleCardHeader`
+
+`SectionHeader` (`components/ui/SectionHeader.tsx`): `title`, `icon?: LucideIcon`,
+`iconTone?: Tone`, `description?` (one short line — a figure or a state, never an explanation),
+`aside?` (right-aligned figure or controls; wraps under the title on a phone),
+`variant: 'card' | 'bare'` (`card` is a padded `CardHeader`; `bare` for a heading above a grid).
+Use it in place of `<CardHeader><CardTitle>…` for every card title.
+
+`CollapsibleCardHeader` takes the same `icon` / `iconTone`, plus `aside` — **text only**: it sits
+inside the toggle button, and a control nested in a button is unreachable. `IconChip`
+(`ui/IconChip.tsx`, `size: 'sm' | 'md'`) is the well both draw; it is `aria-hidden`, so the title
+stays the name.
+
+Icon choice: one lucide glyph per meaning, reused across tabs (the tab strip's below is the
+vocabulary for whole sections). Icons label sections and headline KPIs; a dense row of six
+metrics may well go without.
+
+### The shell
+
+- **The section strip** is icon + label pills (`TabsTrigger`'s `icon` prop): the active tab a
+  primary-tinted pill, the rest muted. The `<button>` stays the 44px target `e2e/mobile.mjs`
+  measures and the 36px pill is a span inside it; the focus ring draws on the pill. Arrow keys,
+  roving tabindex and the one-`tablist` rule are unchanged. Icons: Performance `TrendingUp`,
+  Dividends `HandCoins`, Look-through `Layers`, Allocation `ChartPie`, Activity `ArrowLeftRight`,
+  Fundamentals `Gauge`, Watchlist `Eye`, Tax `Landmark`, Forecast `Telescope`.
+- **The strip is sticky with a blur**, and lifts (a soft shadow) only once the page has scrolled
+  (`lib/useScrolled.ts`). Padding sits on the tablist, not its sticky wrapper, so the tablist's own
+  top is 0 while pinned — what `e2e/mobile.mjs` asserts. The header above it scrolls away; on a
+  phone it wraps to two rows and pinning it too would eat a quarter of the screen.
+- **Cards**: `rounded-2xl`, hairline border, `shadow-card` — in dark mode a 1px inset top
+  highlight, which reads as a lit edge where a drop shadow would vanish.

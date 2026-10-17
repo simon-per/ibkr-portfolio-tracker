@@ -1,5 +1,5 @@
 /**
- * One KPI: a label, a value, an optional icon and an optional footnote.
+ * One KPI: a label, a value, and optionally an icon, a delta, a sparkline and a footnote.
  *
  * Extracted because sixteen cards across four files each hand-rolled the same
  * `CardHeader` + `CardTitle className="text-sm font-medium"` + `CardContent` + value +
@@ -12,20 +12,22 @@
  * hairline dividers. The Performance tab's two metric rows used to be twelve separate
  * boxes under five more — seventeen identical rectangles before the first chart — and the
  * panel is what makes the hero row read as the headline and the rest as its detail.
+ *
+ * The design-foundation pass (2026-10-17) added the fintech furniture, every piece optional
+ * so no existing call site moved: `icon` as a lucide component in a tinted well, `delta` as a
+ * `DeltaChip` pill beside the value, and `sparkline` under it. docs/frontend.md, *Design
+ * foundation*, has the API and when to use which.
  */
-import type { ReactNode } from 'react'
+import { isValidElement, type ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { DeltaChip, type DeltaChipProps } from '@/components/DeltaChip'
+import { IconChip } from '@/components/ui/IconChip'
+import { Sparkline } from '@/components/ui/Sparkline'
+import { TONE_TEXT, type Tone } from '@/lib/tone'
 import { ABSENT, cn } from '@/lib/utils'
 
-export type KpiTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'muted'
-
-const TONE_CLASS: Record<KpiTone, string> = {
-  neutral: '',
-  positive: 'text-green-600 dark:text-green-400',
-  negative: 'text-red-600 dark:text-red-400',
-  warning: 'text-yellow-600 dark:text-yellow-400',
-  muted: 'text-muted-foreground',
-}
+export type KpiTone = Tone
 
 /**
  * `text-lg` below `sm`: two cards share 358px, and "CHF 48,561.36" is ~182px in `text-2xl`.
@@ -45,15 +47,29 @@ export interface KpiCardProps {
    */
   value: ReactNode
   tone?: KpiTone
-  icon?: ReactNode
+  /**
+   * A lucide component (`icon={Wallet}`) renders in a tinted well before the label, in both
+   * renderings. A rendered element (`icon={<Wallet className="h-4 w-4" />}`) is the older
+   * form: drawn as-is at the card's top right, and not at all in a tile.
+   */
+  icon?: LucideIcon | ReactNode
+  /** The well's tint. Defaults to `tone`, so a gain figure gets a green well. */
+  iconTone?: KpiTone
+  /**
+   * A change beside the value, as a `DeltaChip` pill. `flatBand` defaults to 0 here — a KPI's
+   * move is signal — where the chip's own default suits lumpy dividend series.
+   */
+  delta?: Omit<DeltaChipProps, 'variant'>
+  /** A tiny trend under the value, oldest first. Gaps (null) break the line. */
+  sparkline?: readonly (number | null | undefined)[]
   /** Footnote, wrapped in the standard muted line. */
   sub?: ReactNode
   /** Arbitrary content in place of `sub` — a `DeltaChip`, say, that must keep its own colours. */
   footer?: ReactNode
   /**
-   * Full width in a 2-up phone grid and two columns on desktop, and never shrinks its
-   * value to `text-lg`. For the one figure the page is actually about; the rest tile
-   * underneath it.
+   * The emphasis level: full width in a 2-up phone grid and two columns on desktop, and never
+   * shrinks its value to `text-lg`. For the one figure the page is actually about; the rest
+   * tile underneath it.
    */
   hero?: boolean
   /** Render without card chrome, for use inside a {@link KpiPanel}. */
@@ -63,20 +79,45 @@ export interface KpiCardProps {
   className?: string
 }
 
+/** A component to draw in a well, as opposed to an element someone already drew. */
+function isIconComponent(icon: KpiCardProps['icon']): icon is LucideIcon {
+  if (typeof icon === 'function') return true
+  // lucide's icons are `forwardRef` objects: tagged with `$$typeof` like an element, but
+  // not one. An array or a string is a ReactNode and stays on the legacy path.
+  return typeof icon === 'object' && icon !== null && !Array.isArray(icon)
+    && '$$typeof' in icon && !isValidElement(icon)
+}
+
 export function KpiCard({
-  label, value, tone = 'neutral', icon, sub, footer, hero, tile, title, className,
+  label, value, tone = 'neutral', icon, iconTone, delta, sparkline, sub, footer, hero, tile,
+  title, className,
 }: KpiCardProps) {
   const absent = value == null
+  const chipIcon = isIconComponent(icon) ? icon : null
+  const legacyIcon = chipIcon ? null : (icon as ReactNode)
+  const chip = chipIcon && (
+    <IconChip icon={chipIcon} tone={iconTone ?? (absent ? 'muted' : tone)} />
+  )
+  const labelRow = (
+    <div className="flex min-w-0 items-center gap-2">
+      {chip}
+      <span className={cn(LABEL_CLASS, 'min-w-0')}>{label}</span>
+    </div>
+  )
   const body = (
     <>
-      <div
-        className={cn(
-          hero ? HERO_VALUE_CLASS : VALUE_CLASS,
-          TONE_CLASS[absent ? 'muted' : tone],
-        )}
-      >
-        {absent ? ABSENT : value}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div
+          className={cn(
+            hero ? HERO_VALUE_CLASS : VALUE_CLASS,
+            TONE_TEXT[absent ? 'muted' : tone],
+          )}
+        >
+          {absent ? ABSENT : value}
+        </div>
+        {delta && <DeltaChip flatBand={0} {...delta} variant="pill" />}
       </div>
+      {sparkline && <Sparkline values={sparkline} className={cn('mt-1', hero ? 'h-12' : 'h-8')} />}
       {footer}
       {sub != null && <p className="mt-1 text-xs leading-snug text-muted-foreground">{sub}</p>}
     </>
@@ -84,9 +125,8 @@ export function KpiCard({
 
   if (tile) {
     return (
-      // No icon in a tile: six glyphs in a row of six figures is decoration, not information.
       <div className={cn('flex flex-col gap-1.5 p-4 sm:p-5', hero && 'col-span-2', className)} title={title}>
-        <span className={LABEL_CLASS}>{label}</span>
+        {chipIcon ? <div className="mb-0.5">{labelRow}</div> : <span className={LABEL_CLASS}>{label}</span>}
         {body}
       </div>
     )
@@ -94,9 +134,16 @@ export function KpiCard({
 
   return (
     <Card className={cn(hero && 'col-span-2', className)} title={title}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className={LABEL_CLASS}>{label}</CardTitle>
-        {icon && <span className="opacity-70">{icon}</span>}
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+        {chipIcon ? (
+          <CardTitle className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+            {chip}
+            <span className="min-w-0">{label}</span>
+          </CardTitle>
+        ) : (
+          <CardTitle className={LABEL_CLASS}>{label}</CardTitle>
+        )}
+        {legacyIcon && <span className="opacity-70">{legacyIcon}</span>}
       </CardHeader>
       <CardContent>{body}</CardContent>
     </Card>

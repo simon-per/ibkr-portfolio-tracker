@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import { Wallet } from 'lucide-react'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from './KpiCard'
 import { ABSENT } from '@/lib/utils'
 
@@ -133,6 +134,80 @@ describe('KpiCard', () => {
     expect(grid?.children).toHaveLength(2)
     expect(grid?.children[0]?.className).toContain('p-4')
     expect(grid?.children[0]?.className).not.toContain('border')
+  })
+})
+
+/**
+ * The design-foundation props (2026-10-17). Every one is optional, so the block above —
+ * written before they existed — is the backwards-compatibility suite; this pins what each
+ * new prop adds and that it adds nothing when absent.
+ */
+describe('KpiCard furniture', () => {
+  it('draws a lucide component in a tinted, decorative well, in both renderings', () => {
+    for (const tile of [false, true]) {
+      const { container, unmount } = render(<KpiCard tile={tile} icon={Wallet} label="Cash" value="CHF 46" />)
+      const well = container.querySelector('span[aria-hidden="true"]')
+      expect(well?.querySelector('svg'), `tile=${tile}`).toBeTruthy()
+      expect(well?.className).toContain('bg-info-soft')
+      // The label is still the name; the icon adds none.
+      expect(screen.getByText('Cash')).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it('tints the well with the tone, an override, or muted for an absent value', () => {
+    const cases = [
+      [{ tone: 'positive' as const }, 'bg-gain-soft'],
+      [{ tone: 'negative' as const }, 'bg-loss-soft'],
+      [{ tone: 'positive' as const, iconTone: 'warning' as const }, 'bg-warn-soft'],
+    ] as const
+    for (const [props, cls] of cases) {
+      const { container, unmount } = render(<KpiCard icon={Wallet} label="x" value="1" {...props} />)
+      expect(container.querySelector('span[aria-hidden="true"]')?.className).toContain(cls)
+      unmount()
+    }
+    const { container } = render(<KpiCard icon={Wallet} label="x" value={null} tone="positive" />)
+    expect(container.querySelector('span[aria-hidden="true"]')?.className).toContain('bg-muted')
+  })
+
+  it('keeps the older element form where it was: top right of a card, absent from a tile', () => {
+    const icon = <svg data-testid="legacy" />
+    const { unmount } = render(<KpiCard icon={icon} label="x" value="1" />)
+    expect(screen.getByTestId('legacy').parentElement?.className).toContain('opacity-70')
+    unmount()
+    render(<KpiCard tile icon={icon} label="x" value="1" />)
+    expect(screen.queryByTestId('legacy')).toBeNull()
+  })
+
+  it('renders a delta as a pill beside the value, coloured by any move at all', () => {
+    // flatBand defaults to 0 here: a 2% move is signal on a KPI, where DeltaChip's own
+    // default band (made for lumpy dividends) would have greyed it out.
+    render(<KpiCard label="Value" value="CHF 82,092" delta={{ pct: 2, label: 'vs 1M' }} />)
+    const chip = screen.getByText('+2%').parentElement
+    expect(chip?.className).toContain('rounded-full')
+    expect(chip?.className).toContain('bg-gain-soft')
+    expect(chip?.className).toContain('text-green-600')
+    expect(screen.getByText('vs 1M')).toBeTruthy()
+  })
+
+  it('renders an absent delta as a dash, never a zero', () => {
+    render(<KpiCard label="Value" value="1" delta={{ pct: null }} />)
+    expect(screen.getByText('—').parentElement?.className).toContain('bg-muted')
+  })
+
+  it('draws a sparkline under the value, and nothing for fewer than two points', () => {
+    const { container, unmount } = render(<KpiCard label="x" value="1" sparkline={[1, 3, 2, 5]} />)
+    expect(container.querySelectorAll('svg path').length).toBeGreaterThan(0)
+    unmount()
+    const lone = render(<KpiCard label="x" value="1" sparkline={[null, 4]} />)
+    expect(lone.container.querySelector('svg')).toBeNull()
+  })
+
+  it('adds none of it when the props are absent', () => {
+    const { container } = render(<KpiCard label="x" value="1" />)
+    expect(container.querySelector('svg')).toBeNull()
+    expect(container.querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(container.querySelector('.rounded-full')).toBeNull()
   })
 })
 

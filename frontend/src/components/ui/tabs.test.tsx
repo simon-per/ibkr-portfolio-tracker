@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Wallet } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs'
 
 /**
@@ -137,5 +138,20 @@ describe('Tabs keyboard operation', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Three' }))
     expect(screen.getByRole('tabpanel').textContent).toBe('Panel three')
+  })
+})
+
+describe('a tab with an icon', () => {
+  it('keeps the label as the name and the icon out of it', () => {
+    render(
+      <Tabs defaultValue="one">
+        <TabsList>
+          <TabsTrigger value="one" icon={Wallet}>One</TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    )
+    const tab = screen.getByRole('tab', { name: 'One' })
+    expect(tab.textContent).toBe('One')
+    expect(tab.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
   })
 })

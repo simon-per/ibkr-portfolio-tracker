@@ -24,9 +24,20 @@ export const FLAT_BAND_PCT = 5
  * pass 0.
  */
 export function deltaColor(pct: number, flatBand: number = FLAT_BAND_PCT): string {
-  if (pct > flatBand) return 'text-green-600 dark:text-green-400'
-  if (pct < -flatBand) return 'text-red-600 dark:text-red-400'
+  const tone = deltaTone(pct, flatBand)
+  if (tone === 'up') return 'text-green-600 dark:text-green-400'
+  if (tone === 'down') return 'text-red-600 dark:text-red-400'
   return 'text-muted-foreground'
+}
+
+/** The one up / down / flat decision; the text colour and the pill's wash both read it. */
+export function deltaTone(
+  pct: number | null | undefined, flatBand: number = FLAT_BAND_PCT,
+): 'up' | 'down' | 'flat' {
+  if (pct == null || !Number.isFinite(pct)) return 'flat'
+  if (pct > flatBand) return 'up'
+  if (pct < -flatBand) return 'down'
+  return 'flat'
 }
 
 /**
@@ -44,8 +55,6 @@ export function formatDelta(pct: number | null | undefined): string {
 
 /** '▲' / '▼' / '' — omitted inside the flat band, where direction is noise. */
 export function deltaArrow(pct: number | null | undefined, flatBand: number = FLAT_BAND_PCT): string {
-  if (pct == null || !Number.isFinite(pct)) return ''
-  if (pct > flatBand) return '▲'
-  if (pct < -flatBand) return '▼'
-  return ''
+  const tone = deltaTone(pct, flatBand)
+  return tone === 'up' ? '▲' : tone === 'down' ? '▼' : ''
 }

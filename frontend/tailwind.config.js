@@ -50,6 +50,21 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        raised: "hsl(var(--raised))",
+        "border-strong": "hsl(var(--border-strong))",
+        // Semantic state (index.css). `text-gain` is `text-green-600 dark:text-green-400`
+        // in one class; the older pair stays valid and the two are pinned equal.
+        gain: { DEFAULT: "hsl(var(--gain))", soft: "hsl(var(--gain-soft))" },
+        loss: { DEFAULT: "hsl(var(--loss))", soft: "hsl(var(--loss-soft))" },
+        warn: { DEFAULT: "hsl(var(--warn))", soft: "hsl(var(--warn-soft))" },
+        info: { DEFAULT: "hsl(var(--info))", soft: "hsl(var(--info-soft))" },
+        // The categorical chart palette, hex per theme in index.css: `bg-chart-3` for a
+        // legend swatch. No opacity modifier (the values are hex, not HSL triples).
+        chart: {
+          1: "var(--chart-1)", 2: "var(--chart-2)", 3: "var(--chart-3)", 4: "var(--chart-4)",
+          5: "var(--chart-5)", 6: "var(--chart-6)", 7: "var(--chart-7)", 8: "var(--chart-8)",
+          9: "var(--chart-9)", 10: "var(--chart-10)", other: "var(--chart-other)",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -61,6 +76,7 @@ export default {
       boxShadow: {
         card: "var(--shadow-card)",
         pop: "var(--shadow-pop)",
+        raised: "var(--shadow-raised)",
       },
     },
   },

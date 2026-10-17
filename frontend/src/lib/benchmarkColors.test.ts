@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   BENCHMARK_COLORS, PORTFOLIO_SERIES_COLORS, UNLISTED_BENCHMARK_COLOR, benchmarkColor,
 } from './benchmarkColors'
+// OKLab ×100 under normal vision — the dataviz validator's "normal-vision floor".
+import { deltaE } from './colorScience'
 
 /**
  * Colour by identity. Both the chart and the picker used to index the palette by the
@@ -45,26 +47,6 @@ describe('benchmarkColor', () => {
     expect(benchmarkColor(`b${BENCHMARK_COLORS.length}`, many)).toBe(BENCHMARK_COLORS[0])
   })
 })
-
-/** OKLab distance ×100 under normal vision — the dataviz validator's "normal-vision floor". */
-function deltaE(a: string, b: string): number {
-  const lab = (hex: string) => {
-    const [r, g, bl] = [1, 3, 5].map((i) => {
-      const c = parseInt(hex.slice(i, i + 2), 16) / 255
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-    })
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl)
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl)
-    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl)
-    return [
-      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
-      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-    ]
-  }
-  const [x, y] = [lab(a), lab(b)]
-  return 100 * Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])
-}
 
 describe('benchmark hues against the value chart\'s own lines', () => {
   const series = Object.values(PORTFOLIO_SERIES_COLORS)

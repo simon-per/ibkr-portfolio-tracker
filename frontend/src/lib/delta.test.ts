@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deltaArrow, deltaColor, formatDelta, FLAT_BAND_PCT } from './delta'
+import { deltaArrow, deltaColor, deltaTone, formatDelta, FLAT_BAND_PCT } from './delta'
 
 describe('formatDelta', () => {
   it('renders a dash rather than a number when there is no base', () => {
@@ -92,5 +92,27 @@ describe('the flat band is a parameter, not a universal claim', () => {
   it('accepts a wider band too', () => {
     expect(deltaColor(8, 10)).toContain('muted-foreground')
     expect(deltaArrow(12, 10)).toBe('▲')
+  })
+})
+
+describe('deltaTone', () => {
+  it('is the one decision the arrow and the colour both read', () => {
+    for (const pct of [-12, -FLAT_BAND_PCT, 0, FLAT_BAND_PCT, FLAT_BAND_PCT + 0.1, 40]) {
+      const tone = deltaTone(pct)
+      expect(deltaArrow(pct)).toBe(tone === 'up' ? '▲' : tone === 'down' ? '▼' : '')
+      expect(deltaColor(pct)).toContain(tone === 'up' ? 'green' : tone === 'down' ? 'red' : 'muted')
+    }
+  })
+
+  it('reads an unknown as flat, never as a direction', () => {
+    expect(deltaTone(null)).toBe('flat')
+    expect(deltaTone(undefined)).toBe('flat')
+    expect(deltaTone(Number.NaN)).toBe('flat')
+  })
+
+  it('honours a zero band, where every move is a direction', () => {
+    expect(deltaTone(0.5, 0)).toBe('up')
+    expect(deltaTone(-0.5, 0)).toBe('down')
+    expect(deltaTone(0, 0)).toBe('flat')
   })
 })

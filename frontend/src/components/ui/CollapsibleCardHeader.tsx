@@ -1,5 +1,7 @@
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, type LucideIcon } from 'lucide-react'
 import { CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { IconChip } from '@/components/ui/IconChip'
+import type { Tone } from '@/lib/tone'
 import { cn } from '@/lib/utils'
 
 interface CollapsibleCardHeaderProps {
@@ -14,6 +16,14 @@ interface CollapsibleCardHeaderProps {
    * not what it operates. Put the same value on the `<CardContent>`.
    */
   contentId: string
+  /** A lucide component in a tinted well before the title, as `SectionHeader` draws it. */
+  icon?: LucideIcon
+  iconTone?: Tone
+  /**
+   * A figure before the chevron (the section's total, say). Text only: it sits inside the
+   * toggle button, and a control nested in a button is unreachable.
+   */
+  aside?: React.ReactNode
   className?: string
 }
 
@@ -36,6 +46,9 @@ export function CollapsibleCardHeader({
   title,
   description,
   contentId,
+  icon,
+  iconTone,
+  aside,
   className,
 }: CollapsibleCardHeaderProps) {
   return (
@@ -55,10 +68,16 @@ export function CollapsibleCardHeader({
         // the way a disclosure row reads in most finance apps.
         className="group flex w-full select-none items-center justify-between gap-3 rounded-2xl px-[var(--card-padding)] py-4 text-left sm:py-5 ring-offset-background transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        <div className="min-w-0 space-y-1">
-          <CardTitle>{title}</CardTitle>
-          {description !== undefined && <CardDescription>{description}</CardDescription>}
+        <div className="flex min-w-0 items-center gap-3">
+          {icon && <IconChip icon={icon} tone={iconTone} size="md" />}
+          <div className="min-w-0 space-y-1">
+            <CardTitle>{title}</CardTitle>
+            {description !== undefined && <CardDescription>{description}</CardDescription>}
+          </div>
         </div>
+        {aside !== undefined && (
+          <span className="ml-auto shrink-0 text-sm font-semibold tabular-nums">{aside}</span>
+        )}
         <span
           aria-hidden="true"
           className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border/80 text-muted-foreground transition-colors group-hover:bg-muted group-hover:text-foreground"

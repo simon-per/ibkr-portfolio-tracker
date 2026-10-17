@@ -62,10 +62,16 @@ import { rangeFor, TIME_RANGES, type TimeRange } from '@/lib/dateRanges'
 import { writeStored } from '@/lib/storage'
 import { BENCHMARKS_KEY, readSelectedBenchmarks } from '@/lib/benchmarkSelection'
 import { formatShortDateTime } from '@/lib/utils'
-import { RefreshCw } from 'lucide-react'
+import {
+  ArrowLeftRight, ChartPie, Eye, Gauge, HandCoins, Landmark, Layers, RefreshCw, Telescope,
+  TrendingUp,
+} from 'lucide-react'
+import { useScrolled } from '@/lib/useScrolled'
+import { cn } from '@/lib/utils'
 
 export function Dashboard() {
   const queryClient = useQueryClient()
+  const scrolled = useScrolled()
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
 
@@ -408,21 +414,29 @@ export function Dashboard() {
           label is the "there is more" cue. `justify-start` matters: a centred flex row
           wider than its scroller overflows on both sides, and the leading overflow is
           unreachable. */}
-      <div className="sticky top-0 z-30 border-b border-border/80 bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      {/* Lifts off the content (a soft shadow) only once there is content under it. The
+          padding sits on the tablist itself, not this wrapper, so the tablist's own top is
+          the viewport's top while pinned — what e2e/mobile.mjs measures. */}
+      <div
+        className={cn(
+          'sticky top-0 z-30 border-b border-border/80 bg-card/95 backdrop-blur-md transition-shadow supports-[backdrop-filter]:bg-card/85',
+          scrolled && 'shadow-[0_10px_24px_-18px_rgb(16_24_40/0.45)] dark:shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]',
+        )}
+      >
         <TabsList
           label="Portfolio sections"
           className="mx-auto w-full max-w-[1400px] justify-start overflow-x-auto px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
         >
           {/* Most-used first, left to right — the owner's order (2026-09-13). */}
-          <TabsTrigger value="performance">Performance</TabsTrigger>
-          <TabsTrigger value="dividends">Dividends</TabsTrigger>
-          <TabsTrigger value="lookthrough">Look-through</TabsTrigger>
-          <TabsTrigger value="allocation">Allocation</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
-          <TabsTrigger value="fundamentals">Fundamentals</TabsTrigger>
-          <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
-          <TabsTrigger value="tax">Tax</TabsTrigger>
-          <TabsTrigger value="forecast">Forecast</TabsTrigger>
+          <TabsTrigger value="performance" icon={TrendingUp}>Performance</TabsTrigger>
+          <TabsTrigger value="dividends" icon={HandCoins}>Dividends</TabsTrigger>
+          <TabsTrigger value="lookthrough" icon={Layers}>Look-through</TabsTrigger>
+          <TabsTrigger value="allocation" icon={ChartPie}>Allocation</TabsTrigger>
+          <TabsTrigger value="activity" icon={ArrowLeftRight}>Activity</TabsTrigger>
+          <TabsTrigger value="fundamentals" icon={Gauge}>Fundamentals</TabsTrigger>
+          <TabsTrigger value="watchlist" icon={Eye}>Watchlist</TabsTrigger>
+          <TabsTrigger value="tax" icon={Landmark}>Tax</TabsTrigger>
+          <TabsTrigger value="forecast" icon={Telescope}>Forecast</TabsTrigger>
         </TabsList>
       </div>
 

@@ -38,6 +38,25 @@
     --radius: 0.75rem;
     --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.03);
     --shadow-pop: 0 12px 32px -8px rgb(16 24 40 / 0.16), 0 4px 8px -4px rgb(16 24 40 / 0.06);
+    /* Raised: one step above a card (a chip well, a sticky bar, a hovered row). */
+    --raised: 0 0% 100%;
+    --shadow-raised: 0 1px 2px 0 rgb(16 24 40 / 0.06), 0 4px 12px -4px rgb(16 24 40 / 0.08);
+    --border-strong: 220 13% 84%;
+
+    /* Semantic state, as HSL triples so `bg-gain/10` works. Each `-soft` is that colour
+       laid over the card at ~9%, solid, for chips and icon wells. `--gain`/`--loss`/`--warn`
+       ARE the `green-600`/`red-600`/`yellow-600` steps tailwind.config.js re-points
+       (emerald-700 / rose-600 / amber-700); `lib/chartPalette.test.ts` pins the two
+       together. Dark `-soft` steps are tuned by eye toward the navy card rather than
+       blended, which turned rose purple. */
+    --gain: 162.9 93.5% 24.3%;
+    --gain-soft: 163.6 31.4% 93.1%;
+    --loss: 346.8 77.2% 49.8%;
+    --loss-soft: 350 90% 97%;
+    --warn: 26 90.5% 37.1%;
+    --warn-soft: 28 51.7% 94.3%;
+    --info: 221.2 83.2% 53.3%;
+    --info-soft: 220 81.8% 95.7%;
   }
 
   .dark {
@@ -60,9 +79,74 @@
     --border: 223 18% 17%;
     --input: 223 18% 19%;
     --ring: 217 91% 62%;
-    /* Elevation reads as a lighter surface on a dark canvas, not as a shadow. */
-    --shadow-card: 0 0 0 0 transparent;
+    /* Elevation reads as a lighter surface on a dark canvas, not as a shadow — plus a
+       hairline of light along the top edge, which is what makes a dark card look lit. */
+    --shadow-card: inset 0 1px 0 0 rgb(255 255 255 / 0.035);
     --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.55);
+    --raised: 224 26% 13.5%;
+    --shadow-raised: inset 0 1px 0 0 rgb(255 255 255 / 0.05), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+    --border-strong: 223 16% 25%;
+
+    /* = `green-400` / `red-400` / `yellow-400` (emerald-400 / rose-400 / amber-400). */
+    --gain: 158.1 64.4% 51.6%;
+    --gain-soft: 166 40% 14.5%;
+    --loss: 351.3 94.5% 71.4%;
+    --loss-soft: 345 32% 17%;
+    --warn: 43.3 96.4% 56.3%;
+    --warn-soft: 40 30% 15.5%;
+    --info: 213.1 93.9% 67.8%;
+    --info-soft: 217.1 37% 18%;
+  }
+}
+
+@layer base {
+  /**
+   * The categorical chart palette — ten slots, in a fixed order, for any chart that colours
+   * a series or a slice by identity. `lib/chartPalette.ts` hands them out (`chartColor(i)`);
+   * nothing else should name a hex for a categorical series.
+   *
+   * Blue, teal, orange, violet, lime, sky, rose, amber, pink, green — chosen so the opening
+   * reads cool and calm and the two hues a finance reader takes as "up" and "down" (rose,
+   * green) sit late, away from the first six. Measured with the method the dataviz skill
+   * documents (OKLab ΔE×100, Machado-2009 protan/deutan at severity 1), against `--card`:
+   *
+   * - every ADJACENT pair (stacks, bars, lines, donut neighbours) clears CVD ΔE 8 and
+   *   normal-vision ΔE 15, in both themes;
+   * - the FIRST THREE clear the same bars all-pairs (a scatter, or a legend read across);
+   * - each slot sits in its theme's OKLCH lightness band with chroma >= 0.10;
+   * - dark: every slot >= 3:1 on the card. Light: lime, sky and amber are 2.2–2.4:1 on
+   *   white, so a chart using them carries a legend or labels (every chart here does).
+   *
+   * `lib/chartPalette.test.ts` reads these values back out of this file and re-measures
+   * them. `--chart-other` is the fold for anything past slot ten — a neutral, never an
+   * eleventh hue.
+   */
+  :root {
+    --chart-1: #2f6dd3;
+    --chart-2: #0f9b89;
+    --chart-3: #e06623;
+    --chart-4: #7c54cd;
+    --chart-5: #9db030;
+    --chart-6: #57b8e3;
+    --chart-7: #d93f61;
+    --chart-8: #e8a418;
+    --chart-9: #d470b5;
+    --chart-10: #269143;
+    --chart-other: #a3abb9;
+  }
+
+  .dark {
+    --chart-1: #437dde;
+    --chart-2: #158c7b;
+    --chart-3: #cb5a1a;
+    --chart-4: #8e71d6;
+    --chart-5: #809024;
+    --chart-6: #3ea1cc;
+    --chart-7: #d14a65;
+    --chart-8: #c48800;
+    --chart-9: #b9579c;
+    --chart-10: #25873e;
+    --chart-other: #4f586a;
   }
 }
 
