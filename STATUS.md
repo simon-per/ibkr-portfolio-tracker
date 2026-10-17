@@ -87,6 +87,11 @@ Only what is still unverified.
   does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
   read off the API, not the database.
 - **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
+- **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
+  is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
+  container log that used to be silent and no `t=` token in any Flex log line. A
+  `Code=1004`–`1009` or "failed after it may have reached IBKR" at 18:00 is now an `error` after
+  one SendRequest, recovered at 00:00 — expected, not a regression.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.

@@ -7,6 +7,20 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — the Flex client never re-sends on a refusal and paces every poll (#5)
+
+Issue #5, rule 2. SendRequest is re-sent only on 1018/1019/1021 and on a transport error that
+provably never left the machine (`_never_reached_ibkr`); 1001 and 1004–1009, a reset, a dropped
+reply or a body timeout fail fast — each could be a failed generation, which is what `1025`
+counts. Both steps go through one GET, never ibflex's `submit_request` (a hidden 3× re-send);
+every GetStatement waits 7 s, the first included, so a slot stays at ≤ 9 requests a minute; a
+1018 while polling waits 60 s and is logged. Measured offline on a fake clock: a 1004–1009 at
+SendRequest costs 1 request where the scheduled budget spent 4; a statement that never becomes
+ready costs 128 retrieves over 900 s instead of 181, a ReadTimeout on every poll 128 instead of
+543. The Flex log lines no longer print the token inside transport errors. Verified: 2115
+backend tests green, no request to IBKR; the first real generation is under STATUS.md *Watch
+after the next deploy*.
+
 ## Shipped 2026-10-17 (night) — the benchmark warm-up reaches Yahoo (#4), /status's stale count
 
 Issue #4: the scheduled warm-up ran inside its job's `SYNC_PIPELINE` gate and re-entered it,
