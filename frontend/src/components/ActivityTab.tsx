@@ -1,18 +1,34 @@
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
-import { Download, ArrowLeftRight, Banknote, Coins, Split } from 'lucide-react'
+import {
+  ArrowDownToLine, ArrowLeftRight, ArrowRightLeft, ArrowUpFromLine, Banknote, Download,
+  CircleDollarSign, HandCoins, Hash, Minus, Plus, ShoppingCart, Split, Tag, Wallet, type LucideIcon,
+} from 'lucide-react'
 import { cn, formatCount, formatCurrency, formatDate } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { rangeFor, type TimeRange } from '@/lib/dateRanges'
+import { isSell, summarizeActivity, type ActivitySummary } from '@/lib/activitySummary'
+import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import type { ActivityKind, ActivityRow } from '@/lib/api'
 
 const PAGE_SIZE = 100
+
+/**
+ * The figures strip needs every row of the window, so a window longer than one page is
+ * fetched once more, whole — up to the endpoint's own `MAX_LIMIT` (activity_service.py),
+ * the ceiling the CSV download uses too. Past it the strip shows dashes rather than a
+ * partial sum. Completeness is judged on the response (`summarizeActivity`), never on this
+ * number, so a server that lowered its ceiling costs the strip its figures, not its truth.
+ */
+const SUMMARY_LIMIT = 500
 
 /** The ranges that make sense for a ledger: a fixed window, not a chart's zoom. */
 const RANGES: TimeRange[] = ['1M', '3M', '6M', 'YTD', '1Y', '2Y', 'ALL']
@@ -24,18 +40,23 @@ const KIND_LABELS: Record<ActivityKind, string> = {
   corporate_action: 'Corporate actions',
 }
 
-const KIND_ICONS: Record<ActivityKind, typeof Coins> = {
+const KIND_ICONS: Record<ActivityKind, LucideIcon> = {
   trade: ArrowLeftRight,
-  dividend: Coins,
+  dividend: HandCoins,
   cash_flow: Banknote,
   corporate_action: Split,
 }
 
 const ALL_KINDS = Object.keys(KIND_LABELS) as ActivityKind[]
 
+/** Money in is gain ink, money out loss ink: the sign is the direction of the cash. */
+function signTone(amount: number | null | undefined): Tone {
+  if (amount == null || amount === 0) return 'muted'
+  return amount > 0 ? 'positive' : 'negative'
+}
+
 function signClass(amount: number | null | undefined): string {
-  if (amount == null || amount === 0) return 'text-muted-foreground'
-  return amount > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+  return TONE_TEXT[signTone(amount)]
 }
 
 function num(value: number | null, digits = 2): string {
@@ -58,47 +79,44 @@ function qty(value: number | null): string {
   return shown.toLocaleString('en-US', { maximumFractionDigits: 6 })
 }
 
+interface ActivityBadge {
+  text: string
+  tone: Tone
+  icon: LucideIcon
+}
+
 /**
- * What a row's subtype badge should say, and how loudly.
+ * What a row's type badge says, its glyph, and its tint.
  *
  * The transfer case is the one that earns its colour: an incoming transfer booked as
  * an ordinary deposit shows up as a portfolio-sized fake contribution, and until this
  * tab existed the only way to eyeball those rows was `manage_cash_flows list` over ssh.
+ * Hence amber for Transfer against blue for Deposit and Withdrawal; `e2e/ledger.mjs`
+ * reads the word, and the icon is decoration beside it.
  */
-function subtypeBadge(row: ActivityRow): { text: string; className: string } {
+function activityBadge(row: ActivityRow): ActivityBadge {
   if (row.kind === 'cash_flow') {
     if (row.counts_as_money_in) {
-      return {
-        text: (row.amount_base ?? 0) < 0 ? 'Withdrawal' : 'Deposit',
-        className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-      }
+      return (row.amount_base ?? 0) < 0
+        ? { text: 'Withdrawal', tone: 'neutral', icon: ArrowUpFromLine }
+        : { text: 'Deposit', tone: 'neutral', icon: ArrowDownToLine }
     }
-    return {
-      text: 'Transfer',
-      className: 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200',
-    }
+    return { text: 'Transfer', tone: 'warning', icon: ArrowRightLeft }
   }
   if (row.kind === 'trade') {
-    const isSell = row.subtype.toUpperCase().includes('SELL')
-    return {
-      text: isSell ? 'Sell' : row.subtype ? 'Buy' : 'Trade',
-      className: isSell
-        ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
-        : 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
-    }
+    if (isSell(row)) return { text: 'Sell', tone: 'negative', icon: Minus }
+    return row.subtype
+      ? { text: 'Buy', tone: 'positive', icon: Plus }
+      : { text: 'Trade', tone: 'neutral', icon: ArrowLeftRight }
   }
   if (row.kind === 'dividend') {
     // Estimates are a gross guess with no withholding — the same honesty flag the tax
     // report and the dividend card carry.
-    const estimated = row.source === 'yfinance_estimate'
-    return {
-      text: estimated ? 'Dividend · est.' : 'Dividend',
-      className: estimated
-        ? 'bg-muted text-muted-foreground'
-        : 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200',
-    }
+    return row.source === 'yfinance_estimate'
+      ? { text: 'Dividend · est.', tone: 'muted', icon: HandCoins }
+      : { text: 'Dividend', tone: 'positive', icon: HandCoins }
   }
-  return { text: sentenceCase(row.subtype) || 'Action', className: 'bg-muted text-muted-foreground' }
+  return { text: sentenceCase(row.subtype) || 'Action', tone: 'muted', icon: Split }
 }
 
 /** `FORWARDSPLIT` → `Forwardsplit`; `CASH RECEIPTS / X` → `Cash receipts / x`. */
@@ -151,7 +169,7 @@ function activityColumns(deps: {
             {row.symbol ? (
               <TickerAvatar symbol={row.symbol} securityId={row.security_id ?? undefined} className="h-8 w-8 text-[10px]" />
             ) : (
-              <span aria-hidden="true" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <span aria-hidden="true" className={cn('inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full', TONE_CHIP.neutral)}>
                 <Banknote className="h-4 w-4" />
               </span>
             )}
@@ -190,9 +208,16 @@ function activityColumns(deps: {
       shortHeader: 'Type',
       mobile: 'badge',
       cell: (row) => {
-        const badge = subtypeBadge(row)
+        const badge = activityBadge(row)
+        const Icon = badge.icon
         return (
-          <span className={cn('whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', badge.className)}>
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+              TONE_CHIP[badge.tone],
+            )}
+          >
+            <Icon aria-hidden="true" className="h-3 w-3 shrink-0" strokeWidth={2.5} />
             {badge.text}
           </span>
         )
@@ -238,6 +263,40 @@ function activityColumns(deps: {
         row.price == null ? '—' : `${num(row.price)} ${row.currency ?? ''}`.trim(),
     },
   ]
+}
+
+/**
+ * What the filtered window adds up to — figures only, each `null` (a dash) unless every row
+ * behind it is in hand (`summarizeActivity`). Signed like the Amount column: money out of
+ * the account is negative and loss-coloured.
+ */
+function ActivityFigures({ summary, currency }: { summary: ActivitySummary; currency: string }) {
+  const money = (value: number | null) =>
+    value == null ? null : `${value > 0 ? '+' : ''}${formatCurrency(value, currency)}`
+  const tone = (value: number | null): Tone => (value == null ? 'neutral' : signTone(value))
+  return (
+    <KpiPanel columns={6}>
+      <KpiCard tile label="Events" icon={Hash} value={formatCount(summary.events)} />
+      <KpiCard tile label="Bought" icon={ShoppingCart} iconTone="neutral"
+        value={money(summary.bought)} tone={tone(summary.bought)} />
+      <KpiCard tile label="Sold" icon={Tag} iconTone="neutral"
+        value={money(summary.sold)} tone={tone(summary.sold)} />
+      <KpiCard tile label="Realized" icon={CircleDollarSign}
+        value={money(summary.realized)} tone={tone(summary.realized)} />
+      <KpiCard tile label="Dividends" icon={HandCoins}
+        value={summary.dividends == null ? null : (
+          <>
+            {money(summary.dividends)}
+            {summary.dividendsEstimated && (
+              <span className="ml-1 text-xs font-normal text-muted-foreground">est.</span>
+            )}
+          </>
+        )}
+        tone={tone(summary.dividends)} />
+      <KpiCard tile label="Net deposits" icon={Wallet} iconTone="neutral"
+        value={money(summary.netDeposits)} tone={tone(summary.netDeposits)} />
+    </KpiPanel>
+  )
 }
 
 /**
@@ -306,17 +365,33 @@ export function ActivityTab() {
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1
 
+  // The whole window, for the figures strip — only when one page does not already hold it
+  // and the endpoint's ceiling would (see SUMMARY_LIMIT). Pure DB, like the page itself.
+  const wholeParams = useMemo(
+    () => ({ ...params, limit: SUMMARY_LIMIT, offset: 0 }),
+    [params]
+  )
+  const pageIsWhole = !!data && data.offset === 0 && data.items.length === data.total
+  const { data: whole } = useQuery({
+    queryKey: ['portfolio', 'activity', wholeParams],
+    queryFn: () => api.getActivity(wholeParams),
+    staleTime: 5 * 60 * 1000,
+    enabled: !!data && !pageIsWhole && data.total <= SUMMARY_LIMIT,
+  })
+  const summary = useMemo(() => {
+    if (!data) return null
+    // A paged `data` sums to dashes by itself; `whole` must describe the same window.
+    return summarizeActivity(!pageIsWhole && whole?.total === data.total ? whole : data, kinds)
+  }, [data, whole, pageIsWhole, kinds])
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <CardTitle>Activity</CardTitle>
-              {data && (
-                <CardDescription>{formatCount(data.total)} events</CardDescription>
-              )}
-            </div>
+        <SectionHeader
+          title="Activity"
+          icon={ArrowLeftRight}
+          description={data ? `${formatDate(data.start_date)} – ${formatDate(data.end_date)}` : undefined}
+          aside={
             <a
               href={api.getActivityCsvUrl({ ...params, limit: undefined, offset: undefined })}
               className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-input bg-card px-3 shadow-sm text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -324,9 +399,11 @@ export function ActivityTab() {
               <Download className="h-4 w-4" />
               Download CSV
             </a>
-          </div>
+          }
+        />
 
-          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="px-[var(--card-padding)] pb-[var(--card-padding)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             {/* Scrolls below `sm` rather than wrapping: seven range buttons come to
                 ~384px against ~308px of card interior at 390px, so wrapping cost a
                 second row — and the kind group below cost two more. The negative
@@ -406,9 +483,12 @@ export function ActivityTab() {
               )}
             </form>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent>
+        <CardContent className="space-y-4">
+          {summary && !isError && (
+            <ActivityFigures summary={summary} currency={data?.base_currency || baseCurrency} />
+          )}
           {isLoading ? (
             <div className="h-[400px] w-full animate-pulse rounded-md bg-muted" />
           ) : isError ? (

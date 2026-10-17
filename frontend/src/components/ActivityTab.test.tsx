@@ -83,3 +83,75 @@ describe('ActivityTab logos', () => {
     expect(images.map((img) => img.getAttribute('src'))).toEqual([api.logoUrl(7, 'abc123')])
   })
 })
+
+function cashRow(amount: number, moneyIn: boolean, key: string): ActivityRow {
+  return {
+    date: '2026-09-01', kind: 'cash_flow', subtype: moneyIn ? 'DEPOSITWITHDRAW' : 'TRANSFER_IN',
+    symbol: null, security_id: null, description: 'CASH', quantity: null, price: null,
+    currency: 'EUR', amount_base: amount, realized_pnl_base: null, counts_as_money_in: moneyIn,
+    source: null, ib_key: key,
+  }
+}
+
+function page(items: ActivityRow[], total = items.length, limit = 100) {
+  return {
+    items, total, limit, offset: 0, base_currency: 'EUR',
+    start_date: '2025-09-12', end_date: '2026-09-12',
+  }
+}
+
+describe('ActivityTab badges', () => {
+  it('badges a transfer amber and a deposit blue, by word and by tint', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    vi.spyOn(api, 'getActivity').mockResolvedValue(page([cashRow(500, true, 'd'), cashRow(9000, false, 't')]))
+    withProviders(<ActivityTab />)
+
+    const transfer = await screen.findByText('Transfer', { selector: 'span' })
+    const deposit = screen.getByText('Deposit', { selector: 'span' })
+    expect(transfer.className).toContain('bg-warn-soft')
+    expect(deposit.className).toContain('bg-info-soft')
+    // The glyph is decoration: the word stays the badge's whole accessible text.
+    expect(transfer.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+})
+
+describe('ActivityTab figures strip', () => {
+  it('sums a window that fits on one page, leaving a transfer out of net deposits', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    const getActivity = vi.spyOn(api, 'getActivity').mockResolvedValue(
+      page([cashRow(500, true, 'd'), cashRow(-200, true, 'w'), cashRow(9000, false, 't')]),
+    )
+    withProviders(<ActivityTab />)
+
+    const tile = (await screen.findByText('Net deposits')).closest('div.flex.flex-col') as HTMLElement
+    expect(tile.textContent).toMatch(/\+€300\.00/)
+    expect(getActivity).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetches the whole window once when it is longer than a page', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    const getActivity = vi.spyOn(api, 'getActivity').mockImplementation(async (params) =>
+      params?.limit === 500
+        ? page([cashRow(500, true, 'a'), cashRow(700, true, 'b')], 2, 500)
+        : page([cashRow(500, true, 'a')], 2),
+    )
+    withProviders(<ActivityTab />)
+
+    await waitFor(() => {
+      const tile = screen.getByText('Net deposits').closest('div.flex.flex-col') as HTMLElement
+      expect(tile.textContent).toMatch(/\+€1,200\.00/)
+    })
+    expect(getActivity.mock.calls.map(([p]) => p?.limit).sort()).toEqual([100, 500])
+  })
+
+  it('shows dashes, and asks nothing more, past the endpoint ceiling', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    const getActivity = vi.spyOn(api, 'getActivity').mockResolvedValue(page([cashRow(500, true, 'a')], 900))
+    withProviders(<ActivityTab />)
+
+    const tile = (await screen.findByText('Net deposits')).closest('div.flex.flex-col') as HTMLElement
+    expect(tile.textContent).toContain('—')
+    expect(screen.getByText('900')).toBeTruthy()
+    expect(getActivity).toHaveBeenCalledTimes(1)
+  })
+})

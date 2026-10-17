@@ -100,7 +100,7 @@ function bodySymbols(): string[] {
   return within(table)
     .getAllByRole('row')
     .slice(1)
-    .map((row) => row.querySelector('td div')?.textContent ?? '')
+    .map((row) => row.querySelector('td .font-medium')?.textContent ?? '')
 }
 
 describe('FundamentalsTab figures', () => {

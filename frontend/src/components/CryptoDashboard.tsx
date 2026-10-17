@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clock, Download, RefreshCw } from 'lucide-react'
 import { api, type CryptoStatusResponse, type CryptoSyncResponse } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { BannerWarning, StatusBanner } from '@/components/ui/StatusBanner'
 import { LazyTabPanel } from '@/components/ui/LazyTabPanel'
 import { cryptoAccess, isAccessRefusal, retryUnlessRefused, type CryptoAccess } from '@/lib/cryptoAccess'
 import { formatCount, formatShortDateTime } from '@/lib/utils'
@@ -152,31 +153,28 @@ export function CryptoSyncMessage({
 }: { data?: CryptoSyncResponse; error?: { message: string } | null }) {
   if (error) {
     return (
-      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950">
-        <p className="text-sm text-red-800 dark:text-red-200">✗ Crypto sync failed: {error.message}</p>
-      </div>
+      <StatusBanner tone="error">
+        <p className="text-red-800 dark:text-red-200">Crypto sync failed: {error.message}</p>
+      </StatusBanner>
     )
   }
   if (!data) return null
   if (data.status !== 'success') {
     const failed = data.status === 'error'
     return (
-      <div className={failed
-        ? 'mt-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950'
-        : 'mt-4 rounded-lg border bg-muted p-4'}
-      >
-        <p className={failed ? 'text-sm text-red-800 dark:text-red-200' : 'text-sm text-muted-foreground'}>
-          {failed ? '✗' : '⏸'} {data.message}
+      <StatusBanner tone={failed ? 'error' : 'idle'}>
+        <p className={failed ? 'text-red-800 dark:text-red-200' : 'text-muted-foreground'}>
+          {data.message}
         </p>
-      </div>
+      </StatusBanner>
     )
   }
   return (
-    <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
-      <p className="text-sm text-green-800 dark:text-green-200">✓ {data.message}</p>
+    <StatusBanner tone="success">
+      <p className="text-green-800 dark:text-green-200">{data.message}</p>
       {data.warnings.map((warning, i) => (
-        <p key={i} className="mt-1 text-sm text-yellow-800 dark:text-yellow-200">⚠ {warning}</p>
+        <BannerWarning key={i}>{warning}</BannerWarning>
       ))}
-    </div>
+    </StatusBanner>
   )
 }

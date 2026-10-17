@@ -2,20 +2,52 @@ import { useCallback, useState, useMemo } from 'react'
 import { compareNullsLast } from '@/lib/nullsLast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { TONE_CHIP, type Tone } from '@/lib/tone'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { getRatingScore } from '@/lib/analystRating'
 import { ABSENT, cn, formatShortDateTime } from '@/lib/utils'
 import { watchlistFreshness } from '@/lib/watchlistFreshness'
 import { DataTable } from '@/components/ui/DataTable'
-import { watchlistColumns, type WatchlistSortColumn } from './watchlistColumns'
+import { scoreTone, watchlistColumns, type WatchlistSortColumn } from './watchlistColumns'
 import type { WatchlistItem } from '@/lib/api'
-import { RefreshCw, Plus, Trash2, Pencil } from 'lucide-react'
+import { Eye, RefreshCw, Plus, Trash2, Pencil } from 'lucide-react'
 
 type SortColumn = WatchlistSortColumn
 type SortDirection = 'asc' | 'desc'
+
+const SCORE_BANDS: { tone: Tone; label: string }[] = [
+  { tone: 'positive', label: 'Score 70+' },
+  { tone: 'warning', label: 'Score 40–69' },
+  { tone: 'negative', label: 'Score under 40' },
+]
+
+/**
+ * How the list splits across the Score column's own three bands (`scoreTone`), as three
+ * counted pills. A stock with no score is in none of them.
+ */
+function ScoreMix({ items }: { items: WatchlistItem[] }) {
+  const counts = SCORE_BANDS.map(band => items.filter(i => scoreTone(i.buy_score) === band.tone).length)
+  if (counts.every(n => n === 0)) return null
+  return (
+    <ul className="flex items-center gap-1" aria-label="Stocks by buy score">
+      <li aria-hidden="true" className="mr-0.5 text-xs text-muted-foreground">Score</li>
+      {SCORE_BANDS.map((band, idx) => (
+        <li
+          key={band.tone}
+          title={band.label}
+          aria-label={`${band.label}: ${counts[idx]}`}
+          className={cn('min-w-7 rounded-full px-2 py-0.5 text-center text-xs font-semibold tabular-nums', TONE_CHIP[band.tone])}
+        >
+          {counts[idx]}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 export function WatchlistTab() {
   const queryClient = useQueryClient()
@@ -221,40 +253,42 @@ export function WatchlistTab() {
     <div className="space-y-6">
       {/* Add Stock + Sync Controls */}
       <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle>Watchlist</CardTitle>
-              {/* On the surface, beside the title: prices and scores with no date read
-                  as today's, and these sat seven weeks old without saying so. */}
-              {freshness && (
-                <p
-                  className={cn(
-                    'mt-1 text-xs',
-                    freshness.stale ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
-                  )}
-                >
-                  {freshness.oldest === null
-                    ? 'No data yet'
-                    : freshness.mixed
-                      ? `Oldest data from ${formatShortDateTime(freshness.oldest)}, newest ${formatShortDateTime(freshness.newest!)}`
-                      : `Data as of ${formatShortDateTime(freshness.oldest)}`}
-                  {freshness.neverSynced > 0 && freshness.oldest !== null &&
-                    ` · ${freshness.neverSynced} never synced`}
-                </p>
+        <SectionHeader
+          title="Watchlist"
+          icon={Eye}
+          // On the surface, beside the title: prices and scores with no date read as
+          // today's, and these sat seven weeks old without saying so.
+          description={freshness ? (
+            <span
+              className={cn(
+                'text-xs',
+                freshness.stale ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
               )}
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-              {syncMutation.isPending ? 'Syncing...' : 'Refresh All'}
-            </Button>
-          </div>
-        </CardHeader>
+              {freshness.oldest === null
+                ? 'No data yet'
+                : freshness.mixed
+                  ? `Oldest data from ${formatShortDateTime(freshness.oldest)}, newest ${formatShortDateTime(freshness.newest!)}`
+                  : `Data as of ${formatShortDateTime(freshness.oldest)}`}
+              {freshness.neverSynced > 0 && freshness.oldest !== null &&
+                ` · ${freshness.neverSynced} never synced`}
+            </span>
+          ) : undefined}
+          aside={
+            <>
+              {items && items.length > 0 && <ScoreMix items={items} />}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+                {syncMutation.isPending ? 'Syncing...' : 'Refresh All'}
+              </Button>
+            </>
+          }
+        />
         <CardContent>
           <form onSubmit={handleAdd} className="flex gap-2">
             <label htmlFor="watchlist-ticker" className="sr-only">

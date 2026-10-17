@@ -18,7 +18,10 @@ export function ModeToggle() {
       value={mode}
       onChange={setMode}
       className="h-9 items-center"
-      buttonClassName="inline-flex h-[30px] items-center px-2.5 sm:px-3"
+      // The active book wears the section strip's active-tab tint (`TabsTrigger`), so the
+      // header's two "you are here" markers read as one language. `aria-pressed:` rather
+      // than a prop: the pressed state is the one SegmentedControl already renders.
+      buttonClassName="inline-flex h-[30px] items-center px-2.5 sm:px-3 aria-pressed:bg-primary/10 aria-pressed:text-primary aria-pressed:shadow-none dark:aria-pressed:bg-primary/15"
       options={[
         {
           value: 'stocks',

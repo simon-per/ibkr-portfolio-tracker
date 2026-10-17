@@ -9,7 +9,7 @@ import {
   sliceRange,
   valueSeries,
 } from './cryptoChart'
-import { OTHER_COLOR } from './dividendColors'
+import { CHART_OTHER, CHART_SLOTS, chartColor } from './chartPalette'
 
 function holding(coin_id: string, value: number | null, weight: number | null,
   over: Partial<CryptoHoldingItem> = {}): CryptoHoldingItem {
@@ -162,9 +162,22 @@ describe('allocationSlices', () => {
     const coins = slices.filter(s => s.kind === 'coin')
     expect(coins).toHaveLength(DONUT_COINS)
     const other = slices.find(s => s.kind === 'other')
-    expect(other?.color).toBe(OTHER_COLOR)
+    expect(other?.color).toBe(CHART_OTHER)
     expect(other?.value).toBe(many.slice(DONUT_COINS).reduce((n, h) => n + (h.value ?? 0), 0))
     expect(slices.some(s => s.key === 'mystery' || s.key === 'noprice')).toBe(false)
+  })
+
+  it('draws on the shared chart palette and folds a rank past its last slot into Other', () => {
+    const order = Array.from({ length: CHART_SLOTS + 1 }, (_, i) => `r${i}`)
+    const slices = allocationSlices(portfolio({
+      // The two largest coins are the 10th and 11th by market-cap rank.
+      holdings: [holding('r10', 500, 50), holding('r9', 400, 40), holding('r0', 100, 10)],
+      color_order: order,
+    }))
+    expect(slices.find(s => s.key === 'r9')?.color).toBe(chartColor(9))
+    expect(slices.find(s => s.key === 'r0')?.color).toBe(chartColor(0))
+    expect(slices.some(s => s.key === 'r10')).toBe(false)
+    expect(slices.find(s => s.kind === 'other')).toMatchObject({ value: 500, color: CHART_OTHER })
   })
 
   it('says an Other share is unknown when a folded coin has no weight', () => {

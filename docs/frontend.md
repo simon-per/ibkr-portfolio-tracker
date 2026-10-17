@@ -740,3 +740,43 @@ re-point onto the general palette would have to redo, and the section above stil
   row's marks (`incl./excl. N est.`, `est.`, a dash for an unrecorded withholding or an unbuilt
   Steuerwert, never 0.00). Dividend rows show logos by ISIN; realized and holdings rows carry no
   ISIN or security id in `/api/tax/report`, so they show monograms.
+
+### Activity, Fundamentals, Watchlist, header, Crypto (2026-10-17)
+
+- **Activity's figures strip** (`lib/activitySummary.ts`): Events, Bought, Sold, Realized,
+  Dividends, Net deposits for the filtered window, signed like the Amount column. **A figure is
+  null unless every row of the window is in hand** — the endpoint pages, and a sum over page one of
+  270 rows looks like the window's total. A window longer than a page is fetched once more at
+  `SUMMARY_LIMIT` (500, the endpoint's `MAX_LIMIT`, the CSV's ceiling); past it the strip shows
+  dashes and asks nothing. A filtered-out kind is a dash, not a zero. Net deposits reads the
+  server's `counts_as_money_in` (a transfer is never money in). Dividends carry `est.` when an
+  estimate is in the sum.
+- **Activity type badges** are `TONE_CHIP` plus a glyph: Buy positive `Plus`, Sell negative
+  `Minus`, Dividend positive `HandCoins` (est. muted), Deposit/Withdrawal neutral
+  `ArrowDownToLine`/`ArrowUpFromLine`, Transfer warning `ArrowRightLeft`, corporate action muted
+  `Split`. The word is the badge's name (`e2e/ledger.mjs` reads it); the glyph is `aria-hidden`.
+  Dividends are `HandCoins` everywhere on the tab now, the Dividends tab's glyph.
+- **Fundamentals**: logos by `security_id` in the metrics table, the ETF chips, the earnings
+  calendar and the surprise history (20px there: one line, so the measured row height holds). The
+  history header carries "N of M beat" (`lib/earningsBeats.ts`; a quarter with no verdict is in
+  neither count). Beat/Met/Miss are `TONE_CHIP` positive/warning/negative.
+  **The history page-size loop is fixed**: the left card is `self-start`, so its height is its
+  content's and not the grid row's; stretched, it fed back until the history showed all ~170
+  rows. `HISTORY_ROW_H` is 41 (measured), not 37.
+- **Watchlist**: rows carry no security id or ISIN, so the avatar is the monogram — no backend
+  change for it. `% 52w High` and `vs MA200` are pills on the column's existing verdict
+  (`signalTone`: ±5 plain, below the high/MA is the good side); no `tabular-nums` on them, which
+  under Inter gives the hyphen a figure's width. The header counts the list into the Score
+  column's three bands (`scoreTone`).
+- **Header**: two groups — currency + Stocks|Crypto, then theme, key, sync — at either edge of a
+  full-width row on a phone, so the second row reads as one toolbar. The currency warnings sit on
+  their own line under the row (beside the select they wrapped into a 12rem column and pushed the
+  toolbar to a third row). The active book in `ModeToggle` takes the active tab's tint through
+  `aria-pressed:` classes.
+- **Sync outcomes** (stock and crypto) are one `ui/StatusBanner`: success/error/idle wash, a
+  lucide glyph in place of `✓ ✗ ⏸ ⚠`, the message in plain ink. Idle is never green or red.
+- **Crypto**: KPI tiles with icons, Today's change as the `delta` pill, a one-month sparkline on
+  Total value from `/history` (gaps stay gaps); section headers on every card and notice. The
+  allocation donut is on `lib/chartPalette.ts` (`chartColorFor` over `color_order`, ten slots, the
+  rest Other) and no longer uses `dividendColors.seriesColor` — whose comment still names the
+  crypto donut, and which the dividends now use alone.

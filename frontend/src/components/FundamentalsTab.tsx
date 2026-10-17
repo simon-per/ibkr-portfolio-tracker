@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import { cn, formatShortDateTime, marketCapParts } from '@/lib/utils'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
@@ -11,9 +14,10 @@ import type {
 } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
-import { RefreshCw } from 'lucide-react'
+import { CalendarClock, Gauge, History, Layers, RefreshCw } from 'lucide-react'
 import { displayName } from '@/lib/securityName'
 import { compareNullsLast } from '@/lib/nullsLast'
+import { earningsBeats } from '@/lib/earningsBeats'
 
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
@@ -42,8 +46,8 @@ function formatRatio(value: number | null): string {
 // Color coding helpers. Only the two ends are coloured: the middle band is plain ink,
 // the watchlist's rule (`colorClass`, `rsiColorClass`). A third, yellow band put a colour
 // on nearly every cell of the table, and a signal on every cell is no signal.
-const GOOD = 'text-green-600 dark:text-green-400'
-const POOR = 'text-red-600 dark:text-red-400'
+const GOOD = TONE_TEXT.positive
+const POOR = TONE_TEXT.negative
 
 function peColor(value: number | null): string {
   if (value === null) return ''
@@ -75,28 +79,61 @@ function marginColor(value: number | null): string {
   return POOR
 }
 
-function surpriseColor(result: string | null): string {
-  if (result === 'Beat') return 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
-  if (result === 'Miss') return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-  if (result === 'Met') return 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300'
-  return 'bg-muted text-muted-foreground'
+function surpriseTone(result: string | null): Tone {
+  if (result === 'Beat') return 'positive'
+  if (result === 'Miss') return 'negative'
+  if (result === 'Met') return 'warning'
+  return 'muted'
 }
 
+/** "12 of 16 beat": the history's headline figure, beside its title. */
+function BeatRate({ data }: { data: EarningsHistoryItem[] }) {
+  const rate = earningsBeats(data)
+  if (!rate) return null
+  return (
+    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium tabular-nums', TONE_CHIP.neutral)}>
+      {rate.beats} of {rate.judged} beat
+    </span>
+  )
+}
+
+/** The symbol with its logo, as every holdings table in the app draws it. */
+function SymbolWithAvatar({ symbol, securityId, sub }: { symbol: string; securityId: number; sub?: string }) {
+  return (
+    <div className={cn('flex items-center', sub ? 'gap-3' : 'gap-2')}>
+      {/* One line: 20px, the line's own height, so the history table's measured row
+          height (`HISTORY_ROW_H`) still holds. */}
+      <TickerAvatar
+        symbol={symbol}
+        securityId={securityId}
+        className={sub ? 'h-8 w-8 text-[10px]' : 'h-5 w-5 text-[8px]'}
+      />
+      <div className="min-w-0">
+        <div className="font-medium">{symbol}</div>
+        {sub && <div className="text-xs text-muted-foreground truncate max-w-[180px]">{sub}</div>}
+      </div>
+    </div>
+  )
+}
 
 function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
   if (etfs.length === 0) return null
   return (
     <div className="mt-6 pt-4 border-t">
-      <h3 className="text-sm font-medium text-muted-foreground mb-3">
-        ETF Holdings ({etfs.length})
-      </h3>
+      <SectionHeader
+        variant="bare"
+        icon={Layers}
+        title={<span className="text-sm">ETF Holdings ({etfs.length})</span>}
+        className="mb-3"
+      />
       <div className="flex flex-wrap gap-2">
         {etfs.map((etf) => (
           <div
             key={etf.security_id}
-            className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm bg-muted/30"
+            className="inline-flex items-center gap-2 rounded-full border bg-muted/30 py-1 pl-1 pr-3 text-sm"
           >
-            <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">
+            <TickerAvatar symbol={etf.symbol} securityId={etf.security_id} className="h-6 w-6 text-[9px]" />
+            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.neutral)}>
               ETF
             </span>
             <span className="font-medium">{etf.symbol}</span>
@@ -134,10 +171,7 @@ function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, Sort
       mobile: 'title',
       cell: (row, view) =>
         view === 'table' ? (
-          <>
-            <div className="font-medium">{row.symbol}</div>
-            <div className="text-xs text-muted-foreground truncate max-w-[180px]">{displayName(row.description)}</div>
-          </>
+          <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} sub={displayName(row.description)} />
         ) : (
           row.symbol
         ),
@@ -305,7 +339,8 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
 const DEFAULT_HISTORY_PAGE_SIZE = 10
 
 /** Row and chrome heights of the DESKTOP table, in px. Only valid for that rendering. */
-const HISTORY_ROW_H = 37
+/** `py-2.5` around a 20px line plus the 1px rule: 41, measured at 1280 (2026-10-17). */
+const HISTORY_ROW_H = 41
 const HISTORY_THEAD_H = 37
 const HISTORY_PAGINATION_H = 48
 const HISTORY_CONTENT_PAD = 24
@@ -354,8 +389,9 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
               {items.map((item) => (
                 <div
                   key={`${item.security_id}-${item.earnings_date}`}
-                  className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm"
+                  className="inline-flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-sm"
                 >
+                  <TickerAvatar symbol={item.symbol} securityId={item.security_id} className="h-6 w-6 text-[9px]" />
                   <span className="font-medium">{item.symbol}</span>
                   {/* No currency symbol: EPS is in the issuer's reporting currency, which
                       this row does not carry, and a `$` on a Nestlé figure is a claim. */}
@@ -396,7 +432,8 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (row) => row.symbol,
+    cell: (row, view) =>
+      view === 'table' ? <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} /> : row.symbol,
   },
   {
     key: 'date',
@@ -427,7 +464,7 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     mobile: 'badge',
     cell: (row) =>
       row.beat_or_miss ? (
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${surpriseColor(row.beat_or_miss)}`}>
+        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', TONE_CHIP[surpriseTone(row.beat_or_miss)])}>
           {row.beat_or_miss}
         </span>
       ) : null,
@@ -602,10 +639,10 @@ export function FundamentalsTab() {
         leftH - rightHeaderH - HISTORY_CONTENT_PAD - HISTORY_THEAD_H - HISTORY_PAGINATION_H
       setHistoryPageSize(Math.max(1, Math.floor(available / HISTORY_ROW_H)))
     }
-    // Known and deliberately not fixed here: above `lg` the grid stretches both cards
-    // to the row height, so a larger page size grows this card, grows the row, grows
-    // leftCard.offsetHeight and feeds back in. It is bounded by data.length, but it is
-    // a loop waiting for the right data.
+    // The left card is `self-start`, so its height is its own content's and never the
+    // grid row's. Stretched, it fed back: a larger page grew this card, grew the row,
+    // grew leftCard.offsetHeight and asked for a larger page again — which ran to the
+    // whole history (~170 rows) once a row measured taller than HISTORY_ROW_H.
     const ro = new ResizeObserver(update)
     ro.observe(leftCard)
     return () => ro.disconnect()
@@ -640,30 +677,32 @@ export function FundamentalsTab() {
 
       {/* Growth Metrics Table */}
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Fundamentals</CardTitle>
+        <SectionHeader
+          title="Fundamentals"
+          icon={Gauge}
+          description={freshness?.oldest || needsSync ? (
+            <>
               {freshness?.oldest && (
-                <p
+                <span
                   className={cn(
-                    'mt-1 text-xs',
+                    'block text-xs',
                     freshness.stale ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground',
                   )}
                 >
                   {freshness.mixed
                     ? `Oldest data from ${formatShortDateTime(freshness.oldest)}, newest ${formatShortDateTime(freshness.newest!)}`
                     : `Data as of ${formatShortDateTime(freshness.oldest)}`}
-                </p>
+                </span>
               )}
               {needsSync && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400">
                   {status.securities_without_data}{' '}
                   {status.securities_without_data === 1 ? 'holding has' : 'holdings have'} no data yet
-                </p>
+                </span>
               )}
-            </div>
-            {needsSync ? (
+            </>
+          ) : undefined}
+          aside={needsSync ? (
               <Button
                 onClick={() => syncMutation.mutate()}
                 disabled={syncMutation.isPending || isSyncing}
@@ -684,8 +723,7 @@ export function FundamentalsTab() {
                 {forceRefreshMutation.isPending || isSyncing ? 'Updating…' : 'Refresh'}
               </Button>
             )}
-          </div>
-        </CardHeader>
+        />
         <CardContent>
           {metricsLoading ? (
             <div className="flex items-center justify-center h-40 text-muted-foreground">Loading...</div>
@@ -710,10 +748,14 @@ export function FundamentalsTab() {
           whole document sideways. The track, not the card, is what has to yield. */}
       <div className="grid gap-6 [&>*]:min-w-0 lg:grid-cols-2">
         {/* Upcoming Earnings */}
-        <Card ref={leftCardRef} className="flex flex-col">
-          <CardHeader>
-            <CardTitle>Upcoming Earnings</CardTitle>
-          </CardHeader>
+        <Card ref={leftCardRef} className="flex flex-col self-start">
+          <SectionHeader
+            title="Upcoming Earnings"
+            icon={CalendarClock}
+            aside={upcomingEarnings && upcomingEarnings.length > 0 ? (
+              <span className="text-xs text-muted-foreground">{upcomingEarnings.length} in 90 days</span>
+            ) : undefined}
+          />
           <CardContent className="flex-1 flex flex-col">
             {earningsLoading ? (
               <div className="flex items-center justify-center h-20 text-muted-foreground">Loading...</div>
@@ -729,9 +771,14 @@ export function FundamentalsTab() {
 
         {/* Earnings Surprise History */}
         <Card className="flex flex-col">
-          <CardHeader ref={rightHeaderRef}>
-            <CardTitle>Earnings Surprise History</CardTitle>
-          </CardHeader>
+          {/* The wrapper carries the ref: the page-size arithmetic measures this header. */}
+          <div ref={rightHeaderRef}>
+            <SectionHeader
+              title="Earnings Surprise History"
+              icon={History}
+              aside={earningsHistory ? <BeatRate data={earningsHistory} /> : undefined}
+            />
+          </div>
           <CardContent className="flex-1 flex flex-col">
             {historyLoading ? (
               <div className="flex items-center justify-center h-20 text-muted-foreground">Loading...</div>

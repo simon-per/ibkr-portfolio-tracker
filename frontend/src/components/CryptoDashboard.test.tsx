@@ -132,9 +132,11 @@ describe('CryptoSyncMessage', () => {
     const { rerender, container } = render(
       <CryptoSyncMessage data={{ type: 'crypto_sync', status: 'skipped', reason: 'not_synced', message: 'CoinStats is still syncing', warnings: [], timestamp: null }} />,
     )
-    expect(screen.getByText(/⏸ CoinStats is still syncing/)).toBeTruthy()
-    expect(container.innerHTML).not.toContain('bg-red-50')
+    expect(screen.getByText(/CoinStats is still syncing/)).toBeTruthy()
+    expect(container.innerHTML).not.toContain('bg-loss-soft')
+    expect(container.innerHTML).not.toContain('bg-gain-soft')
     rerender(<CryptoSyncMessage error={{ message: 'HTTP 429' }} />)
     expect(screen.getByText(/Crypto sync failed: HTTP 429/)).toBeTruthy()
+    expect(container.innerHTML).toContain('bg-loss-soft')
   })
 })

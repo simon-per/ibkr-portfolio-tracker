@@ -58,23 +58,41 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
               {status}
             </div>
           </div>
-          {/* Wraps: at 390px the currency select plus the sync button are wider than
-              the viewport, and without this the whole page scrolled horizontally by
-              ~25px on every tab. */}
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <select
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-              disabled={currencyUpdating}
-              title="Base currency"
-              className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            >
-              {supportedCurrencies.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+          {/* Two groups: what the page shows (currency, book) and what you do to it
+              (theme, key, sync). On a phone the row is full width with the groups at
+              either edge, so its second row reads as one toolbar rather than a ragged
+              left-aligned run. Each group wraps: at 390px the currency select plus the
+              sync button are wider than the viewport, and without wrapping the whole page
+              scrolled horizontally by ~25px on every tab. */}
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <select
+                value={baseCurrency}
+                onChange={(e) => setBaseCurrency(e.target.value)}
+                disabled={currencyUpdating}
+                title="Base currency"
+                className="h-9 rounded-lg border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              >
+                {supportedCurrencies.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ModeToggle />
+            </div>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <AdminKeyButton writeAuthEnabled={health?.write_auth_enabled} />
+              {actions}
+            </div>
+          </div>
+        </div>
+        {/* The currency's problems, on their own line under the controls: squeezed beside
+            the select they wrapped into a 12rem column and pushed the toolbar onto a
+            third row on a phone. */}
+        {(currencyError || currencyIsAssumed || unavailableBase) && (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs leading-tight sm:justify-end">
             {currencyError && (
-              <span className="max-w-[12rem] text-xs leading-tight text-red-600 dark:text-red-400" role="alert">
+              <span className="text-red-600 dark:text-red-400" role="alert">
                 {currencyError}
               </span>
             )}
@@ -83,7 +101,7 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
                 actually uses — and `staleTime: Infinity` makes that stick for the
                 session rather than blink. */}
             {currencyIsAssumed && !currencyError && (
-              <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
+              <span className="text-amber-700 dark:text-amber-400" role="alert">
                 Couldn't read your display currency — showing {baseCurrency}, which may not be it.
               </span>
             )}
@@ -91,16 +109,12 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
                 EUR (`AppSettingsRepository.get_base_currency`) — said here, or the
                 choice would look ignored. */}
             {unavailableBase && !currencyError && !currencyIsAssumed && (
-              <span className="max-w-[12rem] text-xs leading-tight text-amber-700 dark:text-amber-400" role="alert">
+              <span className="text-amber-700 dark:text-amber-400" role="alert">
                 No {unavailableBase} rate yet — showing {baseCurrency}.
               </span>
             )}
-            <ModeToggle />
-            <ThemeToggle />
-            <AdminKeyButton writeAuthEnabled={health?.write_auth_enabled} />
-            {actions}
           </div>
-        </div>
+        )}
         {below}
       </div>
     </div>

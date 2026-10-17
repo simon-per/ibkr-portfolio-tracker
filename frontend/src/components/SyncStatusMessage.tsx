@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { BannerWarning, StatusBanner } from '@/components/ui/StatusBanner'
 import type { SyncResponse } from '@/lib/api'
 import { formatShortDateTime } from '@/lib/utils'
 
@@ -30,9 +31,9 @@ export interface SyncStatusMessageProps {
 export function SyncStatusMessage({ data, error, isPending, onForce }: SyncStatusMessageProps) {
   if (error) {
     return (
-      <div className="mt-4 p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
-        <p className="text-sm text-red-800 dark:text-red-200">✗ Sync failed: {error.message}</p>
-      </div>
+      <StatusBanner tone="error">
+        <p className="text-red-800 dark:text-red-200">Sync failed: {error.message}</p>
+      </StatusBanner>
     )
   }
 
@@ -40,10 +41,10 @@ export function SyncStatusMessage({ data, error, isPending, onForce }: SyncStatu
 
   if (data.status === 'skipped') {
     return (
-      <div className="mt-4 p-4 bg-muted border rounded-lg">
-        <p className="text-sm text-muted-foreground">⏸ Already up to date. {data.message}</p>
+      <StatusBanner tone="idle">
+        <p className="text-muted-foreground">Already up to date. {data.message}</p>
         {data.next_attempt_after && (
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-muted-foreground">
             Next statement available {formatShortDateTime(data.next_attempt_after)}
             {data.last_success_at && <> · last synced {formatShortDateTime(data.last_success_at)}</>}.
           </p>
@@ -60,24 +61,22 @@ export function SyncStatusMessage({ data, error, isPending, onForce }: SyncStatu
             only useful after editing the Flex Query in the IBKR portal
           </span>
         </div>
-      </div>
+      </StatusBanner>
     )
   }
 
   return (
-    <div className="mt-4 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
-      <p className="text-sm text-green-800 dark:text-green-200">
-        ✓ Sync successful! Securities: {data.securities_synced}, Tax Lots: {data.taxlots_synced}
+    <StatusBanner tone="success">
+      <p className="text-green-800 dark:text-green-200">
+        Sync successful! Securities: {data.securities_synced}, Tax Lots: {data.taxlots_synced}
       </p>
       {data.warnings && data.warnings.length > 0 && (
-        <div className="mt-2">
+        <div className="mt-1">
           {data.warnings.map((warning, i) => (
-            <p key={i} className="text-sm text-yellow-800 dark:text-yellow-200">
-              ⚠ {warning}
-            </p>
+            <BannerWarning key={i}>{warning}</BannerWarning>
           ))}
         </div>
       )}
-    </div>
+    </StatusBanner>
   )
 }

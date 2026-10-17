@@ -1,11 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type CryptoHistoryPoint, type CryptoPortfolioResponse } from '@/lib/api'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  ChartLine, ChartPie, CircleAlert, CircleDollarSign, Clock, Coins, Download, KeyRound, Lock,
+  Settings, Wallet, type LucideIcon,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
 import { DataTable } from '@/components/ui/DataTable'
 import type { SortDirection } from '@/components/ui/SortableTh'
 import { KpiCard, KpiCardSkeleton, KpiPanel, type KpiTone } from '@/components/ui/KpiCard'
-import { DeltaChip } from './DeltaChip'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { sliceRange, valueSeries } from '@/lib/cryptoChart'
 import { CryptoHistoryChart } from './CryptoHistoryChart'
 import { CryptoAllocationChart } from './CryptoAllocationChart'
 import { cryptoHoldingColumns, sortCryptoHoldings, type CryptoSortColumn } from './cryptoColumns'
@@ -25,15 +30,15 @@ import { formatCount, formatCurrency as formatIn, formatDate, formatPrice, forma
  */
 
 function Notice({
-  title, children, tone = 'neutral',
-}: { title: string; children: ReactNode; tone?: 'neutral' | 'error' }) {
+  title, icon, children, tone = 'neutral',
+}: { title: string; icon: LucideIcon; children: ReactNode; tone?: 'neutral' | 'error' }) {
   return (
     <Card role={tone === 'error' ? 'alert' : undefined}>
-      <CardHeader>
-        <CardTitle className={tone === 'error' ? 'text-red-700 dark:text-red-400' : undefined}>
-          {title}
-        </CardTitle>
-      </CardHeader>
+      <SectionHeader
+        title={<span className={tone === 'error' ? 'text-red-700 dark:text-red-400' : undefined}>{title}</span>}
+        icon={icon}
+        iconTone={tone === 'error' ? 'negative' : 'neutral'}
+      />
       <CardContent className="space-y-2 text-sm text-muted-foreground">{children}</CardContent>
     </Card>
   )
@@ -60,7 +65,7 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
   const access = cryptoAccess(portfolioQuery.error, serverHasNoKey ? false : undefined)
   if (access === 'server-has-no-key') {
     return (
-      <Notice title="Crypto needs an admin key on the server">
+      <Notice title="Crypto needs an admin key on the server" icon={KeyRound}>
         <p>
           The crypto book is private: its API refuses every request until the server has an
           admin key, so no key in this browser can open it. Set <code>API_ADMIN_TOKEN</code> in{' '}
@@ -72,7 +77,7 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
   }
   if (access === 'locked') {
     return (
-      <Notice title="Crypto is locked">
+      <Notice title="Crypto is locked" icon={Lock}>
         <p>
           Crypto balances are private — unlock them with the admin key (the lock, top right).
         </p>
@@ -81,7 +86,7 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
   }
   if (portfolioQuery.isError) {
     return (
-      <Notice title="Couldn't load the crypto portfolio" tone="error">
+      <Notice title="Couldn't load the crypto portfolio" icon={CircleAlert} tone="error">
         <p>
           {portfolioQuery.error instanceof Error && portfolioQuery.error.message
             ? portfolioQuery.error.message
@@ -102,14 +107,14 @@ export function CryptoOverview({ serverHasNoKey }: { serverHasNoKey: boolean }) 
   const portfolio = portfolioQuery.data
   if (!portfolio.as_of) {
     return portfolio.configured ? (
-      <Notice title="No crypto sync has run yet">
+      <Notice title="No crypto sync has run yet" icon={Download}>
         <p>
           Press <span className="font-medium text-foreground">Sync crypto</span> above to fetch
           your CoinStats portfolio. After that it refreshes at the scheduled sync times.
         </p>
       </Notice>
     ) : (
-      <Notice title="CoinStats is not configured">
+      <Notice title="CoinStats is not configured" icon={Settings}>
         <p>
           Set <code>COIN_STATS_API_KEY</code> and <code>COIN_STATS_SHARE_TOKEN</code> in{' '}
           <code>backend/.env</code> — the share token is the part after <code>/p/</code> in a
@@ -171,6 +176,7 @@ function CryptoBook({
   const warnings = [...new Set([...portfolio.warnings, ...historyWarnings])]
   const plural = (n: number, word: string) => `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`
   const startLabel = formatDate(portfolio.start_date)
+  const trend = useMemo(() => valueSeries(sliceRange(history, '1M')), [history])
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -195,7 +201,11 @@ function CryptoBook({
           <KpiCard
             tile
             label="Total value"
+            icon={Wallet}
             value={money(portfolio.total_value)}
+            // The last month of the history the chart below draws; a day nobody could
+            // price is a gap, never a zero (`valueSeries`).
+            sparkline={trend}
             sub={portfolio.no_price_symbols.length === 0
               ? undefined
               : portfolio.total_value == null
@@ -206,13 +216,15 @@ function CryptoBook({
           <KpiCard
             tile
             label="Today"
+            icon={Clock}
             value={signedMoney(portfolio.change_today)}
             tone={signTone(portfolio.change_today)}
-            footer={<DeltaChip pct={portfolio.change_today_pct} label="since 00:00 UTC" flatBand={0} />}
+            delta={{ pct: portfolio.change_today_pct, label: 'since 00:00 UTC' }}
           />
           <KpiCard
             tile
             label={`P&L since ${startLabel}`}
+            icon={CircleDollarSign}
             value={signedMoney(portfolio.pnl_since_start)}
             tone={signTone(portfolio.pnl_since_start)}
             sub="Price moves only"
@@ -220,6 +232,8 @@ function CryptoBook({
           <KpiCard
             tile
             label="Coins"
+            icon={Coins}
+            iconTone="neutral"
             value={formatCount(portfolio.valued_count)}
             sub={portfolio.unpriced_count > 0 ? `${plural(portfolio.unpriced_count, 'unpriced coin')} left out` : undefined}
           />
@@ -250,9 +264,7 @@ function CryptoBook({
 
       <div className="grid gap-6 lg:grid-cols-3 [&>*]:min-w-0">
         <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Crypto over time</CardTitle>
-          </CardHeader>
+          <SectionHeader title="Crypto over time" icon={ChartLine} />
           <CardContent>
             {historyFailed ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
@@ -266,12 +278,11 @@ function CryptoBook({
           </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle>Allocation</CardTitle>
-            {portfolio.no_price_symbols.length > 0 && (
-              <CardDescription>Priced coins only</CardDescription>
-            )}
-          </CardHeader>
+          <SectionHeader
+            title="Allocation"
+            icon={ChartPie}
+            description={portfolio.no_price_symbols.length > 0 ? 'Priced coins only' : undefined}
+          />
           <CardContent>
             <CryptoAllocationChart portfolio={portfolio} />
           </CardContent>
@@ -279,13 +290,14 @@ function CryptoBook({
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Holdings</CardTitle>
-          <CardDescription>
-            {plural(portfolio.valued_count, 'coin')}
-            {portfolio.unpriced_count > 0 ? `, ${plural(portfolio.unpriced_count, 'unpriced')}` : ''}
-          </CardDescription>
-        </CardHeader>
+        <SectionHeader
+          title="Holdings"
+          icon={Coins}
+          description={
+            plural(portfolio.valued_count, 'coin')
+            + (portfolio.unpriced_count > 0 ? `, ${plural(portfolio.unpriced_count, 'unpriced')}` : '')
+          }
+        />
         <CardContent className="space-y-3">
           <DataTable
             rows={rows}

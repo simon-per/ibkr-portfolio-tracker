@@ -1,7 +1,10 @@
+import type { ReactNode } from 'react'
 import { displayName } from '@/lib/securityName'
-import { ABSENT, formatMarketCap, marketCapParts } from '@/lib/utils'
+import { ABSENT, cn, formatMarketCap, marketCapParts } from '@/lib/utils'
+import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
 
 /**
  * The watchlist's eighteen columns, described once for both renderings.
@@ -57,11 +60,38 @@ export function formatPercent(value: number | null): string {
 // lives in lib/utils.ts, because it was byte-identical here and in FundamentalsTab.
 export { formatMarketCap }
 
-export function colorClass(value: number | null, invertGood?: boolean): string {
-  if (value === null) return 'text-muted-foreground'
+/**
+ * The watchlist's verdict on a percentage: inside ±5 it is plain, outside it good or poor.
+ * Below the 52-week high or the MA200 is the *good* side (`invertGood` off) — a watchlist
+ * is scanned for entries — and growth is good upward (`invertGood` on).
+ */
+export function signalTone(value: number | null, invertGood?: boolean): Tone {
+  if (value === null) return 'muted'
+  if (Math.abs(value) < 5) return 'neutral'
   const isGood = invertGood ? value > 0 : value < 0
-  if (Math.abs(value) < 5) return 'text-foreground'
-  return isGood ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+  return isGood ? 'positive' : 'negative'
+}
+
+export function colorClass(value: number | null, invertGood?: boolean): string {
+  const tone = signalTone(value, invertGood)
+  return tone === 'neutral' ? 'text-foreground' : TONE_TEXT[tone]
+}
+
+/** A distance as a pill on its verdict's wash; a dash, unwashed, when unknown. */
+function signalPill(value: number | null): ReactNode {
+  const tone = signalTone(value)
+  if (tone === 'muted') return formatPercent(value)
+  return (
+    <span
+      className={cn(
+        // No `tabular-nums`: under it Inter gives the hyphen a figure's width (KpiCard).
+        'inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+        tone === 'neutral' ? 'bg-muted text-foreground' : TONE_CHIP[tone],
+      )}
+    >
+      {formatPercent(value)}
+    </span>
+  )
 }
 
 export function rsiColorClass(rsi: number | null): string {
@@ -71,18 +101,11 @@ export function rsiColorClass(rsi: number | null): string {
   return 'text-foreground'
 }
 
-export function scoreColorClass(score: number | null): string {
-  if (score === null) return 'text-muted-foreground'
-  if (score >= 70) return 'text-green-600 dark:text-green-400'
-  if (score >= 40) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
-}
-
-export function scoreBgClass(score: number | null): string {
-  if (score === null) return 'bg-muted'
-  if (score >= 70) return 'bg-green-100 dark:bg-green-900/40'
-  if (score >= 40) return 'bg-yellow-100 dark:bg-yellow-900/40'
-  return 'bg-red-100 dark:bg-red-900/40'
+export function scoreTone(score: number | null): Tone {
+  if (score === null) return 'muted'
+  if (score >= 70) return 'positive'
+  if (score >= 40) return 'warning'
+  return 'negative'
 }
 
 export function ratingColorClass(rating: string | null): string {
@@ -131,21 +154,25 @@ export function watchlistColumns(deps: {
         view === 'cards' ? (
           i.symbol || i.yahoo_ticker
         ) : (
-          <div>
-            <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
-            <div className="text-xs text-muted-foreground truncate max-w-[140px]">
-              {displayName(i.company_name) || i.yahoo_ticker}
-            </div>
-            {(i.notes || i.target_price !== null) && (
-              <div className="text-[10px] text-muted-foreground/70 mt-0.5 space-x-2">
-                {i.notes && (
-                  <span className="truncate inline-block max-w-[100px] align-bottom">{i.notes}</span>
-                )}
-                {i.target_price !== null && (
-                  <span>TP: {formatCurrency(i.target_price, i.data_currency)}</span>
-                )}
+          // No security id or ISIN on a watchlist row, so the avatar is the monogram.
+          <div className="flex items-center gap-3">
+            <TickerAvatar symbol={i.symbol || i.yahoo_ticker} className="h-8 w-8 text-[10px]" />
+            <div className="min-w-0">
+              <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
+              <div className="text-xs text-muted-foreground truncate max-w-[140px]">
+                {displayName(i.company_name) || i.yahoo_ticker}
               </div>
-            )}
+              {(i.notes || i.target_price !== null) && (
+                <div className="text-[10px] text-muted-foreground/70 mt-0.5 space-x-2">
+                  {i.notes && (
+                    <span className="truncate inline-block max-w-[100px] align-bottom">{i.notes}</span>
+                  )}
+                  {i.target_price !== null && (
+                    <span>TP: {formatCurrency(i.target_price, i.data_currency)}</span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         ),
     },
@@ -187,7 +214,10 @@ export function watchlistColumns(deps: {
       cell: (i) =>
         i.buy_score !== null ? (
           <span
-            className={`inline-flex items-center justify-center w-9 h-6 rounded text-xs font-bold ${scoreColorClass(i.buy_score)} ${scoreBgClass(i.buy_score)}`}
+            className={cn(
+              'inline-flex h-6 w-9 items-center justify-center rounded-full text-xs font-bold tabular-nums',
+              TONE_CHIP[scoreTone(i.buy_score)],
+            )}
           >
             {Math.round(i.buy_score)}
           </span>
@@ -215,7 +245,7 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Distance below 52-week high',
       },
-      cell: (i) => formatPercent(i.pct_from_52w_high),
+      cell: (i) => signalPill(i.pct_from_52w_high),
     },
     {
       key: 'analyst_rating',
@@ -271,7 +301,7 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Distance from 200-day MA',
       },
-      cell: (i) => formatPercent(i.pct_from_ma200),
+      cell: (i) => signalPill(i.pct_from_ma200),
     },
     {
       key: 'peg_ratio',

@@ -1,6 +1,6 @@
 import type { CryptoHistoryPoint, CryptoPortfolioResponse } from './api'
 import { toLocalISODate } from './dateRanges'
-import { hasIdentity, OTHER_COLOR, seriesColor } from './dividendColors'
+import { CHART_OTHER, CHART_SLOTS, chartColorFor } from './chartPalette'
 import { parseLocalDate } from './utils'
 
 /**
@@ -96,6 +96,12 @@ export interface AllocationSlice {
 /** Coins drawn as themselves in the donut; the rest fold into Other. */
 export const DONUT_COINS = 7
 
+/** Whether a coin's identity rank has a palette slot of its own (else it is Other). */
+function hasSlot(key: string, order: readonly string[]): boolean {
+  const rank = order.indexOf(key)
+  return rank >= 0 && rank < CHART_SLOTS
+}
+
 /**
  * The donut's slices: the largest coins that have a colour identity, then Other.
  *
@@ -105,7 +111,10 @@ export const DONUT_COINS = 7
  *
  * Colour is by identity (`color_order`, CoinStats' market-cap rank), so a coin keeps its
  * colour when another overtakes it by value. A large coin whose rank falls outside the
- * palette's identities folds into Other rather than being drawn in Other's grey beside it.
+ * palette's slots folds into Other rather than being drawn in Other's grey beside it.
+ *
+ * The palette is the app's one categorical palette (`lib/chartPalette.ts`) since the
+ * design pass (2026-10-17); it was the dividend chart's `seriesColor` before.
  */
 export function allocationSlices(portfolio: CryptoPortfolioResponse): AllocationSlice[] {
   const valued = portfolio.holdings
@@ -117,13 +126,13 @@ export function allocationSlices(portfolio: CryptoPortfolioResponse): Allocation
   let otherPct: number | null = 0
   for (const holding of valued) {
     const value = holding.value as number
-    if (slices.length < DONUT_COINS && hasIdentity(holding.coin_id, portfolio.color_order)) {
+    if (slices.length < DONUT_COINS && hasSlot(holding.coin_id, portfolio.color_order)) {
       slices.push({
         key: holding.coin_id,
         label: holding.symbol ?? holding.name ?? holding.coin_id,
         value,
         pct: holding.weight_pct,
-        color: seriesColor(holding.coin_id, portfolio.color_order),
+        color: chartColorFor(holding.coin_id, portfolio.color_order),
         kind: 'coin',
       })
     } else {
@@ -133,7 +142,7 @@ export function allocationSlices(portfolio: CryptoPortfolioResponse): Allocation
   }
   if (otherValue > 0) {
     slices.push({
-      key: '__other', label: 'Other', value: otherValue, pct: otherPct, color: OTHER_COLOR,
+      key: '__other', label: 'Other', value: otherValue, pct: otherPct, color: CHART_OTHER,
       kind: 'other',
     })
   }
