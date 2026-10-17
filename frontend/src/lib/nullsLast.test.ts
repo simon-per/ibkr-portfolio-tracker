@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { compareNullsLast } from './nullsLast'
 
 /**
@@ -8,6 +8,9 @@ import { compareNullsLast } from './nullsLast'
  * scans: no module rolls the missing-last comparison again, and `ABSENT` is defined once.
  */
 const SRC = join(__dirname, '..')
+
+/** A source path relative to `src/`, with forward slashes on every OS. */
+const rel = (p: string) => relative(SRC, p).split(sep).join('/')
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -50,14 +53,14 @@ describe('the sort family', () => {
     const offenders = sources(SRC)
       .filter((p) => !p.endsWith('nullsLast.ts'))
       .filter((p) => pattern.test(code(p)))
-      .map((p) => relative(SRC, p))
+      .map(rel)
     expect(offenders).toEqual([])
   })
 
   it('defines ABSENT once', () => {
     const offenders = sources(SRC)
       .filter((p) => /export const ABSENT\s*=/.test(code(p)))
-      .map((p) => relative(SRC, p))
+      .map(rel)
     expect(offenders).toEqual(['lib/utils.ts'])
   })
 })
