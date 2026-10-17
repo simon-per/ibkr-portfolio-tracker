@@ -77,6 +77,11 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    # httpx logs every request URL at INFO, and a download URL carries logo.dev's signature.
+    # The app quiets the same loggers (`app.main._NOISY_AT_INFO`); the per-ISIN lines below
+    # are the run's record.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true",
