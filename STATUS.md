@@ -7,9 +7,17 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-16.** The product pass (frontend only, docs/shipped-log.md 2026-10-16)
+**Last updated: 2026-10-17.** The product pass (frontend only, docs/shipped-log.md 2026-10-16)
 is committed on `main`; confirm `/health` reports its commit after the deploy. The agent-team
 wave's scheduled halves are under *Watch after the next deploy*.
+
+**In progress, not on `main`:** branch `worktree-moonlit-drifting-matsumoto`.
+- Done: dividend raises split out of the forecast's payout change, a resizable forecast chart,
+  and market caps in the base currency.
+- Still to build: daily fundamentals at 05:00 Tue–Sat for held securities only, and holding
+  logos via logo.dev.
+- Before merging: a forecast backfill on the VPS after the deploy.
+- Everything is in `plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md`.
 
 ---
 
@@ -149,6 +157,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-17 (owner's batch, branch `worktree-moonlit-drifting-matsumoto`)** — raises/timing,
+  resizable forecast chart, base-currency market caps; fundamentals and logos handed off.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
@@ -157,5 +167,3 @@ One line each, newest first; drop the oldest.
   local-development), CLAUDE.md slimmed, AGENTS.md made a pointer.
 - **2026-10-14 (agent-team wave)** — growth/forecast pack, KPI fixes, ET Sun/Mon IBKR skip, weekly
   fundamentals refresh, STATUS pruned; browser sweep on production.
-- **2026-10-14 (test speed)** — backend under `pytest-xdist`, `deploy_scripts` deselected locally:
-  5:35 → ~25 s.
