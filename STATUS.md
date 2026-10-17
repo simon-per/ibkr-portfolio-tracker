@@ -75,11 +75,11 @@ on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-
 
 Only what is still unverified.
 
-- **The fintech UI pass in a real browser** (2026-10-17; seen only as screenshots of a routed
-  preview, the dividend summary and benchmarks refused): the Dividend Income card and benchmark
-  lines in the new look; the Performance insights strip's *Next dividend*; constituent logos by
-  ISIN on Look-through (the basket fill-ahead has not run, so most are monograms); the crypto view
-  with data (its reads need the key); the sticky tab strip's shadow on scroll; both themes.
+- **The fintech UI pass with the owner's own eyes** (2026-10-17): every tab was screenshotted in
+  both themes against production data through a routed preview; the dividend summary, the
+  benchmarks and the crypto reads were seen only with made-up fixtures (Yahoo / the key). Open:
+  constituent logos by ISIN on Look-through once the basket fill-ahead runs (most are monograms
+  until then), and the sticky tab strip's shadow on scroll.
 
 - **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
