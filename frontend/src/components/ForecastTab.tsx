@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { formatCount } from '@/lib/utils'
+import { formatCount, formatAxisMoney } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { readStored, writeStored } from '@/lib/storage'
@@ -407,7 +407,7 @@ export function ForecastTab() {
               <YAxis
                 domain={yAxisConfig.domain}
                 ticks={yAxisConfig.ticks}
-                tickFormatter={(value) => `${curSym}${(value / 1000).toFixed(0)}k`}
+                tickFormatter={(value: number) => formatAxisMoney(value, curSym)}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}

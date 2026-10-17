@@ -16,6 +16,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { displayName } from '@/lib/securityName'
+import { formatAxisMoney } from '@/lib/utils'
 
 interface PerformanceAttributionProps {
   data: PerformanceAttributionResponse | undefined
@@ -112,12 +113,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                 <CartesianGrid horizontal={false} stroke="hsl(var(--border))" />
                 <XAxis
                   type="number"
-                  tickFormatter={(value: number) => {
-                    if (Math.abs(value) >= 1000) {
-                      return `${(value / 1000).toFixed(1)}k`
-                    }
-                    return value.toFixed(0)
-                  }}
+                  tickFormatter={(value: number) => formatAxisMoney(value)}
                   fontSize={12}
                 />
                 <YAxis

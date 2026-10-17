@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal, get_db
 from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.sync_run_repository import utc_iso
-from app.services.fundamentals_service import FundamentalsService
+from app.services.fundamentals_service import FundamentalsService, held_security_ids
 from app.single_flight import (
     SYNC_PIPELINE,
     SyncBusy,
@@ -122,12 +122,20 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
     from app.models.earnings_event import EarningsEvent
     from app.models.security import Security
 
-    # Count total securities
-    total_result = await db.execute(select(func.count(Security.id)))
+    # Holdings, not every security ever traded: the tab says "N holdings have no data
+    # yet" off these two counts, and a position sold long ago is not a holding. Same
+    # predicate as the table the tab draws (`held_security_ids`).
+    held = held_security_ids()
+    total_result = await db.execute(
+        select(func.count(Security.id)).where(Security.id.in_(held))
+    )
     total_securities = total_result.scalar() or 0
 
-    # Count metrics
-    metrics_result = await db.execute(select(func.count(FundamentalMetrics.id)))
+    metrics_result = await db.execute(
+        select(func.count(FundamentalMetrics.id)).where(
+            FundamentalMetrics.security_id.in_(held)
+        )
+    )
     total_metrics = metrics_result.scalar() or 0
 
     # Through the repository, so this reports the same threshold a sync acts on. It

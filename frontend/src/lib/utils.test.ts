@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatAxisMoney,
   cn,
   currencySymbol,
   formatCurrency,
@@ -241,5 +242,36 @@ describe('formatQuantity', () => {
   it('keeps a small balance visible rather than rounding it to 0', () => {
     expect(formatQuantity(0.00000123)).toBe('0.00000123')
     expect(formatQuantity(0.000123456789)).toBe('0.000123457')
+  })
+})
+
+describe('formatAxisMoney', () => {
+  it('scales to k, M and B with at most one decimal and no trailing .0', () => {
+    expect(formatAxisMoney(150_000, 'CHF\u00a0')).toBe('CHF\u00a0150k')
+    expect(formatAxisMoney(12_500, '€')).toBe('€12.5k')
+    expect(formatAxisMoney(1_000, '€')).toBe('€1k')
+    expect(formatAxisMoney(1_000_000, 'CHF\u00a0')).toBe('CHF\u00a01M')
+    expect(formatAxisMoney(1_250_000, '$')).toBe('$1.3M')
+    expect(formatAxisMoney(2_000_000_000, '$')).toBe('$2B')
+  })
+
+  it('prints zero as zero, not "0k"', () => {
+    expect(formatAxisMoney(0, 'CHF\u00a0')).toBe('CHF\u00a00')
+    expect(formatAxisMoney(-0.2, '€')).toBe('€0')
+  })
+
+  it('keeps small amounts whole and puts the sign before the symbol', () => {
+    expect(formatAxisMoney(950, '€')).toBe('€950')
+    expect(formatAxisMoney(-2_500, 'CHF\u00a0')).toBe('-CHF\u00a02.5k')
+    expect(formatAxisMoney(-40, '$')).toBe('-$40')
+  })
+
+  it('moves up a unit when rounding reaches a thousand', () => {
+    expect(formatAxisMoney(999_950, '€')).toBe('€1M')
+    expect(formatAxisMoney(999.6)).toBe('1k')
+  })
+
+  it('omits the symbol when none is given', () => {
+    expect(formatAxisMoney(4_500)).toBe('4.5k')
   })
 })

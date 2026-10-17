@@ -675,7 +675,8 @@ describe('periodChange', () => {
     expect(r.percentageChange).toBeCloseTo(10, 6)
     // Unrealised profit went 100 → 200 with no attribution figure to prefer.
     expect(r.periodGain).toBe(100)
-    expect(r.periodGainPercent).toBeCloseTo((100 / 900) * 100, 6)
+    // No flows: the capital at work is the opening value, not what it cost.
+    expect(r.periodGainPercent).toBeCloseTo(10, 6)
     expect([r.startDate, r.endDate]).toEqual([day(0), day(1)])
   })
 
@@ -700,10 +701,11 @@ describe('periodChange', () => {
     expect(r.absoluteChange).toBe(100)
   })
 
-  it('publishes null, never 0%, when the range opens on a pre-inception zero', () => {
+  it('never publishes 0% for a range that opens on a pre-inception zero', () => {
     // The Dashboard's memo wrote `startValue > 0 ? … : 0` here, and `?? null` downstream
     // cannot tell a published 0 from a measured one — so the header read `(+0.00%)`
-    // beside a value change of the whole book.
+    // beside a value change of the whole book. The value change has no base; the gain
+    // is measured from the first point that held anything.
     const series: PortfolioValuePoint[] = [
       { ...point(day(0), 0, 0, 0), unpriced_holdings: 0 },
       point(day(1), 1000, 1000, 1000),
@@ -712,8 +714,39 @@ describe('periodChange', () => {
     const r = periodChange(series)!
     expect(r.absoluteChange).toBe(1100) // the whole book — true, and worth stating
     expect(r.percentageChange).toBeNull() // a percentage of nothing is undefined
-    expect(r.periodGainPercent).toBeNull()
     expect(r.periodGain).toBe(100)
+    expect(r.periodGainPercent).toBeCloseTo(10, 6)
+  })
+
+  it('is null when nothing was held long enough to divide by', () => {
+    const series: PortfolioValuePoint[] = [
+      { ...point(day(0), 0, 0, 0), unpriced_holdings: 0 },
+      point(day(1), 1000, 1000, 1000),
+    ]
+    expect(periodChange(series)!.periodGainPercent).toBeNull()
+  })
+
+  it('divides by the capital at work, so money paid in mid-range does not inflate it', () => {
+    // 1000 held, 1000 more invested halfway, 200 earned. Over the opening cost basis this
+    // read +20%; half the range had 2000 at work, so the capital is 1500 and it is +13.3%.
+    const series: PortfolioValuePoint[] = [
+      point(day(0), 1000, 1000, 0),
+      point(day(1), 2000, 2000, 1000),
+      point(day(2), 2200, 2000, 0),
+    ]
+    const r = periodChange(series)!
+    expect(r.periodGain).toBe(200)
+    expect(r.periodGainPercent).toBeCloseTo((200 / 1500) * 100, 6)
+  })
+
+  it('keeps an interior unpriced day\'s flow in the capital', () => {
+    // The day's value could not be read, but the purchase on it still happened.
+    const series: PortfolioValuePoint[] = [
+      point(day(0), 1000, 1000, 0),
+      { ...point(day(1), 1500, 2000, 1000), unpriced_holdings: 1 },
+      point(day(2), 2200, 2000, 0),
+    ]
+    expect(periodChange(series)!.periodGainPercent).toBeCloseTo((200 / 1500) * 100, 6)
   })
 
   it('is null when no point in the range is measurable', () => {

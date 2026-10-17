@@ -38,14 +38,15 @@ const TICK_LABELS =
   '.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value, ' +
   '.recharts-yAxis .recharts-cartesian-axis-tick-value'
 
-/** "CHF20k" / "-CHF5k" / "CHF0" -> 20000 / -5000 / 0 */
+/** "CHF 20k" / "-CHF 5k" / "CHF 1.2M" / "CHF 0" -> 20000 / -5000 / 1200000 / 0 — the
+ *  shapes `formatAxisMoney` prints. The unit is the last character; "CHF" never ends a label. */
+const UNIT = { k: 1e3, m: 1e6, b: 1e9 }
 function parseTick(text) {
   const t = text.trim()
   const negative = t.startsWith('-')
-  const digits = t.replace(/^-/, '').replace(/[^0-9.k]/gi, '')
-  const value = digits.toLowerCase().endsWith('k')
-    ? parseFloat(digits.slice(0, -1)) * 1000
-    : parseFloat(digits)
+  const digits = t.replace(/^-/, '').replace(/[^0-9.kmb]/gi, '').replace(/^[a-z]+/i, '')
+  const unit = UNIT[digits.slice(-1).toLowerCase()]
+  const value = unit ? parseFloat(digits.slice(0, -1)) * unit : parseFloat(digits)
   return Number.isNaN(value) ? null : (negative ? -value : value)
 }
 

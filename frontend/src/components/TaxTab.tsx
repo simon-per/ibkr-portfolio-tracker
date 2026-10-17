@@ -515,7 +515,7 @@ export function TaxTab() {
                   label="Realized capital gains"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol', 'trade_date', 'quantity'], content: 'Total' },
+                    { key: 'label', spans: ['symbol', 'trade_date'], content: 'Total' },
                     { key: 'proceeds', spans: ['proceeds'], align: 'right', content: money(data.realized_totals.proceeds) },
                     { key: 'cost_basis', spans: ['cost_basis'], align: 'right', content: money(data.realized_totals.cost_basis) },
                     {
@@ -563,7 +563,7 @@ export function TaxTab() {
                   label="Holdings snapshot"
                   density="compact"
                   footer={[
-                    { key: 'label', spans: ['symbol', 'quantity'], content: 'Total' },
+                    { key: 'label', spans: ['symbol'], content: 'Total' },
                     {
                       key: 'market_value',
                       spans: ['market_value'],

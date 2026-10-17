@@ -115,10 +115,11 @@ export interface SortState<SortKey extends string> {
 export interface FooterCell {
   key: string
   /**
-   * Column keys this cell covers. Drives `colSpan` on desktop — better than the literal
-   * `colSpan={3}` the tax tables carry today, which lies silently once a column is
-   * added. On the phone a cell spanning several columns is the footer row's heading and
-   * a cell spanning one becomes a label/value pair.
+   * Column keys this cell covers, which must be adjacent. They decide **where** the cell
+   * sits as well as how wide it is: `footerLayout` places each cell under its own
+   * columns whatever its position in the array, and pads the columns nobody names. On
+   * the phone a cell spanning several columns — or the title column — is the footer
+   * row's heading, and any other cell becomes a label/value pair.
    */
   spans: readonly string[]
   content: React.ReactNode
@@ -192,6 +193,62 @@ function columnLabel<Row, SortKey extends string>(
 ): React.ReactNode {
   if (!column) return null
   return column.shortHeader ?? column.header
+}
+
+/** One `<td>` of the footer row: a footer cell, or padding under the columns nobody named. */
+export interface FooterSlot {
+  cell: FooterCell | null
+  colSpan: number
+}
+
+/**
+ * The footer row's cells in column order, each under the columns its `spans` name.
+ *
+ * The footer used to be laid out in **array** order with `colSpan = spans.length`, so the
+ * spans decided a cell's width and nothing decided its place. Three of the four tax tables
+ * listed their totals in a different order from their columns from the day they became
+ * `DataTable`s (2026-10-12) until 2026-10-17, and every total sat under a neighbour's
+ * header — the dividend net captioned Withholding, the holdings total under Quantity —
+ * while every test stayed green, because each figure was still somewhere on the page.
+ * Deriving the position from the column keys makes the order of the array irrelevant.
+ *
+ * Throws on spans that are not adjacent or that two cells share: a total that cannot be
+ * placed under the column it sums is refused rather than drawn somewhere plausible.
+ * Spans naming no visible column (a `desktop: 'hide'` one) are dropped with their cell.
+ */
+export function footerLayout(
+  footer: readonly FooterCell[],
+  columnKeys: readonly string[],
+  columnCount: number = columnKeys.length,
+): FooterSlot[] {
+  const index = new Map(columnKeys.map((k, i) => [k, i]))
+  const placed: { cell: FooterCell; start: number; end: number }[] = []
+  for (const cell of footer) {
+    const at = cell.spans.map(k => index.get(k)).filter((i): i is number => i !== undefined)
+    if (at.length === 0) continue
+    const start = Math.min(...at)
+    const end = Math.max(...at)
+    if (end - start + 1 !== at.length) {
+      throw new Error(
+        `Footer cell "${cell.key}" spans columns that are not adjacent (${cell.spans.join(', ')})`,
+      )
+    }
+    placed.push({ cell, start, end })
+  }
+  placed.sort((a, b) => a.start - b.start)
+
+  const slots: FooterSlot[] = []
+  let next = 0
+  for (const { cell, start, end } of placed) {
+    if (start < next) {
+      throw new Error(`Footer cell "${cell.key}" overlaps another footer cell`)
+    }
+    if (start > next) slots.push({ cell: null, colSpan: start - next })
+    slots.push({ cell, colSpan: end - start + 1 })
+    next = end + 1
+  }
+  if (next < columnCount) slots.push({ cell: null, colSpan: columnCount - next })
+  return slots
 }
 
 export function DataTable<Row, SortKey extends string = never>({
@@ -368,27 +425,24 @@ function WideTable<Row, SortKey extends string>({
         {footer && footer.length > 0 && (
           <tfoot>
             <tr className="border-t font-medium">
-              {footer.map(cell => (
-                <td
-                  key={cell.key}
-                  colSpan={cell.spans.length}
-                  className={cn(
-                    pad,
-                    ALIGN_CELL[cell.align ?? 'left'],
-                    (cell.align ?? 'left') === 'right' && 'tabular-nums',
-                    cell.tone,
-                  )}
-                >
-                  {cell.content}
-                </td>
-              ))}
-              {/* Pads the row out to the full width when the spans do not cover every
-                  column, which is what the tax tables' trailing empty `<td>` was. */}
-              {footer.reduce((n, c) => n + c.spans.length, 0) < columnCount && (
-                <td
-                  className={pad}
-                  colSpan={columnCount - footer.reduce((n, c) => n + c.spans.length, 0)}
-                />
+              {/* Each cell under the columns it names; the gaps are padding. */}
+              {footerLayout(footer, visible.map(c => c.key), columnCount).map((slot, i) =>
+                slot.cell ? (
+                  <td
+                    key={slot.cell.key}
+                    colSpan={slot.colSpan}
+                    className={cn(
+                      pad,
+                      ALIGN_CELL[slot.cell.align ?? 'left'],
+                      (slot.cell.align ?? 'left') === 'right' && 'tabular-nums',
+                      slot.cell.tone,
+                    )}
+                  >
+                    {slot.cell.content}
+                  </td>
+                ) : (
+                  <td key={`pad-${i}`} className={pad} colSpan={slot.colSpan} />
+                ),
               )}
             </tr>
           </tfoot>
@@ -523,8 +577,18 @@ function CompactFooterRow<Row, SortKey extends string>({
   columns: readonly Column<Row, SortKey>[]
 }) {
   const byKey = new Map(columns.map(c => [c.key, c]))
-  const heading = footer.filter(c => c.spans.length > 1)
-  const pairs = footer.filter(c => c.spans.length <= 1)
+  // The cell over the card's title column is the footer's heading even when it spans
+  // that column alone — a "Total" there is the row's name, not a "Symbol: Total" pair.
+  const titleKey = columns.find(c => c.mobile === 'title')?.key
+  const isHeading = (c: FooterCell) =>
+    c.spans.length > 1 || (titleKey !== undefined && c.spans.includes(titleKey))
+  // In column order, like the desktop row, so the pairs read in the table's order.
+  const order = new Map(columns.map((c, i) => [c.key, i]))
+  const position = (c: FooterCell) =>
+    Math.min(...c.spans.map(k => order.get(k) ?? Number.MAX_SAFE_INTEGER))
+  const sorted = [...footer].sort((a, b) => position(a) - position(b))
+  const heading = sorted.filter(isHeading)
+  const pairs = sorted.filter(c => !isHeading(c))
 
   return (
     <li className="bg-muted/40 py-3 font-medium">

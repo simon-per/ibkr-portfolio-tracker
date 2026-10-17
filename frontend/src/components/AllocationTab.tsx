@@ -366,7 +366,9 @@ function AllocationBreakdown({
             </ResponsiveContainer>
             {/* The largest slice, named in the hole. */}
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span className="text-2xl font-semibold tabular-nums">{lead.percentage.toFixed(0)}%</span>
+              {/* The legend's precision: "37%" in the middle beside "36.5%" in the
+                  legend read as two different answers. */}
+              <span className="text-2xl font-semibold tabular-nums">{lead.percentage.toFixed(1)}%</span>
               <span className="max-w-[7rem] truncate text-xs text-muted-foreground">{leadName}</span>
             </div>
           </div>

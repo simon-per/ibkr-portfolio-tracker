@@ -1,5 +1,5 @@
 import type { PortfolioValuePoint } from './api'
-import { externalFlow, isMeasurable } from './portfolioKpis'
+import { isMeasurable, modifiedDietzCapital } from './portfolioKpis'
 
 export interface MonthReturn {
   returnPercent: number
@@ -95,21 +95,9 @@ export function computeModifiedDietzReturn(
   const endMV = window[window.length - 1].market_value_eur
   if (startMV === 0) return null
 
-  const totalDays = window.length - 1
-
-  let netCashFlow = 0
-  let weightedCashFlow = 0
-  for (let i = 1; i < window.length; i++) {
-    const cf = externalFlow(window[i - 1], window[i])
-    if (cf !== 0) {
-      netCashFlow += cf
-      // Weight: the fraction of the period the flow was actually at work
-      weightedCashFlow += cf * ((totalDays - i) / totalDays)
-    }
-  }
-
+  // Each flow weighted by the fraction of the period it was actually at work.
+  const { averageCapital: denominator, netFlow: netCashFlow } = modifiedDietzCapital(window)
   const gain = endMV - startMV - netCashFlow
-  const denominator = startMV + weightedCashFlow
   // Nothing to divide by means the return is undefined, not flat. Reachable when a
   // withdrawal early in the period exceeds the starting value — the weighted flow then
   // outweighs it — and a `0.00%` cell claiming a quiet month is exactly the plausible

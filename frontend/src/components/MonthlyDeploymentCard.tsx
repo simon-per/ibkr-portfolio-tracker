@@ -14,6 +14,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
+import { formatAxisMoney } from '@/lib/utils'
 
 interface MonthlyDeploymentCardProps {
   data: ContributionsResponse | undefined
@@ -201,12 +202,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                     <YAxis
                       fontSize={12}
                       width="auto"
-                      tickFormatter={(value: number) => {
-                        if (Math.abs(value) >= 1000) {
-                          return `${(value / 1000).toFixed(1)}k`
-                        }
-                        return value.toFixed(0)
-                      }}
+                      tickFormatter={(value: number) => formatAxisMoney(value)}
                     />
                     <Tooltip content={<DeploymentTooltip hasMoneyIn={hasMoneyIn} />} />
                     {/* No legend: exactly one series is ever drawn, and a one-item legend

@@ -15,12 +15,29 @@ from app.services.peg_ratio import peg_from_growth
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_estimates import fetch_estimate_frames, forward_growth, is_fund, read_optional
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
 
+
+
+def held_security_ids():
+    """
+    The ids of every security with an open lot, in any account, as a subquery.
+
+    What "the portfolio" means to the Fundamentals tab's reads -- the table, the
+    earnings lists and the `/status` count of holdings without data. The sync keeps its
+    own wider scope (every Yahoo-eligible security), which costs a sold position a few
+    requests a week and nothing on screen.
+    """
+    return (
+        select(TaxLot.security_id)
+        .where(TaxLot.is_open == True)  # noqa: E712 - SQLAlchemy needs the operator
+        .distinct()
+    )
 
 class FundamentalsService:
     """Service for fetching and caching fundamental metrics and earnings data."""
@@ -406,8 +423,19 @@ class FundamentalsService:
         return to_base
 
     async def get_fundamentals_for_portfolio(self) -> List[Dict]:
-        """Return fundamental metrics joined with security info for all securities."""
-        result = await self.db.execute(select(Security))
+        """
+        Fundamental metrics joined with security info, for every **held** security.
+
+        Held means at least one open lot, in any account. It read every `Security`
+        row until 2026-10-17, so a position sold years ago stayed on the Fundamentals
+        tab as a row of dashes and was counted by `/status` as a holding with "no data
+        yet" -- an alarm about something the portfolio no longer owns. Still not filtered
+        by `yahoo_eligible`: a holding Yahoo cannot price is a holding, and the tab
+        names it with its fundamentals absent.
+        """
+        result = await self.db.execute(
+            select(Security).where(Security.id.in_(held_security_ids()))
+        )
         securities = list(result.scalars().all())
 
         all_metrics = await self.repo.get_all_metrics()
@@ -479,11 +507,17 @@ class FundamentalsService:
 
         return portfolio_data
 
+    async def _held_ids(self) -> set:
+        return set((await self.db.execute(held_security_ids())).scalars().all())
+
     async def get_earnings_calendar(self, days_ahead: int = 90) -> List[Dict]:
-        """Return upcoming earnings events with security info (eagerly loaded)."""
+        """Upcoming earnings of held securities, with security info (eagerly loaded)."""
         events = await self.repo.get_upcoming_earnings(days_ahead)
+        held = await self._held_ids()
         result = []
         for ev in events:
+            if ev.security_id not in held:
+                continue
             result.append({
                 'security_id': ev.security_id,
                 'symbol': ev.security.symbol,
@@ -494,10 +528,13 @@ class FundamentalsService:
         return result
 
     async def get_earnings_history(self, days_back: int = 365) -> List[Dict]:
-        """Return past earnings events with surprise data (eagerly loaded)."""
+        """Past earnings of held securities, with surprise data (eagerly loaded)."""
         events = await self.repo.get_recent_earnings(days_back)
+        held = await self._held_ids()
         result = []
         for ev in events:
+            if ev.security_id not in held:
+                continue
             result.append({
                 'security_id': ev.security_id,
                 'symbol': ev.security.symbol,

@@ -162,6 +162,38 @@ export function formatCount(value: number): string {
 }
 
 /**
+ * A money amount on a chart axis: "CHF 150k", "€1.2M", "-$2.5k", "CHF 0".
+ *
+ * Every chart wrote its own — seven `(value / 1000).toFixed(…)k` variants, three with the
+ * symbol and four without — and each was wrong somewhere: the Forecast axis printed
+ * "CHF 1000k" for a million and "CHF 0k" for zero, the value chart rounded a 12,500 tick
+ * to "13k", and the dividend chart printed "1.0k". One decimal at most, trailing ".0"
+ * dropped, the sign before the symbol as `formatCurrency` puts it. `symbol` is optional
+ * for the axes whose card already names the currency.
+ */
+export function formatAxisMoney(value: number, symbol: string = ""): string {
+  const abs = Math.abs(value)
+  const sign = value < 0 && abs >= 0.5 ? "-" : ""
+  return `${sign}${symbol}${compactBody(abs)}`
+}
+
+const AXIS_UNITS: readonly [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "k"], [1, ""]]
+
+/** `abs` in the largest unit it reaches *after* rounding, so 999,950 is "1M", not "1000k". */
+function compactBody(abs: number): string {
+  // Whole units below a thousand; one decimal from there up.
+  const round = (i: number) => {
+    const size = AXIS_UNITS[i][0]
+    return size === 1 ? Math.round(abs) : Math.round((abs / size) * 10) / 10
+  }
+  let i = AXIS_UNITS.findIndex(([size]) => abs >= size)
+  if (i === -1) i = AXIS_UNITS.length - 1
+  let rounded = round(i)
+  if (rounded >= 1000 && i > 0) rounded = round(--i)
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}${AXIS_UNITS[i][1]}`
+}
+
+/**
  * A market capitalisation as T / B / M, falling back to a separated integer.
  *
  * Extracted because it existed **byte-identically** in `FundamentalsTab.tsx` and

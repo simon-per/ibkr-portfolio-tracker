@@ -24,7 +24,7 @@ import {
   CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_STYLE,
 } from '@/lib/chartTooltip'
-import { formatDate, tooltipValue } from '@/lib/utils'
+import { formatDate, tooltipValue, formatAxisMoney } from '@/lib/utils'
 import { dateAxis } from '@/lib/dateAxis'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -70,11 +70,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
   }, [data, metric, isCompact])
 
   const xAxis = useMemo(() => dateAxis(data.map((p) => p.date)), [data])
-  const formatYAxisTick = (value: number) => {
-    const abs = Math.abs(value)
-    if (abs >= 1000) return `${value < 0 ? '-' : ''}${curSym}${(abs / 1000).toFixed(abs >= 10_000 ? 0 : 1)}k`
-    return `${value < 0 ? '-' : ''}${curSym}${abs.toFixed(0)}`
-  }
+  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym)
 
   return (
     <div className="space-y-3">

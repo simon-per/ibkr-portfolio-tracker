@@ -76,7 +76,7 @@ import {
   CHART_TOOLTIP_LABEL_STYLE,
   CHART_TOOLTIP_STYLE,
 } from '@/lib/chartTooltip'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatAxisMoney } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
 const GAIN = '#10b981'
@@ -126,11 +126,7 @@ function pct(v: number | null | undefined, digits = 2): string {
 /** "12.3k" style axis labels with the currency symbol; the axis measures its own width. */
 function useCompactMoney() {
   const symbol = useCurrencySymbol()
-  const fmt = useMemo(
-    () => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }),
-    [],
-  )
-  return (v: number) => `${v < 0 ? '−' : ''}${symbol}${fmt.format(Math.abs(v))}`
+  return (v: number) => formatAxisMoney(v, symbol)
 }
 
 /**

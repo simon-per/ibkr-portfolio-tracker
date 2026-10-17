@@ -152,6 +152,47 @@ describe('TaxTab', () => {
     expect(within(table).queryByText(/CHF\s-/)).toBeNull()
   })
 
+  it('puts every total under the header of the column it sums', async () => {
+    // Each total sat under a neighbour's header from 2026-10-12 to 2026-10-17: the
+    // footers were laid out in array order and listed in a different order from the
+    // columns. Read the header text at each footer cell's starting column.
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        dividend_source: 'ibkr',
+        dividend_income: [row({})],
+        dividend_totals: { gross: 100, withholding: 35, net: 65 },
+        holdings_snapshot: [{ symbol: 'NESN', quantity: 3, market_value: 240, cost_basis: 270 }],
+        holdings_snapshot_total: 240,
+      }),
+    )
+    renderTab()
+
+    const headerAt = (table: HTMLElement, text: string): string => {
+      const footerCells = Array.from(table.querySelectorAll('tfoot td'))
+      let column = 0
+      for (const td of footerCells) {
+        if ((td.textContent ?? '').replace(/\s/g, ' ') === text) {
+          return table.querySelectorAll('thead th')[column].textContent ?? ''
+        }
+        column += Number(td.getAttribute('colspan') ?? 1)
+      }
+      throw new Error(`no footer cell reads ${text}`)
+    }
+
+    const income = await tableWithHeader('Pay date')
+    expect(headerAt(income, 'CHF 65.00')).toMatch(/^Net/)
+    expect(headerAt(income, 'CHF 100.00')).toMatch(/^Gross/)
+    expect(headerAt(income, '-CHF 35.00')).toMatch(/^Withholding/)
+
+    const realized = await tableWithHeader('Trade date')
+    expect(headerAt(realized, '-CHF 10.00')).toMatch(/^Gain/)
+    expect(headerAt(realized, 'CHF 90.00')).toMatch(/^Proceeds/)
+    expect(headerAt(realized, 'CHF 100.00')).toMatch(/^Cost basis/)
+
+    const holdings = await tableWithHeader('Market value')
+    expect(headerAt(holdings, 'CHF 240.00')).toMatch(/^Market value/)
+  })
+
   it('does not render the country-of-ISIN methodology note', async () => {
     vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
     renderTab()

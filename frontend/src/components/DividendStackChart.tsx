@@ -5,6 +5,7 @@ import {
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendMonthLabel, FC } from '@/lib/dividendChart'
 import { useIsCompact } from '@/lib/useMediaQuery'
+import { formatAxisMoney } from '@/lib/utils'
 
 /**
  * One height for the chart and every placeholder that stands in for it, so a mode
@@ -51,8 +52,7 @@ export function DividendStackChart({
   const formatCurrency = useFormatCurrency()
   const isCompact = useIsCompact()
 
-  const formatAxisTick = (v: number) =>
-    Math.abs(v) >= 1000 ? `${curSym}${(v / 1000).toFixed(1)}k` : `${curSym}${v}`
+  const formatAxisTick = (v: number) => formatAxisMoney(v, curSym)
 
   // Faded rather than hidden: dropping the other series would restack the bar and move the
   // highlighted segment, which is the one thing the reader is trying to follow.

@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { PortfolioValuePoint, BenchmarkValuePoint } from '@/lib/api'
-import { formatDate, tooltipValue } from '@/lib/utils'
+import { formatDate, tooltipValue, formatAxisMoney } from '@/lib/utils'
 import { dateAxis } from '@/lib/dateAxis'
 import { useFormatCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -211,15 +211,7 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
   // One tick per month (or per day on a short span) — see `dateAxis`.
   const xAxis = useMemo(() => dateAxis(chartData.map((p) => String(p.date))), [chartData])
 
-  // Custom tick formatter for Y axis
-  const formatYAxisTick = (value: number) => {
-    if (value === 0) return `${curSym}0`
-    const absValue = Math.abs(value)
-    if (absValue >= 1000) {
-      return `${value < 0 ? '-' : ''}${curSym}${(absValue / 1000).toFixed(0)}k`
-    }
-    return `${curSym}${value.toFixed(0)}`
-  }
+  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym)
 
   // Calculate dynamic Y axis domain and ticks based on data and visible lines
   const yAxisConfig = useMemo(() => {
