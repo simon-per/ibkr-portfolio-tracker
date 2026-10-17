@@ -23,6 +23,7 @@ import app.models  # noqa: F401  register all mappers
 from app.clock import utcnow
 from app.config import settings
 from app.database import Base, get_db
+from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_LOGO_DEV, LOGO_SOURCE_MANUAL, SecurityLogo
 from app.models.sync_run import SyncRun
@@ -209,11 +210,15 @@ async def test_an_unknown_isin_falls_back_to_the_price_paths_ticker(db, keyed):
 
 
 @pytest.mark.asyncio
-async def test_sold_securities_are_not_asked_about(db, keyed):
-    await _hold(db, open_=False)
-    fake = FakeLogoDev()
+async def test_sold_securities_are_asked_about_after_the_held_ones(db, keyed):
+    """The Activity tab lists every trade ever made, so a sold holding needs its logo too
+    — but a pass's budget goes to what is held first."""
+    [sold] = await _hold(db, open_=False, start_id=1)
+    [kept] = await _hold(db, start_id=2)
+    fake = FakeLogoDev({("isin", sold): 200, ("isin", kept): 200})
     result = await _service(db, fake).refresh()
-    assert fake.lookups == [] and result["message"] == "Logos: nothing due"
+    assert fake.lookups == [("isin", kept), ("isin", sold)]
+    assert result["stored"] == 2
 
 
 @pytest.mark.asyncio
@@ -530,3 +535,75 @@ async def test_a_bare_top_level_url_is_not_the_documented_shape():
     async with LogoDevClient(KEY, transport=transport) as client:
         with pytest.raises(LogoDevError):
             await client.lookup("isin", "US0000000001")
+
+
+# --------------------------------------------------------------------- fund baskets
+
+FUND = "US46138G6492"
+
+
+async def _basket(db, weights):
+    """A stored basket for FUND: one constituent per weight, ISINs in weight order given."""
+    isins = []
+    for line, weight in enumerate(weights, start=1):
+        isin = f"US{line:09d}9"
+        db.add(EtfHolding(fund_isin=FUND, line_no=line, constituent_isin=isin,
+                          constituent_ticker=f"C{line}", constituent_name=f"Constituent {line}",
+                          weight_pct=Decimal(str(weight))))
+        isins.append(isin)
+    # A row with no ISIN (a CINS the issuer published) has nothing to ask logo.dev by.
+    db.add(EtfHolding(fund_isin=FUND, line_no=99, constituent_identifier="G1234567X",
+                      constituent_name="No ISIN", weight_pct=Decimal("50")))
+    await db.commit()
+    return isins
+
+
+@pytest.mark.asyncio
+async def test_a_basket_fills_its_heaviest_constituents_by_isin(db, keyed):
+    isins = await _basket(db, [1.0, 9.0, 5.0])
+    fake = FakeLogoDev({("isin", i): 200 for i in isins})
+    result = await _service(db, fake).refresh(baskets=[FUND], top=2, limit=10)
+    assert sorted(fake.lookups) == sorted([("isin", isins[1]), ("isin", isins[2])])
+    assert result["stored"] == 2 and result["unknown_baskets"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_basket_is_named_by_its_fund_symbol_too(db, keyed):
+    isins = await _basket(db, [2.0])
+    db.add(Security(id=50, isin=FUND, symbol="QQQM", description="fund", currency="USD",
+                    conid=5050, asset_category="STK", exchange="NASDAQ"))
+    await db.commit()
+    fake = FakeLogoDev({("isin", isins[0]): 200})
+    result = await _service(db, fake).refresh(baskets=["qqqm"], limit=10)
+    assert fake.lookups == [("isin", isins[0])] and result["stored"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_constituent_unknown_by_isin_falls_back_to_its_published_ticker(db, keyed):
+    [isin] = await _basket(db, [3.0])
+    fake = FakeLogoDev({("ticker", "C1"): 200})
+    result = await _service(db, fake).refresh(baskets=[FUND], limit=10)
+    assert fake.lookups == [("isin", isin), ("ticker", "C1")]
+    assert result["stored"] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_basket_is_named_and_asks_nothing(db, keyed):
+    fake = FakeLogoDev()
+    result = await _service(db, fake).refresh(baskets=["NOPE"], limit=10)
+    assert fake.lookups == [] and result["unknown_baskets"] == ["NOPE"]
+
+
+@pytest.mark.asyncio
+async def test_a_stored_constituent_logo_shows_once_the_stock_is_bought(db, keyed):
+    """Keyed by ISIN: filled ahead from a basket, it is in the manifest the moment a
+    security with that ISIN exists."""
+    from app.repositories.security_logo_repository import SecurityLogoRepository
+    [isin] = await _basket(db, [4.0])
+    await _service(db, FakeLogoDev({("isin", isin): 200})).refresh(baskets=[FUND], limit=10)
+    assert await SecurityLogoRepository(db).manifest() == {}
+
+    db.add(Security(id=60, isin=isin, symbol="C1", description="bought", currency="USD",
+                    conid=6060, asset_category="STK", exchange="NASDAQ"))
+    await db.commit()
+    assert list(await SecurityLogoRepository(db).manifest()) == [60]

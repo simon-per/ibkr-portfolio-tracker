@@ -3,8 +3,14 @@ Holding logos from logo.dev's API, stored in `security_logos` (docs/logos.md).
 
 **Server-side only, and the secret key never leaves this module's request headers.** The
 browser never talks to logo.dev: it reads the stored bytes from `/api/logos/{id}`, so the
-CSP stays `img-src 'self'`. logo.dev learns the held ISINs — the owner accepted that on
-2026-10-17.
+CSP stays `img-src 'self'`. logo.dev learns the ISINs of every security ever held — the
+owner accepted that on 2026-10-17.
+
+**Scope:** every security with an ISIN, sold ones included — the Activity tab lists every
+trade ever made, and a sold holding's row is as much a row as a held one's — held ones
+asked first, so a new purchase never waits behind the back catalogue. `fetch_logos
+--basket` can also fill the constituents of a stored fund basket ahead of any purchase:
+logos are keyed by ISIN, so a stock bought later shows its logo at once.
 
 **Bounded, because every found logo is billed** (about $0.02; the free plan carries $5 of
 credits a month): an ISIN is asked about only when it has no row or its row is older than
@@ -25,8 +31,9 @@ the price path's own resolver, which is a database lookup.
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -34,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.config import settings
+from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_LOGO_DEV
 from app.repositories.security_logo_repository import SecurityLogoRepository
@@ -225,6 +233,18 @@ class LogoDevClient(PacedGet):
             self._last_request_at = self._clock()
 
 
+@dataclass
+class LogoTarget:
+    """
+    One ISIN the pass may ask about. `security` is None for a basket constituent nobody
+    holds; its ticker fallback then uses the issuer's published ticker.
+    """
+    symbol: str
+    security: Optional[Security] = None
+    ticker: Optional[str] = None
+    held: bool = False
+
+
 class LogoService:
     """The logo pass: which ISINs are due, asking logo.dev, storing what passes."""
 
@@ -235,18 +255,54 @@ class LogoService:
         self._transport = transport
         self._sleep = sleep
 
-    async def _targets(self, isin: Optional[str]) -> Dict[str, Security]:
-        """ISIN -> one security carrying it: the held ones, or the one ISIN asked for."""
+    async def _targets(self, isin: Optional[str]) -> Dict[str, LogoTarget]:
+        """ISIN -> one security carrying it: every security, or the one ISIN asked for."""
         query = select(Security).order_by(Security.id)
-        if isin is None:
-            query = query.where(held())
-        else:
+        if isin is not None:
             query = query.where(Security.isin == isin.strip().upper())
-        out: Dict[str, Security] = {}
+        held_ids = set((await self.db.execute(select(Security.id).where(held()))).scalars())
+        out: Dict[str, LogoTarget] = {}
         for security in (await self.db.execute(query)).scalars().all():
-            if security.isin:
-                out.setdefault(security.isin.strip().upper(), security)
+            if not security.isin:
+                continue
+            target = out.setdefault(
+                security.isin.strip().upper(), LogoTarget(security.symbol, security)
+            )
+            target.held = target.held or security.id in held_ids
         return out
+
+    async def _basket_targets(
+        self, funds: Sequence[str], top: Optional[int]
+    ) -> Tuple[Dict[str, LogoTarget], List[str]]:
+        """
+        The constituents of each stored fund basket — a fund ISIN, or the symbol of a
+        security that is one — heaviest first, the `top` largest of each when given.
+        Returns the targets and the funds with no stored basket.
+        """
+        out: Dict[str, LogoTarget] = {}
+        unknown: List[str] = []
+        for ref in funds:
+            ref = ref.strip().upper()
+            fund_isins = {ref} | set((await self.db.execute(
+                select(Security.isin).where(Security.symbol == ref, Security.isin.is_not(None))
+            )).scalars())
+            query = (
+                select(EtfHolding)
+                .where(EtfHolding.fund_isin.in_(fund_isins),
+                       EtfHolding.constituent_isin.is_not(None))
+                .order_by(EtfHolding.weight_pct.desc(), EtfHolding.line_no)
+            )
+            if top is not None:
+                query = query.limit(top)
+            rows = (await self.db.execute(query)).scalars().all()
+            if not rows:
+                unknown.append(ref)
+            for row in rows:
+                out.setdefault(row.constituent_isin.strip().upper(), LogoTarget(
+                    (row.constituent_ticker or row.constituent_name)[:10],
+                    ticker=row.constituent_ticker,
+                ))
+        return out, unknown
 
     async def _ticker(self, security: Security) -> str:
         # The price path's resolver, so the fallback asks about the listing we price.
@@ -259,6 +315,8 @@ class LogoService:
         dry_run: bool = False,
         force: bool = False,
         isin: Optional[str] = None,
+        baskets: Optional[Sequence[str]] = None,
+        top: Optional[int] = None,
         limit: int = MAX_LOOKUPS_PER_PASS,
     ) -> Dict[str, Any]:
         """
@@ -274,10 +332,18 @@ class LogoService:
             return {"status": "skipped", "message": "skipped: not configured"}
 
         now = utcnow()
-        targets = await self._targets(isin)
+        unknown_baskets: List[str] = []
+        if baskets:
+            targets, unknown_baskets = await self._basket_targets(baskets, top)
+        else:
+            targets = await self._targets(isin)
         due = await self.repo.due(targets, now, None if force else RECHECK_AFTER)
+        # Held first (a stable sort keeps ISIN order within each half): a pass's budget goes
+        # to a new purchase before the back catalogue of sold securities.
+        due.sort(key=lambda i: not targets[i].held)
         summary: Dict[str, Any] = {
-            "status": "success", "configured": configured, "held": len(targets),
+            "status": "success", "configured": configured, "targets": len(targets),
+            "unknown_baskets": unknown_baskets,
             "due": len(due), "lookups": 0, "stored": 0, "not_found": 0,
             "not_indexed": 0, "refused": 0, "errors": 0, "deferred": 0, "stopped": None,
             "outcomes": [],
@@ -299,12 +365,12 @@ class LogoService:
         async with LogoDevClient(settings.logo_dev_secret_key.strip(),
                                  transport=self._transport, sleep=self._sleep) as client:
             for position, target_isin in enumerate(due):
-                security = targets[target_isin]
+                target = targets[target_isin]
                 if summary["lookups"] >= limit:
                     summary["deferred"] += len(due) - position
                     break
                 try:
-                    outcome = await self._one(client, target_isin, security, summary, limit)
+                    outcome = await self._one(client, target_isin, target, summary, limit)
                 except LogoDevStop as stop:
                     summary["stopped"] = stop.status
                     summary["deferred"] += len(due) - position
@@ -318,12 +384,12 @@ class LogoService:
                     await self.repo.mark_checked(target_isin, LOGO_SOURCE_LOGO_DEV, utcnow())
                     await self.db.commit()
                     outcome = f"refused: {refused}"
-                    warnings.append(f"{security.symbol} ({target_isin}): logo refused — {refused}.")
+                    warnings.append(f"{target.symbol} ({target_isin}): logo refused — {refused}.")
                 except LogoDevError as error:
                     summary["errors"] += 1
                     outcome = f"error: {error}"
                 summary["outcomes"].append(
-                    {"isin": target_isin, "symbol": security.symbol, "outcome": outcome}
+                    {"isin": target_isin, "symbol": target.symbol, "outcome": outcome}
                 )
 
         if summary["errors"]:
@@ -342,19 +408,22 @@ class LogoService:
             summary["warnings"] = warnings
         return summary
 
-    async def _one(self, client: LogoDevClient, isin: str, security: Security,
+    async def _one(self, client: LogoDevClient, isin: str, target: LogoTarget,
                    summary: Dict[str, Any], limit: int) -> str:
         """Ask about one ISIN, then its ticker if logo.dev has no such ISIN."""
         summary["lookups"] += 1
         state, url = await client.lookup("isin", isin)
         via = "isin"
+        ticker = None
         if state == "not_found":
+            ticker = (await self._ticker(target.security) if target.security is not None
+                      else target.ticker)
+        if state == "not_found" and ticker:
             if summary["lookups"] >= limit:
                 # The fallback would overspend the pass; nothing is stamped, so the
                 # next pass asks again from the start.
                 summary["deferred"] += 1
                 return "deferred: ticker lookup over this pass's budget"
-            ticker = await self._ticker(security)
             summary["lookups"] += 1
             state, url = await client.lookup("ticker", ticker)
             via = f"ticker {ticker}"

@@ -2,8 +2,12 @@
 Fetch holding logos from logo.dev now, instead of waiting for the 05:00 pass (docs/logos.md).
 
 The same `LogoService.refresh` the scheduled step runs, with the same bounds: only ISINs with
-no row or a row older than 90 days, at most 30 lookups, stop on 401/402/403/429. A manual
-logo (`app/cli/import_logo.py`) is never asked about, `--force` included.
+no row or a row older than 90 days, at most 30 lookups (`--limit`), stop on 401/402/403/429.
+A manual logo (`app/cli/import_logo.py`) is never asked about, `--force` included.
+
+`--basket QQQM --basket VT --top 100` fills the constituents of stored fund baskets instead
+(the `--top` heaviest of each), so a stock bought later already has its logo. Each found
+logo is billed: dry-run first and size `--limit` to the free plan's credits.
 
 `--dry-run` lists what is due and makes **no request** — every found logo is billed, so a
 dry run that asked would pay twice for the same answer. The real run prints each ISIN's
@@ -16,17 +20,18 @@ Usage, inside the container:
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --dry-run
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --isin US02079K3059 --force
+    docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --basket QQQM --basket VT --top 100 --limit 150
 """
 import argparse
 import asyncio
 import logging
 import sys
-from typing import Optional
+from typing import List, Optional
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.logo_service import LogoService, is_configured
+from app.services.logo_service import MAX_LOOKUPS_PER_PASS, LogoService, is_configured
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,8 @@ SYNC_TYPE = "manual_logo_fetch"
 
 
 async def fetch_logos(dry_run: bool = False, force: bool = False,
-                      isin: Optional[str] = None) -> int:
+                      isin: Optional[str] = None, baskets: Optional[List[str]] = None,
+                      top: Optional[int] = None, limit: int = MAX_LOOKUPS_PER_PASS) -> int:
     started_at = utcnow()
     if not dry_run and not is_configured():
         print("LOGO_DEV_SECRET_KEY is not set in backend/.env - nothing to do.", file=sys.stderr)
@@ -42,7 +48,9 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
 
     async with AsyncSessionLocal() as db:
         try:
-            summary = await LogoService(db).refresh(dry_run=dry_run, force=force, isin=isin)
+            summary = await LogoService(db).refresh(
+                dry_run=dry_run, force=force, isin=isin, baskets=baskets, top=top, limit=limit,
+            )
         except Exception as e:
             await db.rollback()
             # Best-effort bookkeeping, as ingest_flex_xml does: it must never mask the error.
@@ -52,8 +60,12 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
             print(f"FAILED: {e}", file=sys.stderr)
             return 1
 
-        if isin and not summary.get("held"):
+        if isin and not summary.get("targets"):
             print(f"No security carries ISIN {isin}.", file=sys.stderr)
+            return 1
+        if summary.get("unknown_baskets"):
+            print(f"No stored basket for: {', '.join(summary['unknown_baskets'])}",
+                  file=sys.stderr)
             return 1
         for row in summary.get("outcomes", []):
             print(f"{row['symbol']:<10} {row['isin']}  {row['outcome']}")
@@ -91,8 +103,22 @@ def main() -> int:
                              "(never a manual logo)")
     parser.add_argument("--isin", default=None,
                         help="Only this ISIN (any security carrying it, held or not)")
+    parser.add_argument("--basket", action="append", default=None, metavar="FUND",
+                        help="The constituents of this stored fund basket (fund ISIN or "
+                             "symbol); repeatable")
+    parser.add_argument("--top", type=int, default=None,
+                        help="With --basket: only the N heaviest constituents of each")
+    parser.add_argument("--limit", type=int, default=MAX_LOOKUPS_PER_PASS,
+                        help=f"At most this many lookups (default {MAX_LOOKUPS_PER_PASS})")
     args = parser.parse_args()
-    return asyncio.run(fetch_logos(dry_run=args.dry_run, force=args.force, isin=args.isin))
+    if args.basket and args.isin:
+        parser.error("--basket and --isin are exclusive")
+    if args.top is not None and not args.basket:
+        parser.error("--top needs --basket")
+    return asyncio.run(fetch_logos(
+        dry_run=args.dry_run, force=args.force, isin=args.isin, baskets=args.basket,
+        top=args.top, limit=args.limit,
+    ))
 
 
 if __name__ == "__main__":

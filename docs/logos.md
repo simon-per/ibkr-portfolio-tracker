@@ -70,8 +70,10 @@ must be https, and the secret key is never sent to it (another host).
 
 `LogoService.refresh` (`app/services/logo_service.py`):
 
-- **Held securities only** (`security_repository.held()`), never crypto, not gated by
-  `price_source` (that is the Yahoo opt-out). Touches no Yahoo: the ticker fallback uses the price
+- **Every security with an ISIN, sold ones included**, held ones first (`security_repository.held()`
+  orders the due list), never crypto, not gated by `price_source` (that is the Yahoo opt-out).
+  Until 2026-10-17 it was held only, and the Activity tab — which lists every trade ever made —
+  showed a monogram for every sold holding. Touches no Yahoo: the ticker fallback uses the price
   path's resolver (`MarketDataService._get_yahoo_ticker`), a database lookup.
 - **Due** = no row, or `checked_at` older than `RECHECK_AFTER` (90 days); manual rows never.
 - ISIN first; on `not_found` the security's Yahoo ticker. **At most `MAX_LOOKUPS_PER_PASS` (30)
@@ -90,9 +92,9 @@ docs/flex-and-sync.md, *Sync schedule*). It runs after a Yahoo rate limit or a c
 fundamentals pass (different upstream), its own failure is a warning, never the job's status, and
 it records inside that job's `sync_runs` row as `logos_result`. Nothing due costs zero requests.
 
-**Cost:** at most 30 lookups a pass, five passes a week. After the first fill (a few dozen held
-ISINs, two passes) a pass asks only about new holdings and the ~1/90 of ISINs whose re-check came
-due each day — cents a month. On the free plan spend cannot exceed the monthly credits: once they
+**Cost:** at most 30 lookups a pass, five passes a week. After the first fill (every security
+ever held, a few passes) a pass asks only about new securities and the ~1/90 of ISINs whose
+re-check came due each day — cents a month. On the free plan spend cannot exceed the monthly credits: once they
 are gone logo.dev answers 402 and every pass stops at its first lookup.
 
 ## Serving — `app/routers/logos.py`
@@ -114,11 +116,19 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
 **Fetch now** instead of waiting for 05:00. `--dry-run` lists what is due and makes **no
 request** (a dry run that asked would pay twice for the same answer); the real run prints each
 ISIN's outcome. `--force` ignores the 90 days (never a manual row); `--isin X` asks about one
-ISIN, held or not. Records `sync_type='manual_logo_fetch'`.
+ISIN, held or not; `--limit N` raises the 30-lookup cap for one run. Records
+`sync_type='manual_logo_fetch'`.
+
+**Fill ahead from a fund basket:** `--basket FUND` (a fund ISIN or symbol, repeatable) asks about
+the constituents of a stored basket instead, `--top N` the N heaviest of each. Logos are keyed by
+ISIN, so a stock bought later shows its logo at once (`manifest` joins on the ISIN). The
+scheduled pass never re-checks these — only securities — so they cost once. A constituent
+unknown by ISIN falls back to the issuer's published ticker.
 
 ```bash
 docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --dry-run
 docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
+docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --basket QQQM --basket VT --top 100 --dry-run
 ```
 
 **Import by hand** a logo logo.dev misses or gets wrong (e.g. a PNG from Flaticon, ≤ 100 KB,
