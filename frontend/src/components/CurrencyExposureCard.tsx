@@ -78,14 +78,14 @@ export function CurrencyExposureCard({
                 the fund sleeve. See lib/currencyExposure.ts for why the split is
                 not re-attributed.
               */}
+              {/* One line, in muted ink: it is a standing limit of the method, not a
+                  problem present right now, and amber on every visit teaches the reader to
+                  skip amber. The share and the reason both stay on screen. */}
               {exposure.lookThroughCount > 0 && (
-                <p className="text-sm text-amber-700 dark:text-amber-400">
+                <p className="text-sm text-muted-foreground">
                   {exposure.lookThroughPct.toFixed(1)}% of the book sits in{' '}
                   {exposure.lookThroughCount} fund{exposure.lookThroughCount === 1 ? '' : 's'},
-                  whose quote currency need not be its economic exposure — a EUR-listed S&amp;P
-                  500 tracker is quoted in EUR and carries USD risk. Those rows are counted
-                  where they trade, not re-attributed: the look-through data maps regions, not
-                  currencies.
+                  counted in the currency they trade in; a fund&apos;s economic exposure can differ.
                 </p>
               )}
               {exposure.unpricedCount > 0 && (

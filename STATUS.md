@@ -7,13 +7,19 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-16.** The product pass (frontend only, docs/shipped-log.md 2026-10-16)
-is committed on `main`; confirm `/health` reports its commit after the deploy. The agent-team
-wave's scheduled halves are under *Watch after the next deploy*.
+**Last updated: 2026-10-17.** The fintech pass (docs/shipped-log.md 2026-10-17) is on branch
+`ccr-7289b752-aev50c`, **not on `main` and not deployed** — the owner merges it (*Needs a human*).
+The product pass (2026-10-16) is on `main`; confirm `/health` reports its commit after the
+deploy. The agent-team wave's scheduled halves are under *Watch after the next deploy*.
 
 ---
 
 ## Needs a human
+
+- **Merge the fintech pass** (`ccr-7289b752-aev50c`) into `main` once your local changes are
+  reconciled with it. It touches most of `frontend/src` (tokens, cards, tables, charts, the hero)
+  and two backend reads (Fundamentals held-only). It was checked only against a synthetic book, so
+  look at it on a production snapshot before pushing `main`, which deploys within 5 minutes.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
@@ -61,6 +67,12 @@ wave's scheduled halves are under *Watch after the next deploy*.
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **The fintech pass on real data** (once merged; verified only on a synthetic book): the tax
+  report's totals under their own columns in all four tables; the hero's 1Y return close to the
+  XIRR card; Fundamentals and `/api/fundamentals/status` listing held securities only; the
+  benchmark lines in their new colours; the bundled font and card shadows under the production
+  CSP (`e2e/csp.mjs`).
 
 - **The product pass on production** (verified only on a local build proxied to the live API):
   the bundled Inter font loads under the production CSP (`e2e/csp.mjs`), the favicon renders, and
@@ -125,7 +137,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    stub is in 17 test files (belongs in `setupFiles`). CI pins Node 20 (EOL).
 9. **`coverage_pct` reads 0.0 on an empty book** (`lookthrough_service.py:853`).
 10. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
-    chip, Period Gain %, dividend chips); MoM/YoY chips in the dividend tooltip; XIRR annualised
+    chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
     "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
 11. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
@@ -141,7 +153,14 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 14. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
 15. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-16. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+16. **`e2e/axis.mjs` fails two of eight checks on a stale assumption**: it expects the value
+    chart's axis floor from the API's unrebased market − cost, while the chart draws the
+    range-rebased P/L and extends its domain to the drawn minimum. Rewrite the check against the
+    drawn series; the chart is right.
+17. **The fundamentals sync still fetches sold securities** — the reads are held-only
+    (`held_security_ids`), the sync scope is not. Narrowing `sync_fundamentals_data` /
+    `sync_stale_fundamentals` to it would only remove Yahoo requests.
+18. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
@@ -149,6 +168,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-17 (fintech pass)** — surfaces, hero figure, quiet tables, one chart look; tax
+  footers, held-only fundamentals, period-return denominator fixed; on a branch, not `main`.
 - **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
   provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
 - **2026-10-15 (sweep fixes)** — item 0 fixed and pushed: overflow, axes, wrap,
@@ -157,5 +178,3 @@ One line each, newest first; drop the oldest.
   local-development), CLAUDE.md slimmed, AGENTS.md made a pointer.
 - **2026-10-14 (agent-team wave)** — growth/forecast pack, KPI fixes, ET Sun/Mon IBKR skip, weekly
   fundamentals refresh, STATUS pruned; browser sweep on production.
-- **2026-10-14 (test speed)** — backend under `pytest-xdist`, `deploy_scripts` deselected locally:
-  5:35 → ~25 s.

@@ -147,6 +147,14 @@ lose time to.
   result is a dev server quietly answering from the *previous* config. Kill by PID:
   `netstat -ano | grep ':8000 ' | grep LISTENING` then `taskkill //F //PID <pid>` (double slashes —
   MSYS eats single ones).
+- **On Linux (a cloud session), `pkill -f <pattern>` can kill the shell that runs it.** The
+  agent's shell command line contains the pattern too, so `pkill -f run_demo_backend.py` ended
+  its own shell (exit 144) and left the server running. Find the PID with
+  `ps -eo pid,args | grep '[r]un_demo_backend'` and `kill <pid>`.
+- **In a cloud container the preinstalled Chromium (`/opt/pw-browsers/chromium`) may not be the
+  build `e2e/`'s Playwright expects**, and `playwright install` is off-limits there. The e2e
+  scripts take no browser option, so preload a module that wraps `chromium.launch` to pass
+  `executablePath: '/opt/pw-browsers/chromium'`, and run `node --import ./preload.mjs mobile.mjs`.
 - **A dev server against a prod snapshot must run on port 5173.** `frontend/.env` points
   `VITE_API_URL` at `localhost:8000`, so the browser calls the backend cross-origin and only the
   ports in `CORS_ORIGINS` work. Any other port fails every request with a CORS error and looks like

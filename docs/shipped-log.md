@@ -7,6 +7,27 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 — the fintech pass (on branch `ccr-7289b752-aev50c`, not yet on `main`)
+
+The owner's goal: a clean, slick, fintech-looking app that could be shipped to other people,
+with every insight kept and every calculation and filter checked. Kept off `main` at the owner's
+request (they had local changes of their own), so nothing here is deployed. **Look:** one
+surface system (grey canvas, white cards with a soft shadow, one white app bar), the headline
+figure set like a balance with the range's gain as a pill, a first-run card for an account that
+has never synced, hairline KPI panels on every tab, quieter tables, one grid and one money-axis
+label on every chart, the value chart's lines and the benchmarks re-coloured by identity, the
+crypto value drawn as the stock chart's area, collapsible sections that remember being opened.
+**Fixed:** three of four tax tables printed each total under a neighbour's header (`footerLayout`);
+Fundamentals listed every security ever traded (held only now, no extra Yahoo request); the hero's
+period return divided by the opening cost basis (now the Modified Dietz capital the heatmap uses);
+seven hand-rolled axis formatters ("CHF 1000k" for a million); the realized badge and `est.` mark
+showing on empty tax tables; an unrealized % over a zero cost basis. Rules in docs/frontend.md,
+*The fintech pass*; the copies in docs/failure-modes.md. **Verified on a local stack seeded with
+a synthetic book, with every non-loopback connection refused** — no production data, no Yahoo,
+no Flex: every tab at 1440 and 390 in both themes, Activity's filters summing to the unfiltered
+count, the tax year's realized total equal to the hero's, `e2e/mobile.mjs` and `e2e/a11y.mjs`
+green. `e2e/axis.mjs` fails two checks on a stale assumption (STATUS.md *Worth doing next*).
+
 ## Shipped 2026-10-16 — the product pass (frontend only)
 
 The owner's goal: an end-user product in the getquin mould — polished, not complex, no stray
