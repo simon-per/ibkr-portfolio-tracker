@@ -282,11 +282,12 @@ async def test_the_scheduled_benchmark_warmup_does_not_spend_a_request_on_a_refr
     The Yahoo-budget half, and the reason the flag exists rather than being on
     everywhere.
 
-    `sync_benchmark_prices` loops **every** warm benchmark — all eight on this account —
-    with only a 1-2s gap. Refreshing there would turn a once-a-day 8-request burst into
-    one per market-data slot, seven times a day, against a documented burst tolerance of
-    ~10-20, and no reader would see the difference. Deleting the `refresh_provisional`
-    argument at this call site is the easy "tidy-up" that would do it.
+    `sync_benchmark_prices` asks every warm benchmark — all eight on this account — 1-2s
+    apart, through the last *finished* session only, so it never writes a provisional
+    row. Refreshing there would spend a request per benchmark on every first slot of the
+    day even when nothing is missing, to restate rows it did not write. Deleting the
+    `refresh_provisional` argument at that call site is the easy "tidy-up" that would do
+    it.
     """
     import app.services.benchmark_service as bs
 
@@ -307,7 +308,7 @@ async def test_the_scheduled_benchmark_warmup_does_not_spend_a_request_on_a_refr
         written = await BenchmarkService(session)._ensure_prices_available(
             "^GSPC", anchor, anchor, currency="USD", refresh_provisional=False,
         )
-        assert written == 0
+        assert written is None
     finally:
         await session.close()
         await engine.dispose()

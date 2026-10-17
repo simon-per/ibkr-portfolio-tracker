@@ -34,8 +34,9 @@ from app.services.currency_service import CurrencyService
 from app.services.sync_helper import ingest_flex_statement
 from app.repositories.security_repository import SecurityRepository
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
-from app.services.benchmark_service import BenchmarkService, BENCHMARKS
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.benchmark_service import (
+    BENCHMARKS, BenchmarkService, last_finished_session,
+)
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
@@ -343,6 +344,9 @@ class SchedulerService:
         self._registered_job_ids: set = set()
         # job id -> STOCK_JOB_GROUP | CRYPTO_JOB_GROUP, from the same registration.
         self._job_groups: dict = {}
+        # ticker -> the finished session the benchmark warm-up last had answered for it;
+        # see `sync_benchmark_prices`.
+        self._benchmark_sessions_asked: dict = {}
 
     async def sync_ibkr_data(self, force: bool = False) -> dict:
         """
@@ -1113,8 +1117,19 @@ class SchedulerService:
 
     async def sync_benchmark_prices(self) -> dict:
         """
-        Sync last 7 days of benchmark prices for benchmarks already in the DB.
-        Only syncs benchmarks the user has previously selected (i.e., have cached prices).
+        Fetch the last finished session for every benchmark already in the DB.
+
+        Only benchmarks the user has previously selected (i.e., have cached prices); the
+        chart's own lazy fetch bootstraps a new one. Runs inside `_market_data_only_locked`,
+        so it already holds SYNC_PIPELINE and passes `gate_held=True` — re-entering the
+        gate refused every ticker, and until 2026-10-17 this pass never reached Yahoo.
+
+        The range ends at `last_finished_session`, never today: today's bar is missing
+        until the close and would be asked for at every slot. Each benchmark is asked at
+        most once per finished session (`_benchmark_sessions_asked`), because a holiday at
+        the range end, or inside it and younger than HOLIDAY_GRACE_DAYS, stays missing
+        after Yahoo answers. So: one request per warm benchmark at the first slot after a
+        session, none at the others. The memo is in-process; a restart costs at most one more.
         """
         logger.info("Starting benchmark price sync...")
 
@@ -1124,12 +1139,13 @@ class SchedulerService:
                 result = await db.execute(
                     select(distinct(BenchmarkPrice.ticker))
                 )
-                existing_tickers = {row[0] for row in result.all()}
+                existing_tickers = sorted(row[0] for row in result.all())
 
                 if not existing_tickers:
                     logger.info("No benchmarks in DB to refresh")
                     return {
-                        "status": "success", "benchmarks_synced": 0,
+                        "status": "success", "benchmarks_fetched": 0,
+                        "benchmark_prices_written": 0,
                         "benchmarks_total": 0, "rate_limited": False,
                     }
 
@@ -1139,48 +1155,61 @@ class SchedulerService:
                 }
 
                 bench_service = BenchmarkService(db)
-                today = date.today()
-                start = today - timedelta(days=7)
-                synced = 0
+                end = last_finished_session(date.today())
+                start = end - timedelta(days=7)
+                fetched = 0
+                written = 0
                 rate_limited = False
+                warnings = []
 
                 for ticker in existing_tickers:
+                    if self._benchmark_sessions_asked.get(ticker) == end:
+                        continue
                     bench_info = ticker_to_benchmark.get(ticker)
                     currency = bench_info["currency"] if bench_info else "USD"
                     try:
-                        # No provisional refresh here: this loops every warm benchmark
-                        # back to back with a 1-2s gap, and doing it at all seven
-                        # market-data slots would multiply that burst by seven for a
-                        # value nobody is reading. The chart's own lazy fetch refreshes
-                        # the benchmark being viewed. See _ensure_prices_available.
+                        # No provisional refresh: the range ends at a finished session,
+                        # so every row this pass writes is already a close. See
+                        # _ensure_prices_available.
                         count = await bench_service._ensure_prices_available(
-                            ticker, start, today, currency=currency,
-                            refresh_provisional=False,
+                            ticker, start, end, currency=currency,
+                            refresh_provisional=False, gate_held=True,
                         )
-                        if count > 0:
-                            logger.info(f"Synced {count} benchmark prices for {ticker}")
-                        synced += 1
                     except Exception as e:
-                        # Rule 1: stop on a rate limit rather than working through the
-                        # remaining benchmarks against an IP that has already refused
-                        # us. This loop runs them back to back with only a 1-2s gap, so
-                        # it is the fastest of the Yahoo loops at burning through a
-                        # limit. A benchmark this pass skipped keeps its cached prices
-                        # and the next slot refreshes it.
-                        if is_rate_limit(e):
-                            rate_limited = True
-                            logger.warning(
-                                f"Yahoo rate limit on benchmark {ticker}; "
-                                f"abandoning the rest of the warm-up"
-                            )
-                            break
+                        # The fetch swallows its own upstream errors, so what lands here
+                        # is a bug (a DB error, a false gate_held) — say so on the result.
                         logger.error(f"Failed to sync benchmark {ticker}: {e}")
+                        warnings.append(f"Benchmark {ticker} was not refreshed: {e}")
+                        continue
+                    # Rule 1: stop on a rate limit rather than working through the
+                    # remaining benchmarks against an IP that has already refused us.
+                    # The fetch latches it (it catches every exception), so the latch is
+                    # what this loop reads. A benchmark this pass skipped keeps its
+                    # cached prices, is not marked asked, and the next slot resumes it.
+                    if bench_service.rate_limited:
+                        rate_limited = True
+                        logger.warning(
+                            f"Yahoo rate limit on benchmark {ticker}; "
+                            f"abandoning the rest of the warm-up"
+                        )
+                        break
+                    # None: Yahoo was not asked (nothing missing, throttled) or did not
+                    # answer. Neither is a fetch, and neither uses up this session.
+                    if count is not None:
+                        self._benchmark_sessions_asked[ticker] = end
+                        fetched += 1
+                        written += count
+                        logger.info(f"Synced {count} benchmark prices for {ticker}")
 
                 await db.commit()
-                logger.info(f"Benchmark price sync completed: {synced} benchmarks refreshed")
+                logger.info(
+                    f"Benchmark price sync completed: {fetched} benchmarks fetched, "
+                    f"{written} prices written"
+                )
                 result = {
                     "status": "success",
-                    "benchmarks_synced": synced,
+                    "benchmarks_fetched": fetched,
+                    "benchmark_prices_written": written,
                     "benchmarks_total": len(existing_tickers),
                     "rate_limited": rate_limited,
                 }
@@ -1189,12 +1218,14 @@ class SchedulerService:
                     # in the API to one that finished — and this loop is the fastest of
                     # the Yahoo loops at burning a limit, so it is the leading indicator
                     # for the market-data half that runs beside it.
-                    result["warnings"] = [
+                    warnings.append(
                         f"Yahoo Finance rate limit reached during the benchmark warm-up; "
-                        f"{synced} of {len(existing_tickers)} benchmarks refreshed, the rest "
+                        f"{fetched} of {len(existing_tickers)} benchmarks refreshed, the rest "
                         f"keep their cached prices. Do not retry manually — the next "
                         f"scheduled run resumes where it stopped."
-                    ]
+                    )
+                if warnings:
+                    result["warnings"] = warnings
                 return result
 
             except Exception as e:

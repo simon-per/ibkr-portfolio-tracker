@@ -7,6 +7,7 @@ import random
 from dataclasses import dataclass
 import logging
 import time
+from contextlib import contextmanager
 from typing import List, Dict, Optional, Set, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
@@ -21,7 +22,7 @@ from app.models.security import Security
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
 from app.services.yahoo_rate_limit import is_rate_limit
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +49,41 @@ def _throttled(key: str) -> bool:
     """
     True when ``key`` was attempted within the cooldown, meaning: don't fetch.
 
-    Records the attempt when it returns False, so the caller is free to proceed.
+    Only asks; `_upstream_request` records the attempt once a request really goes out.
     """
-    now = time.monotonic()
     last = _last_upstream_attempt.get(key)
-    if last is not None and (now - last) < UPSTREAM_RETRY_COOLDOWN_SECONDS:
-        return True
-    _last_upstream_attempt[key] = now
-    return False
+    return last is not None and (time.monotonic() - last) < UPSTREAM_RETRY_COOLDOWN_SECONDS
+
+
+@contextmanager
+def _upstream_request(key: str, gate_held: bool = False):
+    """
+    Hold SYNC_PIPELINE around one upstream request, then stamp ``key``'s attempt.
+
+    The stamp follows the gate and never precedes it. It used to be taken before: a
+    fetch the gate refused sent nothing, yet throttled the next caller for five minutes.
+
+    ``gate_held`` is for a caller already inside the gate — the scheduled warm-up runs
+    under its job's `_gated_job`, and `single_flight` is not re-entrant, so entering it
+    again refused every ticker and the warm-up never reached Yahoo. The caller checks
+    the claim before it gets here (`_ensure_prices_available`), outside any `except`
+    that would turn a false claim into a quiet "serving cache".
+    """
+    if gate_held:
+        _last_upstream_attempt[key] = time.monotonic()
+        yield
+        return
+    with single_flight(SYNC_PIPELINE):
+        _last_upstream_attempt[key] = time.monotonic()
+        yield
+
+
+def last_finished_session(today: date) -> date:
+    """The last weekday before ``today`` — the newest session whose close is final."""
+    day = today - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
 
 
 def reset_upstream_throttle() -> None:
@@ -168,15 +196,24 @@ class BenchmarkService:
 
     async def _ensure_prices_available(
         self, ticker: str, start_date: date, end_date: date, currency: str = "USD",
-        refresh_provisional: bool = True,
-    ) -> int:
+        refresh_provisional: bool = True, gate_held: bool = False,
+    ) -> Optional[int]:
         """
         Lazy-sync: fetch missing benchmark prices from Yahoo Finance.
 
+        Returns the rows written from Yahoo's answer (0 for an empty one, e.g. a
+        holiday), or **None when Yahoo did not answer**: nothing was missing, the
+        ticker was throttled, the pipeline was busy, the request failed or was rate
+        limited (`self.rate_limited` says which). The warm-up counts a benchmark as
+        fetched only on a number, so a skip can no longer pass for a fetch.
+
+        ``gate_held`` is for a caller already inside SYNC_PIPELINE, i.e. the scheduled
+        warm-up — see `_upstream_request`. Every other caller enters the gate here and
+        serves cache on `SyncBusy`.
+
         ``refresh_provisional`` re-fetches the trailing days whose cached row may hold a
         mid-session value — see MarketPriceRepository.PROVISIONAL_PRICE_DAYS. **On by
-        default for the read path and off for the scheduled warm-up**, and the asymmetry
-        is a Yahoo-budget decision rather than a correctness one:
+        default for the read path and off for the scheduled warm-up**:
 
         - A read fetches the *one* benchmark being viewed, behind a 300s per-ticker
           throttle. That is where the staleness is visible: the chart draws the
@@ -184,17 +221,21 @@ class BenchmarkService:
           while the benchmark keeps whatever it was first fetched at today, the *gap*
           between the two lines drifts over the day — the one number the panel exists
           to show.
-        - `sync_benchmark_prices` loops **every** warm benchmark (all eight, on this
-          account) with only a 1-2s gap. Refreshing there would turn today's
-          once-a-day 8-request burst into one per market-data slot, seven times a day,
-          against a documented burst tolerance of ~10-20. It buys nothing a reader
-          sees, so it stays off and the scheduled pass costs exactly what it does now.
+        - `sync_benchmark_prices` asks only through the last *finished* session, whose
+          close is final by the time any slot runs, so it never writes a provisional
+          row and has none of its own to restate. Refreshing there would spend a
+          request per warm benchmark on every first slot of the day, including the
+          days nothing is missing, to restate rows the warm-up did not write.
 
-        The residual is deliberate and small: a day nobody opened the chart on can keep
-        a mid-session benchmark close once it ages out of the window. That is the
-        pre-existing behaviour, it never affects a series being looked at, and the fix
-        would be a Yahoo bill paid on every slot for a value no one read.
+        The residual is deliberate and small: a mid-session close a chart load wrote
+        stays once it ages out of the window, if nobody opens that chart again. It never
+        affects a series being looked at.
         """
+        if gate_held and not is_running(SYNC_PIPELINE):
+            raise RuntimeError(
+                f"Benchmark {ticker}: gate_held=True, but {SYNC_PIPELINE} is not held"
+            )
+
         # Check what we already have (include buffer zone to avoid duplicate inserts)
         buffer_start = start_date - timedelta(days=10)
         result = await self.db.execute(
@@ -214,7 +255,7 @@ class BenchmarkService:
             refresh_provisional=refresh_provisional,
         )
         if not missing:
-            return 0
+            return None
 
         # Cheap refusals before the expensive one: a ticker fetched moments ago
         # serves cache, and a fetch never runs beside another pipeline.
@@ -223,7 +264,7 @@ class BenchmarkService:
                 f"Benchmark {ticker}: {len(missing)} dates missing but last attempted "
                 f"under {UPSTREAM_RETRY_COOLDOWN_SECONDS}s ago; serving cache"
             )
-            return 0
+            return None
 
         # Fetch from Yahoo Finance (entire range; yfinance returns only trading days)
         logger.info(f"Fetching benchmark {ticker} prices: {len(missing)} dates missing")
@@ -235,7 +276,7 @@ class BenchmarkService:
             # other routes nothing: entering it bumps the shared last-start clock
             # that their cooldowns read, and a public GET should only do that when
             # it genuinely went upstream.
-            with single_flight(SYNC_PIPELINE):
+            with _upstream_request(f"price:{ticker}", gate_held=gate_held):
                 await asyncio.sleep(random.uniform(1.0, 2.0))  # rate-limit
 
                 # In a thread like every other yfinance call site — this is reachable
@@ -246,14 +287,14 @@ class BenchmarkService:
                 hist = await asyncio.to_thread(_fetch)
         except SyncBusy as e:
             logger.info(f"Benchmark {ticker}: pipeline busy ({e}); serving cached prices")
-            return 0
+            return None
         except Exception as e:
-            # Rule 1: a rate limit is latched here rather than only in the scheduler's
-            # warm-up loop, because this method is also reachable from a public GET on
-            # any cache miss — a chart load that 429s must not go on to tile FX for the
-            # same range. The per-target `UPSTREAM_RETRY_COOLDOWN_SECONDS` memo bounds
-            # re-asking for the *same* benchmark; this bounds the pass across different
-            # ones, which is the axis it cannot see.
+            # Rule 1: every exception ends here, so the latch is the only way a rate
+            # limit reaches the caller — `sync_benchmark_prices` reads it after each
+            # ticker and abandons the pass. The per-target
+            # `UPSTREAM_RETRY_COOLDOWN_SECONDS` memo bounds re-asking for the *same*
+            # benchmark; the latch bounds the pass across different ones, which is the
+            # axis the memo cannot see.
             if is_rate_limit(e):
                 self.rate_limited = True
                 logger.warning(
@@ -266,7 +307,7 @@ class BenchmarkService:
                 await self.db.rollback()
             except Exception:
                 pass
-            return 0
+            return None
 
         try:
             if hist.empty:
@@ -314,7 +355,7 @@ class BenchmarkService:
                 await self.db.rollback()
             except Exception:
                 pass
-            return 0
+            return None
 
     async def _preload_benchmark_prices(
         self, ticker: str, start_date: date, end_date: date, lookback_days: int = 14
@@ -437,7 +478,7 @@ class BenchmarkService:
 
         currency_service = CurrencyService(self.db)
         try:
-            with single_flight(SYNC_PIPELINE):
+            with _upstream_request(f"fx:{currency}"):
                 for target in targets:
                     try:
                         await currency_service._batch_fetch_rates(

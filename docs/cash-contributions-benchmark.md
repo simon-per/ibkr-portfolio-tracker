@@ -349,6 +349,25 @@ since) inherits the FX wobble recorded under *Worth doing next* in STATUS.md; it
 Tests: `tests/test_benchmark_window_anchor.py`, the anchor cases in
 `PortfolioValueChart.test.tsx`, the contribution-day cases in `portfolioKpis.test.ts`.
 
+### When benchmark prices are fetched
+
+Two paths write `benchmark_prices`, and only one of them can start a benchmark:
+
+- **A chart load** (`GET /api/portfolio/benchmark`) fetches whatever the selected benchmark is
+  missing over the requested range, today included, and refreshes its trailing provisional
+  days. It is the only path that bootstraps a benchmark nobody selected before, and the only
+  one that writes an intraday value. It enters `SYNC_PIPELINE` around the request and serves
+  the cache when a sync holds it, behind a 300 s per-ticker attempt memo.
+- **The scheduled warm-up**, inside the `market_data_only` job, fetches every benchmark that
+  already has rows, through the **last finished session** only, once per session. So a
+  benchmark someone has selected gains each day's close by the first slot of the next morning
+  whether or not anyone opens the chart.
+
+Until 2026-10-17 the second path never ran: it re-entered the gate its own job held and was
+refused at every ticker (issue #4). Every benchmark price before that date came from a chart
+load. The budget and the gate rules are in docs/flex-and-sync.md (*Sync schedule* and
+`GET /api/portfolio/benchmark` is gated at the fetch); tests: `tests/test_benchmark_warmup.py`.
+
 ### Where cash reaches, and where it deliberately does not
 
 - **The value chart and the summary hero card.** The card names the split in its footnote

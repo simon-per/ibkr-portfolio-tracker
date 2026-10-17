@@ -251,8 +251,9 @@ the **price** changing, not by the timestamp. Nothing records when a price was l
 
 This is the **precondition for the intraday market-data slots**, not a separate cleanup: adding an
 earlier slot on top of the freeze pins an *earlier* price. If the refresh is ever removed the slots
-have to go with it. `BenchmarkService` opts in per caller — the read path yes, the scheduled warm-up no
-— for the Yahoo-budget reason given in *Sync schedule*, and the **FX path deliberately never** does: an
+have to go with it. `BenchmarkService` opts in per caller — the read path yes, the scheduled warm-up no,
+because it stops at the last finished session and so never writes a provisional row (*Sync schedule*)
+— and the **FX path deliberately never** does: an
 ECB reference rate is published once a day, so there is no intraday rate to converge on, and
 `_batch_fetch_rates` dedups per row and could not rewrite it anyway. Tests:
 `tests/test_provisional_price_refresh.py`.

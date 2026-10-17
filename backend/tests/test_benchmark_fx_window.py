@@ -90,7 +90,7 @@ async def test_a_settled_benchmark_range_makes_no_yahoo_request(monkeypatch):
         fetched = await BenchmarkService(session)._ensure_prices_available(
             "^GSPC", week[0], week[-1], currency="USD"
         )
-        assert fetched == 0
+        assert fetched is None  # Yahoo was not asked, which is not "answered with nothing"
     finally:
         await session.close()
         await engine.dispose()
@@ -120,7 +120,7 @@ async def test_a_cold_benchmark_fetch_does_not_run_beside_another_pipeline(monke
             fetched = await BenchmarkService(session)._ensure_prices_available(
                 "^GSPC", date(2026, 4, 20), date(2026, 4, 24), currency="USD"
             )
-        assert fetched == 0  # served from cache, not a 429 in the caller's face
+        assert fetched is None  # served from cache, not a 429 in the caller's face
     finally:
         await session.close()
         await engine.dispose()

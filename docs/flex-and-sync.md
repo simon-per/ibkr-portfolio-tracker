@@ -402,7 +402,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 
 | Time | ET | Job | Touches Yahoo? |
 |---|---|---|---|
-| 08:00, 11:00, 13:00, 15:00, 20:00, 22:00 | | `market_data_only_sync_job` (7d) | yes |
+| 08:00, 11:00, 13:00, 15:00, 20:00, 22:00 | | `market_data_only_sync_job` (7d) + benchmark warm-up (first slot after a session only) | yes |
 | **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every slot above | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
@@ -519,9 +519,28 @@ Cost, since rule 1 makes this the question: **one Yahoo request per security per
 the refresh only widens a range on a request already being made. 40 securities × 7 passes ≈ 280
 requests/day at ≤48 in any hour, against a documented ~500–2,000/hour, and the ~7.5s per-security
 pacing keeps a pass at ~8 requests/minute, under the ~10–20 burst tolerance. Slots are ≥2h apart, so
-two passes never share an hour. The scheduled *benchmark* warm-up deliberately does **not** refresh —
-it loops all eight warm benchmarks 1-2s apart, so doing it seven times a day would multiply that
-burst for a value nobody read; the chart's own lazy fetch refreshes the one being viewed.
+two passes never share an hour.
+
+**The scheduled benchmark warm-up costs one request per warm benchmark per finished session, at the
+first slot after it, and none at the others** (`SchedulerService.sync_benchmark_prices`). Until
+2026-10-17 it cost nothing because it did nothing: it runs under `_gated_job`, the fetch entered
+`SYNC_PIPELINE` again, and `single_flight` is not re-entrant — every ticker hit `SyncBusy`, was served
+from cache and was counted as synced, so benchmark prices were fetched only by chart loads (GitHub
+issue #4; the gate half is below under `GET /api/portfolio/benchmark`). The budget follows from three
+rules. **The range ends at the last finished session** (`last_finished_session`, the previous
+weekday), never today: today's bar is missing until the close, so asking for it is a request at every
+slot. Every row the warm-up writes is therefore a final close, so it does **not** refresh provisional
+days — it would only restate rows a chart load wrote, at a request per benchmark per day. **Each
+benchmark is asked at most once per session** (`_benchmark_sessions_asked`, in-process): a holiday at
+the range end, or inside the 7-day range and younger than `HOLIDAY_GRACE_DAYS`, stays missing after
+Yahoo answers, and would otherwise be re-asked at every slot for a week. A memo only stamps when Yahoo
+answered, so a throttled, failed or rate-limited ticker is retried at the next slot; a restart forgets
+it and costs at most one more pass. **A 429 abandons the pass**: `_ensure_prices_available` catches
+every exception, so the loop reads `BenchmarkService.rate_limited` after each ticker — the
+`except` that used to test `is_rate_limit` could never fire. The result reports `benchmarks_fetched`
+(Yahoo asked and answered), `benchmark_prices_written` and `benchmarks_total`; a benchmark with nothing
+missing is checked, not fetched. Tests: `tests/test_benchmark_warmup.py`, which drives the real job
+gate and the real fetch with only `yf.Ticker` stubbed.
 
 **A rate limit now abandons the rest of the pass.** This file already credited
 `market_data_service.py` with "rate-limit detection that aborts the run" and it only ever aborted the
@@ -538,7 +557,7 @@ neither `div_result` nor `bench_result` was passed to `_collect_warnings`, so a 
 5 of 40 was recorded as `status: success` and was byte-identical in the API to a complete one. The
 dividend step also reported `securities_processed` as "everything not skipped" rather than what it
 asked about. Both now carry `rate_limited`, the standard "do not retry manually" warning, and (for
-the warm-up) `benchmarks_total` beside `benchmarks_synced`; `sync_dividends()` hoists its two
+the warm-up) `benchmarks_total` beside what it fetched; `sync_dividends()` hoists its two
 children's warnings, which is also how `compute_dividend_income`'s FX-skipped line first became
 visible. Rule: a step that can stop early says so on its own result, and a job passes *every* step
 result to `_collect_warnings` — the silent shape is the default one, since a dict without the key
@@ -830,7 +849,17 @@ the route allows could run beside the 08:00 `full_sync`. It must **not** wrap th
 `sync_benchmark_prices()` only refreshes benchmarks that *already have rows*, so this route bootstraps
 the warm set — a cache-only GET leaves a first-time selection empty forever, and gating the read would
 429 the chart every morning. So the gate sits inside `_ensure_prices_available` /
-`_ensure_fx_rates_available` around the network call, and `SyncBusy` serves what is cached.
+`_ensure_fx_rates_available` around the network call (`_upstream_request`), and `SyncBusy` serves what
+is cached.
+
+**A caller already holding the gate must say so, not enter it again** (2026-10-17, issue #4).
+`single_flight` is not re-entrant, so the scheduled warm-up — inside `_gated_job` — was refused at
+every ticker and never reached Yahoo, while its result counted every skip as synced. It now passes
+`gate_held=True`, which skips the inner gate and is **checked**, not trusted: claimed while
+`SYNC_PIPELINE` is not held, it raises before any request, outside the `except` that would turn it
+into a quiet "serving cache". `tests/test_gate_reentry_family.py` walks the call graph from every job
+`_gated_job` runs and every `with single_flight(SYNC_PIPELINE)` block to anything that enters the gate
+again, so the next nested gate fails the suite rather than a production slot.
 
 Two consequences worth keeping straight. **Entering the gate bumps the shared last-start clock every
 other route's cooldown reads**, which is why the gate wraps only the actual fetch — a warm chart load
@@ -838,7 +867,10 @@ must not 429 a manual IBKR sync. And **the gate cannot stop a sequential loop**,
 currency carries its own `UPSTREAM_RETRY_COOLDOWN_SECONDS` (300) attempt memo: trailing weekdays the
 provider has no bar for stay missing *by design*, so the range end is otherwise re-requested on every
 request forever — the same shape the holiday rule fixed for `market_prices`. Keyed **per upstream
-target**, because warming eight distinct benchmarks is legitimate and re-hitting one is not.
+target**, because warming eight distinct benchmarks is legitimate and re-hitting one is not. **The
+memo is stamped inside the gate, once the request really goes out** (`_upstream_request`): it used to
+be stamped before, so a fetch the gate refused sent nothing yet throttled the next caller for five
+minutes.
 `reset_upstream_throttle()` exists for tests, since the memo is process-lifetime state.
 
 `_ensure_fx_rates_available` also asks what is missing before tiling. `_batch_fetch_rates` issues its

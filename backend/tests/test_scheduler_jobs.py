@@ -1104,7 +1104,7 @@ async def test_benchmark_warnings_reach_the_top_of_the_result(spy, monkeypatch):
     beside it is the fastest Yahoo loop at burning a limit and was silent."""
     svc, s = spy
     monkeypatch.setattr(svc, 'sync_benchmark_prices', s.make('benchmarks', {
-        "status": "success", "benchmarks_synced": 2, "benchmarks_total": 8,
+        "status": "success", "benchmarks_fetched": 2, "benchmarks_total": 8,
         "rate_limited": True,
         "warnings": ["Yahoo Finance rate limit reached during the benchmark warm-up"],
     }))
@@ -1169,55 +1169,8 @@ async def test_a_quiet_dividend_step_grows_no_warnings_key(monkeypatch):
     assert "warnings" not in result   # a clean run must not grow an empty list
 
 
-@pytest.mark.asyncio
-async def test_the_benchmark_warmup_reports_how_far_it_got_when_yahoo_refused(monkeypatch):
-    """A warm-up that stopped at the first of two benchmarks used to return the same
-    `{"status": "success"}` as one that finished."""
-    import app.services.scheduler_service as sched_mod
-    from app.services.benchmark_service import BenchmarkService
-
-    monkeypatch.setattr(
-        sched_mod, "AsyncSessionLocal",
-        lambda: _FakeSession(rows=[("^GSPC",), ("^IXIC",)]),
-    )
-
-    async def _refuse(self, *_a, **_k):
-        raise Exception("HTTP Error 429: Too Many Requests")
-
-    monkeypatch.setattr(BenchmarkService, "_ensure_prices_available", _refuse)
-
-    result = await SchedulerService().sync_benchmark_prices()
-
-    assert result["status"] == "success"          # the step ran; the job is not a failure
-    assert result["rate_limited"] is True
-    assert result["benchmarks_synced"] == 0
-    assert result["benchmarks_total"] == 2
-    assert len(result["warnings"]) == 1
-    assert "0 of 2" in result["warnings"][0]
-    assert "Do not retry manually" in result["warnings"][0]
-
-
-@pytest.mark.asyncio
-async def test_a_complete_benchmark_warmup_is_not_flagged(monkeypatch):
-    import app.services.scheduler_service as sched_mod
-    from app.services.benchmark_service import BenchmarkService
-
-    monkeypatch.setattr(
-        sched_mod, "AsyncSessionLocal",
-        lambda: _FakeSession(rows=[("^GSPC",), ("^IXIC",)]),
-    )
-
-    async def _fine(self, *_a, **_k):
-        return 3
-
-    monkeypatch.setattr(BenchmarkService, "_ensure_prices_available", _fine)
-
-    result = await SchedulerService().sync_benchmark_prices()
-
-    assert result["rate_limited"] is False
-    assert result["benchmarks_synced"] == result["benchmarks_total"] == 2
-    assert "warnings" not in result
-
+# The benchmark warm-up's own tests drive the real fetch under the real gate — stubbing
+# `_ensure_prices_available` here is what hid issue #4. See test_benchmark_warmup.py.
 
 
 # --- the crypto group (docs/crypto.md) ---------------------------------------------------
