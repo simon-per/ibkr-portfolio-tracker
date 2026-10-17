@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Globe } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
@@ -54,6 +55,7 @@ export function CurrencyExposureCard({
         open={open}
         onToggle={() => setOpen((v) => !v)}
         title="Currency Exposure"
+        icon={Globe}
         description={summary}
         contentId="currency-exposure-panel"
       />

@@ -1,6 +1,10 @@
-import { TrendingUp, TrendingDown, Activity, Target, Shield, PieChart } from 'lucide-react'
+import { TrendingUp, TrendingDown, Activity, Target, Shield, ChartPie, ChartLine } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+
+/** The row's heading: return figures here, risk and income in `RiskMetricsCards`. */
+const heading = <SectionHeader variant="bare" title="Returns" icon={ChartLine} className="mb-3" />
 
 interface PerformanceMetricsCardsProps {
   metrics: {
@@ -53,9 +57,12 @@ export function PerformanceMetricsCards({
 }: PerformanceMetricsCardsProps) {
   if (isLoading) {
     return (
-      <KpiPanel>
-        <KpiCardSkeleton tile count={6} />
-      </KpiPanel>
+      <section>
+        {heading}
+        <KpiPanel>
+          <KpiCardSkeleton tile count={6} />
+        </KpiPanel>
+      </section>
     )
   }
 
@@ -81,103 +88,103 @@ export function PerformanceMetricsCards({
   const unvalued = metrics.unvaluedPositions ?? 0
 
   return (
-    <KpiPanel>
-      {/* Outside the cards, in the row's own flow — the rule MonthlyReturnsHeatmap and
-          PerformanceAttribution both had to learn: a caveat you have to open something to
-          reach is as good as absent, and the figure it qualifies is on screen either way.
-          Same shape and colours as PortfolioSummaryCards' notice, because it is the same
-          condition reaching a different set of numbers. */}
-      {xirrUnpriced > 0 && (
-        <div
-          role="alert"
-          className="col-span-2 md:col-span-3 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
-        >
-          <span className="font-medium">
-            Annual return is understated — {xirrUnpriced}{' '}
-            {xirrUnpriced === 1 ? 'holding had' : 'holdings had'} no usable price at one end
-            of this period
-          </span>
-        </div>
-      )}
+    <section>
+      {heading}
+      <KpiPanel>
+        {/* Outside the cards, in the row's own flow — the rule MonthlyReturnsHeatmap and
+            PerformanceAttribution both had to learn: a caveat you have to open something to
+            reach is as good as absent, and the figure it qualifies is on screen either way.
+            Same shape and colours as PortfolioSummaryCards' notice, because it is the same
+            condition reaching a different set of numbers. */}
+        {xirrUnpriced > 0 && (
+          <div
+            role="alert"
+            className="col-span-2 md:col-span-3 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+          >
+            <span className="font-medium">
+              Annual return is understated — {xirrUnpriced}{' '}
+              {xirrUnpriced === 1 ? 'holding had' : 'holdings had'} no usable price at one end
+              of this period
+            </span>
+          </div>
+        )}
 
-      {/* Annual Return (XIRR). A window under 30 days reports simple_period instead, and
-          the label follows it rather than annualising a few days of noise. */}
-      <KpiCard
-        tile
-        label={metrics.xirrMethod === 'simple_period' ? 'Period return' : 'Annual return'}
-        // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
-        // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
-        // window, which 1W on a week with no trades produces — drew a red downward
-        // arrow and `tone: 'negative'` over a dash. A tone ladder asserting a loss about
-        // a value the backend declined to compute. `KpiCard` forces a null value to a
-        // muted tone, but the icon is chosen here, so that guard could not reach it.
-        // Every sibling card on these two rows already branches to muted.
-        icon={metrics.xirr === null
-          ? <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          : isPositiveXIRR
-            ? <TrendingUp className="h-4 w-4 text-green-600" />
-            : <TrendingDown className="h-4 w-4 text-red-600" />}
-        value={metrics.xirr !== null
-          ? `${isPositiveXIRR ? '+' : ''}${metrics.xirr.toFixed(2)}%`
-          : null}
-        tone={metrics.xirr === null ? 'muted' : isPositiveXIRR ? 'positive' : 'negative'}
-      />
+        {/* Annual Return (XIRR). A window under 30 days reports simple_period instead, and
+            the label follows it rather than annualising a few days of noise. */}
+        <KpiCard
+          tile
+          label={metrics.xirrMethod === 'simple_period' ? 'Period return' : 'Annual return'}
+          // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
+          // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
+          // window, which 1W on a week with no trades produces — drew a red downward
+          // arrow and `tone: 'negative'` over a dash. A tone ladder asserting a loss about
+          // a value the backend declined to compute. `KpiCard` forces a null value to a
+          // muted tone, but the icon is chosen here, so that guard could not reach it.
+          // Every sibling card on these two rows already branches to muted. The well takes
+          // `tone`, which is muted for the unknown case.
+          icon={metrics.xirr !== null && !isPositiveXIRR ? TrendingDown : TrendingUp}
+          value={metrics.xirr !== null
+            ? `${isPositiveXIRR ? '+' : ''}${metrics.xirr.toFixed(2)}%`
+            : null}
+          tone={metrics.xirr === null ? 'muted' : isPositiveXIRR ? 'positive' : 'negative'}
+        />
 
-      <KpiCard
-        tile
-        label="Max drawdown"
-        icon={<TrendingDown className="h-4 w-4 text-red-600" />}
-        value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
-        tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
-        // Not "no decline": with nothing measurable in the range there is no decline to
-        // measure, and the two must not share a rendering.
-        sub={metrics.maxDrawdown !== null ? undefined : 'Not enough history in this range'}
-      />
+        <KpiCard
+          tile
+          label="Max drawdown"
+          icon={TrendingDown}
+          value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
+          tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
+          // Not "no decline": with nothing measurable in the range there is no decline to
+          // measure, and the two must not share a rendering.
+          sub={metrics.maxDrawdown !== null ? undefined : 'Not enough history in this range'}
+        />
 
-      <KpiCard
-        tile
-        label="Sharpe ratio"
-        icon={<Activity className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : null}
-        // Says which of the two absences it is, the way the Volatility and Sortino
-        // cards do — the range is too short far more often than the market is flat.
-        sub={metrics.sharpeRatio !== null ? undefined : 'Not enough history in this range'}
-      />
+        <KpiCard
+          tile
+          label="Sharpe ratio"
+          icon={Activity}
+          value={metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : null}
+          // Says which of the two absences it is, the way the Volatility and Sortino
+          // cards do — the range is too short far more often than the market is flat.
+          sub={metrics.sharpeRatio !== null ? undefined : 'Not enough history in this range'}
+        />
 
-      <KpiCard
-        tile
-        label="Win rate"
-        icon={<Target className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : null}
-        // The excluded count belongs beside the ratio, not only in the alert above: a
-        // holding valued at 0.00 carries a gain of -cost, so counting it would move this
-        // figure while looking like an ordinary loser.
-        sub={metrics.winRate === null
-          ? 'No priced positions'
-          : `${metrics.profitablePositions} of ${metrics.totalPositions} in profit` +
-            (unvalued > 0 ? ` · ${unvalued} unpriced` : '')}
-      />
+        <KpiCard
+          tile
+          label="Win rate"
+          icon={Target}
+          value={metrics.winRate !== null ? `${metrics.winRate.toFixed(1)}%` : null}
+          // The excluded count belongs beside the ratio, not only in the alert above: a
+          // holding valued at 0.00 carries a gain of -cost, so counting it would move this
+          // figure while looking like an ordinary loser.
+          sub={metrics.winRate === null
+            ? 'No priced positions'
+            : `${metrics.profitablePositions} of ${metrics.totalPositions} in profit` +
+              (unvalued > 0 ? ` · ${unvalued} unpriced` : '')}
+        />
 
-      <KpiCard
-        tile
-        label="Calmar ratio"
-        icon={<Shield className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.calmarRatio !== null ? metrics.calmarRatio.toFixed(2) : null}
-      />
+        <KpiCard
+          tile
+          label="Calmar ratio"
+          icon={Shield}
+          value={metrics.calmarRatio !== null ? metrics.calmarRatio.toFixed(2) : null}
+        />
 
-      <KpiCard
-        tile
-        label="Top 5 weight"
-        icon={<PieChart className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.top5Weight !== null ? `${metrics.top5Weight.toFixed(1)}%` : null}
-        sub={metrics.top5Weight === null
-          // Both figures are absent on the same condition — nothing priced — so say that
-          // rather than leaving a bare "Concentration risk" under a dash.
-          ? 'No priced positions'
-          : metrics.effectiveHoldings !== null
-            ? `${metrics.effectiveHoldings.toFixed(1)} effective holdings`
-            : undefined}
-      />
-    </KpiPanel>
+        <KpiCard
+          tile
+          label="Top 5 weight"
+          icon={ChartPie}
+          value={metrics.top5Weight !== null ? `${metrics.top5Weight.toFixed(1)}%` : null}
+          sub={metrics.top5Weight === null
+            // Both figures are absent on the same condition — nothing priced — so say that
+            // rather than leaving a bare "Concentration risk" under a dash.
+            ? 'No priced positions'
+            : metrics.effectiveHoldings !== null
+              ? `${metrics.effectiveHoldings.toFixed(1)} effective holdings`
+              : undefined}
+        />
+      </KpiPanel>
+    </section>
   )
 }

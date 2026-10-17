@@ -688,3 +688,26 @@ metrics may well go without.
   phone it wraps to two rows and pinning it too would eat a quarter of the screen.
 - **Cards**: `rounded-2xl`, hairline border, `shadow-card` — in dark mode a 1px inset top
   highlight, which reads as a lit edge where a drop shadow would vanish.
+
+### Performance tab (2026-10-17)
+
+**Insights strip** (`PerformanceInsights.tsx`, logic in `lib/performanceInsights.ts`): four tiles
+under the hero — top mover and biggest drag of the selected range (from the range's attribution
+rows, never recomputed), largest holding by account weight, and the next dividend (the breakdown's
+`upcoming`, skipping `pending` rows and anything before today). It adds no request: Dashboard
+passes the attribution, positions, summary cash and `dividendBreakdown.upcoming` it already holds.
+Each pick has two absences — `undefined` (not loaded) renders a dash, `null` (loaded, no such
+row: nothing lost money this range) renders "None" — and an empty book renders no strip.
+**`weightDenominator` is the one definition of "weight"**: valued holdings plus tracked cash.
+`PositionsList` reads it too, so the tile's weight and the table row's cannot drift.
+The KPI rows carry lucide components (`icon={Waves}`), grouped under bare `SectionHeader`s
+"Returns" and "Risk & income"; Current drawdown's well is red only while in a drawdown, muted
+otherwise (a falling arrow in a green well contradicts itself). Positions: `text-gain`/`text-loss`
+gains, an avatar on the phone card's title line, and a slim weight bar under the figure on desktop,
+scaled to the largest row (decorative — the figure is the value). The Monthly Returns cells are
+washes of `--gain`/`--loss` (`bg-gain/10…/30` with gain ink, then `/80` and solid with
+`text-background` ink, which is white on the light theme's deep green and near-black on the dark
+theme's bright one). Attribution bars take `GAIN_COLOR`/`LOSS_COLOR`, Money In per Month
+`chartColor(0)`. Not migrated, deliberately: `BENCHMARK_COLORS`/`PORTFOLIO_SERIES_COLORS` keep
+their measured hexes — they were picked by a max-separation search against each other, which a
+re-point onto the general palette would have to redo, and the section above still describes them.

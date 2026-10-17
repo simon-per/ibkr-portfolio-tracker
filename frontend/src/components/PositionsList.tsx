@@ -6,10 +6,14 @@ import { getRatingScore } from '@/lib/analystRating'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Briefcase, Wallet } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { IconChip } from '@/components/ui/IconChip'
+import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { displayName } from '@/lib/securityName'
+import { weightDenominator } from '@/lib/performanceInsights'
 
 interface PositionsListProps {
   positions: Position[]
@@ -91,7 +95,7 @@ const cannotValue = (p: Position) => isUnpriced(p)
 const NO_VALUE = '—'
 
 const gainTone = (p: Position) =>
-  cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-green-600' : 'text-red-600'
+  cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-gain' : 'text-loss'
 
 /**
  * The positions table, described once for both renderings.
@@ -122,8 +126,10 @@ export function positionColumns(deps: {
    * non-payer is missing rather than present-with-null. Both mean "no rate to show".
    */
   yieldOnCost: Map<number, number | null>
+  /** The largest row's weight, which the weight bars scale to. Absent: bars scale to 100%. */
+  maxWeightPct?: number | null
 }): Column<Position, SortColumn>[] {
-  const { formatCurrency, totalMarketValue, yieldOnCost } = deps
+  const { formatCurrency, totalMarketValue, yieldOnCost, maxWeightPct } = deps
   // `null` rather than 0 for a holding with no weight to compute — a 0.00% here reads
   // as "this is a negligible part of the book", which is a claim, and `RebalanceCard`'s
   // Current column already prints a dash for the same row.
@@ -168,6 +174,12 @@ export function positionColumns(deps: {
           </div>
         ) : (
           <>
+            {/* Inline, so the title line still truncates as one run of text. */}
+            <TickerAvatar
+              symbol={p.symbol}
+              securityId={p.security_id}
+              className="mr-2 h-6 w-6 align-middle text-[9px]"
+            />
             {name}
             {tag}
           </>
@@ -263,9 +275,25 @@ export function positionColumns(deps: {
       sortKey: 'portfolio_percent',
       align: 'right',
       cellClassName: 'text-muted-foreground',
-      cell: (p) => {
+      cell: (p, view) => {
         const w = weightOf(p)
-        return w === null ? NO_VALUE : `${w.toFixed(2)}%`
+        if (w === null) return NO_VALUE
+        const text = `${w.toFixed(2)}%`
+        if (view !== 'table') return text
+        // A slim bar under the figure, scaled to the largest row so the biggest holding
+        // spans the cell. Decorative: the figure above it is the value.
+        const scale = maxWeightPct && maxWeightPct > 0 ? maxWeightPct : 100
+        return (
+          <div className="ml-auto flex w-16 flex-col items-end gap-1">
+            <span>{text}</span>
+            <span aria-hidden="true" className="block h-1 w-full overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full rounded-full bg-info/70"
+                style={{ width: `${Math.min(100, (w / scale) * 100)}%` }}
+              />
+            </span>
+          </div>
+        )
       },
     },
     {
@@ -304,11 +332,9 @@ export function PositionsList({
   // allowed a weight describing the same set.
   const cashTracked = cashIsTracked(cash)
   const cashAmount = cashTracked ? cash!.amount : 0
-  const totalHoldings = useMemo(() => {
-    if (!positions || positions.length === 0) return 0
-    return positions.reduce((sum, p) => (cannotValue(p) ? sum : sum + p.market_value_eur), 0)
-  }, [positions])
-  const totalMarketValue = totalHoldings + cashAmount
+  // `weightDenominator` is shared with the Performance tab's "Largest holding" tile, so the
+  // tile's weight and this row's cannot disagree.
+  const totalMarketValue = useMemo(() => weightDenominator(positions ?? [], cash), [positions, cash])
 
   /** Named on screen, in the order the table shows them. */
   const unpriced = useMemo(
@@ -396,17 +422,23 @@ export function PositionsList({
     // separately-fetched map would have made the omission actually bite.
   }, [positions, sortColumn, sortDirection, totalMarketValue, yieldOnCost])
 
+  const maxWeightPct = useMemo(() => {
+    if (totalMarketValue <= 0) return null
+    const top = (positions ?? []).reduce(
+      (m, p) => (cannotValue(p) ? m : Math.max(m, p.market_value_eur)), 0,
+    )
+    return (top / totalMarketValue) * 100
+  }, [positions, totalMarketValue])
+
   const columns = useMemo(
-    () => positionColumns({ formatCurrency, totalMarketValue, yieldOnCost }),
-    [formatCurrency, totalMarketValue, yieldOnCost]
+    () => positionColumns({ formatCurrency, totalMarketValue, yieldOnCost, maxWeightPct }),
+    [formatCurrency, totalMarketValue, yieldOnCost, maxWeightPct]
   )
 
   if (isLoading) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Positions</CardTitle>
-        </CardHeader>
+        <SectionHeader title="Positions" icon={Briefcase} />
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
             Loading positions...
@@ -421,9 +453,7 @@ export function PositionsList({
   if (isError) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Positions</CardTitle>
-        </CardHeader>
+        <SectionHeader title="Positions" icon={Briefcase} />
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
             Couldn't load positions — the server didn't respond. It retries automatically.
@@ -436,9 +466,7 @@ export function PositionsList({
   if (!positions || positions.length === 0) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Positions</CardTitle>
-        </CardHeader>
+        <SectionHeader title="Positions" icon={Briefcase} />
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
             No positions yet — sync your account to see your holdings.
@@ -450,11 +478,10 @@ export function PositionsList({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>
-          Positions <span className="font-normal text-muted-foreground">{positions.length}</span>
-        </CardTitle>
-      </CardHeader>
+      <SectionHeader
+        title={<>Positions <span className="font-normal text-muted-foreground">{positions.length}</span></>}
+        icon={Briefcase}
+      />
       <CardContent>
         {unpriced.length > 0 && (
           // Outside no collapsible here — the table is always open — but stated above
@@ -474,8 +501,11 @@ export function PositionsList({
           </div>
         )}
         {cashTracked && totalMarketValue > 0 && (
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
-            <span className="font-medium">Cash</span>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl bg-raised px-3 py-2.5 text-sm">
+            <span className="flex items-center gap-3 font-medium">
+              <IconChip icon={Wallet} />
+              Cash
+            </span>
             <span className="tabular-nums">
               {formatCurrency(cashAmount)}
               <span className="ml-2 text-muted-foreground">

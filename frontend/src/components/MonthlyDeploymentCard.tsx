@@ -8,7 +8,9 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
+import { BanknoteArrowUp } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
+import { chartColor } from '@/lib/chartPalette'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
@@ -31,12 +33,9 @@ function monthLabel(month: string): string {
   return `${MONTH_NAMES[parseInt(m, 10) - 1] ?? m} ${y.slice(2)}`
 }
 
-// Money in and deployed are the same measure family, so two steps of one hue rather
-// than two hues. This exact pair passes the palette validator's CVD-separation, chroma
-// and lightness checks on both the light and dark surfaces. The darker step carries
-// money in, which is now the primary series.
-const MONEY_IN_COLOR = '#1d4fd8'
-const DEPLOYED_COLOR = '#4a90f7'
+// Only one series is ever drawn (deployed is the fallback when money in is absent), so
+// both take the palette's first slot rather than hexes of their own.
+const BAR_COLOR = chartColor(0)
 
 type ChartRow = ContributionMonthlyItem & { label: string }
 
@@ -170,6 +169,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
         open={open}
         onToggle={() => setOpen(o => !o)}
         title="Money In per Month"
+        icon={BanknoteArrowUp}
         description={summaryText}
         contentId="monthly-deployment-content"
       />
@@ -215,10 +215,10 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                     {/* Money in goes negative in a withdrawal month, so the zero line stays. */}
                     <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeWidth={1} />
                     {hasMoneyIn && (
-                      <Bar dataKey="money_in_eur" name="Money in" fill={MONEY_IN_COLOR} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="money_in_eur" name="Money in" fill={BAR_COLOR} radius={[4, 4, 0, 0]} />
                     )}
                     {showDeployed && (
-                      <Bar dataKey="deployed_eur" name="Deployed" fill={DEPLOYED_COLOR} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="deployed_eur" name="Deployed" fill={BAR_COLOR} radius={[4, 4, 0, 0]} />
                     )}
                   </BarChart>
                 </ResponsiveContainer>

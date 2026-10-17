@@ -169,7 +169,7 @@ describe('a holding the backend could not value', () => {
     // than a gap: a muted dash invites a question, a red −100% invites a conclusion.
     const tone = cols().find((c) => c.key === 'gain_loss')!.tone!
     expect(tone(NO_PRICE)).toBe('text-muted-foreground')
-    expect(tone(PAYER)).toBe('text-green-600')
+    expect(tone(PAYER)).toBe('text-gain')
   })
 
   it('still shows what IS known about the row', () => {
@@ -201,8 +201,19 @@ describe('a holding the backend could not value', () => {
       formatCurrency: money, totalMarketValue: 300, yieldOnCost: YIELDS,
     })
     const weight = columns.find((c) => c.key === 'weight')!
-    expect(weight.cell(priced, 'table')).toBe('100.00%')
+    expect(weight.cell(priced, 'cards')).toBe('100.00%')
     expect(weight.cell(NO_PRICE, 'table')).toBe('—')
+  })
+
+  it('draws the weight bar on desktop, scaled to the largest row', () => {
+    const priced = position({ security_id: 6, symbol: 'AAA', market_value_eur: 150 })
+    const columns = positionColumns({
+      formatCurrency: money, totalMarketValue: 600, yieldOnCost: YIELDS, maxWeightPct: 50,
+    })
+    const { container } = render(<>{columns.find((c) => c.key === 'weight')!.cell(priced, 'table')}</>)
+    expect(container.textContent).toBe('25.00%')
+    const bar = container.querySelector<HTMLElement>('[aria-hidden="true"] > span')!
+    expect(bar.style.width).toBe('50%')
   })
 })
 

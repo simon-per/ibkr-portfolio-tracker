@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { CalendarDays } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ABSENT, cn } from '@/lib/utils'
@@ -66,20 +67,21 @@ function getReturnColor(pct: number): string {
   const clamped = Math.max(-10, Math.min(10, pct))
   const intensity = Math.abs(clamped) / 10
 
+  // Washes of the gain / loss tokens, so the cells are the same green and red as every
+  // other figure on the tab. The two strongest steps flip to the page colour for the ink:
+  // white on the light theme's deep green, near-black on the dark theme's bright one.
   if (pct >= 0) {
-    // Green scale - light to dark
-    if (intensity < 0.2) return 'bg-green-100 dark:bg-green-950/40 text-green-800 dark:text-green-200'
-    if (intensity < 0.4) return 'bg-green-200 dark:bg-green-900/60 text-green-900 dark:text-green-100'
-    if (intensity < 0.6) return 'bg-green-300 dark:bg-green-800/70 text-green-900 dark:text-green-100'
-    if (intensity < 0.8) return 'bg-green-400 dark:bg-green-700/80 text-white dark:text-green-50'
-    return 'bg-green-500 dark:bg-green-600 text-white'
+    if (intensity < 0.2) return 'bg-gain/10 text-gain'
+    if (intensity < 0.4) return 'bg-gain/20 text-gain'
+    if (intensity < 0.6) return 'bg-gain/30 text-gain'
+    if (intensity < 0.8) return 'bg-gain/80 text-background'
+    return 'bg-gain text-background'
   } else {
-    // Red scale - light to dark
-    if (intensity < 0.2) return 'bg-red-100 dark:bg-red-950/40 text-red-800 dark:text-red-200'
-    if (intensity < 0.4) return 'bg-red-200 dark:bg-red-900/60 text-red-900 dark:text-red-100'
-    if (intensity < 0.6) return 'bg-red-300 dark:bg-red-800/70 text-red-900 dark:text-red-100'
-    if (intensity < 0.8) return 'bg-red-400 dark:bg-red-700/80 text-white dark:text-red-50'
-    return 'bg-red-500 dark:bg-red-600 text-white'
+    if (intensity < 0.2) return 'bg-loss/10 text-loss'
+    if (intensity < 0.4) return 'bg-loss/20 text-loss'
+    if (intensity < 0.6) return 'bg-loss/30 text-loss'
+    if (intensity < 0.8) return 'bg-loss/80 text-background'
+    return 'bg-loss text-background'
   }
 }
 
@@ -120,7 +122,7 @@ export function MonthlyReturnsHeatmap({
         <span key="month">
           {MONTH_LABELS[lastMonthIdx]}
           {isRunning(topRow.year, lastMonthIdx) ? ' MTD' : ''}:{' '}
-          <span className={m.returnPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+          <span className={m.returnPercent >= 0 ? 'text-gain' : 'text-loss'}>
             {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
           </span>
         </span>
@@ -130,7 +132,7 @@ export function MonthlyReturnsHeatmap({
       parts.push(
         <span key="ytd">
           {' · '}YTD:{' '}
-          <span className={topRow.ytd.returnPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+          <span className={topRow.ytd.returnPercent >= 0 ? 'text-gain' : 'text-loss'}>
             {topRow.ytd.returnPercent >= 0 ? '+' : ''}{topRow.ytd.returnPercent.toFixed(1)}%
           </span>
         </span>
@@ -147,6 +149,7 @@ export function MonthlyReturnsHeatmap({
         open={open}
         onToggle={() => setOpen(o => !o)}
         title="Monthly Returns"
+        icon={CalendarDays}
         description={summaryText}
         contentId="monthly-returns-content"
       />
@@ -190,7 +193,7 @@ export function MonthlyReturnsHeatmap({
                           {m ? (
                             <div
                               className={cn(
-                                'rounded px-1.5 py-1 text-center text-xs font-medium',
+                                'rounded-md px-1.5 py-1 text-center text-xs font-medium tabular-nums',
                                 getReturnColor(m.returnPercent)
                               )}
                               title={cellTitle(`${MONTH_LABELS[i]} ${row.year}`, m, money)}
@@ -209,7 +212,7 @@ export function MonthlyReturnsHeatmap({
                         {row.ytd ? (
                           <div
                             className={cn(
-                              'rounded px-1.5 py-1 text-center text-xs font-medium',
+                              'rounded-md px-1.5 py-1 text-center text-xs font-medium tabular-nums',
                               getReturnColor(row.ytd.returnPercent)
                             )}
                             title={cellTitle(`YTD ${row.year}`, row.ytd, money)}

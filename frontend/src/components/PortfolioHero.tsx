@@ -21,11 +21,11 @@ const RANGE_LABEL: Record<TimeRange, string> = {
   ALL: 'all time',
 }
 
-const GAIN = 'text-green-600 dark:text-green-400'
-const LOSS = 'text-red-600 dark:text-red-400'
-/** The period-gain pill: the gain's own colour on a wash of it. */
-const GAIN_PILL = 'bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400'
-const LOSS_PILL = 'bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400'
+const GAIN = 'text-gain'
+const LOSS = 'text-loss'
+/** The period-gain pill: the gain's own colour on its soft wash (`DeltaChip`'s pill tokens). */
+const GAIN_PILL = 'bg-gain-soft text-gain'
+const LOSS_PILL = 'bg-loss-soft text-loss'
 
 /**
  * The headline amount with its currency and cents a step quieter than the whole units,

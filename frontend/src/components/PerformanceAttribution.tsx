@@ -9,7 +9,9 @@ import {
   Cell,
   ResponsiveContainer,
 } from 'recharts'
+import { ChartBar } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
+import { GAIN_COLOR, LOSS_COLOR } from '@/lib/chartPalette'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
@@ -36,7 +38,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
     summaryText = (
       <>
         Total P&L:{' '}
-        <span className={data.total_pnl_eur >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+        <span className={data.total_pnl_eur >= 0 ? 'text-gain' : 'text-loss'}>
           {data.total_pnl_eur >= 0 ? '+' : ''}{formatCurrency(data.total_pnl_eur)}
         </span>
       </>
@@ -66,6 +68,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
         open={open}
         onToggle={() => setOpen(o => !o)}
         title="Performance Attribution"
+        icon={ChartBar}
         description={summaryText}
         contentId="performance-attribution-content"
       />
@@ -83,7 +86,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
       {(data?.unpriced_holdings ?? 0) > 0 && (
         <p
           role="alert"
-          className="mx-6 mb-3 rounded-md bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300"
+          className="mx-[var(--card-padding)] mb-3 rounded-md bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300"
         >
           {data!.unpriced_holdings} holding{data!.unpriced_holdings === 1 ? '' : 's'} could not be
           priced for this period and {data!.unpriced_holdings === 1 ? 'is' : 'are'} left out, so the
@@ -133,7 +136,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                   {sorted.map((entry, index) => (
                     <Cell
                       key={index}
-                      fill={entry.pnl_contribution_eur >= 0 ? '#10b981' : '#f43f5e'}
+                      fill={entry.pnl_contribution_eur >= 0 ? GAIN_COLOR : LOSS_COLOR}
                     />
                   ))}
                 </Bar>
@@ -160,7 +163,7 @@ function AttributionTooltip({ active, payload }: { active?: boolean; payload?: A
       <div className="border-t pt-1 mt-1 space-y-0.5">
         <p>
           <span className="text-muted-foreground">P&L: </span>
-          <span className={`font-medium ${isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+          <span className={`font-medium ${isPositive ? 'text-gain' : 'text-loss'}`}>
             {isPositive ? '+' : ''}{formatCurrency(d.pnl_contribution_eur)}
           </span>
         </p>

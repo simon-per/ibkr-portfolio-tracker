@@ -1,6 +1,7 @@
-import { Activity, Coins, Gauge, PiggyBank, Scale, TrendingDown } from 'lucide-react'
+import { Coins, PiggyBank, Scale, ShieldHalf, Sigma, TrendingDown, Waves } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
+import { SectionHeader } from '@/components/ui/SectionHeader'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
 import type { SortinoAbsence } from '@/lib/portfolioKpis'
@@ -67,6 +68,9 @@ interface RiskMetricsCardsProps {
  * cannot drift again.
  */
 
+/** The row's heading, beside `PerformanceMetricsCards`' "Returns". */
+const heading = <SectionHeader variant="bare" title="Risk & income" icon={ShieldHalf} className="mb-3" />
+
 /** `2026-03-14` → `14 Mar` without dragging a locale into it. */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 function shortDate(iso: string): string {
@@ -83,9 +87,12 @@ export function RiskMetricsCards({
 
   if (isLoading) {
     return (
-      <KpiPanel>
-        <KpiCardSkeleton tile count={6} />
-      </KpiPanel>
+      <section>
+        {heading}
+        <KpiPanel>
+          <KpiCardSkeleton tile count={6} />
+        </KpiPanel>
+      </section>
     )
   }
 
@@ -143,100 +150,104 @@ export function RiskMetricsCards({
     metrics.currentDrawdownPct !== null && metrics.currentDrawdownPct < -0.05
 
   return (
-    <KpiPanel>
-      <KpiCard
-        tile
-        label="Volatility"
-        icon={<Activity className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.volatilityPct !== null ? `${metrics.volatilityPct.toFixed(1)}%` : null}
-        sub={metrics.volatilityPct !== null ? undefined : 'Not enough history in this range'}
-      />
+    <section>
+      {heading}
+      <KpiPanel>
+        <KpiCard
+          tile
+          label="Volatility"
+          icon={Waves}
+          value={metrics.volatilityPct !== null ? `${metrics.volatilityPct.toFixed(1)}%` : null}
+          sub={metrics.volatilityPct !== null ? undefined : 'Not enough history in this range'}
+        />
 
-      <KpiCard
-        tile
-        label="Sortino ratio"
-        icon={<Gauge className="h-4 w-4 text-muted-foreground" />}
-        value={metrics.sortino !== null ? metrics.sortino.toFixed(2) : null}
-        sub={metrics.sortino !== null
-          ? undefined
-          : metrics.sortinoAbsence === 'no_downside'
-            ? 'No down days'
-            : 'Not enough history in this range'}
-      />
+        <KpiCard
+          tile
+          label="Sortino ratio"
+          icon={Sigma}
+          value={metrics.sortino !== null ? metrics.sortino.toFixed(2) : null}
+          sub={metrics.sortino !== null
+            ? undefined
+            : metrics.sortinoAbsence === 'no_downside'
+              ? 'No down days'
+              : 'Not enough history in this range'}
+        />
 
-      {/* Beta vs the primary benchmark. Three distinct reasons it can be absent, and the
-          footnote is what tells them apart — the value is a dash in all three. */}
-      <KpiCard
-        tile
-        label="Beta"
-        icon={<Scale className="h-4 w-4 text-muted-foreground" />}
-        value={beta?.beta != null ? beta.beta.toFixed(2) : null}
-        sub={beta === null
-          ? 'No benchmark selected'
-          : beta.beta === null
+        {/* Beta vs the primary benchmark. Three distinct reasons it can be absent, and the
+            footnote is what tells them apart — the value is a dash in all three. */}
+        <KpiCard
+          tile
+          label="Beta"
+          icon={Scale}
+          value={beta?.beta != null ? beta.beta.toFixed(2) : null}
+          sub={beta === null
+            ? 'No benchmark selected'
+            : beta.beta === null
+              ? 'Not enough history in this range'
+              : `vs ${beta.benchmarkName}`}
+        />
+
+        {/* Current drawdown, with the worst one for context */}
+        <KpiCard
+          tile
+          label="Current drawdown"
+          icon={TrendingDown}
+          // A falling arrow in a green well would contradict itself: red only while
+          // the account is actually below its peak.
+          iconTone={inDrawdown ? 'negative' : 'muted'}
+          value={metrics.currentDrawdownPct !== null
+            ? `${metrics.currentDrawdownPct.toFixed(2)}%`
+            : null}
+          tone={metrics.currentDrawdownPct === null ? 'muted'
+            : inDrawdown ? 'negative' : 'positive'}
+          // "Never below its opening value" is a CLAIM, so it may only be made about a
+          // measured zero. With no measurable daily return in the range there is nothing to
+          // claim — and that is exactly what a stalled price feed looks like, so a green
+          // reassurance was the worst available answer. Worded like the Sharpe card, which
+          // distinguishes its two absences for the same reason.
+          sub={metrics.maxDrawdownPct === null
             ? 'Not enough history in this range'
-            : `vs ${beta.benchmarkName}`}
-      />
+            : metrics.maxDrawdownPct === 0
+              ? 'Never below its opening value'
+              : metrics.recoveredDate !== null
+                ? `Recovered ${shortDate(metrics.recoveredDate)} from ${metrics.maxDrawdownPct.toFixed(1)}%`
+                : `Worst ${metrics.maxDrawdownPct.toFixed(1)}%${
+                    metrics.troughDate ? ` on ${shortDate(metrics.troughDate)}` : ''
+                  }`}
+        />
 
-      {/* Current drawdown, with the worst one for context */}
-      <KpiCard
-        tile
-        label="Current drawdown"
-        icon={<TrendingDown
-          className={`h-4 w-4 ${inDrawdown ? 'text-red-600' : 'text-muted-foreground'}`}
-        />}
-        value={metrics.currentDrawdownPct !== null
-          ? `${metrics.currentDrawdownPct.toFixed(2)}%`
-          : null}
-        tone={metrics.currentDrawdownPct === null ? 'muted'
-          : inDrawdown ? 'negative' : 'positive'}
-        // "Never below its opening value" is a CLAIM, so it may only be made about a
-        // measured zero. With no measurable daily return in the range there is nothing to
-        // claim — and that is exactly what a stalled price feed looks like, so a green
-        // reassurance was the worst available answer. Worded like the Sharpe card, which
-        // distinguishes its two absences for the same reason.
-        sub={metrics.maxDrawdownPct === null
-          ? 'Not enough history in this range'
-          : metrics.maxDrawdownPct === 0
-            ? 'Never below its opening value'
-            : metrics.recoveredDate !== null
-              ? `Recovered ${shortDate(metrics.recoveredDate)} from ${metrics.maxDrawdownPct.toFixed(1)}%`
-              : `Worst ${metrics.maxDrawdownPct.toFixed(1)}%${
-                  metrics.troughDate ? ` on ${shortDate(metrics.troughDate)}` : ''
-                }`}
-      />
+        {/* The portfolio's dividend rate. This IS the market-value-weighted average of
+            the per-security yields — sum(Vi/V x Di/Vi) == sum(Di)/V — so nothing is
+            weighted on the client; the backend divides two figures it already holds.
+            The per-security column on the Dividends tab is the audit. */}
+        <KpiCard
+          tile
+          label="Dividend yield"
+          icon={Coins}
+          value={dividend != null ? `${dividend.pct.toFixed(2)}%` : null}
+          title={dividendTitle}
+          sub={dividendSub}
+        />
 
-      {/* The portfolio's dividend rate. This IS the market-value-weighted average of
-          the per-security yields — sum(Vi/V x Di/Vi) == sum(Di)/V — so nothing is
-          weighted on the client; the backend divides two figures it already holds.
-          The per-security column on the Dividends tab is the audit. */}
-      <KpiCard
-        tile
-        label="Dividend yield"
-        icon={<Coins className="h-4 w-4 text-muted-foreground" />}
-        value={dividend != null ? `${dividend.pct.toFixed(2)}%` : null}
-        title={dividendTitle}
-        sub={dividendSub}
-      />
-
-      {/* Yield on cost, beside it rather than instead of it: the same income over what
-          the holdings cost, so the gap between the two cards is the book's own
-          appreciation. Both denominators cover the same securities, which is the only
-          reason that reading is valid. */}
-      <KpiCard
-        tile
-        label="Yield on cost"
-        icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
-        value={dividend?.on_cost_pct != null ? `${dividend.on_cost_pct.toFixed(2)}%` : null}
-        title="Next-12-month income / cost basis"
-        sub={dividendUnavailable
-          ? "Couldn't load dividend data"
-          : dividend === undefined
-            ? 'Loading…'
-            : dividend?.on_cost_pct == null
-              ? 'No projected dividends'
-              : undefined}
-      />
-    </KpiPanel>
+        {/* Yield on cost, beside it rather than instead of it: the same income over what
+            the holdings cost, so the gap between the two cards is the book's own
+            appreciation. Both denominators cover the same securities, which is the only
+            reason that reading is valid. */}
+        <KpiCard
+          tile
+          label="Yield on cost"
+          icon={PiggyBank}
+          value={dividend?.on_cost_pct != null ? `${dividend.on_cost_pct.toFixed(2)}%` : null}
+          title="Next-12-month income / cost basis"
+          sub={dividendUnavailable
+            ? "Couldn't load dividend data"
+            : dividend === undefined
+              ? 'Loading…'
+              : dividend?.on_cost_pct == null
+                ? 'No projected dividends'
+                : undefined}
+        />
+      </KpiPanel>
+    </section>
   )
 }

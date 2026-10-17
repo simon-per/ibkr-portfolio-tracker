@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Crosshair } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -214,6 +215,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         open={open}
         onToggle={() => setOpen((v) => !v)}
         title="Target Allocation & Drift"
+        icon={Crosshair}
         description={summary}
         contentId="rebalance-panel"
       />
