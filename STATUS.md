@@ -12,7 +12,7 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#7, #10 and #12 shipped the same night (logos need the key on the VPS); #8, #9 and #11 next.
+#2–#8, #10 and #12 shipped the same night (logos need the key on the VPS); #9 and #11 next.
 
 ---
 
@@ -103,6 +103,10 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **Look-through after #8 (migration `a7d4c1e9f3b8`):** the first 18:00 `full_sync` fetches and
+  rewrites every held basket once (no stamps or fingerprints yet) and runs the CINS pass; from
+  the next evening `lookthrough_result.baskets` lists most funds under `unchanged` or
+  `refreshed` daily, and no stale-basket warning appears on an ordinary week.
 - **Price passes after #10 (migration `a2e8c4f6b0d3`):** the short `market_data_only` passes
   report `securities_skipped_sold` > 0 and "N of M" over held and just-sold securities only; the
   18:00 pass still prices sold ones; `securities_backing_off` stays small; no AV `Information`

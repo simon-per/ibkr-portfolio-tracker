@@ -7,6 +7,20 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — look-through baskets fetched daily, warned about only when overdue (#8)
+
+Issue #8. One threshold (`ADAPTER_STALE_DAYS`) meant both "go fetch" and "warn", so the daily
+issuers were fetched once a week, at 8 days old, after the stale warning had already fired —
+the warning was present every week by construction. `ADAPTER_FETCH_DAYS` now sits beside it:
+the six daily adapters are due every evening, `vanguard_us` every third evening from day 61.
+Every attempt stamps `etf_baskets.checked_at`; a parse identical to the stored basket
+(`content_sha256`) moves only the stamp — no delete+insert, no CINS/SEDOL pass. OpenFIGI's
+"no match" is remembered for 30 days (`constituent_identifier_misses`), and
+`resolve_identities` commits per batch, so a killed GLEIF run keeps its answers. Migration
+`a7d4c1e9f3b8`. Measured offline: a daily feed 1 → 7 fetches a week (its file changes daily);
+a stalled Vanguard fund ~2.5 fetches a week instead of every evening. Verified: 2223 backend
+tests green, no upstream called.
+
 ## Shipped 2026-10-17 (night) — holding logos via logo.dev (#12)
 
 Issue #12, the owner's 2026-10-17 ask, reversing "never a fetched logo". A new
