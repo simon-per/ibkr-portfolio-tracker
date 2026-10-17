@@ -438,8 +438,9 @@ export function TaxTab() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>Dividend income &amp; withholding (DA-1)</CardTitle>
                 {/* Only the `est.` mark survives (owner, 2026-10-14): which feed a figure came
-                    from is not the reader's business, whether it is an estimate is. */}
-                {data.dividend_source !== 'ibkr' && (
+                    from is not the reader's business, whether it is an estimate is. And only
+                    over figures — an empty year has nothing to be an estimate of. */}
+                {data.dividend_source !== 'ibkr' && data.dividend_income.length > 0 && (
                   <span
                     className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
                     title={data.dividend_source === 'mixed' && data.dividend_ibkr_from

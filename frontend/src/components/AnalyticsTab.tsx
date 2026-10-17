@@ -74,7 +74,9 @@ import { allocationSectorPaint, neutralPaint } from '@/lib/sectorColors'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
-  CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
+  CHART_TOOLTIP_STYLE,
+  CHART_GRID_PROPS,
+} from '@/lib/chartTooltip'
 import { formatDate, formatAxisMoney } from '@/lib/utils'
 import { useIsCompact } from '@/lib/useMediaQuery'
 

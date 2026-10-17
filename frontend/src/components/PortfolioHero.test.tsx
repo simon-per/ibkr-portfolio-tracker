@@ -93,3 +93,30 @@ describe('the period gain', () => {
     expect(screen.queryByText(/\(\+/)).toBeNull()
   })
 })
+
+describe('a new account', () => {
+  const empty: Partial<PortfolioSummary> = {
+    total_cost_basis_eur: 0, total_market_value_eur: 0, total_gain_loss_eur: 0,
+    total_gain_loss_percent: 0, num_positions: 0, total_realized_gain_loss_eur: 0,
+    total_realized_proceeds_eur: 0, total_realized_cost_basis_eur: 0, num_closed_positions: 0,
+    cash_source: 'unknown',
+  }
+
+  it('says there is nothing yet instead of drawing zeros', () => {
+    renderWith(empty, null)
+    expect(screen.getByText('No portfolio data yet')).toBeTruthy()
+    expect(screen.queryByText(/0\.00%/)).toBeNull()
+    expect(screen.queryByText('Cost basis')).toBeNull()
+  })
+
+  it('still shows an account that holds only cash', () => {
+    renderWith({ ...empty, cash_source: 'derived', total_cash_eur: 5000, total_value_eur: 5000 }, null)
+    expect(screen.queryByText('No portfolio data yet')).toBeNull()
+    expect(screen.getByText('Total value')).toBeTruthy()
+  })
+
+  it('leaves the unrealized percentage off a zero cost basis', () => {
+    renderWith({ ...empty, cash_source: 'derived', total_cash_eur: 5000, total_value_eur: 5000 }, null)
+    expect(screen.queryByText('+0.00%')).toBeNull()
+  })
+})

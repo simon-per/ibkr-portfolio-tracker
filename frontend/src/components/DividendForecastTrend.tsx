@@ -14,7 +14,9 @@ import { api } from '@/lib/api'
 import {
   CHART_TOOLTIP_ITEM_STYLE,
   CHART_TOOLTIP_LABEL_STYLE,
-  CHART_TOOLTIP_STYLE, CHART_GRID_PROPS } from '@/lib/chartTooltip'
+  CHART_TOOLTIP_STYLE,
+  CHART_GRID_PROPS,
+} from '@/lib/chartTooltip'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendAmount } from '@/lib/dividendFormat'
 import { forecastTrend, fromBuysLabel, type LiveForecast } from '@/lib/dividendForecastTrend'

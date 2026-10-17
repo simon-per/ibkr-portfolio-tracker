@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { LineChart } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { PortfolioSummary } from '@/lib/api'
@@ -94,11 +95,29 @@ export function PortfolioHero({
     )
   }
 
-  if (!isLoading && !summary) {
+  // Nothing imported yet: no position held or ever sold and no cash ledger. The summary
+  // still answers — with zeros — and a "€0.00" headline over "+€0.00 (+0.00%)" is a set of
+  // stand-ins for "nothing to measure yet", which is what a new account sees first.
+  const untouched =
+    !!summary &&
+    summary.num_positions === 0 &&
+    summary.num_closed_positions === 0 &&
+    !cashIsTracked(summary)
+  if ((!isLoading && !summary) || untouched) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-muted-foreground">
-          No portfolio data yet — sync your account to get started.
+        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+          <span
+            aria-hidden="true"
+            className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary"
+          >
+            <LineChart className="h-6 w-6" />
+          </span>
+          {/* e2e/errors.mjs asserts this phrase never shows during an outage. */}
+          <p className="text-lg font-semibold">No portfolio data yet</p>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Press Sync to import your Interactive Brokers positions, trades, dividends and cash.
+          </p>
         </CardContent>
       </Card>
     )
@@ -189,7 +208,8 @@ export function PortfolioHero({
             label="Unrealized gain"
             value={signed(summary.total_gain_loss_eur)}
             tone={summary.total_gain_loss_eur >= 0 ? GAIN : LOSS}
-            sub={signedPct(summary.total_gain_loss_percent)}
+            // A percentage of a zero cost basis is undefined, not +0.00%.
+            sub={summary.total_cost_basis_eur > 0 ? signedPct(summary.total_gain_loss_percent) : undefined}
           />
           <Stat
             label="Realized gain"

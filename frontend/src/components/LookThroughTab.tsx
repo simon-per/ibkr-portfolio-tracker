@@ -516,6 +516,9 @@ export function LookThroughTab() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        // An action, so it looks like one: primary ink, which a ghost button's
+                        // plain foreground did not — it read as one more cell of text.
+                        className="text-primary hover:bg-primary/10 hover:text-primary"
                         aria-expanded={selected === row.company_key}
                         onClick={() =>
                           setSelected(
