@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.etf_mappings import is_known_etf_isin
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
@@ -1771,6 +1772,17 @@ class DividendService:
             self.db
         ).get_dividend_forecast_growth_from()
         lines_by_day = await repo.get_lines(since=growth_from)
+        # `raises` means companies raising (or cutting) their dividend. A fund's
+        # distribution moves every quarter with whatever its holdings paid, which nobody
+        # decided, so a fund's level is not passed on: with no level the attribution
+        # measures no raise, and the change stays in `timing`. Its stored level is kept.
+        # Fundness is `is_known_etf_isin`, the one predicate (test_fundness_predicate.py).
+        fund_ids = {
+            sid for sid, isin in (await self.db.execute(
+                select(Security.id, Security.isin)
+            )).all()
+            if is_known_etf_isin(isin)
+        }
 
         points: List[Dict] = []
         previous = None       # (date, next_12m) of the row before this one
@@ -1825,7 +1837,8 @@ class DividendService:
             if day_lines:
                 holdings = {
                     ln.security_id: Holding(
-                        ln.shares, ln.next_12m_eur, ln.fx_to_eur, ln.level_eur
+                        ln.shares, ln.next_12m_eur, ln.fx_to_eur,
+                        None if ln.security_id in fund_ids else ln.level_eur,
                     )
                     for ln in day_lines
                 }

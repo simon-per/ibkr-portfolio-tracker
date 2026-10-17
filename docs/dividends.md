@@ -964,11 +964,21 @@ that it keeps growing, and have the breakdown available without it being the lou
   `raises = q1·n0·(L1/L0 − 1)·g0`, the old window at the new level, with `timing` the
   rest of the payout change. A steady payer's level is `k ×` its latest payment, so a
   raise counts the day IBKR lists the accrual; a varying payer's is its last cycle slot
-  by slot, so a fund's distribution counts against the same one a year earlier; both are
+  by slot, so its payment counts against the same one a year earlier; both are
   a year's worth, so a payer flipping between the shapes compares like with like. On a
   split the old level is rescaled like the share count. **No level on either day —
   no cadence, or a line stored before the column — is no measure of raises**, and that
   holding's whole payout change stays in `timing`, never guessed.
+- **Raises are companies'; a fund's payout change is `timing`** (2026-10-17, the owner's
+  call). The first production read after the backfill was −3.10 "from cuts" on a book
+  whose every payer had flat or positive per-share growth: the figure's jumps fell on
+  the September ETF distributions (VT, QQQM, SOXQ, QTUM, GRID), while the companies paying
+  then paid their usual amounts. A fund's distribution moves every quarter with what its
+  holdings paid, which nobody decided. So `get_forecast_history` withholds the level of
+  every security `is_known_etf_isin` names — the one fundness predicate — and the rule
+  above puts its change in `timing`. Read time, not write time: the stored level stays,
+  so the rule needs no backfill and changes no stored row. A fund missing from
+  `ETF_ALLOCATIONS` is treated as a company, as everywhere else.
 - **Levels on the days stored before 2026-10-17 come from the backfill.**
   `backfill_dividend_forecast --from <growth_from>` restates the replayed days with their
   levels, restates the replayed lines of the recorded days that have no recorded lines

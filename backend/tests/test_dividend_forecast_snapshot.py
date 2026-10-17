@@ -713,6 +713,34 @@ async def test_the_breakdown_puts_each_cause_in_its_own_part(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_funds_payout_change_is_timing_never_a_raise(monkeypatch):
+    """
+    A fund's distribution rises and falls every quarter with what its holdings paid —
+    on 2026-09 that read as a −3.10 "cut" on a book whose companies had all raised.
+    Raises are companies'. The same move as #2's raise above, on a fund, is timing.
+    """
+    from app.etf_mappings import ETF_ALLOCATIONS
+
+    engine, session = await _make_session()
+    try:
+        await _three_days(session)
+        (await session.get(Security, 2)).isin = ETF_ALLOCATIONS["VT"]["isins"][0]
+        await session.commit()
+        _base_currency(monkeypatch, THREE_RATES)
+
+        points = (await DividendService(session).get_forecast_history())["points"]
+
+        assert points[1]["breakdown"] == {
+            "since": "2026-09-01", "shares": 180.0,
+            "raises": 0.0, "timing": 20.25,     # the same 20.25, not a raise
+            "newly_forecast": 0.0, "fx": -81.25, "unattributed": 0.0,
+        }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_a_day_without_lines_has_no_breakdown_and_does_not_break_the_chain(
     monkeypatch,
 ):
