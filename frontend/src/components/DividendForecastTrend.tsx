@@ -18,7 +18,12 @@ import {
 } from '@/lib/chartTooltip'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendAmount } from '@/lib/dividendFormat'
-import { forecastTrend, fromBuysLabel, type LiveForecast } from '@/lib/dividendForecastTrend'
+import {
+  forecastTrend,
+  fromBuysLabel,
+  fromRaisesLabel,
+  type LiveForecast,
+} from '@/lib/dividendForecastTrend'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { cn, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
@@ -46,8 +51,9 @@ function shortDay(iso: string): string {
  *
  * `live` is the breakdown's own figure for today, so the header and the KPI tile above
  * it print one "Next 12 months" (`lib/dividendForecastTrend.ts`, rule 3). The header
- * also carries the month's and the year's growth and what shares bought added — the
- * part of the growth the owner controls; the other parts stay in the collapsed detail.
+ * also carries the month's and the year's growth, what shares bought added — the part
+ * of the growth the owner controls — and what the payers' raises added; the other
+ * parts stay in the collapsed detail.
  * The received line under the forecast is the trailing twelve months, so the income
  * actually paid can be watched climbing toward what is forecast.
  */
@@ -117,6 +123,11 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
         {trend.fromBuys != null && (
           <span className="text-xs tabular-nums text-muted-foreground">
             {signed(trend.fromBuys)} {fromBuysLabel(trend.fromBuys)}
+          </span>
+        )}
+        {trend.fromRaises != null && (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {signed(trend.fromRaises)} {fromRaisesLabel(trend.fromRaises)}
           </span>
         )}
       </button>

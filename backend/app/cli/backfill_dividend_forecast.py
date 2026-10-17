@@ -15,11 +15,15 @@ rates and payments of that day, under today's rules.
 - **Never over a recorded day.** It stops the day before the first recorded snapshot,
   and the repository refuses to replace a recorded row regardless. Re-running it
   replaces its own earlier rows, which is the point after a change to the forecast.
-- **A recorded day without per-security lines gets replayed ones.** The lines table
-  (`dividend_forecast_snapshot_lines`) is younger than the recorder, so the days
+- **A recorded day without recorded per-security lines gets replayed ones.** The lines
+  table (`dividend_forecast_snapshot_lines`) is younger than the recorder, so the days
   recorded in between have a total and nothing behind it. Their lines are replayed and
-  flagged; the recorded total is not touched, and the history serves whatever
-  separates the two as `unattributed`.
+  flagged — and replayed again on every run, like any replay — while the recorded total
+  is not touched; the history serves whatever separates the two as `unattributed`.
+- **Recorded lines without a payer level get one.** `level_eur` is younger than the
+  lines (2026-10-17), and without it a raise on those days cannot be told from timing.
+  The level is replayed and written only where it is missing (`fill_levels`); nothing
+  else on a recorded line changes.
 - **It measures itself.** The first recorded days are replayed too and printed beside
   what was recorded: that gap is how far a replay sits from the real thing.
 - **Whole or nothing.** Every day is computed before the first is written, in one
@@ -71,9 +75,10 @@ async def backfill(db, start: date, dry_run: bool = False) -> Dict:
     result (unless ``dry_run``). The caller commits.
 
     Returns ``{"rows": [...], "skipped": n, "overlap": [...], "through": date,
-    "lines_filled": [...]}``, where ``overlap`` pairs a replay with the figure
-    recorded on the same day and ``lines_filled`` names the recorded days whose
-    missing lines were replayed.
+    "lines_filled": [...], "levels_filled": n}``, where ``overlap`` pairs a replay with
+    the figure recorded on the same day, ``lines_filled`` names the recorded days whose
+    lines were replayed, and ``levels_filled`` counts the recorded lines given the level
+    they were stored without (in a dry run: the levels a real run would write).
     """
     repo = DividendForecastSnapshotRepository(db)
     recorded = [r for r in await repo.get_all() if not r.reconstructed]
@@ -97,12 +102,15 @@ async def backfill(db, start: date, dry_run: bool = False) -> Dict:
             rows.append(figures)
         day += timedelta(days=1)
 
-    # Replays of recorded days: the first few for the comparison, and every one that
-    # has no lines yet. One replay per day serves both.
-    with_lines = await repo.dates_with_lines()
-    unlined = [r.snapshot_date for r in recorded if r.snapshot_date not in with_lines]
+    # Replays of recorded days: the first few for the comparison, every one without
+    # recorded lines (its replayed lines are restated, like any replay), and every one
+    # whose recorded lines lack a level. One replay per day serves all three.
+    with_recorded_lines = await repo.dates_with_recorded_lines()
+    unlined = [r.snapshot_date for r in recorded
+               if r.snapshot_date not in with_recorded_lines]
+    unlevelled = sorted(await repo.dates_missing_levels())
     replays: Dict[date, Optional[Dict]] = {}
-    for day in [r.snapshot_date for r in recorded[:OVERLAP_DAYS]] + unlined:
+    for day in [r.snapshot_date for r in recorded[:OVERLAP_DAYS]] + unlined + unlevelled:
         if day not in replays:
             replays[day] = await service.forecast_figures(day, replay=True)
 
@@ -115,15 +123,25 @@ async def backfill(db, start: date, dry_run: bool = False) -> Dict:
             "replayed": figures["next_12m_eur"] if figures else None,
         })
     lines_filled = [day for day in unlined if replays[day] is not None]
+    levels = {
+        day: {line["security_id"]: line["level_eur"] for line in replays[day]["lines"]}
+        for day in unlevelled if replays[day] is not None
+    }
 
+    levels_filled = sum(
+        1 for by_sec in levels.values() for level in by_sec.values() if level is not None
+    )
     if not dry_run:
         for figures in rows:
             totals = {k: v for k, v in figures.items() if k != "lines"}
             await repo.upsert_reconstructed(totals, lines=figures["lines"])
         for day in lines_filled:
             await repo.fill_lines(day, replays[day]["lines"])
+        levels_filled = 0
+        for day, by_sec in levels.items():
+            levels_filled += await repo.fill_levels(day, by_sec)
     return {"rows": rows, "skipped": skipped, "overlap": overlap, "through": through,
-            "lines_filled": lines_filled}
+            "lines_filled": lines_filled, "levels_filled": levels_filled}
 
 
 def _gap_pct(recorded: Decimal, replayed) -> str:
@@ -155,6 +173,9 @@ def _print_report(result: Dict) -> None:
         filled = result["lines_filled"]
         print(f"\nReplayed the per-security lines of {len(filled)} recorded day(s), "
               f"{filled[0]} .. {filled[-1]}; their totals are unchanged.")
+    if result.get("levels_filled"):
+        print(f"\nGave {result['levels_filled']} recorded line(s) the payer level they "
+              f"were stored without; nothing else on them changed.")
 
 
 async def run(start: Optional[date], dry_run: bool,
@@ -162,7 +183,8 @@ async def run(start: Optional[date], dry_run: bool,
     started_at = utcnow()
     async with AsyncSessionLocal() as db:
         try:
-            result = {"rows": [], "skipped": 0, "through": None, "lines_filled": []}
+            result = {"rows": [], "skipped": 0, "through": None, "lines_filled": [],
+                      "levels_filled": 0}
             if start is not None:
                 result = await backfill(db, start, dry_run=dry_run)
                 _print_report(result)
@@ -199,6 +221,7 @@ async def run(start: Optional[date], dry_run: bool,
                 "rows": len(rows),
                 "skipped": result["skipped"],
                 "lines_filled": len(result["lines_filled"]),
+                "levels_filled": result["levels_filled"],
                 "growth_from": growth_from.isoformat() if growth_from else None,
             },
             started_at=started_at,

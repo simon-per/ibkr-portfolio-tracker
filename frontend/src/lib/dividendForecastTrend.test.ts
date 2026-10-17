@@ -4,7 +4,7 @@ import type {
   DividendForecastHistoryPoint,
   DividendForecastHistoryResponse,
 } from './api'
-import { forecastTrend, fromBuysLabel, utcToday } from './dividendForecastTrend'
+import { forecastTrend, fromBuysLabel, fromRaisesLabel, utcToday } from './dividendForecastTrend'
 
 function point(
   date: string,
@@ -21,7 +21,7 @@ function point(
 
 function change(extra: Partial<DividendForecastChange> = {}): DividendForecastChange {
   return {
-    since: '2026-08-28', shares: 0, payout: 0, newly_forecast: 0, fx: 0,
+    since: '2026-08-28', shares: 0, raises: 0, timing: 0, newly_forecast: 0, fx: 0,
     unattributed: 0, ...extra,
   }
 }
@@ -70,16 +70,34 @@ describe('forecastTrend', () => {
     expect(forecastTrend(history([point('2026-08-28', 300)]))?.mtdPct).toBeNull()
   })
 
-  it('puts what shares bought added in the header and leaves it out of the parts', () => {
+  it('puts what shares bought and raises added in the header, not in the parts', () => {
     const trend = forecastTrend(history([
       point('2026-08-28', 300),
       point('2026-10-13', 360, {
-        breakdown: change({ shares: 52.4, payout: 9.1, fx: -1.6, unattributed: 0.01 }),
+        breakdown: change({
+          shares: 52.4, raises: 6.3, timing: -4.7, fx: -1.6, unattributed: 0.01,
+        }),
       }),
     ]))
     expect(trend?.fromBuys).toBe(52.4)
+    expect(trend?.fromRaises).toBe(6.3)
     // The parts that round to nothing stay out, the residual included.
-    expect(trend?.parts.map((p) => [p.key, p.value])).toEqual([['payout', 9.1], ['fx', -1.6]])
+    expect(trend?.parts.map((p) => [p.key, p.value])).toEqual([['timing', -4.7], ['fx', -1.6]])
+  })
+
+  it('reports a cut as a negative raise, and no raise figure when it rounds to nothing', () => {
+    const cut = forecastTrend(history([
+      point('2026-08-28', 300),
+      point('2026-10-13', 290, { breakdown: change({ raises: -10 }) }),
+    ]))
+    expect(cut?.fromRaises).toBe(-10)
+    const tiny = forecastTrend(history([
+      point('2026-08-28', 300),
+      point('2026-10-13', 300.3, { breakdown: change({ raises: 0.3 }) }),
+    ]))
+    expect(tiny?.fromRaises).toBeNull()
+    expect(forecastTrend(history([point('2026-08-28', 300), point('2026-08-29', 301)]))
+      ?.fromRaises).toBeNull()
   })
 
   it('has no from-buys figure without a breakdown, or when it rounds to nothing', () => {
@@ -87,7 +105,7 @@ describe('forecastTrend', () => {
       .toBeNull()
     const tiny = forecastTrend(history([
       point('2026-08-28', 300),
-      point('2026-08-29', 301, { breakdown: change({ shares: 0.2, payout: 0.8 }) }),
+      point('2026-08-29', 301, { breakdown: change({ shares: 0.2, timing: 0.8 }) }),
     ]))
     expect(tiny?.fromBuys).toBeNull()
   })
@@ -187,6 +205,13 @@ describe('fromBuysLabel', () => {
   it('says sales when the share count fell', () => {
     expect(fromBuysLabel(12)).toBe('from buys')
     expect(fromBuysLabel(-12)).toBe('from sales')
+  })
+})
+
+describe('fromRaisesLabel', () => {
+  it('says cuts when the payers cut more than they raised', () => {
+    expect(fromRaisesLabel(6)).toBe('from raises')
+    expect(fromRaisesLabel(-6)).toBe('from cuts')
   })
 })
 

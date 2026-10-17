@@ -1,7 +1,8 @@
 from datetime import date
+from decimal import Decimal
 from typing import Dict, List, Optional, Set
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,6 +95,50 @@ class DividendForecastSnapshotRepository:
         await self._replace_lines(snapshot_date, lines, reconstructed=True)
         return True
 
+    async def fill_levels(self, snapshot_date: date, levels: Dict[int, Decimal]) -> int:
+        """
+        Give a day's lines the payer levels they were stored without, from a replay.
+
+        Only where `level_eur` is NULL, and on recorded lines too: those were written
+        before the column existed, and a missing value is not a recorded one, so filling
+        it replaces nothing the application said. A level already there is never
+        touched. Returns how many lines were filled.
+        """
+        filled = 0
+        for security_id, level in levels.items():
+            if level is None:
+                continue
+            result = await self.session.execute(
+                update(DividendForecastSnapshotLine)
+                .where(
+                    DividendForecastSnapshotLine.snapshot_date == snapshot_date,
+                    DividendForecastSnapshotLine.security_id == security_id,
+                    DividendForecastSnapshotLine.level_eur.is_(None),
+                )
+                .values(level_eur=level)
+            )
+            filled += result.rowcount or 0
+        await self.session.flush()
+        return filled
+
+    async def dates_missing_levels(self) -> Set[date]:
+        """Days with a recorded line that has no level — what `fill_levels` is for."""
+        result = await self.session.execute(
+            select(DividendForecastSnapshotLine.snapshot_date).where(
+                DividendForecastSnapshotLine.reconstructed.is_(False),
+                DividendForecastSnapshotLine.level_eur.is_(None),
+            ).distinct()
+        )
+        return set(result.scalars().all())
+
+    async def dates_with_recorded_lines(self) -> Set[date]:
+        result = await self.session.execute(
+            select(DividendForecastSnapshotLine.snapshot_date).where(
+                DividendForecastSnapshotLine.reconstructed.is_(False)
+            ).distinct()
+        )
+        return set(result.scalars().all())
+
     async def _replace_lines(
         self, snapshot_date: date, lines: List[Dict], reconstructed: bool
     ) -> None:
@@ -124,12 +169,6 @@ class DividendForecastSnapshotRepository:
         for line in (await self.session.execute(query)).scalars().all():
             out.setdefault(line.snapshot_date, []).append(line)
         return out
-
-    async def dates_with_lines(self) -> Set[date]:
-        result = await self.session.execute(
-            select(DividendForecastSnapshotLine.snapshot_date).distinct()
-        )
-        return set(result.scalars().all())
 
     async def get_all(self) -> List[DividendForecastSnapshot]:
         """Every snapshot, oldest first."""

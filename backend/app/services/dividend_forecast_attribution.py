@@ -19,17 +19,25 @@ A position opened or closed is `shares` whole. A holding kept through both days 
 forecast appears or disappears is neither a purchase nor a raise, so it has its own
 part, `newly_forecast`.
 
-**`payout` is per share AND timing.** `n` is whatever falls inside the 365-day window,
-so a payment entering or leaving it, or one dropping out of the forecast while it is
-overdue, moves `n` without any company having changed its dividend. The per-payer
-growth figure on the breakdown (`per_share_growth_pct`) is the measure of raises; this
-one answers "what was not shares and not currency".
+**The payout change is served in two parts, `raises` and `timing`.** `n` is whatever
+falls inside the 365-day window, so a payment entering or leaving it, or one dropping
+out of the forecast while it is overdue, moves `n` without any company having changed
+its dividend: measured alone, the payout change read negative on a book whose payers
+had all raised. So each line also carries `L`, the payer's *level*
+(`dividend_forecast.payout_level`: a year of its own schedule at its current size,
+anchored on its newest payment rather than on today, gross of withholding), and
+
+    raises   q1 x n0 x (L1/L0 - 1) x g0        the old window, at the new level
+    timing   payout - raises                   everything else that moved n
+
+A holding without a level on either day has no measure of its raises: its whole payout
+change stays in `timing`, never guessed. The five parts still sum to the change.
 """
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, Mapping, Optional
 
-PARTS = ("shares", "payout", "newly_forecast", "fx")
+PARTS = ("shares", "raises", "timing", "newly_forecast", "fx")
 
 # A share count that moves by this factor while the holding's forecast in its own
 # currency stays within SPLIT_VALUE_TOLERANCE is a split, not a trade: the same money
@@ -45,6 +53,8 @@ class Holding:
     shares: Decimal
     next_12m_eur: Decimal
     fx_to_eur: Optional[Decimal] = None
+    # `payout_level` per share, gross, in EUR at `fx_to_eur`; None when unknown.
+    level_eur: Optional[Decimal] = None
 
 
 def _is_split(q0: Decimal, q1: Decimal, native0: Decimal, native1: Decimal) -> bool:
@@ -82,20 +92,30 @@ def attribute_change(
             continue
 
         # Without both rates the security's own currency cannot be told from its
-        # payout, so its moves stay in `payout` and only EUR→base counts as currency.
+        # payout, so its moves stay in the payout parts and only EUR→base counts as
+        # currency.
         if a.fx_to_eur and b.fx_to_eur:
             f0, f1 = a.fx_to_eur, b.fx_to_eur
         else:
             f0 = f1 = Decimal("1")
         native0, native1 = a.next_12m_eur / f0, b.next_12m_eur / f1
+        # The level is per share, so a split rescales it exactly as it rescales `n`.
+        level_scale = Decimal("1")
         if _is_split(q0, q1, native0, native1):
+            level_scale = q0 / q1
             q0 = q1
         n0, n1 = native0 / q0, native1 / q1
         g0 = f0 * base_rate_prev
 
         shares = (q1 - q0) * n0 * g0
         payout = q1 * (n1 - n0) * g0
+        raises = Decimal("0")
+        if a.level_eur and b.level_eur and a.level_eur > 0 and b.level_eur > 0:
+            level0 = a.level_eur / f0 * level_scale
+            level1 = b.level_eur / f1
+            raises = q1 * n0 * (level1 / level0 - 1) * g0
         out["shares"] += shares
-        out["payout"] += payout
+        out["raises"] += raises
+        out["timing"] += payout - raises
         out["fx"] += (value1 - value0) - shares - payout
     return out

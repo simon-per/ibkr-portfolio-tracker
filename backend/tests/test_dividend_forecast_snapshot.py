@@ -425,9 +425,11 @@ async def test_the_lines_are_the_breakdowns_own_and_sum_to_the_stored_total():
         (row,) = await DividendForecastSnapshotRepository(session).get_all()
         lines = await _lines(session, AS_OF)
         assert [
-            (ln.security_id, float(ln.shares), float(ln.next_12m_eur), ln.reconstructed)
+            (ln.security_id, float(ln.shares), float(ln.next_12m_eur),
+             None if ln.level_eur is None else float(ln.level_eur), ln.reconstructed)
             for ln in lines
-        ] == [(s["security_id"], s["shares"], s["next_12m_eur"], False) for s in served]
+        ] == [(s["security_id"], s["shares"], s["next_12m_eur"], s["level_eur"], False)
+              for s in served]
         assert round(sum(ln.next_12m_eur for ln in lines), 2) == row.next_12m_eur
     finally:
         await session.close()
@@ -450,6 +452,9 @@ async def test_a_holding_that_pays_nothing_still_gets_a_line():
         assert by_sec[2].shares == Decimal("7") and by_sec[2].next_12m_eur == 0
         assert by_sec[1].fx_to_eur == Decimal("1")      # a EUR security
         assert by_sec[2].fx_to_eur is None              # no USD rate is cached here
+        # A year of 1.00 a quarter, gross; a holding without a cadence has no level.
+        assert by_sec[1].level_eur == Decimal("4")
+        assert by_sec[2].level_eur is None
     finally:
         await session.close()
         await engine.dispose()
@@ -487,7 +492,7 @@ async def test_replayed_lines_never_replace_recorded_ones_and_fill_a_day_without
         def line(value):
             return [{"security_id": 1, "shares": Decimal("100"),
                      "next_12m_eur": Decimal(value), "currency": "EUR",
-                     "fx_to_eur": Decimal("1")}]
+                     "fx_to_eur": Decimal("1"), "level_eur": None}]
 
         async def stored():
             (ln,) = await _lines(session, AS_OF)
@@ -542,11 +547,70 @@ async def test_the_backfill_gives_a_recorded_day_its_missing_lines_and_keeps_its
             (AS_OF, Decimal("123.45")),
         ]
 
-        # A second run has nothing left to fill on a day that now has lines.
-        assert (await backfill(session, start))["lines_filled"] == []
-        assert (
-            await session.get(DividendForecastSnapshotLine, lines[AS_OF][0].id)
-        ) is not None
+        # A second run restates the replayed lines, as any replay is restated after a
+        # change to the forecast — and still leaves the recorded total alone.
+        assert (await backfill(session, start))["lines_filled"] == [AS_OF]
+        again = await repo.get_lines()
+        assert all(ln.reconstructed for ln in again[AS_OF])
+        assert [r.next_12m_eur for r in await repo.get_all() if not r.reconstructed] == [
+            Decimal("123.45"),
+        ]
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fill_levels_fills_only_what_is_missing():
+    """A recorded line stored before `level_eur` existed gets one; a level already
+    there — recorded or not — is never replaced."""
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+        await repo.upsert(
+            {"snapshot_date": AS_OF, "next_12m_eur": Decimal("400.00"),
+             "ttm_net_eur": Decimal("50.00")},
+            lines=[_line(1, "100", "400"), _line(2, "5", "0", level="7")],
+        )
+
+        filled = await repo.fill_levels(AS_OF, {1: Decimal("4"), 2: Decimal("99"), 3: None})
+
+        assert filled == 1
+        by_sec = {ln.security_id: ln for ln in await _lines(session, AS_OF)}
+        for ln in by_sec.values():
+            await session.refresh(ln)
+        assert by_sec[1].level_eur == Decimal("4") and not by_sec[1].reconstructed
+        assert by_sec[2].level_eur == Decimal("7")
+        assert await repo.dates_missing_levels() == set()
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_backfill_gives_recorded_lines_the_level_they_lack():
+    """Days recorded with lines before 2026-10-17 have no level, so a raise on them could
+    not be told from timing. The backfill replays the level and writes nothing else."""
+    engine, session = await _make_session()
+    try:
+        repo = DividendForecastSnapshotRepository(session)
+        await repo.upsert(
+            {"snapshot_date": AS_OF, "next_12m_eur": Decimal("321.00"),
+             "ttm_net_eur": Decimal("50.00")},
+            lines=[_line(1, "100", "321")],
+        )
+        start = date(2026, 7, 28)
+
+        assert (await backfill(session, start, dry_run=True))["levels_filled"] == 1
+        assert await repo.dates_missing_levels() == {AS_OF}
+
+        assert (await backfill(session, start))["levels_filled"] == 1
+
+        (line,) = await _lines(session, AS_OF)
+        await session.refresh(line)
+        assert line.level_eur == Decimal("4")           # 4 x 1.00, the fixture's payer
+        assert (line.next_12m_eur, line.reconstructed) == (Decimal("321"), False)
+        assert (await backfill(session, start))["levels_filled"] == 0
     finally:
         await session.close()
         await engine.dispose()
@@ -561,10 +625,11 @@ THREE_RATES = BaseFx("CHF", {
 })
 
 
-def _line(sid, shares, next_12m, fx="1", currency="EUR"):
+def _line(sid, shares, next_12m, fx="1", currency="EUR", level=None):
     return {"security_id": sid, "shares": Decimal(shares),
             "next_12m_eur": Decimal(next_12m), "currency": currency,
-            "fx_to_eur": Decimal(fx) if fx is not None else None}
+            "fx_to_eur": Decimal(fx) if fx is not None else None,
+            "level_eur": Decimal(level) if level is not None else None}
 
 
 async def _three_days(session, with_day_3_lines: bool = True) -> None:
@@ -572,8 +637,8 @@ async def _three_days(session, with_day_3_lines: bool = True) -> None:
     Three holdings over four days, each move a different cause:
 
     - #1 (EUR): 50 shares bought on day 2, at an unchanged payout.
-    - #2 (USD): its dividend raised from 10 to 12.5 a share on day 2, while the dollar
-      fell from 0.9 to 0.8 EUR.
+    - #2 (USD): its dividend raised from 10 to 12.5 a share on day 2 (its level, in EUR
+      at each day's rate, 9 then 10), while the dollar fell from 0.9 to 0.8 EUR.
     - #3 (EUR): held throughout, and forecasting nothing until day 4.
 
     The EUR→CHF rate falls from 0.90 to 0.80 on day 2 as well. Day 4's stored total is
@@ -591,14 +656,15 @@ async def _three_days(session, with_day_3_lines: bool = True) -> None:
                            "ttm_net_eur": Decimal("50.00")}, lines=lines)
 
     await store(DAY_1, "490.00", [
-        _line(1, "100", "400"), _line(2, "10", "90", "0.9", "USD"), _line(3, "5", "0"),
+        _line(1, "100", "400", level="4"), _line(2, "10", "90", "0.9", "USD", "9"),
+        _line(3, "5", "0"),
     ])
-    day_2 = [_line(1, "150", "600"), _line(2, "10", "100", "0.8", "USD"),
+    day_2 = [_line(1, "150", "600", level="4"), _line(2, "10", "100", "0.8", "USD", "10"),
              _line(3, "5", "0")]
     await store(DAY_2, "700.00", day_2)
     await store(DAY_3, "700.00", day_2 if with_day_3_lines else None)
     await store(DAY_4, "760.00", [
-        _line(1, "150", "600"), _line(2, "10", "100", "0.8", "USD"),
+        _line(1, "150", "600", level="4"), _line(2, "10", "100", "0.8", "USD", "10"),
         _line(3, "5", "50"),
     ])
 
@@ -621,7 +687,8 @@ async def test_the_breakdown_puts_each_cause_in_its_own_part(monkeypatch):
         assert points[1]["breakdown"] == {
             "since": "2026-09-01",
             "shares": 180.0,          # 50 shares x 4.00 x 0.90
-            "payout": 20.25,          # 10 shares x 2.50 USD x (0.9 x 0.90)
+            "raises": 20.25,          # 10 shares x 2.50 USD x (0.9 x 0.90)
+            "timing": 0.0,            # the window held the same payments
             "newly_forecast": 0.0,
             "fx": -81.25,             # -60 on #1 and -21.25 on #2
             "unattributed": 0.0,
@@ -629,14 +696,14 @@ async def test_the_breakdown_puts_each_cause_in_its_own_part(monkeypatch):
         assert points[2]["breakdown"] == points[1]["breakdown"]     # nothing moved
         assert points[3]["breakdown"] == {
             "since": "2026-09-01",
-            "shares": 180.0, "payout": 20.25, "fx": -81.25,
+            "shares": 180.0, "raises": 20.25, "timing": 0.0, "fx": -81.25,
             "newly_forecast": 40.0,   # 50 EUR x 0.80, on shares already held
             "unattributed": 8.0,      # the 10 EUR the lines do not account for
         }
         for p in points[1:]:
             b = p["breakdown"]
             assert round(
-                b["shares"] + b["payout"] + b["newly_forecast"] + b["fx"]
+                b["shares"] + b["raises"] + b["timing"] + b["newly_forecast"] + b["fx"]
                 + b["unattributed"], 2
             ) == round(p["next_12m_eur"] - points[0]["next_12m_eur"], 2)
         assert set(points[1]["breakdown"]) == set(DividendForecastChange.model_fields)
@@ -659,7 +726,7 @@ async def test_a_day_without_lines_has_no_breakdown_and_does_not_break_the_chain
         assert points[2]["breakdown"] is None
         # Day 4 is measured across the gap, from day 2's lines, and totals the same.
         assert points[3]["breakdown"] == {
-            "since": "2026-09-01", "shares": 180.0, "payout": 20.25,
+            "since": "2026-09-01", "shares": 180.0, "raises": 20.25, "timing": 0.0,
             "newly_forecast": 40.0, "fx": -81.25, "unattributed": 8.0,
         }
     finally:
@@ -683,7 +750,7 @@ async def test_the_breakdown_starts_at_growth_from_like_the_percentages(monkeypa
         assert points[2]["next_12m_since_start_pct"] == 0.0
         # Day 1's purchase, raise and rate move are before the start and in no part.
         assert points[3]["breakdown"] == {
-            "since": "2026-09-02", "shares": 0.0, "payout": 0.0,
+            "since": "2026-09-02", "shares": 0.0, "raises": 0.0, "timing": 0.0,
             "newly_forecast": 40.0, "fx": 0.0, "unattributed": 8.0,
         }
     finally:

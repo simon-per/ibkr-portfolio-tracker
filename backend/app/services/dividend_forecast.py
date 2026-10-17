@@ -337,6 +337,40 @@ def per_share_growth(history: Sequence[HistPayment]) -> Optional[Decimal]:
     )
 
 
+def payout_level(history: Sequence[HistPayment]) -> Optional[Decimal]:
+    """
+    What one share pays over a year of the payer's own schedule at its current size:
+    the projection of the twelve months after its newest scheduled payment.
+
+    The *Next 12 months* figure cannot tell a raise from timing. Its window is
+    anchored on today, so a payment entering or leaving it moves the figure while no
+    company changed anything. This figure is anchored on the payer's own newest
+    payment instead, so it moves only when the amount evidence does: a raise or a cut
+    paid, or one IBKR has announced (an accrual is the newest regular payment). That
+    is what lets `dividend_forecast_attribution` split raises out of the rest.
+
+    It is `project_dividends` itself, over a horizon chosen to be timing-free, so the
+    sizing rules cannot drift apart. A steady payer reads `k x` its latest payment, and
+    a varying payer reads its last cycle, slot by slot. Both are a year's worth, so a
+    payer that flips between the two shapes compares like with like. ``as_of`` is the
+    payer's own newest payment, so a paused payer is not judged stopped here. Whether
+    it still forecasts anything is the window's question, not this one's.
+
+    None without a cadence or a usable amount: unknown, never 0.
+    """
+    scheduled = [p for p in history if p.cadence]
+    if not scheduled:
+        return None
+    last_seen = max(p.on_date for p in scheduled)
+    projected = project_dividends(
+        list(history), Decimal("1"), last_seen + timedelta(days=1),
+        _add_months(last_seen, 12), as_of=last_seen,
+    )
+    if not projected:
+        return None
+    return sum((p.net_eur for p in projected), Decimal("0"))
+
+
 def _size_for(d: date, regular: Sequence[HistPayment], gap: int, sizing: str,
               steady: bool, last_seen: date) -> tuple:
     """``(per_share, method)`` for the payment projected on ``d``."""

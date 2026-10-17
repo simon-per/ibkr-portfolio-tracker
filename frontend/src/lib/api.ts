@@ -961,18 +961,22 @@ export interface DividendForecastLine {
   next_12m_eur: number;
   currency: string | null;
   fx_to_eur: number | null;
+  /** A year of the payer's own schedule at its current size, per share, gross. */
+  level_eur: number | null;
 }
 
 /**
  * What the growth of the next-12-month forecast since `since` was made of, in the base
- * currency. The five figures sum to the change.
+ * currency. The six figures sum to the change.
  */
 export interface DividendForecastChange {
   since: string;
   /** Shares bought or sold, positions opened or closed. */
   shares: number;
-  /** Payout per share — and payments entering or leaving the 365-day window. */
-  payout: number;
+  /** Payers raising (or cutting) their dividend per share. */
+  raises: number;
+  /** Payments entering or leaving the 365-day window. */
+  timing: number;
   /** A holding kept throughout whose forecast appeared or went. */
   newly_forecast: number;
   /** The securities' currencies against the base currency. */

@@ -696,14 +696,16 @@ def test_the_forecast_history_serves_its_breakdown(client):
     assert last["breakdown"] == {
         "since": first["date"],
         "shares": 7.52,             # 2 shares x 4.00 EUR x 0.94 CHF
-        "payout": 0.0, "newly_forecast": 0.0, "fx": 0.0, "unattributed": 0.0,
+        "raises": 0.0, "timing": 0.0, "newly_forecast": 0.0, "fx": 0.0,
+        "unattributed": 0.0,
     }
 
     # And the figures the recorder stores are on the breakdown, one per holding held.
     lines = client.get("/api/dividends/breakdown").json()["forecast_by_security"]
     assert {ln["security_id"] for ln in lines} == {1, 2, 4}     # AAPL was sold
     assert all(
-        set(ln) == {"security_id", "shares", "next_12m_eur", "currency", "fx_to_eur"}
+        set(ln) == {"security_id", "shares", "next_12m_eur", "currency", "fx_to_eur",
+                    "level_eur"}
         for ln in lines
     )
 

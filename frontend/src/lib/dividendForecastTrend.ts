@@ -38,11 +38,13 @@ const HISTORY_DIGITS = 2
 export type ForecastPartKey = Exclude<keyof DividendForecastChange, 'since'>
 
 /**
- * Display order: the cause that dominates first, the residual last. `shares` is not
- * here: it is the one lever the owner controls, so it rides in the header as `fromBuys`.
+ * Display order: the cause that dominates first, the residual last. `shares` and
+ * `raises` are not here: they are the two answers to "is it growing" — what the owner
+ * bought and what the payers raised — so they ride in the header as `fromBuys` and
+ * `fromRaises`.
  */
 const PART_LABELS: [ForecastPartKey, string][] = [
-  ['payout', 'payouts and timing'],
+  ['timing', 'timing'],
   ['newly_forecast', 'newly forecast'],
   ['fx', 'currency'],
   ['unattributed', 'unexplained'],
@@ -83,6 +85,10 @@ export interface ForecastTrend {
   /** The next-12-month income added by shares bought since `partsSince`; null when the
    *  breakdown is absent or rounds to nothing. Negative when shares were sold. */
   fromBuys: number | null
+  /** The next-12-month income added by payers raising their dividend since
+   *  `partsSince`; null when the breakdown is absent or it rounds to nothing.
+   *  Negative when they cut. */
+  fromRaises: number | null
   /** The latest day's other parts, without the ones that round to nothing. */
   parts: ForecastTrendPart[]
   /** Set only when the breakdown starts later than the line does. */
@@ -93,6 +99,14 @@ export interface ForecastTrend {
 export function fromBuysLabel(value: number): string {
   return value < 0 ? 'from sales' : 'from buys'
 }
+
+/** "from raises", or "from cuts" when the payers cut more than they raised. */
+export function fromRaisesLabel(value: number): string {
+  return value < 0 ? 'from cuts' : 'from raises'
+}
+
+const material = (value: number | undefined): number | null =>
+  value != null && Math.abs(value) >= PART_MIN ? value : null
 
 /** The UTC calendar date — the key the server stores one snapshot per. */
 export function utcToday(now: Date = new Date()): string {
@@ -126,10 +140,10 @@ export function forecastTrend(
         .map(([key, label]) => ({ key, label, value: breakdown[key] }))
         .filter((part) => Math.abs(part.value) >= PART_MIN)
     : []
-  const shares = breakdown?.shares
   const common = {
     start: visible[0].date,
-    fromBuys: shares != null && Math.abs(shares) >= PART_MIN ? shares : null,
+    fromBuys: material(breakdown?.shares),
+    fromRaises: material(breakdown?.raises),
     parts,
     partsSince: breakdown && breakdown.since !== visible[0].date ? breakdown.since : null,
   }

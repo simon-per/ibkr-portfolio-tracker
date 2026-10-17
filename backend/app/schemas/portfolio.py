@@ -808,16 +808,21 @@ class DividendForecastLine(BaseModel):
     # The newest cached <currency>→EUR rate the forecast sized this security at.
     # None when none is cached.
     fx_to_eur: Optional[float] = None
+    # What one share pays over a year at the payer's current size, gross, in EUR at
+    # `fx_to_eur` (`dividend_forecast.payout_level`). None without a cadence.
+    level_eur: Optional[float] = None
 
 
 class DividendForecastChange(BaseModel):
     """
     What the growth of `next_12m_eur` since `since` was made of, in the base currency
-    (`app.services.dividend_forecast_attribution`). The five figures sum to the change.
+    (`app.services.dividend_forecast_attribution`). The six figures sum to the change.
     """
     since: str                      # the first day with per-security lines, "YYYY-MM-DD"
     shares: float                   # shares bought or sold, positions opened or closed
-    payout: float                   # payout per share, and payments entering/leaving the window
+    raises: float                   # payers raising (or cutting) their dividend per share
+    timing: float                   # payments entering/leaving the window, and any payout
+                                    # change of a holding without a measured level
     newly_forecast: float           # a holding kept throughout whose forecast appeared or went
     fx: float                       # the security's currency against the base currency
     # The part of the change the lines do not account for. Near zero on days recorded

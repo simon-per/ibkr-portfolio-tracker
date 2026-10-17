@@ -77,6 +77,14 @@ class DividendForecastSnapshotLine(Base):
     `fx_to_eur` is the newest cached rate of the security's currency on the day — the
     one rate the forecast sized every payment of that security at — or NULL when none
     was cached.
+
+    `level_eur` (since 2026-10-17) is the payer's *level* that day: what one share pays
+    over a year of its own schedule at its current size, gross, in EUR at `fx_to_eur`
+    (`dividend_forecast.payout_level`). The forecast's per-share figure moves with its
+    365-day window too, so without this a raise could not be told from a payment
+    leaving the window. NULL when the payer has no cadence, and on lines recorded before
+    the column existed until the backfill fills it; a NULL is "not measured", never a
+    zero, and that holding's payout change then stays in `timing`.
     """
     __tablename__ = "dividend_forecast_snapshot_lines"
     __table_args__ = (
@@ -94,6 +102,7 @@ class DividendForecastSnapshotLine(Base):
     next_12m_eur: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     fx_to_eur: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
+    level_eur: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 8), nullable=True)
     reconstructed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )

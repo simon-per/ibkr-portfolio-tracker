@@ -35,6 +35,7 @@ from app.services.dividend_forecast import (
     ForecastPayment,
     HistPayment,
     infer_gap_days,
+    payout_level,
     per_share_growth,
     project_dividends,
 )
@@ -1722,6 +1723,10 @@ class DividendService:
                         Decimal(str(line["fx_to_eur"]))
                         if line["fx_to_eur"] is not None else None
                     ),
+                    "level_eur": (
+                        Decimal(str(line["level_eur"]))
+                        if line["level_eur"] is not None else None
+                    ),
                 }
                 for line in breakdown["forecast_by_security"]
             ],
@@ -1750,8 +1755,8 @@ class DividendService:
 
         `next_12m_since_start_pct` is the growth since the first measured day — the
         `growth_from` day when one is set — and `breakdown` says what that growth was
-        made of: shares bought, payout per share, holdings newly forecast and currency
-        (`dividend_forecast_attribution`), accumulated day to day over the
+        made of: shares bought, dividend raises, timing, holdings newly forecast and
+        currency (`dividend_forecast_attribution`), accumulated day to day over the
         per-security lines and in the base currency. Its `since` names the day it
         starts on, which is later than the first measured day only while the earlier
         days have no lines. What the lines do not account for is `unattributed`,
@@ -1819,7 +1824,9 @@ class DividendService:
             day_lines = lines_by_day.get(day)
             if day_lines:
                 holdings = {
-                    ln.security_id: Holding(ln.shares, ln.next_12m_eur, ln.fx_to_eur)
+                    ln.security_id: Holding(
+                        ln.shares, ln.next_12m_eur, ln.fx_to_eur, ln.level_eur
+                    )
                     for ln in day_lines
                 }
                 rate = base_fx.convert(Decimal("1"), day)
@@ -2059,6 +2066,8 @@ class DividendService:
         sizing_fx: Dict[str, Decimal] = {}
         # `per_share_growth` of each held payer that has a year to compare across.
         ps_growth: Dict[int, Decimal] = {}
+        # `payout_level` of each held payer, gross, for `forecast_by_security`.
+        levels: Dict[int, Decimal] = {}
         next_12m_end = as_of + timedelta(days=365)
         # Far enough to complete next calendar year, so the year comparison never
         # shows a truncated bar; further still if the caller asked for a year
@@ -2091,6 +2100,13 @@ class DividendService:
                 sid: g for sid in held_shares
                 if (g := per_share_growth(hist_by_sec.get(sid, []))) is not None
             }
+            # The history is net of each security's ladder rate; the level is taken back
+            # to gross, so a change of withholding rate is not read as a raise.
+            for sid in held_shares:
+                level = payout_level(hist_by_sec.get(sid, []))
+                wht_rate, _ = wht_by_sec.get(sid, (Decimal(1) - net_factor, "assumed"))
+                if level is not None and wht_rate < 1:
+                    levels[sid] = level / (Decimal(1) - wht_rate)
 
             # What the ex→pay distance actually measures out at, per security.
             pay_lags = self._measured_pay_lags(raw_payments, exact_pairs)
@@ -3101,6 +3117,12 @@ class DividendService:
                     "fx_to_eur": (
                         float(sizing_fx[securities[sid].currency or "EUR"])
                         if (securities[sid].currency or "EUR") in sizing_fx else None
+                    ),
+                    # What one share pays over a year at the payer's current size, gross
+                    # and in EUR at `fx_to_eur` (`dividend_forecast.payout_level`): the
+                    # measure a raise is told from timing by. None when unknown.
+                    "level_eur": (
+                        round(float(levels[sid]), 8) if sid in levels else None
                     ),
                 }
                 for sid, qty in sorted(held_shares.items())

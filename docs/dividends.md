@@ -932,28 +932,49 @@ had to exist at all. The owner's brief: track the forecast from a reliable basel
 that it keeps growing, and have the breakdown available without it being the loud part.
 
 - **One line per security HELD that day**, payer or not: `shares`, its part of
-  `next_12m_eur`, its `currency` and the `fx_to_eur` rate it was sized at. They are
+  `next_12m_eur`, its `currency`, the `fx_to_eur` rate it was sized at and its
+  `level_eur` (below, since 2026-10-17). They are
   `get_dividend_breakdown`'s own `forecast_by_security` (served on the breakdown for that
   reason), written in the same transaction as the total, so there is still one sum. A holding
   that forecasts nothing is a zero line, never an absent one: the split has to tell "held,
   and its first forecast appeared" from "bought".
 - **The split is arithmetic** (`app/services/dividend_forecast_attribution.py`). Per
   holding, with `q` shares, `n` the next twelve months per share in its own currency and `g`
-  that currency in the base currency: `shares = (q1-q0)·n0·g0`, `payout = q1·(n1-n0)·g0`,
-  `fx = q1·n1·(g1-g0)`. A position opened or closed is `shares` whole; a holding kept
+  that currency in the base currency: `shares = (q1-q0)·n0·g0`, the payout change
+  `q1·(n1-n0)·g0` served as `raises` and `timing` (below), `fx = q1·n1·(g1-g0)`. A
+  position opened or closed is `shares` whole; a holding kept
   throughout whose forecast appears or goes is `newly_forecast`; a share count that jumps
   while the holding's forecast in its own currency does not is a split and is neither.
 - **Chained day to day and accumulated from `growth_from`**, so shares are valued at the
   payout of the day they were bought. Each point of the history carries
-  `next_12m_since_start_pct` and `breakdown` (`since`, the four parts, `unattributed`), in
+  `next_12m_since_start_pct` and `breakdown` (`since`, the five parts, `unattributed`), in
   the base currency. `since` is later than the start only while earlier days have no lines.
-- **`unattributed` is reported, never spread.** It is the change minus the four parts. On
+- **`unattributed` is reported, never spread.** It is the change minus the five parts. On
   a day recorded with its lines it is rounding; the days recorded between 2026-10-07 and
   this change have a recorded total and replayed lines, and carry the gap there.
-- **`payout` is per share AND timing.** `n` is whatever falls inside the 365-day window, so
-  a payment entering or leaving it, or one that drops out of the forecast while overdue,
-  moves `n` with no company having changed its dividend. It can be negative on a book
-  whose payers all raised. The measure of raises is the per-share figure below.
+- **The payout change is `raises` + `timing`** (since 2026-10-17; it was one part,
+  `payout`, until then). `n` is whatever falls inside the 365-day window, so a payment
+  entering or leaving it, or one that drops out of the forecast while overdue, moves `n`
+  with no company having changed its dividend: on production the single part read
+  negative since `growth_from` on a book whose payers had raised. So each line carries the
+  payer's **level** — `dividend_forecast.payout_level`, what one share pays over the
+  twelve months after the payer's own newest scheduled payment, i.e. `project_dividends`
+  over a horizon that is the same every day, gross of withholding (the ladder rate is
+  divided back out, so a WHT change is not a raise) — and
+  `raises = q1·n0·(L1/L0 − 1)·g0`, the old window at the new level, with `timing` the
+  rest of the payout change. A steady payer's level is `k ×` its latest payment, so a
+  raise counts the day IBKR lists the accrual; a varying payer's is its last cycle slot
+  by slot, so a fund's distribution counts against the same one a year earlier; both are
+  a year's worth, so a payer flipping between the shapes compares like with like. On a
+  split the old level is rescaled like the share count. **No level on either day —
+  no cadence, or a line stored before the column — is no measure of raises**, and that
+  holding's whole payout change stays in `timing`, never guessed.
+- **Levels on the days stored before 2026-10-17 come from the backfill.**
+  `backfill_dividend_forecast --from <growth_from>` restates the replayed days with their
+  levels, restates the replayed lines of the recorded days that have no recorded lines
+  (2026-10-07..12), and writes a replayed level into recorded lines **only where it is
+  NULL** (`fill_levels`) — a missing value is not a recorded one, and nothing else on
+  the line changes. Without it the raises before the deploy stay in `timing`.
 - **Lines follow the parent's replay rule on their own** (`fill_lines`): replayed lines
   never replace recorded ones, and they are the only lines a day recorded before the table
   existed will ever get. The backfill writes them without touching that day's total.
@@ -961,8 +982,10 @@ that it keeps growing, and have the breakdown available without it being the lou
   before `growth_from` is drawn; a part under half a unit of the base currency is not
   printed, the residual included. The card starts collapsed: its header row (figure,
   growth since the start with "est.", `MTD`/`YTD` chips when the server has them, and
-  `+X from buys` — `breakdown.shares`, the lever the owner controls) is the toggle, and
-  the chart and the sentence of the other parts open under it. Under the forecast a
+  `+X from buys` — `breakdown.shares`, the lever the owner controls — and `+X from
+  raises`, `breakdown.raises`, "from cuts" when negative) is the toggle, and the chart
+  and the sentence of the other parts (`timing`, `newly forecast`, currency, the
+  residual) open under it. Under the forecast a
   muted *Received* line draws `ttm_net_eur`, so income actually paid can be watched
   climbing toward the forecast. Replayed days are drawn like recorded ones and the
   book's per-share growth is not repeated there (it is the table's Growth column per

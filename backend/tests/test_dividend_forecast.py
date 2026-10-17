@@ -371,3 +371,59 @@ def test_an_unknown_sizing_is_refused_loudly():
     with pytest.raises(ValueError):
         project_dividends(SEASONAL, Decimal("1"), date(2026, 1, 1), date(2026, 12, 31),
                           sizing="guess")
+
+
+# ---- The payer's level: a year of its own schedule, anchored on its newest payment ----
+#
+# `payout_level` is what lets the forecast history tell a raise from a payment entering
+# or leaving the 365-day window (`dividend_forecast_attribution`). It must move with the
+# amount evidence and with nothing else.
+
+from app.services.dividend_forecast import payout_level  # noqa: E402
+
+
+def test_a_steady_payers_level_is_a_year_of_its_latest_payment():
+    history = _series(_quarters([2025, 2026], [
+        ["0.20", "0.20", "0.20", "0.20"],
+        ["0.20", "0.20", "0.22"],
+    ]))
+    assert payout_level(history) == Decimal("0.88")       # 4 x the raised 0.22
+
+
+def test_the_level_does_not_move_with_the_calendar():
+    """Asked any day of the year, the same history says the same: no `as_of`."""
+    history = _series(_quarters([2025], [["0.50", "0.50", "0.50", "0.50"]]))
+    assert payout_level(history) == Decimal("2.00")
+
+
+def test_a_varying_payers_level_is_its_last_cycle_slot_by_slot():
+    assert payout_level(SEASONAL) == Decimal("2.56")      # 0.42+0.72+0.47+0.95
+
+
+def test_a_raise_moves_the_level_and_a_new_payment_at_the_old_size_does_not():
+    level = _quarters([2025], [["1.00", "1.00", "1.00", "1.00"]])
+    same = payout_level(_series(level + [(date(2026, 3, 15), "1.00")]))
+    raised = payout_level(_series(level + [(date(2026, 3, 15), "1.05")]))
+    assert same == Decimal("4.00")
+    assert raised == Decimal("4.20")
+
+
+def test_an_announced_raise_counts_before_it_is_paid():
+    """An accrual is amount evidence without a date in the schedule: it is the newest
+    regular payment, so the level carries it the day IBKR lists it."""
+    history = _series(_quarters([2025], [["1.00", "1.00", "1.00", "1.00"]])) + [
+        HistPayment(on_date=date(2026, 3, 1), per_share_eur=Decimal("1.10"), cadence=False),
+    ]
+    assert payout_level(history) == Decimal("4.40")
+
+
+def test_no_cadence_is_no_level_not_zero():
+    assert payout_level(_series([(date(2026, 3, 15), "1.00")])) is None
+    assert payout_level([]) is None
+
+
+def test_a_paused_payer_still_has_a_level():
+    """Whether it still forecasts anything is the window's question; the level is what
+    it paid while it paid."""
+    history = _series(_quarters([2023], [["0.30", "0.30", "0.30", "0.30"]]))
+    assert payout_level(history) == Decimal("1.20")
