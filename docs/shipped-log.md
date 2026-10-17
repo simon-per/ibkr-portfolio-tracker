@@ -7,6 +7,17 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — VT's basket from Vanguard's new holdings route (#7)
+
+Issue #7. Vanguard's old profile API path redirects to the fund page's HTML since 2026-10-15,
+so VT's basket (and VOO's, DBPG's donor) could not refresh and aged into the stale warning.
+`fetch_vanguard` now asks `/vmf/api/{ticker}/portfolio-holding/stock.json?count=20000`, which
+the page itself calls: one request for the whole fund instead of 21. The page loop stays as a
+bounded guard, advancing by rows received and never following `next.href`; the parser and its
+refusals are unchanged. A 2 KB real capture pins the shape offline. Verified: 2127 backend
+tests green, one request to Vanguard to capture the fixture; the VPS fetch is under STATUS.md
+*Watch after the next deploy*.
+
 ## Shipped 2026-10-17 (night) — the dividend pass asks each held security once a week (#6)
 
 Issue #6, rule 1. The 7-day guard read the newest `DividendPayment.created_at`, which only an
