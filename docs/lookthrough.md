@@ -288,7 +288,10 @@ republish daily, so 7 days there is a missed fetch worth acting on, while Vangua
 month-end and lags ~6 weeks *by design*, so one 45-day rule badged it permanently for behaving
 exactly as documented. A badge that can never clear is the always-present-Flex-banner pathology.
 A future quarterly source (SEC N-PORT arrives 75–136 days old) needs its own entry rather than a
-raised default. Staleness deliberately **does not reduce `coverage_pct`** — the percentage answers
+raised default. One observation against the ~6-week figure: the **2026-09-30** as-of was already
+being served on **2026-10-17**, a 17-day lag. Recorded, not acted on — the 75-day threshold stays
+until more month-ends say the lag has really shortened. Staleness deliberately **does not reduce
+`coverage_pct`** — the percentage answers
 "how much is attributed", not "how current is it" — which is exactly why the age has to be surfaced
 on the card rather than only in the fund table.
 
@@ -407,7 +410,7 @@ has no route at all, and it borrows VT's basket until one exists.
 |---|---|---|
 | **DWS** | `etf.dws.com/etfdata/export/GBR/ENG/csv/product/constituent/<FUND_ISIN>/` | keyed by fund ISIN, nothing to discover; echoes `ShareClass ISIN` on every row for the parser to check |
 | **BlackRock** | a varnish JSON API needing a per-fund `portfolio_id` | several share classes are distinct product ids over **one** portfolio and return byte-identical baskets, so a copy-pasted id is *invisible* — `test_etf_source_registry.py` checks uniqueness |
-| **Vanguard US** | profile API, 500 rows/page | as-of lags ~6 weeks, which is normal, not stale |
+| **Vanguard US** | `investor.vanguard.com/vmf/api/<ticker>/portfolio-holding/stock.json?start=1&count=20000` — one request for the whole fund | as-of lags ~6 weeks, which is normal, not stale. The old `/investment-products/etfs/profile/api/` path now redirects to the HTML fund page (2026-10-15), which the parser refuses as a web page. `next.href` names an internal `api.vanguard.com` host — `start` is computed locally, never read off it |
 | **Invesco** | `dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/<CUSIP>/holdings/fund` | keyed by the fund's **own CUSIP**, derived from its ISIN — nothing to discover, unlike BlackRock. The *product page* is a single-page app, which is what an earlier note recorded as "no route" |
 | **First Trust** | `ftportfolios.com/retail/etf/etfholdings.aspx?Ticker=<T>` | HTML, and the holdings table is the sixth of eight — `_pick_table` matches on headers, never on position |
 | **Defiance** | `defianceetfs.com/<ticker>-full-holdings/` | **not** `/<ticker>/`, whose table is rendered client-side and absent from the response |
@@ -578,10 +581,13 @@ European feeds, the rest off the four US ones:
   line that is ~11% of the book once VWCE's proxy is counted, with the weights still summing to
   a plausible 91.60%. It is refused as its own named fault, because the count check caught this
   only by the luck of the two totals differing, and "a page is missing" sends the operator
-  hunting something that was never missing. **Pagination cannot be avoided** — `count` above 500
-  returns a non-JSON body, not a capped page — and the retry is deliberately manual, since a
-  cluster that stays split would spend 21 requests an attempt forever while the previous basket
-  is kept anyway. Two snapshots with equal totals and different membership would still get
+  hunting something that was never missing. **Pagination is now avoided rather than survived.**
+  That walk was the old profile route, capped at 500 rows a page; the `/vmf/api/` route that
+  replaced it (2026-10) answers `count=20000` — what Vanguard's own page asks for — with all
+  10,170 of VT's rows and no `next`, so one request is one snapshot. The `next` loop stays,
+  bounded by `VANGUARD_MAX_PAGES` and advancing `start` by the rows received, and both checks
+  stay with it, in case the API starts paging again. The retry is still deliberately manual;
+  the previous basket is kept meanwhile. Two snapshots with equal totals and different membership would still get
   through; that is recorded rather than guarded, because the legitimate duplicate rate (7 rows
   in 10,032, dual listings like BAM and BEPC) is measured and the torn one was 918, but one
   observation is not enough to calibrate a threshold on.

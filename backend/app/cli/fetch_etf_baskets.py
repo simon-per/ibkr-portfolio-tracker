@@ -163,9 +163,10 @@ async def fetch_baskets(
         print("Import them with, for each fund:")
         for symbol, paths in written.items():
             isin = next(i for i, s in FUND_SOURCES.items() if s.symbol == symbol)
-            # A glob for the paginated sources: VT is 21 pages, and printing 21 absolute
-            # paths produces a line nobody can read, let alone copy. The shell expands the
-            # glob in page order because the page number is zero-padded.
+            # A glob for a paginated source: Vanguard is one page today but was 21 for VT
+            # until 2026-10, and printing every absolute path produces a line nobody can
+            # read, let alone copy. The shell expands the glob in page order because the page
+            # number is zero-padded.
             target = (
                 str(paths[0])
                 if len(paths) == 1

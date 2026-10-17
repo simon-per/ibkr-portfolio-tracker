@@ -30,7 +30,8 @@ Seven issuers, seven sets of hazards, every one observed on a live file rather t
   the lengths are asserted equal. Note the payload also contains *unrelated* short arrays
   (length 4 alongside 1,338), so "all arrays are the same length" is the wrong check; only
   the datapoints actually read are compared.
-- **Vanguard US** — paginated JSON, 500 rows a page, month-end as-of that lags ~6 weeks.
+- **Vanguard US** — JSON with a declared `size`, the whole fund in one `count=20000` request
+  (it paged at 500 rows until the 2026-10 endpoint move), month-end as-of that lags ~6 weeks.
   Its stock endpoint returns equities only, so what is missing from Σ is genuinely the
   non-equity remainder.
 - **Invesco** — keyless JSON keyed by the fund's own CUSIP. Names arrive HTML-escaped, one row
@@ -695,7 +696,8 @@ def _ishares_as_of(points) -> date:
 
 def parse_vanguard_us(bodies: Sequence[bytes], fund_isin: str) -> ParsedBasket:
     """
-    Vanguard's US profile API, one body per 500-row page.
+    Vanguard's US holdings API, one body per page — normally a single body, since one
+    `count=20000` request carries the whole fund.
 
     Pages are concatenated in the order given, and the count the API declares is checked
     against the rows actually assembled — a missing page is exactly the shape that would make
@@ -721,10 +723,11 @@ def parse_vanguard_us(bodies: Sequence[bytes], fund_isin: str) -> ParsedBasket:
     calibrate a duplicate-rate rule against — the legitimate duplicate rate is 7 rows in
     10,032 (dual listings such as BAM and BEPC), the torn one was 918.
 
-    Pagination is unavoidable: `count` above 500 is not merely capped, it returns a non-JSON
-    body, so the whole basket cannot be taken in one request. Retrying is the operator's move
-    and it is not automatic — a cluster that stays split would spend 21 requests per attempt
-    forever, and the previous basket is kept meanwhile.
+    That was the old profile route, which capped a page at 500. The `/vmf/api/` route that
+    replaced it in 2026-10 returns all of VT's 10,170 holdings in one request, so a torn walk
+    cannot arise while that holds — but both checks stay, because the fetcher still follows a
+    `next` if the API starts paging again. Retrying is the operator's move and it is not
+    automatic, and the previous basket is kept meanwhile.
 
     Its as-of is a month end and normally lags ~6 weeks. That is Vanguard's publishing
     cadence, not staleness, and must not be treated as a fault.

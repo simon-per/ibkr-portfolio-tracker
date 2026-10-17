@@ -149,9 +149,9 @@ FUND_SOURCES: Dict[str, FundSource] = {
     ),
 
     # --- Vanguard (US listings only) -----------------------------------------------
-    # The US profile API is keyed by lower-cased ticker and pages 500 rows at a time, so
-    # VT's ~10,000 holdings take 21 requests. Its as-of is a month end and lags ~6 weeks,
-    # which is normal for Vanguard and must not read as staleness.
+    # The US holdings API is keyed by lower-cased ticker and returns VT's ~10,000 holdings in
+    # one `count=20000` request. Its as-of is a month end and lags ~6 weeks, which is normal
+    # for Vanguard and must not read as staleness.
     "US9220427424": FundSource(
         symbol="VT",
         name="Vanguard Total World Stock ETF",
@@ -261,8 +261,8 @@ FUND_SOURCES: Dict[str, FundSource] = {
     # --- Vanguard US, held only as a basket donor ------------------------------------
     # NOT held. It is declared solely so DBPG can borrow its basket: DBPG tracks the S&P 500
     # and publishes collateral instead of constituents, and VOO is the plainest full-
-    # replication S&P 500 fund with a machine-readable file. Same paginated endpoint as VT,
-    # so the same torn-read hazard applies — see `parse_vanguard_us`.
+    # replication S&P 500 fund with a machine-readable file. Same endpoint and adapter as VT
+    # — see `parse_vanguard_us`.
     "US9229083632": FundSource(
         symbol="VOO",
         name="Vanguard S&P 500 ETF",

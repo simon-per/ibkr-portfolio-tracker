@@ -65,13 +65,12 @@ BLACKROCK_PARAMS = {
     "component": "holdings",
 }
 
-VANGUARD_URL = (
-    "https://investor.vanguard.com/investment-products/etfs/profile/api/{ticker}/"
-    "portfolio-holding/stock"
-)
-# The API caps a page at 500 however large a `count` is asked for, so VT's ~10,000 holdings
-# take ~21 requests. The ceiling below is a runaway guard, not a limit on any real fund.
-VANGUARD_PAGE = 500
+# The route Vanguard's own fund page calls since the old `/investment-products/etfs/profile/
+# api/` path started redirecting to that page's HTML (found 2026-10-15). The page asks for
+# `count=20000`, and one request returned all 10,170 of VT's holdings with no `next`
+# (2026-10-17). The page loop and its ceiling stay as a runaway guard in case it pages again.
+VANGUARD_URL = "https://investor.vanguard.com/vmf/api/{ticker}/portfolio-holding/stock.json"
+VANGUARD_COUNT = 20000
 VANGUARD_MAX_PAGES = 60
 
 # Keyed by the fund's own CUSIP, which is the ISIN with its country prefix and check digit
@@ -146,7 +145,8 @@ async def fetch_vanguard(
     client: httpx.AsyncClient, isin: str, source: FundSource
 ) -> List[bytes]:
     """
-    Page until the API stops offering a `next`, returning one body per page, in order.
+    Page until the API stops offering a `next`, returning one body per page, in order — one
+    body today, since a single `count=20000` request carries the whole fund.
 
     The parser checks the assembled row count against the `size` the API declares, because a
     missing page is exactly the shape that makes a fund look like it holds only its largest
@@ -163,7 +163,7 @@ async def fetch_vanguard(
             await asyncio.sleep(BETWEEN_REQUESTS_S)
         response = await client.get(
             VANGUARD_URL.format(ticker=ticker),
-            params={"start": start, "count": VANGUARD_PAGE},
+            params={"start": start, "count": VANGUARD_COUNT},
         )
         response.raise_for_status()
         bodies.append(response.content)
@@ -174,9 +174,14 @@ async def fetch_vanguard(
             # Not JSON: let the parser refuse it with its own message rather than guessing
             # here. The bytes are kept, which is the point of separating the two halves.
             break
-        if not (payload.get("next") or {}).get("href"):
+        entities = (payload.get("fund") or {}).get("entity")
+        has_next = bool((payload.get("next") or {}).get("href"))
+        if not has_next or not isinstance(entities, list) or not entities:
             break
-        start += VANGUARD_PAGE
+        # Advanced by the rows that arrived, not by `count`: a server capping pages below what
+        # was asked would otherwise be skipped past. Never taken from `next.href`, which names
+        # an internal host (`api.vanguard.com/rs/...`) that is not ours to call.
+        start += len(entities)
     else:
         raise FetchError(
             f"{source.symbol}: still paginating after {VANGUARD_MAX_PAGES} pages — refusing "

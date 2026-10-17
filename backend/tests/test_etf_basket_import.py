@@ -15,8 +15,8 @@ Every poison shape here was observed rather than imagined:
 - the BlackRock payload is index-aligned parallel arrays *and* carries unrelated short arrays
   beside them, so both a genuine mismatch and a false alarm have to be pinned;
 - Xtrackers ships weights as fractions of 1 and a German-locale variant uses a decimal comma;
-- Vanguard pages 500 rows at a time, and a missing page leaves weights that still sum
-  plausibly.
+- Vanguard declares its holding count, and a missing page (it paged 500 rows at a time until
+  2026-10) leaves weights that still sum plausibly.
 
 Offline: the parsers touch no network and no database.
 """
