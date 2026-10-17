@@ -106,6 +106,19 @@ describe('DividendForecastTrend', () => {
     expect(screen.queryByTestId('chart')).toBeNull()
   })
 
+  it('opens taller than it was, and the grip under the chart resizes it', async () => {
+    localStorage.removeItem('dividendForecastTrendHeight')
+    mount(HISTORY)
+    fireEvent.click(await screen.findByRole('button', { expanded: false }))
+
+    const box = screen.getByTestId('chart').parentElement!
+    expect(box.style.height).toBe('260px')
+    const grip = screen.getByRole('separator', { name: 'Resize chart' })
+    fireEvent.keyDown(grip, { key: 'ArrowDown' })
+    expect(box.style.height).toBe('280px')
+    localStorage.removeItem('dividendForecastTrendHeight')
+  })
+
   it('prints the live figure the KPI tile prints, not the newest snapshot', async () => {
     mount(HISTORY, { next12m: 372, ttm: 155, currency: 'EUR' })
     const section = await screen.findByRole('region', { name: 'Dividend forecast over time' })

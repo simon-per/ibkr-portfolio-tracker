@@ -487,6 +487,11 @@ text. What that settled, so the next change keeps it:
 - **Charts share one look**: no axis rules or tick marks (global CSS in `index.css`), horizontal
   grid only, a themed hover band, the value series as the one gradient area. Bar-chart labels use
   `interval={0}` so a long list does not silently drop every other name.
+- **The forecast trend's chart is resizable** (2026-10-17, the owner: at 120 px the growth was
+  barely visible). It opens at 260 px and a grip under it drags it between 120 and 560;
+  `lib/useResizableHeight.ts` uses pointer capture (touch drags it too), the arrow keys move the
+  focused grip, and the height is stored per viewer through `lib/storage.ts` when a drag ends.
+  Reuse the hook for the next chart that wants it rather than a second drag handler.
 - **Phone cards drop absent details** (`DataTable`'s `isAbsent`) and skip a disclosure that would
   reveal one line; a horizontally scrolling `SegmentedControl` keeps its selected option centred.
 - **Font**: Inter, bundled via `@fontsource-variable/inter` and served from our origin, which is

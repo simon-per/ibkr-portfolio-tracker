@@ -25,9 +25,13 @@ import {
   type LiveForecast,
 } from '@/lib/dividendForecastTrend'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
+import { useResizableHeight } from '@/lib/useResizableHeight'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { cn, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
+
+/** The chart's height when first opened, and the range a drag may take it to. */
+const CHART_HEIGHT = { storageKey: 'dividendForecastTrendHeight', initial: 260, min: 120, max: 560 }
 
 function shortDay(iso: string): string {
   const date = parseLocalDate(iso)
@@ -63,6 +67,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
   const isCompact = useIsCompact()
   const [open, setOpen] = useState(false)
   const contentId = useId()
+  const { height: chartHeight, handleProps: resizeHandle } = useResizableHeight(CHART_HEIGHT)
   const { data } = useQuery({
     queryKey: ['dividends', 'forecast-history'],
     queryFn: () => api.getDividendForecastHistory(),
@@ -134,7 +139,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
 
       {open && (
         <div id={contentId} className="space-y-2 px-4 pb-3">
-          <div className="h-[120px] w-full">
+          <div className="w-full" style={{ height: chartHeight }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trend.points} margin={{ top: 4, right: isCompact ? 8 : 16, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
@@ -186,6 +191,13 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                 />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+          <div
+            {...resizeHandle}
+            aria-label="Resize chart"
+            className="group -mt-1 flex h-3 w-full cursor-row-resize touch-none select-none items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/60" />
           </div>
 
           {trend.parts.length > 0 && (
