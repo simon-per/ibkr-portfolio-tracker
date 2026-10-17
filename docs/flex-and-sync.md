@@ -66,7 +66,9 @@ Retrying *during* a lockout can extend it. When locked: do nothing and let the s
 
 Budgets in `ibkr_service.py`: `_FLEX_RETRY_DELAYS = [30]` (2 attempts, interactive path) and
 `FLEX_RETRY_DELAYS_PATIENT = [120, 300, 600]` (scheduled jobs). `1025` fails fast with guidance; `1018`
-always backs off >= 60s. Pinned by `tests/test_flex_retry_policy.py`.
+always backs off >= 60s, at either step. Every GetStatement waits `_RETRIEVE_POLL_DELAY` (7 s) first,
+the first one included, so SendRequest plus polls are at most 9 in any 60 s window. Pinned by
+`tests/test_flex_retry_policy.py`, which counts every GET against a fake clock.
 
 **`1001` means the opposite thing at each step, and getting that wrong caused a third lockout
 (2026-07-26).** While *retrieving*, it means "not ready" — keep polling the same reference. From
@@ -78,12 +80,29 @@ Code=1001 ...; attempt 1/4, re-requesting in 120s   ->   Code=1025 Too many fail
 
 So `1001` is in `_RETRIEVE_PENDING_CODES` but deliberately **not** in `_REQUEST_RETRYABLE_CODES` — it
 fails fast and the next scheduled job asks for a fresh statement. Giving up costs hours of freshness;
-re-requesting costs a lockout of every sync. The codes still retryable at the
-request step (`1009`/`1018`/`1019`/`1021`) all mean "throttled or busy, no generation job was created".
+re-requesting costs a lockout of every sync.
 
-Genuine transport errors (`requests.RequestException`: DNS, reset, timeout) **are** retried — they never
-reached IBKR, so they cost nothing against the token. Mid-poll they re-retrieve the same reference; before
-a reference exists they re-issue SendRequest. A DNS blip used to kill a whole job.
+**The rest of the not-ready family fails fast at the request step too** (since 2026-10-17, issue #5):
+`1004`–`1008` ("statement is incomplete", "settlement / FIFO / MTM P/L data is not ready") and `1009`
+("the server is under heavy load. Statement could not be generated at this time" — `1001`'s words).
+They sat in `_REQUEST_RETRYABLE_CODES` with no recorded reason while this paragraph named only four
+codes, so one scheduled slot could send four SendRequests on an answer that means what `1001` means.
+`1009` was the open question; nothing shows a refusal worded like `1001` is not counted, and giving
+up costs only freshness, so it went too. All of them stay in `_RETRIEVE_PENDING_CODES`. The codes
+still retryable at the request step are `1018` (the rate limit itself, waited past the minute),
+`1019` and `1021` — busy answers, not refusals.
+
+**Transport errors at the request step are retried only when they provably never left the
+machine** — a whitelist in `_never_reached_ibkr`: a `ConnectTimeout`, or a `ConnectionError`
+wrapping urllib3's `MaxRetryError` whose reason is a `NewConnectionError` (refused, unreachable,
+DNS — `NameResolutionError` is a subclass). A DNS blip used to kill a whole job, and still does
+not. Everything else fails fast like a `1001`, because requests raises the same classes for a reply
+lost *after* the GET went out: a reset or `RemoteDisconnected` while awaiting the reply is
+`ConnectionError(ProtocolError)`, a timeout reading the body is `ConnectionError(ReadTimeoutError)`
+(not `ReadTimeout`), a broken body is `ChunkedEncodingError`; `ReadTimeout`, `SSLError` and
+`ContentDecodingError` fail fast too. Until 2026-10-17 the handler retried all of them as "never
+reached IBKR". **Mid-poll every transport error is retried** against the same reference, after the
+usual wait: a repeated GetStatement only retrieves.
 
 ### The two-step rule (why we don't use `client.download()`)
 
@@ -96,13 +115,18 @@ docs are explicit:
 
 `ibflex.client.download()` polls correctly for `1009`/`1019`/`1018` but **not `1001`** — it raises, so any
 outer retry calls `download()` again and starts a *brand-new generation job*. Do that a few times and
-IBKR blocks the token: **`1025` counts failed *generations*, not request volume** (volume is `1018`,
-which we never saw). The first two lockouts came from this; the third came from re-requesting on `1001`,
-the same mistake one layer up.
+IBKR blocks the token: **`1025` counts failed *generations*, not request volume** (volume is `1018`).
+The first two lockouts came from this; the third came from re-requesting on `1001`, the same mistake
+one layer up. "We never saw a `1018`" was long cited here as evidence, and proved nothing: until
+2026-10-17 a `1018` while polling went through ibflex's `check_statement_response`, which *returns*
+`10` for it (and `5` for `1009`/`1019`) instead of raising, so it was re-polled after 10 s, logged
+nothing and left the timeout's `last` reason unchanged — the code path could not report one.
 
-So `IBKRService._download_statement()` drives the two steps itself using ibflex's public pieces
-(`submit_request`, `check_statement_response`, `parse_stmt_response`, `STMT_URL`): **SendRequest
-once**, then poll the *same* `ReferenceCode` for every `_RETRIEVE_PENDING_CODES` hit, bounded by a
+So `IBKRService._download_statement()` drives the two steps itself, each GET issued once by
+`_flex_get` and parsed with ibflex's `parse_stmt_response` (`send_flex_request`,
+`retrieve_flex_statement`): **SendRequest once**, then poll the *same* `ReferenceCode` for every
+`_RETRIEVE_PENDING_CODES` hit, waiting `_RETRIEVE_POLL_DELAY` before each GetStatement (60 s after a
+`1018`) and logging every not-ready code, bounded by a
 deadline (120s interactive / 900s scheduled) rather than an attempt count. The outer loop only ever
 re-issues SendRequest, and only for failures raised *before* a reference code exists — the one case
 where re-initiating is unavoidable.
@@ -120,14 +144,26 @@ the inner 3-try loop, as a reason to keep the *outer* retries sparse, without dr
 for the request step. The re-send announces itself with a bare `print()`, so it never appeared under
 any logger. Now `send_flex_request` issues **one GET** with `_SEND_REQUEST_TIMEOUT = (10, 60)` and
 parses the reply with ibflex's own parser (same exception types), and `fetch_flex_data` fails fast
-on a `ReadTimeout` the way it does on a `1001`, while a `ConnectionError`/`ConnectTimeout` keeps
-the retry it always had. The poll step still uses `client.submit_request`: a repeated GetStatement
-retrieves the same reference, which is what IBKR asks for. Pinned by the "SendRequest is one HTTP
-request" block in `tests/test_flex_retry_policy.py`, including a source guard that the name
-`client.request_statement(` is never called.
+on a `ReadTimeout` the way it does on a `1001` (since 2026-10-17, on every transport error that may
+have been sent — above). Pinned by the "SendRequest is one HTTP request" block in
+`tests/test_flex_retry_policy.py`, including a source guard on call sites.
+
+**The poll step left ibflex on 2026-10-17 (issue #5)**, for the per-token rate. It fired its first
+GetStatement straight after SendRequest — against the 1/second limit — then every 5 s, 12–13
+requests in the first minute and ~11/min for up to 900 s; `client.submit_request` re-sent a
+timed-out GetStatement three times with no pause; and `check_statement_response` hid `1018`
+(above). Now each poll is one GET (`_RETRIEVE_TIMEOUT = (10, 30)`, past ibflex's 5/10/15 s ceilings
+that a large statement can need) after a 7 s wait. Measured on the fake server: a statement never
+ready costs 17 GetStatements over 120 s interactive and 128 over 900 s scheduled (25 and 181
+before), at most 9 requests in any minute. The guard now bans `request_statement`, `submit_request`,
+`check_statement_response` and `download` call sites. A capped back-off would cut a 900 s poll to
+~20 requests but delay noticing a ready statement by up to the cap; `1025` counts generations, not
+retrieves, so the fixed cadence stayed.
 
 **Flex error codes:** `1001` statement not ready (transient, expected — poll, don't re-request),
-`1003` not available (terminal), `1018` rate limit (1/sec, 10/min per token), `1019`/`1021` transient,
+`1004`–`1008` incomplete / settlement, FIFO or MTM data not ready and `1009` heavy load (the same:
+poll, don't re-request), `1003` not available (terminal), `1018` rate limit (1/sec, 10/min per token),
+`1019`/`1021` transient,
 `1025` **undocumented** token lockout from repeated failures (fatal, never retry), `1012` token expired,
 `1013` IP restriction, `1015` bad token. The official table stops at 1021 — 1025 appears nowhere in it.
 

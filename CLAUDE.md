@@ -80,12 +80,14 @@ self-inflicted. **When locked: do nothing; the schedule recovers it. Retrying ca
 
 - Budgets in `ibkr_service.py`: `_FLEX_RETRY_DELAYS = [30]` (interactive),
   `FLEX_RETRY_DELAYS_PATIENT = [120, 300, 600]` (scheduled); `1025` fails fast, `1018` backs off
-  ≥ 60s. Pinned by `tests/test_flex_retry_policy.py`.
+  ≥ 60s at either step; every GetStatement waits 7 s first (≤ 9 requests a minute). Pinned by
+  `tests/test_flex_retry_policy.py`.
 - **`1001` means the opposite thing at each step.** While *retrieving* it is "not ready": keep
   polling the same `ReferenceCode` (`_RETRIEVE_PENDING_CODES`). From *SendRequest* it is a failed
   generation — exactly what `1025` counts — so it is deliberately **not** in
-  `_REQUEST_RETRYABLE_CODES`: fail fast and let the next slot ask fresh. Transport errors
-  (`requests.RequestException`) never reached IBKR and are retried.
+  `_REQUEST_RETRYABLE_CODES`: fail fast and let the next slot ask fresh. So do `1004`–`1009`.
+  A transport error at SendRequest is retried only if it provably never left the machine
+  (`_never_reached_ibkr`: connect timeout, DNS, refused); a reset or lost reply fails fast.
 - `IBKRService._download_statement()` drives the two-step protocol itself: SendRequest **once**,
   then poll GetStatement on the same reference until a deadline. Never `ibflex.client.download()`
   (raises on `1001`, so an outer retry starts a new generation) and never

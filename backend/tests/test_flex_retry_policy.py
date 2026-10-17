@@ -54,6 +54,21 @@ def _always_raise(monkeypatch, exc):
     return calls
 
 
+_SEND_URL = 'https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest?v=3&t=TOKEN&q=1'
+
+
+def _dns_failure():
+    """What requests raises when the name does not resolve: nothing was sent."""
+    import socket
+    import requests
+    from urllib3.exceptions import MaxRetryError, NameResolutionError
+
+    reason = NameResolutionError(
+        'gdcdyn.interactivebrokers.com', None, socket.gaierror(11001, 'getaddrinfo failed')
+    )
+    return requests.exceptions.ConnectionError(MaxRetryError(None, _SEND_URL, reason))
+
+
 def test_interactive_budget_is_small():
     """A user-facing sync must not spend the token's per-minute allowance."""
     assert len(_FLEX_RETRY_DELAYS) + 1 == 2
@@ -127,14 +142,13 @@ async def test_network_failure_before_a_reference_exists_is_retried(monkeypatch,
     """
     A DNS/connection failure never reached IBKR, so nothing was generated and nothing
     counted against the token — retrying is free. A blip like this cost the whole 20:00
-    job on 2026-07-25.
+    job on 2026-07-25. Built the way requests builds it: a bare `ConnectionError` no
+    longer qualifies, because requests also raises that class for a reply lost *after*
+    the GET went out (see the transport-error block below).
     """
     import requests
 
-    calls = _always_raise(
-        monkeypatch,
-        requests.exceptions.ConnectionError('Failed to resolve gdcdyn.interactivebrokers.com'),
-    )
+    calls = _always_raise(monkeypatch, _dns_failure())
 
     with pytest.raises(requests.exceptions.ConnectionError):
         await IBKRService(token='t', query_id='q').fetch_flex_data()
@@ -175,37 +189,95 @@ async def test_permanent_error_is_not_retried(monkeypatch, no_sleep):
 # The 2-step protocol: SendRequest once, then poll the SAME reference code.
 #
 
+_STATEMENT = b'<FlexQueryResponse></FlexQueryResponse>'
+
+
+def _reply(code=None, msg='Please try again shortly.'):
+    """A real FlexStatementResponse body: a reference code, or IBKR refusing with `code`."""
+    head = b'<FlexStatementResponse timestamp="17 October, 2026 12:00 PM EDT">'
+    if code is None:
+        return head + (
+            b'<Status>Success</Status><ReferenceCode>REF123</ReferenceCode>'
+            b'<Url>https://gdcdyn.interactivebrokers.com/Universal/servlet/'
+            b'FlexStatementService.GetStatement</Url></FlexStatementResponse>'
+        )
+    return head + (
+        f'<Status>Fail</Status><ErrorCode>{code}</ErrorCode>'
+        f'<ErrorMessage>{msg}</ErrorMessage></FlexStatementResponse>'
+    ).encode()
+
+
+class _FakeClock:
+    """Time that only moves when the code under test waits — no real sleeping."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    async def async_sleep(self, seconds):
+        self.sleep(seconds)
+
+
 class _FakeFlexServer:
     """
-    Stands in for IBKR's two endpoints. `retrieve_results` is consumed one per poll;
-    each item is either an exception to raise or a bytes payload to return.
+    Stands in for IBKR's two endpoints at the HTTP layer (`requests.get`), so every reply
+    goes through the real parsing — the earlier fake stubbed `check_statement_response`
+    to `True` and raised 1019 itself, which real ibflex never does (it *returns* 5 for
+    1009/1019 and 10 for 1018). That mismatch is how an unreachable 1018 branch went
+    unnoticed. `send_results` / `retrieve_results` are consumed one per GET; each item is
+    an exception to raise or a body to return. Every GET is stamped on a fake clock.
     """
 
-    def __init__(self, retrieve_results):
+    def __init__(self, retrieve_results=(), send_results=None):
+        self.send_results = list(send_results if send_results is not None else [_reply()])
         self.retrieve_results = list(retrieve_results)
-        self.request_calls = 0
-        self.retrieve_calls = 0
+        self.clock = _FakeClock()
+        self.calls = []  # (time, 'send' | 'retrieve')
+
+    @property
+    def request_calls(self):
+        return sum(1 for _, step in self.calls if step == 'send')
+
+    @property
+    def retrieve_calls(self):
+        return sum(1 for _, step in self.calls if step == 'retrieve')
 
     def install(self, monkeypatch):
-        def request_statement(token, query_id):
-            self.request_calls += 1
-            return SimpleNamespace(ReferenceCode="REF123", Url=None)
-
-        def submit_request(url, token, query):
-            self.retrieve_calls += 1
-            assert query == "REF123", "must poll the same reference code"
-            outcome = self.retrieve_results.pop(0)
+        def get(url, params, headers, timeout):
+            if url == ibkr_module.client.REQUEST_URL:
+                step, results = 'send', self.send_results
+            else:
+                step, results = 'retrieve', self.retrieve_results
+                assert params['q'] == "REF123", "must poll the same reference code"
+            self.calls.append((self.clock.now, step))
+            outcome = results.pop(0) if len(results) > 1 else results[0]
             if isinstance(outcome, Exception):
                 raise outcome
             return SimpleNamespace(content=outcome)
 
-        monkeypatch.setattr(ibkr_module, 'send_flex_request', request_statement)
-        monkeypatch.setattr(ibkr_module.client, 'submit_request', submit_request)
-        # check_statement_response only sees successful payloads here; pending states are
-        # delivered as ResponseCodeError from submit_request, matching ibflex's behaviour.
-        monkeypatch.setattr(ibkr_module.client, 'check_statement_response', lambda r: True)
-        monkeypatch.setattr(ibkr_module.time, 'sleep', lambda s: None)
+        monkeypatch.setattr(ibkr_module.requests, 'get', get)
+        monkeypatch.setattr(
+            ibkr_module, 'time',
+            SimpleNamespace(monotonic=self.clock.monotonic, sleep=self.clock.sleep),
+        )
+        monkeypatch.setattr(ibkr_module.asyncio, 'sleep', self.clock.async_sleep)
         return self
+
+    def max_requests_per_minute(self):
+        """The most GETs, SendRequest included, inside any closed 60 s window."""
+        times = [t for t, _ in self.calls]
+        return max((sum(1 for u in times if t <= u <= t + 60) for t in times), default=0)
+
+    def min_gap(self):
+        times = [t for t, _ in self.calls]
+        return min((b - a for a, b in zip(times, times[1:])), default=None)
 
 
 def test_not_ready_statement_is_re_retrieved_never_re_requested(monkeypatch):
@@ -215,21 +287,21 @@ def test_not_ready_statement_is_re_retrieved_never_re_requested(monkeypatch):
     must NOT start a second generation job — that is what earned two 1025 lockouts.
     """
     server = _FakeFlexServer([
-        ResponseCodeError('1001', 'Statement could not be generated at this time.'),
-        ResponseCodeError('1019', 'Statement generation in progress.'),
-        b'<FlexQueryResponse></FlexQueryResponse>',
+        _reply('1001', 'Statement could not be generated at this time.'),
+        _reply('1019', 'Statement generation in progress.'),
+        _STATEMENT,
     ]).install(monkeypatch)
 
     data = IBKRService(token='t', query_id='q')._download_statement(60)
 
-    assert data == b'<FlexQueryResponse></FlexQueryResponse>'
+    assert data == _STATEMENT
     assert server.request_calls == 1        # <-- the whole point
     assert server.retrieve_calls == 3
 
 
 def test_lockout_during_retrieve_is_not_retried(monkeypatch):
     server = _FakeFlexServer([
-        ResponseCodeError('1025', 'Too many failed attempts. Please review your configuration.'),
+        _reply('1025', 'Too many failed attempts. Please review your configuration.'),
     ]).install(monkeypatch)
 
     with pytest.raises(RuntimeError, match='temporarily locked'):
@@ -242,7 +314,7 @@ def test_lockout_during_retrieve_is_not_retried(monkeypatch):
 def test_fatal_code_during_retrieve_does_not_re_request(monkeypatch):
     """An invalid token mid-poll is terminal; don't start another generation job."""
     server = _FakeFlexServer([
-        ResponseCodeError('1015', 'Token is invalid.'),
+        _reply('1015', 'Token is invalid.'),
     ]).install(monkeypatch)
 
     with pytest.raises(ResponseCodeError):
@@ -259,17 +331,20 @@ def test_network_error_mid_poll_re_retrieves_the_same_reference(monkeypatch):
     """
     import requests
 
+    from urllib3.exceptions import ProtocolError
+
     server = _FakeFlexServer([
-        requests.exceptions.ConnectionError('Temporary failure in name resolution'),
+        _dns_failure(),
         requests.exceptions.ReadTimeout('timed out'),
-        b'<FlexQueryResponse></FlexQueryResponse>',
+        requests.exceptions.ChunkedEncodingError(ProtocolError('Response ended prematurely')),
+        _STATEMENT,
     ]).install(monkeypatch)
 
     data = IBKRService(token='t', query_id='q')._download_statement(60)
 
-    assert data == b'<FlexQueryResponse></FlexQueryResponse>'
+    assert data == _STATEMENT
     assert server.request_calls == 1
-    assert server.retrieve_calls == 3
+    assert server.retrieve_calls == 4
 
 
 def test_unparseable_reply_mid_poll_re_retrieves_the_same_reference(monkeypatch):
@@ -279,28 +354,28 @@ def test_unparseable_reply_mid_poll_re_retrieves_the_same_reference(monkeypatch)
     a second generation job after a reference already existed, i.e. the 1025 mechanism.
     """
     server = _FakeFlexServer([
-        BadResponseError(SimpleNamespace(content=b'')),
-        b'<FlexQueryResponse></FlexQueryResponse>',
+        b'',                         # empty body
+        b'<html>busy</html>',        # neither envelope
+        _reply(),                    # a Success envelope carries no statement
+        _STATEMENT,
     ]).install(monkeypatch)
 
     data = IBKRService(token='t', query_id='q')._download_statement(60)
 
-    assert data == b'<FlexQueryResponse></FlexQueryResponse>'
+    assert data == _STATEMENT
     assert server.request_calls == 1
-    assert server.retrieve_calls == 2
+    assert server.retrieve_calls == 4
 
 
 def test_retrieve_gives_up_at_the_deadline(monkeypatch):
     """A statement that never becomes ready must time out, not poll forever."""
-    server = _FakeFlexServer(
-        [ResponseCodeError('1001', 'not ready')] * 500
-    ).install(monkeypatch)
+    server = _FakeFlexServer([_reply('1001', 'not ready')]).install(monkeypatch)
 
     with pytest.raises(TimeoutError, match='still not ready'):
         IBKRService(token='t', query_id='q')._download_statement(1)
 
     assert server.request_calls == 1
-    assert server.retrieve_calls < 500  # stopped early
+    assert server.retrieve_calls == 1  # the deadline passed during the first wait
 
 
 @pytest.mark.asyncio
@@ -412,22 +487,284 @@ async def test_connect_timeout_before_a_reference_exists_is_still_retried(monkey
 def test_the_request_step_never_goes_through_ibflex_request_statement():
     """
     The guard for the whole section: `client.request_statement` re-sends on a timeout,
-    so the application must not call it. `client.submit_request` stays legitimate for
-    the *poll* step, where a repeat retrieves the same reference.
+    so the application must not call it. Since 2026-10-17 neither may the poll step:
+    `client.submit_request` re-sends a timed-out GetStatement three times outside the
+    pacing, and `client.check_statement_response` turns 1018 into a bare 10 s delay.
+    `download` does all of it and treats 1001 as fatal.
     """
     import ast
     from pathlib import Path
 
     tree = ast.parse(Path(ibkr_module.__file__).read_text(encoding="utf-8"))
+    banned = {"request_statement", "submit_request", "check_statement_response", "download"}
     # Call sites only — the name is allowed in prose, where the docstrings explain why.
     offenders = [
-        node.lineno for node in ast.walk(tree)
+        (node.lineno, node.func.attr) for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "request_statement"
+        and node.func.attr in banned
     ]
     assert offenders == [], (
-        f"ibkr_service.py:{offenders} calls request_statement — SendRequest must be issued "
-        "by send_flex_request, one GET; client.request_statement re-sends on a timeout"
+        f"ibkr_service.py calls {offenders} — Flex GETs must go through _flex_get, one GET "
+        "each; ibflex's client re-sends on a timeout and hides IBKR's code"
     )
     assert callable(getattr(ibkr_module, "send_flex_request", None))
+    assert callable(getattr(ibkr_module, "retrieve_flex_statement", None))
+
+
+# --- The request step refuses whole on "not ready", and on a reply lost in flight ------
+#
+# Issue #5 (2026-10-17). 1004-1008 (and 1009) sat in _REQUEST_RETRYABLE_CODES with no
+# recorded reason, so a scheduled slot could send four SendRequests on an answer that
+# means what 1001 means; and every transport error but ReadTimeout was retried as "never
+# reached IBKR", though requests raises ConnectionError / ChunkedEncodingError for a
+# reply lost after the GET went out. These go through the fake server, so the refusal
+# bodies are parsed by the real code.
+
+_BUDGETS = [None, FLEX_RETRY_DELAYS_PATIENT]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
+@pytest.mark.parametrize("code", ["1001", "1004", "1005", "1006", "1007", "1008", "1009"])
+async def test_not_ready_family_at_the_request_step_is_never_re_requested(
+    monkeypatch, code, budget
+):
+    server = _FakeFlexServer(send_results=[_reply(code)]).install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match=f'Code={code}.*Not re-requesting'):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 0
+    assert server.clock.sleeps == []
+
+
+def _sent_then_lost():
+    """Transport errors raised after SendRequest went out, built as requests 2.34 builds them."""
+    from http.client import RemoteDisconnected
+    import requests
+    from urllib3.exceptions import (
+        MaxRetryError, ProtocolError, ReadTimeoutError, SSLError as Urllib3SSLError,
+    )
+
+    return {
+        # urllib3 re-raises a reset / closed connection while awaiting the reply as-is
+        # (requests' Retry has read=False); adapters.py wraps it in ConnectionError.
+        "remote-disconnected": requests.exceptions.ConnectionError(
+            ProtocolError('Connection aborted.', RemoteDisconnected('Remote end closed connection'))
+        ),
+        # models.py: the body broke off mid-read.
+        "chunked-encoding": requests.exceptions.ChunkedEncodingError(
+            ProtocolError('Response ended prematurely')
+        ),
+        # models.py: a read timeout while streaming the body is a ConnectionError, not
+        # the ReadTimeout handler's class.
+        "body-read-timeout": requests.exceptions.ConnectionError(
+            ReadTimeoutError(None, _SEND_URL, 'Read timed out.')
+        ),
+        "read-timeout": requests.exceptions.ReadTimeout('Read timed out. (read timeout=60)'),
+        "content-decoding": requests.exceptions.ContentDecodingError('bad gzip'),
+        "ssl": requests.exceptions.SSLError(
+            MaxRetryError(None, _SEND_URL, Urllib3SSLError('EOF occurred in violation of protocol'))
+        ),
+        # The shape the old test retried. With no urllib3 reason it proves nothing.
+        "bare-connection-error": requests.exceptions.ConnectionError('Connection reset by peer'),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
+@pytest.mark.parametrize("kind", list(_sent_then_lost()))
+async def test_transport_error_that_may_have_reached_ibkr_is_never_re_requested(
+    monkeypatch, kind, budget
+):
+    exc = _sent_then_lost()[kind]
+    server = _FakeFlexServer(send_results=[exc]).install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match='Not re-requesting') as raised:
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 0
+    assert server.clock.sleeps == []
+    # The text of a transport error carries the URL, token included; the message must not.
+    assert 'TOKEN' not in str(raised.value)
+
+
+def _never_sent():
+    import requests
+    from urllib3.exceptions import ConnectTimeoutError, MaxRetryError, NewConnectionError
+
+    return {
+        "connect-timeout": requests.exceptions.ConnectTimeout(
+            MaxRetryError(None, _SEND_URL, ConnectTimeoutError(None, 'Connection timed out'))
+        ),
+        "connection-refused": requests.exceptions.ConnectionError(
+            MaxRetryError(None, _SEND_URL, NewConnectionError(None, 'Connection refused'))
+        ),
+        "dns": _dns_failure(),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "budget, expected_sleeps",
+    [(None, _FLEX_RETRY_DELAYS), (FLEX_RETRY_DELAYS_PATIENT, FLEX_RETRY_DELAYS_PATIENT)],
+    ids=["interactive", "patient"],
+)
+@pytest.mark.parametrize("kind", list(_never_sent()))
+async def test_transport_error_that_never_left_is_still_retried(
+    monkeypatch, kind, budget, expected_sleeps
+):
+    exc = _never_sent()[kind]
+    server = _FakeFlexServer(send_results=[exc]).install(monkeypatch)
+
+    with pytest.raises(type(exc)):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == len(expected_sleeps) + 1
+    assert server.clock.sleeps == list(expected_sleeps)
+    assert server.max_requests_per_minute() <= 10
+
+
+def test_never_reached_ibkr_is_a_whitelist():
+    """Only the two shapes that prove nothing was sent; everything else may have been."""
+    for exc in _never_sent().values():
+        assert ibkr_module._never_reached_ibkr(exc), exc
+    for exc in _sent_then_lost().values():
+        assert not ibkr_module._never_reached_ibkr(exc), exc
+
+
+# --- The poll step: paced, and reading IBKR's own code ----------------------------------
+#
+# IBKR allows a token 1 request/second and 10/minute. The poll used to fire its first
+# GetStatement straight after SendRequest and then every 5 s (12-13 requests in the first
+# minute), ibflex's submit_request re-sent a timed-out GET three times with no pause, and
+# check_statement_response returned a bare 10 s for 1018 so the 60 s back-off never ran.
+
+
+@pytest.mark.parametrize(
+    "deadline, expected_polls",
+    [(ibkr_module._RETRIEVE_DEADLINE_INTERACTIVE, 17),
+     (ibkr_module._RETRIEVE_DEADLINE_PATIENT, 128)],
+    ids=["interactive", "patient"],
+)
+@pytest.mark.parametrize("code", sorted(ibkr_module._RETRIEVE_PENDING_CODES - {"1018"}))
+def test_poll_cadence_stays_inside_ibkrs_per_token_rate(
+    monkeypatch, code, deadline, expected_polls
+):
+    """A statement that never becomes ready: the full deadline of polling, worst case."""
+    server = _FakeFlexServer([_reply(code)]).install(monkeypatch)
+
+    with pytest.raises(TimeoutError, match=f'Code={code}'):
+        IBKRService(token='t', query_id='q')._download_statement(deadline)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == expected_polls
+    # A wait comes before the first GetStatement, not straight after SendRequest.
+    assert server.calls[1][0] - server.calls[0][0] >= ibkr_module._RETRIEVE_POLL_DELAY
+    assert server.min_gap() >= ibkr_module._RETRIEVE_POLL_DELAY
+    assert server.max_requests_per_minute() <= 10
+
+
+def test_transport_failures_mid_poll_are_paced_too(monkeypatch):
+    """ibflex's submit_request re-sent a timed-out GetStatement at once; ours waits."""
+    import requests
+
+    server = _FakeFlexServer(
+        [requests.exceptions.ReadTimeout('timed out')] * 30 + [_STATEMENT]
+    ).install(monkeypatch)
+
+    assert IBKRService(token='t', query_id='q')._download_statement(900) == _STATEMENT
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 31
+    assert server.min_gap() >= ibkr_module._RETRIEVE_POLL_DELAY
+    assert server.max_requests_per_minute() <= 10
+
+
+def test_a_transport_error_mid_poll_never_logs_the_token(monkeypatch, caplog):
+    """requests puts the whole URL in the error text, `t=<token>` included (CLAUDE.md:
+    secrets are redacted on write and on read)."""
+    import requests
+
+    token = 'SECRETFLEXTOKEN1234567890'
+    _FakeFlexServer([
+        requests.exceptions.ConnectionError(
+            f"HTTPSConnectionPool: Max retries exceeded with url: "
+            f"/GetStatement?v=3&t={token}&q=REF (Caused by ProtocolError)"
+        ),
+        _STATEMENT,
+    ]).install(monkeypatch)
+
+    with caplog.at_level('INFO', logger=ibkr_module.logger.name):
+        assert IBKRService(token=token, query_id='q')._download_statement(900) == _STATEMENT
+
+    assert 'Recoverable failure retrieving' in caplog.text
+    assert token not in caplog.text
+
+
+def test_rate_limit_1018_while_polling_waits_past_the_minute_and_is_logged(monkeypatch, caplog):
+    server = _FakeFlexServer([
+        _reply('1018', 'Too many requests have been made from this token.'),
+        _STATEMENT,
+    ]).install(monkeypatch)
+
+    with caplog.at_level('INFO', logger=ibkr_module.logger.name):
+        data = IBKRService(token='t', query_id='q')._download_statement(900)
+
+    assert data == _STATEMENT
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 2
+    assert server.clock.sleeps == [ibkr_module._RETRIEVE_POLL_DELAY, 60]
+    assert server.calls[2][0] - server.calls[1][0] >= 60
+    assert 'Code=1018' in caplog.text
+
+
+def test_rate_limit_1018_is_what_the_timeout_reports(monkeypatch):
+    """The int path used to leave last_reason at its previous value, hiding the cap."""
+    server = _FakeFlexServer([
+        _reply('1019', 'Statement generation in progress.'),
+        _reply('1018', 'Too many requests have been made from this token.'),
+    ]).install(monkeypatch)
+
+    with pytest.raises(TimeoutError, match='Code=1018'):
+        IBKRService(token='t', query_id='q')._download_statement(120)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 3  # at 7 s, 14 s and 74 s; the next would be 134 s > 120
+    assert server.max_requests_per_minute() <= 10
+
+
+@pytest.mark.asyncio
+async def test_a_whole_scheduled_slot_stays_inside_ibkrs_per_token_rate(monkeypatch):
+    """
+    The worst run the patient budget allows end to end: SendRequest throttled twice (each
+    re-sent after >= 60 s), then accepted, then the statement keeps answering not-ready
+    codes and transport errors before it lands. Counts every GET against the clock.
+    """
+    import requests
+
+    server = _FakeFlexServer(
+        send_results=[
+            _reply('1018', 'Too many requests have been made from this token.'),
+            _reply('1018', 'Too many requests have been made from this token.'),
+            _reply(),
+        ],
+        retrieve_results=[
+            _reply('1019'), _reply('1001'), _reply('1004'), _reply('1009'),
+            requests.exceptions.ReadTimeout('timed out'), b'', _reply('1021'),
+            _reply('1018'), _reply('1006'), _STATEMENT,
+        ],
+    ).install(monkeypatch)
+    monkeypatch.setattr(IBKRService, 'parse_flex_xml', lambda self, xml: {'xml': xml})
+
+    result = await IBKRService(token='t', query_id='q').fetch_flex_data(
+        retry_delays=FLEX_RETRY_DELAYS_PATIENT
+    )
+
+    assert result == {'xml': _STATEMENT}
+    assert server.request_calls == 3
+    assert server.retrieve_calls == 10
+    assert server.min_gap() >= ibkr_module._RETRIEVE_POLL_DELAY
+    assert server.max_requests_per_minute() <= 10

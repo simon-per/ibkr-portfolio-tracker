@@ -12,11 +12,13 @@ import time
 import xml.etree.ElementTree as ET
 
 import requests
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 from ibflex import client, parser, Types, AssetClass
 from ibflex import enums as ibflex_enums
 from ibflex.client import ResponseCodeError, BadResponseError
 
 from app.config import settings
+from app.redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,9 @@ logger = logging.getLogger(__name__)
 _RETRIEVE_PENDING_CODES = {
     "1001", "1004", "1005", "1006", "1007", "1008", "1009", "1018", "1019", "1021"
 }
-# Codes worth re-issuing SendRequest for. Only reachable before a reference code
-# exists, where there is nothing to poll and re-initiating is the sole option.
+# Codes worth re-issuing SendRequest for — a whitelist, short on purpose. Only reachable
+# before a reference code exists, where there is nothing to poll; but at this step a
+# re-send asks IBKR to *generate* again, and failed generations are what `1025` counts.
 #
 # `1001` is deliberately ABSENT even though it is transient. At the *request* step it
 # means IBKR tried to start generating and couldn't — i.e. a failed generation, which
@@ -44,15 +47,70 @@ _RETRIEVE_PENDING_CODES = {
 # freshness; re-requesting costs a multi-hour lockout of *every* sync. So we fail fast
 # and let the next scheduled job start a clean generation.
 #
-# The codes that remain all mean "throttled or busy, no generation job was created"
-# (1018 is the rate limit itself, 1009/1019/1021 are server-side transients), so for
-# those a slow retry is safe.
-# SendRequest's (connect, read) timeouts. A tuple, so a slow *answer* is not mistaken for
-# an unreachable host — ibflex's own request_statement() uses a scalar 5 s that covers
-# both, and re-sends on either. Generous on the read side: IBKR answers SendRequest with
-# a reference code, but under the load that produces 1001s it can take its time, and a
-# timeout here is treated as "may have been accepted" (see fetch_flex_data).
+# 1004-1008 ("statement is incomplete", "settlement / FIFO / MTM P/L data is not ready")
+# and 1009 ("the server is under heavy load. Statement could not be generated at this
+# time") are absent for the same reason. They were retried here until 2026-10-17 with no
+# recorded justification — this comment named only 1009/1018/1019/1021 — so one scheduled
+# slot could send four SendRequests on an answer meaning what 1001 means: IBKR could not
+# produce the statement now. 1009's text repeats 1001's, and nothing shows a refusal like
+# that is not counted. All of them fail fast at the request step (fetch_flex_data) and
+# stay in _RETRIEVE_PENDING_CODES, where re-polling the same reference is right.
+#
+# What remains are busy answers, not refusals: 1018 is the rate limit itself (always
+# waited past the minute window), 1019 "generation in progress", 1021 "could not be
+# retrieved".
+_REQUEST_RETRYABLE_CODES = {"1018", "1019", "1021"}
+
+# (connect, read) timeouts for one Flex GET. A tuple, so a slow *answer* is not mistaken
+# for an unreachable host — ibflex's submit_request() uses a scalar 5/10/15 s covering
+# both, and re-sends on either. SendRequest is generous on the read side: under the load
+# that produces 1001s IBKR can take its time, and a timeout there counts as "may have
+# been accepted" (see _never_reached_ibkr). GetStatement is shorter so the interactive
+# path stays under nginx's 300 s; a timed-out retrieve is simply polled again.
 _SEND_REQUEST_TIMEOUT = (10, 60)
+_RETRIEVE_TIMEOUT = (10, 30)
+
+
+def _flex_get(url: str, token: str, query: str, timeout: Tuple[int, int]) -> requests.Response:
+    """One GET against a Flex endpoint, never re-sent here: every repeat is the caller's
+    decision, made after a paced wait or a retry budget."""
+    return requests.get(
+        url,
+        params={"v": "3", "t": token, "q": query},
+        headers={"user-agent": "Java"},
+        timeout=timeout,
+    )
+
+
+def _parse_flex_reply(response: requests.Response) -> client.StatementAccess:
+    """A `FlexStatementResponse` through ibflex's own parser; a Fail/Warn raises
+    `ResponseCodeError` with IBKR's code, a garbled body `BadResponseError`."""
+    stmt_access = client.parse_stmt_response(response)
+    if isinstance(stmt_access, client.StatementError):
+        raise ResponseCodeError(stmt_access.ErrorCode, stmt_access.ErrorMessage)
+    return stmt_access
+
+
+def _never_reached_ibkr(exc: requests.exceptions.RequestException) -> bool:
+    """
+    Did this transport error provably happen before SendRequest left the machine?
+
+    A whitelist, because a wrong "yes" is a second generation. Two shapes prove it: a
+    `ConnectTimeout` (the TCP connect never completed), and a `ConnectionError` wrapping
+    urllib3's `MaxRetryError` whose reason is a `NewConnectionError` — refused,
+    unreachable, or DNS (`NameResolutionError` is a subclass). Everything else may have
+    been sent. requests 2.34 maps a reset or `RemoteDisconnected` while awaiting the reply
+    to `ConnectionError(ProtocolError)`, a timeout reading the body to
+    `ConnectionError(ReadTimeoutError)` — not `ReadTimeout` — and a broken body to
+    `ChunkedEncodingError`; until 2026-10-17 all of them were retried as "never reached
+    IBKR".
+    """
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return True
+    if not isinstance(exc, requests.exceptions.ConnectionError) or not exc.args:
+        return False
+    reason = exc.args[0]
+    return isinstance(reason, MaxRetryError) and isinstance(reason.reason, NewConnectionError)
 
 
 def send_flex_request(token: str, query_id: str) -> client.StatementAccess:
@@ -73,42 +131,54 @@ def send_flex_request(token: str, query_id: str) -> client.StatementAccess:
 
     One GET, one attempt, a (connect, read) timeout pair; the reply goes through ibflex's
     own parser so callers see the same exception types as before (`ResponseCodeError`,
-    `BadResponseError`, `requests.exceptions.RequestException`). The *poll* step keeps
-    using `client.submit_request`: a repeated GetStatement retrieves the same reference,
-    which is what IBKR asks for.
+    `BadResponseError`, `requests.exceptions.RequestException`).
     """
-    response = requests.get(
-        client.REQUEST_URL,
-        params={"v": "3", "t": token, "q": query_id},
-        headers={"user-agent": "Java"},
-        timeout=_SEND_REQUEST_TIMEOUT,
+    return _parse_flex_reply(
+        _flex_get(client.REQUEST_URL, token, query_id, _SEND_REQUEST_TIMEOUT)
     )
-    stmt_access = client.parse_stmt_response(response)
-    if isinstance(stmt_access, client.StatementError):
-        raise ResponseCodeError(stmt_access.ErrorCode, stmt_access.ErrorMessage)
-    return stmt_access
 
 
-_REQUEST_RETRYABLE_CODES = {
-    "1004", "1005", "1006", "1007", "1008", "1009", "1018", "1019", "1021"
-}
+def retrieve_flex_statement(url: str, token: str, reference: str) -> bytes:
+    """
+    Step 2 — one GetStatement for `reference`: the statement's bytes once it is ready.
+
+    Not `client.submit_request` + `client.check_statement_response`, which the poll used
+    until 2026-10-17. The first re-sends a timed-out GET up to three times with no pause,
+    outside any pacing. The second *returns* a bare delay for 1009/1019 (5) and 1018 (10)
+    instead of raising, so a 1018 — the per-minute cap itself — was re-polled after 10 s
+    and never logged, and the 60 s back-off written for it could not run. Here every
+    not-ready reply raises `ResponseCodeError` with IBKR's own code and the caller picks
+    the wait.
+    """
+    response = _flex_get(url, token, reference, _RETRIEVE_TIMEOUT)
+    # A statement can be megabytes: look for its root tag rather than parse it, as ibflex does.
+    if b"FlexQueryResponse" in response.content:
+        return response.content
+    _parse_flex_reply(response)
+    # A Success envelope carries no statement; from GetStatement that is a garbled reply.
+    raise BadResponseError(response)
+
+
 # How long to keep politely polling one reference code before giving up (seconds).
 # The interactive path must stay under nginx's proxy_read_timeout 300.
 _RETRIEVE_DEADLINE_INTERACTIVE = 120
 _RETRIEVE_DEADLINE_PATIENT = 900
-# Fallback wait between polls when ibflex doesn't hand us a delay.
-_RETRIEVE_POLL_DELAY = 5
+# The wait before every GetStatement, the first included. IBKR allows a token one request
+# per second and ten per minute; 7 s apart is at most 9 in any 60 s window whatever the
+# latency. ibflex's download() fires its first retrieve straight after SendRequest and
+# then polls every 5 s — 12-13 requests in the first minute.
+_RETRIEVE_POLL_DELAY = 7
 # IBKR limits a token to one request per second and 10 requests per minute (the text
-# of Flex error 1018), and a single ibflex download() is already several HTTP requests:
-# one to request the statement, then repeated polls until it's ready, each wrapped in
-# its own 3-try loop inside ibflex.client.submit_request. So an eager outer retry loop
-# blows through the per-minute cap and then trips the harsher, undocumented
+# of Flex error 1018), and one statement is already several HTTP requests: SendRequest,
+# then a GetStatement every _RETRIEVE_POLL_DELAY until it's ready. So an eager outer
+# retry loop blows through the per-minute cap and then trips the harsher, undocumented
 # `Code=1025: Too many failed attempts`, which locks the token for *hours* and blocks
 # all syncing. Retries must therefore be few and far apart.
 #
-# That inner 3-try loop is also why SendRequest is issued by `send_flex_request` below
-# rather than by `client.request_statement`: on the request step a re-send is a new
-# generation, not a harmless re-poll. Found 2026-09-12; see the function.
+# Both steps issue their GET through `_flex_get`, never `client.request_statement` /
+# `client.submit_request`: those re-send a timed-out GET up to three times, which on the
+# request step is a new generation (found 2026-09-12) and on the poll step a burst the
+# pacing cannot see (2026-10-17).
 #
 # Interactive default: one retry, since POST /api/sync/ibkr is synchronous and a user
 # (and the reverse proxy) is waiting on it.
@@ -288,6 +358,9 @@ class IBKRService:
 
         "Once" has to hold below this method too: `send_flex_request` issues the
         SendRequest GET itself, because `client.request_statement` re-sends on a timeout.
+        Every GetStatement waits first, the first one included, and reads IBKR's own
+        code (`retrieve_flex_statement`), so SendRequest and the polls stay inside the
+        per-token rate and a 1018 gets its 60 s (see _RETRIEVE_POLL_DELAY).
         """
         stmt_access = send_flex_request(self.token, self.query_id)
         url = stmt_access.Url or client.STMT_URL
@@ -296,13 +369,11 @@ class IBKRService:
 
         deadline = time.monotonic() + deadline_seconds
         last_reason = "no response yet"
+        # SendRequest has just gone out: the first GetStatement waits too.
+        time.sleep(_RETRIEVE_POLL_DELAY)
         while True:
             try:
-                response = client.submit_request(url=url, token=self.token, query=reference)
-                status = client.check_statement_response(response)
-                if status is True:
-                    return response.content
-                delay = status if isinstance(status, (int, float)) else _RETRIEVE_POLL_DELAY
+                return retrieve_flex_statement(url, self.token, reference)
             except ResponseCodeError as e:
                 if e.code == "1025":
                     raise self._lockout_error(e) from e
@@ -315,16 +386,18 @@ class IBKRService:
                     f"re-retrieving the same reference code in {delay}s"
                 )
             except (requests.exceptions.RequestException, BadResponseError) as e:
-                # Either a transport failure (DNS hiccup, reset, timeout) that never
-                # reached IBKR, or a reply we couldn't parse — ibflex raises
-                # BadResponseError for an empty/garbled body, which is usually the server
-                # being busy. Both happen *after* a reference code exists, so the
-                # statement is still being generated: recover by polling the same
-                # reference. Letting either escape to the outer loop would re-issue
-                # SendRequest and start a second generation job, which is precisely how
-                # the token gets locked with 1025.
+                # Either a transport failure (DNS hiccup, reset, timeout — whether or not
+                # it reached IBKR, a repeated GetStatement only retrieves), or a reply we
+                # couldn't parse — ibflex raises BadResponseError for an empty/garbled
+                # body, which is usually the server being busy. Both happen *after* a
+                # reference code exists, so the statement is still being generated:
+                # recover by polling the same reference. Letting either escape to the
+                # outer loop would re-issue SendRequest and start a second generation
+                # job, which is precisely how the token gets locked with 1025.
                 delay = _RETRIEVE_POLL_DELAY
-                last_reason = f"{type(e).__name__}: {e}"
+                # Redacted: a transport error's text carries the URL, token included,
+                # and this lands in the container log and the timeout's message.
+                last_reason = redact_secrets(f"{type(e).__name__}: {e}")
                 logger.warning(
                     f"Recoverable failure retrieving IBKR Flex statement {reference} "
                     f"({last_reason}); re-retrieving the same reference "
@@ -550,15 +623,16 @@ class IBKRService:
             except ResponseCodeError as e:
                 if e.code == "1025":
                     raise self._lockout_error(e) from e
-                if e.code == "1001":
-                    # A failed *generation*, which is what 1025 counts. Re-requesting here
+                if e.code not in _REQUEST_RETRYABLE_CODES and e.code in _RETRIEVE_PENDING_CODES:
+                    # 1001 and 1004-1009: "not ready" while polling, but here a failed
+                    # *generation*, which is what 1025 counts. Re-requesting after a 1001
                     # is how we locked the token before, so stop and let the next
                     # scheduled job ask for a fresh statement.
                     raise RuntimeError(
-                        f"IBKR could not generate the Flex statement right now (Code=1001: "
-                        f"{e.msg}). Not re-requesting: repeating SendRequest after a 1001 is "
-                        "what trips the Code=1025 token lockout. The next scheduled sync will "
-                        "try again."
+                        f"IBKR could not generate the Flex statement right now (Code={e.code}: "
+                        f"{e.msg}). Not re-requesting: repeating SendRequest after a failed "
+                        "generation is what trips the Code=1025 token lockout. The next "
+                        "scheduled sync will try again."
                     ) from e
                 if e.code not in _REQUEST_RETRYABLE_CODES or attempt == max_attempts - 1:
                     raise
@@ -580,34 +654,34 @@ class IBKRService:
                     raise
                 delay = delays[attempt]
                 logger.warning(
-                    f"IBKR Flex bad/empty response ({e}); "
+                    f"IBKR Flex bad/empty response ({redact_secrets(str(e))}); "
                     f"attempt {attempt + 1}/{max_attempts}, retrying in {delay}s"
                 )
                 await asyncio.sleep(delay)
-            except requests.exceptions.ReadTimeout as e:
-                # The request reached IBKR and the answer did not come back in time, so a
-                # generation may already be running — re-issuing SendRequest is exactly
-                # what 1025 counts. Same treatment as a 1001: fail fast, and let the next
-                # slot ask fresh. (A ConnectTimeout is a ConnectionError, not this: it
-                # never reached IBKR and falls through to the handler below.)
-                raise RuntimeError(
-                    f"IBKR Flex did not answer SendRequest within "
-                    f"{_SEND_REQUEST_TIMEOUT[1]}s ({type(e).__name__}). Not re-requesting: "
-                    "the request may already have started a generation, and repeating "
-                    "SendRequest is what trips the Code=1025 token lockout. The next "
-                    "scheduled sync will try again."
-                ) from e
             except requests.exceptions.RequestException as e:
-                # Raised here only if SendRequest itself never reached IBKR — a DNS or
-                # connection failure, or a connect timeout (a blip like this cost the
-                # whole 20:00 job on 2026-07-25). No statement was generated and nothing
-                # counted against the token, so retrying is free — unlike a 1001, and
-                # unlike the read timeout handled above.
+                if not _never_reached_ibkr(e):
+                    # The GET may have reached IBKR — a read timeout, a reset or a reply
+                    # dropped after it went out — so a generation may already be running,
+                    # and re-issuing SendRequest is exactly what 1025 counts. Same
+                    # treatment as a 1001: fail fast, and let the next slot ask fresh.
+                    # The message names the type only: a transport error's text carries
+                    # the URL, token included.
+                    raise RuntimeError(
+                        f"IBKR Flex SendRequest failed after it may have reached IBKR "
+                        f"({type(e).__name__}). Not re-requesting: the request may already "
+                        "have started a generation, and repeating SendRequest is what trips "
+                        "the Code=1025 token lockout. The next scheduled sync will try again."
+                    ) from e
+                # Provably never left the machine — a DNS or connection failure, or a
+                # connect timeout (a blip like this cost the whole 20:00 job on
+                # 2026-07-25). No statement was generated and nothing counted against
+                # the token, so retrying is free.
                 if attempt == max_attempts - 1:
                     raise
                 delay = delays[attempt]
                 logger.warning(
-                    f"Network error reaching IBKR Flex ({type(e).__name__}: {e}); no request "
+                    f"Network error reaching IBKR Flex ({type(e).__name__}: "
+                    f"{redact_secrets(str(e))}); no request "
                     f"reached IBKR, attempt {attempt + 1}/{max_attempts}, retrying in {delay}s"
                 )
                 await asyncio.sleep(delay)
