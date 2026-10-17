@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — the dividend pass asks each held security once a week (#6)
+
+Issue #6, rule 1. The 7-day guard read the newest `DividendPayment.created_at`, which only an
+inserted row moves, so non-payers and payers between ex-dates were asked on every pass; sold
+positions were asked daily; and `GET /api/dividends/summary` re-enqueued a pass off a
+`last_updated` the Yahoo pass never moves, up to four times a day. One predicate,
+`needs_dividend_check` (Yahoo-eligible, held, `securities.dividends_checked_at` NULL or a week
+old), now drives both the loop and the route's enqueue; every answer is stamped except a rate
+limit, and purging a security's estimates clears its stamp. Measured offline on a simulated week
+(two held, one sold, one manual-price fund): 105 Yahoo requests before, 2 after. Verified: 2121
+backend tests green, no request to Yahoo; the first production passes are under STATUS.md *Watch
+after the next deploy*.
+
 ## Shipped 2026-10-17 (night) — the Flex client never re-sends on a refusal and paces every poll (#5)
 
 Issue #5, rule 2. SendRequest is re-sent only on 1018/1019/1021 and on a transport error that

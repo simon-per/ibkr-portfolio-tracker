@@ -12,7 +12,8 @@
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. Next: holding logos via logo.dev — §3 of
-`plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the GitHub issues.
+`plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the open GitHub
+issues (#4, #5, #6 done).
 
 ---
 
@@ -95,6 +96,10 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **The dividend pass after #6 (migration `f6c2e8a4b1d9`):** the first 18:00 pass after the
+  deploy asks every held, Yahoo-eligible security once (all stamps start NULL); the next day's
+  pass reports `securities_processed: 0`, and dashboard loads stop showing "sync in progress".
+  `securities.dividends_checked_at` filled for held securities only.
 - **The first `fundamentals_refresh`, Tuesday 2026-10-20 05:00 Berlin** (the weekly Sunday run is
   gone): a success row in `/api/scheduler/history`, no rate-limit warning, the Fundamentals as-of
   line within a day; Wednesday's pass refreshes every held row again (20-hour rule).
