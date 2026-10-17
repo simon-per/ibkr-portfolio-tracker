@@ -7,6 +7,19 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — CoinStats /portfolio/value once a day (#3)
+
+Issue #3. Every one of the eight daily crypto slots asked `/portfolio/value` (10 credits) before
+`/portfolio/coins` (8 a page), though its answer fed only the DeFi figure and the wipe guard.
+Coins are now fetched first and `/value` is asked on the Berlin day's first snapshot or when no
+holding came back valued — the wipe guard's own condition, so the guard keeps its input. Other
+runs carry DeFi from the latest snapshot and leave the unread `/value` columns NULL. Computed
+from `CREDIT_COST`: ~4,464 → ~2,294 credits a month before manual runs;
+`test_crypto_budget.py` now fails at the old figure. Production `sync_runs` hold 154
+`crypto_sync` successes and no 409, and the client raises "not synced" for a 409 on any path,
+so a mid-day `/coins`-only run skips rather than stores while CoinStats syncs. Verified: 2129
+backend tests green, no CoinStats request.
+
 ## Shipped 2026-10-17 (night) — VT's basket from Vanguard's new holdings route (#7)
 
 Issue #7. Vanguard's old profile API path redirects to the fund page's HTML since 2026-10-15,

@@ -13,7 +13,7 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. Next: holding logos via logo.dev — §3 of
 `plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the open GitHub
-issues (#4–#7 done).
+issues (#3–#7 done).
 
 ---
 
@@ -96,6 +96,9 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **Crypto after #3** (admin key): the first `crypto_sync` of a Berlin day spends value + coins,
+  the later ones coins only (`credits_spent` in the run details), and the DeFi figure stays put
+  through the day.
 - **VT's basket on Vanguard's new route (#7):** the next 18:00 `full_sync` lists VT under
   `lookthrough_result.baskets.refreshed` with as-of ≥ 2026-09-30, nothing under `failed`, and
   `/api/portfolio/lookthrough` shows VT `stale: false`. Verified only from a residential IP; if
