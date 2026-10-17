@@ -48,13 +48,14 @@ class CryptoSnapshot(Base):
     """
     The portfolio as CoinStats reported it at one successful sync.
 
-    One row per sync, so the table doubles as an intraday value history. The totals are
-    CoinStats' own (`/portfolio/value`); the holdings that belong to this snapshot are
-    `CryptoHolding` rows keyed by `snapshot_id`, which is what lets a reader take the
-    summary and the table from the same sync even when a newer one commits between its
-    two SELECTs. Counts, credits and warnings live here rather than on the `sync_runs`
-    row, because `/api/scheduler/history` is public and this table is only served by the
-    admin-gated `/api/crypto/*` routes.
+    One row per sync. The totals are CoinStats' own (`/portfolio/value`), asked on the
+    Berlin day's first snapshot (or when nothing came back valued): later rows leave them
+    NULL and carry `defi_value_usd` over from the latest one. The holdings that belong to
+    this snapshot are `CryptoHolding` rows keyed by `snapshot_id`, which is what lets a
+    reader take the summary and the table from the same sync even when a newer one
+    commits between its two SELECTs. Counts, credits and warnings live here rather than on
+    the `sync_runs` row, because `/api/scheduler/history` is public and this table is only
+    served by the admin-gated `/api/crypto/*` routes.
     """
     __tablename__ = "crypto_snapshots"
 

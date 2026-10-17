@@ -8,7 +8,7 @@ survives every refusal; CoinGecko's prices — missing key, 429, unmatched coin 
 the snapshot; the re-asks are bounded; and the `sync_runs` row — which lives in a table a
 public endpoint reads — carries no counts, credits or amounts.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -25,12 +25,15 @@ from app.models.crypto import (
     CryptoHolding,
     CryptoSnapshot,
 )
+from app.models.exchange_rate import ExchangeRate
 from app.models.sync_run import SyncRun
 from app.services import crypto_service
+from app.services.coinstats_client import CREDIT_COST
 from app.services.crypto_service import (
     COINGECKO_NOT_CONFIGURED,
     SNAPSHOT_RUN_COST,
     SYNC_TYPE,
+    CryptoService,
     CryptoSyncService,
     parse_coins,
     resolve_coingecko_id,
@@ -112,8 +115,9 @@ async def test_a_full_first_sync_stores_the_snapshot_holdings_and_prices(db, mon
     result = await _service(db, fake, gecko).sync()
 
     assert result["status"] == "success" and result["type"] == SYNC_TYPE
-    # CoinStats' history is no longer asked: the book computes its own.
-    assert fake.paths() == ["/usage/credits", "/portfolio/value", "/portfolio/coins"]
+    # CoinStats' history is no longer asked: the book computes its own. The day's first
+    # snapshot asks `/value`, after the coins.
+    assert fake.paths() == ["/usage/credits", "/portfolio/coins", "/portfolio/value"]
     assert gecko.calls[:2] == ["/coins/list", "/simple/price"]
     assert sorted(gecko.calls[2:]) == [
         "/coins/bitcoin/market_chart/range", "/coins/solana/market_chart/range",
@@ -237,16 +241,73 @@ async def test_the_public_run_row_carries_no_counts_credits_or_amounts(db, monke
         assert leaked not in (run.message or "")
 
 
+async def _defi_value(factory):
+    async with factory() as s:
+        return (await CryptoService(s).portfolio())["defi_value"]
+
+
+@pytest.mark.asyncio
+async def test_value_is_asked_once_a_berlin_day_and_defi_carries_over(db, monkeypatch):
+    """`/portfolio/value` is 10 of a run's 18 credits and feeds one shown figure (DeFi)
+    plus the wipe guard: asked on the day's first snapshot, not on every slot."""
+    configure(monkeypatch)
+    async with db() as s:
+        s.add(ExchangeRate(date=TODAY, from_currency="USD", to_currency="EUR", rate=0.9,
+                           source="test"))
+        await s.commit()
+
+    first = FakeCoinStats(value=value_body(defiValue=250.0))
+    await _service(db, first).sync()
+    assert "/portfolio/value" in first.paths()
+    defi = await _defi_value(db)
+    assert defi == pytest.approx(225.0)
+
+    second = FakeCoinStats(value=value_body(defiValue=999.0))
+    result = await _service(db, second).sync()
+    assert result["status"] == "success"
+    assert second.paths() == ["/usage/credits", "/portfolio/coins"]
+    snapshot, _ = await _latest_holdings(db)
+    assert snapshot.credits_spent == CREDIT_COST["coins"]
+    # Not asked, so absent — except DeFi, carried from the day's first snapshot.
+    assert snapshot.total_value_usd is None and snapshot.defi_value_usd == 250.0
+    assert await _defi_value(db) == defi
+
+    # The next Berlin day asks again.
+    monkeypatch.setattr(crypto_service, "utcnow", lambda: NOW + timedelta(days=1))
+    third = FakeCoinStats(value=value_body(defiValue=300.0))
+    await _service(db, third).sync()
+    assert "/portfolio/value" in third.paths()
+    snapshot, _ = await _latest_holdings(db)
+    assert snapshot.defi_value_usd == 300.0
+
+
 @pytest.mark.asyncio
 async def test_the_wipe_guard_refuses_an_empty_list_beside_a_positive_total(db, monkeypatch):
     configure(monkeypatch)
     await _service(db, FakeCoinStats()).sync()
 
-    result = await _service(db, FakeCoinStats(coins=[])).sync()
+    # A later slot the same day: nothing valued, so `/value` is asked for the guard.
+    empty = FakeCoinStats(coins=[])
+    result = await _service(db, empty).sync()
+    assert empty.paths() == ["/usage/credits", "/portfolio/coins", "/portfolio/value"]
     assert result["status"] == "error" and result["reason"] == "empty_holdings"
     snapshot, holdings = await _latest_holdings(db)
     assert await _count(db, CryptoSnapshot) == 1
     assert "bitcoin" in holdings
+
+
+@pytest.mark.asyncio
+async def test_a_portfolio_that_really_is_empty_is_stored(db, monkeypatch):
+    configure(monkeypatch)
+    await _service(db, FakeCoinStats()).sync()
+
+    empty = FakeCoinStats(coins=[], value=value_body(total=0.0))
+    result = await _service(db, empty).sync()
+    assert "/portfolio/value" in empty.paths()
+    assert result["status"] == "success"
+    assert await _count(db, CryptoSnapshot) == 2
+    _, holdings = await _latest_holdings(db)
+    assert holdings == {}
 
 
 @pytest.mark.asyncio
@@ -271,6 +332,7 @@ async def test_coinstats_still_syncing_is_a_skip_not_an_error(db, monkeypatch):
     fake.responses["/v1/portfolio/value"] = (409, {"message": "Transactions not synced"})
     result = await _service(db, fake).sync()
     assert result["status"] == "skipped" and result["reason"] == "not_synced"
+    assert fake.paths() == ["/usage/credits", "/portfolio/coins", "/portfolio/value"]
     assert await _count(db, CryptoSnapshot) == 0
 
 
@@ -281,7 +343,7 @@ async def test_a_429_abandons_the_pass_immediately(db, monkeypatch):
     fake.responses["/v1/portfolio/value"] = (429, {"message": "Insufficient credits"})
     result = await _service(db, fake).sync()
     assert result["status"] == "error" and result["reason"] == "quota"
-    assert fake.paths() == ["/usage/credits", "/portfolio/value"]
+    assert fake.paths() == ["/usage/credits", "/portfolio/coins", "/portfolio/value"]
 
 
 @pytest.mark.asyncio
@@ -304,7 +366,7 @@ async def test_only_the_newest_snapshot_keeps_its_holdings(db, monkeypatch):
     assert len(snapshot_ids) == 1
     _, holdings = await _latest_holdings(db)
     assert set(holdings) == {"ethereum"}
-    assert await _count(db, CryptoSnapshot) == 2  # the totals survive as history
+    assert await _count(db, CryptoSnapshot) == 2  # the rows survive as history
 
 
 @pytest.mark.asyncio

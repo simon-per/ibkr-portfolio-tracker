@@ -18,8 +18,8 @@ here and `tests/test_crypto_budget.py` multiplies them by the schedule. The rate
 documented as 2 requests/second on the free plan, and **the real limit is tighter**: measured
 2026-09-28, the third call of a pass — about a second in, 0.6 s after the previous one had
 *started* — came back 429 "Rate limit exceeded". So the gap is now `MIN_REQUEST_INTERVAL_S`
-measured from the previous response's *completion*; a pass is three to five calls, so a generous
-gap costs seconds.
+measured from the previous response's *completion*; a pass is two calls on most slots and at
+most seven, so a generous gap costs seconds.
 
 **No retries inside a run.** A 429 means either the rate limit or "Insufficient credits"
 (CoinStats uses the one status for both and sends no Retry-After), and retrying either

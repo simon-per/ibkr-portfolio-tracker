@@ -8,10 +8,12 @@ reader reads a `crypto_*` table. `tests/test_crypto_isolation.py` pins both.
 
 ## Sync — all HTTP before any write
 
-1. **Snapshot** — `/portfolio/value` + every page of `/portfolio/coins`. Stored in one
-   short transaction, or not at all: a failed page, or a coin list that is empty while
-   CoinStats reports a positive total (the wipe guard), keeps the previous snapshot. The
-   same transaction replaces today's `crypto_daily_holdings` set.
+1. **Snapshot** — every page of `/portfolio/coins`, then `/portfolio/value` on the Berlin
+   day's first snapshot or when no holding came back valued; the other runs carry the DeFi
+   figure over. Stored in one short transaction, or not at all: a failed page, or a coin
+   list with nothing valued while CoinStats reports a positive total (the wipe guard),
+   keeps the previous snapshot. The same transaction replaces today's
+   `crypto_daily_holdings` set.
 2. **Prices** — CoinGecko: the id mapping when a coin is new, `/simple/price` for today,
    and the daily closes a held coin is still missing. Without `COINGECKO_API_KEY` this is
    skipped with a warning; a CoinGecko failure abandons the pass with a warning. Neither
@@ -114,9 +116,12 @@ CRYPTO_GATE = "crypto-sync"
 CRYPTO_MANUAL_GATE = "crypto-sync-manual"
 MANUAL_COOLDOWN_SECONDS = 600
 
-# A snapshot run costs /portfolio/value plus one page of coins. Derived from the client's
+# A snapshot run costs one page of coins, plus /portfolio/value on the day's first run (or
+# when nothing came back valued). Any run may need /value, so the credits gate asks for
+# both; the routine figure is what the other slots spend. Derived from the client's
 # documented costs, never restated.
 SNAPSHOT_RUN_COST = CREDIT_COST["value"] + CREDIT_COST["coins"]
+ROUTINE_RUN_COST = CREDIT_COST["coins"]
 # `warnings[]` says so when the month's balance falls under this share of the plan.
 CREDITS_LOW_FRACTION = 0.2
 # The FX warm-up re-fetches the whole crypto window only when the cache does not already
@@ -519,6 +524,10 @@ class CryptoSyncService:
         started_at = utcnow()
         today = started_at.date()
         warnings: List[str] = []
+        # Database reads, no write lock. `/portfolio/value` is asked once a Berlin day; a
+        # later run carries the DeFi figure, as of that first ask, from the latest snapshot.
+        first_today = await self._first_snapshot_today(started_at)
+        carried_defi = None if first_today else await self._latest_defi_value_usd()
 
         async with self._client_factory() as client:
             try:
@@ -550,8 +559,14 @@ class CryptoSyncService:
                 )
 
             try:
-                value_body = await client.portfolio_value()
                 coin_items = await client.portfolio_coins()
+                holdings, malformed, _closed = parse_coins(coin_items)
+                valued = [h for h in holdings if h.status == VALUED]
+                # Nothing valued is the wipe guard's case, so the guard below always has
+                # the total it needs.
+                value_body = (
+                    await client.portfolio_value() if first_today or not valued else None
+                )
             except CoinStatsNotSynced as e:
                 return await self._finish(started_at, "skipped", e.reason, str(e))
             except CoinStatsError as e:
@@ -559,9 +574,11 @@ class CryptoSyncService:
             credits_spent = client.credits_spent
             coin_pages = client.coin_pages
 
-        summary = parse_value(value_body)
-        holdings, malformed, _closed = parse_coins(coin_items)
-        valued = [h for h in holdings if h.status == VALUED]
+        if value_body is not None:
+            summary = parse_value(value_body)
+        else:
+            # Not asked: absent, not a stand-in — except DeFi, the one figure shown.
+            summary = {**parse_value({}), "defi_value_usd": carried_defi}
         if not valued and (summary["total_value_usd"] or 0) > 0:
             # The wipe guard: an empty list beside a positive total is a broken answer,
             # and storing it would draw every coin as sold.
@@ -597,7 +614,7 @@ class CryptoSyncService:
             logger.exception("crypto sync: storing the prices failed")
             warnings.append(f"CoinGecko prices not stored: {type(e).__name__}")
 
-        if await self._first_snapshot_today(started_at):
+        if first_today:
             warnings.extend(await self._warm_fx(today))
 
         snapshot_fields = {
@@ -884,8 +901,8 @@ class CryptoSyncService:
     # ---------------------------------------------------------------- writes
 
     async def _first_snapshot_today(self, now_utc: datetime) -> bool:
-        """True while no snapshot has been stored yet today (Berlin): the FX warm-up is a
-        once-a-day job, not an every-slot one."""
+        """True while no snapshot has been stored yet today (Berlin): the FX warm-up and
+        `/portfolio/value` are once-a-day asks, not every-slot ones."""
         async with self._session_factory() as db:
             count = (await db.execute(
                 select(func.count()).select_from(CryptoSnapshot).where(
@@ -893,6 +910,15 @@ class CryptoSyncService:
                 )
             )).scalar_one()
         return count == 0
+
+    async def _latest_defi_value_usd(self) -> Optional[float]:
+        """The newest snapshot's DeFi figure, for a run that does not ask `/value`."""
+        async with self._session_factory() as db:
+            return (await db.execute(
+                select(CryptoSnapshot.defi_value_usd)
+                .order_by(CryptoSnapshot.taken_at.desc(), CryptoSnapshot.id.desc())
+                .limit(1)
+            )).scalar_one_or_none()
 
     async def _write_snapshot(
         self,

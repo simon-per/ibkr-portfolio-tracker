@@ -9,7 +9,9 @@ noticing what it does to the product. This test does the multiplication, so rais
 of them is a failing test that says by how much, not a surprise at the end of the month.
 
 Since 2026-10-02 the sync no longer pulls CoinStats' history (`/portfolio/chart` +
-`/portfolio/pl/history`, 35 credits a day): the book computes its own.
+`/portfolio/pl/history`, 35 credits a day): the book computes its own. Since 2026-10-17
+`/portfolio/value` is asked once a Berlin day rather than every slot, so the month is
+budgeted per day for `/value` and per slot for the coins.
 """
 import math
 
@@ -19,7 +21,11 @@ from app.services.coinstats_client import (
     MAX_COIN_PAGES,
     MAX_TRANSACTION_PAGES,
 )
-from app.services.crypto_service import CLOSES_RECHECK_HOURS, SNAPSHOT_RUN_COST
+from app.services.crypto_service import (
+    CLOSES_RECHECK_HOURS,
+    ROUTINE_RUN_COST,
+    SNAPSHOT_RUN_COST,
+)
 from app.services.scheduler_service import CRYPTO_SYNC_HOURS
 
 FREE_PLAN_CREDITS = 20_000
@@ -30,18 +36,21 @@ HELD_COINS = 40
 
 def test_the_derived_costs_follow_the_documented_endpoint_prices():
     assert SNAPSHOT_RUN_COST == CREDIT_COST["value"] + CREDIT_COST["coins"]
+    assert ROUTINE_RUN_COST == CREDIT_COST["coins"]
     assert CREDIT_COST["usage"] == 0, "the balance check must stay free"
 
 
 def test_a_normal_month_of_scheduled_syncs_leaves_most_of_the_free_plan():
-    """One coin page per run: the case the plan was sized for, which leaves room for
-    manual syncs and the one-off rebuild."""
-    month = DAYS * len(CRYPTO_SYNC_HOURS) * SNAPSHOT_RUN_COST
-    assert month <= FREE_PLAN_CREDITS * 0.25, month
+    """One coin page per run and `/portfolio/value` once a day: the case the plan was
+    sized for, which leaves room for manual syncs and the one-off rebuild. Asking `/value`
+    on every slot again (31 x 8 x 18 = 4,464) fails here."""
+    month = DAYS * CREDIT_COST["value"] + DAYS * len(CRYPTO_SYNC_HOURS) * ROUTINE_RUN_COST
+    assert month <= FREE_PLAN_CREDITS * 0.125, month
 
 
 def test_the_worst_scheduled_month_still_fits_the_free_plan():
-    """Every sync at the page cap: still inside the allowance."""
+    """Every sync at the page cap with nothing valued, so every one also asks `/value`
+    (the wipe guard's case): still inside the allowance."""
     worst_run = CREDIT_COST["value"] + MAX_COIN_PAGES * CREDIT_COST["coins"]
     month = DAYS * len(CRYPTO_SYNC_HOURS) * worst_run
     assert month <= FREE_PLAN_CREDITS, month

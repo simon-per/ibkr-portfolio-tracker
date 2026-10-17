@@ -131,15 +131,18 @@ exact (the probe spent 53 by these constants and 53 by CoinStats' own balance):
 | call | credits | when |
 |---|---|---|
 | `/usage/credits` | 0 | every run, first — so a run knows its balance before spending |
-| `/portfolio/value` | 10 | every run |
 | `/portfolio/coins` | 8 per page | every run (page size 100, cap `MAX_COIN_PAGES = 5`) |
+| `/portfolio/value` | 10 | the Berlin day's first snapshot, and any run where no holding came back valued (since 2026-10-17; before, every run) |
 | `/portfolio/transactions` | 4 per page | the rebuild CLI only, once (page size 100, cap `MAX_TRANSACTION_PAGES = 100`) |
 | `/portfolio/chart?type=all` | 10 | **no longer asked by the sync** (2026-10-02); the probe only |
 | `/portfolio/pl/history?…` | 25 | **no longer asked by the sync** (2026-10-02); the probe only |
 
-Dropping the history pull saves 35 credits a day. Eight scheduled runs a day at one coin page is
-~4.5k credits a month; `tests/test_crypto_budget.py` multiplies the constants and pins that case
-(≤ 25% of the plan), the worst scheduled month (every run at the page cap) inside the allowance,
+Dropping the history pull saves 35 credits a day; asking `/value` once a day rather than every
+slot saves ~2.2k a month. Eight scheduled runs a day at one coin page, plus one `/value` a day, is
+~2.3k credits a month (it was ~4.5k); `tests/test_crypto_budget.py` multiplies the constants and
+pins that case (≤ 12.5% of the plan, which `/value` on every slot would break), the worst
+scheduled month (every run at the page cap with nothing valued, so `/value` every run too) inside
+the allowance,
 the rebuild's worst case (≤ 5%), and a worst CoinGecko month (40 coins, every coin re-asked as
 often as the re-check allows) inside the Demo plan. **A spam-heavy wallet is the thing that moves
 the CoinStats figure**: every hundred airdropped tokens is another 8 credits on every sync, which
@@ -154,9 +157,14 @@ nothing else; `warnings[]` says so under a fifth of the plan.
 
 1. **Not configured** (no CoinStats key or no share token) → return `None`. No request, and **no
    `sync_runs` row**.
-2. **Snapshot** — `/portfolio/value` then every page of `/portfolio/coins`. Refused, keeping the
-   previous snapshot, when any page fails, when there are more than `MAX_COIN_PAGES` full pages,
-   or when the coin list is empty beside a positive `totalValue` (the wipe guard).
+2. **Snapshot** — every page of `/portfolio/coins`, then `/portfolio/value` only on the Berlin
+   day's first snapshot (`_first_snapshot_today`, read before any request and reused for the FX
+   warm-up) or when no holding came back valued. Refused, keeping the previous snapshot, when any
+   page fails, when there are more than `MAX_COIN_PAGES` full pages, or when nothing is valued
+   beside a positive `totalValue` (the wipe guard). The guard's case is exactly when `/value` is
+   always asked, so it never lacks its input; a portfolio that really is empty (`totalValue` 0)
+   is stored. A run that skips `/value` carries `defi_value_usd` over from the latest snapshot
+   and leaves the other `/value` columns NULL — not asked, so absent; nothing reads them.
 3. **Prices** — the CoinGecko pass above, fetched *before* any write: which prices are needed
    is computed from the stored daily holdings plus today's set, still in memory.
 4. **Writes**: the mapping and prices in one transaction (a failure is a warning); the FX warm-up
@@ -309,8 +317,9 @@ What the figures mean:
 - **Weights are shares of the total**; the total is the priced coins, so they add to 100 by
   construction, and unknown when the total is.
 - **Beside the total, not in it** (*fiat: owner-accepted deviation*): exchange cash
-  (`cash_value`, CoinStats' own figure for fiat balances) and DeFi (`defi_value`). Neither has a
-  CoinGecko price or belongs in a crypto P&L.
+  (`cash_value`, CoinStats' own figure for fiat balances) and DeFi (`defi_value`, as of the
+  Berlin day's first sync — `/value` is asked once a day). Neither has a CoinGecko price or
+  belongs in a crypto P&L.
 - **Excluded and counted**: spam and coins CoinStats cannot price never enter a total.
 - Dropped on 2026-10-02: CoinStats' cost basis, average buy, realized / unrealized / all-time P&L
   and the not-itemised gap — they belonged to CoinStats' books, not to this formula.
