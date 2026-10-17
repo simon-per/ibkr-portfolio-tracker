@@ -13,7 +13,7 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. Next: holding logos via logo.dev — §3 of
 `plans/handoffs/HANDOFF_raises-chart-marketcap-logos_2026-10-17.md` — and the open GitHub
-issues (#2–#7 done).
+issues (#2–#7 and #10 done).
 
 ---
 
@@ -96,6 +96,10 @@ Only what is still unverified.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
+- **Price passes after #10 (migration `a2e8c4f6b0d3`):** the short `market_data_only` passes
+  report `securities_skipped_sold` > 0 and "N of M" over held and just-sold securities only; the
+  18:00 pass still prices sold ones; `securities_backing_off` stays small; no AV `Information`
+  warning in the logs beyond one a pass.
 - **FX after #2:** `/api/scheduler/history` `fx_result.frankfurter_requests` is 1 on the first
   sync after ~16:00 UTC on a weekday and 0 on the others; no `frankfurter_failed`. One request
   now carries every ECB currency, so a provider refusing the whole request sends all of them to

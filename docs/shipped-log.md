@@ -7,6 +7,21 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-17 (night) — sold and delisted securities leave the price passes (#10)
+
+Issue #10, rule 1. Every price pass asked Yahoo about every security ever owned, and a delisted
+ticker's never-closing trailing gap re-asked the mapped ticker, each variation and (US) Alpha
+Vantage at every pass. The six short passes now take held securities and those sold within
+`SOLD_PRICE_GRACE_DAYS` (17); the 18:00 pass prices older sold ones once a day for
+`post_sale_pct`, repairing a held-span gap only up to the last close. A sold security every
+provider answers empty for backs off 1, 2, 4… up to 30 days (`securities.price_checked_at`,
+`price_miss_count`; migration `a2e8c4f6b0d3`); held securities never back off, so a Yahoo soft
+throttle cannot freeze the book. Alpha Vantage asks `compact` (the free tier; `full` was
+premium-only and could never return data), at most once a security a UTC day, latches on
+`Note`/`Information`, and is skipped for a gap older than its reach. Over a simulated 30 days:
+a sold listed security 210 → 30 requests, a delisted German listing 630 → 15, a delisted US one
+210 + 210 AV → 5 + 5. Verified: 2156 backend tests green, no upstream called.
+
 ## Shipped 2026-10-17 (night) — FX asks Frankfurter only for what is missing (#2)
 
 Issue #2. Every sync re-downloaded a 7- or 30-day window per ECB currency, plus two requests
