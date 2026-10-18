@@ -48,7 +48,7 @@ is also why this is **not** spliced at `coverage_from` the way `get_contribution
 the splice exists because *lot cost basis* cannot survive a rotation, and cash is not
 built from lot cost basis.
 
-Five rules, each of which would be a wrong number the other way:
+Six rules, each of which would be a wrong number the other way:
 
 - **Every cash-flow type counts, not `get_deposits()`'s whitelist.** That one answers
   "was money *added*", where a transfer must never count; this asks "did cash *move*",
@@ -83,7 +83,26 @@ Five rules, each of which would be a wrong number the other way:
   and `cash_source` says so; a *derived* zero is a real answer for a fully deployed
   account. Collapsing them renders "we have no idea" as "you hold no cash" — the
   reassuring-zero failure this file keeps rediscovering, and `cashIsTracked` in
-  `lib/portfolioCash.ts` is where the client refuses it.
+  `lib/portfolioCash.ts` is where the client refuses it. On the wire an unknown balance is
+  `null` on the summary (`total_cash_eur`, and `total_value_eur` with it) and on Allocation
+  and Look-through (`cash_eur`); the timeline keeps its numeric `cash_eur: 0.0` /
+  `total_value_eur = market_value_eur` and says `cash_source: "unknown"` per point.
+- **A trade with no FX rate makes the balance unknown, and is counted** (GitHub #59). It
+  used to be logged and skipped, so a skipped buy read as cash never spent and every
+  reader served a balance off by the whole trade with nothing saying so — the silent
+  half-result #26 fixed for realized P&L. `_derived_events` counts them;
+  `CashService.unconverted_trades(base_fx)` reports the count (off the instance's last
+  derivation), and above 0 `uninvested_cash` returns `UNKNOWN` with `balance=None` —
+  the same state as no ledger at all, which every surface already renders as absent.
+  Every reader of the raw events consults it too: the timeline drops the cash events and
+  stamps every point `unknown`, and the decomposition reads cash as untracked and drops
+  the measured corrections, which would otherwise book the trade as fees and interest. The
+  count rides on the summary as `cash_unconverted` (the hero names it) and in
+  Look-through's `warnings[]`. **Unknown even when a later measured level absorbs the
+  trade**: the level would fix today's figure but not the days before it, and the
+  correction would misfile the trade — a balance-per-day rule (unknown only until the next
+  measured row) is the refinement, not built until a real trade needs it. `test_uninvested_cash_family.py` fails a service that reads `balance_events`,
+  `measured_corrections`, `cash_source` or `derived_source` without asking.
 
 **What it cannot see, which is why it is badged.** Broker interest, account fees (the
 sanitizer already drops a `type="AF"` cash transaction) and the spread on FX conversions

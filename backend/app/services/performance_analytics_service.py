@@ -128,6 +128,11 @@ class PerformanceAnalyticsService:
             for when, net_eur in await DividendService(self.db).ibkr_cash_receipts()
         ]
         corrections = await cash_service.measured_corrections(base_fx)
+        # An unconvertible trade leaves the cash unknown, and the timeline's total value
+        # holdings-only with it (GitHub #59); a correction would then book the missing
+        # trade as fees and interest, so the window reads as untracked cash instead.
+        if await cash_service.unconverted_trades(base_fx):
+            cash_source, corrections = CASH_UNKNOWN, []
         flows: List[Tuple[date, Decimal]] = inputs["money_in_legs"]
 
         async def window(ws: date, we: date) -> Dict:

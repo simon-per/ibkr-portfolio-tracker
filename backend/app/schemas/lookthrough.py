@@ -223,8 +223,8 @@ class LookthroughResponse(BaseModel):
         description=(
             "Uninvested cash, signed, from `CashService.uninvested_cash` — the read the "
             "Allocation tab shares. `null` when `cash_source` is 'unknown' (no ledger "
-            "row to derive from; never a stand-in 0.00). A negative balance is reported "
-            "here and joins no denominator."
+            "row to derive from, or a trade with no FX rate; never a stand-in 0.00). A "
+            "negative balance is reported here and joins no denominator."
         ),
     )
     cash_source: str = Field(

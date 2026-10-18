@@ -310,8 +310,8 @@ class AllocationService:
             await portfolio_service._load_base_fx(), utc_today()
         )
         cash_source = cash.source
-        # 0.0 on the wire when unknown, as before; `cash_source` says which zero it is.
-        cash_eur = float(cash.balance) if cash.balance is not None else 0.0
+        # Absent when unknown, never 0.00 — Look-through's reading of the same helper.
+        cash_eur = round(float(cash.balance), 2) if cash.balance is not None else None
         # Only a positive balance is a slice — see the docstring.
         cash_slice = float(cash.in_book)
 
@@ -321,7 +321,7 @@ class AllocationService:
                 'geographic_allocation': {},
                 'asset_type_allocation': {},
                 'total_market_value_eur': 0.0,
-                'cash_eur': round(cash_eur, 2),
+                'cash_eur': cash_eur,
                 'cash_source': cash_source,
                 'total_value_eur': 0.0,
                 'unpriced_holdings': len(unvaluable),
@@ -475,7 +475,7 @@ class AllocationService:
             # Holdings only, kept under its historical name. The percentages above are
             # shares of `total_value_eur`, which adds cash — read that one as the base.
             'total_market_value_eur': round(holdings_value, 2),
-            'cash_eur': round(cash_eur, 2),
+            'cash_eur': cash_eur,
             'cash_source': cash_source,
             'total_value_eur': round(total_value, 2),
             # The completeness of all three breakdowns above. Every percentage is a share

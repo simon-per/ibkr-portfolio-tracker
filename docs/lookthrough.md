@@ -107,7 +107,8 @@ the same "% of portfolio" header.
 - **Unknown or negative cash keeps the holdings-only base**, as on Allocation: no stand-in for
   an unknown, no negative slice for a margin debit. `cash_eur` still reports the balance
   (`null` when unknown); `cash_pct_of_portfolio` is `null` exactly when there is no Cash row, and
-  the client reads the row's presence off it rather than re-deciding the sign rule.
+  the client reads the row's presence off it rather than re-deciding the sign rule. When a trade
+  with no FX rate made it unknown, `warnings[]` names the count (GitHub #59).
 - **Cash sits beside the partition, never inside it.** The five buckets still close on
   `total_market_value_eur` (holdings); `total_market_value_eur` + `in_book` = `total_value_eur`.
   `cash_eur` and `total_value_eur` are classified non-bucket in `test_lookthrough_partition.py`.

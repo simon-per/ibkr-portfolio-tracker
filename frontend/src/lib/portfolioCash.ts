@@ -18,7 +18,8 @@ import type { CashSource } from './api'
  * - **`cash_source === 'unknown'`.** No ledger holds a row to derive a balance from, so
  *   cash genuinely computes to 0.00 everywhere — and that is exactly why it must not be
  *   shown. Labelling a holdings-only line "Total Value" over it would assert a
- *   completeness nothing established.
+ *   completeness nothing established. The backend says the same when a trade has no FX
+ *   rate (`cash_unconverted` > 0): the sum is short by the whole trade (GitHub #59).
  *
  * A **derived zero** is a different thing and does qualify: it is a real answer for an
  * account that has deployed everything it has. The distinction between "measured zero"

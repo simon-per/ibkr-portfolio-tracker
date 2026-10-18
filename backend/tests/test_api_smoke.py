@@ -665,6 +665,9 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert isinstance(summary_now.get("unpriced_disposals"), int), (
         "response_model dropped unpriced_disposals"
     )
+    # And cash's: above 0 the balance is unknown and this names why (GitHub #59). Every
+    # trade in the fixture converts, so it is a known balance with nothing left out.
+    assert summary_now.get("cash_unconverted") == 0, "response_model dropped cash_unconverted"
     assert summary_now["total_value_eur"] == pytest.approx(
         summary_now["total_market_value_eur"] + summary_now["total_cash_eur"]
     )

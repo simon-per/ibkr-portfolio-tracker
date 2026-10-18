@@ -127,8 +127,10 @@ class PortfolioValuePoint(BaseModel):
             "Where cash_eur came from: 'ibkr' is the broker's own end-of-day balance, "
             "'derived' is computed from the trade/deposit/dividend ledgers and so "
             "excludes broker interest, account fees and FX spread, and 'unknown' means "
-            "no ledger has a row to derive from — which is NOT the same as a derived "
-            "zero, that being a real answer for a fully deployed account."
+            "no ledger has a row to derive from, or a trade has no FX rate so the sum "
+            "is not the balance (cash_eur is then 0.0 and total_value_eur holdings "
+            "only) — which is NOT the same as a derived zero, that being a real answer "
+            "for a fully deployed account."
         ),
     )
     base_currency: str = Field("EUR", description="Currency the *_eur values are expressed in")
@@ -324,25 +326,35 @@ class PortfolioSummary(BaseModel):
             "sales (GitHub issues #19 and #26)."
         ),
     )
-    total_cash_eur: float = Field(
-        0.0,
+    total_cash_eur: Optional[float] = Field(
+        None,
         description=(
             "Uninvested cash, in base_currency. Excluded from total_market_value_eur, "
             "which is holdings only — so the two must be added to get what the account "
-            "is worth, and total_value_eur below does exactly that."
+            "is worth, and total_value_eur below does exactly that. null when "
+            "cash_source is 'unknown', never a stand-in 0.00."
         ),
     )
-    total_value_eur: float = Field(
-        0.0,
+    total_value_eur: Optional[float] = Field(
+        None,
         description=(
             "total_market_value_eur + total_cash_eur: the figure a broker statement "
             "shows. The headline card reported the holdings-only total until this "
-            "existed, understating this account by 18% while a rotation sat in cash."
+            "existed, understating this account by 18% while a rotation sat in cash. "
+            "null while total_cash_eur is."
         ),
     )
     cash_source: str = Field(
         "unknown",
         description="See PortfolioValuePoint.cash_source — 'ibkr' | 'derived' | 'unknown'.",
+    )
+    cash_unconverted: int = Field(
+        0,
+        description=(
+            "Trades the cash derivation could not convert (no FX rate). Above 0 the "
+            "balance is unknown — a skipped buy reads as cash never spent, so the sum "
+            "is off by the whole trade — and cash_source is 'unknown' (GitHub #59)."
+        ),
     )
 
     class Config:

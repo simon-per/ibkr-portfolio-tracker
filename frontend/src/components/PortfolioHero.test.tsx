@@ -92,6 +92,29 @@ describe('the realized gain', () => {
   })
 })
 
+describe('cash a trade could not be converted into (GitHub #59)', () => {
+  // What the backend sends: cash unknown and absent, never a 0.00 balance, plus the count.
+  const unconverted: Partial<PortfolioSummary> = {
+    cash_source: 'unknown', total_cash_eur: null, total_value_eur: null, cash_unconverted: 1,
+  }
+
+  it('shows no Cash figure and a holdings-only headline, and names the cause', () => {
+    renderWith(unconverted)
+    expect(screen.queryByText('Cash')).toBeNull()
+    expect(screen.getByText('Market value')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toMatch(/Cash is unknown — 1 trade has no FX rate/)
+  })
+
+  it('uses the plural, and stays silent when nothing was left out', () => {
+    renderWith({ ...unconverted, cash_unconverted: 3 })
+    expect(screen.getByRole('alert').textContent).toMatch(/3 trades have no FX rate/)
+    cleanup()
+    renderWith({ cash_source: 'derived', total_cash_eur: 100, total_value_eur: 65124.51, cash_unconverted: 0 })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('Cash')).toBeTruthy()
+  })
+})
+
 describe('the period gain', () => {
   it('shows the gain, its percentage and the range', () => {
     renderWith()

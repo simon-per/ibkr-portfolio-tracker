@@ -19,7 +19,7 @@ from app.models.trade import Trade
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
-from app.services.cash_service import CashService, MEASURED
+from app.services.cash_service import CashService, MEASURED, UNKNOWN as CASH_UNKNOWN
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
@@ -342,6 +342,17 @@ class PortfolioService:
         cash_events = await cash_service.balance_events(base_fx)
         # The fallback for days before measurement starts — see derived_source().
         cash_source = await cash_service.derived_source()
+        # The service's own verdict for the measured era — MEASURED, or MIXED once
+        # a second account has cash IBKR cannot see. A literal "ibkr" here stamped
+        # the tail of the chart `ibkr` while the summary card said `mixed` for the
+        # same balance on the same day, and the chart dropped its caveat.
+        cash_measured_source = await cash_service.cash_source()
+        # A trade with no FX rate leaves the sum short by the whole trade, so the balance
+        # is unknown on every point — the summary's state, through the summary's rule
+        # (`CashService.unconverted_trades`, GitHub #59). No partial sum reaches the wire.
+        if await cash_service.unconverted_trades(base_fx):
+            cash_events = []
+            cash_source = cash_measured_source = CASH_UNKNOWN
         contributions = await self._contribution_inputs(
             base_fx,
             lot_rows=[
@@ -361,11 +372,7 @@ class PortfolioService:
             money_in_legs=contributions["money_in_legs"],
             cash_source=cash_source,
             cash_measured_from=await cash_service.measured_from(),
-            # The service's own verdict for the measured era — MEASURED, or MIXED once
-            # a second account has cash IBKR cannot see. A literal "ibkr" here stamped
-            # the tail of the chart `ibkr` while the summary card said `mixed` for the
-            # same balance on the same day, and the chart dropped its caveat.
-            cash_measured_source=await cash_service.cash_source(),
+            cash_measured_source=cash_measured_source,
         )
         for row in portfolio_timeline:
             row["base_currency"] = base_fx.base_currency
@@ -606,6 +613,7 @@ class PortfolioService:
                 "unpriced_holdings": 0,
                 "base_currency": base_fx.base_currency,
                 **cash,
+                # None with an unknown balance: the whole value is cash, and it is unknown.
                 "total_value_eur": cash["total_cash_eur"],
                 **realized,
             }
@@ -645,8 +653,12 @@ class PortfolioService:
             # Holdings plus cash: what the account is actually worth, and what the
             # Market Value card understated by the whole idle balance until this
             # existed. Served rather than added on the client so the card and every
-            # chart point come from one derivation.
-            "total_value_eur": daily_value["market_value_eur"] + cash["total_cash_eur"],
+            # chart point come from one derivation. None while cash is unknown: holdings
+            # plus an unknown is not a total, and the hero falls back to Market Value.
+            "total_value_eur": (
+                daily_value["market_value_eur"] + cash["total_cash_eur"]
+                if cash["total_cash_eur"] is not None else None
+            ),
             **realized,
         }
 
@@ -659,13 +671,18 @@ class PortfolioService:
         Split from the caller only because both return paths need it — including the
         empty-portfolio one, where cash is the *entire* value of the account. `service`
         is the caller's own instance, so its ledger rows are read once per request.
+
+        Read through `uninvested_cash`, the helper Allocation and Look-through share, so
+        the card and the two tabs agree about when the balance is unknown. Unknown ships
+        as None, never as 0.00, with `cash_unconverted` naming the trades that made it so
+        (GitHub #59).
         """
         service = service or CashService(self.db)
-        events = await service.balance_events(base_fx)
-        cash = service.balance_as_of(events, on_date)
+        cash = await service.uninvested_cash(base_fx, on_date)
         return {
-            "total_cash_eur": float(cash),
-            "cash_source": await service.cash_source(),
+            "total_cash_eur": float(cash.balance) if cash.balance is not None else None,
+            "cash_source": cash.source,
+            "cash_unconverted": cash.unconverted,
         }
 
     async def _contribution_inputs(

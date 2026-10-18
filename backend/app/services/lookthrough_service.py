@@ -172,6 +172,12 @@ class LookthroughService:
         )
 
         warnings: List[str] = []
+        # The Cash row is absent; say why, since nothing else on this tab would.
+        if cash.unconverted:
+            warnings.append(
+                f"Cash is left out: {cash.unconverted} "
+                f"{'trade has' if cash.unconverted == 1 else 'trades have'} no FX rate."
+            )
         valuable, unvaluable = self._split_by_valuability(positions)
 
         if not valuable:

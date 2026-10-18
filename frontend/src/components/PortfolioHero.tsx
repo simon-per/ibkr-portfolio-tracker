@@ -137,6 +137,9 @@ export function PortfolioHero({
   const unpriced = summary?.unpriced_holdings ?? 0
   // Sales the realized figure could not price or convert: it is a partial sum.
   const unpricedSales = summary?.unpriced_disposals ?? 0
+  // Trades cash could not convert: the backend reports cash as unknown, so the Cash figure
+  // is absent and the headline is holdings only.
+  const unconvertedTrades = summary?.cash_unconverted ?? 0
 
   return (
     <Card className="overflow-hidden">
@@ -189,6 +192,17 @@ export function PortfolioHero({
               {unpriced === 1 ? 'holding has' : 'holdings have'} no usable price today
             </span>
             , so the total and both gains understate.
+          </div>
+        )}
+        {unconvertedTrades > 0 && (
+          <div
+            role="alert"
+            className="mt-4 rounded-lg border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+          >
+            <span className="font-medium">
+              Cash is unknown — {unconvertedTrades}{' '}
+              {unconvertedTrades === 1 ? 'trade has' : 'trades have'} no FX rate
+            </span>
           </div>
         )}
       </div>

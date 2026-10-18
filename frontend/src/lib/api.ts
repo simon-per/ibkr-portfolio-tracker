@@ -113,12 +113,18 @@ export interface PortfolioSummary {
   /**
    * Uninvested cash, in the base currency. Excluded from `total_market_value_eur`,
    * which is holdings only — so `total_value_eur` below is what the account is worth.
-   * Optional: a backend older than 2026-08-26 does not send it.
+   * Optional: a backend older than 2026-08-26 does not send it. `null` while
+   * `cash_source` is 'unknown'.
    */
-  total_cash_eur?: number;
+  total_cash_eur?: number | null;
   /** `total_market_value_eur + total_cash_eur`: the figure a broker statement shows. */
-  total_value_eur?: number;
+  total_value_eur?: number | null;
   cash_source?: CashSource;
+  /**
+   * Trades the cash derivation could not convert (no FX rate). Above 0 cash is unknown
+   * (`cash_source` 'unknown'). Optional: a backend older than 2026-10-18 does not send it.
+   */
+  cash_unconverted?: number;
   date?: string;
   base_currency?: string;
   total_realized_gain_loss_eur: number;
@@ -514,9 +520,9 @@ export interface PortfolioAllocationResponse {
    *
    * A negative balance (a margin debit) is reported here and left out of the charts:
    * a pie cannot draw a negative slice, and renormalising around one would inflate
-   * every other holding.
+   * every other holding. `null` while `cash_source` is 'unknown'.
    */
-  cash_eur?: number;
+  cash_eur?: number | null;
   cash_source?: CashSource;
   /** The base for every percentage: `total_market_value_eur` plus positive cash. */
   total_value_eur?: number;
