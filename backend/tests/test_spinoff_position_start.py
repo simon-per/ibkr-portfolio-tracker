@@ -28,6 +28,7 @@ from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.portfolio_service import BaseFx, PortfolioService
+from app.clock import utc_today
 
 # The parent is bought well before the window; the spinoff lands inside it.
 LOT_OPEN = date(2026, 1, 5)
@@ -80,7 +81,7 @@ async def _session(
     # Priced through today as well, so the summary walk (which always values `today`) is
     # exercised by the same fixture rather than reporting a stale feed.
     d = LOT_OPEN
-    last = max(END, date.today())
+    last = max(END, utc_today())
     while d <= last:
         session.add(MarketPrice(security_id=PARENT, date=d, close_price=Decimal("100"),
                                 currency="EUR", source="test"))

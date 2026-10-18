@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from decimal import Decimal
 
 from app.models.market_price import MarketPrice
+from app.clock import utc_today
 
 
 class MarketPriceRepository:
@@ -127,7 +128,7 @@ class MarketPriceRepository:
 
         ``as_of`` is injectable purely for tests.
         """
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
 
         # Get all existing dates in the range
         result = await self.session.execute(

@@ -69,6 +69,7 @@ from app.services.finpension_ingest import (
     CARRY_HORIZON_DAYS, PRICE_SOURCE_CARRY, PRICE_SOURCE_STATEMENT,
 )
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
+from app.clock import utc_today
 
 # One stock job per declared hour — test_scheduler_registers_every_declared_job asserts
 # no two of the three stock groups share one — plus one crypto job at each of those same
@@ -432,7 +433,7 @@ async def _seed(db, security_id, symbol, latest_price_age=None, is_open=True):
     ))
     if latest_price_age is not None:
         db.add(MarketPrice(
-            security_id=security_id, date=date.today() - timedelta(days=latest_price_age),
+            security_id=security_id, date=utc_today() - timedelta(days=latest_price_age),
             close_price=Decimal("120"), currency="USD", source="yahoo_finance",
         ))
     await db.flush()
@@ -502,7 +503,7 @@ async def test_an_old_price_alongside_a_recent_one_is_not_stale(price_db):
     two years of history would look broken."""
     await _seed(price_db, 1, "HISTORY", latest_price_age=1)
     price_db.add(MarketPrice(
-        security_id=1, date=date.today() - timedelta(days=400),
+        security_id=1, date=utc_today() - timedelta(days=400),
         close_price=Decimal("80"), currency="USD", source="yahoo_finance",
     ))
     await price_db.flush()
@@ -1078,7 +1079,7 @@ async def _seed_manual(db, security_id, symbol, *, observed_age, carry_to):
         cost_basis=Decimal("1000"), price_per_unit=Decimal("100"), currency="CHF",
         cost_basis_eur=Decimal("1000"), is_open=True,
     ))
-    observed = date.today() - timedelta(days=observed_age)
+    observed = utc_today() - timedelta(days=observed_age)
     db.add(MarketPrice(security_id=security_id, date=observed,
                        close_price=Decimal("120"), currency="CHF",
                        source=PRICE_SOURCE_STATEMENT))

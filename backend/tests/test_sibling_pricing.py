@@ -27,13 +27,14 @@ from app.repositories.ticker_mapping_repository import TickerMappingRepository
 from app.services import market_data_service as mds
 from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
 from app.services.market_data_service import MarketDataService
+from app.clock import utc_today
 
 SIBLING = "0P0000S0OE.SW"
 NAV = Decimal("121.201101")
 
 
 def _weekday(days_ago: int) -> date:
-    d = date.today() - timedelta(days=days_ago)
+    d = utc_today() - timedelta(days=days_ago)
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
@@ -115,7 +116,7 @@ async def test_prices_are_the_sibling_scaled_to_the_statement_nav(monkeypatch):
     try:
         security = await _fund(session)
         service = MarketDataService(session)
-        closes = _sibling_closes(ANCHOR - timedelta(days=10), date.today())
+        closes = _sibling_closes(ANCHOR - timedelta(days=10), utc_today())
         calls = []
         _stub_fetch(monkeypatch, service, closes, record=calls)
 
@@ -146,7 +147,7 @@ async def test_an_anchor_day_without_a_sibling_close_uses_the_nearest_prior_one(
     try:
         security = await _fund(session)
         service = MarketDataService(session)
-        closes = [r for r in _sibling_closes(ANCHOR - timedelta(days=10), date.today())
+        closes = [r for r in _sibling_closes(ANCHOR - timedelta(days=10), utc_today())
                   if r["date"] != ANCHOR]
         _stub_fetch(monkeypatch, service, closes)
 
@@ -169,7 +170,7 @@ async def test_a_second_run_writes_only_what_is_missing(monkeypatch):
     try:
         security = await _fund(session)
         service = MarketDataService(session)
-        closes = _sibling_closes(ANCHOR - timedelta(days=10), date.today())
+        closes = _sibling_closes(ANCHOR - timedelta(days=10), utc_today())
         _stub_fetch(monkeypatch, service, closes)
 
         first = await service.sync_sibling_prices(security)
@@ -178,7 +179,7 @@ async def test_a_second_run_writes_only_what_is_missing(monkeypatch):
         # Only the provisional tail (PROVISIONAL_PRICE_DAYS) is re-stated on a warm cache.
         # The cutoff is inclusive: today plus three prior calendar days can
         # contain four weekdays. A fixed <=3 assertion fails on Thu/Fri.
-        cutoff = date.today() - timedelta(days=service.market_price_repo.PROVISIONAL_PRICE_DAYS)
+        cutoff = utc_today() - timedelta(days=service.market_price_repo.PROVISIONAL_PRICE_DAYS)
         expected = sum(row["date"] >= cutoff for row in closes)
         assert first > second
         assert second == expected
@@ -199,7 +200,7 @@ async def test_old_days_between_two_statement_navs_are_still_asked_for(monkeypat
         first_nav = _weekday(70)
         security = await _fund(session, navs=[(first_nav, Decimal("118")), (ANCHOR, NAV)])
         service = MarketDataService(session)
-        closes = _sibling_closes(first_nav - timedelta(days=10), date.today())
+        closes = _sibling_closes(first_nav - timedelta(days=10), utc_today())
         _stub_fetch(monkeypatch, service, closes)
 
         await service.sync_sibling_prices(security, days_back=730)
@@ -221,7 +222,7 @@ async def test_a_sibling_in_another_currency_is_refused_whole(monkeypatch):
         security = await _fund(session)
         service = MarketDataService(session)
         _stub_fetch(monkeypatch, service,
-                    _sibling_closes(ANCHOR - timedelta(days=10), date.today(), currency="USD"))
+                    _sibling_closes(ANCHOR - timedelta(days=10), utc_today(), currency="USD"))
 
         with pytest.raises(ValueError, match="quoted in USD"):
             await service.sync_sibling_prices(security)
@@ -277,7 +278,7 @@ async def test_the_loop_routes_a_sibling_security_and_still_skips_a_manual_one(m
         await session.commit()
         manual = await session.get(Security, 10)
         service = MarketDataService(session)
-        _stub_fetch(monkeypatch, service, _sibling_closes(ANCHOR - timedelta(days=10), date.today()))
+        _stub_fetch(monkeypatch, service, _sibling_closes(ANCHOR - timedelta(days=10), utc_today()))
 
         result = await service.sync_securities([security, manual], days_back=30)
 

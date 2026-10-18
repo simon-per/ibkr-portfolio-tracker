@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.database import Base
 import app.models  # noqa: F401
 from app.models.dividend_accrual import DividendAccrual
@@ -81,7 +81,7 @@ async def _session():
         cost_basis=Decimal("6000"), cost_basis_eur=Decimal("6000"),
         price_per_unit=Decimal("600"), currency="EUR", is_open=True,
     ))
-    session.add(MarketPrice(security_id=1, date=date.today(),
+    session.add(MarketPrice(security_id=1, date=utc_today(),
                             close_price=Decimal("800"), currency="EUR", source="test"))
     await session.flush()
     return engine, session

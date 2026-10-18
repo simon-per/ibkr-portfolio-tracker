@@ -50,6 +50,7 @@ from app.schemas.portfolio import (
     DividendUpcomingPayment,
 )
 from app.services.dividend_service import DividendService
+from app.clock import utc_today
 
 AS_OF = date(2026, 5, 1)
 
@@ -76,7 +77,7 @@ async def _seed(session):
     flag; four quarterly payments give the forecast a cadence (so `upcoming` and
     `latest_month` are non-empty); the price is what makes `forward_yield` and the
     per-row yields resolve at all — and it must be dated **today**, because
-    `get_positions_breakdown()` prices at `date.today()` rather than at the injected
+    `get_positions_breakdown()` prices at `utc_today()` rather than at the injected
     `as_of`, with a 14-day lookback.
     """
     session.add(TaxLot(
@@ -85,7 +86,7 @@ async def _seed(session):
         price_per_unit=Decimal("600"), currency="EUR", is_open=True,
     ))
     session.add(MarketPrice(
-        security_id=1, date=date.today(), close_price=Decimal("800"),
+        security_id=1, date=utc_today(), close_price=Decimal("800"),
         currency="EUR", source="test",
     ))
     await session.flush()

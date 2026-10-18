@@ -39,6 +39,7 @@ from app.services.benchmark_service import (
     reset_upstream_throttle,
 )
 from app.services.currency_service import CurrencyService
+from app.clock import utc_today
 
 WINDOW = MarketPriceRepository.PROVISIONAL_PRICE_DAYS
 
@@ -206,12 +207,12 @@ def _latest_trading_day() -> date:
     """
     The newest weekday on or before today — the one row that is always provisional.
 
-    The helper reads `date.today()` itself and takes no injectable clock, so a test
+    The helper reads `utc_today()` itself and takes no injectable clock, so a test
     has to anchor on the real calendar. Anchoring *here* rather than on a literal
     keeps the assertion the same shape every day of the week: this date is inside the
     3-day window whether today is a Tuesday (itself) or a Sunday (Friday, two back).
     """
-    d = date.today()
+    d = utc_today()
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
@@ -369,7 +370,7 @@ async def test_the_fx_path_stays_out_of_the_refresh(monkeypatch):
         )
     session = AsyncSession(engine, expire_on_commit=False)
     try:
-        end = date.today()
+        end = utc_today()
         start = end - timedelta(days=6)
         d = start
         while d <= end:

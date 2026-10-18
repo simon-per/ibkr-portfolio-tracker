@@ -22,7 +22,7 @@ def _resolve_year(year: Optional[int]) -> int:
     """
     The current calendar year is the ceiling and the default — read per request.
 
-    It was a module constant, `date.today().year` evaluated at import, so on
+    It was a module constant, the host's current year evaluated at import, so on
     1 January `?year=<new year>` answered 422 and the default served the *prior*
     year until the container happened to restart. UTC, like every other clock here
     (`app.clock.utcnow`), so the flip is at midnight UTC rather than 01:00 Berlin.

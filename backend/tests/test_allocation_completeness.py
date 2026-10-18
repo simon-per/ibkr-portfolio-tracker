@@ -24,7 +24,7 @@ held to the same rule without anyone remembering to add a case.
 Offline: no Yahoo, no network. Prices are seeded directly.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -38,6 +38,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.market_price import MarketPrice
 from app.services.allocation_service import AllocationService
+from app.clock import utc_today
 
 BREAKDOWNS = ("asset_type_allocation", "sector_allocation", "geographic_allocation")
 
@@ -71,7 +72,7 @@ async def _hold(db, *, symbol, isin, conid, sector, country, asset_type="Stock",
     await db.flush()
 
     db.add(TaxLot(
-        security_id=security.id, open_date=date.today() - timedelta(days=200),
+        security_id=security.id, open_date=utc_today() - timedelta(days=200),
         quantity=Decimal(quantity), cost_basis=Decimal("500"),
         price_per_unit=Decimal("50"), currency="EUR",
         cost_basis_eur=Decimal("500"), is_open=True,
@@ -80,7 +81,7 @@ async def _hold(db, *, symbol, isin, conid, sector, country, asset_type="Stock",
     # regardless of which one the service asks for.
     for offset in (0, 1):
         db.add(MarketPrice(
-            security_id=security.id, date=date.today() - timedelta(days=offset),
+            security_id=security.id, date=utc_today() - timedelta(days=offset),
             close_price=Decimal(price), currency="EUR", source="test",
         ))
     await db.commit()
@@ -188,7 +189,7 @@ async def test_an_unpriced_holding_does_not_break_the_percentages(db):
     db.add(unpriced)
     await db.flush()
     db.add(TaxLot(
-        security_id=unpriced.id, open_date=date.today() - timedelta(days=200),
+        security_id=unpriced.id, open_date=utc_today() - timedelta(days=200),
         quantity=Decimal("10"), cost_basis=Decimal("500"),
         price_per_unit=Decimal("50"), currency="EUR",
         cost_basis_eur=Decimal("500"), is_open=True,
@@ -226,7 +227,7 @@ async def test_an_unpriced_holding_is_named_rather_than_silently_absent(db):
     db.add(unpriced)
     await db.flush()
     db.add(TaxLot(
-        security_id=unpriced.id, open_date=date.today() - timedelta(days=200),
+        security_id=unpriced.id, open_date=utc_today() - timedelta(days=200),
         quantity=Decimal("10"), cost_basis=Decimal("500"),
         price_per_unit=Decimal("50"), currency="EUR",
         cost_basis_eur=Decimal("500"), is_open=True,
@@ -263,7 +264,7 @@ async def test_a_portfolio_with_nothing_priced_still_reports_what_it_dropped(db)
     db.add(unpriced)
     await db.flush()
     db.add(TaxLot(
-        security_id=unpriced.id, open_date=date.today() - timedelta(days=200),
+        security_id=unpriced.id, open_date=utc_today() - timedelta(days=200),
         quantity=Decimal("10"), cost_basis=Decimal("500"),
         price_per_unit=Decimal("50"), currency="EUR",
         cost_basis_eur=Decimal("500"), is_open=True,

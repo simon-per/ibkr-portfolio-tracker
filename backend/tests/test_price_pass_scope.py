@@ -44,8 +44,9 @@ from app.services.market_data_service import (
     price_backoff_until,
 )
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
+from app.clock import utc_today
 
-TODAY = date.today()
+TODAY = utc_today()
 START = datetime(2026, 10, 5, 0, 0)  # naive UTC, like every stored stamp
 SHORT, LONG = 7, 730
 # Berlin's seven repricing slots, as one day of passes: six 7-day ones and the 18:00 one.

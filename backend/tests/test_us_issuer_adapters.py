@@ -25,6 +25,7 @@ from app.services.etf_basket_parsers import (
     parse_invesco,
     parse_vaneck,
 )
+from app.clock import utc_today
 
 SOXQ = "US46138G6153"      # its own CUSIP is 46138G615
 GRID = "US33737A1088"
@@ -476,8 +477,8 @@ def test_a_basket_dated_a_week_out_is_stale_for_a_daily_issuer():
     basket = parse_invesco(invesco_json([
         invesco_row("NVDA", "NVIDIA Corp", 100.0, "67066G104"),
         invesco_row("MU", "Micron Technology Inc", 0.0, "595112103"),
-    ], business=str(date.today() - timedelta(days=8))), SOXQ)
+    ], business=str(utc_today() - timedelta(days=8))), SOXQ)
 
     from app.services.lookthrough_service import stale_after_days
 
-    assert (date.today() - basket.as_of_date).days > stale_after_days(basket.adapter)
+    assert (utc_today() - basket.as_of_date).days > stale_after_days(basket.adapter)

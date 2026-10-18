@@ -16,6 +16,7 @@ from typing import Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ async def load_base_fx(
 
     from app.models.exchange_rate import ExchangeRate
 
-    today = date.today()
+    today = utc_today()
 
     async def load_cache() -> Dict[date, Decimal]:
         rows = (await db.execute(
@@ -112,4 +113,4 @@ async def load_base_fx(
 def default_start(earliest: Optional[date]) -> date:
     """The loader's window start when a book has no dated history yet: one year back,
     which is what `PortfolioService` has always used for an empty lot table."""
-    return earliest or (date.today() - timedelta(days=365))
+    return earliest or (utc_today() - timedelta(days=365))

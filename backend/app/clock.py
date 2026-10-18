@@ -26,7 +26,24 @@ sync timestamped in the future. Using this everywhere makes the naive-UTC
 invariant true by construction instead of by accident of the base image.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+
+
+def utc_today() -> date:
+    """
+    Today's date in UTC — the calendar day `utcnow()` falls in.
+
+    The stdlib's `date.today()` is the *local* date, with the same undeclared
+    dependency on the container's missing `TZ` as `now()`: on a Berlin machine it
+    is a day ahead of UTC from 00:00 to 02:00 in summer, so a cutoff built from it
+    disagrees with the naive-UTC dates and timestamps it is compared against.
+
+    A site that genuinely means another calendar — the ET day a Flex statement is
+    generated in, the Berlin day the crypto FX warm-up is bounded in — converts
+    `utcnow()` into that zone explicitly (`flex_generation.et_date`,
+    `crypto_service._berlin_day_start_utc`), never by asking the host.
+    """
+    return utcnow().date()
 
 
 def utcnow() -> datetime:

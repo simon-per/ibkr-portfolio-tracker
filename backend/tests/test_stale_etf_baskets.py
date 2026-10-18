@@ -27,6 +27,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.lookthrough_service import stale_after_days
 from app.services.scheduler_service import SchedulerService
+from app.clock import utc_today
 
 # Real registry entries, because the point of the detector is the registry's own rules.
 IWDA = "IE00B4L5Y983"      # blackrock, republishes daily -> 7-day expectation
@@ -71,7 +72,7 @@ async def _hold(db, security_id, isin, symbol, is_open=True):
 async def _basket(db, fund_isin, adapter, age_days, equity=Decimal("99")):
     db.add(EtfBasket(
         fund_isin=fund_isin,
-        as_of_date=date.today() - timedelta(days=age_days),
+        as_of_date=utc_today() - timedelta(days=age_days),
         as_of_is_issuer_stated=True,
         source="test", adapter=adapter,
         source_rows=100, stored_rows=100, skipped_rows=0,
@@ -187,7 +188,7 @@ async def test_a_borrowed_basket_is_judged_by_the_file_it_actually_came_from(db)
 
     # ...and a VT basket inside Vanguard's own cadence keeps VWCE quiet.
     fresh = await SchedulerService().find_stale_etf_baskets(
-        db, as_of=date.today() - timedelta(days=stale_after_days("vanguard_us") + 10)
+        db, as_of=utc_today() - timedelta(days=stale_after_days("vanguard_us") + 10)
     )
     assert fresh == []
 

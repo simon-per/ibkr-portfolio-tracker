@@ -29,6 +29,7 @@ from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.portfolio_service import PortfolioService
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +291,7 @@ class TaxService:
         # Switzerland values wealth at 31 December, so a past year must be reconstructed
         # at that date rather than reported as today's positions. For the current year
         # (no 31 Dec yet) today's snapshot is the right answer.
-        today = date.today()
+        today = utc_today()
         as_of = end if end < today else today
         holdings: List[Dict] = []
         holdings_total = Decimal("0")

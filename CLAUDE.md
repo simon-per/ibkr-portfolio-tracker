@@ -150,7 +150,8 @@ both copies keep working, they just stop agreeing. The catalogue is
 Each of these was a bug first; the file for the area has the story.
 
 - **Every stored timestamp is naive UTC and `app/clock.utcnow()` is the only way to make one.**
-  Never `datetime.now()`; `tests/test_clock_convention.py` walks the tree.
+  Never `datetime.now()`; today's date is `utc_today()`, never `date.today()`;
+  `tests/test_clock_convention.py` walks the tree.
 - **An unknown is absent, never a stand-in.** `None`/`null`, not `0`, not `100`, not a reassuring
   sentence. A `0.00` Sharpe and a `0%` concentration look like answers, which is what makes them
   dangerous.

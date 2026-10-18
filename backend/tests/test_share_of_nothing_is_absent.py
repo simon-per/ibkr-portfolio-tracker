@@ -26,6 +26,7 @@ from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.portfolio_service import PortfolioService
+from app.clock import utc_today
 
 START = date(2026, 3, 2)
 END = date(2026, 3, 31)
@@ -111,7 +112,7 @@ async def test_a_fully_sold_window_has_no_weights_not_zero_weights(db):
 @pytest.mark.asyncio
 async def test_a_zero_cost_position_has_no_gain_percent(db):
     await _sec(db, 5, cost="0")
-    _px(db, 5, date.today(), "10")
+    _px(db, 5, utc_today(), "10")
     await db.commit()
     service = PortfolioService(db)
     out = await service.get_current_portfolio_summary()

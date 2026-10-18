@@ -9,6 +9,7 @@ from app.repositories.sync_run_repository import utc_iso
 from app.schemas.portfolio import FundamentalsStatus
 from app.services.fundamentals_service import FundamentalsService
 from app.single_flight import (
+    PUBLIC_SYNC_COOLDOWN_SECONDS,
     SYNC_PIPELINE,
     SyncBusy,
     cooldown_remaining,
@@ -22,9 +23,9 @@ router = APIRouter()
 
 # A full pass is ~5 Yahoo calls per security across the whole portfolio, so a
 # poller that waits for each pass to finish before starting the next runs them
-# back to back indefinitely — is_running() only fences *overlapping* runs. Same
-# 300s as /sync-stale and the other bulk Yahoo routes.
-SYNC_COOLDOWN_SECONDS = 300
+# back to back indefinitely — is_running() only fences *overlapping* runs. Hence
+# PUBLIC_SYNC_COOLDOWN_SECONDS, the same fence as /sync-stale and the other bulk
+# Yahoo routes.
 
 
 async def _run_sync_background(force_refresh: bool) -> None:
@@ -32,7 +33,7 @@ async def _run_sync_background(force_refresh: bool) -> None:
     try:
         # The handler already answered, so the gate lives here, spanning the
         # actual Yahoo work rather than the enqueue.
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=SYNC_COOLDOWN_SECONDS):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             async with AsyncSessionLocal() as db:
                 try:
                     service = FundamentalsService(db)
@@ -53,7 +54,7 @@ async def sync_fundamentals(
         return {"status": "already_running", "message": "Fundamentals sync is already in progress"}
     # The gate below is what actually enforces this; checking it here too is so
     # the answer is honest rather than "started" for a run that gets dropped.
-    retry_after = cooldown_remaining(SYNC_PIPELINE, SYNC_COOLDOWN_SECONDS)
+    retry_after = cooldown_remaining(SYNC_PIPELINE, PUBLIC_SYNC_COOLDOWN_SECONDS)
     if retry_after:
         raise HTTPException(
             status_code=429,
@@ -75,7 +76,7 @@ async def sync_fundamentals(
 async def sync_stale_fundamentals(db: AsyncSession = Depends(get_db)):
     """Sync fundamentals that are stale or missing entirely — see the service."""
     try:
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=300):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             service = FundamentalsService(db)
             result = await service.sync_stale_fundamentals()
             return {"status": "success", **result}

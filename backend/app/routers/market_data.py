@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.market_data_service import MarketDataService
 from app.repositories.security_repository import SecurityRepository
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import PUBLIC_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def sync_market_data(
     try:
         # Shared pipeline gate: a full market sync is 50-150+ Yahoo requests, and
         # racing the scheduled jobs doubles that against an IP-based rate limit.
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=300):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             return await _sync_market_data_locked(days_back, db)
     except SyncBusy as e:
         raise HTTPException(

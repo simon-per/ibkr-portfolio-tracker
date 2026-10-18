@@ -26,6 +26,7 @@ from app.services.percentages import share_pct
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,13 @@ def _upstream_request(key: str, gate_held: bool = False):
 
 
 def last_finished_session(today: date) -> date:
-    """The last weekday before ``today`` — the newest session whose close is final."""
+    """
+    The last weekday before ``today`` — the newest session whose close is final.
+
+    Callers pass the UTC day (`utc_today()`), not an exchange-local one, on purpose:
+    every benchmark's exchange (Tokyo to New York) has closed by 24:00 UTC, so the
+    weekday before the UTC day is final everywhere at once.
+    """
     day = today - timedelta(days=1)
     while day.weekday() >= 5:
         day -= timedelta(days=1)
@@ -132,7 +139,7 @@ def _missing_business_days(
     missing = expected - cached
     if missing and cached:
         first_cached, last_cached = min(cached), max(cached)
-        holiday_cutoff = date.today() - timedelta(
+        holiday_cutoff = utc_today() - timedelta(
             days=MarketPriceRepository.HOLIDAY_GRACE_DAYS
         )
         missing = {
@@ -140,7 +147,7 @@ def _missing_business_days(
             if not (first_cached < d < last_cached and d < holiday_cutoff)
         }
     if refresh_provisional:
-        provisional_from = date.today() - timedelta(
+        provisional_from = utc_today() - timedelta(
             days=MarketPriceRepository.PROVISIONAL_PRICE_DAYS
         )
         missing |= {d for d in (expected & cached) if d >= provisional_from}

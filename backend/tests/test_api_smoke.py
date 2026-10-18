@@ -51,8 +51,9 @@ from app.models.security_logo import SecurityLogo
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.models.watchlist_item import WatchlistItem
+from app.clock import utc_today
 
-TODAY = date.today()
+TODAY = utc_today()
 START = TODAY - timedelta(days=200)
 SOLD_ON = TODAY - timedelta(days=40)
 

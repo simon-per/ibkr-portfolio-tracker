@@ -6,7 +6,13 @@ from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
 from app.services.ticker_isin import isins_by_yahoo_ticker
 from app.services.watchlist_service import WatchlistService
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import (
+    PUBLIC_SYNC_COOLDOWN_SECONDS,
+    SYNC_PIPELINE,
+    SyncBusy,
+    WATCHLIST_ADD_COOLDOWN_SECONDS,
+    single_flight,
+)
 from app.repositories.sync_run_repository import utc_iso
 from app.repositories.watchlist_repository import WatchlistRepository
 from app.schemas.portfolio import (
@@ -52,7 +58,7 @@ async def add_to_watchlist(
     # One service for the sync and the response, so the ticker index is built once.
     service = WatchlistService(db)
     try:
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=60):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=WATCHLIST_ADD_COOLDOWN_SECONDS):
             await service.sync_item(item.yahoo_ticker, force=True)
     except SyncBusy:
         pass
@@ -114,7 +120,7 @@ async def sync_watchlist(
 ):
     """Force refresh all watchlist items."""
     try:
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=300):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             service = WatchlistService(db)
             result = await service.sync_all(force=force)
             return result

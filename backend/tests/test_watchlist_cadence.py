@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 import app.services.watchlist_service as watchlist_module
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.database import Base
 from app.models.market_price import MarketPrice
 from app.models.security import Security
@@ -103,7 +103,7 @@ async def _hold(db, symbol, closes):
         quantity=Decimal("1"), cost_basis=Decimal("10"), price_per_unit=Decimal("10"),
         currency="USD", cost_basis_eur=Decimal("9"),
     ))
-    start = date.today() - timedelta(days=len(closes))
+    start = utc_today() - timedelta(days=len(closes))
     for i, close in enumerate(closes):
         db.add(MarketPrice(
             security_id=security.id, date=start + timedelta(days=i),

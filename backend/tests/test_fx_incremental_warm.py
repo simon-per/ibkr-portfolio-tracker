@@ -26,6 +26,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.models.security import Security
 from app.services import currency_service as cs
 from app.services.currency_service import CurrencyService
+from app.clock import utc_today
 
 # EUR -> X as the ECB publishes it (Frankfurter, 2026-10-16), answered for every weekday.
 ECB = {"USD": "1.1253", "CHF": "0.9272", "JPY": "177.82", "KRW": "1499.01",
@@ -225,7 +226,7 @@ async def test_a_history_short_of_the_window_gets_the_whole_window_once(monkeypa
 
 @pytest.mark.asyncio
 async def test_an_outage_still_falls_through_to_the_fallback(monkeypatch, session):
-    today = date.today()
+    today = utc_today()
     at(datetime.combine(today, time(18, 0)), monkeypatch)
     calls = install_http(monkeypatch, frankfurter_status=503)
 
@@ -319,7 +320,7 @@ async def test_the_sync_makes_one_frankfurter_request_and_then_none(monkeypatch,
 
     monkeypatch.setattr(sched_mod, "AsyncSessionLocal",
                         async_sessionmaker(engine, expire_on_commit=False))
-    at(datetime.combine(date.today(), time(20, 0)), monkeypatch)
+    at(datetime.combine(utc_today(), time(20, 0)), monkeypatch)
     calls = install_http(monkeypatch)
     async with AsyncSession(engine) as db:
         db.add(Security(id=1, isin="US0378331005", symbol="AAPL", description="Apple",

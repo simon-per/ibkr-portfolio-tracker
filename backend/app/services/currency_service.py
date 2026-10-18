@@ -12,7 +12,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.models.exchange_rate import ExchangeRate
 from app.services.fx_policy import CARRIED_SUFFIX, FX_MAX_CARRY_DAYS, published_rows
 
@@ -527,7 +527,7 @@ class CurrencyService:
         not an outage, and a pair the next slot brings current never appears. A pair
         Frankfurter cannot serve is judged on its fallback rows.
         """
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
         cutoff = self._last_ecb_publication_day(as_of)
         for _ in range(publication_days - 1):
             cutoff = self._last_ecb_publication_day(cutoff - timedelta(days=1))
@@ -636,7 +636,7 @@ class CurrencyService:
         Never raises: like _batch_fetch_rates it simply leaves the cache unpopulated,
         and get_exchange_rate() decides what that means.
         """
-        age = abs((date.today() - target_date).days)
+        age = abs((utc_today() - target_date).days)
         if age > self.FALLBACK_MAX_AGE_DAYS:
             logger.warning(
                 f"No historical rate available for {from_currency} on {target_date}: "
@@ -694,7 +694,7 @@ class CurrencyService:
         Never raises: a provider being down degrades the warm-up, it must not fail the
         sync that called it.
         """
-        target_date = target_date or date.today()
+        target_date = target_date or utc_today()
         wanted = {c.strip().upper() for c in currencies if c and c.strip()}
         wanted.discard(to_currency)
 

@@ -3,7 +3,6 @@ Settings Router
 Read/update application-level settings, notably the portfolio's base (display) currency.
 """
 import logging
-from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -21,6 +20,7 @@ from app.repositories.app_settings_repository import (
 )
 from app.services.base_fx import default_start, load_base_fx
 from app.services.currency_service import CurrencyService
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ async def update_base_currency(
         start = default_start(min_open)
         currency_service = CurrencyService(db)
         try:
-            today = date.today()
+            today = utc_today()
             await currency_service._batch_fetch_rates(
                 from_currency="EUR",
                 target_date=today,

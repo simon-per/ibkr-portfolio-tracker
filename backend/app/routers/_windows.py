@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
+from app.clock import utc_today
 
 MAX_WINDOW_DAYS = 365 * 5
 DEFAULT_WINDOW_DAYS = 365
@@ -66,7 +67,7 @@ def default_window(
     `end_date` is range-checked before the default start is derived from it, so the
     subtraction itself cannot overflow.
     """
-    end_date = end_date or date.today()
+    end_date = end_date or utc_today()
     _check_in_range("end_date", end_date)
     start_date = start_date or (end_date - timedelta(days=DEFAULT_WINDOW_DAYS))
     validate_window(start_date, end_date, allow_same_day=True)

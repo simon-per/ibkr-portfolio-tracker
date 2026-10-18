@@ -45,8 +45,9 @@ from app.schemas.lookthrough import (
 )
 from app.services.allocation_service import AllocationService
 from app.services.lookthrough_service import LookthroughService
+from app.clock import utc_today
 
-TODAY = date.today()
+TODAY = utc_today()
 
 ALPHABET_LEI = "5493006MHB84DD0ZWV18"          # verified: both share classes return it
 ALPHABET_A_ISIN = "US02079K3059"               # GOOGL and ABEA

@@ -18,7 +18,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.etf_mappings import is_known_etf_isin
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -836,7 +836,7 @@ class DividendService:
 
         conid_map = {str(k): v for k, v in conid_to_security_id.items()}
         fx = await self._latest_fx_to_eur(
-            {a.get("currency") for a in accruals if a.get("currency")}, date.today()
+            {a.get("currency") for a in accruals if a.get("currency")}, utc_today()
         )
 
         rows: List[Dict] = []
@@ -2029,7 +2029,7 @@ class DividendService:
         a future one, in which case the whole year is forecast. ``as_of`` is
         injectable purely so tests can pin the forecast horizon.
         """
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
         net_factor = await AppSettingsRepository(self.db).get_dividend_net_factor()
         if period is not None and (period != "24m" or year is not None):
             raise ValueError("Choose either a year or period='24m'")

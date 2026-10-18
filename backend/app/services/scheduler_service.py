@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date, timedelta
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 
 from app.config import settings
 from app.database import AsyncSessionLocal
@@ -698,7 +698,7 @@ class SchedulerService:
         if base != "EUR":
             pairs.append(("EUR", base))
 
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
         stale = await CurrencyService(db).stale_pairs(
             pairs, FX_STALE_PUBLICATION_DAYS, as_of=as_of,
         )
@@ -723,7 +723,7 @@ class SchedulerService:
         Returns human-readable strings, ready for `warnings[]`, so the dashboard and
         `/api/scheduler/history` surface them without needing to know the shape.
         """
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
         cutoff = as_of - timedelta(days=STALE_PRICE_DAYS)
         manual_cutoff = as_of - timedelta(days=MANUAL_PRICE_STALE_DAYS)
 
@@ -1153,7 +1153,7 @@ class SchedulerService:
                 # rate every day. Warming them costs one extra request for the whole set,
                 # and it is what lets a position in a new currency be valued from the day
                 # its statement lands rather than from the day we happen to notice.
-                today = date.today()
+                today = utc_today()
 
                 # And the currencies a market cap is quoted in (`market_cap.py`): every
                 # read converts them from the cache only, so they must be in it.
@@ -1246,7 +1246,7 @@ class SchedulerService:
                 }
 
                 bench_service = BenchmarkService(db)
-                end = last_finished_session(date.today())
+                end = last_finished_session(utc_today())
                 start = end - timedelta(days=7)
                 fetched = 0
                 written = 0

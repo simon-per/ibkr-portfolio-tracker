@@ -2,7 +2,7 @@
 Security Repository
 Handles database operations for Securities.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import List, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.clock import utc_today
 
 
 def held(closed_within_days: Optional[int] = None) -> ColumnElement[bool]:
@@ -28,7 +29,7 @@ def held(closed_within_days: Optional[int] = None) -> ColumnElement[bool]:
     """
     lots = TaxLot.is_open == True  # noqa: E712 — SQL comparison
     if closed_within_days is not None:
-        lots = or_(lots, TaxLot.close_date >= date.today() - timedelta(days=closed_within_days))
+        lots = or_(lots, TaxLot.close_date >= utc_today() - timedelta(days=closed_within_days))
     return Security.id.in_(select(TaxLot.security_id).where(lots))
 
 

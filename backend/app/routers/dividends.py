@@ -13,7 +13,13 @@ from app.schemas.portfolio import (
     DividendSummaryResponse,
 )
 from app.services.dividend_service import DividendService
-from app.single_flight import SYNC_PIPELINE, SyncBusy, cooldown_remaining, single_flight
+from app.single_flight import (
+    PUBLIC_SYNC_COOLDOWN_SECONDS,
+    SYNC_PIPELINE,
+    SyncBusy,
+    cooldown_remaining,
+    single_flight,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +30,9 @@ _sync_in_progress = False
 # A full pass is one Yahoo call per non-fresh security across the whole portfolio, so
 # a poller that waits for `_sync_in_progress` to clear and POSTs again runs passes
 # back to back indefinitely against an IP-based limit — the flag fences only
-# *overlapping* runs. Same 300s as the fundamentals, ratings and watchlist routes;
-# this was the one bulk Yahoo route without it.
-SYNC_COOLDOWN_SECONDS = 300
+# *overlapping* runs. Hence PUBLIC_SYNC_COOLDOWN_SECONDS, the same fence as the
+# fundamentals, ratings and watchlist routes; this was the one bulk Yahoo route
+# without it.
 
 # The summary enqueues a pass only while `needs_dividend_check` selects a security —
 # the loop's own predicate — and no more often than this. The interval is a backstop
@@ -47,7 +53,7 @@ async def _run_dividend_sync_background() -> None:
     """
     global _sync_in_progress
     try:
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=SYNC_COOLDOWN_SECONDS):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             _sync_in_progress = True
             try:
                 async with AsyncSessionLocal() as db:
@@ -131,7 +137,7 @@ async def sync_dividends(background_tasks: BackgroundTasks):
         return {"status": "already_running", "message": "Dividend sync is already in progress"}
     # The gate in the background task is what enforces this; checking here too is so
     # the answer is honest rather than "started" for a run the gate then drops.
-    retry_after = cooldown_remaining(SYNC_PIPELINE, SYNC_COOLDOWN_SECONDS)
+    retry_after = cooldown_remaining(SYNC_PIPELINE, PUBLIC_SYNC_COOLDOWN_SECONDS)
     if retry_after:
         raise HTTPException(
             status_code=429,

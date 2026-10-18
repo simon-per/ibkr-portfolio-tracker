@@ -68,6 +68,17 @@ value raises `TypeError` rather than degrading. `tests/test_clock_convention.py`
 so the old call cannot return, and asserts against real UTC rather than local — the assertion that
 passes vacuously on the container and catches the bug everywhere else.
 
+**Today's date is `app.clock.utc_today()`, never `date.today()`** (issue #45). `date.today()` is the
+host's local date — the same missing-`TZ` dependency, a day ahead of UTC from 00:00 to 02:00 on a
+Berlin machine in summer — and it sat at 34 sites beside `utcnow().date()` at seven, so one cutoff
+could be built from two calendars. `tests/test_clock_convention.py` bans `date.today(` under `app/`;
+the tests seed with `utc_today()` too, so they agree with the code around local midnight. A site that
+genuinely means another calendar converts `utcnow()` into that zone explicitly — the ET day of a Flex
+generation (`flex_generation.et_date`), the Berlin day the crypto FX warm-up is bounded in
+(`crypto_service._berlin_day_start_utc`). None of the 34 replaced sites needed one: the closest,
+`last_finished_session`, takes the UTC day because every benchmark's exchange (Tokyo to New York) has
+closed by 24:00 UTC, so the weekday before the UTC day is final everywhere.
+
 Migrations: `cd backend && alembic upgrade head` (the container CMD runs this on every start).
 
 ---

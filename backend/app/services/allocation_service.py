@@ -4,8 +4,8 @@ Allocation service for fetching and caching sector/geographic data for securitie
 import asyncio
 import logging
 import random
-from datetime import date, datetime, timedelta
-from app.clock import utcnow
+from datetime import datetime, timedelta
+from app.clock import utc_today, utcnow
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select
@@ -307,7 +307,7 @@ class AllocationService:
         # The read Look-through shares (`CashService.uninvested_cash`), so the two tabs
         # cannot disagree about what joins the denominator.
         cash = await CashService(self.db).uninvested_cash(
-            await portfolio_service._load_base_fx(), date.today()
+            await portfolio_service._load_base_fx(), utc_today()
         )
         cash_source = cash.source
         # 0.0 on the wire when unknown, as before; `cash_source` says which zero it is.

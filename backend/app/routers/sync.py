@@ -14,7 +14,7 @@ from app.database import get_db
 from app.redact import redact_secrets
 from app.services.flex_generation import generation_already_spent, next_generation_opens_at
 from app.services.ibkr_service import IBKRService
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import IBKR_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
 from app.services.sync_helper import ingest_flex_statement
 from app.repositories.security_repository import SecurityRepository
 from app.repositories.taxlot_repository import TaxLotRepository
@@ -76,7 +76,7 @@ async def sync_ibkr_data(force: bool = False, db: AsyncSession = Depends(get_db)
     try:
         # Shared pipeline gate + cooldown: this route is public and one Flex
         # round is several requests against a 10/min token budget.
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=120):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=IBKR_SYNC_COOLDOWN_SECONDS):
             return await _sync_ibkr_locked(db, started_at)
     except SyncBusy as e:
         raise HTTPException(

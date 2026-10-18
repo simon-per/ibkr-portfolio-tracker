@@ -78,6 +78,7 @@ from app.services.lookthrough_service import (
     fetch_after_days,
     stale_after_days,
 )
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ async def stale_basket_verdicts(
       fund with no basket that *does* have a route is reported, because that is what a newly
       bought fund looks like and one evening clears it.
     """
-    as_of = as_of or date.today()
+    as_of = as_of or utc_today()
     fund_isins = await _held_fund_isins(db)
     if not fund_isins:
         return []
@@ -274,7 +275,7 @@ async def refresh_stale_baskets(
     fetch = fetch or fetch_bodies
     parse = parse or parse_bodies
 
-    as_of = as_of or date.today()
+    as_of = as_of or utc_today()
     verdicts = await stale_basket_verdicts(db, as_of)
     result: Dict = {
         "status": "success",

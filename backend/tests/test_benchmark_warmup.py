@@ -31,8 +31,9 @@ from app.services.benchmark_service import (
 from app.services.currency_service import CurrencyService
 from app.services.scheduler_service import SchedulerService
 from app.single_flight import SYNC_PIPELINE, is_running, single_flight
+from app.clock import utc_today
 
-SESSION = last_finished_session(date.today())
+SESSION = last_finished_session(utc_today())
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +159,7 @@ async def test_the_request_ends_at_the_last_finished_session(db, yahoo):
     # yfinance's `end` is exclusive: the last day asked for is the day before it.
     last_day_asked = date.fromisoformat(kwargs["end"]) - timedelta(days=1)
     assert last_day_asked == SESSION
-    assert last_day_asked < date.today()
+    assert last_day_asked < utc_today()
 
 
 @pytest.mark.asyncio

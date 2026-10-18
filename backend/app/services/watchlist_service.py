@@ -1,6 +1,6 @@
 from typing import Dict, Optional, List
-from datetime import date, timedelta
-from app.clock import utcnow
+from datetime import timedelta
+from app.clock import utc_today, utcnow
 import logging
 import yfinance as yf
 import random
@@ -269,7 +269,7 @@ class WatchlistService:
             select(MarketPrice.close_price)
             .where(
                 MarketPrice.security_id == security_id,
-                MarketPrice.date >= date.today() - timedelta(days=365),
+                MarketPrice.date >= utc_today() - timedelta(days=365),
             )
             .order_by(MarketPrice.date)
         )).scalars().all()

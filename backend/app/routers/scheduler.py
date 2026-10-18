@@ -16,7 +16,13 @@ from app.services.scheduler_service import (
     STOCK_JOB_GROUP,
     get_scheduler,
 )
-from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
+from app.single_flight import (
+    PUBLIC_SYNC_COOLDOWN_SECONDS,
+    SYNC_PIPELINE,
+    SyncBusy,
+    is_running,
+    single_flight,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +70,7 @@ async def trigger_sync_now():
     try:
         # Own cooldown on top of the pipeline gate: this endpoint is public and
         # runs the heaviest job there is (IBKR + 730d Yahoo + dividends).
-        with single_flight("manual-trigger", cooldown_seconds=300):
+        with single_flight("manual-trigger", cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             scheduler = get_scheduler()
             result = await scheduler.trigger_sync_now()
         return redact_secrets(result)

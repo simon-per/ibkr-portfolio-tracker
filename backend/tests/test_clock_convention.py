@@ -17,12 +17,12 @@ coming back.
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
@@ -32,6 +32,10 @@ NAIVE_LOCAL_NOW = re.compile(r"\bdatetime\.now\(\s*\)")
 # Deprecated since 3.12 and returns a naive value whose UTC-ness is invisible at
 # the call site; `utcnow()` says it in the name.
 DEPRECATED_UTCNOW = re.compile(r"\bdatetime\.utcnow\(")
+# The local *date*, with the same missing-`TZ` dependency as `now()`: a day ahead of
+# UTC from 00:00 to 02:00 on a Berlin machine in summer (issue #45). A site that means
+# an exchange-local or Berlin day converts `utcnow()` into that zone explicitly.
+LOCAL_TODAY = re.compile(r"\bdate\.today\(")
 
 
 def _python_sources() -> list[Path]:
@@ -69,13 +73,23 @@ def test_utcnow_is_not_local_time_unless_the_host_is_utc():
     assert abs((utcnow() - naive_local).total_seconds()) > 60
 
 
+def test_utc_today_is_the_utc_calendar_day():
+    """The UTC date, not the host's: brackets the call so a midnight tick cannot flake."""
+    before = datetime.now(timezone.utc).date()
+    today = utc_today()
+    after = datetime.now(timezone.utc).date()
+    assert type(today) is date
+    assert before <= today <= after
+
+
 @pytest.mark.parametrize(
     "pattern,replacement",
     [
         (NAIVE_LOCAL_NOW, "app.clock.utcnow()"),
         (DEPRECATED_UTCNOW, "app.clock.utcnow()"),
+        (LOCAL_TODAY, "app.clock.utc_today()"),
     ],
-    ids=["datetime.now()", "datetime.utcnow()"],
+    ids=["datetime.now()", "datetime.utcnow()", "date.today()"],
 )
 def test_no_module_reaches_for_a_local_or_deprecated_clock(pattern, replacement):
     offenders = []

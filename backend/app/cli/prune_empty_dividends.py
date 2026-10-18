@@ -35,7 +35,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date
 from app.clock import utcnow
 from typing import Optional
 
@@ -46,7 +46,7 @@ from app.logging_setup import configure_logging
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
 from app.repositories.sync_run_repository import SyncRunRepository
-from app.services.dividend_service import PRE_OWNERSHIP_HISTORY_YEARS, DividendService
+from app.services.dividend_service import DividendService, pre_ownership_cutoff
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +97,10 @@ async def prune(dry_run: bool) -> int:
                 .order_by(DividendPayment.ex_date.asc())
             )).all())
 
-            # Same cutoff the ingest applies, per security: first lot minus the
-            # deliberately-retained pre-ownership history.
+            # The cutoff the ingest applies, per security — the same function, so a row
+            # this deletes is never one the next sync would re-ingest.
             first_lot = await DividendService(db)._first_lot_dates()
-            lookback = timedelta(days=365 * PRE_OWNERSHIP_HISTORY_YEARS)
-            keep_from = {sid: d - lookback for sid, d in first_lot.items()}
+            keep_from = {sid: pre_ownership_cutoff(d) for sid, d in first_lot.items()}
 
             empty = [(p, s) for p, s in rows if _is_empty(p, keep_from.get(p.security_id))]
             pending = sum(1 for p, _ in rows if p.shares_held is None)

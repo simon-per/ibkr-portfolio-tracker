@@ -33,6 +33,7 @@ from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services import currency_service as cs
 from app.services import scheduler_service as sched_mod
+from app.clock import utc_today
 
 CARRIED = f"frankfurter{cs.CurrencyService.CARRIED_SUFFIX}"
 
@@ -78,7 +79,7 @@ async def engine():
 def offline(monkeypatch, engine):
     monkeypatch.setattr(sched_mod, "AsyncSessionLocal",
                         async_sessionmaker(engine, expire_on_commit=False))
-    monkeypatch.setattr(cs, "utcnow", lambda: datetime.combine(date.today(), time(20, 0)))
+    monkeypatch.setattr(cs, "utcnow", lambda: datetime.combine(utc_today(), time(20, 0)))
     monkeypatch.setattr(cs.httpx, "AsyncClient", lambda *a, **k: _BothProvidersDown())
     return engine
 
@@ -86,7 +87,7 @@ def offline(monkeypatch, engine):
 def publication_day(missed: int) -> date:
     """The ECB publication day `missed` publication days before the latest one."""
     service = cs.CurrencyService(None)
-    day = service._last_ecb_publication_day(date.today())
+    day = service._last_ecb_publication_day(utc_today())
     for _ in range(missed):
         day = service._last_ecb_publication_day(day - timedelta(days=1))
     return day
@@ -144,8 +145,8 @@ async def test_a_stale_held_currency_warns_in_every_job(offline, monkeypatch, jo
     stale = publication_day(sched_mod.FX_STALE_PUBLICATION_DAYS)
     await seed(offline,
                ("USD", "EUR", stale, "frankfurter"),
-               ("USD", "EUR", date.today() - timedelta(days=1), cs.CurrencyService.FALLBACK_SOURCE),
-               ("USD", "EUR", date.today(), CARRIED))
+               ("USD", "EUR", utc_today() - timedelta(days=1), cs.CurrencyService.FALLBACK_SOURCE),
+               ("USD", "EUR", utc_today(), CARRIED))
     svc = sched_mod.SchedulerService()
     recorded = []
     stub_steps(monkeypatch, svc, recorded)
@@ -204,7 +205,7 @@ async def test_a_non_ecb_held_currency_is_judged_on_its_fallback_rows(offline):
         await db.commit()
     await seed(offline,
                ("USD", "EUR", publication_day(0), "frankfurter"),
-               ("TWD", "EUR", date.today(), cs.CurrencyService.FALLBACK_SOURCE))
+               ("TWD", "EUR", utc_today(), cs.CurrencyService.FALLBACK_SOURCE))
 
     async with AsyncSession(offline) as db:
         assert await sched_mod.SchedulerService().find_stale_exchange_rates(db) == []

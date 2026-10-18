@@ -23,6 +23,7 @@ from app.models.corporate_action import CorporateAction
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.services.tax_service import TaxService
+from app.clock import utc_today
 
 
 async def _make_session():
@@ -207,9 +208,9 @@ async def test_holdings_snapshot_uses_today_for_the_current_year():
         ))
         await session.commit()
 
-        report = await TaxService(session).get_tax_report(date.today().year)
+        report = await TaxService(session).get_tax_report(utc_today().year)
 
-        assert report["holdings_as_of"] == date.today().isoformat()
+        assert report["holdings_as_of"] == utc_today().isoformat()
         assert "current year" in report["holdings_snapshot_note"]
     finally:
         await session.close()

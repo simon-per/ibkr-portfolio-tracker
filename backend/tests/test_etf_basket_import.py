@@ -44,11 +44,12 @@ from app.services.etf_basket_parsers import (
     parse_ishares,
     parse_vanguard_us,
 )
+from app.clock import utc_today
 
 XNAS = "IE00BMFKG444"
 SXR8 = "IE00B5BMR087"
 VT = "US9220427424"
-TODAY = date.today()
+TODAY = utc_today()
 
 DWS_HEADER = (
     "ShareClass ISIN;Constituent ISIN;Constituent Name;Constituent Country;"

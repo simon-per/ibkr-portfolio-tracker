@@ -255,9 +255,11 @@ toward the old 15, and the CLI's own docstring claimed it "deletes only rows the
 ignore" — true when written, false once the forecast became a reader of them. Prune is now
 additionally bounded by **the ingest window it should always have mirrored**: a row goes only when it
 is older than `PRE_OWNERSHIP_HISTORY_YEARS` before the security's first lot, i.e. exactly what
-`sync_dividend_data` would no longer create. A security with **no lots** is left entirely alone,
-since there is no cutoff to infer. Rows awaiting computation
-(`shares_held IS NULL`) are still never touched. Tests:
+`sync_dividend_data` would no longer create — computed by **calling `pre_ownership_cutoff`**, the
+ingest's own function, not by re-deriving it (the CLI had a hand-written copy until issue #45;
+`tests/test_pre_ownership_cutoff_family.py` fails any other module multiplying the constant). A
+security with **no lots** is left entirely alone, since there is no cutoff to infer. Rows awaiting
+computation (`shares_held IS NULL`) are still never touched. Tests:
 `tests/test_prune_preserves_forecast_basis.py`.
 
 ### The Yahoo pass — each holding at most once a month; new ex-dates ride the price pass

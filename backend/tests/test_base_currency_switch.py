@@ -12,7 +12,6 @@ The rate provider is always replaced here: the real `_batch_fetch_rates` calls
 Frankfurter, and a test must never reach the network.
 """
 import asyncio
-from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -29,6 +28,7 @@ from app.models.app_settings import AppSetting
 from app.models.exchange_rate import ExchangeRate
 from app.services.currency_service import CurrencyService
 from app.main import app
+from app.clock import utc_today
 
 TOKEN = "test-admin-token-long-enough"
 AUTH = {API_KEY_HEADER: TOKEN}
@@ -74,7 +74,7 @@ def env(monkeypatch):
 
     def seed_rate(to_currency, on=None):
         session.add(ExchangeRate(
-            date=on or date.today(), from_currency="EUR",
+            date=on or utc_today(), from_currency="EUR",
             to_currency=to_currency, rate=Decimal("1.08"),
         ))
         loop.run_until_complete(session.commit())

@@ -36,6 +36,7 @@ from app.models.trade import Trade
 from app.services.cash_service import CashService, DERIVED, MEASURED, MIXED, UNKNOWN
 from app.services.portfolio_service import BaseFx, PortfolioService
 from app.services.sync_helper import resolve_cash_balances
+from app.clock import utc_today
 
 EUR = BaseFx("EUR", {})
 
@@ -370,7 +371,7 @@ async def test_the_summary_total_is_holdings_plus_cash():
         session.add(_trade(date(2026, 1, 5), "T1", "-600"))
         session.add(_lot(date(2026, 1, 5), "600"))
         session.add(MarketPrice(
-            security_id=1, date=date.today(), close_price=Decimal("70"),
+            security_id=1, date=utc_today(), close_price=Decimal("70"),
             currency="EUR", source="test",
         ))
         await session.flush()

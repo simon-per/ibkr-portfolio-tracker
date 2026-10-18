@@ -1103,8 +1103,15 @@ guard's window can be killed by a deploy; slots are an hour or more apart, so a 
 meets the next one, and `max_instances=1` simply counts the wait as the running instance
 (`misfire_grace_time` governs only the start). It polls `is_running` rather than retrying
 `single_flight`, so a `SyncBusy` raised inside the job never re-runs it. Tests:
-`tests/test_scheduled_job_waits_for_gate.py`. The public routes add cooldowns (ibkr 120s; market-data / trigger / fundamentals /
-ratings / allocation / watchlist / dividends 300s) and answer **429 with `Retry-After`**. In-process by design —
+`tests/test_scheduled_job_waits_for_gate.py`. The public routes add cooldowns and answer **429 with
+`Retry-After`**. **Every cooldown is a named constant in `app/single_flight.py`, never a number in a
+router:** `PUBLIC_SYNC_COOLDOWN_SECONDS` (300s — market-data / trigger / fundamentals / ratings /
+allocation / watchlist sync / dividends), and the two that differ on purpose, each with its reason
+beside it: `IBKR_SYNC_COOLDOWN_SECONDS` (120s) and `WATCHLIST_ADD_COOLDOWN_SECONDS` (60s). The crypto
+book's manual gate keeps its own `MANUAL_COOLDOWN_SECONDS` in `crypto_service` (a different gate and
+upstream). The 300 was once nine copies, two of them same-named constants in different routers (issue
+#45); `tests/test_sync_cooldown_family.py` fails a literal cooldown, or a router-defined
+`*COOLDOWN_SECONDS`, anywhere under `app/routers`. In-process by design —
 single uvicorn worker, and the check-and-set has no `await` between test and set. A backgrounded route
 (fundamentals `/sync`) checks `is_running()` in the handler and holds the lock inside the task, so the
 gate spans the actual work rather than the enqueue. **`POST /api/watchlist` (add) is gated too** (60s

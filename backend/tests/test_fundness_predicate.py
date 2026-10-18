@@ -21,7 +21,7 @@ sector chart.
 Offline: no Yahoo, no network.
 """
 import ast
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -41,6 +41,7 @@ from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.allocation_service import AllocationService
+from app.clock import utc_today
 
 VT_ISIN = "US9220427424"          # a real row in the table
 NOT_A_FUND = "US0000000009"       # same ticker, different instrument
@@ -72,13 +73,13 @@ async def _hold(db, symbol, isin, conid, sector=None, country=None):
     db.add(security)
     await db.flush()
     db.add(TaxLot(
-        security_id=security.id, open_date=date.today() - timedelta(days=100),
+        security_id=security.id, open_date=utc_today() - timedelta(days=100),
         quantity=Decimal("10"), cost_basis=Decimal("1000"),
         price_per_unit=Decimal("100"), currency="EUR",
         cost_basis_eur=Decimal("1000"), is_open=True,
     ))
     db.add(MarketPrice(
-        security_id=security.id, date=date.today(), close_price=Decimal("100"),
+        security_id=security.id, date=utc_today(), close_price=Decimal("100"),
         currency="EUR", source="test",
     ))
     await db.flush()

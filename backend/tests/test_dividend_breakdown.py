@@ -21,6 +21,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import DividendService
+from app.clock import utc_today
 
 AS_OF = date(2026, 5, 1)
 
@@ -80,7 +81,7 @@ def _price(security_id, close):
     A cached close, for the yield denominators.
 
     Dated **today** rather than at this module's `AS_OF`, and that is not an oversight:
-    `get_positions_breakdown()` hardcodes `date.today()` (`portfolio_service.py`) and
+    `get_positions_breakdown()` hardcodes `utc_today()` (`portfolio_service.py`) and
     ignores the `as_of` the dividend service is given, with only a 14-day lookback. A
     price seeded at `AS_OF` is therefore invisible and every yield comes back `None` —
     which no assertion explains, so it is worth saying once here. Nothing in this file
@@ -88,7 +89,7 @@ def _price(security_id, close):
     actually been exercised.
     """
     return MarketPrice(
-        security_id=security_id, date=date.today(), close_price=Decimal(close),
+        security_id=security_id, date=utc_today(), close_price=Decimal(close),
         currency="EUR", source="test",
     )
 

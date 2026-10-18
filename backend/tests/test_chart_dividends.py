@@ -23,7 +23,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 import app.services.dividend_service as ds
 import app.services.market_data_service as mds
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.database import Base
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
@@ -32,7 +32,7 @@ from app.models.ticker_mapping import TickerMapping
 from app.services.dividend_service import DIVIDENDS_RECHECK_AFTER, DividendService
 from app.services.market_data_service import MarketDataService
 
-TODAY = date.today()
+TODAY = utc_today()
 FIRST_LOT = date(2025, 6, 2)  # pre-ownership cutoff: three years before, 2022-06-03
 
 

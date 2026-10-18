@@ -33,6 +33,7 @@ from app.models.taxlot import TaxLot
 from app.models.market_price import MarketPrice
 from app.services.portfolio_service import PortfolioService
 from app.services.tax_service import TaxService
+from app.clock import utc_today
 
 YEAR = 2026
 AS_OF = date(YEAR, 12, 31)
@@ -74,7 +75,7 @@ async def _holding(db, *, symbol, isin, conid, priced: bool, currency="EUR"):
         # year at `today` (a year still running has no year-end close yet) and a past
         # year at 31 December, so a fixture pinned to one of them silently exercises
         # the wrong path.
-        for anchor in (AS_OF, date.today()):
+        for anchor in (AS_OF, utc_today()):
             for offset in (0, 1, 2):
                 db.add(MarketPrice(
                     security_id=security.id, date=anchor - timedelta(days=offset),

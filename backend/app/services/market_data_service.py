@@ -13,7 +13,7 @@ import random
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.config import settings
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
@@ -707,7 +707,7 @@ class MarketDataService:
             return 0
 
         if not end_date:
-            end_date = date.today()
+            end_date = utc_today()
 
         if not start_date:
             start_date = end_date - timedelta(days=365)
@@ -756,7 +756,7 @@ class MarketDataService:
         ):
             # The free tier's `compact` reaches ~100 trading days back; an older gap is
             # beyond it, and `full` is premium-only, so the call would be spent for nothing.
-            if (date.today() - min(missing_dates)).days > ALPHA_VANTAGE_COMPACT_REACH_DAYS:
+            if (utc_today() - min(missing_dates)).days > ALPHA_VANTAGE_COMPACT_REACH_DAYS:
                 logger.info(
                     f"Not asking Alpha Vantage for {security.symbol}: the gap starts "
                     f"{min(missing_dates)}, beyond what its free tier serves"
@@ -906,7 +906,7 @@ class MarketDataService:
             )
             .order_by(MarketPrice.date.asc())
         )).scalars().all())
-        end_date = date.today()
+        end_date = utc_today()
         anchors = [r for r in statement_rows if r.date <= end_date]
         if not anchors:
             raise ValueError(
@@ -1048,7 +1048,7 @@ class MarketDataService:
 
         held_ids, recent_ids, spans = await self._price_scope(securities)
         long_pass = days_back > SOLD_PRICE_GRACE_DAYS
-        window_start = date.today() - timedelta(days=days_back)
+        window_start = utc_today() - timedelta(days=days_back)
         now = utcnow()
 
         plan = []
@@ -1185,9 +1185,9 @@ class MarketDataService:
             act on. The docstring already promised writes; now it tells the truth. A
             warm cache legitimately returns 0 and no caller treats that as a failure.
         """
-        start_date = date.today() - timedelta(days=days_back)
+        start_date = utc_today() - timedelta(days=days_back)
 
         return await self.fetch_and_cache_prices(
-            security, start_date, end_date or date.today(),
+            security, start_date, end_date or utc_today(),
             refresh_provisional=refresh_provisional,
         )

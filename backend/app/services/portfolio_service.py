@@ -29,6 +29,7 @@ from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
 from app.services.sync_helper import POSITION_CREATING_ACTIONS
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -467,7 +468,7 @@ class PortfolioService:
         """
         Get current portfolio summary with latest values.
         """
-        today = date.today()
+        today = utc_today()
 
         base_fx = await self._load_base_fx()
 
@@ -719,7 +720,7 @@ class PortfolioService:
         question being asked is not history, and without the clamp that identity holds
         only when no row is future-dated.
         """
-        as_of = as_of or date.today()
+        as_of = as_of or utc_today()
         base_fx = await self._load_base_fx()
 
         inputs = await self._contribution_inputs(base_fx)
@@ -1197,7 +1198,7 @@ class PortfolioService:
         """
         Get breakdown of all current positions by security.
         """
-        today = date.today()
+        today = utc_today()
 
         # Get all open taxlots grouped by security
         result = await self.db.execute(

@@ -56,6 +56,7 @@ from app.services.cash_service import CashService, UninvestedCash
 from app.services.company_identity import IdentityMember, company_groups
 from app.services.etf_basket_parsers import counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ class LookthroughService:
         from app.services.portfolio_service import PortfolioService
 
         limit = max(1, min(int(limit), COMPANY_LIMIT_MAX))
-        today = date.today()
+        today = utc_today()
 
         portfolio_service = PortfolioService(self.db)
         positions = await portfolio_service.get_positions_breakdown()

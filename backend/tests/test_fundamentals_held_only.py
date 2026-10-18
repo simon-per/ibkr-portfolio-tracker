@@ -9,7 +9,7 @@ predicate, `security_repository.held`: at least one open lot, in any account.
 
 Offline: nothing here syncs, so yfinance is never reached.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,7 +17,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.earnings_event import EarningsEvent
@@ -46,8 +46,8 @@ async def db():
             id=sid, isin=f"US000000000{sid}", symbol=symbol, description=symbol,
             currency="USD", conid=sid, asset_category="STK", exchange="NASDAQ",
         ))
-    opened = date.today() - timedelta(days=400)
-    for sid, closed in ((HELD, None), (SOLD, date.today() - timedelta(days=90)),
+    opened = utc_today() - timedelta(days=400)
+    for sid, closed in ((HELD, None), (SOLD, utc_today() - timedelta(days=90)),
                         (HELD_NO_DATA, None)):
         session.add(TaxLot(
             security_id=sid, open_date=opened, close_date=closed, is_open=closed is None,

@@ -12,7 +12,7 @@ historical endpoint. These tests pin the resulting rule: recent dates are answer
 older ones still raise so the caller keeps skipping rather than being handed an
 invented historical rate.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -27,6 +27,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.services import currency_service as cs
 from app.services.currency_service import CurrencyService
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.clock import utc_today
 
 
 # EUR-based snapshot, shaped like open.er-api.com's payload.
@@ -90,7 +91,7 @@ def frankfurter_range_payload(rate, on=None, currencies=("USD", "CHF")):
     EUR->CUR}}}, which is how every pair is asked for. ``rate`` is the CUR->EUR figure a
     test expects back, so the reply quotes its inverse.
     """
-    on = on or date.today()
+    on = on or utc_today()
     eur_to_x = float(Decimal(1) / Decimal(str(rate)))
     return {"rates": {on.isoformat(): {c: eur_to_x for c in currencies}}}
 
@@ -129,7 +130,7 @@ async def _rows(session):
 async def test_currency_frankfurter_lacks_is_resolved_by_the_fallback(monkeypatch, session):
     calls = install_fake_http(monkeypatch)
 
-    rate = await CurrencyService(session).get_exchange_rate("TWD", date.today())
+    rate = await CurrencyService(session).get_exchange_rate("TWD", utc_today())
 
     # Provider quotes "X per 1 EUR", so TWD->EUR is the reciprocal. The value comes
     # back through the Numeric(18, 8) column, so compare at the column's precision.
@@ -148,7 +149,7 @@ async def test_old_date_still_raises_rather_than_backdating_todays_rate(monkeypa
     fabricated historical rate on an old tax lot and the tax report would show it as
     fact, so we keep the skip-with-warning behaviour instead."""
     calls = install_fake_http(monkeypatch)
-    stale = date.today() - timedelta(days=CurrencyService.FALLBACK_MAX_AGE_DAYS + 1)
+    stale = utc_today() - timedelta(days=CurrencyService.FALLBACK_MAX_AGE_DAYS + 1)
 
     with pytest.raises(ValueError):
         await CurrencyService(session).get_exchange_rate("TWD", stale)
@@ -168,7 +169,7 @@ async def test_no_provider_switch_while_frankfurter_answers(monkeypatch, session
         fallback=FALLBACK_PAYLOAD,
     )
 
-    rate = await CurrencyService(session).get_exchange_rate("USD", date.today())
+    rate = await CurrencyService(session).get_exchange_rate("USD", utc_today())
 
     assert rate == Decimal("0.878")
     assert CurrencyService.FALLBACK_API_URL not in calls
@@ -189,7 +190,7 @@ async def test_frankfurter_outage_is_rescued_by_the_fallback_and_tagged(monkeypa
         fallback=FALLBACK_PAYLOAD,
     )
 
-    rate = await CurrencyService(session).get_exchange_rate("USD", date.today())
+    rate = await CurrencyService(session).get_exchange_rate("USD", utc_today())
 
     assert abs(rate - Decimal("1") / Decimal("1.138971")) < Decimal("1e-8")
     assert CurrencyService.FALLBACK_API_URL in calls
@@ -207,7 +208,7 @@ async def test_frankfurter_outage_on_an_old_date_still_raises(monkeypatch, sessi
         frankfurter={"rates": {}},
         fallback=FALLBACK_PAYLOAD,
     )
-    stale = date.today() - timedelta(days=CurrencyService.FALLBACK_MAX_AGE_DAYS + 1)
+    stale = utc_today() - timedelta(days=CurrencyService.FALLBACK_MAX_AGE_DAYS + 1)
 
     with pytest.raises(ValueError):
         await CurrencyService(session).get_exchange_rate("USD", stale)
@@ -221,17 +222,17 @@ async def test_frankfurter_outage_on_an_old_date_still_raises(monkeypatch, sessi
 async def test_carry_forward_preserves_the_provider_tag(monkeypatch, session):
     """A rate carried across a weekend must not be relabelled as Frankfurter data."""
     install_fake_http(monkeypatch, payload={"result": "error"})
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = utc_today() - timedelta(days=1)
     session.add(ExchangeRate(
         date=yesterday, from_currency="TWD", to_currency="EUR",
         rate=Decimal("0.02716"), source=CurrencyService.FALLBACK_SOURCE,
     ))
     await session.flush()
 
-    rate = await CurrencyService(session).get_exchange_rate("TWD", date.today())
+    rate = await CurrencyService(session).get_exchange_rate("TWD", utc_today())
 
     assert rate == Decimal("0.02716")
-    carried = [r for r in await _rows(session) if r.date == date.today()]
+    carried = [r for r in await _rows(session) if r.date == utc_today()]
     assert len(carried) == 1
     assert carried[0].source == CurrencyService.FALLBACK_SOURCE + CurrencyService.CARRIED_SUFFIX
 
@@ -244,7 +245,7 @@ async def test_carry_forward_refuses_a_rate_past_the_bound(monkeypatch, session)
     permanent mis-valuation, while a skipped lot self-heals on the next sync.
     """
     install_fake_http(monkeypatch, payload={"result": "error"})
-    stale_day = date.today() - timedelta(days=FX_MAX_CARRY_DAYS + 10)
+    stale_day = utc_today() - timedelta(days=FX_MAX_CARRY_DAYS + 10)
     session.add(ExchangeRate(
         date=stale_day, from_currency="TWD", to_currency="EUR",
         rate=Decimal("0.02716"), source=CurrencyService.FALLBACK_SOURCE,
@@ -252,20 +253,20 @@ async def test_carry_forward_refuses_a_rate_past_the_bound(monkeypatch, session)
     await session.flush()
 
     with pytest.raises(ValueError):
-        await CurrencyService(session).get_exchange_rate("TWD", date.today())
+        await CurrencyService(session).get_exchange_rate("TWD", utc_today())
 
 
 @pytest.mark.asyncio
 async def test_carry_forward_covers_a_gap_inside_the_bound(monkeypatch, session):
     install_fake_http(monkeypatch, payload={"result": "error"})
-    recent = date.today() - timedelta(days=FX_MAX_CARRY_DAYS - 1)
+    recent = utc_today() - timedelta(days=FX_MAX_CARRY_DAYS - 1)
     session.add(ExchangeRate(
         date=recent, from_currency="TWD", to_currency="EUR",
         rate=Decimal("0.02716"), source=CurrencyService.FALLBACK_SOURCE,
     ))
     await session.flush()
 
-    rate = await CurrencyService(session).get_exchange_rate("TWD", date.today())
+    rate = await CurrencyService(session).get_exchange_rate("TWD", utc_today())
     assert rate == Decimal("0.02716")
 
 
@@ -275,7 +276,7 @@ async def test_provider_failure_leaves_the_cache_untouched(monkeypatch, session)
     install_fake_http(monkeypatch, payload={"result": "error"})
 
     with pytest.raises(ValueError):
-        await CurrencyService(session).get_exchange_rate("TWD", date.today())
+        await CurrencyService(session).get_exchange_rate("TWD", utc_today())
 
     assert await _rows(session) == []
 
@@ -424,13 +425,13 @@ async def test_a_published_quote_replaces_the_stand_in_for_its_day(monkeypatch, 
     (1.0566) was skipped on every later fetch because a row already existed. A CHF 4,500
     withdrawal read as CHF 4,517.50. A stand-in now gives way to the published figure.
     """
-    day = date.today() - timedelta(days=2)
+    day = utc_today() - timedelta(days=2)
     session.add(ExchangeRate(date=day, from_currency="CHF", to_currency="EUR",
                              rate=Decimal("1.0591772946"), source=stand_in))
     await session.flush()
     install_fake_http(monkeypatch, payload=frankfurter_range_payload(1.0566, on=day))
 
-    assert await CurrencyService(session)._batch_fetch_rates("CHF", date.today(), "EUR")
+    assert await CurrencyService(session)._batch_fetch_rates("CHF", utc_today(), "EUR")
 
     rows = [r for r in await _rows(session) if r.date == day]
     assert len(rows) == 1
@@ -440,13 +441,13 @@ async def test_a_published_quote_replaces_the_stand_in_for_its_day(monkeypatch, 
 @pytest.mark.asyncio
 async def test_a_rate_that_is_not_a_stand_in_is_never_rewritten(monkeypatch, session):
     """Only what announced itself as provisional gives way — a hand-loaded rate does not."""
-    day = date.today() - timedelta(days=2)
+    day = utc_today() - timedelta(days=2)
     session.add(ExchangeRate(date=day, from_currency="CHF", to_currency="EUR",
                              rate=Decimal("1.06"), source="manual"))
     await session.flush()
     install_fake_http(monkeypatch, payload=frankfurter_range_payload(1.0566, on=day))
 
-    await CurrencyService(session)._batch_fetch_rates("CHF", date.today(), "EUR")
+    await CurrencyService(session)._batch_fetch_rates("CHF", utc_today(), "EUR")
 
     rows = [r for r in await _rows(session) if r.date == day]
     assert rows[0].rate == Decimal("1.06") and rows[0].source == "manual"

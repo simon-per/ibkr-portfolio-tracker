@@ -11,7 +11,7 @@ from app.services.allocation_service import (
     AllocationService,
     needs_allocation_refresh,
 )
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import PUBLIC_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
 
 
 router = APIRouter()
@@ -29,7 +29,7 @@ async def sync_allocation_data(
     """
     try:
         # Public route, one Yahoo request per security: one at a time, cooled down.
-        with single_flight(SYNC_PIPELINE, cooldown_seconds=300):
+        with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             service = AllocationService(db)
             result = await service.sync_allocation_data(force_refresh=force_refresh)
             return result

@@ -26,6 +26,20 @@ from typing import Dict, Set
 
 SYNC_PIPELINE = "sync-pipeline"
 
+# Every public route's start cooldown, in one place. Routers import these and never
+# write a number (`tests/test_sync_cooldown_family.py`): the 300 was once one policy
+# written nine ways, two of them as same-named constants in different routers.
+#
+# The bulk Yahoo routes and the manual trigger: a full pass is one or more Yahoo calls
+# per security, and a poller that waits for each pass to finish would otherwise run
+# them back to back against an IP-based limit.
+PUBLIC_SYNC_COOLDOWN_SECONDS = 300
+# POST /api/sync/ibkr: no Yahoo, and one Flex round is a few requests against a
+# 10/minute token budget, so a shorter fence than the bulk Yahoo passes.
+IBKR_SYNC_COOLDOWN_SECONDS = 120
+# POST /api/watchlist's immediate fetch: one ticker, lighter than a bulk pass.
+WATCHLIST_ADD_COOLDOWN_SECONDS = 60
+
 
 class SyncBusy(Exception):
     """Another run of this pipeline is in flight, or its cooldown hasn't elapsed."""

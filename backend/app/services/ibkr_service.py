@@ -19,6 +19,7 @@ from ibflex.client import ResponseCodeError, BadResponseError
 
 from app.config import settings
 from app.redact import redact_secrets
+from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
@@ -910,7 +911,7 @@ class IBKRService:
                         open_date = report_date
                         logger.warning(f"No openDateTime for {symbol}, using reportDate: {open_date}")
                     else:
-                        open_date = date.today()
+                        open_date = utc_today()
                         logger.warning(f"No openDateTime or reportDate for {symbol} (conid: {conid}), using today's date")
 
                 if not conid or quantity == 0:
