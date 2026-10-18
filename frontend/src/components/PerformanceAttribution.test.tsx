@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { PerformanceAttribution } from './PerformanceAttribution'
+import { AttributionTooltip, PerformanceAttribution } from './PerformanceAttribution'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 
 /**
@@ -75,5 +75,28 @@ describe('PerformanceAttribution completeness notice', () => {
     // own unpriced_holdings makes.
     render(<PerformanceAttribution data={data()} isLoading={false} />)
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+/**
+ * Contribution and weight are shares of the window's total P&L and end value; with a zero
+ * total the server sends `null` (issue #29). `.toFixed` on it threw and broke the tooltip.
+ */
+describe('the attribution tooltip', () => {
+  const row = data().attributions[0]
+  const tooltip = (over: Partial<typeof row>) =>
+    render(<AttributionTooltip active payload={[{ payload: { ...row, ...over } }]} />)
+
+  it('renders the shares it has', () => {
+    const { container } = tooltip({ contribution_percent: 62.5, weight_percent: 40 })
+    expect(container.textContent).toMatch(/Contribution: 62\.5%/)
+    expect(container.textContent).toMatch(/Weight: 40\.0%/)
+  })
+
+  it('renders a dash, without throwing, for a share of a zero total', () => {
+    const { container } = tooltip({ contribution_percent: null, weight_percent: null })
+    expect(container.textContent).toMatch(/Contribution: —/)
+    expect(container.textContent).toMatch(/Weight: —/)
+    expect(container.textContent).not.toMatch(/0\.0%/)
   })
 })

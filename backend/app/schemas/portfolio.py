@@ -46,7 +46,8 @@ class PositionResponse(BaseModel):
     market_value_eur: float
     market_price: Optional[float]
     gain_loss_eur: float
-    gain_loss_percent: float
+    #: None on a zero cost basis — a share of nothing (`percentages.share_pct`).
+    gain_loss_percent: Optional[float]
     taxlots: List[TaxLotInfo]
     analyst_rating: Optional[AnalystRatingInfo] = None
     #: Which account holds it. Declared on the model deliberately: a
@@ -70,7 +71,9 @@ class PortfolioValuePoint(BaseModel):
     cost_basis_eur: float = Field(..., description="Total amount invested up to this date (in base_currency)")
     market_value_eur: float = Field(..., description="Current market value on this date (in base_currency)")
     gain_loss_eur: float = Field(..., description="Unrealized gain/loss (in base_currency)")
-    gain_loss_percent: float = Field(..., description="Percentage gain/loss")
+    gain_loss_percent: Optional[float] = Field(
+        ..., description="Percentage gain/loss; null with no cost basis"
+    )
     external_flow_eur: float = Field(
         0.0,
         description=(
@@ -163,7 +166,7 @@ class BenchmarkValuePoint(BaseModel):
     benchmark_value_eur: float
     cost_basis_eur: float
     gain_loss_eur: float
-    gain_loss_percent: float
+    gain_loss_percent: Optional[float]  # None with no cost basis
     external_flow_eur: Optional[float] = Field(
         None,
         description=(
@@ -245,8 +248,11 @@ class SecurityAttribution(BaseModel):
     disposal_proceeds_eur: float = 0.0
     value_change_eur: float
     pnl_contribution_eur: float
-    contribution_percent: float
-    weight_percent: float
+    # Shares of the window's total P&L and end value; None when that whole is zero
+    # (`percentages.share_pct`) — contributions that cancel exactly, or a window where
+    # everything attributed was sold.
+    contribution_percent: Optional[float]
+    weight_percent: Optional[float]
     # The currency the security's prices are quoted in, and the split of
     # pnl_contribution_eur into what the holding earned in that currency (converted at
     # the window-end rate) and what the base currency's move against it added. Both
@@ -284,7 +290,9 @@ class PortfolioSummary(BaseModel):
     total_cost_basis_eur: float = Field(..., description="Total amount invested")
     total_market_value_eur: float = Field(..., description="Current total value")
     total_gain_loss_eur: float = Field(..., description="Total unrealized gain/loss")
-    total_gain_loss_percent: float = Field(..., description="Total percentage gain/loss")
+    total_gain_loss_percent: Optional[float] = Field(
+        ..., description="Total percentage gain/loss; null with no cost basis"
+    )
     num_positions: int = Field(..., description="Number of unique securities held")
     unpriced_holdings: int = Field(
         0,

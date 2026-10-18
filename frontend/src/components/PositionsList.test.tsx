@@ -217,6 +217,36 @@ describe('a holding the backend could not value', () => {
   })
 })
 
+/**
+ * A holding received for nothing (a stock distribution, a bonus issue) has a zero cost
+ * basis, so the server sends `gain_loss_percent: null` (issue #29). `formatPercent(null)`
+ * would print `0.00%`, the stand-in the server stopped sending.
+ */
+describe('a holding with a zero cost basis', () => {
+  const GIFT = position({
+    security_id: 7, symbol: 'GIFT', cost_basis_eur: 0, market_value_eur: 200,
+    gain_loss_eur: 200, gain_loss_percent: null,
+  })
+  const cellFor = (key: string, p: Position, view: 'table' | 'cards' = 'table') =>
+    cols().find((c) => c.key === key)!.cell(p, view)
+
+  it('renders a dash for its return, not 0.00%', () => {
+    expect(cellFor('gain_loss_percent', GIFT)).toBe('—')
+    expect(cellFor('gain_loss_percent', GIFT, 'cards')).toBe('—')
+  })
+
+  it('keeps the gain itself and dashes only the percentage under it', () => {
+    const { container } = render(<>{cellFor('gain_loss', GIFT)}</>)
+    expect(container.textContent).toBe(`${money(200)}—`)
+  })
+
+  it('renders the table without throwing', () => {
+    const { container } = render(<PositionsList positions={[PAYER, GIFT]} />)
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
+    expect(container.textContent).toContain('GIFT')
+  })
+})
+
 describe('the account badge', () => {
   const symbolCell = (p: Position, view: 'table' | 'cards' = 'table') =>
     render(<>{cols().find((c) => c.key === 'symbol')!.cell(p, view)}</>)

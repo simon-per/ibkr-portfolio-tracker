@@ -115,7 +115,8 @@ describe('the period gain', () => {
 describe('a new account', () => {
   const empty: Partial<PortfolioSummary> = {
     total_cost_basis_eur: 0, total_market_value_eur: 0, total_gain_loss_eur: 0,
-    total_gain_loss_percent: 0, num_positions: 0, total_realized_gain_loss_eur: 0,
+    // What the server sends for a gain on no cost (`share_pct`): null, not 0.
+    total_gain_loss_percent: null, num_positions: 0, total_realized_gain_loss_eur: 0,
     total_realized_proceeds_eur: 0, total_realized_cost_basis_eur: 0, num_closed_positions: 0,
     cash_source: 'unknown',
   }

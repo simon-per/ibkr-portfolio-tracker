@@ -17,7 +17,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { displayName } from '@/lib/securityName'
-import { formatAxisMoney } from '@/lib/utils'
+import { ABSENT, formatAxisMoney } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
@@ -149,7 +149,10 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
   )
 }
 
-function AttributionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: PerformanceAttributionResponse['attributions'][0] }> }) {
+/** A share of the window's total, or the dash when that total is zero (`null`). */
+const shareOf = (pct: number | null): string => (pct == null ? ABSENT : `${pct.toFixed(1)}%`)
+
+export function AttributionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: PerformanceAttributionResponse['attributions'][0] }> }) {
   const formatCurrency = useFormatCurrency()
   if (!active || !payload || payload.length === 0) return null
 
@@ -169,11 +172,11 @@ function AttributionTooltip({ active, payload }: { active?: boolean; payload?: A
         </p>
         <p>
           <span className="text-muted-foreground">Contribution: </span>
-          <span>{d.contribution_percent.toFixed(1)}%</span>
+          <span>{shareOf(d.contribution_percent)}</span>
         </p>
         <p>
           <span className="text-muted-foreground">Weight: </span>
-          <span>{d.weight_percent.toFixed(1)}%</span>
+          <span>{shareOf(d.weight_percent)}</span>
         </p>
         {d.new_investment_eur > 0 && (
           <p>

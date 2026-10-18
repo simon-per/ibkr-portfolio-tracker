@@ -232,6 +232,22 @@ The two are numerically identical by construction and pinned that way
 (`tests/test_timeline_equivalence.py` asserts exact equality across closed lots, a same-day rotation,
 price gaps, a USD security and a CHF base) — **keep them in lockstep**.
 
+**Every percentage of a whole on these paths goes through `percentages.share_pct`, so a zero whole
+is `None`, never 0%** (GitHub issue #29, 2026-10-18). Seven inline `x / whole * 100 if whole > 0
+else 0` copies answered 0: the timeline point's and `_calculate_daily_value`'s (so `/summary`'s)
+gain % before anything is held at cost, the position's gain % on a zero cost basis (a stock
+distribution reads no percentage, not `+0.00%` over a positive gain), the attribution's
+`weight_percent` when everything attributed ends the window at zero, its `contribution_percent`
+when contributions cancel exactly (a +100 and a −100 both read 0.0%), and both benchmark point
+paths. The empty-book summary sends `None` too. The attribution now works in Decimal: weights
+divide the rows' `end_mv_base` by their Decimal sum, and contributions divide each published
+two-decimal P&L by their exact Decimal sum, so a cancelling pair is an exact zero rather than a
+float residue dividing into a huge share. One behaviour moved with the helper: `share_pct` tests
+for a non-zero whole where the copies tested `> 0`, so a negative cost basis (a short lot) would
+now produce a figure rather than 0. `tests/test_share_of_nothing_is_absent.py` pins
+the cases; `tests/test_percentages_family.py` fails the inline form coming back anywhere under
+`app/`.
+
 **A split also invalidates the cached prices.** Yahoo restates historical `Close` after a split, but
 `get_missing_dates()` only fetches dates we *don't* have, so pre-split rows are never refreshed while
 IBKR restates the lot quantity immediately — leaving a step change in the chart that nothing detects.

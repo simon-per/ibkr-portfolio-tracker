@@ -210,8 +210,8 @@ export function PortfolioHero({
             label="Unrealized gain"
             value={signed(summary.total_gain_loss_eur)}
             tone={summary.total_gain_loss_eur >= 0 ? GAIN : LOSS}
-            // A percentage of a zero cost basis is undefined, not +0.00%.
-            sub={summary.total_cost_basis_eur > 0 ? signedPct(summary.total_gain_loss_percent) : undefined}
+            // The server sends null for a percentage of a zero cost basis.
+            sub={summary.total_gain_loss_percent != null ? signedPct(summary.total_gain_loss_percent) : undefined}
           />
           <Stat
             label="Realized gain"

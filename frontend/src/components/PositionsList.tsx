@@ -94,6 +94,14 @@ const cannotValue = (p: Position) => isUnpriced(p)
 /** What every figure derived from a valuation shows when there is no valuation. */
 const NO_VALUE = '—'
 
+/**
+ * The return cell: a dash for an unvalued holding, and for a zero cost basis (a stock
+ * distribution), where the server sends `null` — `formatPercent(null)` would print the
+ * `0.00%` the server stopped sending.
+ */
+const returnOf = (p: Position): string =>
+  cannotValue(p) || p.gain_loss_percent == null ? NO_VALUE : formatPercent(p.gain_loss_percent)
+
 const gainTone = (p: Position) =>
   cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-gain' : 'text-loss'
 
@@ -269,7 +277,7 @@ export function positionColumns(deps: {
       // Carried under the gain on desktop.
       desktop: 'hide',
       tone: gainTone,
-      cell: (p) => (cannotValue(p) ? NO_VALUE : formatPercent(p.gain_loss_percent)),
+      cell: returnOf,
     },
     {
       key: 'quantity',
@@ -299,7 +307,7 @@ export function positionColumns(deps: {
         : view === 'table' ? (
           <>
             <div>{formatCurrency(p.gain_loss_eur)}</div>
-            <div className="text-xs">{formatPercent(p.gain_loss_percent)}</div>
+            <div className="text-xs">{returnOf(p)}</div>
           </>
         ) : formatCurrency(p.gain_loss_eur),
     },

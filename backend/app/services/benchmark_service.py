@@ -22,6 +22,7 @@ from app.models.security import Security
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.services.percentages import share_pct
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
@@ -428,7 +429,7 @@ class BenchmarkService:
             p["benchmark_value_eur"] = float(round(bv, 2))
             p["cost_basis_eur"] = float(round(cb, 2))
             p["gain_loss_eur"] = float(round(gl, 2))
-            p["gain_loss_percent"] = float(round((gl / cb * 100) if cb > 0 else 0, 2))
+            p["gain_loss_percent"] = share_pct(gl, cb)
             # Only window-mode points carry a flow; an absent key stays absent.
             flow = p.get("external_flow_eur")
             if flow is not None:
@@ -930,15 +931,13 @@ class BenchmarkService:
                 "benchmark_value_eur": float(round(bench_value_eur, 2)),
                 "cost_basis_eur": float(round(running_cost_basis, 2)),
                 "gain_loss_eur": float(round(gain_loss, 2)),
-                "gain_loss_percent": float(
-                    round((gain_loss / running_cost_basis * 100), 2)
-                    if running_cost_basis > 0 else 0
-                ),
+                # None on a zero cost basis, never a flat 0% (`share_pct`).
+                "gain_loss_percent": share_pct(gain_loss, running_cost_basis),
             }
         return {
             "date": on_date.isoformat(),
             "benchmark_value_eur": 0.0,
             "cost_basis_eur": float(round(running_cost_basis, 2)),
             "gain_loss_eur": 0.0,
-            "gain_loss_percent": 0.0,
+            "gain_loss_percent": share_pct(Decimal("0"), running_cost_basis),
         }

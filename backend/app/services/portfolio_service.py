@@ -24,6 +24,7 @@ from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.fx_preload import eur_rate_on, preload_eur_rates
+from app.services.percentages import share_pct
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
@@ -413,9 +414,9 @@ class PortfolioService:
                     "cost_basis_eur": float(total_cost),
                     "market_value_eur": float(mv),
                     "gain_loss_eur": float(gain),
-                    "gain_loss_percent": float(
-                        (gain / total_cost * 100) if total_cost > 0 else 0
-                    ),
+                    # None before anything is held at cost, never a flat 0% (`share_pct`);
+                    # `_calculate_daily_value` answers the same, the equivalence test pins it.
+                    "gain_loss_percent": share_pct(gain, total_cost),
                     # Money entering (+) or leaving (−) the tracked holdings today:
                     # purchases at cost, sales at their market proceeds. Any return
                     # measure has to net this out, and inferring it from the
@@ -489,7 +490,8 @@ class PortfolioService:
                 "total_cost_basis_eur": 0.0,
                 "total_market_value_eur": 0.0,
                 "total_gain_loss_eur": 0.0,
-                "total_gain_loss_percent": 0.0,
+                # A gain on no cost at all has no percentage (`share_pct`).
+                "total_gain_loss_percent": None,
                 "num_positions": 0,
                 "unpriced_holdings": 0,
                 "base_currency": base_fx.base_currency,
@@ -1297,9 +1299,9 @@ class PortfolioService:
             gain_loss = market_value - cost_basis
 
             position["gain_loss_eur"] = float(gain_loss)
-            position["gain_loss_percent"] = float(
-                (gain_loss / cost_basis * 100) if cost_basis > 0 else 0
-            )
+            # None on a zero cost basis (a stock distribution, a bonus issue): any gain
+            # on nothing is not +0.00%.
+            position["gain_loss_percent"] = share_pct(gain_loss, cost_basis)
 
             # Convert Decimal to float for JSON serialization
             position["quantity"] = float(position["quantity"])
@@ -1809,7 +1811,7 @@ class PortfolioService:
             sid: r for sid, r in computed["rows"].items() if sid not in computed["unpriced"]
         }
 
-        total_end_mv = sum(float(r["end_mv_base"]) for r in priced.values())
+        total_end_mv = sum((r["end_mv_base"] for r in priced.values()), Decimal("0"))
         attributions = []
 
         for sid, r in priced.items():
@@ -1820,7 +1822,6 @@ class PortfolioService:
             disposal = float(r["disposals_base"])
             value_change = end_mv - start_mv
             pnl = value_change + disposal - new_inv
-            weight = (end_mv / total_end_mv * 100) if total_end_mv > 0 else 0.0
 
             attributions.append({
                 "security_id": sid,
@@ -1832,8 +1833,10 @@ class PortfolioService:
                 "disposal_proceeds_eur": round(disposal, 2),
                 "value_change_eur": round(value_change, 2),
                 "pnl_contribution_eur": round(pnl, 2),
-                "contribution_percent": 0.0,  # set below
-                "weight_percent": round(weight, 2),
+                "contribution_percent": None,  # set below
+                # None when everything attributed ends the window at zero: a share of
+                # nothing is absent, not 0% (`share_pct`).
+                "weight_percent": share_pct(r["end_mv_base"], total_end_mv),
                 "price_currency": r["price_currency"],
                 # None when the local-currency leg could not be built — absent, not 0.
                 "price_effect_eur": (
@@ -1846,13 +1849,16 @@ class PortfolioService:
                 ),
             })
 
-        total_pnl = sum(a["pnl_contribution_eur"] for a in attributions)
+        # Summed in Decimal over the published two-decimal figures, so contributions that
+        # cancel give an exact zero rather than a float residue that would divide into a
+        # huge percentage. With a zero total every share is None, not 0%: a +100 and a
+        # -100 would otherwise both read 0.0% (`share_pct`).
+        pnl_parts = [Decimal(str(a["pnl_contribution_eur"])) for a in attributions]
+        total_pnl_exact = sum(pnl_parts, Decimal("0"))
+        total_pnl = float(total_pnl_exact)
 
-        # Set contribution percentages
-        for a in attributions:
-            a["contribution_percent"] = round(
-                (a["pnl_contribution_eur"] / total_pnl * 100) if total_pnl != 0 else 0.0, 2
-            )
+        for a, part in zip(attributions, pnl_parts):
+            a["contribution_percent"] = share_pct(part, total_pnl_exact)
 
         # Sort by absolute P&L contribution descending
         attributions.sort(key=lambda a: abs(a["pnl_contribution_eur"]), reverse=True)
@@ -2166,6 +2172,7 @@ class PortfolioService:
             "cost_basis_eur": float(total_cost_basis),
             "market_value_eur": float(total_market_value),
             "gain_loss_eur": float(gain_loss),
-            "gain_loss_percent": float((gain_loss / total_cost_basis * 100) if total_cost_basis > 0 else 0),
+            # None with nothing held at cost (`share_pct`), exactly as the swept timeline.
+            "gain_loss_percent": share_pct(gain_loss, total_cost_basis),
             "unpriced_holdings": len(unpriced_securities),
         }

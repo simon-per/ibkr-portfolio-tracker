@@ -290,8 +290,26 @@ async def _seed(session: AsyncSession) -> None:
     await session.commit()
 
 
-@pytest.fixture()
-def client(monkeypatch):
+async def _seed_zero_cost(session: AsyncSession) -> None:
+    """
+    One holding received for nothing (a stock distribution), held across the whole
+    window at a flat price: zero cost basis, so every gain percentage is None, and zero
+    P&L, so the attribution's contribution share is None too (`percentages.share_pct`).
+    """
+    session.add(Security(id=1, isin="US0000000ZC1", symbol="ZC", description="Zero Cost",
+                         currency="EUR", conid=201, asset_category="STK", exchange="NYSE"))
+    session.add(TaxLot(
+        security_id=1, open_date=START - timedelta(days=10), close_date=None, is_open=True,
+        quantity=Decimal("5"), cost_basis=Decimal("0"), cost_basis_eur=Decimal("0"),
+        price_per_unit=Decimal("0"), currency="EUR",
+    ))
+    for d in _weekdays(START - timedelta(days=20), TODAY):
+        session.add(MarketPrice(security_id=1, date=d, close_price=Decimal("20"),
+                                currency="EUR", source="test"))
+    await session.commit()
+
+
+def _serve(monkeypatch, seed):
     # Any accidental Yahoo reach must fail loudly, not spend rate-limit budget.
     def _forbidden(*_a, **_kw):
         raise AssertionError("a test tried to call Yahoo Finance")
@@ -327,7 +345,7 @@ def client(monkeypatch):
     async def _setup():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        await _seed(session)
+        await seed(session)
 
     loop.run_until_complete(_setup())
 
@@ -343,6 +361,41 @@ def client(monkeypatch):
     loop.run_until_complete(session.close())
     loop.run_until_complete(engine.dispose())
     loop.close()
+
+
+@pytest.fixture()
+def client(monkeypatch):
+    yield from _serve(monkeypatch, _seed)
+
+
+@pytest.fixture()
+def zero_cost_client(monkeypatch):
+    yield from _serve(monkeypatch, _seed_zero_cost)
+
+
+def test_a_share_of_nothing_serializes_as_null(zero_cost_client):
+    """
+    The six percentage fields are `Optional` on their models: a None that a `float`
+    field refused would 500 the endpoint rather than reach the client as null.
+    """
+    c = zero_cost_client
+    summary = c.get("/api/portfolio/summary")
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["total_cost_basis_eur"] == 0
+    assert summary.json()["total_gain_loss_percent"] is None
+
+    [position] = c.get("/api/portfolio/positions").json()
+    assert position["market_value_eur"] > 0 and position["gain_loss_percent"] is None
+
+    vot = c.get(f"/api/portfolio/value-over-time?start_date={START}&end_date={TODAY}")
+    assert vot.status_code == 200, vot.text
+    assert vot.json() and all(p["gain_loss_percent"] is None for p in vot.json())
+
+    attr = c.get(f"/api/portfolio/attribution?start_date={START}&end_date={TODAY}")
+    assert attr.status_code == 200, attr.text
+    [row] = attr.json()["attributions"]
+    assert attr.json()["total_pnl_eur"] == 0
+    assert row["contribution_percent"] is None and row["weight_percent"] == 100.0
 
 
 @pytest.mark.parametrize("path", READ_ENDPOINTS)

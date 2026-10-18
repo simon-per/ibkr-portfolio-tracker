@@ -364,6 +364,16 @@ purpose is the rating's unrated sentinel (`getRatingScore`, pinned by `ratingSor
 `nullsLast.test.ts` fails a direction-flipping comparator written by hand and any table passing
 `sort` to `DataTable` that reaches `compareNullsLast` neither itself nor through a module it imports.
 
+**A share of a zero whole arrives as `null`, and every reader renders the dash** (issue #29,
+2026-10-18). The server computes these through `percentages.share_pct`, so the position's and the
+summary's gain %, the timeline and benchmark points' gain %, and the attribution's
+`contribution_percent` and `weight_percent` are `number | null` in `api.ts`. Positions' return
+cell (`returnOf`, both the Return column and the line under Gain) prints `NO_VALUE` for a zero
+cost basis — `formatPercent(null)` would print the `0.00%` the server stopped sending — and its sort
+value is already `null`, so the row sorts last. The attribution tooltip (`shareOf`) prints `ABSENT`
+where `.toFixed` on `null` threw. `PortfolioHero` keys the unrealized percentage on `null`; it used
+to re-guard on `total_cost_basis_eur > 0` because the server sent `0`.
+
 Three tables deliberately stay tables, each argued in its own file: `CurrencyExposureCard` (the
 comparison *between* rows is the point, and there is no identity column to promote), and the two
 12-month x N-year matrices (`MonthlyReturnsHeatmap`, `DividendSummary`). They get a designed

@@ -46,7 +46,8 @@ export interface PortfolioValuePoint {
   cost_basis_eur: number;
   market_value_eur: number;
   gain_loss_eur: number;
-  gain_loss_percent: number;
+  /** `null` with no cost basis yet: a share of nothing is absent, never 0%. */
+  gain_loss_percent: number | null;
   /**
    * Money entering (+) or leaving (−) the holdings that day: purchases at cost,
    * sales at market proceeds. Optional so older payloads still parse.
@@ -96,7 +97,8 @@ export interface PortfolioSummary {
   total_cost_basis_eur: number;
   total_market_value_eur: number;
   total_gain_loss_eur: number;
-  total_gain_loss_percent: number;
+  /** `null` with a zero cost basis: a gain on nothing has no percentage. */
+  total_gain_loss_percent: number | null;
   num_positions: number;
   /**
    * Held securities whose value could not be resolved today. Above 0 means
@@ -216,7 +218,8 @@ export interface Position {
   market_value_eur: number;
   market_price: number | null;
   gain_loss_eur: number;
-  gain_loss_percent: number;
+  /** `null` on a zero cost basis (a stock distribution, a bonus issue). */
+  gain_loss_percent: number | null;
   taxlots: TaxLotInfo[];
   analyst_rating: AnalystRating | null;
 }
@@ -275,7 +278,8 @@ export interface BenchmarkValuePoint {
   benchmark_value_eur: number;
   cost_basis_eur: number;
   gain_loss_eur: number;
-  gain_loss_percent: number;
+  /** `null` with no cost basis yet. */
+  gain_loss_percent: number | null;
   /**
    * Contributions the hypothetical invested that day (a withdrawal is negative). Reported
    * in window mode only: `null`/absent means *not reported*, never zero. `betaAndCorrelation`
@@ -318,8 +322,12 @@ export interface SecurityAttribution {
   new_investment_eur: number;
   value_change_eur: number;
   pnl_contribution_eur: number;
-  contribution_percent: number;
-  weight_percent: number;
+  /**
+   * Shares of the window's total P&L and end value, `null` when that whole is zero —
+   * contributions that cancel exactly, or everything attributed sold by the end.
+   */
+  contribution_percent: number | null;
+  weight_percent: number | null;
   /** The currency the security's prices are quoted in. Optional: sent since 2026-09-13. */
   price_currency?: string | null;
   /**
