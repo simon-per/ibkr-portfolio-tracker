@@ -52,6 +52,13 @@ PARTS = ("shares", "raises", "timing", "newly_forecast", "fx")
 SPLIT_MIN_RATIO = Decimal("1.5")
 SPLIT_VALUE_TOLERANCE = Decimal("0.05")
 
+# A level that moved by less than this, relatively, did not move. `level_eur` is stored
+# rounded at `fx_to_eur`, so dividing it back to the security's currency leaves a ratio a
+# few parts in 10^8 off 1 on a day nothing changed; read as a raise, it put every payer
+# into the raises feed every day (2026-10-18, 205 "raises" in seven weeks) and a
+# rounding residue into the card's "from raises". A real raise is orders larger.
+LEVEL_CHANGE_TOLERANCE = Decimal("0.0001")
+
 
 @dataclass(frozen=True)
 class Holding:
@@ -140,7 +147,8 @@ def attribute_holding(
     if a.level_eur and b.level_eur and a.level_eur > 0 and b.level_eur > 0:
         level0 = a.level_eur / f0 * level_scale
         level1 = b.level_eur / f1
-        raises = q1 * n0 * (level1 / level0 - 1) * g0
+        if abs(level1 / level0 - 1) >= LEVEL_CHANGE_TOLERANCE:
+            raises = q1 * n0 * (level1 / level0 - 1) * g0
     parts["shares"] += shares
     parts["raises"] += raises
     parts["timing"] += payout - raises

@@ -206,3 +206,18 @@ def test_the_server_classifies_no_raise_by_a_band_of_its_own():
         and "RAISE" in node.id.upper() and "BAND" in node.id.upper()
     )
     assert named == []
+
+
+def test_a_level_that_moved_by_rounding_alone_is_no_raise():
+    """A stored level re-divided by its own day's rate is a few parts in 10^8 off."""
+    from app.services.dividend_forecast_attribution import Holding, attribute_holding
+
+    fx0, fx1 = Decimal("0.02860000"), Decimal("0.02873000")
+    a = Holding(Decimal("100"), Decimal("80.08"), fx0, (Decimal("28") * fx0).quantize(Decimal("1e-8")))
+    b = Holding(Decimal("100"), Decimal("80.44"), fx1, (Decimal("28") * fx1).quantize(Decimal("1e-8")) + Decimal("1e-8"))
+    change = attribute_holding(a, b, Decimal("1"), Decimal("1"))
+    assert change.parts["raises"] == 0
+    assert sum(change.parts.values()) == b.next_12m_eur - a.next_12m_eur
+
+    raised = Holding(Decimal("100"), Decimal("83.00"), fx1, (Decimal("29") * fx1).quantize(Decimal("1e-8")))
+    assert attribute_holding(a, raised, Decimal("1"), Decimal("1")).parts["raises"] > 0

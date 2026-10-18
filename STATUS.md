@@ -179,6 +179,9 @@ Only what is still unverified.
   - Tax (#77, #78): the current year shows gross and withholding through 31 Dec (`est.`); every
     year shows the KS 36 row — turnover as a multiple, sales held under six months, whether IBKR
     cash went negative. Not tax advice: the owner judges what the figures mean for a filing.
+    2026 reads `margin_used` true on a small negative minimum: check the IBKR statement for a
+    real debit before trusting it — a derived balance between measured days can dip a little
+    on FX alone (docs/tax.md).
   - Dividends (#74, #75): an announced raise carries "+x%" in the calendar; "Raises & cuts N"
     beside the payouts count opens the feed (annual level per share, old → new, %, /yr). A
     reverse split would read as a raise there (documented gap).

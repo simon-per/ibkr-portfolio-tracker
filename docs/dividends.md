@@ -1240,7 +1240,10 @@ that it keeps growing, and have the breakdown available without it being the lou
   `get_forecast_history` sums the same per-holding results for the breakdown and emits
   them for the feed, so the entries add up to `breakdown.raises`. Funds are absent for
   the reason above (no level reaches the attribution), and so are purchases, splits, a
-  first forecast and a holding without a level on both days. The server serves every
+  first forecast and a holding without a level on both days. A level that moved by less
+  than `LEVEL_CHANGE_TOLERANCE` (0.01%) did not move: `level_eur` is stored rounded at
+  `fx_to_eur`, and the first production run listed every payer every day as a 0.0% raise
+  from that residue alone (205 entries in seven weeks). The server serves every other
   move; the client keeps those beyond `RAISE_BAND_PCT` (`feedRaises`). The levels are
   annual, not per payment: a snapshot line stores no payment count, so "0.83 → 0.91 a
   quarter" cannot be restated from it. `tests/test_dividend_raises_feed.py` also asks the
