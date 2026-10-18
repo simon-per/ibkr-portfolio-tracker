@@ -246,6 +246,13 @@ defer_while_ci_may_answer() {   # defer_while_ci_may_answer <what is missing>
     git cat-file -e "$REMOTE:$CI_WORKFLOW" 2>/dev/null || return 0
     now=$(date -u +%s)
     read -r sha first 2>/dev/null < "$CI_WAIT_STATE"
+    # The last answer GitHub DID give for this sha was red: silence since then is not a
+    # reason to forget it. Without this a red commit deployed on the first blip after
+    # CI_WAIT_MAX_MIN, because the stamp still held the push-time "no checks yet" sighting.
+    if [ "$sha" = "$REMOTE" ] && [ "$first" = "red" ]; then
+        log "REFUSE: CI was red for ${REMOTE:0:7} and GitHub has not answered since ($1) — not deploying"
+        exit 0
+    fi
     if [ "$sha" != "$REMOTE" ] || ! [[ "$first" =~ ^[0-9]+$ ]] || [ "$first" -gt "$now" ]; then
         first=$now
         # A stamp that cannot be written would restart the wait every tick, forever.
@@ -264,8 +271,15 @@ defer_while_ci_may_answer() {   # defer_while_ci_may_answer <what is missing>
 VERDICT=$(ci_verdict)
 case "$VERDICT" in
     success)   : ;;
-    pending)   log "WAIT: CI still running for ${REMOTE:0:7}; deferring to the next tick"; exit 0 ;;
-    failed:*)  log "REFUSE: CI is red for ${REMOTE:0:7} (${VERDICT#failed:}) — not deploying. Fix it and push again."; exit 0 ;;
+    # A definite answer resets what the bound measures: `pending` restarts the wait (CI is
+    # alive, so the clock counts silence from now), `failed` pins the sha as red. Either
+    # way a later `unavailable` cannot inherit the push-time sighting and deploy ungated.
+    pending)
+        echo "$REMOTE $(date -u +%s)" 2>/dev/null > "$CI_WAIT_STATE"
+        log "WAIT: CI still running for ${REMOTE:0:7}; deferring to the next tick"; exit 0 ;;
+    failed:*)
+        echo "$REMOTE red" 2>/dev/null > "$CI_WAIT_STATE"
+        log "REFUSE: CI is red for ${REMOTE:0:7} (${VERDICT#failed:}) — not deploying. Fix it and push again."; exit 0 ;;
     none)
         defer_while_ci_may_answer "no CI checks yet"
         log "NOTE: no CI checks found for ${REMOTE:0:7}; deploying ungated"

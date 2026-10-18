@@ -312,15 +312,15 @@ def test_the_ci_gate_decision_table(label, payload, expected):
 def test_a_red_commit_is_refused_and_a_pending_one_only_deferred():
     """
     The verdicts above only matter if the script acts on them differently. `pending`
-    must not write anything or exit non-zero — it is a normal tick — while `failed:`
-    must stop the deploy.
+    must not exit non-zero — it is a normal tick, restamping the CI wait at most — while
+    `failed:` must stop the deploy.
     """
     source = _code_only(_auto())
     case = re.search(r'case "\$VERDICT" in(.*?)esac', source, re.S)
     assert case, "the verdict case statement was not found"
     body = case.group(1)
-    assert re.search(r"pending\)\s+log[^\n]*deferring", body), "pending must defer, with a log line"
-    assert re.search(r"failed:\*\)\s+log[^\n]*REFUSE", body), "a red commit must be refused"
+    assert re.search(r"pending\)[^;]*?\blog[^\n]*deferring", body), "pending must defer, with a log line"
+    assert re.search(r"failed:\*\)[^;]*?\blog[^\n]*REFUSE", body), "a red commit must be refused"
     assert "exit 0" in body, "refusing and deferring must both end the tick cleanly"
     # Fail-open is the property most likely to be "tidied" into fail-closed later, and
     # it has to be asserted about the `none)` arm SPECIFICALLY. The first version of
@@ -812,6 +812,47 @@ def test_a_commit_carrying_the_workflow_waits_for_a_verdict_then_fails_open(
     assert "REFUSE" not in log
     assert _git(r.repo, "rev-parse", "HEAD") == r.bad
     assert not r.ci_wait.exists(), "a deploy must clear the stamp"
+
+
+_RED = '{"check_runs":[{"name":"backend","status":"completed","conclusion":"failure"}]}'
+_PENDING = '{"check_runs":[{"name":"backend","status":"in_progress","conclusion":null}]}'
+
+
+@rehearsal
+def test_a_red_commit_never_deploys_on_a_later_blip(tmp_path):
+    """none -> red -> (30 min) -> 502 deployed the red commit ungated until 2026-10-18."""
+    r = _Rehearsal(tmp_path, migration=False, bad_marker="FEATURE", workflow=True)
+    _github_answers(r, '{"total_count":0,"check_runs":[]}', 200)
+    r.run()
+    _github_answers(r, _RED, 200)
+    assert "REFUSE: CI is red" in r.run()
+    assert r.ci_wait.read_text().split() == [r.bad, "red"]
+
+    for body, code in (('{"message":"Server Error"}', 502), ('{"check_runs":[]}', 200)):
+        _github_answers(r, body, code)
+        log = r.run()
+        assert "REFUSE: CI was red" in log, log
+        assert "deploying ungated" not in log and "change detected" not in log, log
+    assert _git(r.repo, "rev-parse", "HEAD") == r.good
+    assert not (r.state / "deploys.log").exists()
+
+
+@rehearsal
+def test_pending_restarts_the_wait_for_an_answer(tmp_path):
+    """A blip right after a long CI run defers; the bound counts silence, not runtime."""
+    r = _Rehearsal(tmp_path, migration=False, bad_marker="FEATURE", workflow=True)
+    _github_answers(r, '{"total_count":0,"check_runs":[]}', 200)
+    r.run()
+    sha, first = r.ci_wait.read_text().split()
+    # 31 minutes of CI running: the push-time sighting is now past the bound.
+    _write(r.ci_wait, f"{sha} {int(first) - _ci_wait_max_min() * 60 - 1}\n")
+    _github_answers(r, _PENDING, 200)
+    assert "CI still running" in r.run()
+    _github_answers(r, '{"message":"Server Error"}', 502)
+    log = r.run()
+    assert "WAIT: no answer from the GitHub check API" in log, log
+    assert "ungated" not in log, log
+    assert _git(r.repo, "rev-parse", "HEAD") == r.good
 
 
 @rehearsal

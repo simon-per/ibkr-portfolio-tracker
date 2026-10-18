@@ -256,8 +256,12 @@ issue #37) not on the first tick:
   and `unavailable` means "GitHub would not say", so both defer (`WAIT: …`). The wait is bounded
   by `CI_WAIT_MAX_MIN` (30) from the **first tick that saw this sha without a verdict**, stamped
   as `<sha> <epoch>` in `/root/.auto-deploy-ci-wait` (`CI_WAIT_STATE`); after that it deploys
-  ungated with the same `NOTE` as before. A stamp for another sha, a future or garbled one is
-  replaced; a stamp that cannot be written means no wait. A deploy removes it. A commit without
+  ungated with the same `NOTE` as before. A definite answer resets the stamp: `pending`
+  restamps it with the current time (the bound counts silence, not CI's runtime) and `failed`
+  writes `<sha> red`, after which `none`/`unavailable` for that sha refuse rather than fail
+  open — until 2026-10-18 a red commit deployed on the first API blip 30 minutes after its
+  push, because the stamp still held the push-time sighting. A stamp for another sha, a future
+  or garbled one is replaced; a stamp that cannot be written means no wait. A deploy removes it. A commit without
   the workflow deploys ungated at once. The old proxy — defer only if the committer timestamp was
   under 180 s old — let every commit made locally and pushed later through ungated on the first
   tick.
