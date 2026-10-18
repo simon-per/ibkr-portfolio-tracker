@@ -7,10 +7,13 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
-## Shipped 2026-10-18 — audit round 2, wave 2 (#58, #62–#64, #66, #68)
+## Shipped 2026-10-18 — audit round 2, wave 2 (#58, #60–#64, #66, #68)
 
 - **#58** (`cf964b8`): `trade_kind`/`sale_sign`/`uncancelled_sales` beside the model and one
   `realized_from_sell_trades`; a CANCELSELL nets its sale out everywhere; activity rows carry `is_sale`.
+- **#60 + #61** (`3dc5f20`): `dividend_withholding_adjustments` (migration `c3f9a7d1e5b2`) folds a
+  later WHTAX line into its dividend, idempotently; `IncomeSplit` gives an estimate row its
+  ladder-net for every reader but the tax report.
 - **#62 + #63** (`5e53147`): DA-1 creditable/excess per country (`swiss_treaty_rates.py`;
   TW added on review), `dividend_payments.withholding_country` (migration `c9f6e1a3b5d7`), the
   3a snapshot guarded, ISINs on tax rows, an IBKR year-end cash line (`CashService` account scope).
@@ -22,8 +25,8 @@
   on Look-through, Activity paging and Dividends.
 
 Merging #64 after #66 tripped #66's doubling scan on `DB_INT_MAX = 2**63 - 1`; the scan now
-ignores constant exponents. Verified offline: backend 2816 passed / 8 skipped, frontend 1125
-passed, build and lint, one Alembic head.
+ignores constant exponents. Verified offline: backend 2831 passed / 8 skipped, frontend 1126
+passed, build and lint, one Alembic head (three migrations, re-pointed into one chain).
 
 ## Shipped 2026-10-18 — audit round 2, wave 1 (#53–#57, #59, #67), and the owner's VPS actions
 

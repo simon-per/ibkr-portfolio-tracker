@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; waves 1 and 2 (#53–#59, #62–#64, #66–#68) shipped that evening.
+code trace; waves 1 and 2 (#53–#64, #66–#68) shipped that evening.
 
 ---
 
@@ -176,6 +176,11 @@ Only what is still unverified.
   - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
     refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
   - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
+  - Dividends (#61): estimate-era years now read net of the ladder's withholding, so the
+    2025 and boundary-year nets, TTM and the YoY chips across the splice drop by roughly the
+    withholding rate, and the forecast history's TTM line steps down once at the deploy (older
+    snapshots keep the old basis). #60: a later WHTAX correction is folded into its dividend;
+    a refused one warns once (`withholding_adjustments_unmatched` on the run).
 - **#38's first deploy:** a full uncached build (the dependency layer is new), the log shows
   `docker compose build --pull`, `docker builder prune` and, from the second deploy on,
   "Skipping npm ci"; `docker system df` on the VPS a week later shows build cache bounded to about
@@ -255,7 +260,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #60, #61, #65, #69–#79** (`gh issue list`), in
+1. **The second audit round's open issues, #65, #69–#79** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
