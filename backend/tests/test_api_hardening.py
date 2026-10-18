@@ -12,6 +12,7 @@ runs, or on /health, which has no dependencies.
 import pytest
 import asyncio
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -413,3 +414,96 @@ def test_a_non_ascii_key_is_refused_not_a_server_error(client, monkeypatch):
         headers={API_KEY_HEADER.encode("ascii"): "sécret".encode("latin-1")},
     )
     assert r.status_code == 401
+
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+
+def _cors_options() -> dict:
+    middleware = next(m for m in app.user_middleware if m.cls is CORSMiddleware)
+    return middleware.kwargs
+
+
+def test_cors_carries_no_credentials_and_names_every_method_and_header():
+    """
+    The key is a header the client sets (X-API-Key, or Bearer), never a cookie, so there
+    is no ambient credential a cross-site page could ride and nothing for
+    `allow_credentials` to enable. `"*"` for methods and headers allowed more than the
+    API speaks (GitHub issue #51).
+    """
+    options = _cors_options()
+    assert options["allow_credentials"] is False
+    assert "*" not in options["allow_methods"]
+    assert "*" not in options["allow_headers"]
+    # What the frontend actually sends (`lib/api.ts`), and what the backend reads.
+    for header in ("Content-Type", API_KEY_HEADER, "Authorization", REQUEST_ID_HEADER):
+        assert header in options["allow_headers"], header
+
+
+def test_every_route_method_is_allowed_cross_origin():
+    """The method list is explicit, so a route on a verb it lacks would work same-origin
+    and fail only from a dev server. Walks the live route table, like the auth test."""
+    allowed = set(_cors_options()["allow_methods"])
+    seen = set()
+    for ctx in iter_route_contexts(app.routes):
+        seen |= set(ctx.methods or ())
+    assert MUTATING_METHODS <= seen, "the walk should reach the mutating routes"
+    assert seen <= allowed, f"route methods missing from CORS: {sorted(seen - allowed)}"
+
+
+def test_a_listed_origin_may_preflight_a_keyed_write(client):
+    origins = _cors_options()["allow_origins"]
+    if not origins:
+        pytest.skip("CORS_ORIGINS is empty in this environment")
+    r = client.options(
+        "/api/settings/base-currency",
+        headers={
+            "Origin": origins[0],
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": f"content-type, {API_KEY_HEADER.lower()}",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == origins[0]
+    assert "access-control-allow-credentials" not in r.headers
+
+
+def test_a_preflight_for_an_unlisted_header_is_refused(client):
+    origins = _cors_options()["allow_origins"]
+    if not origins:
+        pytest.skip("CORS_ORIGINS is empty in this environment")
+    r = client.options(
+        "/api/settings/base-currency",
+        headers={
+            "Origin": origins[0],
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "x-something-else",
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_an_unlisted_origin_still_reaches_the_api_without_a_preflight(client, monkeypatch):
+    """
+    Production lists no origin at all, and the browser still sends `Origin` on a
+    same-origin PUT. CORS refuses only preflights; a request without one passes through
+    untouched, so an empty list cannot lock the production UI out of its own writes.
+    """
+    monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
+    origin = "https://portfolio.example.invalid"
+    assert origin not in _cors_options()["allow_origins"]
+    r = client.post(
+        "/api/does-not-exist", headers={"Origin": origin, API_KEY_HEADER: TOKEN}
+    )
+    assert r.status_code == 404  # reached routing
+    assert "access-control-allow-origin" not in r.headers
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("", []),                                   # production: same-origin, nothing listed
+    ("  ", []),
+    ("http://localhost:5173", ["http://localhost:5173"]),
+    ("http://a.test, ,http://b.test,", ["http://a.test", "http://b.test"]),
+])
+def test_cors_origins_parse_without_empty_entries(monkeypatch, raw, expected):
+    monkeypatch.setattr(settings, "cors_origins", raw, raising=False)
+    assert settings.cors_origins_list == expected

@@ -1,5 +1,6 @@
 node_modules/
-package-lock.json
+# package-lock.json is tracked (GitHub issue #51): `^1.62.1` alone let every install
+# resolve a different Playwright and Chromium, and the pixel and axis checks moved with it.
 
 # Screenshots are real account data and this repo is public. The scripts write them
 # next to themselves, so this must stay. Videos, traces and HAR captures record the

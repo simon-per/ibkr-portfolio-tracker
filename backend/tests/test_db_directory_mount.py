@@ -102,11 +102,31 @@ def test_the_container_runs_the_guard_before_alembic():
 
 def test_the_data_directory_is_never_committed_or_baked_into_the_image():
     """The repository is public, and data/ also holds the sidecars db-layout.sh sets aside
-    under names (`portfolio.db-wal.pre-switchover-...`) no `*.db*` pattern catches."""
+    under names (`portfolio.db-wal.pre-switchover-...`) no `*.db*` pattern catches.
+
+    The image side is a whitelist (GitHub issue #51): `.dockerignore` excludes everything,
+    then re-includes exactly the Dockerfile's COPY sources, so data/, scheduler-data/,
+    .env and tests/ never reach the build context whatever they are called. A COPY without
+    its `!` line fails the build; a `!` line without a COPY is context nobody needs."""
     gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "backend/data/" in [l.strip() for l in gitignore]
-    dockerignore = (BACKEND_DIR / ".dockerignore").read_text(encoding="utf-8").splitlines()
-    assert "data/" in [l.strip() for l in dockerignore]
+
+    patterns = [
+        l.strip()
+        for l in (BACKEND_DIR / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if l.strip() and not l.strip().startswith("#")
+    ]
+    assert patterns[0] == "*", "the first pattern must exclude everything"
+    included = {p[1:].rstrip("/") for p in patterns if p.startswith("!")}
+
+    copied = set()
+    for line in DOCKERFILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("COPY "):
+            *sources, _dest = line.split()[1:]
+            copied |= {s.rstrip("/") for s in sources}
+    assert copied, "expected COPY lines in the Dockerfile"
+    assert included == copied, f"whitelist {sorted(included)} != COPY sources {sorted(copied)}"
+    assert not included & {"data", "scheduler-data", ".env", "tests", "."}
 
 
 # --- deploy.sh and backup-db.sh ---------------------------------------------------------

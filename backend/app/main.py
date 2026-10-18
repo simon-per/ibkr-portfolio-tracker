@@ -7,11 +7,16 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy import text
 
-from app.auth import log_write_auth_state, write_auth_enabled, write_auth_middleware
+from app.auth import (
+    API_KEY_HEADER, MUTATING_METHODS, log_write_auth_state, write_auth_enabled,
+    write_auth_middleware,
+)
 from app.config import settings
 from app.database import engine
 from app.logging_setup import configure_logging
-from app.observability import request_id_middleware, unhandled_exception_handler
+from app.observability import (
+    REQUEST_ID_HEADER, request_id_middleware, unhandled_exception_handler,
+)
 from app.rate_limit import rate_limit_middleware
 
 # Third-party loggers that are chatty at INFO and say nothing we act on. yfinance in
@@ -184,13 +189,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# CORS matters only to a page on ANOTHER origin, which in practice is local development
+# (Vite on :5173 calling uvicorn on :8000). Production is same-origin and lists no origin
+# (.env.example). Everything here is explicit rather than "*":
+# - no credentials: the key is a header the client sets itself (X-API-Key, or Bearer),
+#   never a cookie, so there is no ambient credential for a cross-site page to ride;
+# - methods: the read verbs plus exactly the verbs app/auth.py gates;
+# - headers: what the client sends (Content-Type on every request, the key) plus the two
+#   the backend reads (Bearer auth, a caller-supplied request id).
+# tests/test_api_hardening.py checks that every route's methods are in the list.
+CORS_ALLOW_METHODS = ["GET", "HEAD", *sorted(MUTATING_METHODS), "OPTIONS"]
+CORS_ALLOW_HEADERS = ["Content-Type", API_KEY_HEADER, "Authorization", REQUEST_ID_HEADER]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
 )
 
 # `add_middleware` builds the stack outermost-LAST, so these run in reverse of the

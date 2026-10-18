@@ -1,8 +1,23 @@
-__pycache__/
-*.pyc
-venv/
-.env
-portfolio.db
-data/
-*.log
-server_test.log
+# A whitelist: the build context is exactly what the Dockerfile COPYs, and nothing else.
+#
+# This directory also holds the live database (data/, with its -wal/-shm sidecars and the
+# set-aside copies db-layout.sh leaves there), the scheduler's job store
+# (scheduler-data/), yfinance's cache, .env with every secret, local portfolio.db
+# snapshots under any name, tests/ and venv/. A list of exclusions is always one name
+# behind (.gitignore's history says so), and a future `COPY . .` would bake whatever it
+# missed into the image. Everything is excluded first; a new COPY source needs its own
+# `!` line, and CI's `image` job fails the build until it has one.
+# tests/test_db_directory_mount.py pins this list against the Dockerfile's COPY lines.
+*
+!requirements.txt
+!app/
+!alembic/
+!alembic.ini
+
+# Inside the whitelisted trees: bytecode, and any database copy someone drops there.
+**/__pycache__/
+**/*.py[cod]
+**/*.db
+**/*.db.*
+**/*.db-*
+**/*.sqlite*

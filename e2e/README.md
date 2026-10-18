@@ -16,7 +16,7 @@ It cannot be a `frontend` devDependency: `deploy.sh` runs `npm ci` inside `front
 deploy that already runs every 10 minutes. Nothing in the deploy path touches this directory.
 
 ```bash
-cd e2e && npm install && npx playwright install chromium
+cd e2e && npm ci && npx playwright install chromium
 ```
 
 ## Preconditions differ per script — read these

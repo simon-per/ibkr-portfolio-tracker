@@ -16,7 +16,9 @@ and for wiping / rebuilding it without losing data.
 
 **In git (restored by `git clone`):** all app code, `frontend/.env.production`
 (empty `VITE_API_URL` → frontend calls `/api/*` same-origin), `backend/frontend-nginx.conf`,
-`backend/docker-compose.yml`, `deploy.sh`, `backend/.env.example`.
+`backend/docker-compose.yml`, `deploy.sh`, `backend/.env.example`, and
+`ops/nginx-portfolio.conf.example`, a reconstruction of the host vhost (not the live file;
+see the table).
 
 **NOT in git — back these up before wiping:**
 
@@ -24,7 +26,7 @@ and for wiping / rebuilding it without losing data.
 |---|---|---|
 | `backend/data/portfolio.db` | All portfolio data (securities, tax lots, prices, FX, dividends, fundamentals, etc.) | SQLite, **WAL mode** — never plain-`cp` it while the backend runs; use `/root/backup-db.sh` or stop the backend first. Until 2026-10-04 it was `backend/portfolio.db`, which is now a symlink to it ([docs/deployment.md](docs/deployment.md), *The database directory*) |
 | `backend/.env` | Secrets: `IBKR_TOKEN`, `IBKR_QUERY_ID`, etc. | Can also be rebuilt from `backend/.env.example` |
-| `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; the vhost itself is hand-written and **not** in git |
+| `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; the vhost itself is hand-written and **not** in git. `ops/nginx-portfolio.conf.example` was reconstructed from the docs, so diff it against this file before trusting it ([docs/deployment.md](docs/deployment.md), *The host nginx vhost*) |
 | `/root/auto-deploy.sh`, `/root/backup-db.sh` | The deploy and backup jobs | Both are in git under `ops/` — reinstall from there rather than restoring the copies |
 | root's crontab | `auto-deploy` every 5 min (`*/5`, since 2026-10-04), `backup-db daily` at 03:17 UTC | Two lines; recreate by hand |
 
@@ -114,8 +116,13 @@ git clone https://github.com/simon-per/ibkr-portfolio-tracker.git IBKR_investmen
 cd IBKR_investment_tracker
 
 # Secrets: restore the backup, or create from template
-cp backend/.env.example backend/.env   # then edit, OR scp your backup over it (step 3)
+cp backend/.env.example backend/.env   # then edit (CORS_ORIGINS= empty here), OR scp your backup over it (step 3)
 ```
+
+The host nginx vhost (TLS, the `/api/` and `/health` proxy, the `[::]` listens): restore the
+backed-up `/etc/nginx/sites-available/portfolio`, or follow
+[docs/deployment.md](docs/deployment.md), *The host nginx vhost*, which starts from
+`ops/nginx-portfolio.conf.example` and gets the certificate.
 
 ---
 

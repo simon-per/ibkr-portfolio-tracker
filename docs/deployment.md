@@ -35,7 +35,8 @@ before believing it.
   Inside the container uvicorn therefore sees the Docker bridge gateway — a private address — as the
   peer, whether docker-proxy or iptables carries the connection. `app/rate_limit.py` relies on that: it
   honours `X-Forwarded-For` only from a loopback/private peer and keys on the entry nginx appended
-  (`TRUSTED_PROXY_HOPS=1`). Inferred from the repo, not measured: the live vhost is not in git. If
+  (`TRUSTED_PROXY_HOPS=1`). Inferred from the repo, not measured: the live vhost is not in git
+  (*The host nginx vhost* below). If
   the peer were ever public the limiter keys on it, which is safe but one bucket for everyone. A
   CDN or second proxy in front means raising `TRUSTED_PROXY_HOPS`
 - Backups: `/root/ibkr-backups/<date>/`, 30 days, at least 10 kept. `/root/auto-deploy.sh` and
@@ -45,6 +46,16 @@ before believing it.
 - `/health` reports `commit`, `scheduler_enabled`, `write_auth_enabled` and
   `scheduler_jobstore_persistent` (`false` means misfire recovery is off, whatever
   `/api/scheduler/status` says)
+- **`CORS_ORIGINS` is empty in production.** The frontend is same-origin (empty `VITE_API_URL`),
+  and CORS only ever refuses a *preflight* from an unlisted origin, so the UI's own writes pass with
+  nothing listed (`tests/test_api_hardening.py` pins it). Only local development needs origins:
+  Vite calls `:8000` cross-origin. The middleware sends no credentials (the key is a header,
+  never a cookie) and names its methods and headers; a route on a new verb fails
+  `test_every_route_method_is_allowed_cross_origin` until `CORS_ALLOW_METHODS` in `main.py` has it
+- **`backend/.dockerignore` is a whitelist** (GitHub issue #51): `*`, then `!` exactly the
+  Dockerfile's COPY sources. `data/` (the live database), `scheduler-data/`, `.env`, `tests/` and
+  snapshot copies under any name never reach the build context. A new COPY source needs its `!`
+  line, or CI's `image` job fails; `tests/test_db_directory_mount.py` pins the two lists equal
 
 **`portfolio.db` was a FILE bind mount until 2026-10-04, and until 2026-09-08 every deploy
 silently discarded the tail of the database.** SQLite in WAL mode writes its `-wal` and `-shm` sidecars *beside*
@@ -243,6 +254,145 @@ issue #37) not on the first tick:
 A **cloud routine** `ibkr-sync-validator` (claude.ai/code/routines) runs daily at 07:45 UTC to validate
 the morning sync via the public API + the IBKR MCP connector. It **cannot SSH**, so it opens PRs rather
 than pushing to `main`.
+
+## The host nginx vhost
+
+**The public vhost is hand-written on the VPS and not in git**: `/etc/nginx/sites-available/portfolio`,
+linked into `sites-enabled/`, certificate from Certbot. It terminates TLS on 80/443 (both with a
+`listen [::]` twin, because an AAAA record exists), proxies `/api/` and `/health` to the backend on
+`127.0.0.1:8000` (`proxy_read_timeout 300`, `X-Forwarded-For $proxy_add_x_forwarded_for` — the entry
+`app/rate_limit.py` keys on) and everything else to the frontend container on `127.0.0.1:8080`, whose
+`frontend-nginx.conf` sets the CSP and cache headers. The same nginx serves an unrelated n8n vhost.
+
+**`ops/nginx-portfolio.conf.example` is a reconstruction, not a copy.** It was written from what this
+repo documents, without access to the server. Diff it against the live file on the VPS before
+relying on it, and fold back whatever the live file has that it lacks. Once the two agree it can
+become the versioned copy. HSTS is in it commented out, with a 5-minute `max-age`: enabling it is
+the owner's call (STATUS.md).
+
+**`backend/setup_ssl.sh` was deleted on 2026-10-18** (GitHub issue #51). Nothing referenced it,
+and running it would have broken the site. It overwrote `$(ls /etc/nginx/sites-enabled/*)`, which is
+two files on this host (n8n). It had no `listen [::]` lines. It served `frontend/dist` from the
+host, which bypasses the container's CSP.
+
+**On a rebuilt VPS**, after DNS points at it (DEPLOY.md section 2):
+
+```bash
+apt-get install -y nginx certbot python3-certbot-nginx
+cp /root/IBKR_investment_tracker/ops/nginx-portfolio.conf.example /etc/nginx/sites-available/portfolio
+# The certificate does not exist yet, so `nginx -t` rejects the 443 server. For the first run,
+# comment out that server and the port-80 `return 301` (Certbot must answer its challenge
+# over plain HTTP).
+# Get the certificate, then restore both.
+ln -s /etc/nginx/sites-available/portfolio /etc/nginx/sites-enabled/portfolio
+nginx -t && systemctl reload nginx
+certbot certonly --nginx -d portfolio.srv1211053.hstgr.cloud
+# Restore both. Certbot's nginx plugin normally creates options-ssl-nginx.conf and
+# ssl-dhparams.pem. If either is missing, drop that line.
+nginx -t && systemctl reload nginx
+```
+
+## The healthcheck restarts nothing (decision, GitHub issue #51)
+
+**The compose healthcheck reports. It does not recover.** `restart: unless-stopped` acts only when
+the process *exits*. A hung event loop leaves the container up and marked `unhealthy`, and nothing
+reads that flag: no `depends_on: condition: service_healthy`, no autoheal. This is deliberate
+and stays. `/health` touches no database (auto-deploy pairs it with `/api/portfolio/summary`),
+and the healthcheck exists so `docker compose ps` can tell "running" from "serving". The gap:
+**a hang is never recovered on its own.** No hang has been recorded, so nothing is installed.
+
+**Owner action, only if a hang is ever seen:** a host cron that reads Docker's own verdict and
+restarts after N consecutive unhealthy ticks. Docker marks the container `unhealthy` only after 3
+failed probes 30 s apart. With `N=3` at `*/5`, the backend has to stay unhealthy for 10–15 minutes
+before a restart. Keep N generous. A restart kills an in-flight sync, and a killed scheduled Flex
+run re-runs, which is a second generation (rule 2).
+
+```bash
+#!/bin/bash
+# /root/health-watch.sh: restart a backend that stays unhealthy.
+# Install: chmod 755 /root/health-watch.sh; root crontab:  */5 * * * * /root/health-watch.sh
+set -u
+N="${HEALTH_WATCH_TICKS:-3}"             # consecutive unhealthy ticks before a restart
+STATE=/root/.health-watch-count
+LOG=/root/health-watch.log
+cd /root/IBKR_investment_tracker/backend || exit 0
+# Never during a deploy. auto-deploy holds this lock for its whole run, and its own health
+# gate and rollback own the container meanwhile. -n skips the tick instead of queueing.
+exec 9>/root/.auto-deploy.lock
+flock -n 9 || exit 0
+cid=$(docker compose ps -q portfolio-backend)
+status=""
+[ -n "$cid" ] && status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")
+prev=$(cat "$STATE" 2>/dev/null); case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
+if [ "$status" = "unhealthy" ]; then n=$((prev + 1)); else n=0; fi
+echo "$n" >"$STATE"
+if [ "$n" -ge "$N" ]; then
+    echo "$(date -u +%FT%TZ) unhealthy for $n ticks; restarting portfolio-backend" >>"$LOG"
+    docker compose restart portfolio-backend >>"$LOG" 2>&1
+    echo 0 >"$STATE"
+fi
+```
+
+`restart`, not `up -d`, on purpose: nothing in `.env` changed, and `restart` keeps the container's
+`GIT_COMMIT`. A bare `up -d` would reset `/health`'s `commit` to `unknown` (above). Rejected
+alternative: the `willfarrell/autoheal` container. It needs `/var/run/docker.sock` mounted into a
+third-party image, which is root on the host.
+
+## Not done: non-root container
+
+**The backend still runs as root inside its container** (GitHub issue #51, item 1). That is
+the process that parses third-party XML, HTML and CSV and talks to five external APIs. The
+change needs a one-time ownership change on the VPS that the owner has not approved yet. The plan,
+in one commit:
+
+1. **Dockerfile**, after the `COPY` lines and before `CMD`:
+
+   ```dockerfile
+   RUN useradd --uid 10001 --user-group --no-log-init --create-home --shell /usr/sbin/nologin app
+   USER 10001:10001
+   ```
+
+   The code stays root-owned and world-readable, which is all the app needs. `--create-home`
+   gives libraries a writable `$HOME`. yfinance's cache already lives on the data mount
+   (`app/yf_cache.py`). `__pycache__` writes under `/app/app` fail silently, which is harmless.
+   Add `ENV PYTHONDONTWRITEBYTECODE=1` to skip the attempts.
+2. **Ownership, in `deploy.sh` between `ops/db-layout.sh switch` and `docker compose up -d`, on every
+   deploy** (idempotent and cheap), not as a one-off:
+
+   ```bash
+   chown -R 10001:10001 "$REPO_DIR/backend/data" "$REPO_DIR/backend/scheduler-data"
+   ```
+
+   Every deploy, because root keeps creating files there. `db-layout.sh`'s legacy move,
+   auto-deploy's rollback restore (it copies a snapshot into place as root and then re-runs
+   `deploy.sh`), and a hand restore by `scp` (DEPLOY.md section 3) all leave root-owned files.
+   `chown -R` does not follow the `backend/portfolio.db` symlink, which sits outside both
+   directories anyway. `/root` being `0700` does not matter: the container reaches the bind mounts
+   through its own mount namespace. Backups are unaffected, because `/root/backup-db.sh` runs as
+   root on the host and reads anything.
+3. **`app/db_guard.py`: add a writability check** (`os.access` with `W_OK` on the file and its
+   directory). That way, a missed chown is refused with a message that names it.
+
+**If the chown is missed** (a human's `./deploy.sh` runs the old copy once, see *A `deploy.sh`
+that pulls the repo itself*): today's `db_guard` only checks that the file exists, is a regular
+file and is non-empty, and a root-owned file passes all three. The failure surfaces one step later.
+`alembic upgrade head` cannot open the database for writing ("attempt to write a readonly database"
+or "unable to open database file": WAL mode must create or write `-wal`/`-shm` in the directory).
+The `&&` chain stops, and the container crash-loops. `health_ok` fails, and auto-deploy rolls back to
+the previous root image, which works on root-owned files. Loud, down for the deploy window,
+self-recovering. A missed **`scheduler-data/` alone is quiet**: the job store cannot open, the
+scheduler falls back to memory, and only `/health`'s `scheduler_jobstore_persistent: false` says so.
+`health_ok` does not check that field. A missed `data/yf-cache/` costs yfinance's cache and a log
+line.
+
+**Verify after the deploy:** `docker compose exec portfolio-backend id -u` prints `10001`;
+`ls -ln backend/data backend/scheduler-data` shows `10001` on `portfolio.db`, its `-wal`/`-shm`,
+`yf-cache/` and `scheduler_jobs.db`; `/health` reports `scheduler_jobstore_persistent: true`; the
+next slot's `sync_runs` row lands.
+
+**Rollback:** revert the commit. A root image reads and writes `10001`-owned files, so nothing has to
+be chowned back. Files it creates meanwhile are root-owned again, and the `chown` in step 2 fixes
+them on the next attempt.
 
 ## Rollback and the database
 

@@ -117,7 +117,9 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list:
-        return [origin.strip() for origin in self.cors_origins.split(",")]
+        # Empty entries dropped, so `CORS_ORIGINS=` (production: same-origin, nothing to
+        # allow) is an empty list rather than [""].
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 # Create a global settings instance

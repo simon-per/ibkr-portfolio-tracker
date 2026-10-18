@@ -51,6 +51,10 @@ production CSP, chunk boundaries, and the backend-down pass asserting no surface
 empty-data message. Read `e2e/README.md` first: **the preconditions differ per script**, and two of
 them (`csp`, `chunks`) must run against `vite preview` rather than the dev server, because the dev
 server emits an inline react-refresh script that `script-src 'self'` correctly blocks and does not
-produce chunk boundaries at all.
+produce chunk boundaries at all. **Install it with `npm ci`**: `e2e/package-lock.json` is tracked
+since 2026-10-18 and pins Playwright (1.62.1) and with it the Chromium build. Before that, each
+`npm install` could resolve a different one, and the pixel and axis checks moved with it.
+Bump it deliberately (`npm install playwright@<version>` in `e2e/`, then
+`npx playwright install chromium`).
 
 ---
