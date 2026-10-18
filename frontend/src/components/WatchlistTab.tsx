@@ -361,6 +361,7 @@ export function WatchlistTab() {
               label="Watchlist table"
               density="roomy"
               minWidthClassName="min-w-[64rem]"
+              pinFirstColumn
               // Four visible details, twelve behind the disclosure. Hiding them outright
               // would hide the data the watchlist is for; a collapsed card is ~120px, so
               // thirty rows is one honest vertical scroll instead of four sideways ones.

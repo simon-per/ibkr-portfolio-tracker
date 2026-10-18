@@ -6,6 +6,12 @@ interface ScrollableTableProps {
   /** Names the scroll region for screen readers, e.g. "Watchlist table". */
   label: string
   className?: string
+  /**
+   * The table pins its first column (`position: sticky`). The left fade would then lie
+   * over the pinned cells, so it is dropped; the pinned column draws its own edge, keyed
+   * off the scroller's `data-scrolled` attribute.
+   */
+  pinnedStart?: boolean
 }
 
 /**
@@ -20,7 +26,7 @@ interface ScrollableTableProps {
  * It is also a real scroll region: `tabIndex={0}` plus `role="region"` make it
  * reachable and scrollable by keyboard, which an `overflow-x-auto` div is not.
  */
-export function ScrollableTable({ children, label, className }: ScrollableTableProps) {
+export function ScrollableTable({ children, label, className, pinnedStart = false }: ScrollableTableProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
 
@@ -62,6 +68,7 @@ export function ScrollableTable({ children, label, className }: ScrollableTableP
         tabIndex={0}
         role="region"
         aria-label={`${label} (scrolls horizontally)`}
+        data-scrolled={edges.left || undefined}
         // `relative` makes the scroller the containing block of any absolute descendant
         // (an `sr-only` header span is one): otherwise it resolves to the wrapper outside
         // the scroller, sits at the table's far edge unclipped, and widens the page.
@@ -75,7 +82,7 @@ export function ScrollableTable({ children, label, className }: ScrollableTableP
       </div>
 
       {/* pointer-events-none so the fades never intercept a click on a cell beneath. */}
-      {edges.left && (
+      {edges.left && !pinnedStart && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-card to-transparent"

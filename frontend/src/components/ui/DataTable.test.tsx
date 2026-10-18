@@ -342,6 +342,33 @@ describe('expandedRow puts a panel under its own row', () => {
   })
 })
 
+describe('pinFirstColumn keeps the identity column on screen', () => {
+  const isPinned = (el: Element | null | undefined) => !!el?.className.split(' ').includes('sticky')
+
+  it('pins the first header, body and footer cell, and nothing else', () => {
+    const { tableView } = renderBoth({ pinFirstColumn: true, footer: [
+      { key: 'sym', spans: ['symbol'], content: 'Total' },
+      { key: 'value', spans: ['value'], content: '8010.65', align: 'right' },
+    ] })
+    for (const row of Array.from(tableView.querySelectorAll('tr'))) {
+      const cells = Array.from(row.children)
+      expect(isPinned(cells[0])).toBe(true)
+      expect(cells.slice(1).some(isPinned)).toBe(false)
+    }
+  })
+
+  it('never pins a footer cell spanning more than the first column', () => {
+    // A sticky span would drag its neighbours' columns along with it.
+    const { tableView } = renderBoth({ pinFirstColumn: true, footer: FOOTER })
+    expect(isPinned(tableView.querySelector('tfoot td'))).toBe(false)
+  })
+
+  it('pins nothing unless asked', () => {
+    const { tableView } = renderBoth({ footer: FOOTER })
+    expect(Array.from(tableView.querySelectorAll('th, td')).some(isPinned)).toBe(false)
+  })
+})
+
 describe('the column hint', () => {
   it('puts the hint on the desktop header, where it was before', () => {
     render(<DataTable rows={ROWS} columns={COLUMNS} getRowKey={r => r.id} label="t" mode="table" />)

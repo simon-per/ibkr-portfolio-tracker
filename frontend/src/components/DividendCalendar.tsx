@@ -62,14 +62,20 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
       <DividendSubheading title="Expected next" icon={CalendarClock} />
 
       {/* Bounded height: 12 months of a 20-payer portfolio is ~60 rows, which
-          would otherwise push the position table off the page. */}
-      <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+          would otherwise push the position table off the page.
+          `-mx-1.5 px-1.5` gives the rows' `-mx-1.5` hover wash room INSIDE the
+          scroller: with only `pr-1` the rows overflowed it by 2px, and because
+          `overflow-y-auto` forces `overflow-x` to auto that bought a sideways
+          scrollbar for nothing. The scrollbar is thin and themed; the native one
+          rendered as a white bar in dark mode. */}
+      <div className="-mx-1.5 max-h-72 space-y-3 overflow-y-auto px-1.5 [scrollbar-color:hsl(var(--border-strong))_transparent] [scrollbar-width:thin]">
         {groups.map(([month, rows]) => {
           const monthTotal = rows.reduce((s, r) => s + r.net_eur, 0)
           return (
             <div key={month}>
-              {/* Sticky inside the scroller, so a long month keeps its heading and total. */}
-              <div className="sticky top-0 z-[1] mb-1 flex items-baseline justify-between border-b border-border/60 bg-card pb-1">
+              {/* Sticky inside the scroller, so a long month keeps its heading and total.
+                  Bleeds over the scroller's padding so a row scrolling under it is covered edge to edge. */}
+              <div className="sticky top-0 z-[1] -mx-1.5 mb-1 flex items-baseline justify-between border-b border-border/60 bg-card px-1.5 pb-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {monthHeading(month)}
                 </span>
