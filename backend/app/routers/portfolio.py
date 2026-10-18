@@ -4,12 +4,13 @@ API endpoints for portfolio value and positions.
 """
 import logging
 from typing import List, Optional
-from datetime import date, timedelta
+from datetime import date
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.routers._windows import default_window, validate_window
 from app.services.activity_service import (
     ActivityService,
     DEFAULT_LIMIT,
@@ -35,10 +36,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Same reasoning as the 5-year cap on value-over-time: the route is anonymous, so the
-# window a caller can ask for has to be bounded somewhere.
-MAX_ACTIVITY_DAYS = 365 * 5
-
 
 @router.get("/value-over-time", response_model=List[PortfolioValuePoint])
 async def get_portfolio_value_over_time(
@@ -61,27 +58,7 @@ async def get_portfolio_value_over_time(
 
     Returns data points for each business day in the range.
     """
-    if not end_date:
-        end_date = date.today()
-
-    if not start_date:
-        # Default to 1 year ago
-        start_date = end_date - timedelta(days=365)
-
-    # Validate date range
-    if start_date > end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before or equal to end_date"
-        )
-
-    # Limit to reasonable range (max 5 years to prevent huge queries)
-    max_days = 365 * 5
-    if (end_date - start_date).days > max_days:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Date range too large. Maximum allowed is {max_days} days (5 years)"
-        )
+    start_date, end_date = default_window(start_date, end_date)
 
     portfolio_service = PortfolioService(db)
 
@@ -137,11 +114,7 @@ async def get_annualized_return(
     Treats each tax lot purchase as a dated cash flow and finds the annualized
     rate that makes the NPV of all cash flows equal zero.
     """
-    if start_date >= end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before end_date"
-        )
+    validate_window(start_date, end_date)
 
     portfolio_service = PortfolioService(db)
     xirr_pct, num_cash_flows, eff_start, eff_end, method = await portfolio_service.calculate_xirr(start_date, end_date)
@@ -173,39 +146,12 @@ async def get_performance_attribution(
     Shows which securities drove portfolio gains/losses by comparing
     market values at start and end dates, accounting for new investments.
     """
-    if start_date >= end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before end_date"
-        )
+    validate_window(start_date, end_date)
 
     portfolio_service = PortfolioService(db)
     result = await portfolio_service.get_performance_attribution(start_date, end_date)
 
     return PerformanceAttributionResponse(**result)
-
-
-def _activity_window(start_date: Optional[date], end_date: Optional[date]) -> tuple:
-    """
-    Default and validate the activity window, mirroring the guards on value-over-time.
-
-    The default is one year rather than everything: the ledger is the landing view of a
-    tab, and an unbounded default would make the first paint the most expensive query
-    on the site.
-    """
-    end_date = end_date or date.today()
-    start_date = start_date or (end_date - timedelta(days=365))
-
-    if start_date > end_date:
-        raise HTTPException(
-            status_code=400, detail="start_date must be before or equal to end_date"
-        )
-    if (end_date - start_date).days > MAX_ACTIVITY_DAYS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Date range too large. Maximum allowed is {MAX_ACTIVITY_DAYS} days",
-        )
-    return start_date, end_date
 
 
 def _activity_kinds(kind: Optional[str]) -> Optional[List[str]]:
@@ -245,7 +191,7 @@ async def get_activity(
     money-added figure was an ssh command. Cash-flow rows carry `counts_as_money_in`
     for exactly that.
     """
-    start_date, end_date = _activity_window(start_date, end_date)
+    start_date, end_date = default_window(start_date, end_date)
     return await ActivityService(db).get_activity(
         start_date=start_date, end_date=end_date,
         kinds=_activity_kinds(kind), symbol=symbol, limit=limit, offset=offset,
@@ -266,7 +212,7 @@ async def get_activity_csv(
     The same ledger as a download. Defaults to the maximum page rather than the UI's,
     since someone exporting wants the window they asked for, not one screen of it.
     """
-    start_date, end_date = _activity_window(start_date, end_date)
+    start_date, end_date = default_window(start_date, end_date)
     service = ActivityService(db)
     result = await service.get_activity(
         start_date=start_date, end_date=end_date,
@@ -328,17 +274,7 @@ async def get_benchmark_comparison(
             detail=f"Unknown anchor '{anchor}'. Choose from: {', '.join(ANCHOR_MODES)}",
         )
 
-    if not end_date:
-        end_date = date.today()
-    if not start_date:
-        start_date = end_date - timedelta(days=365)
-
-    if start_date > end_date:
-        raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
-
-    max_days = 365 * 5
-    if (end_date - start_date).days > max_days:
-        raise HTTPException(status_code=400, detail=f"Date range too large. Maximum {max_days} days.")
+    start_date, end_date = default_window(start_date, end_date)
 
     bench_info = BENCHMARKS[benchmark]
     service = BenchmarkService(db)

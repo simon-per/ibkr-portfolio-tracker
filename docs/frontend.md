@@ -411,9 +411,15 @@ did not cause.
 
 **`MAX_RANGE_DAYS` is the other cross-language constant**, and it drifts with no other symptom:
 `dateRanges.ts` clamps the ALL button to `365 * 5` precisely so it never asks
-`/api/portfolio/value-over-time` for a span the router's own `max_days = 365 * 5` returns 400 for. The
-clamp lands *on* the boundary — the client sends exactly `max_days` and the server compares with `>` —
-so an off-by-one on either side breaks ALL for anyone with enough history while both suites stay
+`/api/portfolio/value-over-time` for a span the server's `MAX_WINDOW_DAYS = 365 * 5` returns 400 for.
+That constant lives in `backend/app/routers/_windows.py`, the one window guard every
+`start_date`/`end_date` route calls (`validate_window`, or `default_window` for an optional window
+defaulting to the year ending today); it also refuses an inverted window and a date outside
+1900-01-01..2199-12-31, so no service's date arithmetic can overflow into a 500. It was hand-written
+four times and missing from `/attribution` and `/annualized-return` until issue #30;
+`tests/test_window_guard_family.py` fails for a window route that bypasses it. The
+clamp lands *on* the boundary — the client sends exactly `MAX_WINDOW_DAYS` and the server compares with
+`>` — so an off-by-one on either side breaks ALL for anyone with enough history while both suites stay
 green. `tests/test_range_limit_agreement.py` reads both files and pins them **equal**, not merely
 compatible: a client that shrank to one year would satisfy "not larger" and silently truncate.
 

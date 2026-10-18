@@ -1,17 +1,18 @@
 """
 `/api/performance/*` — where the return came from.
 
-Pure database reads: none of these can reach Yahoo or IBKR. The window guards mirror
-`/api/portfolio/value-over-time`, including the 5-year ceiling the frontend's
+Pure database reads: none of these can reach Yahoo or IBKR. The window guard is the
+shared `routers/_windows.validate_window`, including the 5-year ceiling the frontend's
 `MAX_RANGE_DAYS` is pinned to.
 """
 import logging
-from datetime import date, timedelta
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.routers._windows import validate_window
 from app.schemas.performance import (
     ClosedPositionsResponse,
     ReturnDecompositionResponse,
@@ -21,18 +22,6 @@ from app.services.performance_analytics_service import PerformanceAnalyticsServi
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-MAX_DAYS = 365 * 5
-
-
-def _window(start_date: date, end_date: date) -> None:
-    if start_date >= end_date:
-        raise HTTPException(status_code=400, detail="start_date must be before end_date")
-    if (end_date - start_date).days > MAX_DAYS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Date range too large. Maximum allowed is {MAX_DAYS} days (5 years)",
-        )
 
 
 @router.get("/decomposition", response_model=ReturnDecompositionResponse)
@@ -45,7 +34,7 @@ async def get_return_decomposition(
     The change in Total Value over the window split into flows, price, FX, dividends,
     fees/interest and an explicit remainder — for the window and per calendar year.
     """
-    _window(start_date, end_date)
+    validate_window(start_date, end_date)
     return await PerformanceAnalyticsService(db).decomposition(start_date, end_date)
 
 
@@ -56,7 +45,7 @@ async def get_segment_attribution(
     db: AsyncSession = Depends(get_db),
 ):
     """Per-security gains folded onto sectors and countries through the look-through."""
-    _window(start_date, end_date)
+    validate_window(start_date, end_date)
     return await PerformanceAnalyticsService(db).segments(start_date, end_date)
 
 

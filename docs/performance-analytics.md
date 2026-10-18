@@ -28,6 +28,11 @@ make it).
 | Rolling Sharpe / volatility / beta | `lib/rollingRisk.ts` | the value series the chart already fetched, plus the selected benchmark |
 | Drawdown ledger | `lib/rollingRisk.ts` | the same |
 
+The two windowed routes go through the shared guard `routers/_windows.validate_window`, like
+every `start_date`/`end_date` route (`/api/portfolio/attribution` included): 400 for a window
+that is inverted or zero-length, longer than `MAX_WINDOW_DAYS` (5 years, the frontend's
+`MAX_RANGE_DAYS`), or dated outside 1900–2199. [frontend.md](frontend.md) has why the cap is pinned.
+
 ## One loop over the lots — `PortfolioService.attribution_rows`
 
 The per-security window arithmetic behind `/api/portfolio/attribution` was extracted into

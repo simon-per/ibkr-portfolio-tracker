@@ -1,7 +1,8 @@
 """
 The maximum chart span is written down in two languages and must agree.
 
-`/api/portfolio/value-over-time` refuses a range wider than `365 * 5` days with a 400,
+`/api/portfolio/value-over-time` refuses a range wider than `365 * 5` days with a 400
+(the shared guard in `app/routers/_windows.py`, which every window route goes through),
 and `frontend/src/lib/dateRanges.ts` clamps the ALL button to its own `MAX_RANGE_DAYS`
 so it never asks for one the server will reject. Two copies of one number, in files that
 cannot import each other — the same shape as `breakpoints.test.ts` (Tailwind's scale in
@@ -13,7 +14,7 @@ and the ALL button starts returning 400 for every user whose inception is far en
 back, while every test on both sides still passes.
 
 The boundary is exact, not approximate. The client asks for `today - MAX_RANGE_DAYS`,
-so the span it sends is exactly `max_days` and the server's `> max_days` is False by one
+so the span it sends is exactly `MAX_WINDOW_DAYS` and the server's `>` is False by one
 day. A test asserting only "the client is not larger" would allow the client to shrink
 to a year and never notice, so equality is what is pinned.
 """
@@ -23,20 +24,20 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-ROUTER = REPO / "backend" / "app" / "routers" / "portfolio.py"
+ROUTER = REPO / "backend" / "app" / "routers" / "_windows.py"
 DATE_RANGES = REPO / "frontend" / "src" / "lib" / "dateRanges.ts"
 
 
 def _server_max_days() -> int:
-    """The `max_days = 365 * 5` the range validator compares against."""
+    """The `MAX_WINDOW_DAYS = 365 * 5` the shared window validator compares against."""
     tree = ast.parse(ROUTER.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            if "max_days" in names:
+            if "MAX_WINDOW_DAYS" in names:
                 return int(eval(compile(ast.Expression(node.value), "<v>", "eval")))
     raise AssertionError(
-        "no `max_days = ...` in portfolio.py — the range guard moved or was renamed, "
+        "no `MAX_WINDOW_DAYS = ...` in _windows.py — the range guard moved or was renamed, "
         "and this test can no longer see what the client has to agree with"
     )
 
