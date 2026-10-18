@@ -43,6 +43,8 @@ SMOKE_URL="${SMOKE_URL:-http://127.0.0.1:8000/api/portfolio/summary}"
 GITHUB_REPO="${GITHUB_REPO:-simon-per/ibkr-portfolio-tracker}"
 # Records a commit whose deploy was rolled back — see the quarantine guard.
 QUARANTINE="${QUARANTINE:-/root/.auto-deploy-quarantine}"
+# "<sha> <epoch>": when origin/main was first seen without a CI verdict — see the CI gate.
+CI_WAIT_STATE="${CI_WAIT_STATE:-/root/.auto-deploy-ci-wait}"
 # The installed copy is preferred; see the backup step for why, and for the fallback.
 BACKUP_SCRIPT="${BACKUP_SCRIPT:-/root/backup-db.sh}"
 # Where the rollback's database restore looks for migrations in the pushed range.
@@ -175,7 +177,8 @@ fi
 # unreachable" must FAIL OPEN and deploy: a gate that can brick every future deploy
 # because an unrelated service is down, or because the commit predates the workflow, is
 # a worse failure than the one it prevents. Same reasoning as the sync-slot guard
-# logging only when there is something waiting.
+# logging only when there is something waiting. Failing open is bounded rather than
+# immediate when the commit carries the workflow: see defer_while_ci_may_answer.
 #
 # Unauthenticated, which is fine on a public repo (60 requests/hour/IP) and means no
 # credential on the VPS. Reached only when there is something to deploy.
@@ -185,10 +188,17 @@ fi
 #
 # `neutral` and `skipped` count as success: a job that deliberately did not run (a path
 # filter, a manual skip) is not a failing test.
+#
+# Only a body that HAS a `check_runs` list can say "none". Until 2026-10-18 a missing key
+# read as an empty list, so every GitHub error reply — a rate limit, a 404, a 5xx with a
+# JSON `message` — meant "this commit has no checks" (GitHub issue #37). ci_verdict also
+# refuses any non-200 before this runs; the shape test is the second half of that.
 read -r -d '' CI_VERDICT_PY <<'PYEOF'
 import json, sys
 try:
-    runs = json.load(sys.stdin).get("check_runs") or []
+    runs = json.load(sys.stdin)["check_runs"]
+    if not isinstance(runs, list):
+        raise TypeError("check_runs is not a list")
 except Exception:
     print("unavailable"); raise SystemExit(0)
 if not runs:
@@ -200,10 +210,55 @@ bad = [r.get("name", "?") for r in runs
 print("failed:" + ",".join(bad) if bad else "success")
 PYEOF
 
+# The HTTP status decides whether there is an answer at all: anything but 200 is
+# `unavailable`, whatever the body says. `-w` appends the status as a last line of its own.
 ci_verdict() {
     local url="https://api.github.com/repos/${GITHUB_REPO}/commits/${REMOTE}/check-runs"
-    curl -s --max-time 20 -H "Accept: application/vnd.github+json" "$url" 2>/dev/null \
-        | python3 -c "$CI_VERDICT_PY" 2>/dev/null || echo unavailable
+    local out
+    out=$(curl -s --max-time 20 -w '\n%{http_code}' \
+        -H "Accept: application/vnd.github+json" "$url" 2>/dev/null)
+    if [ "${out##*$'\n'}" != "200" ]; then
+        echo unavailable
+        return
+    fi
+    printf '%s' "${out%$'\n'*}" | python3 -c "$CI_VERDICT_PY" 2>/dev/null || echo unavailable
+}
+
+# "No checks yet" and "no checks ever" look identical to the API, and they need opposite
+# answers: the first is a push whose workflow has not registered its jobs, the second a
+# commit that predates the workflow. Whether the commit carries the workflow is a fact git
+# answers offline, so that is what separates them. A commit WITHOUT it fails open at once.
+# A commit WITH it waits for a verdict — and so does one whose verdict GitHub would not
+# give (`unavailable`), so a blip defers a few ticks instead of deploying ungated on the
+# first. The wait is bounded by CI_WAIT_MAX_MIN measured from the first tick that saw
+# this sha without a verdict (recorded in CI_WAIT_STATE), never by the commit's own
+# timestamp: until 2026-10-18 a 180 s committer-age proxy deployed every commit made
+# locally and pushed later ungated, on the very first tick (GitHub issue #37). After the
+# bound it returns and the caller deploys ungated, loudly: the fail-open property holds,
+# a few ticks later. Exits the tick when deferring, so call it directly, never in $(...).
+CI_WORKFLOW=".github/workflows/ci.yml"
+# CI takes a few minutes; 30 is ample for the jobs to register and finish, and short
+# enough that a GitHub outage delays a deploy by half an hour rather than blocking it.
+CI_WAIT_MAX_MIN=30
+
+defer_while_ci_may_answer() {   # defer_while_ci_may_answer <what is missing>
+    local now sha="" first=""
+    git cat-file -e "$REMOTE:$CI_WORKFLOW" 2>/dev/null || return 0
+    now=$(date -u +%s)
+    read -r sha first 2>/dev/null < "$CI_WAIT_STATE"
+    if [ "$sha" != "$REMOTE" ] || ! [[ "$first" =~ ^[0-9]+$ ]] || [ "$first" -gt "$now" ]; then
+        first=$now
+        # A stamp that cannot be written would restart the wait every tick, forever.
+        if ! echo "$REMOTE $now" 2>/dev/null > "$CI_WAIT_STATE"; then
+            log "WARN: cannot write $CI_WAIT_STATE, so a wait for CI could never end; not waiting"
+            return 0
+        fi
+    fi
+    if [ $(( now - first )) -lt $(( CI_WAIT_MAX_MIN * 60 )) ]; then
+        log "WAIT: $1 for ${REMOTE:0:7}, which carries $CI_WORKFLOW; first seen $(( now - first ))s ago, deferring (fails open after ${CI_WAIT_MAX_MIN}min)"
+        exit 0
+    fi
+    log "NOTE: still $1 for ${REMOTE:0:7} after ${CI_WAIT_MAX_MIN}min"
 }
 
 VERDICT=$(ci_verdict)
@@ -212,25 +267,15 @@ case "$VERDICT" in
     pending)   log "WAIT: CI still running for ${REMOTE:0:7}; deferring to the next tick"; exit 0 ;;
     failed:*)  log "REFUSE: CI is red for ${REMOTE:0:7} (${VERDICT#failed:}) — not deploying. Fix it and push again."; exit 0 ;;
     none)
-        # "No checks yet" and "no checks ever" look identical here, and they need
-        # opposite answers: the first is a push from thirty seconds ago whose workflow
-        # has not registered its jobs, the second is a commit that predates the workflow
-        # or a repo where Actions is off. Deploying the first ungated would quietly
-        # reopen the hole this gate exists to close.
-        #
-        # The commit's own timestamp separates them well enough. It is a proxy rather
-        # than a proof — a commit authored yesterday and pushed now reads as old, so it
-        # deploys ungated — but it costs one tick and closes the common case.
-        NOW=$(date -u +%s)
-        MADE=$(git show -s --format=%ct "$REMOTE" 2>/dev/null || echo 0)
-        if [ "$MADE" -gt 0 ] && [ $((NOW - MADE)) -lt 180 ]; then
-            log "WAIT: ${REMOTE:0:7} has no CI checks yet and is $((NOW - MADE))s old; deferring one tick"
-            exit 0
-        fi
+        defer_while_ci_may_answer "no CI checks yet"
         log "NOTE: no CI checks found for ${REMOTE:0:7}; deploying ungated"
         ;;
-    *)         log "NOTE: could not reach the GitHub check API; deploying ungated" ;;
+    *)
+        defer_while_ci_may_answer "no answer from the GitHub check API"
+        log "NOTE: could not reach the GitHub check API; deploying ungated"
+        ;;
 esac
+rm -f "$CI_WAIT_STATE"
 
 log "change detected: ${LOCAL:0:7} -> ${REMOTE:0:7}, deploying"
 

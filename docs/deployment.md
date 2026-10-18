@@ -9,7 +9,7 @@
 
 **Push to `main` → deployed automatically within 5 minutes** (once CI is green).
 `/root/auto-deploy.sh` on the VPS (root crontab, `*/5 * * * *` — `*/10` until 2026-10-04) does: `flock` → `git fetch` → deploy **only if strictly behind** `origin/main`
-(`merge-base --is-ancestor`; it will refuse and log if the VPS has diverged) → back up `portfolio.db` →
+(`merge-base --is-ancestor`; it will refuse and log if the VPS has diverged) → CI gate (below) → back up `portfolio.db` →
 `deploy.sh` → health check → **roll back to the previous commit if health fails**. Log:
 `/root/auto-deploy.log`.
 
@@ -208,6 +208,29 @@ The rules:
   `/root/auto-deploy.log` as `Holding the restart: …`.
 - **`DEPLOY_IGNORE_SLOTS=1 ./deploy.sh`** skips the check for a manual deploy that must go now. A
   plain manual `./deploy.sh` waits like the unattended one.
+
+**The CI gate asks GitHub's check-runs API for the commit's verdict before the backup.**
+Red (`failed:`) is refused, `pending` defers a tick, and green deploys. The other two answers
+**fail open on purpose** — a gate that blocks every deploy because GitHub is down, or because a
+commit predates the workflow, is worse than the hole it closes — but since 2026-10-18 (GitHub
+issue #37) not on the first tick:
+
+- **`unavailable` is anything that is not an answer**: a transport failure, any HTTP status but
+  200 (`curl -w '%{http_code}'`), or a body without a `check_runs` list. Only a 200 with an empty
+  `check_runs` is `none`. Before, a rate-limit or 404 reply parsed as zero check runs and read as
+  "this commit has no checks".
+- **Whether a verdict is coming is decided by the commit, not the clock.** If the pushed tree has
+  `.github/workflows/ci.yml` (`git cat-file -e`, offline), `none` means "jobs not registered yet"
+  and `unavailable` means "GitHub would not say", so both defer (`WAIT: …`). The wait is bounded
+  by `CI_WAIT_MAX_MIN` (30) from the **first tick that saw this sha without a verdict**, stamped
+  as `<sha> <epoch>` in `/root/.auto-deploy-ci-wait` (`CI_WAIT_STATE`); after that it deploys
+  ungated with the same `NOTE` as before. A stamp for another sha, a future or garbled one is
+  replaced; a stamp that cannot be written means no wait. A deploy removes it. A commit without
+  the workflow deploys ungated at once. The old proxy — defer only if the committer timestamp was
+  under 180 s old — let every commit made locally and pushed later through ungated on the first
+  tick.
+- Rehearsed in `backend/tests/test_deploy_rollback.py` (stubbed curl; the decision table is
+  extracted from the script and run).
 
 A **cloud routine** `ibkr-sync-validator` (claude.ai/code/routines) runs daily at 07:45 UTC to validate
 the morning sync via the public API + the IBKR MCP connector. It **cannot SSH**, so it opens PRs rather

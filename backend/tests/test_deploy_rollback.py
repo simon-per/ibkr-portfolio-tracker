@@ -256,9 +256,32 @@ def _verdict(payload: str) -> str:
             "success",
         ),
         (
+            "no check runs registered — the only body that means none",
+            '{"total_count":0,"check_runs":[]}',
+            "none",
+        ),
+        # GitHub's error replies carry a `message` and no `check_runs`. Until issue #37
+        # all three read as "none": GitHub refusing to answer, taken for an answer.
+        (
             "repo or commit unknown to GitHub",
             '{"message":"Not Found"}',
-            "none",
+            "unavailable",
+        ),
+        (
+            "rate limited",
+            '{"message":"API rate limit exceeded for 0.0.0.0.",'
+            '"documentation_url":"https://docs.github.com/rest"}',
+            "unavailable",
+        ),
+        (
+            "a 5xx with a JSON body",
+            '{"message":"Server Error"}',
+            "unavailable",
+        ),
+        (
+            "check_runs that is not a list",
+            '{"check_runs":null}',
+            "unavailable",
         ),
         (
             "GitHub returned something that is not JSON",
@@ -314,7 +337,8 @@ def test_a_red_commit_is_refused_and_a_pending_one_only_deferred():
         "`none` must not refuse: a commit predating the workflow, or Actions being off, "
         "would then block every deploy forever"
     )
-    # The young-commit defer is the one exit in this arm, and it is conditional.
+    # The wait for a commit carrying the workflow lives in defer_while_ci_may_answer and
+    # is bounded (rehearsed below); the arm itself must not end the tick.
     assert none_arm.count("exit 0") <= 1, (
         "the `none` arm must not unconditionally end the tick"
     )
@@ -373,11 +397,20 @@ exec /usr/bin/date "$@"
     "flock": "#!/bin/bash\nexit 0\n",
     # health_ok sleeps 5s twelve times on a failing build.
     "sleep": "#!/bin/bash\nexit 0\n",
-    # The CI gate gets a green check run; the health gate reads the fake app's state.
+    # The CI gate gets a green check run unless $STATE/checkruns.{body,code} say otherwise,
+    # and the HTTP status only when it asks for it (`-w ...%{http_code}`), as real curl.
+    # The health gate reads the fake app's state.
     "curl": """#!/bin/bash
 for a in "$@"; do
     case "$a" in *check-runs*)
-        echo '{"check_runs":[{"name":"backend","status":"completed","conclusion":"success"}]}'
+        if [ -f "$STATE/checkruns.body" ]; then cat "$STATE/checkruns.body"
+        else printf '%s' '{"check_runs":[{"name":"backend","status":"completed","conclusion":"success"}]}'
+        fi
+        for w in "$@"; do
+            case "$w" in *'%{http_code}'*)
+                printf '\\n%s' "$(cat "$STATE/checkruns.code" 2>/dev/null || echo 200)" ;;
+            esac
+        done
         exit 0 ;;
     esac
 done
@@ -468,7 +501,8 @@ def _notes(db: Path) -> list[str]:
 class _Rehearsal:
     """A production-shaped checkout one bad commit behind origin/main."""
 
-    def __init__(self, tmp: Path, *, migration: bool, bad_marker: str):
+    def __init__(self, tmp: Path, *, migration: bool, bad_marker: str,
+                 workflow: bool = False):
         self.tmp = tmp
         self.state = tmp / "state"
         self.stubs = tmp / "bin"
@@ -476,6 +510,7 @@ class _Rehearsal:
         self.backups = tmp / "backups"
         self.log = tmp / "auto-deploy.log"
         self.quarantine = tmp / "quarantine"
+        self.ci_wait = tmp / "ci-wait"
         self.state.mkdir()
         self.backups.mkdir()
         for name, body in _STUBS.items():
@@ -501,6 +536,8 @@ class _Rehearsal:
         if migration:
             _write(self.repo / "backend" / "alembic" / "versions" / "b2_new.py", "# b2\n")
         _write(self.repo / bad_marker, "x\n")
+        if workflow:
+            _write(self.repo / ".github" / "workflows" / "ci.yml", "name: CI\n")
         _git(self.repo, "add", "-A")
         _git(self.repo, "commit", "-qm", "bad")
         self.bad = _git(self.repo, "rev-parse", "HEAD")
@@ -538,6 +575,7 @@ class _Rehearsal:
             "BACKUP_SCRIPT": backup_script.as_posix(),
             "LOCKFILE": (self.tmp / "lock").as_posix(),
             "QUARANTINE": self.quarantine.as_posix(),
+            "CI_WAIT_STATE": self.ci_wait.as_posix(),
             **extra,
         }
         # Prepend the stubs from INSIDE bash: Git Bash's launcher puts /usr/bin first,
@@ -732,3 +770,82 @@ def test_an_unusable_snapshot_is_never_restored(tmp_path, sabotage):
     assert r.aside() == []
     assert _revision(r.db) == "b2", "the live database must be left as it was"
     assert "CRITICAL" in log
+
+
+# --- The CI gate, rehearsed -----------------------------------------------------------
+#
+# GitHub issue #37: an error reply read as "no checks", and "no checks" deployed ungated
+# whenever the commit's own timestamp was over 180 s old — the usual case for a commit
+# made locally and pushed later. The gate still fails open; these pin WHEN.
+
+
+def _ci_wait_max_min() -> int:
+    match = re.search(r"^CI_WAIT_MAX_MIN=(\d+)$", _auto(), re.M)
+    assert match, "CI_WAIT_MAX_MIN not found in ops/auto-deploy.sh"
+    return int(match.group(1))
+
+
+def _github_answers(r: _Rehearsal, body: str, code: int) -> None:
+    _write(r.state / "checkruns.body", body)
+    _write(r.state / "checkruns.code", str(code))
+
+
+@rehearsal
+@pytest.mark.parametrize(
+    "body,code",
+    [
+        pytest.param('{"total_count":0,"check_runs":[]}', 200, id="no-check-runs-yet"),
+        pytest.param('{"message":"API rate limit exceeded for 0.0.0.0."}', 403,
+                     id="rate-limited"),
+    ],
+)
+def test_a_commit_carrying_the_workflow_waits_for_a_verdict_then_fails_open(
+    tmp_path, body, code
+):
+    r = _Rehearsal(tmp_path, migration=False, bad_marker="FEATURE", workflow=True)
+    _github_answers(r, body, code)
+    # A stamp left by an earlier commit, ages old, must not wave this one through.
+    _write(r.ci_wait, f"{r.good} 0\n")
+
+    log = r.run()
+    assert "WAIT: " in log and "deferring" in log, log
+    assert "change detected" not in log and "ungated" not in log, log
+    assert not (r.state / "deploys.log").exists()
+    assert _git(r.repo, "rev-parse", "HEAD") == r.good
+    sha, first = r.ci_wait.read_text().split()
+    assert sha == r.bad
+
+    # The bound runs from the FIRST sighting: a later tick neither deploys nor restamps.
+    log = r.run()
+    assert log.count("WAIT: ") == 2, log
+    assert r.ci_wait.read_text().split() == [sha, first]
+
+    # Past the bound it fails open, loudly, as it always did.
+    _write(r.ci_wait, f"{r.bad} {int(first) - _ci_wait_max_min() * 60 - 1}\n")
+    log = r.run()
+    assert "deploying ungated" in log and "SUCCESS: deployed" in log, log
+    assert "REFUSE" not in log
+    assert _git(r.repo, "rev-parse", "HEAD") == r.bad
+    assert not r.ci_wait.exists(), "a deploy must clear the stamp"
+
+
+@rehearsal
+@pytest.mark.parametrize(
+    "body,code,line",
+    [
+        pytest.param('{"check_runs":[]}', 200, "NOTE: no CI checks found", id="none"),
+        # A none-shaped body on a non-200 proves the status, not the body, decides.
+        pytest.param('{"check_runs":[]}', 502, "NOTE: could not reach the GitHub check API",
+                     id="non-200"),
+    ],
+)
+def test_a_commit_without_the_workflow_fails_open_at_once(tmp_path, body, code, line):
+    """No workflow in the commit, so no verdict is coming: waiting would only delay it."""
+    r = _Rehearsal(tmp_path, migration=False, bad_marker="FEATURE")
+    _github_answers(r, body, code)
+
+    log = r.run()
+    assert line in log and "deploying ungated" in log, log
+    assert "WAIT: " not in log
+    assert "SUCCESS: deployed" in log, log
+    assert not r.ci_wait.exists()
