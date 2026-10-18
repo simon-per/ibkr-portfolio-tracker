@@ -18,6 +18,52 @@ from app.services.fx_policy import CARRIED_SUFFIX, FX_MAX_CARRY_DAYS, published_
 
 logger = logging.getLogger(__name__)
 
+Pair = Tuple[str, str]
+
+# Codes Frankfurter answered with a 4xx when asked for on their own, each with the UTC day
+# it did. Until that day ends a code is left out of every request and its pairs go
+# straight to the fallback, so a code that drifted out of the provider's list costs one
+# batch rejection and one request of its own per day — not N+1 requests at every slot.
+# In-process, like `benchmark_service._last_upstream_attempt` (one uvicorn worker): a
+# restart re-learns it once, which bounds the same way without a table to keep.
+_frankfurter_rejected: Dict[str, date] = {}
+
+# A 4xx that is about the asking, not about what was asked for: answered like an outage
+# (no per-code retry, nothing remembered).
+_NOT_A_REJECTION = {408, 429}
+
+
+def reset_frankfurter_rejections() -> None:
+    """Clear the rejection memo. For tests — the memo is process-lifetime state."""
+    _frankfurter_rejected.clear()
+
+
+def _is_rejection(status: Optional[int]) -> bool:
+    return status is not None and 400 <= status < 500 and status not in _NOT_A_REJECTION
+
+
+def easter_sunday(year: int) -> date:
+    """Gregorian Easter Sunday — the anonymous Gregorian algorithm (Meeus/Jones/Butcher)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7  # noqa: E741 — the algorithm's own name
+    m = (a + 11 * h + 22 * l) // 451
+    month, day = divmod(h + l - 7 * m + 114, 31)
+    return date(year, month, day + 1)
+
+
+def is_target_closing_day(day: date) -> bool:
+    """A weekday the ECB publishes no reference rate: the TARGET2 closing days."""
+    if (day.month, day.day) in CurrencyService.ECB_FIXED_CLOSING_DAYS:
+        return True
+    easter = easter_sunday(day.year)
+    return day in (easter - timedelta(days=2), easter + timedelta(days=1))
+
 
 class CurrencyService:
     """Service for currency conversion and exchange rate caching"""
@@ -26,8 +72,14 @@ class CurrencyService:
     BASE_CURRENCY = "EUR"
 
     # Currencies Frankfurter serves. It republishes the ECB reference rates, so the
-    # list is exactly the ECB's 30 + EUR and does not grow — anything outside it
+    # list is the ECB's set + EUR and does not grow — anything outside it
     # (TWD, RUB, QAR, SAR, ...) has to come from FALLBACK_API_URL below.
+    #
+    # BGN stays although Bulgaria adopted the euro on 2026-01-01 and the ECB publishes
+    # no rate for it after 2025: its history before then is still an ECB series, which
+    # only Frankfurter can supply for an old lot (the fallback is latest-only). For a
+    # date after it, a reply without BGN is a per-pair miss and a 4xx costs only BGN's
+    # own pair (`_fetch_ecb_range`), so the entry cannot take the other pairs down.
     SUPPORTED_CURRENCIES = {
         'AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK',
         'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK',
@@ -67,8 +119,8 @@ class CurrencyService:
     # and Frankfurter carries it shortly after. Before this UTC hour today does not count
     # as published, so the warm-up does not ask for a day that is not out yet.
     ECB_PUBLISHED_BY_UTC_HOUR = 16
-    # The fixed-date TARGET closing days. Good Friday and Easter Monday move and are left
-    # out: on those two days each warm-up asks once more and gets nothing new.
+    # The fixed-date TARGET closing days. The two moving ones, Good Friday and Easter
+    # Monday, come from `easter_sunday` (`is_target_closing_day`).
     ECB_FIXED_CLOSING_DAYS = {(1, 1), (5, 1), (12, 25), (12, 26)}
     # A pair's history reaches the start of a warm-up window when its oldest published
     # rate is within this many days of it: a window opening on a weekend or over Easter
@@ -298,21 +350,26 @@ class CurrencyService:
             a run where one fetch had actually failed.
         """
         start_date = target_date - timedelta(days=days_back)
-        answered = await self._fetch_ecb_range(
+        answered, _ = await self._fetch_ecb_range(
             [(from_currency, to_currency)], start_date, target_date
         )
         return bool(answered)
 
+    def _rejected_by_frankfurter(self, pair: Pair) -> bool:
+        """True while a code of ``pair`` stands rejected for today (`_frankfurter_rejected`)."""
+        today = utcnow().date()
+        return any(_frankfurter_rejected.get(code) == today for code in pair)
+
     async def _fetch_ecb_range(
         self,
-        pairs: List[Tuple[str, str]],
+        pairs: List[Pair],
         start_date: date,
         end_date: date,
-    ) -> Optional[Set[Tuple[str, str]]]:
+    ) -> Tuple[Set[Pair], int]:
         """
         One Frankfurter range request (`/start..end`) for every pair in ``pairs``, each
-        cached in its own direction. Returns the pairs the reply carried a rate for, or
-        None if the request failed. Never raises.
+        cached in its own direction. Returns the pairs a reply carried a rate for and the
+        number of requests made. Never raises.
 
         Always asked as EUR -> each currency — the ECB's own figures — and every pair is
         derived from that one table (``table[to] / table[from]``, EUR implied at 1), so
@@ -320,63 +377,109 @@ class CurrencyService:
         one request serve the whole warm-up, and it is more exact than asking with ``X``
         as the base: v1 rounds such a reply to five decimals, so KRW->EUR came back as
         0.00067 against the ECB's 1/1499.01 = 0.00066711 (checked 2026-10-17).
+
+        Riding one request means one code the provider rejects would fail every pair. So
+        a 4xx for a request naming several codes is retried once per code, and a code
+        rejected on its own is remembered for the rest of the UTC day
+        (`_frankfurter_rejected`) and left out of every later request: its pairs come
+        back unserved, the rest are stored. A 5xx, a 408/429 or a transport error is an
+        outage and fails the whole request, as before — retrying it per code would only
+        multiply the requests into a provider that is not answering.
         """
+        pairs = [pair for pair in pairs if not self._rejected_by_frankfurter(pair)]
         quotes = sorted({c for pair in pairs for c in pair} - {self.BASE_CURRENCY})
-        url = f"{self.FRANKFURTER_API_URL}/{start_date.isoformat()}..{end_date.isoformat()}"
-        params = {"from": self.BASE_CURRENCY, "to": ",".join(quotes)}
+        if not quotes:
+            return set(), 0
         span = f"{', '.join(f'{f}/{t}' for f, t in pairs)} over {start_date}..{end_date}"
 
         async with httpx.AsyncClient() as client:
-            try:
-                logger.debug(f"Range fetching {url} with params {params}")
-                response = await client.get(url, params=params, timeout=10.0)
-
-                if response.status_code >= 400:
-                    logger.warning(
-                        f"Range fetch for {span} failed (status {response.status_code})"
+            status, rates_by_date = await self._get_ecb_range(client, quotes, start_date, end_date)
+            requests = 1
+            if _is_rejection(status) and len(quotes) == 1:
+                self._remember_rejection(quotes[0], status)
+            elif _is_rejection(status):
+                logger.warning(
+                    f"Range fetch for {span} rejected (status {status}); asking for each "
+                    f"of {', '.join(quotes)} on its own"
+                )
+                rates_by_date = {}
+                for quote in quotes:
+                    status, alone = await self._get_ecb_range(
+                        client, [quote], start_date, end_date
                     )
-                    return None
+                    requests += 1
+                    if _is_rejection(status):
+                        self._remember_rejection(quote, status)
+                    elif alone is None:
+                        break  # an outage now: the codes not yet asked stay unserved
+                    else:
+                        for date_str, quoted in alone.items():
+                            rates_by_date.setdefault(date_str, {}).update(quoted)
+            elif rates_by_date is None:
+                logger.warning(f"Range fetch for {span} failed (status {status})")
 
-                # {"base": "EUR", "rates": {"2026-10-16": {"CHF": 0.9272, "USD": 1.1253}, ...}}
-                rates_by_date = response.json().get('rates', {})
+        if not rates_by_date:
+            return set(), requests
 
-                answered: Set[Tuple[str, str]] = set()
-                for date_str, quoted in rates_by_date.items():
-                    table = {code: Decimal(str(value)) for code, value in quoted.items() if value}
-                    table[self.BASE_CURRENCY] = Decimal(1)
-                    rate_date = date.fromisoformat(date_str)
-                    for from_currency, to_currency in pairs:
-                        if from_currency not in table or to_currency not in table:
-                            continue
-                        rate = (table[to_currency] / table[from_currency]).quantize(
-                            self.RATE_SCALE
-                        )
-                        # A published ECB quote replaces a stand-in for the same day. Before
-                        # it is published a date is filled by a carry-forward copy or the
-                        # fallback's *latest* rate, and keeping that row once the real
-                        # one exists made the stand-in permanent: found 2026-10-01, a
-                        # fallback CHF->EUR of 1.05918 on 09-28 against the ECB's 1.0566,
-                        # carried onto 09-30 and never corrected, put a CHF 4,500
-                        # withdrawal in at CHF 4,517.50.
-                        await self._store_published_rate(
-                            from_currency, to_currency, rate_date, rate
-                        )
-                        answered.add((from_currency, to_currency))
+        answered: Set[Pair] = set()
+        for date_str, quoted in rates_by_date.items():
+            table = {code: Decimal(str(value)) for code, value in quoted.items() if value}
+            table[self.BASE_CURRENCY] = Decimal(1)
+            rate_date = date.fromisoformat(date_str)
+            for from_currency, to_currency in pairs:
+                if from_currency not in table or to_currency not in table:
+                    continue
+                rate = (table[to_currency] / table[from_currency]).quantize(self.RATE_SCALE)
+                # A published ECB quote replaces a stand-in for the same day. Before it is
+                # published a date is filled by a carry-forward copy or the fallback's
+                # *latest* rate, and keeping that row once the real one exists made the
+                # stand-in permanent: found 2026-10-01, a fallback CHF->EUR of 1.05918 on
+                # 09-28 against the ECB's 1.0566, carried onto 09-30 and never corrected,
+                # put a CHF 4,500 withdrawal in at CHF 4,517.50.
+                await self._store_published_rate(from_currency, to_currency, rate_date, rate)
+                answered.add((from_currency, to_currency))
 
-                # A pair missing from a *successful* reply is a miss, not a success — the
-                # provider drifting out of step with SUPPORTED_CURRENCIES looks exactly
-                # like this — so the caller falls through instead of counting a currency
-                # it never actually got a rate for.
-                logger.debug(f"Range fetch for {span}: {len(rates_by_date)} day(s)")
-                return answered
+        # A pair missing from a *successful* reply is a miss, not a success — the provider
+        # drifting out of step with SUPPORTED_CURRENCIES looks exactly like this — so the
+        # caller falls through instead of counting a currency it never actually got a
+        # rate for.
+        logger.debug(f"Range fetch for {span}: {len(rates_by_date)} day(s)")
+        return answered, requests
 
-            except Exception as e:
-                # httpx transport errors routinely stringify to '', which made this line
-                # read "Batch fetch error: " and say nothing about what broke or where.
-                logger.error(f"Range fetch error for {span}: {type(e).__name__}: {e}")
-                # Don't raise: get_exchange_rate() decides what an empty cache means,
-                # and can now reach the fallback provider instead of giving up.
-                return None
+    def _remember_rejection(self, code: str, status: int) -> None:
+        logger.warning(
+            f"Frankfurter rejected {code} (status {status}); leaving it out of every "
+            f"request until the end of the UTC day"
+        )
+        _frankfurter_rejected[code] = utcnow().date()
+
+    async def _get_ecb_range(
+        self, client: httpx.AsyncClient, quotes: List[str], start_date: date, end_date: date,
+    ) -> Tuple[Optional[int], Optional[Dict[str, Dict[str, float]]]]:
+        """
+        One GET of `/start..end?from=EUR&to=<quotes>`. Returns the status (None on a
+        transport error) and the reply's ``rates`` by date (None unless it succeeded).
+        Never raises.
+        """
+        url = f"{self.FRANKFURTER_API_URL}/{start_date.isoformat()}..{end_date.isoformat()}"
+        params = {"from": self.BASE_CURRENCY, "to": ",".join(quotes)}
+        try:
+            logger.debug(f"Range fetching {url} with params {params}")
+            response = await client.get(url, params=params, timeout=10.0)
+            if response.status_code >= 400:
+                return response.status_code, None
+            # {"base": "EUR", "rates": {"2026-10-16": {"CHF": 0.9272, "USD": 1.1253}, ...}}
+            return response.status_code, response.json().get('rates', {})
+        except Exception as e:
+            # httpx transport errors routinely stringify to '', which made this line read
+            # "Batch fetch error: " and say nothing about what broke or where. Don't raise:
+            # get_exchange_rate() decides what an empty cache means, and can reach the
+            # fallback provider instead of giving up.
+            logger.error(
+                f"Range fetch error for {', '.join(quotes)} over {start_date}..{end_date}: "
+                f"{type(e).__name__}: {e}"
+            )
+            return None, None
 
     def _last_ecb_publication_day(self, target_date: date) -> date:
         """The newest day on or before ``target_date`` whose ECB rates should be out."""
@@ -384,7 +487,7 @@ class CurrencyService:
         day = min(target_date, now.date())
         if day == now.date() and now.hour < self.ECB_PUBLISHED_BY_UTC_HOUR:
             day -= timedelta(days=1)
-        while day.weekday() >= 5 or (day.month, day.day) in self.ECB_FIXED_CLOSING_DAYS:
+        while day.weekday() >= 5 or is_target_closing_day(day):
             day -= timedelta(days=1)
         return day
 
@@ -446,7 +549,9 @@ class CurrencyService:
         A pair needs the whole window when it has no published rate or its history does
         not reach the window's start (a first warm-up, a backfill); otherwise only from
         its newest published day. Returns the pairs the provider did not serve and the
-        number of requests made (0 or 1).
+        number of requests made: 0 or 1, plus one per code when the provider rejects the
+        batch (`_fetch_ecb_range`). A pair with a code rejected earlier today is unserved
+        without being asked, and does not widen the span.
         """
         last_published = self._last_ecb_publication_day(target_date)
         window_start = target_date - timedelta(days=days_back)
@@ -460,16 +565,15 @@ class CurrencyService:
             elif newest < last_published:
                 # From the newest day held, not the day after: re-asking one known day
                 # keeps the reply non-empty while the next one is not out yet (Frankfurter
-                # lagging the ECB, Easter), so a pair missing from it still means the
+                # lagging the ECB), so a pair missing from it still means the
                 # provider has nothing for that currency.
                 starts[pair] = max(newest, window_start)
-        if not starts:
-            return [], 0
-
-        answered = await self._fetch_ecb_range(
-            list(starts), min(starts.values()), target_date
-        ) or set()
-        return [pair for pair in starts if pair not in answered], 1
+        asked = {p: s for p, s in starts.items() if not self._rejected_by_frankfurter(p)}
+        answered, requests = (
+            await self._fetch_ecb_range(list(asked), min(asked.values()), target_date)
+            if asked else (set(), 0)
+        )
+        return [pair for pair in starts if pair not in answered], requests
 
     async def _fetch_fallback_table(self) -> Optional[Dict[str, Decimal]]:
         """
@@ -675,70 +779,6 @@ class CurrencyService:
             # sync record rather than only in the container log.
             summary["frankfurter_failed"] = failed + failed_extra
         return summary
-
-    async def _fetch_from_api(
-        self,
-        from_currency: str,
-        target_date: date,
-        to_currency: str
-    ) -> Decimal:
-        """
-        Fetch exchange rate from Frankfurter API.
-
-        API docs: https://www.frankfurter.app/docs/
-
-        Raises:
-            ValueError: If currency is not supported by Frankfurter API
-        """
-        url = f"{self.FRANKFURTER_API_URL}/{target_date.isoformat()}"
-        params = {
-            "from": from_currency,
-            "to": to_currency
-        }
-
-        async with httpx.AsyncClient() as client:
-            try:
-                logger.debug(f"Fetching {url} with params {params}")
-                response = await client.get(url, params=params, timeout=10.0)
-                logger.debug(f"Response status: {response.status_code}")
-
-                # If 404, the date might not be available yet (too recent or weekend)
-                # Fall back to latest available rate
-                if response.status_code == 404:
-                    logger.debug(f"Date {target_date} not available, using latest rate")
-                    url_latest = f"{self.FRANKFURTER_API_URL}/latest"
-                    response = await client.get(url_latest, params=params, timeout=10.0)
-                    logger.debug(f"Latest rate response status: {response.status_code}")
-
-                # Check for unsupported currency error (400 status)
-                if response.status_code >= 400:
-                    try:
-                        error_data = response.json()
-                        error_msg = str(error_data)
-                    except:
-                        error_msg = response.text
-
-                    # Check if it's a currency support issue
-                    if 'Unknown currency' in error_msg or 'not supported' in error_msg.lower():
-                        raise ValueError(f"Currency {from_currency} is not supported by Frankfurter API")
-
-                response.raise_for_status()
-                data = response.json()
-
-                # Extract rate from response
-                rate = data.get('rates', {}).get(to_currency)
-                if rate is None:
-                    raise ValueError(f"No exchange rate found for {from_currency}/{to_currency} on {target_date}")
-
-                return Decimal(str(rate))
-
-            except httpx.HTTPStatusError as e:
-                # Handle HTTP errors (400, 404 indicate unsupported currency)
-                if e.response.status_code in (400, 404):
-                    raise ValueError(f"Currency {from_currency} is not supported by Frankfurter API")
-                raise ValueError(f"Failed to fetch exchange rate: {str(e)}")
-            except httpx.RequestError as e:
-                raise ValueError(f"Network error while fetching exchange rate: {str(e)}")
 
     async def _store_published_rate(
         self, from_currency: str, to_currency: str, rate_date: date, rate: Decimal

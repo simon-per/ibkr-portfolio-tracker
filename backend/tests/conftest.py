@@ -48,6 +48,7 @@ import pytest  # noqa: E402
 
 from app import rate_limit  # noqa: E402
 from app.config import settings  # noqa: E402
+from app.services.currency_service import reset_frankfurter_rejections  # noqa: E402
 
 
 def pytest_configure(config):
@@ -70,8 +71,10 @@ def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "coingecko_api_key", "", raising=False)
     monkeypatch.setattr(settings, "logo_dev_secret_key", "", raising=False)
     rate_limit.reset()
+    reset_frankfurter_rejections()
     yield
     rate_limit.reset()
+    reset_frankfurter_rejections()
 
 
 @pytest.fixture

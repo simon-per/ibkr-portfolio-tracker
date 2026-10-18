@@ -164,17 +164,44 @@ deliberate job.
 rows the base-currency switch reads (`extra_pairs`) — it takes the newest **published** row (a
 fallback row or a carried copy does not count: it is what a fetch must still replace). A pair whose
 newest row is the ECB's last publication day (`_last_ecb_publication_day`: weekdays, not before
-16:00 UTC on the day itself, not on the fixed-date TARGET closing days) is current; if every pair
+16:00 UTC on the day itself, not on a TARGET closing day) is current; if every pair
 is, **no request is made**. Otherwise one request spans from the oldest stale pair's newest day —
 re-asked on purpose, so a reply is never empty while the next day is not out yet and a pair missing
 from it still means "nothing for this currency" — to the target date. A pair with no published row,
 or whose history does not reach the window's start within `WARM_REACH_SLACK_DAYS` (7), gets the
-whole `days_back` window: that is how the crypto book's long backfill still happens. Good Friday and
-Easter Monday are not modelled, so on those two days each slot asks once and gets nothing new. A
+whole `days_back` window: that is how the crypto book's long backfill still happens. A
 failed request sends every warmed currency to the fallback as before (`frankfurter_failed`, which
-names a failed extra pair as `EUR->CHF`); `frankfurter_requests` in the summary records 0 or 1.
-Before this, each slot sent one 7- or 30-day request per ECB currency plus two for CHF/USD, nearly
-all re-downloading stored rows. Tests: `tests/test_fx_incremental_warm.py`.
+names a failed extra pair as `EUR->CHF`). Before this, each slot sent one 7- or 30-day request per
+ECB currency plus two for CHF/USD, nearly all re-downloading stored rows. Tests:
+`tests/test_fx_incremental_warm.py`.
+
+**The TARGET calendar includes Easter** (2026-10-18, issue #40). `is_target_closing_day` adds Good
+Friday and Easter Monday, from `easter_sunday` (the anonymous Gregorian computus), to the fixed
+dates in `ECB_FIXED_CLOSING_DAYS`; `_last_ecb_publication_day`, and so the warm-up and
+`stale_pairs`, read it. Before, Good Friday counted as published from 16:00 UTC through the
+weekend and Easter Monday until Tuesday 16:00 UTC, so **every slot in between** — 18 of the 26
+stock slots over Easter 2027, not "once on each of the two days" as this file said — asked for a
+day that never came. Cost only: the reply re-carried Thursday, nothing failed and no figure moved.
+
+**One code Frankfurter rejects costs only its own pair** (2026-10-18, issue #40). Riding one
+request, a 4xx for the batch used to send every pair to the fallback. Now `_fetch_ecb_range`
+retries a rejected multi-code request **once per code**; a code rejected on its own is remembered
+until the UTC day ends (`_frankfurter_rejected`) and left out of every later request, and only its
+pairs come back unserved (`frankfurter_failed`) and go to the fallback. So a drifted code costs one
+batch rejection plus one request per code on the day's first slot, and 0 or 1 request at every
+slot after — on the warm-up and the on-demand `_batch_fetch_rates` alike. A 5xx, a 408/429 or a
+transport error is an outage and fails the whole request with no per-code retry, and an outage
+midway through the retries stops them. `frankfurter_requests` in the summary counts what went out.
+The memo is in-process, like `benchmark_service._last_upstream_attempt` (one uvicorn worker): a
+restart re-learns a rejection once, which bounds the same way with no table to migrate.
+**Unverified:** what Frankfurter answers for a `to=` code it does not carry. The tests assume a 404
+(what the deleted `_fetch_from_api` assumed); a 200 that omits the code is a per-pair miss and was
+already handled. Check once by hand and record the answer here.
+
+**BGN stays in `SUPPORTED_CURRENCIES`** although Bulgaria adopted the euro on 2026-01-01 and the
+ECB publishes no BGN rate after 2025: its history before then is an ECB series only Frankfurter can
+supply for an old lot (the fallback is latest-only), and for a later date either answer above
+costs only BGN's pair. Tests: `tests/test_fx_warm_rejections_and_easter.py`.
 
 **A failed warm-up is recorded at every run and warned about only once it is stale** (2026-10-18,
 issue #17). `sync_exchange_rates` keeps `frankfurter_failed` and `fallback_available` from

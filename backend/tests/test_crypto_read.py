@@ -69,7 +69,7 @@ def _network(*_args, **_kwargs):
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     for name in ("get_exchange_rate", "_batch_fetch_rates", "_fetch_fallback_table",
-                 "_fetch_fallback_rate", "_fetch_from_api", "warm_rates"):
+                 "_fetch_fallback_rate", "_fetch_ecb_range", "warm_rates"):
         monkeypatch.setattr(CurrencyService, name, _network)
     monkeypatch.setattr(coinstats_client.CoinStatsClient, "__init__", _network)
     monkeypatch.setattr(coingecko_client.CoinGeckoClient, "__init__", _network)
