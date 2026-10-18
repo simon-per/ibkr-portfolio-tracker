@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { api } from '@/lib/api'
+import { forecastHistoryQuery } from '@/lib/queryCache'
 import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
 import { IconChip } from '@/components/ui/IconChip'
 import {
@@ -30,7 +30,7 @@ import {
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useResizableHeight } from '@/lib/useResizableHeight'
 import { useIsCompact } from '@/lib/useMediaQuery'
-import { cn, formatAxisMoney, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { cn, formatAxisMoney, formatDate, formatSigned, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 
 /** The chart's height when first opened, and the range a drag may take it to. */
@@ -71,10 +71,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
   const [open, setOpen] = useState(false)
   const contentId = useId()
   const { height: chartHeight, handleProps: resizeHandle } = useResizableHeight(CHART_HEIGHT)
-  const { data } = useQuery({
-    queryKey: ['dividends', 'forecast-history'],
-    queryFn: () => api.getDividendForecastHistory(),
-  })
+  const { data } = useQuery(forecastHistoryQuery)
   const trend = useMemo(() => forecastTrend(data, live), [data, live])
 
   const axis = useMemo(() => {
@@ -88,8 +85,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
 
   if (!trend || !axis || trend.points.length < 2) return null
 
-  const signed = (value: number) =>
-    `${value < 0 ? '−' : '+'}${formatCurrency(Math.abs(value))}`
+  const signed = (value: number) => formatSigned(value, formatCurrency)
 
   return (
     <section

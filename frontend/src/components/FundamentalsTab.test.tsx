@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { FundamentalsTab } from './FundamentalsTab'
 import { api } from '@/lib/api'
-import type { FundamentalMetrics, FundamentalsStatus } from '@/lib/api'
+import type { EarningsHistoryItem, FundamentalMetrics, FundamentalsStatus } from '@/lib/api'
 
 /**
  * EPS figures carried a hardcoded `$` in three places. EPS is reported in the issuer's own
@@ -16,20 +16,6 @@ import type { FundamentalMetrics, FundamentalsStatus } from '@/lib/api'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-})
-
-/**
- * `ScrollableTable` measures overflow with a ResizeObserver, and this tab constructs one of
- * its own to size the history page; jsdom implements neither.
- */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
 })
 
 function withProviders(node: React.ReactNode) {
@@ -221,4 +207,36 @@ describe('FundamentalsTab background sync', () => {
     await waitFor(() => expect(rows.mock.calls.length).toBeGreaterThan(fetchesBefore))
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy()
   }, 20_000)
+})
+
+describe('FundamentalsTab earnings surprise history', () => {
+  const quarter = (i: number): EarningsHistoryItem => ({
+    security_id: i, symbol: `S${i}`, symbols: [`S${i}`], description: `S${i} Corp`,
+    earnings_date: `2026-07-${String(1 + (i % 28)).padStart(2, '0')}T05:00:00+00:00`,
+    eps_estimate: 1, reported_eps: 1.1, surprise_percent: 10, beat_or_miss: 'Beat',
+  })
+
+  it('stays on a page that exists when a shorter history arrives (not "Page 3 of 2")', async () => {
+    const history = Array.from({ length: 25 }, (_, i) => quarter(i + 1))
+    vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue([])
+    vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([])
+    vi.spyOn(api, 'getEarningsHistory').mockResolvedValue(history)
+    vi.spyOn(api, 'getFundamentalsStatus').mockResolvedValue(STATUS)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><FundamentalsTab /></QueryClientProvider>)
+
+    expect(await screen.findByText('Page 1 of 3')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(screen.getByText('Page 3 of 3')).toBeTruthy()
+
+    // A refetch after a sync returns twelve quarters: two pages, and the last one has rows.
+    act(() => client.setQueryData(['fundamentals', 'earnings', 'history'], history.slice(0, 12)))
+    expect(await screen.findByText('Page 2 of 2')).toBeTruthy()
+    expect(screen.getAllByText('S11').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('S12').length).toBeGreaterThan(0)
+    // And Previous still steps back from where the reader is.
+    fireEvent.click(screen.getByRole('button', { name: /Prev/ }))
+    expect(screen.getByText('Page 1 of 2')).toBeTruthy()
+  })
 })

@@ -39,6 +39,7 @@ describe('PerformanceInsights', () => {
       <PerformanceInsights
         attribution={attribution([[1, 'AAA', 300], [2, 'BBB', -40], [3, 'CCC', 20]])}
         positions={[pos(1, 'AAA', 750), pos(2, 'BBB', 250)]}
+        cash={{ amount: 0, cash_source: 'derived' }}
         upcoming={[PAYMENT]}
         range="1Y"
         today="2026-05-10"
@@ -57,6 +58,7 @@ describe('PerformanceInsights', () => {
       <PerformanceInsights
         attribution={attribution([[1, 'AAA', 300]])}
         positions={undefined}
+        cash={{ amount: 0, cash_source: 'derived' }}
         upcoming={[]}
         range="1Y"
         today="2026-05-10"
@@ -69,8 +71,24 @@ describe('PerformanceInsights', () => {
 
   it('renders nothing for an empty book', () => {
     const { container } = render(
-      <PerformanceInsights attribution={undefined} positions={[]} upcoming={undefined} range="1Y" />,
+      <PerformanceInsights attribution={undefined} positions={[]} cash={undefined} upcoming={undefined} range="1Y" />,
     )
     expect(container.innerHTML).toBe('')
+  })
+
+  it('dashes the largest holding until the summary (and its cash) arrives', () => {
+    render(
+      <PerformanceInsights
+        attribution={attribution([[1, 'AAA', 300]])}
+        positions={[pos(1, 'AAA', 750), pos(2, 'BBB', 250)]}
+        cash={undefined}
+        upcoming={[]}
+        range="1Y"
+        today="2026-05-10"
+      />,
+    )
+    // Not "100.0%" of holdings alone, and not "None": the weight is not known yet.
+    expect(tile('Largest holding').textContent).toContain('—')
+    expect(tile('Largest holding').textContent).not.toContain('%')
   })
 })

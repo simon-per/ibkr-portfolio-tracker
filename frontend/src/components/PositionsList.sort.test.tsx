@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PositionsList } from './PositionsList'
 import type { Position } from '@/lib/api'
@@ -12,15 +12,8 @@ import type { Position } from '@/lib/api'
  */
 
 afterEach(cleanup)
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
+/** A loaded summary from a backend that tracks no cash: weights are shares of holdings. */
+const UNTRACKED_CASH = { amount: 0 }
 
 function position(over: Partial<Position> & { security_id: number; symbol: string }): Position {
   return {
@@ -60,21 +53,21 @@ function bothWays(container: HTMLElement, header: string) {
 describe('an unvalued holding in the positions sort', () => {
   it('sorts last on Gain, in both directions', () => {
     // Return is desktop-hidden; Gain carries the same stand-in (-cost).
-    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} />)
+    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} cash={UNTRACKED_CASH} />)
     expect(bothWays(container, 'Gain')).toEqual({
       first: ['WIN', 'LOS', 'UNP'], second: ['LOS', 'WIN', 'UNP'],
     })
   })
 
   it('sorts last on Value ascending, not first as a 0.00 holding', () => {
-    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} />)
+    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} cash={UNTRACKED_CASH} />)
     expect(order(container)).toEqual(['WIN', 'LOS', 'UNP'])
     fireEvent.click(screen.getByRole('button', { name: 'Value' })) // already sorted: flips to asc
     expect(order(container)).toEqual(['LOS', 'WIN', 'UNP'])
   })
 
   it('sorts last on Weight, in both directions', () => {
-    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} />)
+    const { container } = render(<PositionsList positions={[WIN, UNPRICED, LOSS]} cash={UNTRACKED_CASH} />)
     expect(bothWays(container, 'Weight')).toEqual({
       first: ['WIN', 'LOS', 'UNP'], second: ['LOS', 'WIN', 'UNP'],
     })
@@ -86,7 +79,7 @@ describe('yield on cost in the positions sort', () => {
     // UNP is priced here: only its yield is absent.
     const payer = { ...UNPRICED, market_value_eur: 300, market_price: 30 }
     const yields = new Map<number, number | null>([[WIN.security_id, 4], [LOSS.security_id, 1]])
-    const { container } = render(<PositionsList positions={[payer, WIN, LOSS]} yieldOnCost={yields} />)
+    const { container } = render(<PositionsList positions={[payer, WIN, LOSS]} yieldOnCost={yields} cash={UNTRACKED_CASH} />)
     expect(bothWays(container, 'YoC')).toEqual({
       first: ['WIN', 'LOS', 'UNP'], second: ['LOS', 'WIN', 'UNP'],
     })
@@ -99,14 +92,14 @@ describe('the name sort', () => {
   const z = position({ security_id: 5, symbol: 'ZEB', description: 'Zebra Technologies' })
 
   it('compares as a reader would (localeCompare), like every other table', () => {
-    const { container } = render(<PositionsList positions={[z, e, apple]} />)
+    const { container } = render(<PositionsList positions={[z, e, apple]} cash={UNTRACKED_CASH} />)
     const { first, second } = bothWays(container, 'Position')
     // In either direction Électricité sits between Apple and Zebra.
     expect({ first: first[1], second: second[1] }).toEqual({ first: 'EGL', second: 'EGL' })
   })
 
   it('starts A to Z on the first click', () => {
-    const { container } = render(<PositionsList positions={[z, e, apple]} />)
+    const { container } = render(<PositionsList positions={[z, e, apple]} cash={UNTRACKED_CASH} />)
     expect(bothWays(container, 'Position')).toEqual({
       first: ['WIN', 'EGL', 'ZEB'], second: ['ZEB', 'EGL', 'WIN'],
     })

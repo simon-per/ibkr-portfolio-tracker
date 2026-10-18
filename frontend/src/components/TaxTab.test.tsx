@@ -20,13 +20,6 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
   vi.spyOn(api, 'getSettings').mockResolvedValue({
     base_currency: 'CHF',
     supported_currencies: ['EUR', 'CHF', 'USD'],

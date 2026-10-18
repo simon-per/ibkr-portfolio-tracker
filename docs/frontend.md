@@ -325,6 +325,15 @@ missing it costs a wrong figure.
   `staleTime`. Positions used to fall back to the 5-minute default at both of its readers. Opening
   the Allocation tab after 5 minutes then refetched positions but not the summary, and the hero's
   `unpriced_holdings` and the positions table's own count could come from different valuations.
+- **Every query read from more than one place is defined there too** (#70):
+  `valueOverTimeQuery(range)`, `contributionsQuery`, `availableBenchmarksQuery`, `healthQuery`,
+  `forecastHistoryQuery`, `dividendBreakdownQuery(year)`, `activityQuery(params)`. A reader spreads
+  one and adds only its own options (`placeholderData`, `enabled`). Written out per reader there
+  were four contributions copies, and the two value-over-time copies disagreed on `staleTime` (30
+  minutes on Performance, the 5-minute default on Analytics) for one cache entry.
+  `lib/queryKeyFamily.test.ts` reads every `queryKey` definition in `src/` (a client call's filter
+  is not one) and fails a key shape defined twice — strings as written, anything else a wildcard,
+  so `['dividends', 'breakdown', year]` and `[…, new Date().getFullYear()]` are one key.
 
 ## Render identity — what a no-op render must not rebuild (#48)
 
@@ -340,6 +349,8 @@ while a tab loads). A memo is only as stable as its least stable input, so these
   factories are memoised on it.
 - **`lib/utils.ts` builds one `Intl.NumberFormat` per option set** and reuses it (tens of
   microseconds to construct, under one to format, and a table render formats every money cell).
+  `formatMoneyWhole` built its own per call until #70; `new Intl.NumberFormat(` now appears once
+  in the file, inside the cache, and the test reads the source to keep it so.
 - **State only the sticky strip reads lives in the strip** (`SectionStrip` owns `useScrolled`), so
   a scroll crossing re-renders the strip and not the page.
 - **`ScrollableTable` attaches its listeners once per mount.** Its effect depended on `children`,
@@ -383,6 +394,16 @@ view it is rendering into rather than being duplicated, and two test files hold 
 `DataTable.test.tsx` drives both modes from one fixture, and `tableFamily.test.tsx` pins the
 conventions across column sets plus a source scan for any raw `<table>` outside `ui/`.
 
+**The card title carries the row's avatar, drawn by `DataTable`** (#70). The `title` column's
+`avatar: (row, className) => …` returns its `TickerAvatar`, `ConstituentAvatar` or Activity's cash
+chip (`null` for a row without one); the card draws it once, inline before the title at 24px, and
+the desktop cell calls the same function at its own size, so the two cannot name different
+securities. The 390px pass found no logos in any card view but Positions' — each table drew its
+avatar in the cell's `table` branch and only one remembered the `cards` branch. A cell's `cards`
+branch must not draw one too. `tableFamily.test.tsx` renders each exported column set both ways
+and compares the avatar count, and fails a module with a card title that draws an avatar anywhere
+but declares no `avatar`.
+
 **It never owns sort state.** The three sorting tables have genuinely bespoke comparators — nulls-last
 over a string|number union, a rating consensus through a score table, a memoised portfolio total —
 and pulling them in would need a `sortValue` per column, a fourth thing to keep in step with `cell`.
@@ -409,6 +430,19 @@ value is already `null`, so the row sorts last. The attribution tooltip (`shareO
 where `.toFixed` on `null` threw. `PortfolioHero` keys the unrealized percentage on `null`; it used
 to re-guard on `total_cost_basis_eur > 0` because the server sent `0`.
 
+**The dash is `ABSENT`, imported, never written again** (#70). Two modules defined their own
+`const ABSENT = '—'` and sixteen wrote `'—'` inline; `DataTable`'s `isAbsent` compares a card
+detail against the one constant. `nullsLast.test.ts` fails any `const ABSENT` outside `lib/utils.ts`
+and any `'—'`/`"—"`/`` `—` ``/`>—<` literal in code (comments are fine); a dash that is genuinely
+text goes in the test's `TEXT_DASHES` with its reason (empty today).
+
+**A sign is `formatSigned(value, format)`, and zero has none** (`lib/utils.ts`, #70). About ten
+sites wrote the plus by hand, half `>= 0` and half `> 0`, so the same zero printed "+CHF 0.00" on
+one screen and "CHF 0.00" on the next. The formatter prints the figure and its minus; this adds
+the plus, and a value that rounds to zero at the format's precision prints as an unsigned zero
+(no "+0.00%", no "-0.0%"). `formatSignedPercent(value, digits)` is the `toFixed` percentage
+form. `displayFamily.test.ts` refuses `? '+' :`, `` `+${ `` and `>+{` outside `utils.ts`.
+
 Three tables deliberately stay tables, each argued in its own file: `CurrencyExposureCard` (the
 comparison *between* rows is the point, and there is no identity column to promote), and the two
 12-month x N-year matrices (`MonthlyReturnsHeatmap`, `DividendSummary`). They get a designed
@@ -433,8 +467,11 @@ did not cause.
 - **`useMediaQuery`'s no-`matchMedia` fallback is desktop, and that is an invariant.** jsdom
   implements neither `matchMedia` nor `ResizeObserver` nor `scrollIntoView`. Falling back to desktop
   is what lets every pre-existing component test keep seeing the `<table>` it was written against,
-  needs no vitest setup file, and keeps `e2e/a11y.mjs`'s `aria-sort` count non-zero. Flip it and two
-  component tests plus an e2e check fail on day one.
+  needs no `matchMedia` stub, and keeps `e2e/a11y.mjs`'s `aria-sort` count non-zero. Flip it and two
+  component tests plus an e2e check fail on day one. `ResizeObserver` *is* stubbed, once, in
+  `src/testSetup.ts` for every jsdom file (#70: it had been copied into 23 test files in two
+  styles); `testSetup.test.tsx` fails a test file that stubs it again, except
+  `renderIdentity.test.tsx`, whose stubs count and record observations.
 - **An `absolute` descendant of a scroller escapes it unless the scroller is positioned.** The
   `sr-only` "Actions" header span resolved its containing block to `ScrollableTable`'s outer
   wrapper, sat at the wide table's far edge unclipped, and scrolled the whole Watchlist page 211px
@@ -790,7 +827,9 @@ without one). Plain SVG, no Recharts — it may sit on the eager Performance tab
 
 `SectionHeader` (`components/ui/SectionHeader.tsx`): `title`, `icon?: LucideIcon`,
 `iconTone?: Tone`, `description?` (one short line — a figure or a state, never an explanation),
-`aside?` (right-aligned figure or controls; wraps under the title on a phone),
+`aside?` (right-aligned figure or controls; wraps under the title on a phone, and an aside
+wider than the row wraps its own items: `min-w-0 max-w-full`, no `shrink-0` — #70, where a
+362px aside scrolled a 390px page by 38px),
 `variant: 'card' | 'bare'` (`card` is a padded `CardHeader`; `bare` for a heading above a grid).
 Use it in place of `<CardHeader><CardTitle>…` for every card title.
 
@@ -837,6 +876,12 @@ holding reads one share on all three tabs. A margin debit is left out rather tha
 still shows the signed balance but carries a share only when the balance is in the book. The
 summary ships only the signed balance, hence a copy rather than a read: `portfolioCash.test.ts`
 and `test_uninvested_cash_family.py` pin the same four cases and name each other.
+**A summary not loaded is not "cash untracked"** (#70). Both readers take `cash: AccountCash |
+undefined` as a *required* prop, built once by `summaryCash(summary)` in `Dashboard`: `undefined`
+while the summary loads or after it fails, and then every Positions weight, the Cash line and the
+Largest-holding tile are dashes. Read as untracked, it divided by holdings alone and inflated every
+weight by the cash share with nothing on screen saying so. Untracked is a loaded summary saying so
+itself (`cash_source` absent or `'unknown'`). The weight's definition is unchanged.
 The KPI rows carry lucide components (`icon={Waves}`), grouped under bare `SectionHeader`s
 "Returns" and "Risk & income"; Current drawdown's well is red only while in a drawdown, muted
 otherwise (a falling arrow in a green well contradicts itself). Positions: `text-gain`/`text-loss`
@@ -864,8 +909,8 @@ re-point onto the general palette would have to redo, and the section above stil
   and the forecast card share the `['dividends', 'forecast-history']` query.
 - **Inside the Dividends card**, blocks take `DividendSubheading` (small well, `text-sm`), one
   step below the card's `SectionHeader`. The card's controls sit in their own wrapping row, not in
-  `SectionHeader`'s `aside`: the aside is `shrink-0`, and four controls wider than a phone pushed
-  the page into horizontal scroll at 390.
+  `SectionHeader`'s `aside`: the aside was `shrink-0` then, and four controls wider than a phone
+  pushed the page into horizontal scroll at 390. It wraps since #70, but the row stays.
 - **Calendar rows** lead with a date chip and the holding's `TickerAvatar` (by `security_id`),
   the chart-colour swatch as a dot on the avatar. The per-position *Growth* column is toned at
   `RAISE_BAND_PCT`, the band the "raised · cut" count uses.
@@ -901,7 +946,10 @@ re-point onto the general palette would have to redo, and the section above stil
   neither count). Beat/Met/Miss are `TONE_CHIP` positive/warning/negative.
   **The history page-size loop is fixed**: the left card is `self-start`, so its height is its
   content's and not the grid row's; stretched, it fed back until the history showed all ~170
-  rows. `HISTORY_ROW_H` is 41 (measured), not 37.
+  rows. `HISTORY_ROW_H` is 41 (measured), not 37. The page is **clamped** to the data in hand
+  (#70): a shorter history after a refetch read "Page 5 of 3" over an empty table. A clamp, not
+  a reset on a new `data` identity — the tab passes `earningsHistory || []`, a fresh array every
+  render while there is none.
 - **Watchlist**: since 2026-10-18 rows carry `security_id` (a ticker that is ours, a held
   security's ahead of a sold one's on the same ticker) or `isin` (from the stored baskets,
   `ticker_isin.py`), so the avatar shows the logo ([logos.md](logos.md)). `% 52w High` and `vs MA200` are pills on the column's existing verdict

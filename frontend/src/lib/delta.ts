@@ -6,6 +6,7 @@
  * as flat, and two different answers to "is this up or down" is worse than
  * either answer.
  */
+import { ABSENT, formatSigned } from '@/lib/utils'
 
 /**
  * Changes inside this band are ordinary variation, not a trend worth colouring.
@@ -48,9 +49,9 @@ export function deltaTone(
  * undefined rather than large, so it must never render as a number.
  */
 export function formatDelta(pct: number | null | undefined): string {
-  if (pct == null || !Number.isFinite(pct)) return '—'
+  if (pct == null || !Number.isFinite(pct)) return ABSENT
   const rounded = Math.abs(pct) >= 100 ? Math.round(pct) : Math.round(pct * 10) / 10
-  return `${rounded > 0 ? '+' : ''}${rounded}%`
+  return formatSigned(rounded, (n) => `${n}%`)
 }
 
 /** '▲' / '▼' / '' — omitted inside the flat band, where direction is noise. */

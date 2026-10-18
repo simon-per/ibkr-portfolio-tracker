@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ActivityTab } from './ActivityTab'
@@ -17,17 +17,6 @@ import type { ActivityRow, ContributionsResponse } from '@/lib/api'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-})
-
-// `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
 })
 
 function withProviders(node: React.ReactNode) {

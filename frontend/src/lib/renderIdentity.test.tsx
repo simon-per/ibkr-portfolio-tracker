@@ -4,7 +4,9 @@ import { cleanup, render, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useQueries } from '@tanstack/react-query'
 import { useFormatCurrency } from './CurrencyContext'
 import { dataOf } from './queryCache'
-import { formatCount, formatCurrency, formatPercent } from './utils'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { formatCount, formatCurrency, formatMoneyWhole, formatPercent } from './utils'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
 
 /**
@@ -70,6 +72,10 @@ describe('the number formatters', () => {
     formatPercent(6)
     formatPercent(7)
     expect(construct).toHaveBeenCalledTimes(3)
+    // Whole units too: it built a new formatter per call until 2026-10-18 (#70).
+    formatMoneyWhole(8, 'JPY')
+    formatMoneyWhole(9, 'JPY')
+    expect(construct).toHaveBeenCalledTimes(4)
     // And the cached formatter is the one each call would have built.
     expect(formatCurrency(1234.5, 'JPY')).toBe(
       new Intl.NumberFormat('en-US', {
@@ -79,6 +85,11 @@ describe('the number formatters', () => {
         maximumFractionDigits: 2,
       }).format(1234.5),
     )
+  })
+
+  it('are built only by the cache: utils.ts constructs Intl.NumberFormat in one place', () => {
+    const source = readFileSync(join(__dirname, 'utils.ts'), 'utf8')
+    expect(source.match(/new Intl\.NumberFormat\(/g)).toHaveLength(1)
   })
 })
 

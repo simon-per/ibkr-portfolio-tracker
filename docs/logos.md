@@ -169,7 +169,9 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
   (`securityId`, else `isin`): the image
   `object-contain` on a white circle with a hairline ring, in the monogram's box (no layout
   shift); `onError` falls back to the monogram. Outside a `QueryClientProvider` (a table's own
-  unit tests) the avatar is the monogram.
+  unit tests) the avatar is the monogram. A `DataTable`'s phone card draws it through the title
+  column's `avatar` (docs/frontend.md, *The mobile layout*), so every table's cards show the logos
+  its desktop rows do.
 
 ## The CLIs — the write paths (no upload endpoint)
 

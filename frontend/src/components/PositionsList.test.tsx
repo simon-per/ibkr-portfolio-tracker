@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { PositionsList, positionColumns } from './PositionsList'
 import type { Position } from '@/lib/api'
@@ -15,23 +15,10 @@ import type { Position } from '@/lib/api'
 
 afterEach(cleanup)
 
-/**
- * `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not
- * implement. It has been in every browser since 2020, so this is a gap in the test
- * environment rather than something the component should guard against. Same stub as
- * `RebalanceCard.test.tsx` and `ui/DataTable.test.tsx`.
- */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 const money = (n: number) => `CHF ${n.toFixed(2)}`
+
+/** A loaded summary from a backend that tracks no cash: weights are shares of holdings. */
+const UNTRACKED_CASH = { amount: 0 }
 
 function position(over: Partial<Position> & { security_id: number; symbol: string }): Position {
   return {
@@ -97,7 +84,7 @@ describe('the yield-on-cost column', () => {
 
 describe('PositionsList rendering', () => {
   it('shows the rate for a payer and a dash for a non-payer', () => {
-    render(<PositionsList positions={[PAYER, ETF]} yieldOnCost={YIELDS} />)
+    render(<PositionsList positions={[PAYER, ETF]} yieldOnCost={YIELDS} cash={UNTRACKED_CASH} />)
     expect(screen.getByText('1.24%')).toBeTruthy()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
@@ -105,7 +92,7 @@ describe('PositionsList rendering', () => {
   it('renders without the prop at all, before the breakdown resolves', () => {
     // The table must not wait on a second query: every row simply shows a dash until the
     // dividend data lands.
-    render(<PositionsList positions={[PAYER, ETF]} />)
+    render(<PositionsList positions={[PAYER, ETF]} cash={UNTRACKED_CASH} />)
     expect(screen.getAllByText(/AVGO/).length).toBeGreaterThan(0)
     expect(screen.queryByText('1.24%')).toBeNull()
   })
@@ -114,7 +101,7 @@ describe('PositionsList rendering', () => {
     // Descending is the default and the direction someone clicking this column wants.
     // Nulls floating to the top would bury every real figure.
     const { container } = render(
-      <PositionsList positions={[ETF, PAYER, IN_TABLE_NO_RATE]} yieldOnCost={YIELDS} />,
+      <PositionsList positions={[ETF, PAYER, IN_TABLE_NO_RATE]} yieldOnCost={YIELDS} cash={UNTRACKED_CASH} />,
     )
     const symbols = [...container.querySelectorAll('tbody tr')].map(
       (tr) => tr.querySelector('td')?.textContent ?? '',
@@ -180,7 +167,7 @@ describe('a holding the backend could not value', () => {
   })
 
   it('names the holdings on screen and says why', () => {
-    render(<PositionsList positions={[PAYER, NO_PRICE]} />)
+    render(<PositionsList positions={[PAYER, NO_PRICE]} cash={UNTRACKED_CASH} />)
     const alert = screen.getByRole('alert')
     expect(alert.textContent).toMatch(/1 holding could not be valued/)
     expect(alert.textContent).toMatch(/TSMC/)
@@ -189,7 +176,7 @@ describe('a holding the backend could not value', () => {
 
   it('says nothing when every holding is valued', () => {
     // A notice that is always present is the always-present-Flex-banner pathology.
-    render(<PositionsList positions={[PAYER, ETF]} />)
+    render(<PositionsList positions={[PAYER, ETF]} cash={UNTRACKED_CASH} />)
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -241,7 +228,7 @@ describe('a holding with a zero cost basis', () => {
   })
 
   it('renders the table without throwing', () => {
-    const { container } = render(<PositionsList positions={[PAYER, GIFT]} />)
+    const { container } = render(<PositionsList positions={[PAYER, GIFT]} cash={UNTRACKED_CASH} />)
     expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
     expect(container.textContent).toContain('GIFT')
   })
@@ -325,5 +312,17 @@ describe('the cash line and the weight denominator (GitHub #52)', () => {
     render(<PositionsList positions={[BIG, SMALL]} cash={{ amount: 100, cash_source: 'derived' }} />)
     expect(screen.getAllByText('9.00%').length).toBeGreaterThan(0)
     expect(cashLine()).toMatch(/10\.00%/)
+  })
+
+  it('dashes every weight until the summary arrives, never a share of holdings alone (#70)', () => {
+    // Not loaded (or failed) is not "untracked": holdings alone would print SMALL at 10.00%
+    // where the account, cash included, puts it lower.
+    const { container } = render(<PositionsList positions={[BIG, SMALL]} cash={undefined} />)
+    expect(screen.queryByText('10.00%')).toBeNull()
+    expect(screen.queryByText('90.00%')).toBeNull()
+    expect(screen.queryByText('Cash')).toBeNull()
+    const weightIndex = [...container.querySelectorAll('thead th')].findIndex((th) => th.textContent?.includes('Weight'))
+    const weights = [...container.querySelectorAll('tbody tr')].map((tr) => tr.children[weightIndex].textContent)
+    expect(weights).toEqual(['—', '—'])
   })
 })

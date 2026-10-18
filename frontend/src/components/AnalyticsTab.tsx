@@ -52,6 +52,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { KpiCard, KpiCardSkeleton } from '@/components/ui/KpiCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { api } from '@/lib/api'
+import { valueOverTimeQuery } from '@/lib/queryCache'
 import type {
   ClosedPosition,
   ClosedPositionsResponse,
@@ -77,7 +78,7 @@ import {
   CHART_TOOLTIP_STYLE,
   CHART_GRID_PROPS,
 } from '@/lib/chartTooltip'
-import { ABSENT, formatDate, formatAxisMoney } from '@/lib/utils'
+import { ABSENT, formatDate, formatAxisMoney, formatSignedPercent } from '@/lib/utils'
 import { niceTicks, zeroBasedTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
@@ -121,7 +122,7 @@ interface AnalyticsTabProps {
 
 function pct(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return ABSENT
-  return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`
+  return formatSignedPercent(v, digits)
 }
 
 /**
@@ -185,10 +186,7 @@ export function AnalyticsTab({ inception, benchmark }: AnalyticsTabProps) {
     queryFn: () => api.getSegmentAttribution(dateRange.start, dateRange.end),
   })
   // Same key as the Performance tab's chart query, so switching tabs costs no request.
-  const timeline = useQuery({
-    queryKey: ['portfolio', 'value-over-time', dateRange],
-    queryFn: () => api.getPortfolioValueOverTime(dateRange.start, dateRange.end),
-  })
+  const timeline = useQuery(valueOverTimeQuery(dateRange))
   // Only when the Performance tab already asks for this benchmark: on a cache miss the
   // benchmark endpoint fetches Yahoo, and this tab must never be the first to ask.
   const benchmarkQuery = useQuery({

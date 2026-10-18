@@ -25,11 +25,6 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  })
   vi.spyOn(api, 'getSettings').mockResolvedValue({
     base_currency: 'CHF', supported_currencies: ['EUR', 'CHF', 'USD'],
     dividend_forecast_withholding_pct: 15,

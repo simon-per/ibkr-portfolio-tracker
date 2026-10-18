@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PositionsList } from './PositionsList'
@@ -25,16 +25,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement. */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
+/** A loaded summary from a backend that tracks no cash: weights are shares of holdings. */
+const UNTRACKED_CASH = { amount: 0 }
 
 function withProviders(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -103,7 +95,7 @@ function rowSymbols(container: HTMLElement): string[] {
 
 describe('analyst-rating sort, across both tables', () => {
   it('ranks the positions table strongest-first on a descending Rating sort', () => {
-    const { container } = render(<PositionsList positions={FIXTURE.map(position)} />)
+    const { container } = render(<PositionsList positions={FIXTURE.map(position)} cash={UNTRACKED_CASH} />)
     // Default sort is market value; the first click on a new column sorts descending.
     fireEvent.click(screen.getByRole('button', { name: 'Analysts' }))
     expect(rowSymbols(container)).toEqual(EXPECTED_DESCENDING)
@@ -118,7 +110,7 @@ describe('analyst-rating sort, across both tables', () => {
   })
 
   it('agrees between the two tables in the ascending direction as well', async () => {
-    const positions = render(<PositionsList positions={FIXTURE.map(position)} />)
+    const positions = render(<PositionsList positions={FIXTURE.map(position)} cash={UNTRACKED_CASH} />)
     const rating = screen.getByRole('button', { name: 'Analysts' })
     fireEvent.click(rating) // descending
     fireEvent.click(rating) // flips to ascending

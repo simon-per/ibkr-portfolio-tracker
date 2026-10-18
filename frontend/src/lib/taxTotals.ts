@@ -2,6 +2,7 @@
  * The tax report's dividend totals as the Tax tab prints them. Pure, so the arithmetic of
  * the labels is tested in node and `TaxTab.tsx` exports only its component.
  */
+import { ABSENT } from '@/lib/utils'
 
 export type Money = (n: number) => string
 
@@ -21,7 +22,7 @@ export function withholdingTotalLabel(
   total: number | null,
   estimatedRows: number,
 ): { amount: string; excluded: string | null } {
-  if (total == null) return { amount: '—', excluded: null }
+  if (total == null) return { amount: ABSENT, excluded: null }
   return {
     amount: withheld(money, total),
     excluded: estimatedRows > 0 ? `excl. ${estimatedRows} est.` : null,

@@ -15,7 +15,9 @@ interface SectionHeaderProps {
   description?: ReactNode
   /**
    * Right-aligned: the section's headline figure, a `SegmentedControl`, a button. Wraps under
-   * the title on a phone rather than squeezing it.
+   * the title on a phone rather than squeezing it, and an aside wider than the row wraps its
+   * own items rather than scrolling the page: it may shrink (no `shrink-0`), never past the
+   * row (`max-w-full`).
    */
   aside?: ReactNode
   /**
@@ -44,7 +46,7 @@ export function SectionHeader({
         </div>
       </div>
       {aside !== undefined && (
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 sm:justify-end">{aside}</div>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">{aside}</div>
       )}
     </>
   )

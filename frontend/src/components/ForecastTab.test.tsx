@@ -22,17 +22,6 @@ afterEach(cleanup)
 afterEach(() => vi.restoreAllMocks())
 beforeEach(() => localStorage.clear())
 
-/** `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement. */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 /** Holdings 60,000 plus 12,000 of cash, against 55,000 paid in: 17,000 of gain already made. */
 const summary: PortfolioSummary = {
   total_cost_basis_eur: 50_000,

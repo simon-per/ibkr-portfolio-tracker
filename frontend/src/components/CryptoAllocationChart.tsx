@@ -4,7 +4,7 @@ import type { CryptoPortfolioResponse } from '@/lib/api'
 import { allocationSlices } from '@/lib/cryptoChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
-import { tooltipValue } from '@/lib/utils'
+import { ABSENT, tooltipValue } from '@/lib/utils'
 
 /**
  * The crypto book by coin, as shares of the priced coins' total.
@@ -63,7 +63,7 @@ export function CryptoAllocationChart({ portfolio }: { portfolio: CryptoPortfoli
               {slice.label}
             </span>
             <span className="tabular-nums text-muted-foreground">
-              {slice.pct == null ? '—' : `${slice.pct.toFixed(1)}%`}
+              {slice.pct == null ? ABSENT : `${slice.pct.toFixed(1)}%`}
             </span>
           </li>
         ))}

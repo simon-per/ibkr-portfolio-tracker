@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { healthQuery } from '@/lib/queryCache'
 
 /**
  * Build identity. /health used to return only {"status":"healthy"}, so confirming a
@@ -9,11 +9,7 @@ import { api } from '@/lib/api'
  * the same footer. Refetched on mount only — it changes on deploy.
  */
 export function AppFooter() {
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => api.healthCheck(),
-    staleTime: Infinity,
-  })
+  const { data: health } = useQuery(healthQuery)
 
   if (!health) return null
 

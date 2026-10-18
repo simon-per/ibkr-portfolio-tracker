@@ -58,12 +58,33 @@ export function formatCurrency(value: number, currency: string = "EUR"): string 
  * zero prints unsigned, as `formatAxisMoney` does, rather than "-CHF 0".
  */
 export function formatMoneyWhole(value: number, currency: string = "EUR"): string {
-  return new Intl.NumberFormat("en-US", {
+  return numberFormat({
     style: "currency",
     currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(Math.abs(value) < 0.5 ? 0 : value)
+}
+
+/**
+ * A figure with its direction spelled out: "+€12.30", "-€4.00", "+1.5%", and **zero
+ * unsigned** — "€0.00", "0.0%".
+ *
+ * `format` prints the figure (and its minus); this only adds the plus. About ten sites wrote
+ * `${n >= 0 ? '+' : ''}…` or `${n > 0 ? '+' : ''}…` by hand, so a zero printed "+CHF 0" on
+ * some screens and "CHF 0" on others. Zero is not a gain, and a value that rounds to zero at
+ * the format's precision is printed as zero: no "+0.00%" for 0.001, no "-0.0%" for -0.01.
+ */
+export function formatSigned(value: number, format: (value: number) => string): string {
+  if (!Number.isFinite(value)) return format(value)
+  const body = format(value)
+  if (!/[1-9]/.test(body)) return format(0)
+  return value > 0 ? `+${body}` : body
+}
+
+/** `formatSigned` over a plain `toFixed` percentage: "+1.5%", "-0.3%", "0.0%". */
+export function formatSignedPercent(value: number, digits: number): string {
+  return formatSigned(value, (n) => `${n.toFixed(digits)}%`)
 }
 
 /**

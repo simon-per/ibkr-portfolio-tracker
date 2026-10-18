@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { DataTable, type Column, type FooterCell } from './DataTable'
 import { footerLayout } from './footerLayout'
@@ -16,21 +16,6 @@ import { footerLayout } from './footerLayout'
  */
 
 afterEach(cleanup)
-
-/**
- * `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not
- * implement. It has been in every browser since 2020, so this is a gap in the test
- * environment rather than something the component should guard against.
- */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
 
 interface Holding {
   id: number
@@ -424,5 +409,46 @@ describe('footerLayout', () => {
   it('drops a cell whose columns are all hidden on this rendering', () => {
     const slots = footerLayout([{ key: 'x', spans: ['zz'], content: 'X' }], keys)
     expect(slots).toEqual([{ cell: null, colSpan: 5 }])
+  })
+})
+
+describe('the title avatar', () => {
+  const mark = (r: Holding, className: string) => (
+    <span aria-hidden="true" data-testid={`mark-${r.symbol}`} className={className} />
+  )
+  const withAvatar: Column<Holding, SortKey>[] = COLUMNS.map((c) =>
+    c.key === 'symbol' ? { ...c, avatar: mark } : c,
+  )
+
+  it('draws it once on each card, before the title, at 24px', () => {
+    const { container } = render(
+      <DataTable rows={ROWS} columns={withAvatar} getRowKey={(r) => r.id} label="Holdings" mode="cards" />,
+    )
+    for (const row of ROWS) {
+      const marks = screen.getAllByTestId(`mark-${row.symbol}`)
+      expect(marks).toHaveLength(1)
+      expect(marks[0].className).toContain('h-6 w-6')
+      // The title line: the mark, then the title's own text.
+      expect(marks[0].parentElement!.textContent).toBe(row.symbol)
+      expect(marks[0].parentElement!.firstElementChild).toBe(marks[0])
+    }
+    expect(container.querySelectorAll('[data-testid^="mark-"]')).toHaveLength(ROWS.length)
+  })
+
+  it('leaves the desktop cell to draw its own', () => {
+    // The table cell calls the same function at its own size; DataTable adds nothing there.
+    render(<DataTable rows={ROWS} columns={withAvatar} getRowKey={(r) => r.id} label="Holdings" mode="table" />)
+    expect(screen.queryByTestId('mark-AAPL')).toBeNull()
+  })
+
+  it('draws nothing for a row whose avatar is null', () => {
+    const none: Column<Holding, SortKey>[] = COLUMNS.map((c) =>
+      c.key === 'symbol' ? { ...c, avatar: () => null } : c,
+    )
+    const { container } = render(
+      <DataTable rows={ROWS} columns={none} getRowKey={(r) => r.id} label="Holdings" mode="cards" />,
+    )
+    expect(container.querySelector('li .truncate')!.textContent).toBe('AAPL')
+    expect(container.querySelector('li .truncate')!.children).toHaveLength(0)
   })
 })

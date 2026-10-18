@@ -20,6 +20,9 @@ function pos(security_id: number, symbol: string, value: number, price: number |
   }
 }
 
+/** A loaded summary from a backend that tracks no cash: weights are shares of holdings. */
+const UNTRACKED = { amount: 0 }
+
 function pay(over: Partial<DividendUpcomingPayment> & { date: string; symbol: string }): DividendUpcomingPayment {
   return {
     ex_date: null, security_id: 1, net_eur: 5, basis: 'net', pay_date_source: 'accrual',
@@ -64,8 +67,8 @@ describe('largestHolding', () => {
     // 9.0% beside a credit — the same reading `UninvestedCash.in_book` gives server-side.
     const rows = [pos(1, 'BIG', 810), pos(2, 'SMALL', 90)]
     expect(weightDenominator(rows, { amount: -100, cash_source: 'derived' })).toBe(900)
-    expect((90 / weightDenominator(rows, { amount: -100, cash_source: 'ibkr' })) * 100).toBeCloseTo(10)
-    expect((90 / weightDenominator(rows, { amount: 100, cash_source: 'derived' })) * 100).toBeCloseTo(9)
+    expect((90 / weightDenominator(rows, { amount: -100, cash_source: 'ibkr' })!) * 100).toBeCloseTo(10)
+    expect((90 / weightDenominator(rows, { amount: 100, cash_source: 'derived' })!) * 100).toBeCloseTo(9)
     // The Largest holding tile reads the same denominator.
     expect(largestHolding(rows, { amount: -100, cash_source: 'derived' })?.weightPct).toBeCloseTo(90)
   })
@@ -78,15 +81,25 @@ describe('largestHolding', () => {
   it('never crowns, nor divides by, an unvaluable holding', () => {
     // An FX failure keeps the price and zeroes the value; a missing price clears both.
     const rows = [pos(1, 'AAA', 100), pos(2, 'NOFX', 0, 42), pos(3, 'NOPX', 9999, null)]
-    expect(largestHolding(rows)?.symbol).toBe('AAA')
-    expect(largestHolding(rows)?.weightPct).toBeCloseTo(100)
-    expect(weightDenominator(rows)).toBe(100)
+    expect(largestHolding(rows, UNTRACKED)?.symbol).toBe('AAA')
+    expect(largestHolding(rows, UNTRACKED)?.weightPct).toBeCloseTo(100)
+    expect(weightDenominator(rows, UNTRACKED)).toBe(100)
   })
 
   it('separates not loaded from nothing valued', () => {
-    expect(largestHolding(undefined)).toBeUndefined()
-    expect(largestHolding([])).toBeNull()
-    expect(largestHolding([pos(1, 'AAA', 100, null)])).toBeNull()
+    expect(largestHolding(undefined, UNTRACKED)).toBeUndefined()
+    expect(largestHolding([], UNTRACKED)).toBeNull()
+    expect(largestHolding([pos(1, 'AAA', 100, null)], UNTRACKED)).toBeNull()
+  })
+
+  it('has no weight while the cash is not loaded, rather than a share of holdings alone (#70)', () => {
+    // 200 of cash in a 1,000 account: holdings alone would make BBB 62.5% instead of 50%.
+    const rows = [pos(1, 'AAA', 300), pos(2, 'BBB', 500)]
+    expect(weightDenominator(rows, undefined)).toBeNull()
+    expect(largestHolding(rows, undefined)).toBeUndefined()
+    // Untracked is a loaded answer, and a different one.
+    expect(weightDenominator(rows, UNTRACKED)).toBe(800)
+    expect(largestHolding(rows, { amount: 200, cash_source: 'ibkr' })?.weightPct).toBeCloseTo(50)
   })
 })
 

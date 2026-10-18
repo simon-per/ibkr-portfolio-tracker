@@ -49,11 +49,6 @@ const EMPTY_BOOK: CryptoPortfolioResponse = {
 }
 
 beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  })
   vi.spyOn(api, 'getSettings').mockResolvedValue({
     base_currency: 'EUR', supported_currencies: ['EUR', 'CHF', 'USD'],
     dividend_forecast_withholding_pct: 15,

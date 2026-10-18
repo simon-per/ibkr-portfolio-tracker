@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnalyticsTab } from './AnalyticsTab'
@@ -22,16 +22,6 @@ import type {
  */
 afterEach(cleanup)
 afterEach(() => vi.restoreAllMocks())
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 const window: DecompositionWindow = {
   start_date: '2025-09-12',
   end_date: '2026-09-12',

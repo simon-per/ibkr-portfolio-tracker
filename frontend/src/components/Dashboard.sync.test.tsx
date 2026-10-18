@@ -19,13 +19,6 @@ afterEach(() => {
 
 beforeEach(() => {
   localStorage.clear()
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
   // Every read stays pending: this test is about which cache entries a sync marks stale.
   vi.stubGlobal('fetch', () => new Promise(() => {}))
 })

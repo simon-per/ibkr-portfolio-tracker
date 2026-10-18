@@ -29,6 +29,15 @@ describe('SectionHeader', () => {
     expect(aside?.className).toContain('justify-end')
   })
 
+  it('lets a wide aside wrap within the row instead of overflowing the page', () => {
+    // `shrink-0` held a 362px aside at full width inside a 324px header: 38px of sideways
+    // scroll at 390. Shrinkable, capped at the row, and wrapping its own items.
+    render(<SectionHeader title="Dividends" aside={<span data-testid="aside">x</span>} />)
+    const classes = screen.getByTestId('aside').parentElement!.className.split(/\s+/)
+    expect(classes).not.toContain('shrink-0')
+    expect(classes).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full', 'flex-wrap']))
+  })
+
   it('pads like a card header by default and not at all when bare', () => {
     const { container, unmount } = render(<SectionHeader title="A" />)
     expect((container.firstElementChild as HTMLElement).className).toContain('p-[var(--card-padding)]')

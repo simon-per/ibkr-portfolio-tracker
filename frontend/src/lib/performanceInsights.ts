@@ -8,8 +8,8 @@
  * no such row* ("None") — a range in which nothing lost money has no biggest drag, and a
  * dash there would claim the answer is unknown.
  */
-import type { CashSource, DividendUpcomingPayment, Position, SecurityAttribution } from '@/lib/api'
-import { inBookCash } from '@/lib/portfolioCash'
+import type { DividendUpcomingPayment, Position, SecurityAttribution } from '@/lib/api'
+import { inBookCash, type AccountCash } from '@/lib/portfolioCash'
 import { isUnpriced } from '@/lib/positionValuation'
 
 export interface Mover {
@@ -42,11 +42,15 @@ export interface NextDividend {
  * What a position weight is a share of, so the table and the tiles cannot disagree:
  * valued holdings plus in-book cash (`inBookCash` — positive and tracked, the rule
  * Allocation and Look-through share server-side).
+ *
+ * `null` while the cash is not loaded (`AccountCash`): without it there is no denominator,
+ * and holdings alone overstated every weight by the cash share (#70).
  */
 export function weightDenominator(
   positions: readonly Position[],
-  cash?: { amount: number; cash_source?: CashSource },
-): number {
+  cash: AccountCash | undefined,
+): number | null {
+  if (!cash) return null
   const holdings = positions.reduce((sum, p) => (isUnpriced(p) ? sum : sum + p.market_value_eur), 0)
   return holdings + inBookCash(cash)
 }
@@ -79,15 +83,20 @@ export function topMover(
   }
 }
 
-/** The biggest holding the backend could value, by market value, with its account weight. */
+/**
+ * The biggest holding the backend could value, by market value, with its account weight.
+ * Not loaded (`undefined`) until both the positions and the cash are: the tile's figure is
+ * the weight, and the cash is half of what it divides by.
+ */
 export function largestHolding(
   positions: readonly Position[] | undefined,
-  cash?: { amount: number; cash_source?: CashSource },
+  cash: AccountCash | undefined,
 ): LargestHolding | null | undefined {
   if (!positions) return undefined
   const valued = positions.filter((p) => !isUnpriced(p))
   if (valued.length === 0) return null
   const total = weightDenominator(positions, cash)
+  if (total === null) return undefined
   if (total <= 0) return null
   const top = valued.reduce((a, b) => (b.market_value_eur > a.market_value_eur ? b : a))
   return {

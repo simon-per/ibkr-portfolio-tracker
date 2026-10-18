@@ -1,11 +1,10 @@
 import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
-import { formatPercent, formatQuantity } from '@/lib/utils'
+import { ABSENT, formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
 import { compareNullsLast, type SortDirection } from '@/lib/nullsLast'
-import { cashIsTracked, inBookCash } from '@/lib/portfolioCash'
-import type { CashSource } from '@/lib/api'
+import { cashIsTracked, inBookCash, type AccountCash } from '@/lib/portfolioCash'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Briefcase, Wallet } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -35,10 +34,12 @@ interface PositionsListProps {
    * "% of portfolio" — the same mislabelling the allocation charts carried when they
    * dropped an unvaluable holding and still summed to 100.
    *
-   * Optional, and absent means a backend that does not track cash: the denominator then
-   * falls back to holdings, which is what it always was.
+   * Required, and `undefined` means the summary is **not loaded** (loading or failed): every
+   * weight is a dash until it arrives. Falling back to holdings there read as "this backend
+   * does not track cash" and inflated every row by the cash share (#70); a backend that does
+   * not track cash says so inside a loaded summary (`AccountCash`).
    */
-  cash?: { amount: number; cash_source?: CashSource }
+  cash: AccountCash | undefined
 }
 
 type SortColumn = 'symbol' | 'description' | 'rating' | 'quantity' | 'cost_basis_eur' | 'market_value_eur' | 'gain_loss_eur' | 'gain_loss_percent' | 'portfolio_percent' | 'yield_on_cost'
@@ -62,7 +63,7 @@ const getRatingBadgeColor = (consensus: string): string => {
 // The rating sort score lives in `lib/analystRating.ts`, shared with the watchlist — the
 // two tables ranked the same ratings by different rules until 2026-09-12.
 
-const exchangeOf = (p: Position) => p.exchange || '—'
+const exchangeOf = (p: Position) => p.exchange || ABSENT
 
 /**
  * A short label for the account a row belongs to, or null for the brokerage one.
@@ -92,7 +93,7 @@ const accountBadge = (p: Position): string | null =>
 const cannotValue = (p: Position) => isUnpriced(p)
 
 /** What every figure derived from a valuation shows when there is no valuation. */
-const NO_VALUE = '—'
+const NO_VALUE = ABSENT
 
 /**
  * The return cell: a dash for an unvalued holding, and for a zero cost basis (a stock
@@ -102,6 +103,11 @@ const NO_VALUE = '—'
 const returnOf = (p: Position): string =>
   cannotValue(p) || p.gain_loss_percent == null ? NO_VALUE : formatPercent(p.gain_loss_percent)
 
+/** The holding's logo or monogram; the card title draws it at 24px (`DataTable`'s `avatar`). */
+const positionAvatar = (p: Position, className?: string) => (
+  <TickerAvatar symbol={p.symbol} securityId={p.security_id} className={className} />
+)
+
 const gainTone = (p: Position) =>
   cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-gain' : 'text-loss'
 
@@ -110,8 +116,10 @@ const gainTone = (p: Position) =>
  * as "a negligible part of the book", which is a claim, and `RebalanceCard`'s Current
  * column already prints a dash for the same row. The cell and the sort both read this.
  */
-const weightOf = (p: Position, totalMarketValue: number): number | null =>
-  cannotValue(p) || totalMarketValue <= 0 ? null : (p.market_value_eur / totalMarketValue) * 100
+const weightOf = (p: Position, totalMarketValue: number | null): number | null =>
+  cannotValue(p) || totalMarketValue === null || totalMarketValue <= 0
+    ? null
+    : (p.market_value_eur / totalMarketValue) * 100
 
 /**
  * What a column sorts by: what its cell shows, with a dash as `null`.
@@ -127,7 +135,7 @@ const weightOf = (p: Position, totalMarketValue: number): number | null =>
 function positionSortValue(
   p: Position,
   column: SortColumn,
-  deps: { totalMarketValue: number; yieldOnCost: Map<number, number | null> },
+  deps: { totalMarketValue: number | null; yieldOnCost: Map<number, number | null> },
 ): number | string | null {
   switch (column) {
     case 'symbol': return p.symbol
@@ -164,8 +172,9 @@ export function positionColumns(deps: {
   /**
    * The denominator for `weight`: holdings **plus** uninvested cash wherever cash is
    * tracked, because the column is labelled "% of portfolio" and cash is part of one.
+   * `null` while the cash is not loaded: every weight is a dash.
    */
-  totalMarketValue: number
+  totalMarketValue: number | null
   /**
    * Projected next-12-month income over cost, per security, from
    * `/api/dividends/breakdown`. Keyed on `security_id` because identity is
@@ -189,6 +198,7 @@ export function positionColumns(deps: {
       shortHeader: 'Name',
       sortKey: 'description',
       mobile: 'title',
+      avatar: positionAvatar,
       cell: (p, view) => {
         const badge = accountBadge(p)
         // One Column[] renders both the table and the phone card list, so the badge
@@ -204,7 +214,7 @@ export function positionColumns(deps: {
         const name = displayName(p.description) || p.symbol
         return view === 'table' ? (
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={p.symbol} securityId={p.security_id} />
+            {positionAvatar(p)}
             <div className="min-w-0">
               <div className="max-w-[16rem] truncate font-medium" title={p.description}>
                 {name}
@@ -217,12 +227,6 @@ export function positionColumns(deps: {
           </div>
         ) : (
           <>
-            {/* Inline, so the title line still truncates as one run of text. */}
-            <TickerAvatar
-              symbol={p.symbol}
-              securityId={p.security_id}
-              className="mr-2 h-6 w-6 align-middle text-[9px]"
-            />
             {name}
             {tag}
           </>
@@ -248,7 +252,7 @@ export function positionColumns(deps: {
         !p.analyst_rating ? (
           // A table cell cannot be empty, so the dash is the desktop placeholder. In a
           // card it would be a stray dash floating in the badge row, saying nothing.
-          view === 'table' ? <span className="text-xs text-muted-foreground">—</span> : null
+          view === 'table' ? <span className="text-xs text-muted-foreground">{ABSENT}</span> : null
         ) : (
           <span
             className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${getRatingBadgeColor(p.analyst_rating.consensus)}`}
@@ -354,7 +358,7 @@ export function positionColumns(deps: {
       // chip row says nothing. A detail row needs a value beside its label.
       cell: (p) => {
         const y = yocOf(p)
-        return y != null ? `${y.toFixed(2)}%` : '—'
+        return y != null ? `${y.toFixed(2)}%` : ABSENT
       },
     },
   ]
@@ -412,7 +416,7 @@ export function PositionsList({
   }, [positions, sortColumn, sortDirection, totalMarketValue, yieldOnCost])
 
   const maxWeightPct = useMemo(() => {
-    if (totalMarketValue <= 0) return null
+    if (totalMarketValue === null || totalMarketValue <= 0) return null
     const top = (positions ?? []).reduce(
       (m, p) => (cannotValue(p) ? m : Math.max(m, p.market_value_eur)), 0,
     )
@@ -489,7 +493,7 @@ export function PositionsList({
             available, so totals exclude them.
           </div>
         )}
-        {cashTracked && totalMarketValue > 0 && (
+        {cashTracked && totalMarketValue !== null && totalMarketValue > 0 && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl bg-raised px-3 py-2.5 text-sm">
             <span className="flex items-center gap-3 font-medium">
               <IconChip icon={Wallet} />

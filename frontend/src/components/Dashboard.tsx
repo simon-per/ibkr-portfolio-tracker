@@ -1,7 +1,11 @@
 import { useState, useMemo, lazy } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { dataOf, positionsQuery, readsIbkrRows, summaryQuery } from '@/lib/queryCache'
+import {
+  availableBenchmarksQuery, contributionsQuery, dataOf, dividendBreakdownQuery, positionsQuery,
+  readsIbkrRows, summaryQuery, valueOverTimeQuery,
+} from '@/lib/queryCache'
+import { summaryCash } from '@/lib/portfolioCash'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -132,11 +136,7 @@ export function Dashboard() {
     data: contributions,
     isLoading: contributionsLoading,
     isError: contributionsError,
-  } = useQuery({
-    queryKey: ['portfolio', 'contributions'],
-    queryFn: () => api.getContributions(),
-    staleTime: 30 * 60 * 1000,
-  })
+  } = useQuery(contributionsQuery)
 
   const inception = contributions?.first_contribution_date ?? null
 
@@ -150,13 +150,13 @@ export function Dashboard() {
 
   // Fetch portfolio summary
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery(summaryQuery)
+  // The weight readers' cash: `undefined` until the summary arrives (and after it fails), which
+  // they render as an absent weight rather than a share of holdings alone. One identity per
+  // response, so their memos hold across renders.
+  const accountCash = useMemo(() => summaryCash(summary), [summary])
 
   // Fetch portfolio value over time
-  const { data: valueOverTime, isLoading: chartLoading, isError: chartError } = useQuery({
-    queryKey: ['portfolio', 'value-over-time', dateRange],
-    queryFn: () => api.getPortfolioValueOverTime(dateRange.start, dateRange.end),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: valueOverTime, isLoading: chartLoading, isError: chartError } = useQuery(valueOverTimeQuery(dateRange))
 
   // Fetch positions
   const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery(positionsQuery)
@@ -177,11 +177,7 @@ export function Dashboard() {
   // The full `/benchmarks` list, for colouring by identity rather than by position in
   // the selection. Same key and `staleTime` as `BenchmarkPicker`'s query, so it is one
   // request shared through the cache.
-  const { data: availableBenchmarks } = useQuery({
-    queryKey: ['portfolio', 'benchmarks'],
-    queryFn: () => api.getAvailableBenchmarks(),
-    staleTime: Infinity,
-  })
+  const { data: availableBenchmarks } = useQuery(availableBenchmarksQuery)
 
   const benchmarkDatasets: BenchmarkDataset[] = useMemo(() => {
     return selectedBenchmarks
@@ -227,11 +223,7 @@ export function Dashboard() {
   const {
     data: dividendBreakdown,
     isError: dividendBreakdownError,
-  } = useQuery({
-    queryKey: ['dividends', 'breakdown', new Date().getFullYear()],
-    queryFn: () => api.getDividendBreakdown(new Date().getFullYear()),
-    staleTime: 30 * 60 * 1000,
-  })
+  } = useQuery(dividendBreakdownQuery(new Date().getFullYear()))
 
   // Per-security yield on cost for the positions table, keyed on `security_id` because
   // identity is isin + exchange (ASML is two securities). Memoised so the table's column
@@ -495,7 +487,7 @@ export function Dashboard() {
             <PerformanceInsights
               attribution={attribution}
               positions={positions}
-              cash={summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined}
+              cash={accountCash}
               upcoming={dividendBreakdown?.upcoming}
               range={selectedRange}
             />
@@ -542,7 +534,7 @@ export function Dashboard() {
               yieldOnCost={yieldOnCostBySecurity}
               // Weight is a share of the account, and cash is part of one — see the
               // prop's docstring for what dividing by holdings alone did to it.
-              cash={summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined}
+              cash={accountCash}
             />
           </TabsContent>
 

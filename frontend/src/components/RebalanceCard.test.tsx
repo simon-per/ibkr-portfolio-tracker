@@ -17,21 +17,6 @@ import type { DriftInput } from '@/lib/rebalance'
 afterEach(cleanup)
 beforeEach(() => localStorage.clear())
 
-/**
- * `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not
- * implement. It has been in every browser since 2020, so this is a gap in the
- * test environment rather than something the component should guard against.
- */
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 function pos(
   security_id: number,
   symbol: string,

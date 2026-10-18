@@ -33,13 +33,6 @@ beforeEach(() => {
   chartRenders.length = 0
   localStorage.clear()
   localStorage.setItem(BENCHMARKS_KEY, JSON.stringify(['sp500']))
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
   // Every other read stays pending; only the benchmark answers.
   vi.stubGlobal('fetch', () => new Promise(() => {}))
   vi.spyOn(api, 'getBenchmarkComparison').mockResolvedValue({

@@ -1,5 +1,6 @@
 import { queryOptions, type Query } from '@tanstack/react-query'
-import { api } from './api'
+import { api, type ActivityParams } from './api'
+import type { DateRange } from './dateRanges'
 
 /**
  * Which cached queries a write makes stale (docs/frontend.md, *The query cache*).
@@ -44,6 +45,71 @@ export const positionsQuery = queryOptions({
   queryFn: () => api.getPositions(),
   staleTime: VALUATION_STALE_TIME,
 })
+
+/*
+ * Every query read from more than one place is defined here, once (#70). Written out at
+ * each reader, two copies of one key drifted on the option nobody looks at: the Analytics
+ * tab's value-over-time took the 5-minute default where the Performance tab's took 30, so
+ * the same cache entry went stale on whichever tab mounted it first.
+ * `queryKeyFamily.test.ts` fails a query key written at two definition sites.
+ */
+
+/** The valuation over a window; the window's last point is the summary's valuation. */
+export const valueOverTimeQuery = (range: DateRange) =>
+  queryOptions({
+    queryKey: ['portfolio', 'value-over-time', range],
+    queryFn: () => api.getPortfolioValueOverTime(range.start, range.end),
+    staleTime: VALUATION_STALE_TIME,
+  })
+
+/** Money in by month and the first contribution date (Performance, Activity, Tax, Forecast). */
+export const contributionsQuery = queryOptions({
+  queryKey: ['portfolio', 'contributions'],
+  queryFn: () => api.getContributions(),
+  staleTime: 30 * 60 * 1000,
+})
+
+/** The benchmark list: fixed per deploy. */
+export const availableBenchmarksQuery = queryOptions({
+  queryKey: ['portfolio', 'benchmarks'],
+  queryFn: () => api.getAvailableBenchmarks(),
+  staleTime: Infinity,
+})
+
+/** The build, the scheduler flag and write-auth: one request per session. */
+export const healthQuery = queryOptions({
+  queryKey: ['health'],
+  queryFn: () => api.healthCheck(),
+  staleTime: Infinity,
+})
+
+/** The forecast's daily history (the Dividends tiles' sparklines and the forecast card). */
+export const forecastHistoryQuery = queryOptions({
+  queryKey: ['dividends', 'forecast-history'],
+  queryFn: () => api.getDividendForecastHistory(),
+})
+
+/**
+ * The dividends breakdown for a calendar year or the trailing 24 months. The Performance tab
+ * reads the current year's for the KPI cards and yield on cost; the Dividends tab, any.
+ */
+export const dividendBreakdownQuery = (year: number | 'all' | '24m') =>
+  queryOptions({
+    queryKey: ['dividends', 'breakdown', year],
+    queryFn: () => api.getDividendBreakdown(
+      typeof year === 'number' ? year : undefined,
+      year === '24m' ? '24m' : undefined,
+    ),
+    staleTime: 30 * 60 * 1000,
+  })
+
+/** One page of the activity ledger, or a whole window at the endpoint's ceiling. */
+export const activityQuery = (params: ActivityParams) =>
+  queryOptions({
+    queryKey: ['portfolio', 'activity', params],
+    queryFn: () => api.getActivity(params),
+    staleTime: 5 * 60 * 1000,
+  })
 
 /**
  * A `useQueries` `combine`: each query's data, in query order.

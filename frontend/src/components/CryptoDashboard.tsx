@@ -2,6 +2,7 @@ import { lazy } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clock, Download, RefreshCw } from 'lucide-react'
 import { api, type CryptoStatusResponse, type CryptoSyncResponse } from '@/lib/api'
+import { healthQuery } from '@/lib/queryCache'
 import { Button } from '@/components/ui/button'
 import { BannerWarning, StatusBanner } from '@/components/ui/StatusBanner'
 import { LazyTabPanel } from '@/components/ui/LazyTabPanel'
@@ -27,11 +28,7 @@ const CryptoOverview = lazy(() =>
 export function CryptoDashboard() {
   const queryClient = useQueryClient()
 
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => api.healthCheck(),
-    staleTime: Infinity,
-  })
+  const { data: health } = useQuery(healthQuery)
   const serverHasNoKey = health?.write_auth_enabled === false
 
   const statusQuery = useQuery({

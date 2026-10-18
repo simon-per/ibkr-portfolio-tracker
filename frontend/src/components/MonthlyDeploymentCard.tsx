@@ -15,7 +15,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { useFormatCurrency, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
-import { formatAxisMoney } from '@/lib/utils'
+import { ABSENT, formatAxisMoney } from '@/lib/utils'
 import { zeroBasedTicks } from '@/lib/niceTicks'
 import { useRememberedOpen } from '@/lib/storage'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
@@ -122,7 +122,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // so this figure and the strip's are the same quantity as well as the same number.
   const twelveMonth = data?.windows.find(w => w.label === '12m')
   // Whole units — cents on a monthly figure are noise, and the tooltip keeps them.
-  const money = (v: number | null | undefined) => (v == null ? '—' : formatWhole(v))
+  const money = (v: number | null | undefined) => (v == null ? ABSENT : formatWhole(v))
   let summaryText: React.ReactNode = hasMoneyIn ? 'Money in per month' : 'Capital deployed per month'
   if (isError) {
     summaryText = 'Could not load contributions'
@@ -248,7 +248,7 @@ function DeploymentTooltip(
         {hasMoneyIn && (
           <p>
             <span className="text-muted-foreground">Money in: </span>
-            <span className="font-medium">{d.money_in_eur == null ? '—' : fmt(d.money_in_eur)}</span>
+            <span className="font-medium">{d.money_in_eur == null ? ABSENT : fmt(d.money_in_eur)}</span>
           </p>
         )}
         <p>

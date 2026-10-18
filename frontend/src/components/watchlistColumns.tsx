@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { displayName } from '@/lib/securityName'
-import { ABSENT, cn, formatMarketCap, marketCapParts } from '@/lib/utils'
+import { ABSENT, cn, formatMarketCap, formatSignedPercent, marketCapParts } from '@/lib/utils'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
@@ -53,7 +53,7 @@ export const RATING_LABELS: Record<string, string> = {
 
 export function formatPercent(value: number | null): string {
   if (value === null) return ABSENT
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  return formatSignedPercent(value, 1)
 }
 
 // Re-exported so existing importers of this module keep working; the definition
@@ -135,6 +135,16 @@ export function pegOf(item: WatchlistItem): number | null {
 const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : ABSENT)
 const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : ABSENT)
 
+/** The entry's logo by security or ISIN, else a monogram; the card title draws it too. */
+const watchlistAvatar = (i: WatchlistItem, className: string) => (
+  <TickerAvatar
+    symbol={i.symbol || i.yahoo_ticker}
+    securityId={i.security_id ?? undefined}
+    isin={i.isin ?? undefined}
+    className={className}
+  />
+)
+
 export function watchlistColumns(deps: {
   formatCurrency: (value: number | null, currency: string | null) => string
   /** The base currency's prefix, for the market cap (`useCurrencySymbol`). */
@@ -150,13 +160,13 @@ export function watchlistColumns(deps: {
       sortKey: 'symbol',
       mobile: 'title',
       headerClassName: 'min-w-[160px]',
+      avatar: watchlistAvatar,
       cell: (i, view) =>
         view === 'cards' ? (
           i.symbol || i.yahoo_ticker
         ) : (
-          // No security id or ISIN on a watchlist row, so the avatar is the monogram.
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={i.symbol || i.yahoo_ticker} securityId={i.security_id ?? undefined} isin={i.isin ?? undefined} className="h-8 w-8 text-[10px]" />
+            {watchlistAvatar(i, 'h-8 w-8 text-[10px]')}
             <div className="min-w-0">
               <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
               <div className="text-xs text-muted-foreground truncate max-w-[140px]">
@@ -269,8 +279,7 @@ export function watchlistColumns(deps: {
               <div
                 className={`text-[11px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
               >
-                {upside >= 0 ? '+' : ''}
-                {upside.toFixed(0)}% upside
+                {formatSignedPercent(upside, 0)} upside
               </div>
             )}
           </div>

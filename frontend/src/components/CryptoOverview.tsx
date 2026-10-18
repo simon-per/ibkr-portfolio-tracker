@@ -16,7 +16,7 @@ import { CryptoAllocationChart } from './CryptoAllocationChart'
 import { cryptoHoldingColumns, sortCryptoHoldings, type CryptoSortColumn } from './cryptoColumns'
 import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
 import { cryptoAccess, retryUnlessRefused } from '@/lib/cryptoAccess'
-import { formatCount, formatCurrency as formatIn, formatDate, formatPrice, formatShortDateTime } from '@/lib/utils'
+import { ABSENT, formatCount, formatCurrency as formatIn, formatDate, formatPrice, formatShortDateTime, formatSigned } from '@/lib/utils'
 
 /**
  * The crypto book (docs/crypto.md): one page, no tab strip — the section strip is the
@@ -148,7 +148,7 @@ function CryptoBook({
   const formatCurrency = useFormatCurrency()
   const money = (value: number | null | undefined) => (value == null ? null : formatCurrency(value))
   const signedMoney = (value: number | null | undefined) =>
-    value == null ? null : `${value > 0 ? '+' : ''}${formatCurrency(value)}`
+    value == null ? null : formatSigned(value, formatCurrency)
 
   const [sortColumn, setSortColumn] = useState<CryptoSortColumn | null>('value')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -242,7 +242,7 @@ function CryptoBook({
         {/* The qualifiers, on the surface beside the figures they qualify. */}
         <div className="space-y-1 text-xs text-muted-foreground">
           <p>
-            As of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : '—'}
+            As of {portfolio.as_of ? formatShortDateTime(portfolio.as_of) : ABSENT}
             {portfolio.cash_value
               ? ` · exchange cash ${formatCurrency(portfolio.cash_value)} not included`
               : ''}
@@ -313,7 +313,7 @@ function CryptoBook({
                 key: 'total-value',
                 spans: ['value'],
                 align: 'right',
-                content: money(portfolio.total_value) ?? '—',
+                content: money(portfolio.total_value) ?? ABSENT,
               },
             ]}
           />

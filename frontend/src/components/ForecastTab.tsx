@@ -10,9 +10,8 @@ import { SectionHeader } from '@/components/ui/SectionHeader'
 import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
-import { summaryQuery } from '@/lib/queryCache'
-import { formatAxisMoney } from '@/lib/utils'
+import { contributionsQuery, summaryQuery } from '@/lib/queryCache'
+import { ABSENT, formatAxisMoney } from '@/lib/utils'
 import { niceTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
@@ -127,7 +126,7 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
     tone: (p) =>
       p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
     hint: { description: 'Value minus money in' },
-    cell: (p) => (p.gains === null ? '—' : money(p.gains)),
+    cell: (p) => (p.gains === null ? ABSENT : money(p.gains)),
   },
   {
     key: 'moneyIn',
@@ -135,7 +134,7 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
     shortHeader: 'Money in',
     align: 'right',
     hint: { description: 'Paid in plus projected contributions' },
-    cell: (p) => (p.moneyIn === null ? '—' : money(p.moneyIn)),
+    cell: (p) => (p.moneyIn === null ? ABSENT : money(p.moneyIn)),
   },
 ]
 
@@ -176,11 +175,7 @@ export function ForecastTab() {
   // request once the Performance tab has loaded. The summary query used to carry no
   // `staleTime` and refetched on every visit to this tab.
   const { data: summary, isError: summaryError } = useQuery(summaryQuery)
-  const { data: contributions, isPending: contributionsPending } = useQuery({
-    queryKey: ['portfolio', 'contributions'],
-    queryFn: () => api.getContributions(),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: contributions, isPending: contributionsPending } = useQuery(contributionsQuery)
 
   // `summary?.total_market_value_eur || 0` on its own made a failed request
   // indistinguishable from an empty portfolio — and "Current" is the *selected* starting
@@ -432,7 +427,7 @@ export function ForecastTab() {
               />
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number | undefined) => value != null ? money(value) : '—'}
+                formatter={(value: number | undefined) => value != null ? money(value) : ABSENT}
                 labelFormatter={(label) => `In ${Number(label)} ${Number(label) === 1 ? 'year' : 'years'}`}
               />
               {/* This two-series area had no legend at all, at any width — the grey band

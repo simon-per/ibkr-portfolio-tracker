@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { PortfolioValueChart } from './PortfolioValueChart'
 import type { BenchmarkDataset } from './PortfolioValueChart'
@@ -16,18 +16,6 @@ import type { PortfolioValuePoint } from '@/lib/api'
  */
 
 afterEach(cleanup)
-
-// `ResponsiveContainer` measures with a ResizeObserver, absent from jsdom. Same stub as
-// the other component specs.
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
 
 function point(date: string, mv: number, unpriced?: number): PortfolioValuePoint {
   return {

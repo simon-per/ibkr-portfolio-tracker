@@ -25,7 +25,8 @@ function sources(dir: string): string[] {
 
 function code(path: string): string {
   return readFileSync(path, 'utf8')
-    .split('\n')
+    // CRLF too: `.` stops at a `\r`, so `\/\/.*$` left a CRLF line's comment in place.
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ''))
     .join('\n')
 }
@@ -92,8 +93,26 @@ describe('the sort family', () => {
 
   it('defines ABSENT once', () => {
     const offenders = sources(SRC)
-      .filter((p) => /export const ABSENT\s*=/.test(code(p)))
+      .filter((p) => /\bconst ABSENT\s*=/.test(code(p)))
       .map(rel)
     expect(offenders).toEqual(['lib/utils.ts'])
+  })
+
+  /**
+   * A module-local `const ABSENT = '—'` (two of them) and a bare `'—'` in sixteen files
+   * passed the scan above, which only looked for an *exported* redefinition. A dash
+   * literal is the glyph written again; every absent figure imports the one `ABSENT`.
+   */
+  it("writes the dash only as ABSENT, never as a '—' literal", () => {
+    // Where a dash is genuinely text rather than an absent figure: path → why. Empty today.
+    const TEXT_DASHES: Record<string, string> = {}
+    const literal = /(['"`])—\1|>\s*—\s*</
+    const withoutComments = (p: string) => code(p).replace(/\/\*[\s\S]*?\*\//g, '')
+    const offenders = sources(SRC)
+      .filter((p) => !p.endsWith(join('lib', 'utils.ts')))
+      .filter((p) => !(rel(p) in TEXT_DASHES))
+      .filter((p) => literal.test(withoutComments(p)))
+      .map(rel)
+    expect(offenders).toEqual([])
   })
 })

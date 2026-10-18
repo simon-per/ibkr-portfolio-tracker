@@ -201,11 +201,12 @@ lose time to.
   0.00.** So the currency-exposure card reports *no priced positions* and the rebalance panel shows
   every row unpriced — both correct, and both easy to mistake for a broken feature. Anything that
   depends on a valued portfolio can only be browser-verified against a production snapshot.
-- **A jsdom test that renders `ScrollableTable` (anything through `DataTable`) needs a
-  `ResizeObserver` stub**, copied inline into 17 test files today (STATUS.md *Worth doing next*, tooling);
-  and a component test that renders anything using `useBaseCurrency`/`useCurrencySymbol` needs a
-  `QueryClientProvider` *above* `CurrencyProvider`, or it throws `No QueryClient set`. Neither is
-  a component defect. `RebalanceCard.test.tsx` has both patterns to copy.
+- **A component test that renders anything using `useBaseCurrency`/`useCurrencySymbol` needs a
+  `QueryClientProvider` *above* `CurrencyProvider`**, or it throws `No QueryClient set` — not a
+  component defect; `AllocationTab.test.tsx` has the pattern. The `ResizeObserver` that
+  `ScrollableTable` (anything through `DataTable`) and Recharts need is stubbed once in
+  `src/testSetup.ts` for every jsdom file; don't stub it again in a test (`testSetup.test.tsx`
+  fails one that does, #70).
 - **uvicorn can die mid-Playwright-run with `OSError: [WinError 64] The specified network name is no
   longer available`** — a Windows asyncio-proactor reaction to an abruptly closed connection, not a code
   fault. The e2e script then reports `ERR_CONNECTION_REFUSED` and a shrunken panel, which reads exactly

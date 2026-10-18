@@ -99,6 +99,16 @@ export interface Column<Row, SortKey extends string = never> {
   hint?: ColumnHint
   mobile?: MobileSlot
   desktop?: 'show' | 'hide'
+  /**
+   * The row's identity mark — a `TickerAvatar`, a `ConstituentAvatar`, Activity's cash chip
+   * — on the `title` column. DataTable draws it once, before the phone card's title, at the
+   * size it passes (`CARD_AVATAR`), so every table's cards carry the logos its desktop rows
+   * do: at 390px only Positions had any, because each table drew its own in a `cards`
+   * branch and only one remembered to. The desktop cell draws its own at its own size by
+   * calling the same function, so the two cannot name different securities. `null` for a
+   * row without one; the cell's `cards` branch must not draw it again.
+   */
+  avatar?: (row: Row, className: string) => React.ReactNode
 }
 
 /**
@@ -160,6 +170,9 @@ const PINNED_CELL = cn(
   '[[data-scrolled]_&]:shadow-[1px_0_0_hsl(var(--border)),6px_0_8px_-6px_rgb(0_0_0/0.35)]',
 )
 const PINNED_ROW_HOVER = 'group-hover:bg-[linear-gradient(hsl(var(--muted)/0.4),hsl(var(--muted)/0.4))]'
+
+/** The card title's avatar: 24px, inline, so the title line still truncates as one run. */
+const CARD_AVATAR = 'mr-2 h-6 w-6 align-middle text-[9px]'
 
 export interface DataTableProps<Row, SortKey extends string = never> {
   rows: readonly Row[]
@@ -482,7 +495,10 @@ function CompactRow<Row, SortKey extends string>({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           {title && (
-            <div className="truncate font-medium leading-tight">{title.cell(row, 'cards')}</div>
+            <div className="truncate font-medium leading-tight">
+              {title.avatar?.(row, CARD_AVATAR)}
+              {title.cell(row, 'cards')}
+            </div>
           )}
           {metas.map(col => (
             <div key={col.key} className="truncate text-xs text-muted-foreground">

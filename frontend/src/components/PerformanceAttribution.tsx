@@ -17,7 +17,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { displayName } from '@/lib/securityName'
-import { ABSENT, formatAxisMoney } from '@/lib/utils'
+import { ABSENT, formatAxisMoney, formatSigned } from '@/lib/utils'
 import { zeroBasedTicks } from '@/lib/niceTicks'
 import { useRememberedOpen } from '@/lib/storage'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
@@ -40,7 +40,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
       <>
         Total P&L:{' '}
         <span className={data.total_pnl_eur >= 0 ? 'text-gain' : 'text-loss'}>
-          {data.total_pnl_eur >= 0 ? '+' : ''}{formatCurrency(data.total_pnl_eur)}
+          {formatSigned(data.total_pnl_eur, formatCurrency)}
         </span>
       </>
     )
@@ -171,7 +171,7 @@ export function AttributionTooltip({ active, payload }: { active?: boolean; payl
         <p>
           <span className="text-muted-foreground">P&L: </span>
           <span className={`font-medium ${isPositive ? 'text-gain' : 'text-loss'}`}>
-            {isPositive ? '+' : ''}{formatCurrency(d.pnl_contribution_eur)}
+            {formatSigned(d.pnl_contribution_eur, formatCurrency)}
           </span>
         </p>
         <p>

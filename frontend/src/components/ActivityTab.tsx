@@ -11,8 +11,9 @@ import {
   ArrowDownToLine, ArrowLeftRight, ArrowRightLeft, ArrowUpFromLine, Banknote, Download,
   CircleDollarSign, HandCoins, Hash, Minus, Plus, ShoppingCart, Split, Tag, Wallet, type LucideIcon,
 } from 'lucide-react'
-import { cn, formatCount, formatCurrency, formatDate, placeholderDim } from '@/lib/utils'
+import { ABSENT, cn, formatCount, formatCurrency, formatDate, formatSigned, placeholderDim } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { activityQuery, contributionsQuery } from '@/lib/queryCache'
 import { useBaseCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import { rangeFor, type TimeRange } from '@/lib/dateRanges'
 import { isSell, summarizeActivity, type ActivitySummary } from '@/lib/activitySummary'
@@ -66,7 +67,7 @@ function signClass(amount: number | null | undefined): string {
 }
 
 function num(value: number | null, digits = 2): string {
-  if (value == null) return '—'
+  if (value == null) return ABSENT
   return value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 }
 
@@ -79,7 +80,7 @@ function num(value: number | null, digits = 2): string {
  * trailing zeros, so a whole-share trade still reads `50` rather than `50.000000`.
  */
 function qty(value: number | null): string {
-  if (value == null) return '—'
+  if (value == null) return ABSENT
   // Intl renders -0.0000001 as "-0"; the sign is already in the BUY/SELL badge.
   const shown = Object.is(value, -0) ? 0 : value
   return shown.toLocaleString('en-US', { maximumFractionDigits: 6 })
@@ -149,6 +150,21 @@ function detailOf(row: ActivityRow): string | null {
   return sentenceCase(row.description) || null
 }
 
+/** The security's logo or monogram; a cash flow, which has no security, the cash chip. */
+function activityAvatar(row: ActivityRow, className: string) {
+  if (row.symbol) {
+    return <TickerAvatar symbol={row.symbol} securityId={row.security_id ?? undefined} className={className} />
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={cn('inline-flex shrink-0 items-center justify-center rounded-full', TONE_CHIP.neutral, className)}
+    >
+      <Banknote className="h-1/2 w-1/2" />
+    </span>
+  )
+}
+
 /**
  * The ledger's eight columns, described once for both renderings.
  *
@@ -170,6 +186,7 @@ function activityColumns(deps: {
       header: 'Asset',
       shortHeader: 'Asset',
       mobile: 'title',
+      avatar: activityAvatar,
       cell: (row, view) => {
         const detail = detailOf(row)
         // The type badge sits under the title on a card, so a cash row is titled "Cash"
@@ -177,13 +194,7 @@ function activityColumns(deps: {
         if (view !== 'table') return row.symbol ?? 'Cash'
         return (
           <div className="flex items-center gap-3">
-            {row.symbol ? (
-              <TickerAvatar symbol={row.symbol} securityId={row.security_id ?? undefined} className="h-8 w-8 text-[10px]" />
-            ) : (
-              <span aria-hidden="true" className={cn('inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full', TONE_CHIP.neutral)}>
-                <Banknote className="h-4 w-4" />
-              </span>
-            )}
+            {activityAvatar(row, 'h-8 w-8 text-[10px]')}
             <div className="min-w-0">
               <div className="font-medium">{row.symbol ?? 'Cash'}</div>
               {detail && (
@@ -242,7 +253,7 @@ function activityColumns(deps: {
       mobile: 'value',
       tone: (row) => signClass(row.amount_base),
       cellClassName: 'font-medium',
-      cell: (row) => (row.amount_base == null ? '—' : money(row.amount_base)),
+      cell: (row) => (row.amount_base == null ? ABSENT : money(row.amount_base)),
     },
     {
       key: 'realized',
@@ -255,7 +266,7 @@ function activityColumns(deps: {
       // delta slot a lone dash reads as an error rather than as "not applicable".
       cell: (row, view) =>
         row.realized_pnl_base == null
-          ? view === 'table' ? '—' : null
+          ? view === 'table' ? ABSENT : null
           : money(row.realized_pnl_base),
     },
     {
@@ -271,7 +282,7 @@ function activityColumns(deps: {
       shortHeader: 'Price',
       align: 'right',
       cell: (row) =>
-        row.price == null ? '—' : `${num(row.price)} ${row.currency ?? ''}`.trim(),
+        row.price == null ? ABSENT : `${num(row.price)} ${row.currency ?? ''}`.trim(),
     },
   ]
 }
@@ -283,7 +294,7 @@ function activityColumns(deps: {
  */
 function ActivityFigures({ summary, currency }: { summary: ActivitySummary; currency: string }) {
   const money = (value: number | null) =>
-    value == null ? null : `${value > 0 ? '+' : ''}${formatCurrency(value, currency)}`
+    value == null ? null : formatSigned(value, (n) => formatCurrency(n, currency))
   const tone = (value: number | null): Tone => (value == null ? 'neutral' : signTone(value))
   return (
     <KpiPanel columns={6}>
@@ -327,11 +338,7 @@ export function ActivityTab() {
 
   // Shares Dashboard's inception source so ALL starts at the first tax lot rather than
   // a hardcoded date — transferred lots keep their original open_date.
-  const { data: contributions } = useQuery({
-    queryKey: ['portfolio', 'contributions'],
-    queryFn: () => api.getContributions(),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: contributions } = useQuery(contributionsQuery)
 
   const window = useMemo(
     () => rangeFor(range, new Date(), contributions?.first_contribution_date ?? null),
@@ -352,9 +359,7 @@ export function ActivityTab() {
 
   const keepPrevious = useKeepPreviousData()
   const { data, isLoading, isError, isPlaceholderData } = useQuery({
-    queryKey: ['portfolio', 'activity', params],
-    queryFn: () => api.getActivity(params),
-    staleTime: 5 * 60 * 1000,
+    ...activityQuery(params),
     // The last page stays while the next one loads (#68): Previous/Next sit under the table,
     // so blanking it unmounted the button just pressed. Only across a page turn: the figures
     // strip sums the rows against the kind filter, and old rows under a new filter would be
@@ -391,9 +396,7 @@ export function ActivityTab() {
   )
   const pageIsWhole = !!data && data.offset === 0 && data.items.length === data.total
   const { data: whole } = useQuery({
-    queryKey: ['portfolio', 'activity', wholeParams],
-    queryFn: () => api.getActivity(wholeParams),
-    staleTime: 5 * 60 * 1000,
+    ...activityQuery(wholeParams),
     enabled: !!data && !pageIsWhole && data.total <= SUMMARY_LIMIT,
   })
   const summary = useMemo(() => {

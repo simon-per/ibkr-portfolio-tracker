@@ -2,6 +2,7 @@ import { TrendingUp, TrendingDown, Activity, Target, Shield, ChartPie, ChartLine
 import { Card, CardContent } from '@/components/ui/card'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { SectionHeader } from '@/components/ui/SectionHeader'
+import { formatSignedPercent } from '@/lib/utils'
 
 /** The row's heading: return figures here, risk and income in `RiskMetricsCards`. */
 const heading = <SectionHeader variant="bare" title="Returns" icon={ChartLine} className="mb-3" />
@@ -124,7 +125,7 @@ export function PerformanceMetricsCards({
           // `tone`, which is muted for the unknown case.
           icon={metrics.xirr !== null && !isPositiveXIRR ? TrendingDown : TrendingUp}
           value={metrics.xirr !== null
-            ? `${isPositiveXIRR ? '+' : ''}${metrics.xirr.toFixed(2)}%`
+            ? formatSignedPercent(metrics.xirr, 2)
             : null}
           tone={metrics.xirr === null ? 'muted' : isPositiveXIRR ? 'positive' : 'negative'}
         />

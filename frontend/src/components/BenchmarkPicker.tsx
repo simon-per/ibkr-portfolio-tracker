@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { availableBenchmarksQuery } from '@/lib/queryCache'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,11 +13,7 @@ interface BenchmarkPickerProps {
 }
 
 export function BenchmarkPicker({ selected, onChange }: BenchmarkPickerProps) {
-  const { data: benchmarks } = useQuery({
-    queryKey: ['portfolio', 'benchmarks'],
-    queryFn: () => api.getAvailableBenchmarks(),
-    staleTime: Infinity,
-  })
+  const { data: benchmarks } = useQuery(availableBenchmarksQuery)
 
   const toggle = (key: string) => {
     if (selected.includes(key)) {

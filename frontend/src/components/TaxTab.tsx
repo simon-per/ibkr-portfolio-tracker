@@ -5,8 +5,9 @@ import {
   Building2, Download, Globe, HandCoins, Landmark, Loader2, PiggyBank, ReceiptText, TriangleAlert,
   Wallet,
 } from 'lucide-react'
-import { cn, formatPercent } from '@/lib/utils'
+import { ABSENT, cn, formatPercent, formatSigned } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { contributionsQuery } from '@/lib/queryCache'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
@@ -40,7 +41,7 @@ function gainTone(amount: number): Tone {
 }
 
 function signed(money: Money, amount: number): string {
-  return `${amount >= 0 ? '+' : ''}${money(amount)}`
+  return formatSigned(amount, money)
 }
 
 /** A small rounded tag in a card header: `est.`, a source, an as-at date. */
@@ -62,19 +63,25 @@ function symbolCell(
   view: 'table' | 'cards',
   securityId?: number | null,
 ) {
-  if (!symbol) return '—'
+  if (!symbol) return ABSENT
   if (view === 'cards') return symbol
   return (
     <span className="flex items-center gap-2.5">
-      <TickerAvatar
-        symbol={symbol}
-        securityId={securityId ?? undefined}
-        isin={isin}
-        className="h-7 w-7 text-[10px]"
-      />
+      {symbolAvatar(symbol, isin, 'h-7 w-7 text-[10px]', securityId)}
       <span>{symbol}</span>
     </span>
   )
+}
+
+/** The symbol cell's avatar, which the card title draws too (`DataTable`'s `avatar`). */
+function symbolAvatar(
+  symbol: string | null,
+  isin: string | null,
+  className: string,
+  securityId?: number | null,
+) {
+  if (!symbol) return null
+  return <TickerAvatar symbol={symbol} securityId={securityId ?? undefined} isin={isin} className={className} />
 }
 type DividendIncomeRow = TaxReport['dividend_income'][number]
 type ByCountryRow = TaxReport['dividend_by_country'][number]
@@ -98,6 +105,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
+    avatar: (d, className) => symbolAvatar(d.symbol, d.isin, className),
     cell: (d, view) => symbolCell(d.symbol, d.isin, view),
   },
   {
@@ -106,7 +114,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Description',
     mobile: 'meta',
     cellClassName: 'max-w-[240px] truncate text-muted-foreground',
-    cell: (d) => (d.description ? displayName(d.description) : '—'),
+    cell: (d) => (d.description ? displayName(d.description) : ABSENT),
   },
   {
     key: 'pay_date',
@@ -137,7 +145,7 @@ const DIVIDEND_INCOME_COLUMNS = (money: Money): Column<DividendIncomeRow>[] => [
     shortHeader: 'Withholding',
     align: 'right',
     cellClassName: 'text-muted-foreground',
-    cell: (d) => (d.withholding == null ? '—' : withheld(money, d.withholding)),
+    cell: (d) => (d.withholding == null ? ABSENT : withheld(money, d.withholding)),
   },
 ]
 
@@ -186,7 +194,7 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     align: 'right',
     cell: (c) =>
       c.withholding == null ? (
-        '—'
+        ABSENT
       ) : c.estimated_payments > 0 ? (
         <>
           {withheld(money, c.withholding)}
@@ -204,7 +212,7 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     cellClassName: 'text-muted-foreground',
     cell: (c) =>
       c.rate_pct == null ? (
-        '—'
+        ABSENT
       ) : (
         <span title={c.residual_pct == null ? undefined : `Treaty ${c.residual_pct}%`}>
           {formatPercent(c.rate_pct)}
@@ -216,7 +224,7 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     header: 'Creditable',
     shortHeader: 'Creditable',
     align: 'right',
-    cell: (c) => (c.creditable == null ? '—' : money(c.creditable)),
+    cell: (c) => (c.creditable == null ? ABSENT : money(c.creditable)),
   },
   {
     key: 'excess',
@@ -224,7 +232,7 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     shortHeader: 'Excess',
     align: 'right',
     tone: (c) => (c.excess ? 'text-warn' : undefined),
-    cell: (c) => (c.excess == null ? '—' : money(c.excess)),
+    cell: (c) => (c.excess == null ? ABSENT : money(c.excess)),
   },
 ]
 
@@ -235,6 +243,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
+    avatar: (r, className) => symbolAvatar(r.symbol, r.isin, className, r.security_id),
     cell: (r, view) => symbolCell(r.symbol, r.isin, view, r.security_id),
   },
   {
@@ -261,7 +270,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
     header: 'Quantity',
     shortHeader: 'Quantity',
     align: 'right',
-    cell: (r) => (r.quantity != null ? r.quantity : '—'),
+    cell: (r) => (r.quantity != null ? r.quantity : ABSENT),
   },
   {
     key: 'proceeds',
@@ -287,6 +296,7 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
+    avatar: (h, className) => symbolAvatar(h.symbol, h.isin, className, h.security_id),
     cell: (h, view) => symbolCell(h.symbol, h.isin, view, h.security_id),
   },
   {
@@ -303,7 +313,7 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
     header: 'Quantity',
     shortHeader: 'Quantity',
     align: 'right',
-    cell: (h) => (h.quantity != null ? h.quantity : '—'),
+    cell: (h) => (h.quantity != null ? h.quantity : ABSENT),
   },
   {
     key: 'cost_basis',
@@ -424,11 +434,7 @@ export function TaxTab() {
 
   // Shares Dashboard's query key, so TanStack Query serves it from cache rather than
   // refetching. Failure is non-fatal: the picker falls back to the hardcoded floor.
-  const { data: contributions } = useQuery({
-    queryKey: ['portfolio', 'contributions'],
-    queryFn: () => api.getContributions(),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: contributions } = useQuery(contributionsQuery)
 
   const inceptionYear = contributions?.first_contribution_date
     ? Number(contributions.first_contribution_date.slice(0, 4))
@@ -528,7 +534,7 @@ export function TaxTab() {
                   </div>
                   <div className="rounded-xl border border-border/70 bg-raised p-4">
                     <div className="text-2xl font-semibold tracking-tight text-muted-foreground">
-                      {data.pillar3a.holdings_value == null ? '—' : money(data.pillar3a.holdings_value)}
+                      {data.pillar3a.holdings_value == null ? ABSENT : money(data.pillar3a.holdings_value)}
                     </div>
                     <div className="mt-1 text-sm text-muted-foreground">
                       Assets held
@@ -684,7 +690,7 @@ export function TaxTab() {
                       content:
                         data.holdings_snapshot_total != null
                           ? money(data.holdings_snapshot_total)
-                          : '—',
+                          : ABSENT,
                     },
                   ]}
                 />

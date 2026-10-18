@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { healthQuery } from '@/lib/queryCache'
 import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { ThemeToggle } from './ThemeToggle'
 import { AdminKeyButton } from './AdminKeyButton'
@@ -38,11 +38,7 @@ export function AppHeader({ status, actions, below, bordered }: AppHeaderProps) 
   } = useBaseCurrency()
 
   // Same key and staleTime as the footer's read, so it is one request per session.
-  const { data: health } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => api.healthCheck(),
-    staleTime: Infinity,
-  })
+  const { data: health } = useQuery(healthQuery)
 
   return (
     // One white app bar with the section strip under it (the strip is the sticky half):

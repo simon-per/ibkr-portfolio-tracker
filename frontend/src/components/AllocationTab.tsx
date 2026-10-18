@@ -122,6 +122,14 @@ function mergeAllocation(
 }
 
 /** The drill-down's five columns, described once for both renderings. */
+type DrillDownPosition = AllocationCategory['positions'][number]
+
+/** The holding's logo or monogram, where the row names a security. */
+const drillDownAvatar = (pos: DrillDownPosition, className: string) =>
+  pos.security_id != null ? (
+    <TickerAvatar symbol={pos.symbol} securityId={pos.security_id} className={className} />
+  ) : null
+
 function drillDownColumns(deps: {
   formatCurrency: (v: number) => string
 }): Column<AllocationCategory['positions'][number]>[] {
@@ -133,10 +141,11 @@ function drillDownColumns(deps: {
       shortHeader: 'Symbol',
       mobile: 'title',
       cellClassName: 'font-medium',
+      avatar: drillDownAvatar,
       cell: (pos, view) =>
         view === 'table' && pos.security_id != null ? (
           <div className="flex items-center gap-2.5">
-            <TickerAvatar symbol={pos.symbol} securityId={pos.security_id} className="h-7 w-7 text-[10px]" />
+            {drillDownAvatar(pos, 'h-7 w-7 text-[10px]')}
             {pos.symbol}
           </div>
         ) : (

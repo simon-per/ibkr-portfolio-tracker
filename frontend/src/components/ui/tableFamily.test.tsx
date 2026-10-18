@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import type { Column } from './DataTable'
+import { cleanup, render } from '@testing-library/react'
+import { DataTable, type Column } from './DataTable'
 import { positionColumns } from '../PositionsList'
 import { watchlistColumns } from '../watchlistColumns'
 import { lookthroughColumns } from '../LookThroughTab'
@@ -181,6 +182,22 @@ describe.each(FAMILY)('%s columns follow the shared conventions', (_name, column
     }
   })
 
+  it('carries the desktop avatar into the phone card title, once (#70)', () => {
+    // At 390px no table but Positions showed a logo: the desktop cell drew one and the
+    // card's title branch did not. The title column's `avatar` is drawn by DataTable.
+    const row = sparseRow as never
+    const title = columns.find(c => c.mobile === 'title')!
+    const avatars = (root: Element) => root.querySelectorAll('span[aria-hidden="true"].rounded-full').length
+    const desktop = render(<>{title.cell(row, 'table')}</>).container
+    const cards = render(
+      <DataTable rows={[row]} columns={columns} getRowKey={() => 1} label="t" mode="cards" />,
+    ).container
+    const cardTitle = cards.querySelector('li .truncate')!
+    expect(avatars(cardTitle)).toBe(avatars(desktop))
+    expect(avatars(cardTitle)).toBeLessThanOrEqual(1)
+    cleanup()
+  })
+
   it('renders every cell without throwing on an all-null row', () => {
     // An unsynced watchlist entry really is almost entirely null, and a cell that
     // assumes a value takes the whole tab down rather than showing one blank column.
@@ -214,6 +231,20 @@ describe('no component renders a table outside the primitive', () => {
       '../DividendSummary.tsx',
       '../MonthlyReturnsHeatmap.tsx',
     ])
+  })
+
+  it('gives every title column that draws an avatar on desktop an `avatar` for the card', () => {
+    // The backstop for the module-local column sets (Activity, Dividends, Tax, Fundamentals,
+    // Allocation, Rebalance): a module with a card title that draws a logo anywhere declares
+    // the title's `avatar`, so the card cannot be the one rendering left without it.
+    const sources = import.meta.glob('../*.tsx', { query: '?raw', import: 'default', eager: true })
+    const offenders = Object.entries(sources)
+      .filter(([path]) => !path.endsWith('.test.tsx'))
+      .filter(([, src]) => /mobile: 'title'/.test(src as string))
+      .filter(([, src]) => /<(TickerAvatar|ConstituentAvatar)\b/.test(src as string))
+      .filter(([, src]) => !/\bavatar: /.test(src as string))
+      .map(([path]) => path)
+    expect(offenders).toEqual([])
   })
 
   it('has no consumer passing DataTable\'s test-only mode prop', () => {

@@ -6,7 +6,7 @@ import type { PortfolioSummary } from '@/lib/api'
 import type { PeriodChange } from '@/lib/portfolioKpis'
 import type { TimeRange } from '@/lib/dateRanges'
 import { useBaseCurrency, useFormatCurrency } from '@/lib/CurrencyContext'
-import { cn } from '@/lib/utils'
+import { cn, formatSigned, formatSignedPercent } from '@/lib/utils'
 
 /** What the selected range is called beside the period's gain. */
 const RANGE_LABEL: Record<TimeRange, string> = {
@@ -82,8 +82,8 @@ export function PortfolioHero({
 }: PortfolioHeroProps) {
   const formatCurrency = useFormatCurrency()
   const { baseCurrency } = useBaseCurrency()
-  const signed = (n: number) => `${n >= 0 ? '+' : ''}${formatCurrency(n)}`
-  const signedPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+  const signed = (n: number) => formatSigned(n, formatCurrency)
+  const signedPct = (n: number) => formatSignedPercent(n, 2)
 
   if (isError) {
     return (

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
-import { ABSENT, cn } from '@/lib/utils'
+import { ABSENT, cn, formatSigned, formatSignedPercent } from '@/lib/utils'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { monthlyReturnRows, type MonthReturn } from '@/lib/monthlyReturns'
 import type { PortfolioValuePoint } from '@/lib/api'
@@ -40,10 +40,9 @@ function localMonth(): string {
  * added twice, and the YTD one is the likelier to be forgotten.
  */
 function cellTitle(label: string, m: MonthReturn, money: (n: number) => string): string {
-  const sign = m.returnPercent >= 0 ? '+' : ''
   return [
-    `${label}: ${sign}${m.returnPercent.toFixed(2)}% (${money(m.startValue)} → ${money(m.endValue)})`,
-    ...(m.newInvestment > 0 ? [`+${money(m.newInvestment)} invested`] : []),
+    `${label}: ${formatSignedPercent(m.returnPercent, 2)} (${money(m.startValue)} → ${money(m.endValue)})`,
+    ...(m.newInvestment > 0 ? [`${formatSigned(m.newInvestment, money)} invested`] : []),
     // Names the days it actually covers, not just that some were dropped: the label is
     // the thing that is wrong on a trimmed figure, so "part of the period" alone leaves
     // the reader no way to tell a lost day from a lost half-year. And names the cause,
@@ -123,7 +122,7 @@ export function MonthlyReturnsHeatmap({
           {MONTH_LABELS[lastMonthIdx]}
           {isRunning(topRow.year, lastMonthIdx) ? ' MTD' : ''}:{' '}
           <span className={m.returnPercent >= 0 ? 'text-gain' : 'text-loss'}>
-            {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
+            {formatSignedPercent(m.returnPercent, 1)}
           </span>
         </span>
       )
@@ -133,7 +132,7 @@ export function MonthlyReturnsHeatmap({
         <span key="ytd">
           {' · '}YTD:{' '}
           <span className={topRow.ytd.returnPercent >= 0 ? 'text-gain' : 'text-loss'}>
-            {topRow.ytd.returnPercent >= 0 ? '+' : ''}{topRow.ytd.returnPercent.toFixed(1)}%
+            {formatSignedPercent(topRow.ytd.returnPercent, 1)}
           </span>
         </span>
       )
@@ -198,7 +197,7 @@ export function MonthlyReturnsHeatmap({
                               )}
                               title={cellTitle(`${MONTH_LABELS[i]} ${row.year}`, m, money)}
                             >
-                              {m.returnPercent >= 0 ? '+' : ''}{m.returnPercent.toFixed(1)}%
+                              {formatSignedPercent(m.returnPercent, 1)}
                               {isRunning(row.year, i) && (
                                 <div className="text-[9px] font-normal leading-none opacity-80">MTD</div>
                               )}
@@ -217,7 +216,7 @@ export function MonthlyReturnsHeatmap({
                             )}
                             title={cellTitle(`YTD ${row.year}`, row.ytd, money)}
                           >
-                            {row.ytd.returnPercent >= 0 ? '+' : ''}{row.ytd.returnPercent.toFixed(1)}%
+                            {formatSignedPercent(row.ytd.returnPercent, 1)}
                           </div>
                         ) : (
                           <div className="text-center text-xs text-muted-foreground py-1">{ABSENT}</div>

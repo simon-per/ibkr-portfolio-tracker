@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
-import { cn, formatDate, formatShortDateTime, marketCapParts, parseLocalDate } from '@/lib/utils'
+import { ABSENT, cn, formatDate, formatShortDateTime, marketCapParts, parseLocalDate } from '@/lib/utils'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
@@ -22,9 +22,6 @@ import { earningsBeats } from '@/lib/earningsBeats'
 type SortKey = 'symbol' | 'trailing_pe' | 'forward_pe' | 'peg_ratio' | 'price_to_sales' |
   'revenue_growth' | 'earnings_growth' | 'fwd_revenue_growth' | 'fwd_eps_growth' | 'profit_margins' | 'market_cap'
 type SortDir = 'asc' | 'desc'
-
-/** What an absent figure prints as, everywhere on this tab. */
-const ABSENT = '—'
 
 /**
  * Past this the as-of line turns amber. Four days: the scheduled refresh runs Tuesday to
@@ -111,6 +108,11 @@ function BeatRate({ data }: { data: EarningsHistoryItem[] }) {
   )
 }
 
+/** A holding's logo or monogram: the card title's avatar (`DataTable`) and the desktop cell's. */
+const securityAvatar = (row: { symbol: string; security_id: number }, className: string) => (
+  <TickerAvatar symbol={row.symbol} securityId={row.security_id} className={className} />
+)
+
 /** The symbol with its logo, as every holdings table in the app draws it. */
 /** Every held listing of an earnings row's company — "GOOG · ABEA · GOOGL". */
 function listings(row: { symbols: string[] }): string {
@@ -124,11 +126,7 @@ function SymbolWithAvatar({ symbol, securityId, sub, label }: {
     <div className={cn('flex items-center', sub ? 'gap-3' : 'gap-2')}>
       {/* One line: 20px, the line's own height, so the history table's measured row
           height (`HISTORY_ROW_H`) still holds. */}
-      <TickerAvatar
-        symbol={symbol}
-        securityId={securityId}
-        className={sub ? 'h-8 w-8 text-[10px]' : 'h-5 w-5 text-[8px]'}
-      />
+      {securityAvatar({ symbol, security_id: securityId }, sub ? 'h-8 w-8 text-[10px]' : 'h-5 w-5 text-[8px]')}
       <div className="min-w-0">
         <div className="font-medium whitespace-nowrap">{label ?? symbol}</div>
         {sub && <div className="text-xs text-muted-foreground truncate max-w-[180px]">{sub}</div>}
@@ -190,6 +188,7 @@ function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, Sort
       shortHeader: 'Symbol',
       sortKey: 'symbol',
       mobile: 'title',
+      avatar: securityAvatar,
       cell: (row, view) =>
         view === 'table' ? (
           <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} sub={displayName(row.description)} />
@@ -453,6 +452,7 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
+    avatar: securityAvatar,
     cell: (row, view) =>
       view === 'table'
         ? <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} label={listings(row)} />
@@ -514,7 +514,11 @@ function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistor
     setPage(0)
   }
   const totalPages = Math.ceil(data.length / pageSize)
-  const pageData = data.slice(page * pageSize, (page + 1) * pageSize)
+  // Clamped to the data in hand: a shorter list (a refetch after a sync) read "Page 5 of 3"
+  // over an empty table. A clamp rather than a reset on a new `data` identity, because the
+  // caller passes `earningsHistory || []`, a fresh array on every render while there is none.
+  const current = Math.min(page, Math.max(0, totalPages - 1))
+  const pageData = data.slice(current * pageSize, (current + 1) * pageSize)
 
   if (data.length === 0) {
     return (
@@ -537,11 +541,11 @@ function EarningsSurpriseHistory({ data, pageSize = 10 }: { data: EarningsHistor
       </div>
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground mt-auto pt-3">
-          <Button variant="ghost" size="sm" onClick={() => setPage(p => p - 1)} disabled={page === 0}>
+          <Button variant="ghost" size="sm" onClick={() => setPage(current - 1)} disabled={current === 0}>
             ← Prev
           </Button>
-          <span>Page {page + 1} of {totalPages}</span>
-          <Button variant="ghost" size="sm" onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1}>
+          <span>Page {current + 1} of {totalPages}</span>
+          <Button variant="ghost" size="sm" onClick={() => setPage(current + 1)} disabled={current >= totalPages - 1}>
             Next →
           </Button>
         </div>

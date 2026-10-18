@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChartColumnStacked, HandCoins, ListOrdered } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/SectionHeader'
-import { api } from '@/lib/api'
+import { dividendBreakdownQuery, forecastHistoryQuery } from '@/lib/queryCache'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import {
@@ -27,7 +27,7 @@ import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
-import { ABSENT, cn, placeholderDim } from '@/lib/utils'
+import { ABSENT, cn, formatSigned, formatSignedPercent, placeholderDim } from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { displayName } from '@/lib/securityName'
@@ -41,6 +41,11 @@ import { TickerAvatar } from '@/components/ui/TickerAvatar'
 function isEstimated(row: DividendSecurityRow): boolean {
   return (row.payouts === 0 && row.forecast_payouts > 0) || (row.source !== 'ibkr' && row.source !== 'mixed')
 }
+
+/** The holding's logo or monogram; the card title draws it too (`DataTable`'s `avatar`). */
+const dividendAvatar = (row: DividendSecurityRow, className: string) => (
+  <TickerAvatar symbol={row.symbol} securityId={row.security_id} className={className} />
+)
 
 /**
  * The per-position dividend columns, described once for both renderings.
@@ -63,6 +68,7 @@ function dividendColumns(deps: {
       header: 'Position',
       shortHeader: 'Symbol',
       mobile: 'title',
+      avatar: dividendAvatar,
       cell: (row, view) => {
         const exchange = duplicated.has(row.symbol) && row.exchange ? row.exchange : null
         const est = isEstimated(row) ? (
@@ -70,7 +76,7 @@ function dividendColumns(deps: {
         ) : null
         return view === 'table' ? (
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={row.symbol} securityId={row.security_id} className="h-8 w-8 text-[10px]" />
+            {dividendAvatar(row, 'h-8 w-8 text-[10px]')}
             <div className="min-w-0">
               <div className="max-w-[15rem] truncate font-medium" title={row.description}>
                 {displayName(row.description) || row.symbol}
@@ -120,7 +126,7 @@ function dividendColumns(deps: {
         row.trailing_yield_pct != null ? (
           `${row.trailing_yield_pct.toFixed(2)}%`
         ) : view === 'table' ? (
-          '—'
+          ABSENT
         ) : null,
     },
     {
@@ -135,7 +141,7 @@ function dividendColumns(deps: {
         row.forward_yield_pct != null
           ? `${row.forward_yield_pct.toFixed(2)}%`
           : view === 'table'
-            ? '—'
+            ? ABSENT
             : null,
     },
     {
@@ -161,7 +167,7 @@ function dividendColumns(deps: {
       align: 'right',
       cellClassName: 'text-muted-foreground',
       hint: { description: "Share of this period's income" },
-      cell: (row) => (row.share_pct != null ? `${row.share_pct.toFixed(1)}%` : '—'),
+      cell: (row) => (row.share_pct != null ? `${row.share_pct.toFixed(1)}%` : ABSENT),
     },
     {
       key: 'forecast',
@@ -172,9 +178,9 @@ function dividendColumns(deps: {
       cellClassName: 'text-muted-foreground',
       cell: (row) =>
         showForecast && row.forecast_net_eur > 0 ? (
-          `+${formatCurrency(row.forecast_net_eur)}`
+          formatSigned(row.forecast_net_eur, formatCurrency)
         ) : (
-          '—'
+          ABSENT
         ),
     },
     {
@@ -185,7 +191,7 @@ function dividendColumns(deps: {
       align: 'right',
       cellClassName: 'text-muted-foreground',
       cell: (row) =>
-        showForecast && row.next_pay_date ? monthLabel(row.next_pay_date.slice(0, 7), true) : '—',
+        showForecast && row.next_pay_date ? monthLabel(row.next_pay_date.slice(0, 7), true) : ABSENT,
     },
     {
       key: 'growth',
@@ -202,8 +208,8 @@ function dividendColumns(deps: {
       hint: { description: 'Payout per share vs a year earlier' },
       cell: (row) =>
         row.per_share_growth_pct != null
-          ? `${row.per_share_growth_pct > 0 ? '+' : ''}${row.per_share_growth_pct.toFixed(1)}%`
-          : '—',
+          ? formatSignedPercent(row.per_share_growth_pct, 1)
+          : ABSENT,
     },
     {
       key: 'yoc',
@@ -214,7 +220,7 @@ function dividendColumns(deps: {
       cellClassName: 'text-muted-foreground',
       hint: { description: 'Next 12M forecast ÷ cost' },
       cell: (row) =>
-        row.yield_on_cost_pct != null ? `${row.yield_on_cost_pct.toFixed(2)}%` : '—',
+        row.yield_on_cost_pct != null ? `${row.yield_on_cost_pct.toFixed(2)}%` : ABSENT,
     },
     {
       key: 'gross',
@@ -264,13 +270,8 @@ export function DividendsTab() {
   const keepPrevious = useKeepPreviousData()
 
   const { data, isLoading, isError, isPlaceholderData } = useQuery({
-    queryKey: ['dividends', 'breakdown', year],
     // Forecast is always fetched; the toggle only hides it, so flipping is instant.
-    queryFn: () => api.getDividendBreakdown(
-      typeof year === 'number' ? year : undefined,
-      year === '24m' ? '24m' : undefined,
-    ),
-    staleTime: 30 * 60 * 1000,
+    ...dividendBreakdownQuery(year),
     // The last period stays while the next one loads (#68): the year bars below and the
     // withholding control sit inside the data branch, so blanking it unmounted the bar just
     // pressed and collapsed the page under it.
@@ -356,10 +357,7 @@ export function DividendsTab() {
 
   // The KPI sparklines: the forecast history's two series, ending on `live`. Same query key
   // as the forecast card, so the two share one request and one cache entry.
-  const { data: forecastHistory } = useQuery({
-    queryKey: ['dividends', 'forecast-history'],
-    queryFn: () => api.getDividendForecastHistory(),
-  })
+  const { data: forecastHistory } = useQuery(forecastHistoryQuery)
   const kpiTrend = useMemo<DividendKpiTrend | null>(() => {
     const trend = forecastTrend(forecastHistory, live)
     if (!trend) return null

@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
 import { useBaseCurrency } from '@/lib/CurrencyContext'
-import { formatMoneyWhole } from '@/lib/utils'
+import { ABSENT, formatMoneyWhole } from '@/lib/utils'
 import {
   computeCurrencyExposure,
   foreignQuotedPct,
@@ -137,7 +137,7 @@ export function CurrencyExposureCard({
                           {row.positionCount}
                         </td>
                         <td className="py-2 text-right tabular-nums text-muted-foreground">
-                          {row.fundCount === 0 ? '—' : row.fundCount}
+                          {row.fundCount === 0 ? ABSENT : row.fundCount}
                         </td>
                       </tr>
                     ))}

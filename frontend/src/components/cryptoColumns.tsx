@@ -1,18 +1,15 @@
 import type { Column } from '@/components/ui/DataTable'
 import { compareNullsLast } from '@/lib/nullsLast'
 import type { CryptoHoldingItem } from '@/lib/api'
-import { formatQuantity } from '@/lib/utils'
+import { ABSENT, formatQuantity, formatSignedPercent } from '@/lib/utils'
 
 export type CryptoSortColumn = 'symbol' | 'value' | 'change' | 'weight'
-
-/** What an unknown figure shows. Never a zero: a 0.00 claims a value. */
-const ABSENT = '—'
 
 const signedTone = (value: number | null) =>
   value == null ? 'text-muted-foreground' : value >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
 
 const pct = (value: number | null) =>
-  value == null ? ABSENT : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
+  value == null ? ABSENT : formatSignedPercent(value, 2)
 
 const BADGE =
   'ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground align-middle'

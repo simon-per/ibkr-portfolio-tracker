@@ -1,4 +1,22 @@
-import type { CashSource } from './api'
+import type { CashSource, PortfolioSummary } from './api'
+
+/**
+ * The account's cash as the weight readers take it (`PositionsList`, the Performance tab's
+ * largest-holding tile). A **loaded** summary always yields one of these — a backend that
+ * does not track cash says so inside it (`cash_source` absent or `'unknown'`), and
+ * `inBookCash` reads that as 0.
+ *
+ * `undefined` in its place means the summary is **not loaded** — still loading, or failed —
+ * and is never read as "not tracked": dividing by holdings alone then inflated every weight
+ * by the cash share with no qualifier (#70). The readers take it as a required prop, so a
+ * caller has to pass the state explicitly.
+ */
+export type AccountCash = { amount: number; cash_source?: CashSource }
+
+/** The summary's cash for the weight readers; `undefined` while the summary is not loaded. */
+export function summaryCash(summary: PortfolioSummary | undefined): AccountCash | undefined {
+  return summary ? { amount: summary.total_cash_eur ?? 0, cash_source: summary.cash_source } : undefined
+}
 
 /**
  * "Does this payload carry a cash balance worth showing?" — asked by the value chart,

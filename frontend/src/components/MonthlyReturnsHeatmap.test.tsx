@@ -19,17 +19,6 @@ afterEach(cleanup)
 // Sections remember being opened (`useRememberedOpen`); each test starts closed.
 beforeEach(() => localStorage.clear())
 
-// `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 function point(date: string, mv: number, unpriced = 0): PortfolioValuePoint {
   return {
     date,

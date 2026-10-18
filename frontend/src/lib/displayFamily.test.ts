@@ -87,6 +87,28 @@ describe('the dark theme', () => {
   })
 })
 
+/**
+ * A plus written by hand before a figure: `n >= 0 ? '+' : ''`, `` `+${…}` ``, `>+{…}`. Ten
+ * sites did, with two zero rules between them; `formatSigned` is the one rule.
+ */
+const HAND_SIGNED = /\?\s*'\+'\s*:|`\+\$\{|>\+\{/g
+
+describe('signed figures', () => {
+  it('the scan recognises every hand-signed shape', () => {
+    const samples = [
+      "`${n >= 0 ? '+' : ''}${money(n)}`",
+      "{v > 0 ? '+' : ''}{v.toFixed(1)}%",
+      '`+${money(n)} invested`',
+      '<span>+{money(n)}</span>',
+    ]
+    for (const s of samples) expect(s.match(HAND_SIGNED), s).not.toBeNull()
+  })
+
+  it('are signed through formatSigned, never by hand', () => {
+    expect(hits(HAND_SIGNED, (p) => p === 'lib/utils.ts')).toEqual([])
+  })
+})
+
 describe('the absent glyph', () => {
   it('is ABSENT (em dash) everywhere, never an en dash placeholder', () => {
     expect(hits(/\{'\\u2013'\}|'\\u2013'|'–'|"–"|>\s*–\s*</g)).toEqual([])

@@ -26,17 +26,9 @@ afterEach(() => {
   localStorage.clear()
 })
 
-// `ScrollableTable` measures overflow with a ResizeObserver, which jsdom does not implement.
 beforeEach(() => {
   // Every company avatar reads the logo manifest; none stored unless a test says otherwise.
   vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
 })
 
 function withProviders(node: React.ReactNode) {

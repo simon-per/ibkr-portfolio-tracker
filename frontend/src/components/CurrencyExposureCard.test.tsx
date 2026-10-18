@@ -20,16 +20,6 @@ afterEach(cleanup)
 // Sections remember being opened (`useRememberedOpen`); each test starts closed.
 beforeEach(() => localStorage.clear())
 
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
-})
-
 function pos(
   security_id: number,
   symbol: string,

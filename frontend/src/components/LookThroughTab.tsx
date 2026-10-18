@@ -23,7 +23,7 @@ import { paintBackground } from '@/lib/chartPaint'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
 import { listingTickers } from '@/lib/lookthroughIdentity'
-import { cn, formatCount, placeholderDim } from '@/lib/utils'
+import { ABSENT, cn, formatCount, formatSigned, placeholderDim } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { unresolvedTone } from '@/lib/lookthroughTone'
 import { TONE_CHIP } from '@/lib/tone'
@@ -72,6 +72,11 @@ const FUND_STATUS_LABEL: Record<LookthroughFundCoverage['status'], string> = {
 }
 
 /** The company columns, described once for both renderings. */
+/** The constituent's logo by ISIN, else a monogram. */
+const companyAvatar = (row: LookthroughCompanyRow, className: string) => (
+  <ConstituentAvatar isins={row.isins} listings={row.listings} name={displayName(row.name)} className={className} />
+)
+
 export function lookthroughColumns(deps: {
   formatCurrency: (v: number) => string
 }): Column<LookthroughCompanyRow>[] {
@@ -83,17 +88,11 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Company',
       mobile: 'title',
       cellClassName: 'font-medium',
-      // The constituent's logo by ISIN, falling back to a monogram. Table only: a phone card's
-      // title is the name, as on Positions.
+      avatar: companyAvatar,
       cell: (row, view) =>
         view === 'table' ? (
           <div className="flex items-center gap-3">
-            <ConstituentAvatar
-              isins={row.isins}
-              listings={row.listings}
-              name={displayName(row.name)}
-              className="h-8 w-8 text-[10px]"
-            />
+            {companyAvatar(row, 'h-8 w-8 text-[10px]')}
             <span className="max-w-[240px] truncate" title={row.name}>{displayName(row.name)}</span>
           </div>
         ) : (
@@ -133,7 +132,7 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Direct',
       align: 'right',
       hint: { description: 'Held directly' },
-      cell: (row) => (row.direct_value_eur > 0 ? formatCurrency(row.direct_value_eur) : '—'),
+      cell: (row) => (row.direct_value_eur > 0 ? formatCurrency(row.direct_value_eur) : ABSENT),
     },
     {
       key: 'via_funds',
@@ -142,7 +141,7 @@ export function lookthroughColumns(deps: {
       align: 'right',
       hint: { description: 'Held through funds' },
       cell: (row) =>
-        row.via_funds_value_eur > 0 ? formatCurrency(row.via_funds_value_eur) : '—',
+        row.via_funds_value_eur > 0 ? formatCurrency(row.via_funds_value_eur) : ABSENT,
     },
     {
       key: 'funds',
@@ -150,7 +149,7 @@ export function lookthroughColumns(deps: {
       shortHeader: 'Funds',
       align: 'right',
       hint: { description: 'Funds holding it' },
-      cell: (row) => (row.via_funds.length ? String(row.via_funds.length) : '—'),
+      cell: (row) => (row.via_funds.length ? String(row.via_funds.length) : ABSENT),
     },
   ]
 }
@@ -240,7 +239,7 @@ function fundColumns(deps: {
             {row.basket_as_of}
           </span>
         ) : (
-          '—'
+          ABSENT
         ),
     },
     {
@@ -248,7 +247,7 @@ function fundColumns(deps: {
       header: 'Holdings',
       shortHeader: 'Holdings',
       align: 'right',
-      cell: (row) => (row.constituents ? String(row.constituents) : '—'),
+      cell: (row) => (row.constituents ? String(row.constituents) : ABSENT),
     },
     {
       key: 'equity',
@@ -257,7 +256,7 @@ function fundColumns(deps: {
       align: 'right',
       hint: { description: 'Basket weight in securities' },
       cell: (row) =>
-        row.equity_weight_pct === null ? '—' : `${row.equity_weight_pct.toFixed(2)}%`,
+        row.equity_weight_pct === null ? ABSENT : `${row.equity_weight_pct.toFixed(2)}%`,
     },
   ]
 }
@@ -313,7 +312,7 @@ function CompanyBreakdown({
       <p className="text-xs text-muted-foreground">
         {row.isins.length > 1
           ? `${row.isins.length} ISINs folded into this company: ${row.isins.join(', ')}`
-          : `ISIN ${row.isins[0] ?? '—'}`}
+          : `ISIN ${row.isins[0] ?? ABSENT}`}
       </p>
       {row.identity_conflicts.map((conflict) => (
         <p key={conflict} className="text-xs text-amber-700 dark:text-amber-400">
@@ -382,7 +381,7 @@ function InsightStrip({
         value={insights.heldBothWays ? formatCount(insights.heldBothWays.count) : null}
         sub={
           insights.heldBothWays && insights.heldBothWays.count > 0
-            ? `+${formatCurrency(insights.heldBothWays.viaFundsValue)} via funds`
+            ? `${formatSigned(insights.heldBothWays.viaFundsValue, formatCurrency)} via funds`
             : undefined
         }
       />

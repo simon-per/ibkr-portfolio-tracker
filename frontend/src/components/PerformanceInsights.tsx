@@ -4,22 +4,26 @@ import { KpiPanel } from '@/components/ui/KpiCard'
 import { IconChip } from '@/components/ui/IconChip'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import type {
-  CashSource, DividendUpcomingPayment, PerformanceAttributionResponse, Position,
+  DividendUpcomingPayment, PerformanceAttributionResponse, Position,
 } from '@/lib/api'
+import type { AccountCash } from '@/lib/portfolioCash'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TimeRange } from '@/lib/dateRanges'
 import { toLocalISODate } from '@/lib/dateRanges'
 import { largestHolding, nextDividend, topMover } from '@/lib/performanceInsights'
 import { displayName } from '@/lib/securityName'
 import { TONE_TEXT, type Tone } from '@/lib/tone'
-import { ABSENT, cn, parseLocalDate } from '@/lib/utils'
+import { ABSENT, cn, formatSigned, parseLocalDate } from '@/lib/utils'
 
 interface PerformanceInsightsProps {
   /** The selected range's attribution; `undefined` while loading or after a failure. */
   attribution: PerformanceAttributionResponse | undefined
   positions: Position[] | undefined
-  /** Same shape `PositionsList` takes, so the largest holding's weight matches its row. */
-  cash?: { amount: number; cash_source?: CashSource }
+  /**
+   * What `PositionsList` takes, so the largest holding's weight matches its row. `undefined`
+   * is a summary not loaded, and the tile shows a dash (`AccountCash`).
+   */
+  cash: AccountCash | undefined
   /** `dividendBreakdown.upcoming`; `undefined` while loading or from an older backend. */
   upcoming: DividendUpcomingPayment[] | undefined
   range: TimeRange
@@ -48,7 +52,7 @@ export function PerformanceInsights({
   const worst = topMover(attribution?.attributions, 'worst')
   const largest = largestHolding(positions, cash)
   const dividend = nextDividend(upcoming, today)
-  const signed = (n: number) => `${n > 0 ? '+' : ''}${money(n)}`
+  const signed = (n: number) => formatSigned(n, money)
 
   return (
     <KpiPanel columns={4}>

@@ -14,4 +14,19 @@
 if (typeof document !== 'undefined') {
   const { configure } = await import('@testing-library/react')
   configure({ asyncUtilTimeout: 4000 })
+
+  // jsdom has no ResizeObserver, and `ScrollableTable`, Recharts' `ResponsiveContainer` and
+  // the Fundamentals history page all construct one. A browser has had it since 2020, so this
+  // is a gap in the test environment, not something a component should guard against. It
+  // was copied into ~27 test files in two styles; a test that needs to watch the observer
+  // (`renderIdentity.test.tsx`) still stubs its own with `vi.stubGlobal`.
+  // `matchMedia` stays unstubbed on purpose: its absence is the desktop fallback every
+  // component test relies on (docs/frontend.md, *The mobile layout*).
+  if (!('ResizeObserver' in globalThis)) {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver
+  }
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WatchlistTab } from './WatchlistTab'
@@ -10,16 +10,6 @@ import type { WatchlistItem } from '@/lib/api'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-})
-
-beforeEach(() => {
-  if (!('ResizeObserver' in globalThis)) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
-  }
 })
 
 function item(id: number, over: Partial<WatchlistItem>): WatchlistItem {

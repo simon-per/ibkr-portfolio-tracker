@@ -8,6 +8,8 @@ import {
   formatPercent,
   formatPrice,
   formatQuantity,
+  formatSigned,
+  formatSignedPercent,
   formatShortDateTime,
   parseLocalDate,
   tooltipValue,
@@ -239,6 +241,33 @@ describe('cn', () => {
   it('lets a later Tailwind class win over an earlier conflicting one', () => {
     // The reason this wraps twMerge rather than clsx alone.
     expect(cn('p-2', 'p-4')).toBe('p-4')
+  })
+})
+
+describe('formatSigned', () => {
+  it('spells out a gain and leaves a loss to the formatter', () => {
+    expect(formatSigned(12.3, (n) => formatCurrency(n, 'EUR'))).toBe('+€12.30')
+    expect(formatSigned(-4, (n) => formatCurrency(n, 'EUR'))).toBe('-€4.00')
+    expect(formatSignedPercent(1.5, 1)).toBe('+1.5%')
+    expect(formatSignedPercent(-0.3, 1)).toBe('-0.3%')
+  })
+
+  it('gives zero no sign, on every screen', () => {
+    // ">= 0" printed "+CHF 0.00" where "> 0" printed "CHF 0.00" for the same figure.
+    expect(formatSigned(0, (n) => formatCurrency(n, 'CHF'))).toBe('CHF 0.00')
+    expect(formatSignedPercent(0, 2)).toBe('0.00%')
+    expect(formatSigned(-0, (n) => `${n}%`)).toBe('0%')
+  })
+
+  it('prints a figure that rounds to zero as zero, unsigned', () => {
+    expect(formatSignedPercent(0.001, 2)).toBe('0.00%')
+    expect(formatSignedPercent(-0.01, 1)).toBe('0.0%')
+    expect(formatSigned(0.004, (n) => formatCurrency(n, 'EUR'))).toBe('€0.00')
+    expect(formatSigned(-0.004, (n) => formatCurrency(n, 'EUR'))).toBe('€0.00')
+  })
+
+  it('passes a non-finite value through to the formatter untouched', () => {
+    expect(formatSigned(Number.NaN, (n) => `${n}`)).toBe('NaN')
   })
 })
 

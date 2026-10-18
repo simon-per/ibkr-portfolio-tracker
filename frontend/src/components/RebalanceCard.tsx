@@ -7,7 +7,7 @@ import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { readStored, writeStored, useRememberedOpen } from '@/lib/storage'
 import { TARGETS_KEY, readTargets } from '@/lib/rebalanceTargets'
-import { formatMoneyWhole } from '@/lib/utils'
+import { ABSENT, formatMoneyWhole, formatSigned } from '@/lib/utils'
 import {
   DEFAULT_BAND_PP,
   computeRebalancePlan,
@@ -21,13 +21,18 @@ import { displayName } from '@/lib/securityName'
 const BAND_KEY = 'allocationBandPp'
 
 function pct(value: number | null, digits = 1): string {
-  return value === null ? '—' : `${value.toFixed(digits)}%`
+  return value === null ? ABSENT : `${value.toFixed(digits)}%`
 }
 
 function signedPp(value: number | null): string {
-  if (value === null) return '—'
-  return `${value > 0 ? '+' : ''}${value.toFixed(1)} pp`
+  if (value === null) return ABSENT
+  return formatSigned(value, (n) => `${n.toFixed(1)} pp`)
 }
+
+/** The holding's logo or monogram; the card title draws it too (`DataTable`'s `avatar`). */
+const rebalanceAvatar = (row: DriftRow, className: string) => (
+  <TickerAvatar symbol={row.symbol} securityId={row.securityId} className={className} />
+)
 
 function driftClass(row: DriftRow): string {
   if (row.withinBand === null) return 'text-muted-foreground'
@@ -104,10 +109,11 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         header: 'Position',
         shortHeader: 'Position',
         mobile: 'title',
+        avatar: rebalanceAvatar,
         cell: (row, view) =>
           view === 'table' ? (
             <div className="flex items-center gap-2.5">
-              <TickerAvatar symbol={row.symbol} securityId={row.securityId} className="h-7 w-7 text-[10px]" />
+              {rebalanceAvatar(row, 'h-7 w-7 text-[10px]')}
               <div className="min-w-0">
                 <span className="font-medium">{row.symbol}</span>
                 <span className="block text-xs text-muted-foreground">
@@ -134,7 +140,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         align: 'right',
         mobile: 'value',
         cell: (row) =>
-          row.unpriced ? '—' : formatMoneyWhole(row.marketValue, baseCurrency),
+          row.unpriced ? ABSENT : formatMoneyWhole(row.marketValue, baseCurrency),
       },
       {
         key: 'drift',
@@ -167,7 +173,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
             step={0.1}
             value={row.targetPct ?? ''}
             onChange={(e) => setTarget(row.securityId, e.target.value)}
-            placeholder="—"
+            placeholder={ABSENT}
             className="w-20 rounded-md border border-input bg-card px-2 py-1 text-right tabular-nums"
             aria-label={`Target weight for ${row.symbol}`}
           />
@@ -180,8 +186,8 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         align: 'right',
         cell: (row) =>
           row.tradeValue === null
-            ? '—'
-            : `${row.tradeValue > 0 ? '+' : ''}${formatMoneyWhole(row.tradeValue, baseCurrency)}`,
+            ? ABSENT
+            : formatSigned(row.tradeValue, (n) => formatMoneyWhole(n, baseCurrency)),
       },
     ],
     // `setTarget` is deliberately out of the deps: it only ever calls setTargets with a
