@@ -7,6 +7,24 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — the audit's wave 3 (#26–#31)
+
+- **#26** (`a7a1268`): closed positions fall back to closed lots when any SELL is
+  unconvertible; the summary's realized figure reports `unpriced_disposals` from either path and
+  the hero tags it.
+- **#27** (`820fa83`): `ticker_isin` admits a CN ISIN under `.HK` only for a ≤5-digit raw
+  code and under `.SZ`/`.SS` only for a 6-digit one.
+- **#28** (`f776490`): `CashService.uninvested_cash` is the one cash read for Allocation and
+  Look-through; Look-through shares are of holdings + positive cash, with a Cash row.
+- **#29** (`c95992c`): seven inline percentage copies through `share_pct`; six schema
+  fields Optional; the frontend renders null as the dash.
+- **#30** (`edc63a6`): `routers/_windows.py` is the one window guard for all eight routes.
+- **#31** (`4cb6a04`): 17 dead methods deleted; `test_flex_generation_callers` pins who may
+  call `fetch_flex_data`.
+
+Verified offline: backend 2470 passed / 8 skipped, frontend 1083 passed, build green. Found on
+the way: #52 (Positions adds a negative cash balance to its weight denominator).
+
 ## Shipped 2026-10-18 — the audit's wave 2 (#19–#25)
 
 Same method as Tier 1 below: one worktree agent per issue from its repro, reviewed, cherry-picked.
