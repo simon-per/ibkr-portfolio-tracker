@@ -120,7 +120,12 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
   `X-Content-Type-Options: nosniff`, and `Cache-Control: public, max-age=31536000, immutable`
   **only when `v` is the current version** (`no-cache` otherwise, so a replaced logo is never
   pinned under its old URL); `If-None-Match` answers 304; 404 without an image.
-- Reads are open and rate-limited like every `/api/` read; only a first visit spends requests.
+- Reads are open. The manifest is rate-limited like every `/api/` read; **the images
+  (`GET /api/logos/...`) are exempt from the limiter** (`EXEMPT_GET_PREFIXES` in
+  `app/rate_limit.py`): one request per avatar, and on a cold cache a look-through page's hundred
+  avatars used to spend the per-client budget and 429 the page's own data requests — a 429 on an
+  image also flips that avatar to its monogram for the session. They are primary-key/ISIN lookups,
+  served `immutable` once versioned.
 - Frontend: `lib/useLogos.ts` (TanStack Query, `staleTime` 1 h) and `TickerAvatar`
   (`securityId`, else `isin`): the image
   `object-contain` on a white circle with a hairline ring, in the monogram's box (no layout

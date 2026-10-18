@@ -66,7 +66,9 @@ def client(monkeypatch):
 
     app.dependency_overrides[get_db] = _override
     try:
-        yield TestClient(app)
+        # The peer the host nginx presents in production (the Docker bridge gateway): the
+        # limiter honours X-Forwarded-For only from a loopback/private peer.
+        yield TestClient(app, client=("172.17.0.1", 50000))
     finally:
         app.dependency_overrides.clear()
         loop.run_until_complete(session.close())
@@ -259,7 +261,7 @@ def test_the_limit_answers_429_with_retry_after(client, monkeypatch):
 
 def test_clients_are_counted_separately(client, monkeypatch):
     """
-    nginx proxies everything, so request.client.host is always loopback — without
+    nginx proxies everything, so request.client.host is always the proxy — without
     reading X-Forwarded-For there would be one bucket for the whole internet.
     """
     monkeypatch.setattr(settings, "rate_limit_per_minute", 2, raising=False)

@@ -1402,9 +1402,20 @@ last, so a rejection from any of them still carries a correlation id:
   (403) when no token is configured; the view unlocks with the key the browser already holds.
   `tests/test_crypto_auth.py` walks those routes the way the mutating walk does ([crypto.md](crypto.md)).
 - **`app/rate_limit.py`** is a fixed-window per-client counter (`RATE_LIMIT_PER_MINUTE`, 0 disables).
-  `single_flight` fences the sync *pipelines*; nothing bounded the expensive anonymous reads. Keyed on
-  the first `X-Forwarded-For` entry, since nginx makes `request.client.host` always loopback — forging
-  it only splits the forger's own bucket. `/health` is exempt: the deploy script polls it.
+  `single_flight` fences the sync *pipelines*; nothing bounded the expensive anonymous reads.
+  **The key is the `X-Forwarded-For` entry the trusted proxy appended**: `entries[-TRUSTED_PROXY_HOPS]`
+  (default 1, the host nginx — the rightmost entry), honoured only when the direct peer
+  (`request.client.host`) is loopback/private; a public peer is keyed on its own address and its
+  header ignored. Until 2026-10-18 it took the *first* entry, which the client supplies — so a client
+  could pick its own key, either escaping the limit or charging another client's window (#25).
+  Rightmost is right under both `$proxy_add_x_forwarded_for` and `$remote_addr`; it assumes exactly
+  one proxy appends, which is the shape the repo shows (*Peer address* in
+  [deployment.md](deployment.md)). Behind a second proxy (a CDN) raise `TRUSTED_PROXY_HOPS`.
+  The key table is bounded at `_MAX_TRACKED_CLIENTS`; a new key arriving while it is full is counted in
+  one shared overflow bucket, never let through uncounted. Exempt: `/health` (the deploy script polls
+  it) and **GETs under `/api/logos/`** — one image per avatar, up to a hundred on the look-through
+  page, which on a cold cache spent the budget the page's data requests needed. The manifest
+  `GET /api/logos` (no trailing slash) is still counted. Tests: `tests/test_rate_limit_client_key.py`.
 - **`app/observability.py`** stamps `X-Request-ID` (reusing a plausible inbound one so it correlates
   across a proxy) and installs the handler for unhandled exceptions — the one path where `str(e)`
   still reached the client unredacted. The body is a fixed string plus the id; the log line,

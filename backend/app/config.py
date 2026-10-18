@@ -89,6 +89,12 @@ class Settings(BaseSettings):
     # one dashboard load issues a dozen or so. 0 disables the limiter.
     rate_limit_per_minute: int = 120
 
+    # How many proxies in front of the backend append to X-Forwarded-For. The limiter
+    # keys on the entry that many places from the right — the one the outermost trusted
+    # proxy wrote — and only when the direct peer is a loopback/private address. 1 = the
+    # host nginx; 0 ignores the header and keys on the peer.
+    trusted_proxy_hops: int = 1
+
     # Identifies the running build on /health, so "did my deploy land" is answerable
     # from the browser. Set by deploy.sh / ops/auto-deploy.sh from the deployed sha.
     git_commit: str = "unknown"

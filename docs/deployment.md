@@ -30,6 +30,14 @@ before believing it.
   [logos.md](logos.md)); every setting is listed in `backend/.env.example`
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
+- **Peer address.** The host nginx is the only proxy in front of the backend (the frontend container
+  has no `/api/` location) and connects to `127.0.0.1:8000`, which compose publishes on loopback only.
+  Inside the container uvicorn therefore sees the Docker bridge gateway — a private address — as the
+  peer, whether docker-proxy or iptables carries the connection. `app/rate_limit.py` relies on that: it
+  honours `X-Forwarded-For` only from a loopback/private peer and keys on the entry nginx appended
+  (`TRUSTED_PROXY_HOPS=1`). Inferred from the repo, not measured: the live vhost is not in git. If
+  the peer were ever public the limiter keys on it, which is safe but one bucket for everyone. A
+  CDN or second proxy in front means raising `TRUSTED_PROXY_HOPS`
 - Backups: `/root/ibkr-backups/<date>/`, 30 days, at least 10 kept. `/root/auto-deploy.sh` and
   `/root/backup-db.sh` are COPIES of `ops/` that auto-deploy and the daily cron prefer — refresh
   them by atomic rename (copy to a temp name beside them, then `mv` over) when the repo scripts
