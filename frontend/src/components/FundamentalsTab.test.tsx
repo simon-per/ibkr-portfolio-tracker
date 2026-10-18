@@ -45,6 +45,7 @@ const STATUS: FundamentalsStatus = {
   total_earnings_events: 2,
   oldest_update: null,
   newest_update: null,
+  sync_running: false,
 }
 
 describe('FundamentalsTab EPS figures', () => {
@@ -166,9 +167,11 @@ describe('FundamentalsTab background sync', () => {
     const rows = vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue([metrics({})])
     vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([])
     vi.spyOn(api, 'getEarningsHistory').mockResolvedValue([])
+    // The pass is running until it writes, so only the newer row can end the banner.
     vi.spyOn(api, 'getFundamentalsStatus').mockImplementation(async () => ({
       ...STATUS,
       newest_update: newest,
+      sync_running: true,
     }))
     vi.spyOn(api, 'syncFundamentals').mockResolvedValue(
       { status: 'started' } as Awaited<ReturnType<typeof api.syncFundamentals>>,

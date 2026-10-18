@@ -33,6 +33,20 @@ const ABSENT = '—'
  */
 const FUNDAMENTALS_STALE_AFTER_DAYS = 4
 
+/** How often the status is polled while a background sync runs. */
+const SYNC_POLL_MS = 5000
+
+/**
+ * The backstop on the "Updating" state, measured on the polls' own clock. A sync normally
+ * ends on a newer row or on a poll reporting no pipeline running; this only bounds a lost
+ * process. Not the primary rule: a legitimate pass runs several minutes (~6 Yahoo requests
+ * and 3–7 s of sleep per security), so any fixed deadline either ends early or lingers.
+ */
+const SYNC_DEADLINE_MS = 15 * 60_000
+
+/** A status poll, stamped with when it was asked — so a poll can be placed after a click. */
+type StatusPoll = FundamentalsStatus & { askedAt: number }
+
 function formatPct(value: number | null): string {
   if (value === null) return ABSENT
   return `${(value * 100).toFixed(1)}%`
@@ -573,16 +587,28 @@ export function FundamentalsTab() {
   })
 
   // A background sync is finished once the newest row is newer than the moment it was
-  // started. Derived while rendering: clearing `syncStartedAt` from an effect cost a
-  // second render on every status poll (react-hooks/set-state-in-effect).
-  const syncFinished = (s: FundamentalsStatus | undefined) =>
-    syncStartedAt !== null && s?.newest_update != null && new Date(s.newest_update) > syncStartedAt
+  // started, or once a poll *asked* after the click finds no pipeline running — a pass
+  // that writes nothing (all fresh, a 429 at the first security, refused as busy) never
+  // moves `newest_update` (GitHub issue #18). `askedAt`, not the response time: a fetch
+  // in flight at the click carries the pre-click answer. SYNC_DEADLINE_MS bounds the
+  // rest. Derived while rendering: clearing `syncStartedAt` from an effect cost a second
+  // render on every status poll (react-hooks/set-state-in-effect).
+  const syncFinished = (s: StatusPoll | undefined) => {
+    if (syncStartedAt === null || s === undefined) return false
+    const started = syncStartedAt.getTime()
+    if (s.newest_update != null && new Date(s.newest_update).getTime() > started) return true
+    if (s.askedAt < started) return false
+    return s.sync_running === false || s.askedAt - started >= SYNC_DEADLINE_MS
+  }
 
   const { data: status } = useQuery({
     queryKey: ['fundamentals', 'status'],
-    queryFn: () => api.getFundamentalsStatus(),
+    queryFn: async (): Promise<StatusPoll> => {
+      const askedAt = Date.now()
+      return { ...(await api.getFundamentalsStatus()), askedAt }
+    },
     refetchInterval: (query) =>
-      syncStartedAt !== null && !syncFinished(query.state.data) ? 5000 : false,
+      syncStartedAt !== null && !syncFinished(query.state.data) ? SYNC_POLL_MS : false,
   })
 
   const syncDone = syncFinished(status)
@@ -649,6 +675,9 @@ export function FundamentalsTab() {
   }, [sideBySide])
 
   const needsSync = status && status.securities_without_data > 0
+  // Either button's refusal (a 429 cooldown, a busy gate), one line. Each click clears
+  // the other button's error, so the line names the latest attempt only.
+  const syncError = syncMutation.error ?? forceRefreshMutation.error
 
   return (
     <div className="space-y-6">
@@ -665,11 +694,11 @@ export function FundamentalsTab() {
         </Card>
       )}
 
-      {syncMutation.isError && (
+      {syncError && (
         <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
           <CardContent className="pt-6">
             <p className="text-sm text-red-800 dark:text-red-200">
-              Update failed: {syncMutation.error.message}
+              Update failed: {syncError.message}
             </p>
           </CardContent>
         </Card>
@@ -704,7 +733,7 @@ export function FundamentalsTab() {
           ) : undefined}
           aside={needsSync ? (
               <Button
-                onClick={() => syncMutation.mutate()}
+                onClick={() => { forceRefreshMutation.reset(); syncMutation.mutate() }}
                 disabled={syncMutation.isPending || isSyncing}
                 variant="outline"
                 size="sm"
@@ -714,7 +743,7 @@ export function FundamentalsTab() {
               </Button>
             ) : (
               <Button
-                onClick={() => forceRefreshMutation.mutate()}
+                onClick={() => { syncMutation.reset(); forceRefreshMutation.mutate() }}
                 disabled={forceRefreshMutation.isPending || isSyncing}
                 variant="outline"
                 size="sm"

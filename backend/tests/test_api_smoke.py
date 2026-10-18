@@ -844,3 +844,22 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     ratings = client.get("/api/analyst-ratings/status").json()
     assert ratings["newest_update"].endswith("+00:00")
     assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")
+
+
+def test_fundamentals_status_says_whether_a_sync_is_running(client, monkeypatch):
+    """
+    The tab ends its "Updating" banner on a row newer than the click *or* on a poll
+    that says no sync is running, since a pass that writes nothing never moves
+    `newest_update` (GitHub issue #18). The flag must survive `response_model`.
+    """
+    import app.single_flight as sf
+    from app.schemas.portfolio import FundamentalsStatus
+
+    status = client.get("/api/fundamentals/status").json()
+    assert set(status) == set(FundamentalsStatus.model_fields)
+    assert status["sync_running"] is False
+    # Held and Yahoo-eligible: ASML on both venues and TSMC; AAPL was sold.
+    assert (status["total_securities"], status["securities_with_data"]) == (3, 2)
+
+    monkeypatch.setattr(sf, "_running", {sf.SYNC_PIPELINE})
+    assert client.get("/api/fundamentals/status").json()["sync_running"] is True

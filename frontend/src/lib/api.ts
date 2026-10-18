@@ -690,6 +690,8 @@ export interface FundamentalsStatus {
   total_earnings_events: number;
   oldest_update: string | null;
   newest_update: string | null;
+  /** Any sync pipeline holds the shared gate (`single_flight.SYNC_PIPELINE`). */
+  sync_running: boolean;
 }
 
 export interface FundamentalsSyncResponse {

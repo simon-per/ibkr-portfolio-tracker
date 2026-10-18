@@ -983,6 +983,8 @@ class FundamentalsStatus(BaseModel):
     total_earnings_events: int
     oldest_update: Optional[str] = None
     newest_update: Optional[str] = None
+    # `single_flight.is_running(SYNC_PIPELINE)`: any sync pipeline, not only this one.
+    sync_running: bool
 
     class Config:
         from_attributes = True

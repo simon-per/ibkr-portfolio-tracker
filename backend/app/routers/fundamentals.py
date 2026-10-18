@@ -4,9 +4,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
-from app.repositories.fundamentals_repository import FundamentalsRepository
-from app.repositories.security_repository import held
+from app.repositories.fundamentals_repository import FundamentalsRepository, sync_scope
 from app.repositories.sync_run_repository import utc_iso
+from app.schemas.portfolio import FundamentalsStatus
 from app.services.fundamentals_service import FundamentalsService
 from app.single_flight import (
     SYNC_PIPELINE,
@@ -115,7 +115,7 @@ async def get_earnings_history(
     return await service.get_earnings_history(days_back)
 
 
-@router.get("/status")
+@router.get("/status", response_model=FundamentalsStatus)
 async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
     """Get status of fundamentals data cache."""
     from sqlalchemy import select, func
@@ -123,17 +123,17 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
     from app.models.earnings_event import EarningsEvent
     from app.models.security import Security
 
-    # Holdings, not every security ever traded: the tab says "N holdings have no data
-    # yet" off these two counts, and a position sold long ago is not a holding. Same
-    # predicate as the table the tab draws (`security_repository.held`).
-    total_result = await db.execute(
-        select(func.count(Security.id)).where(held())
-    )
+    # The securities a sync walks (`sync_scope`: held and Yahoo-eligible), not every
+    # security ever traded and not a holding Yahoo is never asked about: the tab says
+    # "N holdings have no data yet" off these two counts and offers Update for them, and
+    # a sold position or a `price_source` opt-out is something no sync will fill.
+    in_scope = select(Security.id).where(sync_scope())
+    total_result = await db.execute(select(func.count(Security.id)).where(sync_scope()))
     total_securities = total_result.scalar() or 0
 
     metrics_result = await db.execute(
         select(func.count(FundamentalMetrics.id)).where(
-            FundamentalMetrics.security_id.in_(select(Security.id).where(held()))
+            FundamentalMetrics.security_id.in_(in_scope)
         )
     )
     total_metrics = metrics_result.scalar() or 0
@@ -167,4 +167,10 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
         # as local time — two hours early in Berlin — so a finished sync went unseen.
         "oldest_update": utc_iso(oldest_update),
         "newest_update": utc_iso(newest_update),
+        # The tab's other way to see a background sync end: a pass that writes no row
+        # (all fresh, a 429 at the first security, refused as busy) never moves
+        # `newest_update`. The gate is shared by every sync, so this reads "a pipeline
+        # is running" — which is the honest answer, since a fundamentals pass queued
+        # behind another sync is refused rather than waiting (`_run_sync_background`).
+        "sync_running": is_running(SYNC_PIPELINE),
     }

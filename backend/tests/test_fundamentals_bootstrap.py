@@ -194,6 +194,35 @@ async def test_status_counts_exactly_what_a_sync_would_refresh(db, fetched):
 
 
 @pytest.mark.asyncio
+async def test_status_counts_the_holdings_a_sync_walks(db, fetched):
+    """
+    A held `price_source` opt-out (the pillar 3a funds) is something no sync will fetch,
+    so `/status` must not report it as a holding without data — it did, through `held()`
+    alone, which kept the tab's amber line and Update button up for good and made Update
+    start a pass that could not clear them (GitHub issue #18).
+    """
+    from app.models.security import PRICE_SOURCE_MANUAL
+    from app.routers.fundamentals import get_fundamentals_status
+    from app.schemas.portfolio import FundamentalsStatus
+
+    add_security(db, 1, "AAA")
+    add_security(db, 2, "PILLAR").price_source = PRICE_SOURCE_MANUAL
+    add_security(db, 3, "NEW")
+    add_metrics(db, 1, age_days=0)
+    add_metrics(db, 2, age_days=30)     # an opt-out's old row is not "data" either
+    await db.commit()
+
+    status = await get_fundamentals_status(db)
+    await FundamentalsService(db).sync_fundamentals_data()
+
+    # The handler's own keys, against the model it is filtered through, both ways.
+    assert set(status) == set(FundamentalsStatus.model_fields)
+    assert (status["total_securities"], status["securities_with_data"],
+            status["securities_without_data"]) == (2, 1, 1)
+    assert fetched == ["NEW"], f"the sync fetched {fetched}, not what /status reported missing"
+
+
+@pytest.mark.asyncio
 async def test_the_threshold_lives_in_one_place(db):
     """
     The repository default and what the service asks for must be the same number, or the

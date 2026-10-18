@@ -4,6 +4,7 @@ from app.clock import utcnow
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.earnings_event import EarningsEvent
@@ -25,6 +26,19 @@ from app.services.yahoo_eligibility import yahoo_eligible
 #: hours still leaves a manual Refresh pressed the same day spending nothing on rows the
 #: morning pass already wrote — each costs ~6 Yahoo requests.
 STALE_AFTER = timedelta(hours=20)
+
+
+def sync_scope() -> ColumnElement[bool]:
+    """
+    SQLAlchemy criterion: the securities a fundamentals sync walks — held and
+    Yahoo-eligible (`price_source`).
+
+    One predicate for the sync's selection, the stale count and `/status`'s holding
+    counts. `/status` used to count `held()` alone, so a held opt-out (the pillar 3a
+    funds) sat in `securities_without_data` for good: an amber line and an Update button
+    that never went away, and a pass that could not write the row it promised.
+    """
+    return and_(yahoo_eligible(), held())
 
 
 class FundamentalsRepository:
@@ -73,9 +87,7 @@ class FundamentalsRepository:
         """
         return and_(
             FundamentalMetrics.last_updated < utcnow() - older_than,
-            FundamentalMetrics.security_id.in_(
-                select(Security.id).where(yahoo_eligible(), held())
-            ),
+            FundamentalMetrics.security_id.in_(select(Security.id).where(sync_scope())),
         )
 
     async def upsert_metrics(self, data: dict) -> FundamentalMetrics:

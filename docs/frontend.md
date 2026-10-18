@@ -568,10 +568,23 @@ insight. What that settled, on top of the product pass:
   renders a collapsible card clears `localStorage` in `beforeEach`.
 - **Fundamentals colour only the two ends** of each metric's range, like the watchlist; the
   middle band is plain ink. A third, yellow band put a colour on nearly every cell.
-- **Fundamentals list what is held.** The table, both earnings lists and `/api/fundamentals/status`
-  read open lots only (`security_repository.held`); a sold position was a row of dashes counted as
-  "no data yet". The sync fetches held securities only too, which only removes Yahoo requests
-  (a sold security comes back with the next sync after it is bought again).
+- **Fundamentals list what is held.** The table and both earnings lists read open lots only
+  (`security_repository.held`); a sold position was a row of dashes counted as "no data yet". The
+  sync fetches held securities only too, which only removes Yahoo requests (a sold security comes
+  back with the next sync after it is bought again). `/api/fundamentals/status` counts holdings
+  with the sync's own predicate (`fundamentals_repository.sync_scope`: held **and** Yahoo-eligible):
+  counted through `held()` alone, a `price_source` opt-out (the pillar 3a funds) was "no data yet"
+  for good, so the amber line and the Update button never went away (GitHub issue #18).
+- **A background fundamentals sync ends three ways** (`FundamentalsTab`): a row newer than the
+  click; a status poll *asked* after the click reporting `sync_running: false`
+  (`single_flight.is_running(SYNC_PIPELINE)` — any pipeline, which is honest because a pass queued
+  behind another sync is refused rather than waiting); or `SYNC_DEADLINE_MS` (15 min, on the polls'
+  own `askedAt`). The row alone never ended a pass that wrote nothing — all fresh, a 429 at the first
+  security, refused as busy — so the banner and the 5 s poll ran for as long as the tab was open. A
+  deadline alone was rejected: a legitimate pass runs several minutes. Polls are stamped with when
+  they were *asked*, so a fetch in flight at the click cannot carry its pre-click "not running".
+  Either button's refusal (a 429 cooldown) renders one `Update failed:` line; Refresh's used to
+  render nothing.
 - **Copy stays figure-first.** A conditional caveat is one muted line (the currency-exposure fund
   caveat), never a paragraph, and the empty and error states say what is missing in a sentence.
 - **A component module exports components only** (ESLint `react-refresh/only-export-components`,

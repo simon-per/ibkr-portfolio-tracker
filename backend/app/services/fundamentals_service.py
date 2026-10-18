@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.etf_mappings import allocation_for_fund_isin
-from app.repositories.fundamentals_repository import FundamentalsRepository
+from app.repositories.fundamentals_repository import FundamentalsRepository, sync_scope
 from app.repositories.security_repository import held
 from app.services.allocation_service import allocation_from_info, apply_allocation
 from app.services.market_cap import market_cap_to_base
@@ -18,7 +18,6 @@ from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.security import Security
-from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_estimates import (
     EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
 )
@@ -181,9 +180,10 @@ class FundamentalsService:
         # of these rows — the table, both earnings lists, `/status` — shows what is held,
         # and the daily pass would otherwise refetch a sold position forever. Buying it
         # again brings it back with the next sync. Its sibling
-        # `get_fundamentals_for_portfolio` filters on held() only.
+        # `get_fundamentals_for_portfolio` filters on held() only. Both through
+        # `fundamentals_repository.sync_scope`, which `/status` counts with too.
         result = await self.db.execute(
-            select(Security).where(yahoo_eligible(), held())
+            select(Security).where(sync_scope())
         )
         securities = list(result.scalars().all())
 
