@@ -551,6 +551,30 @@ describe('The per-position table', () => {
     expect(screen.getByLabelText('Payout changes').textContent).toBe('Payouts · 1 raised · 1 cut')
   })
 
+  it("leaves an estimate's withholding absent on the card rather than printing 0.00", async () => {
+    const data = withSecurities()
+    data.securities = [
+      { ...security(1, 'AAA', null, 34), gross_eur: 40, withholding_eur: 6 },
+      { ...security(2, 'BBB', null, 17), gross_eur: 20, withholding_eur: 0, source: 'estimate' },
+    ]
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
+    // A phone: jsdom has no matchMedia, and without one the table renders, not cards.
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    }))
+    try {
+      mount()
+      await screen.findByText(/Received/)
+      // Each card's pair: AAA's figure, and none for BBB — an absent pair is left out.
+      const labels = screen.getAllByText('Withholding', { selector: 'dt' })
+      expect(labels).toHaveLength(1)
+      expect(labels[0].nextElementSibling?.textContent).toContain('6.00')
+      expect(screen.getAllByText('Gross', { selector: 'dt' })).toHaveLength(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('says nothing about raises when no payer can be measured', async () => {
     const data = withSecurities()
     data.securities = data.securities.map((r) => ({ ...r, per_share_growth_pct: null }))

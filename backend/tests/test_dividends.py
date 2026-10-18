@@ -15,6 +15,8 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.dividend_payment import DividendPayment
 from app.models.app_settings import AppSetting
+from app.models.dividend_withholding_adjustment import DividendWithholdingAdjustment
+from app.models.dividend_accrual import DividendAccrual
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import DividendService
 
@@ -25,7 +27,10 @@ async def _make_session():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    tables = [Security.__table__, TaxLot.__table__, DividendPayment.__table__, AppSetting.__table__]
+    # The accruals because the summary reads an estimate's net through the withholding
+    # ladder (issue #61), whose first rung is an open accrual.
+    tables = [Security.__table__, TaxLot.__table__, DividendPayment.__table__, AppSetting.__table__,
+              DividendWithholdingAdjustment.__table__, DividendAccrual.__table__]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     session = AsyncSession(engine, expire_on_commit=False)
@@ -167,9 +172,12 @@ async def test_the_boundary_era_reports_mixed_not_ibkr():
 
         assert summary["source"] == "mixed"
         assert summary["ibkr_from"] == "2026-05-02"
-        # Both eras contribute: 5 estimated + 85 net actual.
-        assert summary["total_net_eur"] == 90.0
-        assert summary["total_withholding_eur"] == 15.0
+        # Both eras contribute, both net: the estimate's gross 5 less the 15% IBKR
+        # withheld on this security (issue #61), + 85 net actual. The withholding takes
+        # the same estimated 0.75, so gross = net + withholding on the card.
+        assert summary["total_net_eur"] == 89.25
+        assert summary["total_withholding_eur"] == 15.75
+        assert summary["total_gross_eur"] == 105.0
     finally:
         await session.close()
         await engine.dispose()
@@ -191,7 +199,10 @@ async def test_an_estimate_only_history_reports_yfinance_estimate():
 
         assert summary["source"] == "yfinance_estimate"
         assert summary["ibkr_from"] is None
-        assert summary["total_withholding_eur"] == 0.0
+        # Nothing measured, so the WHT setting's assumed 15% (issue #61); the figure
+        # carries the estimate provenance above.
+        assert summary["total_withholding_eur"] == 0.75
+        assert summary["total_net_eur"] == 4.25
     finally:
         await session.close()
         await engine.dispose()

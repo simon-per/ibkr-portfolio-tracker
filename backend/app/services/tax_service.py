@@ -126,7 +126,10 @@ class TaxService:
             # withheld". It is absent here, and the withholding total is the RECORDED
             # withholding only — the count below says how many rows it leaves out. The
             # net keeps the gross fallback (`_net_eur`), so real income is not dropped,
-            # and is counted the same way.
+            # and is counted the same way. Deliberately NOT `IncomeSplit`, which every
+            # other reader uses (issue #61): its net is gross less an ASSUMED withholding,
+            # and on a filing aid gross minus net would publish that assumption as a
+            # withholding figure this report refuses to state (docs/tax.md).
             estimated = row_source == "yfinance_estimate"
             if estimated:
                 estimated_rows += 1

@@ -106,10 +106,12 @@ async def test_summary_keeps_pre_ibkr_estimate_months_and_never_sums_the_two():
 
         summary = await DividendService(session).get_dividend_summary()
         months = {m["month"]: m["amount_eur"] for m in summary["monthly"]}
-        assert months["2025-05"] == 7.50           # the old global switch erased this
+        # The old global switch erased this. Net since issue #61: the estimate's gross
+        # 7.50 less the 2/12 IBKR withheld on this security.
+        assert months["2025-05"] == 6.25
         assert months["2026-03"] == 10.00          # ibkr only — estimate not added on top
         assert summary["ibkr_from"] == "2026-03-10"
-        assert summary["total_net_eur"] == 17.50
+        assert summary["total_net_eur"] == 16.25
     finally:
         await session.close()
         await engine.dispose()
@@ -257,7 +259,8 @@ async def test_a_legacy_row_with_no_net_falls_back_to_gross():
     Rows predating the withholding-fields migration carry gross but a NULL net.
     Both endpoints must fall back to gross — the breakdown crashed on them in
     production (Decimal += None) the moment the income filter stopped keying on
-    net alone.
+    net alone. An estimate's net is that gross less the ladder rate since issue #61
+    (the WHT setting's 15% here, nothing being measured): 7.00 → 5.95.
     """
     engine, session = await _make_session()
     try:
@@ -271,11 +274,12 @@ async def test_a_legacy_row_with_no_net_falls_back_to_gross():
         svc = DividendService(session)
 
         out = await svc.get_dividend_breakdown(year=2026, include_forecast=False, as_of=AS_OF)
-        assert out["total_net_eur"] == 7.00
-        assert out["securities"][0]["net_eur"] == 7.00
+        assert out["total_net_eur"] == 5.95
+        assert out["securities"][0]["net_eur"] == 5.95
+        assert out["securities"][0]["gross_eur"] == 7.00
 
         summary = await svc.get_dividend_summary()
-        assert summary["total_net_eur"] == 7.00
+        assert summary["total_net_eur"] == 5.95
     finally:
         await session.close()
         await engine.dispose()

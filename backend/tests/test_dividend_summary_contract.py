@@ -131,10 +131,12 @@ async def test_the_service_output_validates_against_the_model():
         # The splice keeps the 2025 estimate and the 2026 actual: the boundary era.
         assert model.source == "mixed"
         assert model.ibkr_from == "2026-02-11"
-        # NET, and the back-compat key agrees with the explicit one.
-        assert model.total_eur == model.total_net_eur == pytest.approx(32.0)
+        # NET, and the back-compat key agrees with the explicit one. The 2025 estimate
+        # reads net of the 15% IBKR withheld on this security (issue #61): 12.75 + 17,
+        # and its 2.25 joins the withholding so gross = net + withholding.
+        assert model.total_eur == model.total_net_eur == pytest.approx(29.75)
         assert model.total_gross_eur == pytest.approx(35.0)
-        assert model.total_withholding_eur == pytest.approx(3.0)
+        assert model.total_withholding_eur == pytest.approx(5.25)
     finally:
         await session.close()
         await engine.dispose()

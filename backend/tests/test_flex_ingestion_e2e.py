@@ -30,6 +30,7 @@ from app.models.trade import Trade
 from app.models.corporate_action import CorporateAction
 from app.models.dividend_payment import DividendPayment
 from app.models.app_settings import AppSetting
+from app.models.dividend_withholding_adjustment import DividendWithholdingAdjustment
 from app.models.market_price import MarketPrice
 from app.models.cash_flow import CashFlow
 from app.models.cash_balance import CashBalance
@@ -105,7 +106,8 @@ async def _make_session():
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               CorporateAction.__table__, DividendPayment.__table__,
               AppSetting.__table__, MarketPrice.__table__,
-              CashFlow.__table__, CashBalance.__table__]
+              CashFlow.__table__, CashBalance.__table__,
+              DividendWithholdingAdjustment.__table__]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     return engine, AsyncSession(engine, expire_on_commit=False)

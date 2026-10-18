@@ -220,6 +220,15 @@ PENDING_MAX_AGE_DAYS = 90
 # payer's genuinely separate next payment is never swallowed.
 ACCRUAL_MATCH_DAYS = 15
 
+# How far back a withholding line posted on a day with no dividend of its security (a
+# refund or correction, GitHub issue #60) may reach for the dividend it corrects. The tax
+# year is the hard bound — DA-1 is filed per year, so a January refund of December's tax
+# is never folded into the old year. Within the year, half a year covers the whole cycle
+# of every payer that pays at least twice a year; further back, "the nearest preceding
+# dividend" is more likely another distribution than the one corrected, so the line is
+# counted and named in `warnings[]` instead of moving withholding onto a guess.
+WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS = 185
+
 
 def match_estimates_to_ibkr(
     estimates: Iterable,
@@ -372,6 +381,49 @@ def _forward_basis(total: Decimal, gross_estimate: Decimal) -> str:
     if gross_estimate <= 0:
         return "net"
     return "gross_estimate" if gross_estimate >= total else "mixed"
+
+
+class IncomeSplit:
+    """
+    ``(net, withholding)`` in EUR of a spliced income row — the one place an
+    estimate's net is decided (GitHub issue #61).
+
+    An IBKR row carries both: its net (`DividendService._net_eur`) and the tax IBKR
+    withheld. A `yfinance_estimate` row stores its GROSS as net, because yfinance
+    knows no withholding (`compute_dividend_income`). Read as net, that put estimated
+    gross beside IBKR's real net in every "net" figure: year over year across the
+    splice compared gross against net and read low by about the withholding rate, and
+    on an estimate-era year the net plus the estimated tax beside it exceeded gross.
+
+    So an estimate's withholding is its gross at the security's ladder rate
+    (`DividendService._withholding_rates`, the rate its projections are sized with)
+    and its net is the gross less exactly that amount: ``net + withholding == gross``
+    by construction, for every reader. Read time only — stored rows are unchanged.
+    The tax report deliberately does not use it (docs/tax.md: an estimate's
+    withholding is absent there, not assumed).
+    """
+
+    def __init__(self, rates: Dict[int, Tuple[Decimal, str]], net_factor: Decimal):
+        self.rates = rates
+        self.net_factor = net_factor
+
+    def rate(self, security_id: int) -> Decimal:
+        """The security's ladder rate; the WHT setting for one the ladder never saw."""
+        rate, _ = self.rates.get(security_id, (Decimal(1) - self.net_factor, "assumed"))
+        return rate
+
+    def split(self, p) -> Tuple[Decimal, Decimal]:
+        if p.source == "ibkr":
+            return DividendService._net_eur(p), abs(p.withholding_tax_eur or Decimal("0"))
+        gross = (
+            p.gross_amount_eur if p.gross_amount_eur is not None
+            else DividendService._net_eur(p)
+        )
+        withholding = gross * self.rate(p.security_id)
+        return gross - withholding, withholding
+
+    def net(self, p) -> Decimal:
+        return self.split(p)[0]
 
 
 class DividendService:
@@ -723,6 +775,13 @@ class DividendService:
         security per pay date, computes net = gross - withholding, converts to EUR
         at the pay date, and upserts with source='ibkr'. Does NOT commit — the
         caller's sync transaction owns the commit. Tolerant of an empty list.
+
+        A day with withholding and no dividend is a refund or correction of an earlier
+        dividend's tax: each line is recorded once in `dividend_withholding_adjustments`
+        and folded into the security's nearest preceding IBKR dividend in the same tax
+        year (`_fold_withholding_adjustment`); one with no such dividend is counted and
+        named in ``warnings[]`` (issue #60). A dividend's stored withholding is its own
+        day's plus the adjustments folded into it, so re-ingesting either is idempotent.
         """
         if not cash_txns:
             return {"ibkr_dividends": 0, "message": "No dividend cash transactions"}
@@ -737,6 +796,11 @@ class DividendService:
             "rate_currencies": set(),
             # The countries the group's withholding lines name -- see below.
             "wht_countries": set(),
+            # The withholding lines themselves: a group with no dividend is made of
+            # adjustments to an earlier one, each recorded once by its own key.
+            "wht_lines": [],
+            "div_lines": [],
+            "symbol": None,
         })
 
         for ct in cash_txns:
@@ -746,8 +810,10 @@ class DividendService:
             key = (security_id, ct["pay_date"])
             g = grouped[key]
             g["currency"] = g["currency"] or ct.get("currency")
+            g["symbol"] = g["symbol"] or ct.get("symbol")
             if ct["type"] in ("DIVIDEND", "PAYMENTINLIEU"):
                 g["gross"] += ct["amount"]
+                g["div_lines"].append(ct)
                 rate_cur, rate, kind = parse_ibkr_dividend_description(ct.get("description"))
                 if rate is not None and ct["amount"]:
                     g["rates"][kind] += rate if ct["amount"] > 0 else -rate
@@ -757,14 +823,67 @@ class DividendService:
                 country = parse_ibkr_withholding_country(ct.get("description"))
                 if country:
                     g["wht_countries"].add(country)
+                g["wht_lines"].append(ct)
+
+        from app.models.dividend_withholding_adjustment import DividendWithholdingAdjustment
+
+        # Every withholding adjustment recorded so far, by IBKR's key, and what each
+        # dividend row has had folded into it. Small (a handful a year), so read whole.
+        recorded: Dict[str, Any] = {
+            a.ib_key: a for a in
+            (await self.db.execute(select(DividendWithholdingAdjustment))).scalars().all()
+        }
+        attached_eur: Dict[Tuple[int, date], Decimal] = defaultdict(Decimal)
+        for a in recorded.values():
+            if a.target_pay_date is not None:
+                attached_eur[(a.security_id, a.target_pay_date)] += a.withholding_eur
+
+        def _line_key(ln: Dict) -> str:
+            return str(
+                ln.get("ib_key")
+                or f"{ln['conid']}-{ln['type']}-{ln['pay_date']}-{ln['amount']}"
+            )
 
         saved = 0
         skipped_currencies: Dict[str, int] = {}
+        adjustment_lines: List[Tuple[int, Dict]] = []
+        # Each refused line or reversal is counted on every ingest that delivers it,
+        # but WARNED only on the one that first records it: the ~30-day window re-delivers
+        # it daily, and a warning that is always present teaches the reader to skip it.
+        reversals: List[str] = []
+        new_reversals: List[str] = []
         now = utcnow()
         for (security_id, pay_date), g in grouped.items():
             gross = g["gross"]
             if gross <= 0:
-                # Only withholding with no matching dividend (e.g. a reclass) — skip.
+                # No dividend paid this day. Withholding alone is a refund or correction
+                # of an earlier dividend's tax (issue #60): it used to be skipped here
+                # without a word, so the corrected dividend kept the over-withheld amount
+                # and DA-1 with it. Folded in below, once the day's dividends are stored.
+                if gross < 0:
+                    # A reversal with no re-payment the same day: the dividend it reverses
+                    # is overstated, and nothing here can tell by how much. Named, never
+                    # half-applied — and recorded (never folded, no withholding), so the
+                    # warning is given once.
+                    label = f"{g['symbol'] or 'conid ' + str(security_id)} {pay_date}"
+                    reversals.append(label)
+                    first_time = False
+                    for ln in g["div_lines"]:
+                        key = _line_key(ln)
+                        if key in recorded:
+                            continue
+                        first_time = True
+                        recorded[key] = DividendWithholdingAdjustment(
+                            ib_key=key, security_id=security_id, posted_date=pay_date,
+                            line_type=ln["type"], currency=ln.get("currency"),
+                            amount=ln["amount"], withholding_eur=Decimal("0"),
+                            target_pay_date=None, first_seen_at=now,
+                        )
+                        self.db.add(recorded[key])
+                    if first_time:
+                        new_reversals.append(label)
+                elif g["wht"]:
+                    adjustment_lines.extend((security_id, ln) for ln in g["wht_lines"])
                 continue
             withholding = -g["wht"]  # make positive
             # IBKR names the currency on every cash line; a row without one is not
@@ -780,6 +899,10 @@ class DividendService:
                 # a silently inflated one is not.
                 skipped_currencies[currency or "?"] = skipped_currencies.get(currency or "?", 0) + 1
                 continue
+            # The day's own withholding plus every later adjustment already folded into
+            # this dividend — so re-ingesting it from an overlapping statement restores
+            # the corrected figure rather than the original one.
+            wht_eur += attached_eur.get((security_id, pay_date), Decimal("0"))
             net_eur = gross_eur - wht_eur
 
             # One rate per row. An ordinary dividend and a special paid on the same day
@@ -821,6 +944,59 @@ class DividendService:
 
         logger.info(f"Recorded {saved} IBKR dividend payment(s) from cash transactions")
 
+        # ---- Withholding adjustments (issue #60) ------------------------------------
+        # Each line is recorded once by its key and folded into its dividend once, so
+        # a statement re-delivering it — the window is ~30 days and overlaps the last —
+        # changes nothing. A line still waiting for its dividend is retried on every
+        # ingest, in case an older statement has since supplied it.
+        applied = 0
+        unmatched: List[str] = []
+        new_unmatched: List[str] = []
+        adjustment_fx_skipped: Dict[str, int] = {}
+        delivered: set = set()
+        # Withholding added before withholding refunded, so a day that reverses a tax and
+        # re-posts it lower never passes through a negative figure line by line.
+        adjustment_lines.sort(key=lambda x: (x[0], x[1]["pay_date"], x[1]["amount"]))
+        for security_id, ln in adjustment_lines:
+            key = _line_key(ln)
+            delivered.add(key)
+            adj = recorded.get(key)
+            first_time = adj is None
+            if adj is None:
+                currency = ln.get("currency")
+                # IBKR's sign flipped: a refund (positive line) lowers the withholding.
+                wht_change = await to_eur_or_none(
+                    self.currency_service, -ln["amount"], currency, ln["pay_date"]
+                )
+                if wht_change is None:
+                    # Not recorded, so the next statement carrying it tries again.
+                    adjustment_fx_skipped[currency or "?"] = (
+                        adjustment_fx_skipped.get(currency or "?", 0) + 1
+                    )
+                    continue
+                adj = DividendWithholdingAdjustment(
+                    ib_key=key, security_id=security_id, posted_date=ln["pay_date"],
+                    line_type="WHTAX", currency=currency, amount=ln["amount"],
+                    withholding_eur=wht_change, target_pay_date=None, first_seen_at=now,
+                )
+                self.db.add(adj)
+                recorded[key] = adj
+            if adj.target_pay_date is not None:
+                continue    # already folded into its dividend
+            if await self._fold_withholding_adjustment(adj, now):
+                applied += 1
+            else:
+                label = ln.get("symbol") or "conid " + str(ln["conid"])
+                unmatched.append(f"{label} {ln['pay_date']}")
+                if first_time:
+                    new_unmatched.append(unmatched[-1])
+        for key, adj in recorded.items():
+            if (key not in delivered and adj.target_pay_date is None
+                    and adj.line_type == "WHTAX"):
+                if await self._fold_withholding_adjustment(adj, now):
+                    applied += 1
+        await self.db.flush()
+
         warnings: List[str] = []
         if skipped_currencies:
             detail = ", ".join(f"{n} in {cur}" for cur, n in sorted(skipped_currencies.items()))
@@ -833,13 +1009,83 @@ class DividendService:
                 f"them up."
             )
             logger.warning(warnings[-1])
+        if new_unmatched:
+            warnings.append(
+                f"{len(new_unmatched)} IBKR withholding adjustment(s) matched no dividend of "
+                f"the same security earlier in the same year within "
+                f"{WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS} days ({', '.join(sorted(new_unmatched))}). "
+                f"Their withholding is not in any dividend's figures or in DA-1."
+            )
+            logger.warning(warnings[-1])
+        if adjustment_fx_skipped:
+            detail = ", ".join(f"{n} in {cur}" for cur, n in sorted(adjustment_fx_skipped.items()))
+            warnings.append(
+                f"Skipped {sum(adjustment_fx_skipped.values())} IBKR withholding "
+                f"adjustment(s) with no FX rate for their date ({detail}). Retried on the "
+                f"next statement that carries them."
+            )
+            logger.warning(warnings[-1])
+        if new_reversals:
+            warnings.append(
+                f"{len(new_reversals)} IBKR dividend reversal(s) posted without a re-payment "
+                f"the same day ({', '.join(sorted(new_reversals))}). The dividends they "
+                f"reverse are still counted in full."
+            )
+            logger.warning(warnings[-1])
 
         return {
             "ibkr_dividends": saved,
             "dividends_skipped": sum(skipped_currencies.values()),
+            "withholding_adjustments_applied": applied,
+            "withholding_adjustments_unmatched": len(unmatched),
+            "withholding_adjustments_skipped": sum(adjustment_fx_skipped.values()),
+            "dividend_reversals_skipped": len(reversals),
             "warnings": warnings,
             "message": f"Recorded {saved} IBKR dividend payments",
         }
+
+    async def _fold_withholding_adjustment(self, adj, now: datetime) -> bool:
+        """
+        Fold one withholding adjustment into the dividend it corrects: that security's
+        nearest IBKR dividend on or before the line's date, in the same calendar (tax)
+        year and within `WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS`. Adjusts the row's
+        withholding and net, stamps the adjustment with the row it went into, and
+        returns True; False when no dividend qualifies.
+
+        Also False when the result would be a negative withholding: a refund larger
+        than the tax withheld from the nearest dividend did not come from that dividend,
+        and folding it in would publish income above gross.
+        """
+        from app.models.dividend_payment import DividendPayment
+
+        posted = adj.posted_date
+        earliest = max(
+            posted - timedelta(days=WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS), date(posted.year, 1, 1)
+        )
+        on_date = func.coalesce(DividendPayment.pay_date, DividendPayment.ex_date)
+        target = (await self.db.execute(
+            select(DividendPayment)
+            .where(and_(
+                DividendPayment.security_id == adj.security_id,
+                DividendPayment.source == "ibkr",
+                DividendPayment.gross_amount_eur > 0,
+                on_date >= earliest,
+                on_date <= posted,
+            ))
+            .order_by(on_date.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if target is None:
+            return False
+        withholding = (target.withholding_tax_eur or Decimal("0")) + adj.withholding_eur
+        if withholding < 0:
+            return False
+        target.withholding_tax_eur = withholding
+        target.net_amount_eur = target.gross_amount_eur - withholding
+        target.last_computed = now
+        # The row's key: an IBKR row's ex_date is its pay date.
+        adj.target_pay_date = target.ex_date
+        return True
 
     async def sync_dividend_accruals(
         self, accruals: List[Dict], conid_to_security_id: Dict[str, int]
@@ -1042,6 +1288,25 @@ class DividendService:
             else:
                 logger.info(f"Dividend forecast: no current {cur}->EUR rate, skipping its per-share amounts")
         return out
+
+    async def income_split(self, raw_payments: Optional[List] = None) -> IncomeSplit:
+        """
+        The `IncomeSplit` for readers outside the breakdown: today's ladder, built from
+        the whole table exactly as `get_dividend_breakdown` builds it. ``raw_payments``
+        saves the fetch when the caller already holds every computed row.
+        """
+        if raw_payments is None:
+            raw_payments = await self.repo.get_computed_dividends()
+        securities = {
+            s.id: s for s in (await self.db.execute(select(Security))).scalars().all()
+        }
+        net_factor = await AppSettingsRepository(self.db).get_dividend_net_factor()
+        return IncomeSplit(
+            self._withholding_rates(
+                raw_payments, securities, await self._open_accruals(), net_factor
+            ),
+            net_factor,
+        )
 
     async def ibkr_cash_receipts(self) -> List[tuple]:
         """
@@ -1422,8 +1687,11 @@ class DividendService:
            the one whose projections stay labelled `gross_estimate`.
 
         The median rather than the mean on rungs 2–3: a withholding posted on a
-        different day from its dividend leaves one row at 0%, and one such row must
-        not move a rate every other payment agrees on.
+        different day from its dividend used to leave one row at 0% — the ingest folds
+        it in since issue #60, but never across a tax year — and one such row must not
+        move a rate every other payment agrees on.
+
+        Also the rate an estimate-era row is read at (`IncomeSplit`, issue #61).
         """
         def _rate(gross, wht) -> Optional[Decimal]:
             if gross is None or gross <= 0 or wht is None:
@@ -1620,7 +1888,12 @@ class DividendService:
                     # No cached rate for the currency today. A row computed while
                     # shares were held already carries the EUR amount at its own
                     # ex-date rate; over the shares, that is the gross per share.
-                    gross_ps = self._net_eur(p) / p.shares_held
+                    # The stored GROSS, never `IncomeSplit`'s net: the ladder is
+                    # applied once, below, to every entry of the history.
+                    gross_ps = (
+                        p.gross_amount_eur if p.gross_amount_eur is not None
+                        else self._net_eur(p)
+                    ) / p.shares_held
                 ibkr = ibkr_for_estimate.get(id(p))
                 if ibkr is not None:
                     special = ibkr.dividend_kind in SPECIAL_DIVIDEND_KINDS
@@ -1714,8 +1987,12 @@ class DividendService:
         every pre-IBKR month from the card). Monthly amounts and totals are NET
         of withholding tax; gross and withholding totals are reported separately.
         """
-        payments, ibkr_from = self._splice_by_era(await self.repo.get_computed_dividends())
+        raw_payments = await self.repo.get_computed_dividends()
+        payments, ibkr_from = self._splice_by_era(raw_payments)
         payments = [p for p in payments if self._is_income(p)]
+        # An estimate's net is its gross less the ladder withholding, the same split the
+        # Dividends tab uses, so the card and the tab carry one net per month.
+        income = await self.income_split(raw_payments)
 
         # Project EUR amounts into the configured base currency at each date.
         from app.services.portfolio_service import PortfolioService
@@ -1731,9 +2008,10 @@ class DividendService:
 
         for p in payments:
             on_date = p.pay_date or p.ex_date
-            gross_e = p.gross_amount_eur or Decimal("0")
-            net_e = p.net_amount_eur if p.net_amount_eur is not None else gross_e
-            wht_e = p.withholding_tax_eur or Decimal("0")
+            # Withholding includes an estimate's ladder amount, so gross = net + tax on
+            # the card as on each breakdown year.
+            net_e, wht_e = income.split(p)
+            gross_e = p.gross_amount_eur if p.gross_amount_eur is not None else net_e + wht_e
 
             gross = base_fx.convert(gross_e, on_date)
             net = base_fx.convert(net_e, on_date)
@@ -2099,6 +2377,18 @@ class DividendService:
         def _in_window(d: date) -> bool:
             return (win_start is None or d >= win_start) and (win_end is None or d <= win_end)
 
+        # The announced dividends IBKR has published and not yet paid. Read before the
+        # walk: the withholding ladder starts from them, and the walk needs the ladder.
+        accruals_by_sec = {} if replay else await self._open_accruals()
+        # Every net below — the months, the years, TTM/YTD, the trailing yields — reads an
+        # estimate as its gross less the ladder withholding, and the year's withholding
+        # figure takes exactly that amount (issue #61). Built even without a forecast, so
+        # no figure moves with the toggle; it is the ladder `_forecast_inputs` builds.
+        income = IncomeSplit(
+            self._withholding_rates(raw_payments, securities, accruals_by_sec, net_factor),
+            net_factor,
+        )
+
         def _new_row() -> Dict:
             return {
                 "payouts": 0, "gross": Decimal("0"), "wht": Decimal("0"),
@@ -2145,11 +2435,10 @@ class DividendService:
         annual_actual: Dict[int, Decimal] = defaultdict(Decimal)
         # Withholding per calendar year, for the small "WHT" figure beside each year —
         # a reminder of the DA-1 threshold, not a tax figure. IBKR's rows carry what was
-        # withheld; an estimate-era row recorded none, so its gross is kept here and
-        # sized with the security's ladder rate once that is known (below).
+        # withheld; an estimate-era row recorded none, so it takes the security's ladder
+        # rate — the amount `income` deducted from that row's net.
         annual_wht_actual: Dict[int, Decimal] = defaultdict(Decimal)
         annual_wht_forecast: Dict[int, Decimal] = defaultdict(Decimal)
-        estimate_gross_by_year: Dict[Tuple[int, int], Decimal] = defaultdict(Decimal)
         month_actual_all: Dict[str, Decimal] = defaultdict(Decimal)
         month_sources_all: Dict[str, set] = defaultdict(set)
         month_actual_sym_all: Dict[str, Dict[str, Decimal]] = defaultdict(
@@ -2159,7 +2448,8 @@ class DividendService:
         for p in all_payments:
             on_date = p.pay_date or p.ex_date
             mk = on_date.strftime("%Y-%m")
-            net = base_fx.convert(self._net_eur(p), on_date)
+            net_eur, wht_eur = income.split(p)
+            net = base_fx.convert(net_eur, on_date)
             symbol = _symbol(p.security_id)
             # These four accumulate BEFORE the window guard, and that order is the
             # whole point: hoist the `continue` above them and growth quietly
@@ -2167,12 +2457,7 @@ class DividendService:
             # `test_calendar_ttm_uses_history_outside_each_display_window` and
             # `test_growth_is_identical_whichever_year_is_selected` pin it.
             annual_actual[on_date.year] += net
-            if p.source == "ibkr":
-                annual_wht_actual[on_date.year] += base_fx.convert(
-                    abs(p.withholding_tax_eur or Decimal("0")), on_date
-                )
-            else:
-                estimate_gross_by_year[(on_date.year, p.security_id)] += net
+            annual_wht_actual[on_date.year] += base_fx.convert(wht_eur, on_date)
             month_actual_all[mk] += net
             month_actual_sym_all[mk][symbol] += net
             month_sources_all[mk].add(p.source)
@@ -2239,10 +2524,8 @@ class DividendService:
         horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
-            # The announced dividends IBKR has published and not yet paid, and IBKR's own
-            # (ex-date, pay date) pairs. Read first: both size the projections as well as
-            # dating them.
-            accruals_by_sec = {} if replay else await self._open_accruals()
+            # IBKR's own (ex-date, pay date) pairs, and the open accruals read above. Read
+            # first: both size the projections as well as dating them.
             exact_pairs = await self._exact_date_pairs()
             if replay:
                 exact_pairs = {
@@ -2533,15 +2816,10 @@ class DividendService:
                 if _accrual_covers(p.security_id, ex, expected):
                     continue  # IBKR has announced it; the accrual above says it better
                 # The stored Yahoo "net" is gross. The security's own withholding
-                # applies — the same ladder rung `_forecast_inputs` sized it with.
-                wht_rate, _ = wht_by_sec.get(
-                    p.security_id, (Decimal(1) - net_factor, "assumed")
-                )
+                # applies — the same ladder rung `_forecast_inputs` sized it with, and
+                # the same split every realized estimate is read through.
                 est_basis = basis_by_sec.get(p.security_id, "gross_estimate")
-                amt = base_fx.convert(
-                    _estimated_net_from_gross(self._net_eur(p), Decimal(1) - wht_rate),
-                    expected,
-                )
+                amt = base_fx.convert(income.net(p), expected)
                 upcoming.append({
                     "date": expected.isoformat(),
                     "ex_date": ex.isoformat(),
@@ -2679,7 +2957,7 @@ class DividendService:
             for payment in all_payments:
                 d = payment.pay_date or payment.ex_date
                 if after < d <= through:
-                    total += base_fx.convert(self._net_eur(payment), d)
+                    total += base_fx.convert(income.net(payment), d)
             return total
 
         year_ago, two_years_ago = as_of - timedelta(days=365), as_of - timedelta(days=730)
@@ -2696,8 +2974,8 @@ class DividendService:
         )
 
         # The two 12-month windows sit either side of the splice, so one is IBKR
-        # actuals and the other yfinance estimates — sized comparably, sourced
-        # differently. Flagged rather than silently presented as like-for-like.
+        # actuals and the other yfinance estimates — both net (an estimate at its
+        # ladder rate, `income`), sourced differently. Flagged for that.
         ttm_crosses_era = (
             ibkr_from is not None and two_years_ago < ibkr_from <= as_of
         )
@@ -2705,17 +2983,6 @@ class DividendService:
         first_income = min(
             ((p.pay_date or p.ex_date) for p in all_payments), default=None
         )
-
-        # Estimate-era income recorded no withholding; size it at the security's ladder
-        # rate. Without a forecast the ladder was never built, so build it here — it is
-        # pure DB, and the figure must not change with the Forecast toggle.
-        if estimate_gross_by_year:
-            rates = wht_by_sec or self._withholding_rates(
-                raw_payments, securities, await self._open_accruals(), net_factor
-            )
-            for (y, sid), gross in estimate_gross_by_year.items():
-                rate, _ = rates.get(sid, (Decimal(1) - net_factor, "assumed"))
-                annual_wht_actual[y] += gross * rate
 
         annual_rows: List[Dict] = []
         prev_row: Optional[Dict] = None
@@ -2877,7 +3144,7 @@ class DividendService:
         for p in all_payments:
             d = p.pay_date or p.ex_date
             if ttm_start <= d <= as_of:
-                ttm_net[p.security_id] += base_fx.convert(self._net_eur(p), d)
+                ttm_net[p.security_id] += base_fx.convert(income.net(p), d)
 
         # How much of that trailing year the position was actually held for. A
         # holding bought seven weeks ago divides seven weeks of income by a full

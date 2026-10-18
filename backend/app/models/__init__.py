@@ -15,6 +15,7 @@ from app.models.watchlist_item import WatchlistItem
 from app.models.dividend_payment import DividendPayment
 from app.models.dividend_accrual import DividendAccrual
 from app.models.dividend_date_pair import DividendDatePair
+from app.models.dividend_withholding_adjustment import DividendWithholdingAdjustment
 from app.models.dividend_forecast_snapshot import (
     DividendForecastSnapshot,
     DividendForecastSnapshotLine,
@@ -50,6 +51,7 @@ __all__ = [
     "DividendPayment",
     "DividendAccrual",
     "DividendDatePair",
+    "DividendWithholdingAdjustment",
     "DividendForecastSnapshot",
     "DividendForecastSnapshotLine",
     "AppSetting",

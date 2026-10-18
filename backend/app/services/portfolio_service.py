@@ -1654,18 +1654,20 @@ class PortfolioService:
         # the dividend views, so the two sources never double-count a payment.
         from app.repositories.dividend_repository import DividendRepository
         from app.services.dividend_service import DividendService
-        payments, _ = DividendService._splice_by_era(
-            await DividendRepository(self.db).get_computed_dividends()
-        )
+        raw_dividends = await DividendRepository(self.db).get_computed_dividends()
+        payments, _ = DividendService._splice_by_era(raw_dividends)
         # Via the shared helpers, not the columns: rows predating the
         # withholding-fields migration carry gross with a NULL net, and keying on
-        # net alone silently dropped that income here.
+        # net alone silently dropped that income here. An estimate's net is its gross
+        # less the ladder withholding (`IncomeSplit`, issue #61) — what reached the
+        # account, as on the Dividends tab.
+        income = await DividendService(self.db).income_split(raw_dividends)
         for p in payments:
             on_date = p.pay_date or p.ex_date
             if effective_start_date < on_date <= effective_end_date \
                     and DividendService._is_income(p):
                 dates.append(on_date)
-                amounts.append(float(base_fx.convert(DividendService._net_eur(p), on_date)))
+                amounts.append(float(base_fx.convert(income.net(p), on_date)))
 
         # Terminal inflow: portfolio value at effective end date
         if end_mv > 0:

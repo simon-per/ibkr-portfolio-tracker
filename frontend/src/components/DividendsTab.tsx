@@ -27,7 +27,7 @@ import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
-import { cn, placeholderDim } from '@/lib/utils'
+import { ABSENT, cn, placeholderDim } from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { displayName } from '@/lib/securityName'
@@ -230,7 +230,9 @@ function dividendColumns(deps: {
       shortHeader: 'Withholding',
       align: 'right',
       desktop: 'hide',
-      cell: (row) => formatCurrency(row.withholding_eur),
+      // An estimate records no withholding, so its 0 means unknown, not none withheld:
+      // absent, as on the Tax tab (the card leaves an absent pair out).
+      cell: (row) => (row.source === 'estimate' ? ABSENT : formatCurrency(row.withholding_eur)),
     },
   ]
 }

@@ -102,6 +102,14 @@ mechanism and the sign convention it assumes are in
 
 Frontend: `TaxTab.tsx`. It's a filing aid, not tax advice.
 
+**A withholding IBKR corrects later reaches DA-1** (2026-10-18, issue #60). A refund or
+correction posted after its dividend (30% corrected to 15%, a fund's year-end adjustment) is folded
+into that dividend's withholding at ingest — the nearest preceding IBKR dividend of the security in
+the **same tax year** — so the report reads the corrected withholding with no logic of its own. A
+correction with no dividend in reach, a January one for December's tax among them, stays out of
+every year and is named in `warnings[]` of the sync run that first records it. The mechanics are in docs/dividends.md
+(*A withholding posted after its dividend*).
+
 **An estimated row's withholding is absent, not 0.00** (2026-10-14; the backend half 2026-10-17).
 A yfinance estimate carries a guessed gross and no withholding on record — `compute_dividend_income`
 stores `0` because yfinance has none — so its `0` means "not known", and on a DA-1 aid a `0.00` reads
@@ -109,7 +117,12 @@ as "nothing was withheld", a claim against the reclaim. So the **service** says 
 inherits it:
 
 - an estimate's `withholding` is `null`; its `net` keeps the gross fallback (`_net_eur`), so real
-  income is not dropped;
+  income is not dropped. **Deliberately not `IncomeSplit`**, the gross-less-ladder net every other
+  reader shows for an estimate since 2026-10-18 (docs/dividends.md, issue #61): that net subtracts
+  an *assumed* withholding, and here gross − net would publish the assumption as the very figure
+  this report refuses to state. So an estimate year's net on this tab is its gross, and the
+  Dividends tab's is lower by the ladder rate — two readings, each `est.`-tagged, reasoned on
+  both sides (`tax_service.py`, and the exemption in `tests/test_dividend_estimate_net.py`);
 - `dividend_totals.withholding` is the recorded withholding only, `null` when every row is an
   estimate, and `dividend_totals.estimated_rows` counts what it leaves out — and what `gross` and
   `net` include;

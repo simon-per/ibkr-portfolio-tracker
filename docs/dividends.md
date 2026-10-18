@@ -275,6 +275,94 @@ broker's own entitlement. Both readers count through `shares_held_at`, which ask
 (`test_ex_date_shares_count_a_buy_on_the_ex_date_and_drop_a_sale_on_it`), so changing the rule is a
 deliberate act that moves every valuation with it.
 
+### An estimate's net is its gross less the ladder withholding — `IncomeSplit`
+
+`compute_dividend_income` stores `net = gross` on a `yfinance_estimate` row, because yfinance knows
+no withholding, and until 2026-10-18 every reader took that as net (GitHub issue #61). The breakdown
+put it into the months, the years and TTM/YTD, then added the ladder-rate withholding for the same
+years beside it — so on an estimate-era year net plus the WHT line exceeded gross, and every
+comparison across the splice (each year's YoY, *this year vs last*, *last 12M vs prior 12M*, the
+rolling TTM) measured IBKR's real net against estimated gross and read low by about the
+withholding rate.
+
+**`IncomeSplit` (`dividend_service.py`) is the one place an estimate's net is decided.** Its
+withholding is its gross at the security's ladder rate (`_withholding_rates` — *The withholding
+ladder* below, the rate its projections are sized with), and its net is the gross less exactly that
+amount, so `net + withholding = gross` by construction. IBKR rows read their own net and
+withholding, unchanged. Read time only — stored rows are unchanged — so a new WHT setting or a
+newly measured IBKR rate re-prices the estimate era at once, as it re-prices the forecast; that
+includes the `accrual` rung, which the per-year WHT figure already used. Built from the whole table
+(`DividendService.income_split()`), or inside the breakdown before its walk from the same rows and
+accruals `_forecast_inputs` reads, with or without a forecast, so no figure moves with the toggle.
+
+Every reader of an estimate row, decided:
+
+- **The breakdown** — months, `ttm_series`, `annual[]` net and `withholding_eur`, TTM/YTD and the
+  paces, per-security `net_eur` and the trailing yield: the split. A per-security row's
+  `gross_eur`/`withholding_eur` stay the recorded figures, and the phone card leaves an estimate
+  row's withholding out (`source === 'estimate'`: absent, not 0.00).
+- **The pending-estimate tail of the calendar**: the split (it already deducted the ladder rate,
+  through its own call; now through the same helper).
+- **The summary card** (`/api/dividends/summary`): the split; `total_withholding_eur` includes the
+  estimates' ladder amount, so `total_gross = total_net + total_withholding` as on each year.
+- **XIRR's dividend inflows** and **the activity ledger**: the split — what reached the investor,
+  and the amount the tab counts for that dividend.
+- **The forecast's inputs**: deliberately the stored **gross** per share. The ladder is applied
+  once to every history entry; reading the split there would deduct it twice.
+- **The tax report**: deliberately **not** the split — see [tax.md](tax.md): an estimate's
+  withholding is absent there, and gross less an assumed tax would publish it as gross − net.
+- **The cash balance** (`ibkr_cash_receipts`): IBKR rows only; an estimate never reaches it.
+- **Forecast snapshots** store `ttm_net_eur` off the breakdown, so rows written from 2026-10-18
+  carry the split and earlier rows the old basis: the history's TTM line steps down once while its
+  window still holds estimate-era months. Stored rows are not rewritten.
+
+Tests: `tests/test_dividend_estimate_net.py` — net + withholding = gross on an estimate-era year on
+both rungs and with the toggle either way, flat income reading 0.0% across the splice, the IBKR era
+to the cent, the summary and the ledger agreeing with the tab, and the family rule: every module
+under `app/` that calls `_splice_by_era` reads net through `income_split()` (`tax_service` the one
+named exemption). The growth-mechanics tests whose estimate rows stand in for landed income set
+the WHT setting to 0% (`_estimates_read_at_gross` in `test_dividend_growth.py`).
+
+### A withholding posted after its dividend — `dividend_withholding_adjustments`
+
+`sync_dividends_from_cash_transactions` groups IBKR's cash lines by (security, settle date). IBKR
+posts refunds and corrections of withheld tax — a 30% withholding corrected to the 15% treaty rate,
+a fund's year-end adjustment — as standalone WHTAX lines on a later date, so until 2026-10-18 they
+formed a group with no gross, which was skipped without a count: the dividend kept the
+over-withheld amount, and DA-1 with it (GitHub issue #60).
+
+**Each such line is recorded once and folded into the dividend it corrects:** the security's
+nearest IBKR dividend on or before the line's date, **in the same calendar (tax) year** — DA-1 is
+filed per year — and within `WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS` (185, the whole cycle of any payer
+paying at least twice a year). That dividend's withholding and net move, and the line, keyed on
+IBKR's `transactionID` in `dividend_withholding_adjustments`, records which row took it
+(`target_pay_date`). **A dividend's stored withholding is its own day's plus the adjustments folded
+into it**, which is what makes re-ingesting idempotent: the ~30-day Flex window overlaps the last
+statement, so a refund arrives with its dividend, without it, or several times, and the row ends on
+the corrected figure every time. A day that reverses a tax and re-posts it lower is applied
+withholding-first, so no line passes through a negative figure.
+
+Refused whole, counted (`withholding_adjustments_unmatched` on the run) and named in `warnings[]`:
+a line with no dividend in reach (a January refund of December's tax, or one past the lookback),
+and a refund larger than the tax withheld from that dividend — a negative withholding would publish
+income above gross, so it was not that dividend's. A refused line stays recorded without a target
+and is retried on every ingest, so a dividend supplied later by an older statement (the
+`ingest_flex_xml` path) picks it up; an attachment, once made, is not revisited. A line with no FX
+rate is not recorded, and the next statement carrying it retries. A dividend **reversal** alone on
+its day (negative gross, no re-payment) is counted and warned, never applied; its lines are
+recorded (`line_type` `DIVIDEND`/`PAYMENTINLIEU`, never folded) for one reason only, below.
+
+**Counted on every ingest, warned on the first.** The ~30-day window re-delivers a refused line
+or reversal on every statement for about a month. Each ingest counts it
+(`withholding_adjustments_unmatched`, `dividend_reversals_skipped`), but only the ingest that
+first records it names it in `warnings[]` — a warning that is always present teaches the reader to
+skip it. "First" is "not yet in `dividend_withholding_adjustments`"; a line with no FX rate is not
+recorded, so its warning repeats until it can be. Pinned by
+`test_a_refused_line_warns_on_the_ingest_that_first_records_it_only`. Still folded into
+the day's row: a correction landing on the same day as another distribution of the same security,
+which nothing in the lines tells apart from that distribution's own withholding.
+Tests: `tests/test_dividend_withholding_adjustment.py`.
+
 ### The Yahoo pass — each holding at most once a month; new ex-dates ride the price pass
 
 **New ex-dates come from the price responses** (GitHub issue #11, item a, 2026-10-17). Every price
@@ -455,8 +543,9 @@ on, and a future year is forecast in full rather than from today.
 security's rate from the withholding ladder (the settings repository's factor only on its `assumed`
 rung, since 2026-10-04) when `_forecast_inputs` turns gross into net and when an unpaid Yahoo
 estimate is emitted directly to the calendar. Both apply it before display-currency conversion and rounding;
-missing per-share inputs stay absent. Stored gross and historical estimates remain unchanged,
-as do shared income readers. Repeated reads always start from the original gross, so the factor
+missing per-share inputs stay absent. Stored gross and historical estimates remain unchanged; the
+realized readers deduct the same ladder rate through `IncomeSplit` (above, since 2026-10-18).
+Repeated reads always start from the original gross, so the factor
 cannot compound. `GET /api/settings` publishes the percentage and authenticated
 `PUT /api/settings/dividend-withholding` persists it; `0 ≤ withholding ≤ 100` maps to
 `net factor = 1 − withholding / 100`, with up to three decimal places accepted. IBKR-derived forecasts, accrual `netAmount` (or gross minus reported withholding
@@ -544,14 +633,16 @@ recorded it, unpaid). The table no longer shows it (owner, 2026-10-14); it is se
    here had exactly 15% withheld);
 4. `assumed` — the WHT setting, labelled `gross_estimate`.
 
-Median on rungs 2–3 because a withholding posted on another day leaves one row at 0%. The same rate
+Median on rungs 2–3 because a withholding posted on another day used to leave one row at 0% — the
+ingest folds it into its dividend since issue #60, but not across a tax year. The same rate
 applies to the forward projections, the overdue inference and the pending-estimate tail, so an
 announced accrual re-prices every later projection of its security — pinned in
 `test_pending_estimate_hands_off_to_accrual_then_actual_cash`.
 
 **The per-year WHT figure** (2026-10-04, owner request). Each `growth.annual[]` row carries
 `withholding_eur` (received: IBKR's own withholding; estimate-era income, which recorded none, at
-the security's ladder rate) and `forecast_withholding_eur` (each projection's `net × r / (1 − r)` at
+the security's ladder rate — exactly what `IncomeSplit` took off that year's net, so the year's net
+plus this figure is its gross) and `forecast_withholding_eur` (each projection's `net × r / (1 − r)` at
 the rate that took it from gross). *Per year* shows their sum as one small grey "WHT" line under
 the amount — deliberately not split, a quiet reminder of the DA-1 threshold rather than a tax
 figure; with Forecast off, `realizedOnlyYears` zeroes the projected half. The received half does

@@ -22,6 +22,7 @@ from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import DividendService
 
@@ -40,6 +41,16 @@ async def _make_session():
                          currency="EUR", conid=100, asset_category="STK", exchange="XETRA"))
     await session.flush()
     return engine, session
+
+
+async def _estimates_read_at_gross(session):
+    """
+    A 0% withholding setting. Since issue #61 an estimate's net is its gross less the
+    security's ladder rate — 15% assumed by default — so the tests whose estimate rows
+    stand in for landed income, and whose point is the growth arithmetic rather than
+    the withholding, set the rate to zero and keep their figures as written.
+    """
+    await AppSettingsRepository(session).set_dividend_net_factor(Decimal("1"))
 
 
 async def _seed(session, on_date, net, source="yfinance_estimate",
@@ -98,6 +109,7 @@ async def test_ytd_compares_like_for_like_not_against_a_whole_prior_year():
     """
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         # Last year: 10 before the cutoff day, 90 after it. Only the 10 is
         # comparable to a Jan..Jul window.
         await _seed(session, date(2025, 3, 1), "10.00")
@@ -120,6 +132,7 @@ async def test_a_leap_day_as_of_still_finds_a_comparable_day():
     """29 February has no counterpart, and .replace(year=...) raises on it."""
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         await _seed(session, date(2023, 2, 1), "5.00")
         await _seed(session, date(2024, 2, 1), "7.00")
 
@@ -339,6 +352,7 @@ async def test_growth_is_identical_whichever_year_is_selected():
     """
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         await _seed(session, date(2025, 4, 1), "10.00")
         await _seed(session, date(2026, 4, 1), "25.00")
 
@@ -363,6 +377,7 @@ async def test_latest_month_reports_the_last_realized_month_not_a_projected_one(
     """
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         session.add(_lot(1, date(2024, 1, 1), "100"))
         await session.flush()
         for d in [date(2026, 1, 15), date(2026, 4, 15), date(2026, 7, 15)]:
@@ -388,6 +403,7 @@ async def test_the_two_paces_compare_finished_months_per_month():
     """
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         session.add(_lot(1, date(2024, 1, 1), "100"))
         await session.flush()
         await _seed_per_share(session, date(2024, 12, 15))                   # income from 2024
@@ -568,6 +584,7 @@ async def test_a_stopped_payer_falls_to_a_measured_zero_and_the_open_month_is_ab
     """
     engine, session = await _make_session()
     try:
+        await _estimates_read_at_gross(session)
         await _seed(session, date(2023, 1, 15), "10")
         r = await DividendService(session).get_dividend_breakdown(
             as_of=date(2024, 3, 1), include_forecast=False,
@@ -608,7 +625,10 @@ async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_i
         closed = [p for p in on["ttm_series"] if not p["partial"]]
         assert off["ttm_series"] == closed
         assert [p["month"] for p in closed] == [f"2026-{m:02d}" for m in range(1, 7)]
-        assert all(p["total_eur"] == p["net_eur"] == 400 for p in closed)
+        # Four estimated payments of gross 100, each read net of the same 15% the
+        # projection deducts (issue #61) — so folding the forecast in below replaces
+        # a payment like for like instead of stepping the total down by the tax.
+        assert all(p["total_eur"] == p["net_eur"] == 340 for p in closed)
         assert all(p["forecast_net_eur"] == 0 for p in closed)
 
         by_m = {p["month"]: p for p in on["ttm_series"]}
@@ -618,9 +638,9 @@ async def test_hiding_the_forecast_yields_exactly_the_closed_prefix_of_showing_i
         assert by_m["2026-07"]["forecast_net_eur"] == 0
         assert by_m["2026-07"]["mom_includes_forecast"] is False
         # ...and this one is open AND projected.
-        assert by_m["2026-10"]["net_eur"] == 300
+        assert by_m["2026-10"]["net_eur"] == 255
         assert by_m["2026-10"]["forecast_net_eur"] == 85  # gross 100 x 0.85
-        assert by_m["2026-10"]["total_eur"] == 385
+        assert by_m["2026-10"]["total_eur"] == 340
         assert by_m["2026-10"]["mom_includes_forecast"] is True
     finally:
         await session.close()
@@ -801,6 +821,7 @@ async def test_the_per_symbol_split_reconciles_to_the_scalar_it_is_drawn_against
         session.add(Security(id=2, isin="US0000000002", symbol="BBB", description="Beta Corp",
                              currency="EUR", conid=200, asset_category="STK", exchange="XETRA"))
         await session.flush()
+        await _estimates_read_at_gross(session)
         for month in range(1, 13):
             await _seed(session, date(2025, month, 15), "10")
             await _seed(session, date(2025, month, 20), "4", security_id=2)

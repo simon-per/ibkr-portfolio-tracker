@@ -670,12 +670,16 @@ async def test_the_ledger_dividend_total_agrees_with_the_dividends_reader(db):
             "app.repositories.dividend_repository", fromlist=["DividendRepository"]
         ).DividendRepository(db).get_computed_dividends()
     )
+    # Every reader's net since issue #61: an estimate's is its gross less the ladder
+    # withholding, so the ledger lists the amount the Dividends tab counts.
+    income = await DividendService(db).income_split()
     reader_total = sum(
-        (p.net_amount_eur if p.net_amount_eur is not None else p.gross_amount_eur)
+        income.net(p)
         for p in spliced
         if WINDOW_START <= (p.pay_date or p.ex_date) <= TODAY
     )
     assert ledger_total == reader_total
+    assert any(p.source != "ibkr" for p in spliced)
 
 
 @pytest.mark.asyncio

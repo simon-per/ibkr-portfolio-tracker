@@ -251,6 +251,12 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         "corporate_actions_seen": len(corp_actions_data),
         "prices_invalidated": invalidated["prices_invalidated"],
         "cash_transactions_seen": len(cash_txns),
+        # Withholding refunds/corrections posted after their dividend (issue #60):
+        # folded into it, or left over and named in `warnings[]`.
+        "withholding_adjustments_applied": dividend_result.get("withholding_adjustments_applied", 0),
+        "withholding_adjustments_unmatched": dividend_result.get(
+            "withholding_adjustments_unmatched", 0
+        ),
         # The count STORED, not the raw row count, for the same reason `cash_balances_seen`
         # is: 0 against a non-empty section would say "the portal edit did not take" about
         # an edit that did. 0 with no section is the normal, supported state.

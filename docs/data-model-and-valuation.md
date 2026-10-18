@@ -25,7 +25,12 @@
   deposit +, withdrawal −), `amount_eur` (pre-converted at `flow_date`). Only `DEPOSITWITHDRAW` counts as
   money added — see the contributions section.
 - **dividend_payments** — `gross_amount_eur`, **`withholding_tax_eur`**, **`net_amount_eur`**,
-  `pay_date`, **`source`** ∈ `ibkr` | `yfinance_estimate`.
+  `pay_date`, **`source`** ∈ `ibkr` | `yfinance_estimate`. An estimate stores its gross as net; it is
+  read through `IncomeSplit` (docs/dividends.md).
+- **dividend_withholding_adjustments** — IBKR withholding lines posted on a day with no dividend of
+  their security (refunds, corrections), idempotent on `ib_key` (IBKR transactionID):
+  `posted_date`, `amount` (IBKR's sign), `withholding_eur` (+ withholds, − refunds) and
+  `target_pay_date`, the IBKR dividend row it was folded into (NULL while none qualifies).
 - **exchange_rates** / **market_prices** — caches. **ticker_mappings** — IBKR→Yahoo symbols.
 - **isin_identities** — ISIN → company identity, keyed by ISIN: `lei` + `issuer_name` +
   `lei_source` + `lei_checked_at` (GLEIF), `share_class_figi` + `composite_figi` + `figi_name` +

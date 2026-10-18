@@ -363,6 +363,9 @@ class ActivityService:
         ]
 
         symbols = await self._symbols_by_id()
+        # An estimate's amount is its gross less the ladder withholding — the net every
+        # other reader shows for it (`IncomeSplit`, issue #61).
+        income = await DividendService(self.db).income_split()
         out = []
         for p in payments:
             # The shared helpers, not local equivalents of them. These were inline
@@ -374,7 +377,7 @@ class ActivityService:
             if not DividendService._is_income(p):
                 continue
             gross = p.gross_amount_eur or Decimal("0")
-            net = DividendService._net_eur(p)
+            net = income.net(p)
 
             when = p.pay_date or p.ex_date
             withholding = p.withholding_tax_eur or Decimal("0")
