@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; waves 1–3 (#53–#69, #73, #79) shipped that evening.
+code trace; waves 1–3 (#53–#70, #73, #79) shipped that evening.
 
 ---
 
@@ -176,6 +176,8 @@ Only what is still unverified.
   - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
     refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
   - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
+  - UI polish (#70): every table's phone cards carry logos; Positions weights show a dash until
+    the summary loads; a zero prints unsigned ("CHF 0", "0.0%") everywhere.
   - Earnings (#69): one calendar/history row per company and day (GOOG folds with GOOGL/ABEA
     once Alphabet's LEI is cached); a moved event's old row clears on the security's next fetch.
   - Sync routes (#65, #79): a weekend manual market sync no longer re-downloads closes;
@@ -267,13 +269,12 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #70–#72 and #74–#78** (`gh issue list`), in
+1. **The second audit round's open issues, #71, #72 and #74–#78** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-3. **Tooling.** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an
-   image build. `alembic check` fails on naming drift only. The `ResizeObserver` stub is in 23
-   test files — `src/testSetup.ts` is the place for it.
+3. **Tooling (#72).** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an
+   image build. `alembic check` fails on naming drift only.
 4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
@@ -291,12 +292,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
 9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-10. **UI follow-ups from the fintech pass:** `/api/tax/report`'s realized and holdings rows carry
-    no ISIN or security id, so their avatars are monograms; Activity's phone cards have no logo
-    (`DataTable`'s card view); the earnings calendar and surprise history list some companies
-    twice (seen on production 2026-10-17, not investigated); `SectionHeader`'s `aside` is
-    `shrink-0`, so a wide one overflows a phone (Dividends moved its controls out).
-11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 

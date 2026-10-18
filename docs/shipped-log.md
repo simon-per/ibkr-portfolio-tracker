@@ -12,6 +12,9 @@
 - **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
   (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
   contributions and summary were identical before and after.
+- **#70** (`bce65f5`): phone-card logos through DataTable's title `avatar`; weights absent until the
+  summary loads; one `ABSENT`, one `formatSigned`, shared query options (family tests); the
+  ResizeObserver stub in `testSetup.ts`.
 - **#69** (`8d9c719`): earnings grouped by the look-through's company identity
   (`identity_service.group_companies`), future events replaced per fetch, `utc_iso` dates.
 - **#65 + #79** (`6de291d`): the manual market and dividend syncs call the scheduler's steps
