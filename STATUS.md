@@ -15,7 +15,8 @@ docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
-#47 and #51 followed; #38 is open.
+#47, #51 and #38 followed: every audit issue is closed. A second audit round started the same
+afternoon.
 
 ---
 
@@ -173,6 +174,10 @@ Only what is still unverified.
 - **#48/#49 in a real browser:** dark mode's native scrollbars and selects are dark now
   (`color-scheme`, not visible to jsdom); money reads "-CHF 1,234" everywhere; the Forecast tab's
   dividend-trend axis labels — if the monthly forecast passes 1,000, check no tick label repeats.
+- **#38's first deploy:** a full uncached build (the dependency layer is new), the log shows
+  `docker compose build --pull`, `docker builder prune` and, from the second deploy on,
+  "Skipping npm ci"; `docker system df` on the VPS a week later shows build cache bounded to about
+  seven days of layers instead of growing.
 - **The VPS still runs Node 20** (deploy.sh installs Node only when none is present): `npm ci` on
   deploy prints an `EBADENGINE` warning since `engines: >=22` (#39) — harmless; upgrading is an
   owner action over ssh.
@@ -249,9 +254,8 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issue #38** (dependency lock, cached builds) (`gh issue list`). Each carries its
-   repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
-   tooling below is #39.
+1. **The second audit round (2026-10-18)** — findings are verified by offline repro before they
+   are filed (`gh issue list`).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 3. **Tooling.** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an

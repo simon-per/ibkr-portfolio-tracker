@@ -7,6 +7,21 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — #38, dependency lock and cached builds (pushed alone)
+
+- The image and CI install `backend/requirements.lock` (uv-compiled for Python 3.11 manylinux,
+  `--require-hashes`); CI adds `requirements-dev.lock` in the same pass. `requirements.txt` and
+  `requirements-dev.txt` are only the inputs; `test_requirements_lock.py` catches a stale lock
+  offline. python-multipart and the pytest packages left the runtime set.
+- `deploy.sh`: `docker compose build --pull` with the layer cache instead of `--no-cache`;
+  `docker builder prune --filter until=168h` after `up -d` (a failure only warns); `npm ci` only
+  when `node_modules`' stamp (Node version + lockfile hash) differs.
+- `.dockerignore` whitelists `requirements.lock` in place of `requirements.txt`. One shared
+  `tests/bash_finder.py` replaces three copies.
+
+Verified offline: backend 2655 passed / 8 skipped plus 27 deploy-script tests, ruff, frontend
+1102 passed, build and lint.
+
 ## Shipped 2026-10-18 — #51, deploy hardening (pushed alone)
 
 `481d803`: `backend/setup_ssl.sh` deleted; `ops/nginx-portfolio.conf.example`; `.dockerignore` is a
