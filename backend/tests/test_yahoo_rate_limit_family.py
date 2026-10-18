@@ -23,8 +23,6 @@ from datetime import date
 from decimal import Decimal
 import inspect
 import pathlib
-from datetime import date
-from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -38,6 +36,7 @@ from app.services.analyst_rating_service import AnalystRatingService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.watchlist_service import WatchlistService
 from app.services.yahoo_rate_limit import is_rate_limit, yahoo_hold_until
+from tests.ast_scope import imports_yfinance
 
 
 async def _no_sleep(_seconds):
@@ -296,21 +295,10 @@ def _label(path: pathlib.Path) -> str:
     return path.relative_to(APP).as_posix()
 
 
-def _imports_yfinance(tree: ast.AST) -> bool:
-    # An AST import, not the word "yfinance" — three pure helper modules
-    # (peg_ratio, safe_numbers, ttm_growth) only mention it in prose, and matching
-    # those would make this assertion noise that gets silenced rather than read.
-    return any(
-        (isinstance(n, ast.Import) and any(a.name.split(".")[0] == "yfinance" for a in n.names))
-        or (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "yfinance")
-        for n in ast.walk(tree)
-    )
-
-
 def _yahoo_modules() -> list:
     return [
         path for path in _app_modules()
-        if _imports_yfinance(ast.parse(path.read_text(encoding="utf-8")))
+        if imports_yfinance(ast.parse(path.read_text(encoding="utf-8")))
     ]
 
 

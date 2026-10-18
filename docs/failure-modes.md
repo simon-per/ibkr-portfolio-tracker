@@ -117,7 +117,8 @@ compared while three fundamentals models no route used were "covered". Each woul
 in a module it never opened. The walks now start from what the rule is about — every module under
 `app/` that imports yfinance (`yf_cache.py` the one reasoned exemption), every route's live
 `response_model` with an explicit `TS_NAME_FOR` alias map — and each carries a floor, a stale-entry
-check, and a failure for a paired model that governs nothing.
+check, and a failure for a paired model that governs nothing. The scope predicate is itself shared:
+the three Yahoo family tests each wrote "imports yfinance" until `tests/ast_scope.py` (issue #72).
 
 **The lesson is not "never duplicate", though.** `lib/dividendGrowth.ts` deliberately reimplements the
 server's year-over-year arithmetic — it cannot be extracted, since it lives across the language

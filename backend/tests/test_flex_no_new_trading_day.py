@@ -18,10 +18,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.sync_run import SyncRun
 from app.services.flex_generation import (
@@ -36,6 +34,7 @@ from app.services.scheduler_service import (
     IBKR_ONLY_HOURS,
     SchedulerService,
 )
+from tests.memory_db import memory_engine
 
 BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -134,12 +133,7 @@ def test_the_oldest_trading_day_a_statement_misses(generated_on, expected):
 
 @pytest_asyncio.fixture
 async def maker(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", sessions)
     monkeypatch.setattr("app.services.scheduler_service.IBKRService", _ExplodingFlex)

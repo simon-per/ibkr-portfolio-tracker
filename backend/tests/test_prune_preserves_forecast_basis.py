@@ -23,16 +23,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cli.prune_empty_dividends import _is_empty
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import PRE_OWNERSHIP_HISTORY_YEARS, DividendService
+from tests.memory_db import memory_engine
 
 AS_OF = date(2026, 5, 1)
 
@@ -45,12 +44,7 @@ async def _keep_from(session, security_id: int):
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(id=1, isin="US0000000001", symbol="TSMC", description="Taiwan Semi",
                          currency="EUR", conid=100, asset_category="STK", exchange="XETRA"))

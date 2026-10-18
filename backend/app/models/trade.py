@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, ForeignKey, Numeric, Date, Index
+from sqlalchemy import String, ForeignKey, Numeric, Date, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from datetime import datetime, date
@@ -22,8 +22,8 @@ class Trade(Base):
     """
     __tablename__ = "trades"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    ib_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ib_key: Mapped[str] = mapped_column(String(64), nullable=False)
     # The source ledger's durable instrument identifier: IBKR's contract id for an
     # IBKR row, and the **ISIN** for a ledger that issues no such id (Pillar 3a).
     # Deliberately still NOT NULL -- every IBKR row honours it and weakening the
@@ -53,7 +53,10 @@ class Trade(Base):
     )
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 
+    # A unique *constraint* on ib_key, named as migration i2d9f6a3b5c7 created it, not
+    # the unique index `unique=True, index=True` would declare (`alembic check`).
     __table_args__ = (
+        UniqueConstraint("ib_key", name="uq_trades_ib_key"),
         Index("ix_trades_conid_date", "conid", "trade_date"),
     )
 

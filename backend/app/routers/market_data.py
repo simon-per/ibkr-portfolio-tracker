@@ -69,10 +69,6 @@ async def get_market_data_status(db: AsyncSession = Depends(get_db)):
     Returns:
         Statistics about cached market prices
     """
-    from app.repositories.market_price_repository import MarketPriceRepository
-
-    price_repo = MarketPriceRepository(db)
-
     # Get total count and date range
     from sqlalchemy import select, func
     from app.models.market_price import MarketPrice

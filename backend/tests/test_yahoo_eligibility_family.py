@@ -22,6 +22,7 @@ import pathlib
 
 from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_YAHOO, Security
 from app.services.yahoo_eligibility import is_yahoo_eligible, yahoo_eligible
+from tests.ast_scope import imports_yfinance
 
 
 APP = pathlib.Path(__file__).resolve().parents[1] / "app"
@@ -55,17 +56,6 @@ def _label(path: pathlib.Path) -> str:
     return path.relative_to(APP).as_posix()
 
 
-def _imports_yfinance(tree: ast.AST) -> bool:
-    """An AST import, not the word — several pure helpers only mention it in prose."""
-    return any(
-        (isinstance(n, ast.Import)
-         and any(a.name.split(".")[0] == "yfinance" for a in n.names))
-        or (isinstance(n, ast.ImportFrom)
-            and (n.module or "").split(".")[0] == "yfinance")
-        for n in ast.walk(tree)
-    )
-
-
 def _selects_security(tree: ast.AST) -> bool:
     """`select(Security)` anywhere — the shape that feeds a loop with rows to fetch."""
     for node in ast.walk(tree):
@@ -93,7 +83,7 @@ def test_every_yahoo_service_that_selects_securities_consults_the_predicate():
     for path in _app_modules():
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
-        if not (_imports_yfinance(tree) and _selects_security(tree)):
+        if not (imports_yfinance(tree) and _selects_security(tree)):
             continue
         if "yahoo_eligible" not in source and _label(path) not in NOT_IN_THE_FAMILY:
             offenders.append(_label(path))
@@ -117,7 +107,7 @@ def test_no_exemption_outlives_its_reason():
     """
     matched = {
         _label(path) for path in _app_modules()
-        if _imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
+        if imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
         and _selects_security(tree)
     }
     stale = set(NOT_IN_THE_FAMILY) - matched
@@ -142,7 +132,7 @@ def test_the_family_is_not_empty():
     """
     matched = [
         _label(path) for path in _app_modules()
-        if _imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
+        if imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
         and _selects_security(tree)
     ]
     assert len(matched) >= 5, (

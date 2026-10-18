@@ -27,10 +27,9 @@ from typing import Dict, Optional
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base, get_db
+from app.database import get_db
 import app.models  # noqa: F401
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
@@ -41,6 +40,7 @@ from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services.benchmark_service import BenchmarkService, reset_upstream_throttle
 from app.services.portfolio_service import PortfolioService
+from tests.memory_db import memory_engine
 
 # March 2026: the 1st is a Sunday, the 2nd a Monday, the 7th/8th a weekend.
 MARCH = [date(2026, 3, d) for d in range(1, 32)]
@@ -94,12 +94,7 @@ async def _session(index_from: date = MARCH[0], stock_price: Optional[str] = "12
     the seed has its own test below. Index and stock are flat so any movement a test sees
     is the event under test.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(
         id=1, isin="US0000000001", symbol="AAA", description="Test Co",

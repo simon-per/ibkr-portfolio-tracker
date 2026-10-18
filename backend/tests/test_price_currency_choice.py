@@ -9,23 +9,17 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.services.portfolio_service import PortfolioService
+from tests.memory_db import memory_engine
 
 
 async def _session_with_prices(rows):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(id=1, isin="CA0000000001", symbol="SBI", description="Test",
                          currency="CAD", conid=100, asset_category="STK", exchange="TSE"))

@@ -1,4 +1,4 @@
-from sqlalchemy import Float, String, ForeignKey, DateTime, Index, UniqueConstraint, Boolean
+from sqlalchemy import Float, ForeignKey, DateTime, Index, UniqueConstraint, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -14,7 +14,7 @@ class EarningsEvent(Base):
     """
     __tablename__ = "earnings_events"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     security_id: Mapped[int] = mapped_column(
         ForeignKey("securities.id", ondelete="CASCADE"),
         nullable=False,

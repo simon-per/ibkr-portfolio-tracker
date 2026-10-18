@@ -12,11 +12,10 @@ schema at once.
 import collections
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 import app.models  # noqa: F401  - registers every model on the metadata
+from tests.memory_db import create_schema, new_memory_engine
 
 
 def test_no_table_declares_the_same_index_name_twice():
@@ -36,13 +35,8 @@ def test_no_table_declares_the_same_index_name_twice():
 @pytest.mark.asyncio
 async def test_full_schema_can_be_created_from_metadata():
     """The whole schema must build in one go, so integration tests can use it."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
     finally:
         await engine.dispose()

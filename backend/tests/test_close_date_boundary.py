@@ -11,10 +11,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.market_price import MarketPrice
 from app.models.security import Security
@@ -22,6 +20,7 @@ from app.models.taxlot import TaxLot
 from app.repositories.security_repository import held_at, lot_held_at
 from app.services.dividend_service import shares_held_at
 from app.services.portfolio_service import BaseFx, PortfolioService
+from tests.memory_db import memory_engine
 
 D = date(2026, 3, 10)
 
@@ -59,12 +58,7 @@ def test_a_same_day_rotation_counts_once_on_the_rotation_day():
 
 @pytest.mark.asyncio
 async def test_a_31_dec_sale_is_realized_gains_not_steuerwert():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         year_end = date(2025, 12, 31)
@@ -109,12 +103,7 @@ def test_lot_held_at_over_the_day_before_the_day_and_the_day_after(open_date, cl
 
 @pytest.mark.asyncio
 async def test_the_sql_criterion_and_the_python_helper_agree():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         session.add(_sec(1, "AAA"))

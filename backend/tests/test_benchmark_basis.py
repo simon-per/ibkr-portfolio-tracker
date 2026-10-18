@@ -25,10 +25,8 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
 from app.models.benchmark_price import BenchmarkPrice
@@ -37,6 +35,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.benchmark_service import BenchmarkService, reset_upstream_throttle
+from tests.memory_db import memory_engine
 
 
 @pytest.fixture(autouse=True)
@@ -47,14 +46,9 @@ def _clear_throttle():
 
 
 async def _session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [BenchmarkPrice.__table__, ExchangeRate.__table__, TaxLot.__table__,
               Security.__table__, AppSetting.__table__, CashFlow.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(
         id=1, isin="US0000000001", symbol="AAA", description="Test Co",

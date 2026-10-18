@@ -16,13 +16,11 @@ import asyncio
 from datetime import date, datetime, timedelta
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.models  # noqa: F401
 import app.services.benchmark_service as bs
 import app.services.yahoo_rate_limit as hold
-from app.database import Base
 from app.models.app_settings import AppSetting
 from app.services.benchmark_service import BENCHMARKS, BenchmarkService, reset_upstream_throttle
 from app.services.yahoo_rate_limit import (
@@ -35,6 +33,7 @@ from app.services.yahoo_rate_limit import (
     reset_yahoo_hold,
     yahoo_hold_until,
 )
+from tests.memory_db import memory_engine
 
 T0 = datetime(2026, 3, 10, 14, 0)
 
@@ -63,12 +62,7 @@ def _clear_throttle():
 
 async def _settings_store(monkeypatch):
     """Where the stamp persists, for this test: `app_settings` and nothing else."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[AppSetting.__table__]))
+    engine = await memory_engine(tables=[AppSetting.__table__])
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(hold, "_session_factory", lambda: factory)
     return engine, factory

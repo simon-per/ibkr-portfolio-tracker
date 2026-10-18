@@ -17,12 +17,9 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.etf_basket import EtfHolding
 from app.repositories.etf_basket_repository import EtfBasketRepository
@@ -35,24 +32,12 @@ from app.services.identity_service import (
     IdentityService,
     rotating_window,
 )
+from tests.memory_db import memory_engine
 
 GRID = "US33737A1088"
 EATON_CINS = "G29183103"
 EATON_ISIN = "IE00B8KQN827"
 EATON_FIGI = "BBG001S5QZ45"
-
-
-@pytest_asyncio.fixture
-async def session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with AsyncSession(engine, expire_on_commit=False) as db:
-        yield db
-    await engine.dispose()
 
 
 def basket(rows):
@@ -73,16 +58,16 @@ def row(line_no, name, weight, isin=None, identifier=None):
 # ------------------------------------------------------------------------------- storage
 
 @pytest.mark.asyncio
-async def test_an_unconvertible_identifier_survives_the_import(session):
+async def test_an_unconvertible_identifier_survives_the_import(db):
     """
     Without this the value is lost at import time and unrecoverable afterwards: the parser has
     already decided it is not an ISIN, so nothing downstream would know a CINS had been there.
     """
-    await EtfBasketRepository(session).replace_basket(basket([
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "Nvidia Corp", "40", isin="US67066G1040"),
     ]))
-    stored = (await session.execute(
+    stored = (await db.execute(
         select(EtfHolding).order_by(EtfHolding.line_no)
     )).scalars().all()
 
@@ -94,8 +79,8 @@ async def test_an_unconvertible_identifier_survives_the_import(session):
 
 
 @pytest.mark.asyncio
-async def test_only_the_rows_with_no_identity_at_all_are_pending(session):
-    repo = EtfBasketRepository(session)
+async def test_only_the_rows_with_no_identity_at_all_are_pending(db):
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(basket([
         row(1, "Eaton Corporation Plc", "40", identifier=EATON_CINS),
         row(2, "Nvidia Corp", "40", isin="US67066G1040"),
@@ -106,8 +91,8 @@ async def test_only_the_rows_with_no_identity_at_all_are_pending(session):
 
 
 @pytest.mark.asyncio
-async def test_a_resolved_identifier_is_not_asked_about_twice(session):
-    repo = EtfBasketRepository(session)
+async def test_a_resolved_identifier_is_not_asked_about_twice(db):
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "Nvidia Corp", "40", isin="US67066G1040"),
@@ -115,7 +100,7 @@ async def test_a_resolved_identifier_is_not_asked_about_twice(session):
     assert await repo.apply_resolved_identifiers({EATON_CINS: EATON_FIGI}) == 1
 
     assert await repo.unresolved_identifiers() == []
-    stored = (await session.execute(
+    stored = (await db.execute(
         select(EtfHolding).where(EtfHolding.line_no == 1)
     )).scalars().one()
     assert stored.constituent_share_class_figi == EATON_FIGI
@@ -125,9 +110,9 @@ async def test_a_resolved_identifier_is_not_asked_about_twice(session):
 
 
 @pytest.mark.asyncio
-async def test_one_identifier_resolves_every_fund_that_carries_it(session):
+async def test_one_identifier_resolves_every_fund_that_carries_it(db):
     """A company inside two funds is one question, and one answer must reach both rows."""
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "Nvidia Corp", "40", isin="US67066G1040"),
@@ -144,7 +129,7 @@ async def test_one_identifier_resolves_every_fund_that_carries_it(session):
 
 
 @pytest.mark.asyncio
-async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(session):
+async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(db):
     """
     Until 2026-10-15 a replace dropped the FIGI, on the grounds that it was re-derivable from
     one request. That stopped holding once the evening pass was capped at
@@ -153,7 +138,7 @@ async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(ses
     security for good, so OpenFIGI's earlier answer is still the answer. A new identifier in
     the fresher basket is still pending, and the raw identifier is never dropped.
     """
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "Nvidia Corp", "40", isin="US67066G1040"),
@@ -169,7 +154,7 @@ async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(ses
     await repo.replace_basket(fresher)
 
     assert await repo.unresolved_identifiers() == ["N07059210"]
-    stored = (await session.execute(
+    stored = (await db.execute(
         select(EtfHolding).where(EtfHolding.line_no == 1)
     )).scalars().one()
     assert stored.constituent_share_class_figi == EATON_FIGI
@@ -177,9 +162,9 @@ async def test_a_re_import_keeps_the_resolution_and_the_published_identifier(ses
 
 
 @pytest.mark.asyncio
-async def test_another_funds_answer_reaches_a_newly_imported_basket(session):
+async def test_another_funds_answer_reaches_a_newly_imported_basket(db):
     """One identifier is one security whichever fund lists it — the same rule as the update."""
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(basket([
         row(1, "Eaton Corporation Plc", "100", identifier=EATON_CINS),
     ]))
@@ -285,7 +270,7 @@ def test_a_cins_is_never_asked_as_a_cusip():
 # ---------------------------------------------------------------------------- the key
 
 @pytest.mark.asyncio
-async def test_the_api_key_changes_the_batch_and_the_pacing_together(session, monkeypatch):
+async def test_the_api_key_changes_the_batch_and_the_pacing_together(db, monkeypatch):
     """
     Both or neither: a 10x batch at the keyless rate would still take an hour for a fund's
     tail, and the keyed rate with a batch of 10 wastes the key entirely.
@@ -293,20 +278,20 @@ async def test_the_api_key_changes_the_batch_and_the_pacing_together(session, mo
     from app.config import settings
 
     monkeypatch.setattr(settings, "openfigi_api_key", "", raising=False)
-    headers, batch, interval = IdentityService(session)._openfigi_pacing
+    headers, batch, interval = IdentityService(db)._openfigi_pacing
     assert "X-OPENFIGI-APIKEY" not in headers
     assert batch == OPENFIGI_BATCH
 
     monkeypatch.setattr(settings, "openfigi_api_key", "  a-key  ", raising=False)
-    keyed_headers, keyed_batch, keyed_interval = IdentityService(session)._openfigi_pacing
+    keyed_headers, keyed_batch, keyed_interval = IdentityService(db)._openfigi_pacing
     assert keyed_headers["X-OPENFIGI-APIKEY"] == "a-key"
     assert keyed_batch == OPENFIGI_BATCH_KEYED
     assert keyed_interval < interval
 
 
 @pytest.mark.asyncio
-async def test_nothing_pending_makes_no_request_and_says_so(session):
-    summary = await IdentityService(session).resolve_constituent_identifiers()
+async def test_nothing_pending_makes_no_request_and_says_so(db):
+    summary = await IdentityService(db).resolve_constituent_identifiers()
 
     assert summary["identifiers_pending"] == 0
     assert summary["holdings_updated"] == 0
@@ -387,17 +372,17 @@ def providers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_known_miss_is_not_re_asked_until_the_recheck_interval(
-    session, providers, monkeypatch
+    db, providers, monkeypatch
 ):
     from app.services import identity_service
     from app.services.identity_service import IDENTIFIER_MISS_RECHECK_DAYS
 
-    await EtfBasketRepository(session).replace_basket(basket([
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "ASML Holding NV", "40", identifier=ASML_CINS),
     ]))
     providers.figis = {EATON_CINS: EATON_FIGI}
-    service = IdentityService(session)
+    service = IdentityService(db)
 
     first = await service.resolve_constituent_identifiers()
     assert providers.asked == [[EATON_CINS, ASML_CINS]]
@@ -414,16 +399,16 @@ async def test_a_known_miss_is_not_re_asked_until_the_recheck_interval(
     third = await service.resolve_constituent_identifiers()
     assert providers.asked[-1] == [ASML_CINS]
     assert third["identifiers_resolved"] == 1
-    assert await EtfBasketRepository(session).identifier_misses_since(datetime.min) == set()
+    assert await EtfBasketRepository(db).identifier_misses_since(datetime.min) == set()
 
 
 @pytest.mark.asyncio
-async def test_a_failed_request_is_not_remembered_as_a_miss(session, providers):
-    await EtfBasketRepository(session).replace_basket(basket([
+async def test_a_failed_request_is_not_remembered_as_a_miss(db, providers):
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
     ]))
     providers.fail = {ASML_CINS}
-    service = IdentityService(session)
+    service = IdentityService(db)
 
     summary = await service.resolve_constituent_identifiers()
 
@@ -449,15 +434,15 @@ def one_job_batches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_429_in_the_isin_pass_stops_both_passes(session, providers, one_job_batches):
+async def test_a_429_in_the_isin_pass_stops_both_passes(db, providers, one_job_batches):
     from app.models.isin_identity import IsinIdentity
 
-    await EtfBasketRepository(session).replace_basket(basket([
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
     ]))
     apple, microsoft = "US0378331005", "US5949181045"
     providers.throttle = {apple}
-    service = IdentityService(session)
+    service = IdentityService(db)
 
     first = await service.resolve([apple, microsoft])
     second = await service.resolve_constituent_identifiers()
@@ -467,7 +452,7 @@ async def test_a_429_in_the_isin_pass_stops_both_passes(session, providers, one_
     assert first["openfigi_rate_limited"] and second["openfigi_rate_limited"]
     assert first["openfigi_errors"] == 0 and second["identifiers_errors"] == 0
     # Nothing it was not asked about is remembered as answered: all of it is asked next run.
-    stamped = (await session.execute(
+    stamped = (await db.execute(
         select(IsinIdentity).where(IsinIdentity.figi_checked_at.is_not(None))
     )).scalars().all()
     assert stamped == []
@@ -478,14 +463,14 @@ async def test_a_429_in_the_isin_pass_stops_both_passes(session, providers, one_
 
 @pytest.mark.asyncio
 async def test_a_429_in_the_identifier_pass_stops_its_remaining_batches(
-    session, providers, one_job_batches
+    db, providers, one_job_batches
 ):
-    await EtfBasketRepository(session).replace_basket(basket([
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
         row(2, "ASML Holding NV", "40", identifier=ASML_CINS),
     ]))
     providers.throttle = {EATON_CINS}
-    service = IdentityService(session)
+    service = IdentityService(db)
 
     summary = await service.resolve_constituent_identifiers()
 
@@ -499,18 +484,18 @@ async def test_a_429_in_the_identifier_pass_stops_its_remaining_batches(
 
 
 @pytest.mark.asyncio
-async def test_the_second_pass_is_paced_against_the_first(session, providers, monkeypatch):
+async def test_the_second_pass_is_paced_against_the_first(db, providers, monkeypatch):
     """One client for both passes: the CINS pass's first request waits out the interval
     from the ISIN pass's last, which two pacers never did."""
     from app.config import settings
     from app.services import identity_service
 
     monkeypatch.setattr(settings, "openfigi_api_key", "", raising=False)
-    await EtfBasketRepository(session).replace_basket(basket([
+    await EtfBasketRepository(db).replace_basket(basket([
         row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
     ]))
     monkeypatch.setattr(identity_service, "OPENFIGI_MIN_INTERVAL_S", 2.6)
-    service = IdentityService(session)
+    service = IdentityService(db)
     sleeps = []
 
     async def _sleep(seconds):
@@ -558,18 +543,11 @@ async def test_a_cli_run_killed_mid_gleif_keeps_every_answer_already_given(provi
     """
     import asyncio
 
-    from sqlalchemy.ext.asyncio import create_async_engine as _engine
-
     from app.cli import resolve_identities as cli
     from app.models.isin_identity import IsinIdentity
 
     apple, microsoft = "US0378331005", "US5949181045"
-    engine = _engine(
-        "sqlite+aiosqlite:///:memory:", connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     async def _held(db, funds=False):
         return [apple, microsoft]
@@ -593,7 +571,7 @@ async def test_a_cli_run_killed_mid_gleif_keeps_every_answer_already_given(provi
 
 
 @pytest.mark.asyncio
-async def test_held_isins_splits_one_held_set_into_companies_and_funds(session):
+async def test_held_isins_splits_one_held_set_into_companies_and_funds(db):
     """
     The identity pass (companies), the basket refresh (funds) and the CLI's
     `--include-funds` (both) read one held set — `security_repository.held()` — and only
@@ -606,15 +584,15 @@ async def test_held_isins_splits_one_held_set_into_companies_and_funds(session):
     fund, company, sold = "IE00B4L5Y983", "US0378331005", "US5949181045"
     for sid, isin, closed in ((1, fund.lower() + " ", None), (2, company, None),
                               (3, sold, date(2026, 5, 4))):
-        session.add(Security(id=sid, isin=isin, symbol=f"S{sid}", description=f"S{sid}",
+        db.add(Security(id=sid, isin=isin, symbol=f"S{sid}", description=f"S{sid}",
                              currency="EUR", conid=100 + sid, asset_category="STK",
                              exchange="XETRA"))
-        session.add(TaxLot(security_id=sid, open_date=date(2025, 1, 2), close_date=closed,
+        db.add(TaxLot(security_id=sid, open_date=date(2025, 1, 2), close_date=closed,
                            is_open=closed is None, quantity=Decimal("1"),
                            cost_basis=Decimal("1"), cost_basis_eur=Decimal("1"),
                            price_per_unit=Decimal("1"), currency="EUR"))
-    await session.flush()
+    await db.flush()
 
-    assert await held_isins(session) == [company]
-    assert await held_isins(session, funds=True) == [fund]
-    assert await held_isins(session, funds=None) == sorted([fund, company])
+    assert await held_isins(db) == [company]
+    assert await held_isins(db, funds=True) == [fund]
+    assert await held_isins(db, funds=None) == sorted([fund, company])

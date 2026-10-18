@@ -12,29 +12,19 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
 from app.services.benchmark_service import BenchmarkService, reset_upstream_throttle
 from app.services.currency_service import CurrencyService
 from app.single_flight import SYNC_PIPELINE, single_flight
+from tests.memory_db import memory_engine
 
 
 async def _session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[BenchmarkPrice.__table__, ExchangeRate.__table__]
-            )
-        )
+    engine = await memory_engine(tables=[BenchmarkPrice.__table__, ExchangeRate.__table__])
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

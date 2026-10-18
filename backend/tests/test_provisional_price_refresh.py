@@ -23,10 +23,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
@@ -40,6 +38,7 @@ from app.services.benchmark_service import (
 )
 from app.services.currency_service import CurrencyService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 WINDOW = MarketPriceRepository.PROVISIONAL_PRICE_DAYS
 
@@ -49,16 +48,7 @@ AS_OF = date(2026, 8, 4)
 
 
 async def _repo_with(dates):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[Security.__table__, MarketPrice.__table__]
-            )
-        )
+    engine = await memory_engine(tables=[Security.__table__, MarketPrice.__table__])
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(id=1, isin="US0000000001", symbol="AAA", description="A",
                          currency="EUR", conid=100, asset_category="STK", exchange="XETRA"))
@@ -242,16 +232,7 @@ def _clear_throttle():
 
 
 async def _benchmark_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[BenchmarkPrice.__table__, ExchangeRate.__table__]
-            )
-        )
+    engine = await memory_engine(tables=[BenchmarkPrice.__table__, ExchangeRate.__table__])
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 
@@ -358,16 +339,7 @@ async def test_the_fx_path_stays_out_of_the_refresh(monkeypatch):
 
     monkeypatch.setattr(CurrencyService, "_batch_fetch_rates", _record)
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[BenchmarkPrice.__table__, ExchangeRate.__table__]
-            )
-        )
+    engine = await memory_engine(tables=[BenchmarkPrice.__table__, ExchangeRate.__table__])
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         end = utc_today()

@@ -25,12 +25,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.etf_basket import EtfHolding
 from app.repositories.etf_basket_repository import (
@@ -477,22 +473,6 @@ def test_the_invested_predicate_is_shared_and_whitelists():
 
 # ------------------------------------------------------------- replace-or-refuse gate
 
-@pytest_asyncio.fixture
-async def session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    db = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield db
-    finally:
-        await db.close()
-        await engine.dispose()
-
-
 def _full_basket(rows: int, as_of: date):
     return parse_dws(dws_csv([
         (f"US{i:010d}", f"HOLDING {i}", f"{1 / rows:.10f}", "Technology")
@@ -501,38 +481,38 @@ def _full_basket(rows: int, as_of: date):
 
 
 @pytest.mark.asyncio
-async def test_a_first_import_stores_the_whole_basket(session):
-    repo = EtfBasketRepository(session)
+async def test_a_first_import_stores_the_whole_basket(db):
+    repo = EtfBasketRepository(db)
     result = await repo.replace_basket(_full_basket(20, TODAY))
     assert result.stored_rows == 20
     assert result.previous_rows == 0
-    stored = (await session.execute(select(EtfHolding))).scalars().all()
+    stored = (await db.execute(select(EtfHolding))).scalars().all()
     assert len(stored) == 20
     assert {r.fund_isin for r in stored} == {XNAS}
 
 
 @pytest.mark.asyncio
-async def test_a_replacement_is_wholesale_not_a_merge(session):
-    repo = EtfBasketRepository(session)
+async def test_a_replacement_is_wholesale_not_a_merge(db):
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(_full_basket(20, TODAY))
     await repo.replace_basket(_full_basket(15, TODAY + timedelta(days=1)))
-    stored = (await session.execute(select(EtfHolding))).scalars().all()
+    stored = (await db.execute(select(EtfHolding))).scalars().all()
     assert len(stored) == 15, "the old rows must be gone, not merged with the new ones"
 
 
 @pytest.mark.asyncio
-async def test_a_collapse_in_row_count_is_refused_and_the_old_basket_survives(session):
+async def test_a_collapse_in_row_count_is_refused_and_the_old_basket_survives(db):
     """
     The quiet failure this gate exists for. `validate()` catches an HTML body or a one-row
     file, but a genuinely partial parse yields hundreds of plausible rows — and replacing a real
     basket with those makes every look-through figure shrink with nothing reporting it.
     """
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(_full_basket(20, TODAY))
     with pytest.raises(BasketReplaceRefused, match="floor"):
         await repo.replace_basket(_full_basket(5, TODAY + timedelta(days=1)))
 
-    stored = (await session.execute(select(EtfHolding))).scalars().all()
+    stored = (await db.execute(select(EtfHolding))).scalars().all()
     assert len(stored) == 20, "the previous basket must be untouched"
     basket = (await repo.get_baskets([XNAS]))[XNAS]
     assert basket.stored_rows == 20
@@ -540,34 +520,34 @@ async def test_a_collapse_in_row_count_is_refused_and_the_old_basket_survives(se
 
 
 @pytest.mark.asyncio
-async def test_a_basket_moving_backwards_in_time_is_refused(session):
+async def test_a_basket_moving_backwards_in_time_is_refused(db):
     """Re-importing an older saved file would regress the basket while looking like a refresh."""
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(_full_basket(20, TODAY))
     with pytest.raises(BasketReplaceRefused, match="backwards"):
         await repo.replace_basket(_full_basket(20, TODAY - timedelta(days=5)))
 
 
 @pytest.mark.asyncio
-async def test_the_same_as_of_re_imports_cleanly_so_a_rerun_is_idempotent(session):
-    repo = EtfBasketRepository(session)
+async def test_the_same_as_of_re_imports_cleanly_so_a_rerun_is_idempotent(db):
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(_full_basket(20, TODAY))
     result = await repo.replace_basket(_full_basket(20, TODAY))
     assert result.stored_rows == 20
-    stored = (await session.execute(select(EtfHolding))).scalars().all()
+    stored = (await db.execute(select(EtfHolding))).scalars().all()
     assert len(stored) == 20
 
 
 @pytest.mark.asyncio
-async def test_force_overrides_both_refusals(session):
+async def test_force_overrides_both_refusals(db):
     """An index reconstitution can legitimately halve a niche fund's row count."""
-    repo = EtfBasketRepository(session)
+    repo = EtfBasketRepository(db)
     await repo.replace_basket(_full_basket(20, TODAY))
     result = await repo.replace_basket(
         _full_basket(4, TODAY - timedelta(days=5)), force=True
     )
     assert result.stored_rows == 4
-    stored = (await session.execute(select(EtfHolding))).scalars().all()
+    stored = (await db.execute(select(EtfHolding))).scalars().all()
     assert len(stored) == 4
 
 

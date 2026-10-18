@@ -10,11 +10,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.app_settings import AppSetting
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW, TRANSFER_IN
@@ -34,20 +31,6 @@ from app.services.activity_service import (
 
 TODAY = date(2026, 7, 31)
 WINDOW_START = TODAY - timedelta(days=365)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    yield session
-    await session.close()
-    await engine.dispose()
 
 
 async def seed(session: AsyncSession, base_currency: str = "EUR") -> None:

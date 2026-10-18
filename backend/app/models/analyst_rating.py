@@ -14,7 +14,7 @@ class AnalystRating(Base):
     """
     __tablename__ = "analyst_ratings"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     security_id: Mapped[int] = mapped_column(
         ForeignKey("securities.id", ondelete="CASCADE"),
         nullable=False,

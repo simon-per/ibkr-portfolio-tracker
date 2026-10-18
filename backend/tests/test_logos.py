@@ -16,13 +16,12 @@ import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.models  # noqa: F401  register all mappers
 from app.clock import utcnow
 from app.config import settings
-from app.database import Base, get_db
+from app.database import get_db
 from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_LOGO_DEV, LOGO_SOURCE_MANUAL, SecurityLogo
@@ -39,6 +38,7 @@ from app.services.logo_service import (
     LogoService,
     validate_logo,
 )
+from tests.memory_db import create_schema, memory_engine, new_memory_engine
 
 KEY = "sk_test_logo_dev_key_0123456789"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -83,12 +83,7 @@ def test_an_oversized_image_is_refused():
 
 @pytest_asyncio.fixture
 async def engine():
-    eng = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    eng = await memory_engine()
     yield eng
     await eng.dispose()
 
@@ -507,16 +502,12 @@ async def test_fetch_logos_without_a_key_does_nothing(db, cli_sessions):
 def client():
     from app.routers import logos
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     loop = asyncio.new_event_loop()
 
     async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
         # Two listings of one ISIN share a logo; a third security has none.
         for sid, isin, exchange in ((1, "NL0010273215", "NASDAQ"), (2, "NL0010273215", "AEB"),
                                     (3, "US0378331005", "NASDAQ")):

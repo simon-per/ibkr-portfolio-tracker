@@ -16,19 +16,19 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401  (before `app.main`, whose `app` must win the name)
 from app import rate_limit
 from app.auth import API_KEY_HEADER
 from app.config import settings
-from app.database import Base, get_db
+from app.database import get_db
 from app.models.app_settings import AppSetting
 from app.models.exchange_rate import ExchangeRate
 from app.services.currency_service import CurrencyService
 from app.main import app
 from app.clock import utc_today
+from tests.memory_db import create_schema, new_memory_engine
 
 TOKEN = "test-admin-token-long-enough"
 AUTH = {API_KEY_HEADER: TOKEN}
@@ -40,16 +40,12 @@ def env(monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     loop = asyncio.new_event_loop()
 
     async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
 
     loop.run_until_complete(_setup())
 

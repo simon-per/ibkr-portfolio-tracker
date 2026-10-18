@@ -17,16 +17,15 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.exchange_rate import ExchangeRate
 from app.models.security import Security
 from app.services import currency_service as cs
 from app.services.currency_service import CurrencyService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 # EUR -> X as the ECB publishes it (Frankfurter, 2026-10-16), answered for every weekday.
 ECB = {"USD": "1.1253", "CHF": "0.9272", "JPY": "177.82", "KRW": "1499.01",
@@ -43,13 +42,7 @@ PAIRS = [("USD", "EUR"), ("JPY", "EUR")] + BASE_PAIRS
 
 @pytest_asyncio.fixture
 async def engine():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     try:
         yield engine
     finally:

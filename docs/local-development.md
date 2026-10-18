@@ -75,7 +75,20 @@ database would make the module order-dependent.
 
 A service test that wants an empty in-memory schema takes `db` from `tests/conftest.py`. A module
 whose `db` adds rows or patches defines its own, which overrides it; a plain copy is refused by
-`tests/test_fixture_copies.py`.
+`tests/test_fixture_copies.py`. Anything else that needs an in-memory database — the engine itself
+(a session factory, a patched `AsyncSessionLocal`), a subset of the tables (`tables=`), or a schema
+created inside a `TestClient` fixture's own event loop — builds it with `tests/memory_db.py`
+(`memory_engine`, `new_memory_engine`, `create_schema`), which is also what `db` is made of. The
+same test fails `create_all` or an import of `create_async_engine` anywhere else under `tests/`
+(issue #72: the block had been copied into ~90 modules, one behind an import alias); its `ALLOWED`
+map names the two modules that need a database of another kind, each with its reason. Scope
+predicates shared by the AST family tests (`imports_yfinance`) live in `tests/ast_scope.py` and
+may not be redefined.
+
+`tests/test_migrations.py` runs `alembic check` against a temporary database built by
+`upgrade head`, so a model that no longer describes what the migrations created — down to an
+index name or a unique constraint versus a unique index — fails the suite. Align the model:
+production's schema is what the migrations made.
 
 Tests (1427 backend as of 2026-09-07 + 555 frontend as of 2026-09-08, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale

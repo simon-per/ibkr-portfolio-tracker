@@ -18,16 +18,15 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.exchange_rate import ExchangeRate
 from app.services import currency_service as cs
 from app.services.currency_service import CurrencyService
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 
 # EUR-based snapshot, shaped like open.er-api.com's payload.
@@ -40,15 +39,7 @@ FALLBACK_PAYLOAD = {
 
 @pytest_asyncio.fixture
 async def session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(c, tables=[ExchangeRate.__table__])
-        )
+    engine = await memory_engine(tables=[ExchangeRate.__table__])
     db = AsyncSession(engine, expire_on_commit=False)
     try:
         yield db

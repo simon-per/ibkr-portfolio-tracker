@@ -28,13 +28,11 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import event, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
 from app.accounts import IBKR, PILLAR3A
 from app.clock import utc_today
-from app.database import Base
 from app.models.app_settings import AppSetting
 from app.models.cash_balance import CashBalance
 from app.models.cash_flow import CashFlow
@@ -53,6 +51,7 @@ from app.services.performance_analytics_service import PerformanceAnalyticsServi
 from app.services.portfolio_service import PortfolioService
 from app.services.sync_helper import POSITION_CREATING_ACTIONS
 from tests.test_performance_analytics import END, _session as analytics_session
+from tests.memory_db import memory_engine
 
 TODAY = utc_today()
 
@@ -63,10 +62,7 @@ DECOMPOSITION_MAX_QUERIES = 11
 
 
 async def _engine():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

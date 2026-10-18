@@ -11,30 +11,26 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import rate_limit
-from app.database import Base, get_db
+from app.database import get_db
 from app.main import app
 from app.models.sync_run import SyncRun
 from app.services.crypto_service import REBUILD_SYNC_TYPE, SYNC_TYPE
 from app.services.scheduler_service import SCHEDULED_JOB_TYPES
+from tests.memory_db import create_schema, new_memory_engine
 
 
 @pytest.fixture()
 def client():
     rate_limit.reset()
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     loop = asyncio.new_event_loop()
 
     async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
         session.add_all([
             SyncRun(sync_type="market_data_only", status="success", message="stock run",
                     started_at=datetime(2026, 9, 20, 13), finished_at=datetime(2026, 9, 20, 13, 5)),

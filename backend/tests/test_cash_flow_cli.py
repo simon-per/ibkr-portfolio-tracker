@@ -26,10 +26,8 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.cash_flow import (
     CashFlow, DEPOSIT_WITHDRAW, TRANSFER, TRANSFER_IN, TRANSFER_OUT,
@@ -38,6 +36,7 @@ from app.models.sync_run import SyncRun
 from app.cli import manage_cash_flows as cli
 from app.cli.manage_cash_flows import CashFlowError, build_parser, cmd_list, cmd_reclassify
 from app.repositories.cash_flow_repository import CashFlowRepository
+from tests.memory_db import memory_engine
 
 
 def flow(ib_key, day, flow_type, amount, currency="EUR", amount_eur=None, description=None):
@@ -54,13 +53,7 @@ def flow(ib_key, day, flow_type, amount, currency="EUR", amount_eur=None, descri
 
 @pytest_asyncio.fixture
 async def db(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     session = AsyncSession(engine, expire_on_commit=False)
     session.add_all([

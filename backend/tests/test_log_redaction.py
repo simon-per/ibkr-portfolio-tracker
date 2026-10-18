@@ -22,15 +22,14 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.models  # noqa: F401
 from app.config import settings
-from app.database import Base
 from app.redact import RedactingFormatter
 from app.services import ibkr_service as ibkr_module
 from app.services import market_data_service as mds
+from tests.memory_db import memory_engine
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
@@ -57,12 +56,7 @@ async def _run_scheduled_ibkr_sync(monkeypatch, exc):
     monkeypatch.setattr(ibkr_module.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(ibkr_module, "send_flex_request", boom)
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     monkeypatch.setattr(
         "app.services.scheduler_service.AsyncSessionLocal",
         async_sessionmaker(engine, expire_on_commit=False),

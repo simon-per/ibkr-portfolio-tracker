@@ -2,9 +2,8 @@
 Portfolio Schemas
 Pydantic models for portfolio API responses.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, List, Literal, Optional
-from datetime import date
 
 
 class TaxLotInfo(BaseModel):
@@ -14,8 +13,7 @@ class TaxLotInfo(BaseModel):
     cost_basis: float
     cost_basis_eur: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AnalystRatingInfo(BaseModel):
@@ -29,8 +27,7 @@ class AnalystRatingInfo(BaseModel):
     consensus: str
     last_updated: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PositionResponse(BaseModel):
@@ -61,8 +58,7 @@ class PositionResponse(BaseModel):
     #: positions table badges the last two, since a caveat behind a hover does not exist.
     price_source: str = "yahoo"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PortfolioValuePoint(BaseModel):
@@ -135,8 +131,7 @@ class PortfolioValuePoint(BaseModel):
     )
     base_currency: str = Field("EUR", description="Currency the *_eur values are expressed in")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AnnualizedReturnResponse(BaseModel):
@@ -158,8 +153,7 @@ class AnnualizedReturnResponse(BaseModel):
     # return before either valuation runs stay valid.
     unpriced_holdings: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BenchmarkValuePoint(BaseModel):
@@ -264,8 +258,7 @@ class SecurityAttribution(BaseModel):
     price_effect_eur: Optional[float] = None
     fx_effect_eur: Optional[float] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PerformanceAttributionResponse(BaseModel):
@@ -283,8 +276,7 @@ class PerformanceAttributionResponse(BaseModel):
     unpriced_holdings: int = 0
     attributions: List[SecurityAttribution]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PortfolioSummary(BaseModel):
@@ -357,8 +349,7 @@ class PortfolioSummary(BaseModel):
         ),
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FundamentalMetricsResponse(BaseModel):
@@ -392,8 +383,7 @@ class FundamentalMetricsResponse(BaseModel):
     data_currency: Optional[str] = None
     last_updated: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EarningsCalendarItem(BaseModel):
@@ -405,8 +395,7 @@ class EarningsCalendarItem(BaseModel):
     earnings_date: str
     eps_estimate: Optional[float] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EarningsHistoryItem(BaseModel):
@@ -421,8 +410,7 @@ class EarningsHistoryItem(BaseModel):
     surprise_percent: Optional[float] = None
     beat_or_miss: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WatchlistItemResponse(BaseModel):
@@ -466,8 +454,7 @@ class WatchlistItemResponse(BaseModel):
     last_synced: Optional[str] = None
     created_at: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AddWatchlistItemRequest(BaseModel):
@@ -1049,5 +1036,4 @@ class FundamentalsStatus(BaseModel):
     # `single_flight.is_running(SYNC_PIPELINE)`: any sync pipeline, not only this one.
     sync_running: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

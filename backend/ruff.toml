@@ -1,13 +1,19 @@
-# Correctness only (issue #39): syntax errors, undefined names, `is` against a literal,
-# a misplaced return/yield/break. CI runs it as part of the deploy gate, so a rule joins
-# this list only once the tree is clean against it; style rules are not the point.
+# Correctness only (issue #39): syntax errors, then all of Pyflakes (`F`, since issue #72) —
+# undefined names, `is` against a literal, a misplaced return/yield/break, and the unused
+# imports and dead locals that hid unfinished edits. CI runs it as part of the deploy gate,
+# so a rule joins this list only once the tree is clean against it; style rules are not
+# the point.
 target-version = "py311"
 
 [lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F"]
 
 [lint.per-file-ignores]
 # `Mapped["Security"]` and friends: SQLAlchemy resolves those strings through the mapper
 # registry at configure time, so they are not undefined at runtime. Scoped to the models
 # so an undefined name anywhere else still fails.
 "app/models/*.py" = ["F821"]
+# Pytest fixtures imported from another module (`session`, `engine`) and then named as
+# test parameters: pytest injects them by name, pyflakes reads a parameter shadowing an
+# unused import. Scoped to the one module that shares fixtures this way.
+"tests/test_fx_warm_rejections_and_easter.py" = ["F811"]

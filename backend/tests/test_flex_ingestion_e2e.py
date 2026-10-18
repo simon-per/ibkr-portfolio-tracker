@@ -17,12 +17,10 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibflex import parser
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -41,6 +39,7 @@ from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import persist_transactions
 from app.services.dividend_service import DividendService
 from app.services.tax_service import TaxService
+from tests.memory_db import memory_engine
 
 
 GOOGL_CONID = "208813719"
@@ -98,18 +97,12 @@ FLEX_XML = f"""<FlexQueryResponse queryName="Portfolio" type="AF">
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               CorporateAction.__table__, DividendPayment.__table__,
               AppSetting.__table__, MarketPrice.__table__,
               CashFlow.__table__, CashBalance.__table__,
               DividendWithholdingAdjustment.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

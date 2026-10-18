@@ -19,15 +19,14 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.models.exchange_rate import ExchangeRate
 from app.services.base_fx import BaseFx
 from app.services.fx_preload import PreloadedRates, eur_rate_on, preload_eur_rates
 from app.services.native_amounts import NativeToBase
+from tests.memory_db import memory_engine
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
@@ -90,9 +89,7 @@ async def test_preloaded_rates_convert_through_native_to_base_without_any_io():
 
 @pytest.mark.asyncio
 async def test_preload_reaches_back_for_the_fill_and_skips_eur():
-    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         session.add_all([

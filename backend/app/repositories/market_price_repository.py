@@ -7,7 +7,6 @@ from datetime import date, timedelta
 from sqlalchemy import select, and_, or_, delete, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from decimal import Decimal
 
 from app.models.market_price import MarketPrice
 from app.clock import utc_today

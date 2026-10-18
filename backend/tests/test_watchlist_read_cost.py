@@ -15,17 +15,16 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.watchlist_item import WatchlistItem
 from app.routers.watchlist import _responses, get_watchlist
 from app.services.watchlist_service import WatchlistService
+from tests.memory_db import memory_engine
 
 # Statements one GET issues for the fixed 3-item watchlist below, whatever the security
 # count: base currency, the items, the securities, the mappings, the basket candidates.
@@ -33,10 +32,7 @@ GET_STATEMENTS = 5
 
 
 async def _session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

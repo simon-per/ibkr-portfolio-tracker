@@ -20,16 +20,15 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.sync_run import SyncRun
 from app.cli import import_prices as cli
 from app.cli.import_prices import PriceImportError, parse_payload
+from tests.memory_db import memory_engine
 
 SBI_PAYLOAD = {
     "symbol": "SBI",
@@ -46,13 +45,7 @@ SBI_PAYLOAD = {
 @pytest_asyncio.fixture
 async def db(monkeypatch):
     """In-memory DB, wired in as the CLI's session factory so it needs no patching."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     session = AsyncSession(engine, expire_on_commit=False)
     session.add_all([

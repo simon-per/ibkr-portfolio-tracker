@@ -24,6 +24,7 @@ from app.models.taxlot import TaxLot
 from app.services.lookthrough_service import stale_after_days
 from app.services.scheduler_service import SchedulerService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 # Real registry entries, because the point of the detector is the registry's own rules.
 IWDA = "IE00B4L5Y983"      # blackrock, republishes daily -> 7-day expectation
@@ -301,17 +302,10 @@ def test_every_path_that_syncs_market_data_collects_the_diagnostics():
 
 async def _stale_iwda_database(monkeypatch):
     """IWDA held, its basket past the warn threshold, behind the scheduler's session."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import StaticPool
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.database import Base
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as seed:
         await _hold(seed, 1, IWDA, "IWDA")

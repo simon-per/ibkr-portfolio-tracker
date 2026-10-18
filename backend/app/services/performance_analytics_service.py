@@ -239,7 +239,6 @@ class PerformanceAnalyticsService:
         # (docs/frontend.md, *A pre-inception day is measurable*), so the first year's
         # gain is measured from nothing held — which is what happened.
         gain = end_tv - start_tv - net_flows
-        holdings_gain = price_effect + fx_effect + unsplit
 
         # Round the legs, then take the remainder on the rounded figures so the
         # response's parts sum exactly (the `fund_residual_eur` rule).

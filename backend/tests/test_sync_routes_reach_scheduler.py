@@ -24,12 +24,10 @@ import pytest_asyncio
 from fastapi import BackgroundTasks, HTTPException
 from fastapi.routing import iter_route_contexts
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.models  # noqa: F401  register all mappers
 from app import single_flight as sf
-from app.database import Base
 from app.main import app as fastapi_app
 from app.models.security import Security
 from app.models.sync_run import SyncRun
@@ -38,6 +36,7 @@ from app.routers import market_data as md_router
 from app.services import scheduler_service as sched
 from app.services.dividend_service import DividendService
 from app.services.scheduler_service import BERLIN, SchedulerService
+from tests.memory_db import memory_engine
 
 # The `POST …/sync` routes with no scheduler body to call, and why. A route in neither
 # this table nor reaching a SchedulerService method fails the family test below.
@@ -130,12 +129,7 @@ def test_the_two_routes_reach_the_bodies_they_copied():
 async def isolated(monkeypatch):
     """A fresh scheduler singleton over an in-memory database with one security, and a
     clean gate."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as seed:
         seed.add(Security(

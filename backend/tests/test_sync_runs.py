@@ -10,24 +10,17 @@ it can never break a sync.
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.sync_run import SyncRun
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.scheduler_service import SchedulerService
+from tests.memory_db import memory_engine, new_memory_engine
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[SyncRun.__table__]))
+    engine = await memory_engine(tables=[SyncRun.__table__])
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 
@@ -99,10 +92,7 @@ async def test_recording_never_breaks_a_sync():
     Bookkeeping must not be able to fail a sync that otherwise worked, nor mask the
     real error on the failure path. The table is absent here, so the insert fails.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         result = await SyncRunRepository(session).record(

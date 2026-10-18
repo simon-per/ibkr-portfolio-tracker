@@ -11,14 +11,13 @@ Offline: httpx, requests and yfinance are recorders that refuse.
 """
 import pytest
 import requests
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.services import currency_service as cs
 from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import ingest_flex_statement
+from tests.memory_db import memory_engine
 
 XML = b"""<FlexQueryResponse queryName="Portfolio" type="AF">
 <FlexStatements count="1">
@@ -68,10 +67,7 @@ async def test_the_ingest_reaches_only_the_fx_hosts(monkeypatch):
     monkeypatch.setattr(yf, "Ticker", refuse("yfinance.Ticker"))
     monkeypatch.setattr(yf, "download", refuse("yfinance.download"))
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         flex_data = IBKRService(token="t", query_id="q").parse_flex_xml(XML)

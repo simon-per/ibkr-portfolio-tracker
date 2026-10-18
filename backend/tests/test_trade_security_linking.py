@@ -13,10 +13,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -26,18 +24,13 @@ from app.repositories.trade_repository import TradeRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
 from app.repositories.taxlot_repository import TaxLotRepository
 from app.services.sync_helper import persist_transactions, restamp_unsourced_closed_lots
+from tests.memory_db import memory_engine
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               CorporateAction.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     # A security we no longer hold: still in the DB, absent from OpenPositions.
     session.add(Security(

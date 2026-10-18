@@ -23,10 +23,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.market_price import MarketPrice
 from app.models.security import Security
@@ -69,6 +66,7 @@ from app.services.finpension_ingest import (
 )
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 # One stock job per declared hour — test_scheduler_registers_every_declared_job asserts
 # no two of the three stock groups share one — plus one crypto job at each of those same
@@ -268,12 +266,7 @@ async def test_a_yahoo_rate_limit_abandons_the_rest_of_the_pass(monkeypatch):
     Cheap to ignore at three market-data passes a day. Not at seven, which is why this
     lands with the intraday slots rather than separately.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
     maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -708,12 +701,7 @@ async def test_the_weekend_full_sync_prices_missing_dates_only(spy, monkeypatch,
     (issues #6, #11), so skipping it would move those requests, not save them.
     """
     svc, s = spy
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
     maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -762,12 +750,7 @@ async def test_the_weekend_full_sync_prices_missing_dates_only(spy, monkeypatch,
 async def test_a_missing_only_pass_still_runs_the_diagnostics(monkeypatch):
     """The Flex-gap alarm and the stale-price check hang off the price pass, and the
     weekend 18:00 run is the only one on a Sunday — so it must still reach them."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
     maker = async_sessionmaker(engine, expire_on_commit=False)

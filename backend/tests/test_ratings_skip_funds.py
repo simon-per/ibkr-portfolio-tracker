@@ -6,25 +6,24 @@ interval, so every held fund cost a `recommendations` request on every pass. A f
 known without Yahoo: the stored `fundamental_metrics.quote_type` (FUND_QUOTE_TYPES) or an
 ISIN the ETF table maps. Offline: `yf.Ticker` is a recording stub.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pandas as pd
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
 import app.services.analyst_rating_service as ratings_module
 from app.clock import utcnow
-from app.database import Base
 from app.models.analyst_rating import AnalystRating
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.analyst_rating_service import AnalystRatingService
+from tests.memory_db import memory_engine
 
 # symbol -> (isin, stored quote_type or None)
 HOLDINGS = {
@@ -38,12 +37,7 @@ HOLDINGS = {
 
 @pytest_asyncio.fixture
 async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     for i, (symbol, (isin, quote_type)) in enumerate(HOLDINGS.items()):
         security = Security(

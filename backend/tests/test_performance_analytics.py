@@ -19,11 +19,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR, PILLAR3A
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
 from app.models.cash_balance import CashBalance
@@ -40,6 +38,7 @@ from app.services.performance_analytics_service import (
     FUND_RESIDUAL,
     PerformanceAnalyticsService,
 )
+from tests.memory_db import memory_engine
 
 START = date(2026, 3, 2)     # a Monday
 MID = date(2026, 4, 15)
@@ -56,12 +55,7 @@ def _weekdays(start, end):
 
 
 async def _session(base_currency: str, eur_chf_end: str = "0.94"):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     s = AsyncSession(engine, expire_on_commit=False)
     s.add(AppSetting(key="base_currency", value=base_currency))
 
@@ -103,7 +97,6 @@ async def _session(base_currency: str, eur_chf_end: str = "0.94"):
                 realized_pnl=Decimal("12")))
 
     for d in _weekdays(before - timedelta(days=5), END):
-        second_half = d >= MID
         px = {
             1: "120" if d >= END else "100",       # +20% on the last day of the window
             2: "100",                              # flat in USD
@@ -301,12 +294,7 @@ async def test_closed_positions_prefer_ibkr_realized_and_measure_the_post_sale_m
 
 @pytest.mark.asyncio
 async def test_an_empty_database_answers_with_absences_not_zeros():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     s = AsyncSession(engine, expire_on_commit=False)
     try:
         svc = PerformanceAnalyticsService(s)

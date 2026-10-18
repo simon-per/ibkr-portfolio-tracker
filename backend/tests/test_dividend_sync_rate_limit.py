@@ -9,24 +9,18 @@ from decimal import Decimal
 
 import pandas as pd
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.dividend_service import DividendService
 import app.services.dividend_service as ds
+from tests.memory_db import memory_engine
 
 
 async def _session(n_securities: int):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     for i in range(1, n_securities + 1):
         session.add(Security(

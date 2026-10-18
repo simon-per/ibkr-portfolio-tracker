@@ -18,17 +18,16 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401  register all mappers
 from app.cli import manage_mappings as cli
 from app.cli.manage_mappings import build_parser
 from app.cli.security_lookup import resolve_security
-from app.database import Base
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.ticker_mapping import TickerMapping
+from tests.memory_db import memory_engine
 
 CLI_DIR = Path(__file__).resolve().parents[1] / "app" / "cli"
 
@@ -51,12 +50,7 @@ def test_no_cli_but_the_shared_module_looks_a_security_up_by_symbol():
 
 @pytest_asyncio.fixture
 async def db(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     # One ticker on one exchange, two ISINs: the shape an ISIN change leaves behind.
     session.add_all([

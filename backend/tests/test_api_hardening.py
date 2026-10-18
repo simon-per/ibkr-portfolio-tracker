@@ -15,15 +15,15 @@ import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import rate_limit
 from app.auth import API_KEY_HEADER, MUTATING_METHODS
 from app.config import settings
-from app.database import Base, get_db
+from app.database import get_db
 from app.main import app
 from app.observability import REQUEST_ID_HEADER
+from tests.memory_db import create_schema, new_memory_engine
 
 TOKEN = "test-admin-token-long-enough"
 
@@ -49,16 +49,12 @@ def client(monkeypatch):
     # place.
     #
     # Same shape as `tests/test_api_smoke.py`'s fixture, which had it right already.
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     loop = asyncio.new_event_loop()
 
     async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
 
     loop.run_until_complete(_setup())
 

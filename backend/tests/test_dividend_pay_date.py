@@ -34,11 +34,9 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.dividend_accrual import DividendAccrual
 from app.models.market_price import MarketPrice
@@ -47,10 +45,10 @@ from app.models.taxlot import TaxLot
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import (
     DividendService,
-    EX_TO_PAY_MAX_LAG_DAYS,
     PENDING_MAX_AGE_DAYS,
     match_estimates_to_ibkr,
 )
+from tests.memory_db import memory_engine
 
 AS_OF = date(2026, 5, 1)
 LAG = 14
@@ -67,12 +65,7 @@ class Row:
 
 
 async def _session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(id=1, isin="NL0010273215", symbol="ASML", description="ASML",
                          currency="EUR", conid=100, asset_category="STK", exchange="AEB"))

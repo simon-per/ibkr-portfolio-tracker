@@ -1,27 +1,20 @@
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 from app.repositories.app_settings_repository import (
     DIVIDEND_FORECAST_NET_FACTOR_KEY,
     AppSettingsRepository,
 )
+from tests.memory_db import memory_engine
 
 
 @pytest.mark.asyncio
 async def test_dividend_net_factor_defaults_persists_and_recovers_from_bad_storage(
     caplog,
 ):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         repo = AppSettingsRepository(session)
@@ -41,13 +34,7 @@ async def test_dividend_net_factor_defaults_persists_and_recovers_from_bad_stora
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", [Decimal("-0.001"), Decimal("1.001"), Decimal("NaN")])
 async def test_dividend_net_factor_refuses_values_outside_zero_to_one(value):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         with pytest.raises(ValueError):

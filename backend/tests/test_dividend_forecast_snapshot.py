@@ -12,14 +12,11 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cli.backfill_dividend_forecast import BackfillError, backfill
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.dividend_accrual import DividendAccrual
-from app.models.dividend_forecast_snapshot import DividendForecastSnapshotLine
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.repositories.app_settings_repository import AppSettingsRepository
@@ -35,6 +32,7 @@ from app.schemas.portfolio import (
 from app.services.base_fx import BaseFx
 from app.services.dividend_service import DividendService
 from app.services.portfolio_service import PortfolioService
+from tests.memory_db import memory_engine
 
 AS_OF = date(2026, 7, 29)
 NEXT_DAY = date(2026, 7, 30)
@@ -42,12 +40,7 @@ CHF = BaseFx("CHF", {AS_OF: Decimal("0.90"), NEXT_DAY: Decimal("0.80")})
 
 
 async def _make_session(with_history: bool = True):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(id=1, isin="US0000000001", symbol="AAA", description="Alpha Corp",
                          currency="EUR", conid=100, asset_category="STK", exchange="XETRA"))

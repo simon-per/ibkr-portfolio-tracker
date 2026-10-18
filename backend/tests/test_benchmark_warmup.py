@@ -16,13 +16,11 @@ import pandas as pd
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.models  # noqa: F401
 import app.services.benchmark_service as bs
 import app.services.scheduler_service as sched_mod
-from app.database import Base
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
 from app.services.benchmark_service import (
@@ -33,6 +31,7 @@ from app.services.scheduler_service import SchedulerService
 from app.services.yahoo_rate_limit import reset_yahoo_hold
 from app.single_flight import SYNC_PIPELINE, is_running, single_flight
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 SESSION = last_finished_session(utc_today())
 
@@ -80,16 +79,7 @@ def _bar(day: date, close: float = 5100.0):
 
 @pytest_asyncio.fixture
 async def db(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda c: Base.metadata.create_all(
-                c, tables=[BenchmarkPrice.__table__, ExchangeRate.__table__]
-            )
-        )
+    engine = await memory_engine(tables=[BenchmarkPrice.__table__, ExchangeRate.__table__])
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(sched_mod, "AsyncSessionLocal", factory)
     yield factory

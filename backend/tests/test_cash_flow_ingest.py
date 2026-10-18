@@ -18,12 +18,10 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ibflex import enums
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.cash_flow import (
     CashFlow, DEPOSIT_WITHDRAW, TRANSFER_IN, TRANSFER_OUT,
@@ -35,6 +33,7 @@ from app.repositories.cash_flow_repository import CashFlowRepository
 from app.services.ibkr_service import IBKRService
 from app.services.currency_service import CurrencyService
 from app.services.sync_helper import persist_cash_flows
+from tests.memory_db import memory_engine
 
 
 def _svc():
@@ -69,14 +68,8 @@ def _transfer(**kw):
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [CashFlow.__table__, ExchangeRate.__table__, AppSetting.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

@@ -8,15 +8,14 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.portfolio_service import PortfolioService
+from tests.memory_db import memory_engine
 
 START = date(2026, 1, 5)
 MID = date(2026, 3, 10)
@@ -24,12 +23,7 @@ END = date(2026, 6, 5)
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     for sid, sym in ((1, "SOLD"), (2, "HELD"), (3, "NEW")):
         session.add(Security(id=sid, isin=f"US000000000{sid}", symbol=sym, description=sym,

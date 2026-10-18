@@ -25,10 +25,8 @@ from typing import Optional
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401 - register every mapper
 from app.models.app_settings import AppSetting
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
@@ -46,6 +44,7 @@ from app.schemas.lookthrough import (
 from app.services.allocation_service import AllocationService
 from app.services.lookthrough_service import LookthroughService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 TODAY = utc_today()
 
@@ -89,13 +88,7 @@ async def session():
     connection to the garbage collector and SQLAlchemy warns on every one, which buries
     the suite's real output.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     db = AsyncSession(engine, expire_on_commit=False)
     db.add(AppSetting(key="base_currency", value="EUR"))
     await db.flush()

@@ -17,12 +17,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
 from app.accounts import IBKR, PILLAR3A, is_tax_exempt, tax_exempt_accounts
-from app.database import Base
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW, TRANSFER_IN
 from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
@@ -30,6 +28,7 @@ from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.services.tax_service import TaxService
+from tests.memory_db import memory_engine
 
 
 # A *past* year on purpose: the Steuerwert is the 31 December value, so this
@@ -39,12 +38,7 @@ ON = date(YEAR, 12, 31)
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool, connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

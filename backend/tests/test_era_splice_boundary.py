@@ -27,7 +27,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
-import pytest
 
 from app.services.dividend_service import DividendService, EX_TO_PAY_MAX_LAG_DAYS
 

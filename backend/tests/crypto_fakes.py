@@ -9,18 +9,17 @@ from a real portfolio; the shapes follow CoinStats' documentation and the probe
 headers, pacing, error mapping, pagination — runs unmodified and no request can leave
 the machine.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import app.models  # noqa: F401  register every mapper
 from app.config import settings
-from app.database import Base
 from app.services.coingecko_client import CoinGeckoClient
 from app.services.coinstats_client import COINS_PAGE_LIMIT, CoinStatsClient
+from tests.memory_db import memory_engine
 
 KEY = "test-coinstats-key-0123456789"
 TOKEN = "test-share-token-0123456789"
@@ -192,9 +191,7 @@ class RecordingCurrencyService:
 
 async def memory_session_factory():
     """An in-memory database with the full schema, and a session factory bound to it."""
-    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 

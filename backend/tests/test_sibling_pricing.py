@@ -16,10 +16,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.market_price import MarketPrice, PRICE_ROW_SOURCE_SIBLING_SCALED
 from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_SIBLING, Security
@@ -28,6 +26,7 @@ from app.services import market_data_service as mds
 from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
 from app.services.market_data_service import MarketDataService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 SIBLING = "0P0000S0OE.SW"
 NAV = Decimal("121.201101")
@@ -44,12 +43,7 @@ ANCHOR = _weekday(12)
 
 
 async def _session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

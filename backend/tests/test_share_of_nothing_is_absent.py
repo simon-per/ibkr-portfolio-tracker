@@ -16,12 +16,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -30,20 +26,6 @@ from app.clock import utc_today
 
 START = date(2026, 3, 2)
 END = date(2026, 3, 31)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    s = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield s
-    finally:
-        await s.close()
-        await engine.dispose()
 
 
 async def _sec(db, sid, cost="1000", closed=None):

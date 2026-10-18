@@ -14,10 +14,8 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.sync_run import SyncRun
 from app.services.flex_generation import (
@@ -37,6 +35,7 @@ from app.services.scheduler_service import (
     IBKR_SYNC_STALE_DAYS,
     SchedulerService,
 )
+from tests.memory_db import create_schema, memory_engine, new_memory_engine
 
 # 2026-08-08 12:00 UTC is 08:00 ET — mid-morning in New York, comfortably inside one ET
 # day, so a test that meant to write "today" cannot land on a boundary by accident.
@@ -179,12 +178,7 @@ def test_the_next_window_opens_at_the_next_midnight_new_york():
 
 @pytest.mark.asyncio
 async def test_the_scheduled_sync_skips_without_touching_ibkr(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", maker)
     monkeypatch.setattr("app.services.scheduler_service.IBKRService", _ExplodingFlex)
@@ -213,12 +207,7 @@ async def test_force_bypasses_the_guard(monkeypatch):
 
     Reaching the exploding client *is* the assertion — it proves the guard was skipped.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     maker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", maker)
     monkeypatch.setattr("app.services.scheduler_service.IBKRService", _ExplodingFlex)
@@ -349,16 +338,12 @@ def test_the_route_answers_200_skipped_and_records_nothing(monkeypatch):
     # built never to do. It fails offline and loudly instead.
     monkeypatch.setattr("app.routers.sync.IBKRService", _ExplodingFlex)
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    engine = new_memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     loop = asyncio.new_event_loop()
 
     async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
         session.add(SyncRun(
             sync_type="ibkr_sync", status="success", finished_at=utcnow_today(),
         ))

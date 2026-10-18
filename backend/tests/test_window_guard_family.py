@@ -19,14 +19,14 @@ from pathlib import Path
 import pytest
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
 from app import rate_limit
 from app.config import settings
-from app.database import Base, get_db
+from app.database import get_db
 from app.main import app
+from tests.memory_db import create_schema, new_memory_engine
 
 ROUTERS = Path(__file__).resolve().parents[1] / "app" / "routers"
 GUARD_MODULE = ROUTERS / "_windows.py"
@@ -115,12 +115,10 @@ def client(monkeypatch):
     # so a route whose guard is missing fails on its own terms rather than on a table.
     rate_limit.reset()
     monkeypatch.setattr(settings, "rate_limit_per_minute", 0, raising=False)
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
+    engine = new_memory_engine()
 
     async def setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
 
     asyncio.run(setup())
 

@@ -13,7 +13,6 @@ than waiting to be noticed in the portfolio total.
 
 Offline: no Yahoo, no IBKR, no network at all.
 """
-import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -21,31 +20,24 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.sync_run import SyncRun
 from app.models.ticker_mapping import TickerMapping
 from app.cli import manage_mappings as cli
-from app.cli.manage_mappings import MappingError, build_parser, implied_currency
+from app.cli.manage_mappings import build_parser, implied_currency
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
 from app.services.market_data_service import MarketDataService
 from app.services.finpension_ingest import PRICE_SOURCE_CARRY, PRICE_SOURCE_STATEMENT
+from tests.memory_db import memory_engine
 
 
 @pytest_asyncio.fixture
 async def db(monkeypatch):
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
 
     session = AsyncSession(engine, expire_on_commit=False)
     session.add_all([

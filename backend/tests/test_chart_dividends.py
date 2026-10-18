@@ -9,7 +9,7 @@ same_rows` feeds one frame through each.
 
 Offline: `yf.Ticker` is a stub serving a fixed frame; `.dividends` records every read.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 

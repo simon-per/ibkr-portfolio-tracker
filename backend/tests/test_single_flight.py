@@ -11,6 +11,7 @@ from app.single_flight import (
     cooldown_remaining,
     single_flight,
 )
+from tests.memory_db import memory_engine
 
 
 def test_the_gate_rejects_a_concurrent_entry_then_releases():
@@ -117,20 +118,12 @@ async def test_the_dividend_card_does_not_start_a_second_yahoo_pass(monkeypatch)
 
 
 async def _watchlist_session():
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-    from sqlalchemy.pool import StaticPool
-    from app.database import Base
+    from sqlalchemy.ext.asyncio import AsyncSession
     import app.models  # noqa: F401
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     # Every table, not just `watchlist_items`: each response now carries the base-currency
     # market cap (`app/services/market_cap.py`), which reads the settings and the rates.
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

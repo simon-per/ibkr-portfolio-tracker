@@ -23,11 +23,9 @@ from datetime import date
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.models.dividend_accrual import DividendAccrual
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
@@ -36,6 +34,7 @@ from app.models.trade import Trade
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import ingest_flex_statement
+from tests.memory_db import memory_engine
 
 # A bought after June, B held throughout, C sold in July, D bought on the newest day only.
 A, B, C, D = "1001", "1002", "1003", "1004"
@@ -123,10 +122,7 @@ def _july(to_date, extra_positions="", extra_trades=""):
 
 
 async def _session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 

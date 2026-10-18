@@ -17,7 +17,7 @@ fund's cost cannot be split across its constituents without knowing the basket o
 purchase date, which nothing stores — so any per-company cost would be fabricated rather
 than merely approximate. The market-value view is the honest one; do not "complete" it.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 
 
@@ -28,8 +28,7 @@ class LookthroughFundContribution(BaseModel):
     value_eur: float
     weight_pct: float = Field(..., description="The company's weight inside that fund")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LookthroughCompanyRow(BaseModel):
@@ -98,8 +97,7 @@ class LookthroughCompanyRow(BaseModel):
         ),
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LookthroughFundCoverage(BaseModel):
@@ -167,8 +165,7 @@ class LookthroughFundCoverage(BaseModel):
         ),
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LookthroughIdentityCoverage(BaseModel):
@@ -190,8 +187,7 @@ class LookthroughIdentityCoverage(BaseModel):
         ),
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LookthroughResponse(BaseModel):
@@ -321,5 +317,4 @@ class LookthroughResponse(BaseModel):
         ),
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

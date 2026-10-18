@@ -13,12 +13,10 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR, PILLAR3A
 from app.cli import import_finpension_csv as cli
-from app.database import Base
 from app.models.cash_flow import (
     CashFlow, DEPOSIT_WITHDRAW, FEE as FLOW_FEE, INCOME as FLOW_INCOME,
     TRANSFER_IN as FLOW_TRANSFER_IN,
@@ -38,6 +36,7 @@ from app.services.finpension_ingest import (
     ingest_finpension_report,
 )
 from app.services.finpension_report import EXPECTED_HEADER, parse_transaction_report
+from tests.memory_db import memory_engine
 
 
 HEADER = ";".join(EXPECTED_HEADER)
@@ -83,12 +82,7 @@ class StubFx:
 @pytest_asyncio.fixture
 async def db(monkeypatch):
     """In-memory DB, wired in as the CLI's session factory so it needs no patching."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool, connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
 
     class _Ctx:

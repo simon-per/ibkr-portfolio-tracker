@@ -17,11 +17,9 @@ from decimal import Decimal
 from typing import Optional
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR, PILLAR3A
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
 from app.models.cash_balance import CashBalance
@@ -37,22 +35,17 @@ from app.services.cash_service import CashService, DERIVED, MEASURED, MIXED, UNK
 from app.services.portfolio_service import BaseFx, PortfolioService
 from app.services.sync_helper import resolve_cash_balances
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 EUR = BaseFx("EUR", {})
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [Security.__table__, TaxLot.__table__, AppSetting.__table__,
               CashFlow.__table__, CashBalance.__table__, ExchangeRate.__table__,
               Trade.__table__, DividendPayment.__table__, MarketPrice.__table__,
               CorporateAction.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(
         id=1, isin="US0000000001", symbol="AAA", description="Test Co",

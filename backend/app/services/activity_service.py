@@ -376,7 +376,6 @@ class ActivityService:
             # correctly is still one that will not follow it.
             if not DividendService._is_income(p):
                 continue
-            gross = p.gross_amount_eur or Decimal("0")
             net = income.net(p)
 
             when = p.pay_date or p.ex_date

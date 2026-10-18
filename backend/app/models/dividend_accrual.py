@@ -1,6 +1,5 @@
-from sqlalchemy import Integer, Numeric, String, Date, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Numeric, String, Date, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.sql import func
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional

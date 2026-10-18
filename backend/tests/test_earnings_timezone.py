@@ -25,7 +25,6 @@ Offline: seeded frames, no Yahoo.
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from app.models.security import Security
 from app.services.fundamentals_service import FundamentalsService

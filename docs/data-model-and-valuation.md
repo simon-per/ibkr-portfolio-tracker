@@ -86,6 +86,10 @@ generation (`flex_generation.et_date`), the Berlin day the crypto FX warm-up is 
 closed by 24:00 UTC, so the weekday before the UTC day is final everywhere.
 
 Migrations: `cd backend && alembic upgrade head` (the container CMD runs this on every start).
+The models describe exactly what the migrations created, index names and unique constraints
+included — `tests/test_migrations.py` runs `alembic check` (issue #72: `corporate_actions`'
+indexes are `ix_corp_actions_*`, and `ib_key` on it and on `trades` is a named unique
+*constraint*, `uq_*`, not a unique index). On a mismatch, change the model, not the database.
 
 ---
 

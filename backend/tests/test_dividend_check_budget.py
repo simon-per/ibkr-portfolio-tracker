@@ -20,8 +20,7 @@ from decimal import Decimal
 import pandas as pd
 import pytest
 from fastapi import BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
 import app.routers.dividends as div_router
@@ -30,11 +29,11 @@ import app.services.scheduler_service as sched
 import app.services.yahoo_rate_limit as yahoo_hold
 import app.single_flight as sf
 from app.clock import utcnow as real_utcnow
-from app.database import Base
 from app.models.dividend_payment import DividendPayment
 from app.models.security import PRICE_SOURCE_MANUAL, Security
 from app.models.taxlot import TaxLot
 from app.services.dividend_service import DividendService
+from tests.memory_db import memory_engine
 
 PAYER, NON_PAYER, SOLD, OFF_YAHOO = 1, 2, 3, 4
 START = datetime(2026, 10, 5, 0, 0)  # a Monday, naive UTC like every stored stamp
@@ -43,12 +42,7 @@ PAYER_EX_DATES = [date(2025, 9, 1), date(2025, 12, 1), date(2026, 3, 2), date(20
 
 
 async def _session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
 
     def _security(sid, symbol, **kw):

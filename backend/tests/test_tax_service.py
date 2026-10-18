@@ -8,10 +8,8 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -26,22 +24,17 @@ from app.repositories.trade_repository import TradeRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.services.tax_service import TaxService
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     # corporate_actions comes along because the holdings snapshot asks it when a position
     # actually began (a spun-off line's lots predate its listing); the two cash tables
     # because the IBKR cash line beside the holdings reads every cash ledger.
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               DividendPayment.__table__, AppSetting.__table__, MarketPrice.__table__,
               CorporateAction.__table__, CashFlow.__table__, CashBalance.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(
         id=1, isin="US0000000001", symbol="AAA", description="Test Co",

@@ -8,7 +8,7 @@ from alembic import context
 
 # Import the base and all models
 from app.database import Base
-from app.models import Security, TaxLot, ExchangeRate, MarketPrice
+import app.models  # noqa: F401  (registers every table on Base.metadata for autogenerate)
 from app.config import settings
 
 # this is the Alembic Config object, which provides

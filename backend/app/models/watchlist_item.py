@@ -14,7 +14,7 @@ class WatchlistItem(Base):
     """
     __tablename__ = "watchlist_items"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     yahoo_ticker: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
     symbol: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     company_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

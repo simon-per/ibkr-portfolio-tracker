@@ -9,15 +9,14 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.services.portfolio_service import BaseFx, PortfolioService
+from tests.memory_db import memory_engine
 
 START = date(2026, 3, 2)
 END = date(2026, 4, 10)
@@ -216,12 +215,7 @@ async def test_a_lot_closed_on_the_window_start_adds_no_disposal_flow():
     external_flow_eur — that would be a flow against value the series never
     held. A lot closed strictly inside the window still flows normally.
     """
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         window_start, window_end = date(2026, 3, 2), date(2026, 3, 6)  # Mon-Fri
@@ -287,12 +281,7 @@ async def test_a_lot_closed_on_the_window_start_adds_no_disposal_flow():
 
 async def _priced_and_unpriced_session():
     """Two EUR securities, both held; only one has any cached price."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     for sid, sym in ((1, "AAA"), (2, "BBB")):
         session.add(Security(id=sid, isin=f"X{sid:011d}", symbol=sym, description=sym,

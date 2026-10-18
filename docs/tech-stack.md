@@ -22,9 +22,12 @@ paying jsdom's startup for all of them is the wrong default.
 NodeSource line in `deploy.sh` (fresh hosts only; an installed Node is left alone) and
 `engines` in `frontend/package.json`, which makes `npm ci` warn `EBADENGINE` on an older one.
 **Static checks in CI:** ESLint (`npm run lint`) and ruff with correctness rules only
-(`backend/ruff.toml`: `E9`, `F63`, `F7`, `F82`). Ruff is in neither lock (`requirements.lock` is what
-the image installs), so CI pins its version. `F821` is ignored in `app/models/` only:
-SQLAlchemy resolves the string annotations there (`Mapped["Security"]`) through its registry.
+(`backend/ruff.toml`: `E9` and all of Pyflakes, `F` — since 2026-10-18, issue #72, which also
+fails an unused import or a dead local; before, `F63`, `F7`, `F82`). Ruff is in neither lock
+(`requirements.lock` is what the image installs), so CI pins its version. Two per-file ignores,
+each with its reason in the file: `F821` in `app/models/` (SQLAlchemy resolves the string
+annotations there, `Mapped["Security"]`, through its registry) and `F811` in the one test module
+that imports pytest fixtures from another and names them as parameters.
 Workflow actions are pinned to commit shas with the tag as a comment.
 
 **The bundle is code-split, and two of the boundaries are deliberate.** The eight non-default tabs

@@ -6,14 +6,13 @@ until 2026-07-28. These tests pin both choke points: what gets stored is clean,
 and what gets read out is clean even when a poisoned row already exists.
 """
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.sync_run import SyncRun
 from app.redact import redact_secrets
 from app.repositories.sync_run_repository import SyncRunRepository
+from tests.memory_db import memory_engine
 
 FAKE_TOKEN = "123456789012345678901234"
 POISONED = (
@@ -83,9 +82,7 @@ def test_redaction_recurses_into_job_result_payloads():
 
 @pytest.mark.asyncio
 async def test_record_never_stores_a_token_bearing_string():
-    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         run = await SyncRunRepository(session).record(

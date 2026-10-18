@@ -22,11 +22,9 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
 from app.models.exchange_rate import ExchangeRate
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -34,6 +32,7 @@ from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services import currency_service as cs
 from app.services import scheduler_service as sched_mod
 from app.clock import utc_today
+from tests.memory_db import memory_engine
 
 CARRIED = f"frankfurter{cs.CurrencyService.CARRIED_SUFFIX}"
 
@@ -60,10 +59,7 @@ class _BothProvidersDown:
 
 @pytest_asyncio.fixture
 async def engine():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     async with AsyncSession(engine) as db:
         db.add(Security(id=1, isin="US0378331005", symbol="AAPL", description="Apple",
                         currency="USD", conid=1, asset_category="STK", exchange="NASDAQ"))

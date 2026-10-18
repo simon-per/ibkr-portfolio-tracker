@@ -12,27 +12,25 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401
-from app.database import Base, get_db
+from app.database import get_db
 from app.main import app
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from tests.memory_db import create_schema, new_memory_engine
 
 
 @pytest.fixture
 def client():
     import asyncio
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
+    engine = new_memory_engine()
 
     async def seed():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
         async with AsyncSession(engine) as s:
             s.add(Security(id=1, isin="US0000000031", symbol="A", description="A",
                            currency="EUR", conid=31, asset_category="STK", exchange="X"))

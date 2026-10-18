@@ -9,7 +9,6 @@ fund's distribution and a first forecast are not raises — and the entries add 
 "+X from raises" beside them, because they are one computation, not two.
 """
 import ast
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 

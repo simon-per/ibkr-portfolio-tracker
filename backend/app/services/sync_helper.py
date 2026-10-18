@@ -74,7 +74,6 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     # Imported here rather than at module scope to match the existing pattern and keep
     # sync_helper importable from the CLI without pulling in the service graph eagerly.
     from app.services.dividend_service import DividendService
-    from app.services.benchmark_service import BenchmarkService
     from app.repositories.security_repository import SecurityRepository
     from app.repositories.taxlot_repository import TaxLotRepository
     from app.repositories.app_settings_repository import AppSettingsRepository

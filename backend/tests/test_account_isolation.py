@@ -26,11 +26,9 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR, PILLAR3A
-from app.database import Base
 from app.models.cash_balance import CashBalance
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.security import Security
@@ -45,6 +43,7 @@ from app.services.sync_helper import (
     reconcile_taxlots,
     restamp_unsourced_closed_lots,
 )
+from tests.memory_db import memory_engine
 
 
 class FakeCurrencyService:
@@ -55,14 +54,8 @@ class FakeCurrencyService:
 
 
 async def _make_repos():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     return engine, session, TaxLotRepository(session), TradeRepository(session)
 

@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
-from app.database import Base, get_db
+from app.database import get_db
 import app.models  # noqa: F401
 from app.models.app_settings import AppSetting
 from app.models.crypto import (
@@ -62,6 +62,7 @@ from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.models.watchlist_item import WatchlistItem
 from app.clock import utc_today
+from tests.memory_db import create_schema
 
 TODAY = utc_today()
 START = TODAY - timedelta(days=200)
@@ -357,8 +358,7 @@ def _template(seed):
                                  connect_args={"check_same_thread": False})
 
     async def _build():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await create_schema(engine)
         async with AsyncSession(engine, expire_on_commit=False) as session:
             await seed(session)
         await engine.dispose()

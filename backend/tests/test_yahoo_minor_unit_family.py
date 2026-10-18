@@ -20,6 +20,7 @@ from app.services import yahoo_minor_units
 from app.services.dividend_service import DividendService, yahoo_dividend_rows
 from app.services.market_data_service import chart_actions
 from app.services.yahoo_minor_units import minor_unit_scale
+from tests.ast_scope import imports_yfinance
 
 APP = pathlib.Path(__file__).resolve().parents[1] / "app"
 HELPER = APP / "services" / "yahoo_minor_units.py"
@@ -46,15 +47,6 @@ AMOUNT_COLUMNS = {"Close", "Dividends"}
 def _modules():
     for path in sorted(APP.rglob("*.py")):
         yield path.relative_to(APP).as_posix(), ast.parse(path.read_text(encoding="utf-8"))
-
-
-def _imports_yfinance(tree) -> bool:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import) and any(a.name.split(".")[0] == "yfinance" for a in node.names):
-            return True
-        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "yfinance":
-            return True
-    return False
 
 
 def _reads_yahoo_amounts(tree) -> bool:
@@ -84,7 +76,7 @@ def _calls(tree, name: str) -> bool:
 def _amount_readers():
     return {
         rel: tree for rel, tree in _modules()
-        if _imports_yfinance(tree) and _reads_yahoo_amounts(tree)
+        if imports_yfinance(tree) and _reads_yahoo_amounts(tree)
     }
 
 

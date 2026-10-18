@@ -6,10 +6,8 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401  register mappers
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -19,20 +17,15 @@ from app.models.dividend_withholding_adjustment import DividendWithholdingAdjust
 from app.models.dividend_accrual import DividendAccrual
 from app.repositories.dividend_repository import DividendRepository
 from app.services.dividend_service import DividendService
+from tests.memory_db import memory_engine
 
 
 async def _make_session():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
     # The accruals because the summary reads an estimate's net through the withholding
     # ladder (issue #61), whose first rung is an open accrual.
     tables = [Security.__table__, TaxLot.__table__, DividendPayment.__table__, AppSetting.__table__,
               DividendWithholdingAdjustment.__table__, DividendAccrual.__table__]
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+    engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(
         id=1, isin="US0000000001", symbol="AAA", description="Test Co",

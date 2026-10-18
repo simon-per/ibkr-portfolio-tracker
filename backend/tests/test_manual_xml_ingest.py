@@ -17,10 +17,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -30,18 +28,13 @@ from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import ingest_flex_statement, EmptyStatementError
 
 from tests.test_flex_ingestion_e2e import FLEX_XML, CSU_CONID
+from tests.memory_db import memory_engine
 
 
 async def _make_session():
     """Full schema: ingest_flex_statement touches securities, lots, trades, dividends,
     app_settings and the benchmark cache, so create everything rather than a subset."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await memory_engine()
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 
