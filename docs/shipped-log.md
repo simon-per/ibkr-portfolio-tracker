@@ -7,6 +7,20 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — #39 and the audit's wave 6 part one (#48–#50)
+
+- **#39** (`870634e`, pushed alone): Node 22, `permissions: contents: read`, actions pinned
+  to SHAs verified against their tags, `npm run lint`, ruff (`E9,F63,F7,F82`), an `image` job
+  building `backend/Dockerfile`. Its first CI run was green on all three jobs.
+- **#48** (`45f2283`): `SectionStrip` owns `useScrolled`; `useQueries` with a module-level
+  `combine`; stable formatter hooks; one cached `Intl.NumberFormat` per option set;
+  `ScrollableTable` re-arms on child swaps only; card cells render once.
+- **#49** (`504f627`): `formatMoneyWhole`, 23 hand-built money strings replaced, a family scan;
+  `color-scheme`; `ABSENT` placeholders.
+- **#50** (`a81d735`): smoke test seeds once per module (34 s → 4 s); one conftest `db`.
+
+Verified offline: backend 2620 passed / 8 skipped, frontend 1102 passed, build and lint green.
+
 ## Shipped 2026-10-18 — the audit's wave 5 (#40, #42–#46)
 
 Four of the six agents stopped on the org's monthly spend limit mid-task and were resumed from

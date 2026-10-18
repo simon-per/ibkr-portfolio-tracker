@@ -14,8 +14,8 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech UI pass on every
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
-the same day, and wave 5 (#40, #42–#46) after them (docs/shipped-log.md 2026-10-18). #38, #39
-(committed, held for its first CI run) and #47–#51 are open.
+the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
+#38, #47 and #51 are open.
 
 ---
 
@@ -163,6 +163,12 @@ Only what is still unverified.
     by under 0.3%); other currencies unchanged (#46).
   - `fx_result.frankfurter_requests` may read N+1 once on a day Frankfurter rejects a code, then 0–1
     (#40); Easter weekend slots ask nothing.
+- **#48/#49 in a real browser:** dark mode's native scrollbars and selects are dark now
+  (`color-scheme`, not visible to jsdom); money reads "-CHF 1,234" everywhere; the Forecast tab's
+  dividend-trend axis labels — if the monthly forecast passes 1,000, check no tick label repeats.
+- **The VPS still runs Node 20** (deploy.sh installs Node only when none is present): `npm ci` on
+  deploy prints an `EBADENGINE` warning since `engines: >=22` (#39) — harmless; upgrading is an
+  owner action over ssh.
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
@@ -236,15 +242,14 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #38, #39 and #47–#51, in number order** (`gh issue list`). Each carries its
+1. **The open audit issues, #38, #47 and #51** (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-3. **Tooling.** ESLint is clean; `positionColumns` and `lookthroughColumns` are its one named
-   exception (`eslint.config.js`). Ruff unconfigured; neither in CI. `alembic check` fails on
-   naming drift only. The `ResizeObserver` stub is in 17 test files — `src/testSetup.ts` is now
-   the place for it. CI pins Node 20 (EOL).
+3. **Tooling.** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an
+   image build. `alembic check` fails on naming drift only. The `ResizeObserver` stub is in 23
+   test files — `src/testSetup.ts` is the place for it.
 4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
