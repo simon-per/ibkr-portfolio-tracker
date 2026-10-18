@@ -12,8 +12,27 @@ export function cn(...inputs: ClassValue[]) {
  */
 export const ABSENT = '—'
 
+const NUMBER_FORMATS = new Map<string, Intl.NumberFormat>()
+
+/**
+ * One `en-US` `Intl.NumberFormat` per option set, built on first use and reused.
+ *
+ * Constructing one costs tens of microseconds and formatting with a built one well under
+ * one, and a table re-render formats every money cell. Keyed on the options themselves,
+ * so a key cannot drift from what it builds.
+ */
+function numberFormat(options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = JSON.stringify(options)
+  let format = NUMBER_FORMATS.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat("en-US", options)
+    NUMBER_FORMATS.set(key, format)
+  }
+  return format
+}
+
 export function formatCurrency(value: number, currency: string = "EUR"): string {
-  return new Intl.NumberFormat("en-US", {
+  return numberFormat({
     style: "currency",
     currency: currency,
     minimumFractionDigits: 2,
@@ -32,7 +51,7 @@ export function formatCurrency(value: number, currency: string = "EUR"): string 
 export function formatPrice(value: number, currency: string = "EUR"): string {
   const abs = Math.abs(value)
   if (abs === 0 || abs >= 1 || !Number.isFinite(value)) return formatCurrency(value, currency)
-  return new Intl.NumberFormat("en-US", {
+  return numberFormat({
     style: "currency",
     currency,
     minimumSignificantDigits: 2,
@@ -48,9 +67,9 @@ export function formatPrice(value: number, currency: string = "EUR"): string {
 export function formatQuantity(value: number): string {
   const abs = Math.abs(value)
   if (abs > 0 && abs < 1) {
-    return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 6 }).format(value)
+    return numberFormat({ maximumSignificantDigits: 6 }).format(value)
   }
-  return new Intl.NumberFormat("en-US", {
+  return numberFormat({
     maximumFractionDigits: abs >= 1000 ? 2 : 4,
   }).format(value)
 }
@@ -75,7 +94,7 @@ export function currencySymbol(currency: string = "EUR"): string {
 }
 
 export function formatPercent(value: number): string {
-  return new Intl.NumberFormat("en-US", {
+  return numberFormat({
     style: "percent",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -166,7 +185,7 @@ export function tooltipValue<T>(
  * formatting inline.
  */
 export function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value)
+  return numberFormat({}).format(value)
 }
 
 /**

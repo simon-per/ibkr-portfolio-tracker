@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, useCallback, useContext } from 'react'
 import { formatCurrency as formatCurrencyUtil, currencySymbol as currencySymbolUtil } from './utils'
 
 export interface CurrencyContextValue {
@@ -49,11 +49,19 @@ export function useBaseCurrency() {
   return useContext(CurrencyContext)
 }
 
-/** Returns a formatter bound to the current base currency (override optional). */
+/**
+ * Returns a formatter bound to the current base currency (override optional).
+ *
+ * The same function until the base currency changes: the tables memoise their column
+ * factories on it, and a fresh closure per render rebuilt every column every render.
+ */
 export function useFormatCurrency() {
   const { baseCurrency } = useContext(CurrencyContext)
-  return (value: number, currencyOverride?: string) =>
-    formatCurrencyUtil(value, currencyOverride ?? baseCurrency)
+  return useCallback(
+    (value: number, currencyOverride?: string) =>
+      formatCurrencyUtil(value, currencyOverride ?? baseCurrency),
+    [baseCurrency],
+  )
 }
 
 /** Returns the short symbol/prefix for the current base currency. */

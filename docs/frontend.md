@@ -313,6 +313,28 @@ missing it costs a wrong figure.
   the Allocation tab after 5 minutes then refetched positions but not the summary, and the hero's
   `unpriced_holdings` and the positions table's own count could come from different valuations.
 
+## Render identity — what a no-op render must not rebuild (#48)
+
+The Dashboard stays mounted and re-renders often (the 60 s scheduler poll, every query state change
+while a tab loads). A memo is only as stable as its least stable input, so these hold:
+
+- **`useQueries` takes a module-level `combine`** (`dataOf` in `lib/queryCache.ts`). Without one it
+  returns a new array every render, and the benchmark datasets and risk metrics memoised on it
+  (drawdown, Sortino, beta over the whole series) recomputed on every render. The combined result
+  is structurally shared, so it keeps its identity until a response changes; an inline `combine`
+  is a new function each render and is re-run each render.
+- **`useFormatCurrency` returns one function per base currency** (`useCallback`). The table column
+  factories are memoised on it.
+- **`lib/utils.ts` builds one `Intl.NumberFormat` per option set** and reuses it (tens of
+  microseconds to construct, under one to format, and a table render formats every money cell).
+- **State only the sticky strip reads lives in the strip** (`SectionStrip` owns `useScrolled`), so
+  a scroll crossing re-renders the strip and not the page.
+- **`ScrollableTable` attaches its listeners once per mount.** Its effect depended on `children`,
+  a new element every parent render, so each render rebuilt the observer and forced a layout. A
+  child swapped in later is observed through a `MutationObserver`.
+
+`lib/renderIdentity.test.tsx` and `Dashboard.render.test.tsx` pin them.
+
 ---
 
 ## Visual hierarchy and KPI panels
@@ -762,7 +784,8 @@ metrics may well go without.
   Dividends `HandCoins`, Look-through `Layers`, Allocation `ChartPie`, Activity `ArrowLeftRight`,
   Fundamentals `Gauge`, Watchlist `Eye`, Tax `Landmark`, Forecast `Telescope`.
 - **The strip is sticky with a blur**, and lifts (a soft shadow) only once the page has scrolled
-  (`lib/useScrolled.ts`). Padding sits on the tablist, not its sticky wrapper, so the tablist's own
+  (`lib/useScrolled.ts`, read only inside `SectionStrip` so a crossing re-renders the strip
+  alone). Padding sits on the tablist, not its sticky wrapper, so the tablist's own
   top is 0 while pinned — what `e2e/mobile.mjs` asserts. The header above it scrolls away; on a
   phone it wraps to two rows and pinning it too would eat a quarter of the screen.
 - **Cards**: `rounded-2xl`, hairline border, `shadow-card` — in dark mode a 1px inset top

@@ -1,7 +1,7 @@
 import { useState, useMemo, lazy } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { positionsQuery, readsIbkrRows, summaryQuery } from '@/lib/queryCache'
+import { dataOf, positionsQuery, readsIbkrRows, summaryQuery } from '@/lib/queryCache'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -71,9 +71,50 @@ import {
 import { useScrolled } from '@/lib/useScrolled'
 import { cn } from '@/lib/utils'
 
+/**
+ * The sticky section strip. Its own component because it is the only reader of
+ * `useScrolled`: in the Dashboard body each threshold crossing re-rendered the whole page,
+ * and every memo on the Performance tab with it, to change one shadow.
+ */
+function SectionStrip() {
+  const scrolled = useScrolled()
+  return (
+    // Sticky at every width: it is the one control used constantly, and a 3,000px panel
+    // scrolls under it. On a phone the strip scrolls sideways and the half-cut next
+    // label is the "there is more" cue. `justify-start` matters: a centred flex row
+    // wider than its scroller overflows on both sides, and the leading overflow is
+    // unreachable.
+    //
+    // Lifts off the content (a soft shadow) only once there is content under it. The
+    // padding sits on the tablist itself, not this wrapper, so the tablist's own top is
+    // the viewport's top while pinned — what e2e/mobile.mjs measures.
+    <div
+      className={cn(
+        'sticky top-0 z-30 border-b border-border/80 bg-card/95 backdrop-blur-md transition-shadow supports-[backdrop-filter]:bg-card/85',
+        scrolled && 'shadow-[0_10px_24px_-18px_rgb(16_24_40/0.45)] dark:shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]',
+      )}
+    >
+      <TabsList
+        label="Portfolio sections"
+        className="mx-auto w-full max-w-[1400px] justify-start overflow-x-auto px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
+      >
+        {/* Most-used first, left to right — the owner's order (2026-09-13). */}
+        <TabsTrigger value="performance" icon={TrendingUp}>Performance</TabsTrigger>
+        <TabsTrigger value="dividends" icon={HandCoins}>Dividends</TabsTrigger>
+        <TabsTrigger value="lookthrough" icon={Layers}>Look-through</TabsTrigger>
+        <TabsTrigger value="allocation" icon={ChartPie}>Allocation</TabsTrigger>
+        <TabsTrigger value="activity" icon={ArrowLeftRight}>Activity</TabsTrigger>
+        <TabsTrigger value="fundamentals" icon={Gauge}>Fundamentals</TabsTrigger>
+        <TabsTrigger value="watchlist" icon={Eye}>Watchlist</TabsTrigger>
+        <TabsTrigger value="tax" icon={Landmark}>Tax</TabsTrigger>
+        <TabsTrigger value="forecast" icon={Telescope}>Forecast</TabsTrigger>
+      </TabsList>
+    </div>
+  )
+}
+
 export function Dashboard() {
   const queryClient = useQueryClient()
-  const scrolled = useScrolled()
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1Y')
   const [selectedBenchmarks, setSelectedBenchmarks] = useState<string[]>(readSelectedBenchmarks)
 
@@ -120,14 +161,17 @@ export function Dashboard() {
   // Fetch positions
   const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery(positionsQuery)
 
-  // Fetch benchmark comparisons (dynamic based on selection)
-  const benchmarkQueries = useQueries({
+  // Fetch benchmark comparisons (dynamic based on selection). Combined to the data alone,
+  // which keeps one identity until a response changes: `benchmarkDatasets` and the risk
+  // metrics below are memoised on it.
+  const benchmarkResponses = useQueries({
     queries: selectedBenchmarks.map((key) => ({
       queryKey: ['portfolio', 'benchmark', dateRange, key],
       queryFn: () => api.getBenchmarkComparison(dateRange.start, dateRange.end, key),
       enabled: !!dateRange.start && !!dateRange.end,
       staleTime: 30 * 60 * 1000,
     })),
+    combine: dataOf,
   })
 
   // The full `/benchmarks` list, for colouring by identity rather than by position in
@@ -142,19 +186,19 @@ export function Dashboard() {
   const benchmarkDatasets: BenchmarkDataset[] = useMemo(() => {
     return selectedBenchmarks
       .map((key, i): BenchmarkDataset | null => {
-        const query = benchmarkQueries[i]
-        if (!query?.data) return null
+        const response = benchmarkResponses[i]
+        if (!response) return null
         return {
           key,
-          name: query.data.benchmark_name,
+          name: response.benchmark_name,
           color: benchmarkColor(key, availableBenchmarks),
-          data: query.data.data,
+          data: response.data,
           // 0 from a backend older than 2026-09-07.
-          anchorUnpriced: query.data.anchor_unpriced_holdings ?? 0,
+          anchorUnpriced: response.anchor_unpriced_holdings ?? 0,
         }
       })
       .filter((d): d is BenchmarkDataset => d !== null)
-  }, [selectedBenchmarks, benchmarkQueries, availableBenchmarks])
+  }, [selectedBenchmarks, benchmarkResponses, availableBenchmarks])
 
   // Fetch XIRR annualized return for selected time range
   const { data: annualizedReturn, isLoading: xirrLoading } = useQuery({
@@ -405,36 +449,7 @@ export function Dashboard() {
         }
       />
 
-      {/* Sticky at every width: it is the one control used constantly, and a 3,000px panel
-          scrolls under it. On a phone the strip scrolls sideways and the half-cut next
-          label is the "there is more" cue. `justify-start` matters: a centred flex row
-          wider than its scroller overflows on both sides, and the leading overflow is
-          unreachable. */}
-      {/* Lifts off the content (a soft shadow) only once there is content under it. The
-          padding sits on the tablist itself, not this wrapper, so the tablist's own top is
-          the viewport's top while pinned — what e2e/mobile.mjs measures. */}
-      <div
-        className={cn(
-          'sticky top-0 z-30 border-b border-border/80 bg-card/95 backdrop-blur-md transition-shadow supports-[backdrop-filter]:bg-card/85',
-          scrolled && 'shadow-[0_10px_24px_-18px_rgb(16_24_40/0.45)] dark:shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]',
-        )}
-      >
-        <TabsList
-          label="Portfolio sections"
-          className="mx-auto w-full max-w-[1400px] justify-start overflow-x-auto px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
-        >
-          {/* Most-used first, left to right — the owner's order (2026-09-13). */}
-          <TabsTrigger value="performance" icon={TrendingUp}>Performance</TabsTrigger>
-          <TabsTrigger value="dividends" icon={HandCoins}>Dividends</TabsTrigger>
-          <TabsTrigger value="lookthrough" icon={Layers}>Look-through</TabsTrigger>
-          <TabsTrigger value="allocation" icon={ChartPie}>Allocation</TabsTrigger>
-          <TabsTrigger value="activity" icon={ArrowLeftRight}>Activity</TabsTrigger>
-          <TabsTrigger value="fundamentals" icon={Gauge}>Fundamentals</TabsTrigger>
-          <TabsTrigger value="watchlist" icon={Eye}>Watchlist</TabsTrigger>
-          <TabsTrigger value="tax" icon={Landmark}>Tax</TabsTrigger>
-          <TabsTrigger value="forecast" icon={Telescope}>Forecast</TabsTrigger>
-        </TabsList>
-      </div>
+      <SectionStrip />
 
       {/* Constrained and centred: at 1440px and wider a full-bleed grid reads as a
           spreadsheet, and every reference app constrains its content. */}

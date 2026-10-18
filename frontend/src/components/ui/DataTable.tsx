@@ -462,8 +462,11 @@ function CompactRow<Row, SortKey extends string>({
   const metas = pick('meta')
   const badges = pick('badge')
   // A card has room to leave an absent figure out, where a table cell has to print its
-  // dash: "Shares —  Price —" under a deposit is two lines saying nothing.
-  const details = pick('detail').filter(col => !isAbsent(col.cell(row, 'cards')))
+  // dash: "Shares —  Price —" under a deposit is two lines saying nothing. Each cell is
+  // rendered once and the node reused below, rather than once to filter and again to draw.
+  const details = pick('detail')
+    .map(col => ({ col, node: col.cell(row, 'cards') }))
+    .filter(({ node }) => !isAbsent(node))
 
   // A disclosure that would reveal a single line costs as much as the line itself.
   const limit = detailLimit != null && details.length - detailLimit > 1 ? detailLimit : null
@@ -511,13 +514,13 @@ function CompactRow<Row, SortKey extends string>({
 
       {shownDetails.length > 0 && (
         <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          {shownDetails.map(col => (
+          {shownDetails.map(({ col, node }) => (
             // Wraps rather than truncates: a cut label ("Withh…") loses the meaning,
             // while a value under its label at 390px only costs a line.
             <div key={col.key} className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2">
               <dt className="text-muted-foreground">{columnLabel(col)}</dt>
               <dd className={cn('ml-auto shrink-0 tabular-nums', col.tone?.(row))}>
-                {col.cell(row, 'cards')}
+                {node}
               </dd>
             </div>
           ))}

@@ -44,3 +44,15 @@ export const positionsQuery = queryOptions({
   queryFn: () => api.getPositions(),
   staleTime: VALUATION_STALE_TIME,
 })
+
+/**
+ * A `useQueries` `combine`: each query's data, in query order.
+ *
+ * Without a `combine`, `useQueries` returns a new array on every render, so every memo
+ * keyed on it recomputes every render. Its combined result is structurally shared, so this
+ * one keeps its identity until some query's data changes. Module-level on purpose: an
+ * inline `combine` is a new function each render and is re-run each render.
+ */
+export function dataOf<T>(results: readonly { data: T | undefined }[]): (T | undefined)[] {
+  return results.map((r) => r.data)
+}

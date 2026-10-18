@@ -54,12 +54,28 @@ export function ScrollableTable({ children, label, className, pinnedStart = fals
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     for (const child of Array.from(el.children)) observer.observe(child)
+    // Attached once per mount, not per render: `children` is a new element on every parent
+    // render, and depending on it rebuilt both listeners and forced a layout each time. A
+    // child the parent swaps out (table for empty state) is picked up here instead.
+    const mutations = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (node instanceof Element) observer.observe(node)
+        }
+        for (const node of Array.from(record.removedNodes)) {
+          if (node instanceof Element) observer.unobserve(node)
+        }
+      }
+      measure()
+    })
+    mutations.observe(el, { childList: true })
 
     return () => {
       el.removeEventListener('scroll', measure)
       observer.disconnect()
+      mutations.disconnect()
     }
-  }, [measure, children])
+  }, [measure])
 
   return (
     <div className="relative">
