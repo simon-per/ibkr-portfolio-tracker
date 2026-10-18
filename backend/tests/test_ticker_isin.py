@@ -7,28 +7,10 @@ production baskets on 2026-10-18.
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401  register all mappers
-from app.database import Base
 from app.models.etf_basket import EtfHolding
 from app.services.ticker_isin import isins_by_yahoo_ticker, normalise, split_yahoo_ticker
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-                                 connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 ROWS = [

@@ -15,34 +15,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.clock import utcnow
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.analyst_rating import AnalystRating
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.routers.analyst_ratings import get_analyst_ratings_status
 from app.services.analyst_rating_service import AnalystRatingService
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 @pytest.fixture

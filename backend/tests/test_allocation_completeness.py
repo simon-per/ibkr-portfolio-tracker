@@ -28,11 +28,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -41,23 +37,6 @@ from app.services.allocation_service import AllocationService
 from app.clock import utc_today
 
 BREAKDOWNS = ("asset_type_allocation", "sector_allocation", "geographic_allocation")
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _hold(db, *, symbol, isin, conid, sector, country, asset_type="Stock",

@@ -15,8 +15,17 @@ serve from cache, and an accidental network reach has to fail loudly rather than
 quietly spend the rate-limit budget (CLAUDE.md rule 1).
 
 POST routes are deliberately not exercised — they start real syncs.
+
+Each fixture is seeded once per module into a template database, and every test is
+served from its own copy of it (an SQLite backup into a fresh named in-memory
+database, milliseconds against ~0.4 s for the seed). A copy, not one shared database:
+some read endpoints write, so a shared one would let a test see another's writes and
+make the outcome depend on test order.
 """
+import asyncio
 import hashlib
+import sqlite3
+import uuid
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -323,7 +332,54 @@ async def _seed_zero_cost(session: AsyncSession) -> None:
     await session.commit()
 
 
-def _serve(monkeypatch, seed):
+def _memory_db(name: str):
+    """
+    A named in-memory database that lives as long as the returned connection stays
+    open, and its engine URL. The name is what lets the async engine (whose connection
+    aiosqlite opens on its own thread) and this plain `sqlite3` handle see one database.
+    """
+    keepalive = sqlite3.connect(f"file:{name}?mode=memory&cache=shared", uri=True,
+                                check_same_thread=False)
+    url = f"sqlite+aiosqlite:///file:{name}?mode=memory&cache=shared&uri=true"
+    return keepalive, url
+
+
+def _template(seed):
+    """Seed once; the returned connection holds the template until it is closed."""
+    keepalive, url = _memory_db(f"smoke-template-{uuid.uuid4().hex}")
+    engine = create_async_engine(url, poolclass=StaticPool,
+                                 connect_args={"check_same_thread": False})
+
+    async def _build():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            await seed(session)
+        await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_build())
+    finally:
+        loop.close()
+    return keepalive
+
+
+@pytest.fixture(scope="module")
+def seeded_template():
+    template = _template(_seed)
+    yield template
+    template.close()
+
+
+@pytest.fixture(scope="module")
+def zero_cost_template():
+    template = _template(_seed_zero_cost)
+    yield template
+    template.close()
+
+
+def _serve(monkeypatch, template):
     # Any accidental Yahoo reach must fail loudly, not spend rate-limit budget.
     def _forbidden(*_a, **_kw):
         raise AssertionError("a test tried to call Yahoo Finance")
@@ -347,21 +403,13 @@ def _serve(monkeypatch, seed):
 
     monkeypatch.setattr(div_router, "_run_dividend_sync_background", _no_sync)
 
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    # This test's own copy of the seeded template.
+    keepalive, url = _memory_db(f"smoke-{uuid.uuid4().hex}")
+    template.backup(keepalive)
+    engine = create_async_engine(url, poolclass=StaticPool,
+                                 connect_args={"check_same_thread": False})
     session = AsyncSession(engine, expire_on_commit=False)
-
-    import asyncio
     loop = asyncio.new_event_loop()
-
-    async def _setup():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        await seed(session)
-
-    loop.run_until_complete(_setup())
 
     from app.main import app
 
@@ -375,16 +423,34 @@ def _serve(monkeypatch, seed):
     loop.run_until_complete(session.close())
     loop.run_until_complete(engine.dispose())
     loop.close()
+    keepalive.close()
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    yield from _serve(monkeypatch, _seed)
+def client(monkeypatch, seeded_template):
+    yield from _serve(monkeypatch, seeded_template)
 
 
 @pytest.fixture()
-def zero_cost_client(monkeypatch):
-    yield from _serve(monkeypatch, _seed_zero_cost)
+def zero_cost_client(monkeypatch, zero_cost_template):
+    yield from _serve(monkeypatch, zero_cost_template)
+
+
+def test_a_write_through_one_copy_reaches_neither_the_next_nor_the_template(
+    seeded_template, monkeypatch
+):
+    """The seed runs once per module; the isolation each test had before must not go with it."""
+    for _ in range(2):
+        served = _serve(monkeypatch, seeded_template)
+        c = next(served)
+        assert c.get("/api/settings").json()["base_currency"] == "CHF"
+        r = c.put("/api/settings/base-currency", json={"base_currency": "EUR"})
+        assert r.status_code == 200, r.text
+        assert c.get("/api/settings").json()["base_currency"] == "EUR"
+        next(served, None)   # teardown
+    assert seeded_template.execute(
+        "SELECT value FROM app_settings WHERE key = 'base_currency'"
+    ).fetchone() == ("CHF",)
 
 
 def test_a_share_of_nothing_serializes_as_null(zero_cost_client):

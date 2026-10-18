@@ -30,6 +30,10 @@ so the variable is set here, before anything below imports `app.config`; an envi
 variable outranks `.env` in pydantic-settings. A test that wants a particular file still
 patches `settings.database_url` itself (`test_migrations.py`). Each process — the xdist
 controller and every worker — gets its own directory, removed when it exits.
+
+`db` is the plain in-memory database most service tests want: the whole schema, empty,
+one per test. A module that needs rows or patches on top defines its own `db`, which
+overrides this one; `tests/test_fixture_copies.py` refuses a module-level copy of it.
 """
 import atexit
 import logging
@@ -45,9 +49,14 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(_TEST_DB_DIR / 'test.db').a
 atexit.register(shutil.rmtree, _TEST_DB_DIR, ignore_errors=True)
 
 import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
+import app.models  # noqa: E402,F401  (every table on Base.metadata)
 from app import rate_limit  # noqa: E402
 from app.config import settings  # noqa: E402
+from app.database import Base  # noqa: E402
 from app.services.currency_service import reset_frankfurter_rejections  # noqa: E402
 
 
@@ -75,6 +84,23 @@ def _neutral_process_state(monkeypatch):
     yield
     rate_limit.reset()
     reset_frankfurter_rejections()
+
+
+@pytest_asyncio.fixture
+async def db():
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session = AsyncSession(engine, expire_on_commit=False)
+    try:
+        yield session
+    finally:
+        await session.close()
+        await engine.dispose()
 
 
 @pytest.fixture

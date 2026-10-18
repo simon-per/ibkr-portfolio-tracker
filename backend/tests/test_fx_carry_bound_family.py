@@ -22,12 +22,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.exchange_rate import ExchangeRate
 from app.services.currency_service import CurrencyService
@@ -38,22 +34,6 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 OWNER = "services/fx_policy.py"
 
 LAST_RATE = date(2026, 3, 2)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 @pytest.fixture(autouse=True)

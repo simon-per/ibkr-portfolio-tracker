@@ -15,16 +15,12 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-import pytest_asyncio
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 import app.services.dividend_service as ds
 import app.services.market_data_service as mds
 from app.clock import utc_today, utcnow
-from app.database import Base
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -90,22 +86,6 @@ class _Yahoo:
                 return column[column != 0]  # exactly yfinance's `get_dividends`
 
         self.Ticker = _Ticker
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 @pytest.fixture

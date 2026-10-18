@@ -66,7 +66,14 @@ net, a pre-ownership zero row, a non-EUR security, CHF as base. Every other test
 directly, which is how a `Decimal + None` reached production behind a green suite. `yfinance` is a
 raiser for that whole module, so an accidental network reach fails loudly; `/api/portfolio/benchmark`
 is excluded because it lazy-fetches Yahoo on a cache miss, and POST routes are excluded because they
-start real syncs. **Add a case here when an endpoint's response shape changes.**
+start real syncs. **Add a case here when an endpoint's response shape changes.** The fixture is seeded
+once per module into a template and each test is served from its own SQLite-backup copy (issue #50:
+the seed was 93% of the module's runtime). Keep the copy: some read endpoints write, so one shared
+database would make the module order-dependent.
+
+A service test that wants an empty in-memory schema takes `db` from `tests/conftest.py`. A module
+whose `db` adds rows or patches defines its own, which overrides it; a plain copy is refused by
+`tests/test_fixture_copies.py`.
 
 Tests (1427 backend as of 2026-09-07 + 555 frontend as of 2026-09-08, all offline — no IBKR, Yahoo or FX-provider
 calls). Take the number the suite actually prints as your baseline, not this line — it has been stale

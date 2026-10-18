@@ -26,11 +26,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.etf_mappings import (
     ETF_ALLOCATIONS,
@@ -45,23 +41,6 @@ from app.clock import utc_today
 
 VT_ISIN = "US9220427424"          # a real row in the table
 NOT_A_FUND = "US0000000009"       # same ticker, different instrument
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _hold(db, symbol, isin, conid, sector=None, country=None):

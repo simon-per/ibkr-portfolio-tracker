@@ -13,7 +13,6 @@ is asserted rather than assumed.
 from datetime import datetime, timedelta
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -42,22 +41,6 @@ from app.services.scheduler_service import (
 # 2026-08-08 12:00 UTC is 08:00 ET — mid-morning in New York, comfortably inside one ET
 # day, so a test that meant to write "today" cannot land on a boundary by accident.
 NOW = datetime(2026, 8, 8, 12, 0, 0)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _run(db, sync_type, status, at, details=None):

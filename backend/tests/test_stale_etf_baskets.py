@@ -15,11 +15,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.etf_sources import FUND_SOURCES
 from app.models.etf_basket import EtfBasket
@@ -35,23 +31,6 @@ VT = "US9220427424"        # vanguard_us, month-end -> 75-day expectation
 VWCE = "IE00BK5BQT80"      # adapter="manual", borrows VT's basket
 SOXQ = "US46138G6153"      # invesco, fetchable
 AAPL = "US0378331005"      # not a fund at all
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _hold(db, security_id, isin, symbol, is_open=True):

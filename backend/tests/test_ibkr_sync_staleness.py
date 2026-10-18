@@ -15,32 +15,12 @@ recoverable only by a manual period change and an offline XML ingest.
 from datetime import datetime, timedelta
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.sync_run import SyncRun
 from app.services.scheduler_service import IBKR_SYNC_STALE_DAYS, SchedulerService
 
 NOW = datetime(2026, 7, 31, 20, 0, 0)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _run(db, sync_type, status, days_ago):

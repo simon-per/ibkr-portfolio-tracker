@@ -21,11 +21,7 @@ from decimal import Decimal
 from typing import List
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.security import Security
@@ -56,23 +52,6 @@ SOXQ = "US46138G6153"      # invesco, fetchable
 VT = "US9220427424"        # vanguard_us, month-end -> 75-day expectation
 VWCE = "IE00BK5BQT80"      # adapter="manual", borrows VT's basket
 TODAY = date(2026, 9, 8)
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 @pytest.fixture(autouse=True)

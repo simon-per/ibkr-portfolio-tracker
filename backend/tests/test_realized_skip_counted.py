@@ -13,11 +13,7 @@ from decimal import Decimal
 from typing import Optional
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -30,22 +26,6 @@ START = date(2026, 3, 2)
 END = date(2026, 3, 31)
 SALE = START + timedelta(days=20)  # Sunday 2026-03-22; nearest price is 20 days earlier
 SALE_ROW = "2026-03-23"            # the weekday row a Sunday flow is booked on
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 def _security(n: int, symbol: str) -> Security:

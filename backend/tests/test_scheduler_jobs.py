@@ -23,8 +23,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
@@ -401,23 +400,6 @@ def test_both_sync_paths_share_one_sweep():
 # --- stale / missing prices ---------------------------------------------------------
 
 
-@pytest_asyncio.fixture
-async def price_db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
-
-
 async def _seed(db, security_id, symbol, latest_price_age=None, is_open=True):
     """A security with one tax lot and, optionally, a newest price N days old."""
     db.add(Security(
@@ -440,12 +422,12 @@ async def _seed(db, security_id, symbol, latest_price_age=None, is_open=True):
 
 
 @pytest.mark.asyncio
-async def test_a_security_with_no_price_at_all_is_reported(price_db):
+async def test_a_security_with_no_price_at_all_is_reported(db):
     """The case that actually cost money: no price means the position is valued at 0.00,
     and every other layer treats that as a legitimate number."""
-    await _seed(price_db, 1, "SBI", latest_price_age=None)
+    await _seed(db, 1, "SBI", latest_price_age=None)
 
-    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    warnings = await SchedulerService().find_stale_priced_securities(db)
 
     assert len(warnings) == 1
     assert "SBI@NASDAQ" in warnings[0]
@@ -453,62 +435,62 @@ async def test_a_security_with_no_price_at_all_is_reported(price_db):
 
 
 @pytest.mark.asyncio
-async def test_a_stale_price_is_reported_with_its_age(price_db):
-    await _seed(price_db, 1, "OLD", latest_price_age=STALE_PRICE_DAYS + 3)
+async def test_a_stale_price_is_reported_with_its_age(db):
+    await _seed(db, 1, "OLD", latest_price_age=STALE_PRICE_DAYS + 3)
 
-    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    warnings = await SchedulerService().find_stale_priced_securities(db)
 
     assert len(warnings) == 1
     assert f"{STALE_PRICE_DAYS + 3} days old" in warnings[0]
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_price_is_not_reported(price_db):
+async def test_a_fresh_price_is_not_reported(db):
     """The 15:00 market-data job runs before the US close, so a day or two of lag on a
     price is routine. Warning on it would train the reader to ignore this."""
-    await _seed(price_db, 1, "FRESH", latest_price_age=1)
+    await _seed(db, 1, "FRESH", latest_price_age=1)
 
-    assert await SchedulerService().find_stale_priced_securities(price_db) == []
+    assert await SchedulerService().find_stale_priced_securities(db) == []
 
 
 @pytest.mark.asyncio
-async def test_a_fully_sold_security_going_quiet_is_not_a_fault(price_db):
+async def test_a_fully_sold_security_going_quiet_is_not_a_fault(db):
     """Only open lots move a number the user sees; a closed-out holding legitimately
     stops getting prices, and reporting it would be permanent noise."""
-    await _seed(price_db, 1, "GONE", latest_price_age=None, is_open=False)
+    await _seed(db, 1, "GONE", latest_price_age=None, is_open=False)
 
-    assert await SchedulerService().find_stale_priced_securities(price_db) == []
+    assert await SchedulerService().find_stale_priced_securities(db) == []
 
 
 @pytest.mark.asyncio
-async def test_each_held_security_is_reported_at_most_once(price_db):
+async def test_each_held_security_is_reported_at_most_once(db):
     """Several open lots per security is the norm (972 lots over 38 securities), so the
     grouping has to collapse them or one bad feed becomes dozens of warnings."""
-    await _seed(price_db, 1, "MANYLOTS", latest_price_age=None)
-    price_db.add(TaxLot(
+    await _seed(db, 1, "MANYLOTS", latest_price_age=None)
+    db.add(TaxLot(
         security_id=1, open_date=date(2026, 2, 9), quantity=Decimal("5"),
         cost_basis=Decimal("500"), price_per_unit=Decimal("100"), currency="USD",
         cost_basis_eur=Decimal("450"), is_open=True,
     ))
-    await price_db.flush()
+    await db.flush()
 
-    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    warnings = await SchedulerService().find_stale_priced_securities(db)
 
     assert len(warnings) == 1
 
 
 @pytest.mark.asyncio
-async def test_an_old_price_alongside_a_recent_one_is_not_stale(price_db):
+async def test_an_old_price_alongside_a_recent_one_is_not_stale(db):
     """The check is on the *newest* price, not any price — otherwise every security with
     two years of history would look broken."""
-    await _seed(price_db, 1, "HISTORY", latest_price_age=1)
-    price_db.add(MarketPrice(
+    await _seed(db, 1, "HISTORY", latest_price_age=1)
+    db.add(MarketPrice(
         security_id=1, date=utc_today() - timedelta(days=400),
         close_price=Decimal("80"), currency="USD", source="yahoo_finance",
     ))
-    await price_db.flush()
+    await db.flush()
 
-    assert await SchedulerService().find_stale_priced_securities(price_db) == []
+    assert await SchedulerService().find_stale_priced_securities(db) == []
 
 
 @pytest.fixture()
@@ -1091,7 +1073,7 @@ async def _seed_manual(db, security_id, symbol, *, observed_age, carry_to):
 
 
 @pytest.mark.asyncio
-async def test_a_carried_price_does_not_hide_a_stale_statement(price_db):
+async def test_a_carried_price_does_not_hide_a_stale_statement(db):
     """
     The defect this exists to prevent. The importer carries the last NAV forward 45
     days, so `max(market_prices.date)` sits in the **future** and a staleness alarm
@@ -1099,10 +1081,10 @@ async def test_a_carried_price_does_not_hide_a_stale_statement(price_db):
     with nothing asking for a newer export. The alarm must read the newest *observed*
     row, which is the whole reason the two source tags exist.
     """
-    await _seed_manual(price_db, 1, "CH1529078078",
+    await _seed_manual(db, 1, "CH1529078078",
                        observed_age=MANUAL_PRICE_STALE_DAYS + 5, carry_to=45)
 
-    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    warnings = await SchedulerService().find_stale_priced_securities(db)
 
     assert len(warnings) == 1
     assert "CH1529078078" in warnings[0]
@@ -1113,16 +1095,16 @@ async def test_a_carried_price_does_not_hide_a_stale_statement(price_db):
 
 
 @pytest.mark.asyncio
-async def test_a_recent_statement_is_quiet_even_though_a_daily_feed_would_warn(price_db):
+async def test_a_recent_statement_is_quiet_even_though_a_daily_feed_would_warn(db):
     """
     A monthly upload must not warn every week. Reusing STALE_PRICE_DAYS here would
     badge it permanently, which is the always-present-never-actionable warning that
     teaches the reader to skip the banner carrying something real.
     """
-    await _seed_manual(price_db, 1, "CH1529078078",
+    await _seed_manual(db, 1, "CH1529078078",
                        observed_age=STALE_PRICE_DAYS + 10, carry_to=45)
 
-    assert await SchedulerService().find_stale_priced_securities(price_db) == []
+    assert await SchedulerService().find_stale_priced_securities(db) == []
 
 
 @pytest.mark.asyncio
@@ -1144,11 +1126,11 @@ async def test_the_warning_arrives_before_the_holding_drops_out_of_the_total():
 
 
 @pytest.mark.asyncio
-async def test_a_yahoo_security_is_unaffected_by_the_manual_threshold(price_db):
+async def test_a_yahoo_security_is_unaffected_by_the_manual_threshold(db):
     """The ordinary case keeps the tight threshold: a daily feed going quiet for a week
     really is broken."""
-    await _seed(price_db, 1, "OLD", latest_price_age=STALE_PRICE_DAYS + 3)
-    warnings = await SchedulerService().find_stale_priced_securities(price_db)
+    await _seed(db, 1, "OLD", latest_price_age=STALE_PRICE_DAYS + 3)
+    warnings = await SchedulerService().find_stale_priced_securities(db)
     assert len(warnings) == 1
     assert "price feed looks broken" in warnings[0]
 

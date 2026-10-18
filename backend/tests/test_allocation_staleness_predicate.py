@@ -24,13 +24,9 @@ Offline: seeded rows, no Yahoo.
 from datetime import timedelta
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.clock import utcnow
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
 from app.services.allocation_service import (
@@ -38,23 +34,6 @@ from app.services.allocation_service import (
     AllocationService,
     needs_allocation_refresh,
 )
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 async def _seed(db):

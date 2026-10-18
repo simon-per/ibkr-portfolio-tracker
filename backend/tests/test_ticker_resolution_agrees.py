@@ -23,11 +23,7 @@ Offline: resolution is pure lookup — no yfinance, no network.
 """
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
 from app.models.ticker_mapping import TickerMapping
@@ -36,23 +32,6 @@ from app.services.analyst_rating_service import AnalystRatingService
 from app.services.dividend_service import DividendService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.market_data_service import MarketDataService
-
-
-@pytest_asyncio.fixture
-async def db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session = AsyncSession(engine, expire_on_commit=False)
-    try:
-        yield session
-    finally:
-        await session.close()
-        await engine.dispose()
 
 
 def security(symbol, exchange, currency="USD"):

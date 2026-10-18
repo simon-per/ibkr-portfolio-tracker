@@ -27,9 +27,7 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.services import market_data_service as mds
 from app.services.market_data_service import REPAIR_TRAILING_GRACE_WEEKDAYS
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
-from tests.test_price_pass_scope import (  # noqa: F401  db is a fixture
-    LONG, TODAY, _pass, _security, _weekdays, _written, db,
-)
+from tests.test_price_pass_scope import LONG, TODAY, _pass, _security, _weekdays, _written
 
 GRACE = MarketPriceRepository.HOLIDAY_GRACE_DAYS
 
