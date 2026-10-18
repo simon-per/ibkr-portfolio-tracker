@@ -13,8 +13,9 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech UI pass on every
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
-verified first by an offline repro; the Tier 1 six (#13–#18, plus #41) shipped the same morning
-(docs/shipped-log.md 2026-10-18). #19–#51 are open, numbered in fix order.
+verified first by an offline repro; Tier 1 (#13–#18, #41) is live since 11:15 and wave 2
+(#19–#25) shipped after it (docs/shipped-log.md 2026-10-18). #26–#40 and #42–#51 are open,
+numbered in fix order.
 
 ---
 
@@ -124,6 +125,17 @@ Only what is still unverified.
   - Fundamentals: no "N holdings have no data yet" line for the 3a funds; Update/Refresh never
     leaves the banner up (#18).
   - The IBKR staleness messages now read "the newest data is from the sync of …" (#13).
+- **The audit's wave 2 (#19–#25) on production:**
+  - Switching the base currency blanks the figures to loading states, never old numbers under
+    the new symbol (#22); the manual Sync refreshes Dividends, Tax and Allocation too (#23).
+  - Positions: unvalued rows sort last both ways, Name starts A→Z (#24).
+  - A cold Look-through at 100 rows loads every logo with no 429 on data requests (#25). If the
+    whole site starts answering 429 for everyone, the limiter is seeing a public peer — set
+    `TRUSTED_PROXY_HOPS=0` or check the host nginx (docs/deployment.md *Peer address*).
+  - FX carries at most 14 days now, from the newest *published* rate (#20): a currency silent
+    for 15–30 days refuses where it used to carry; old carried copies are re-derived or deleted
+    on their next read.
+  - `/api/analyst-ratings/status` `stale_ratings` covers held, Yahoo-eligible rows only (#21).
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
@@ -197,7 +209,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #19–#51, in number order** (`gh issue list`). Each carries its
+1. **The open audit issues, #26–#40 and #42–#51, in number order** (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
@@ -237,7 +249,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
-  offline repros, 39 issues filed (#13–#51); Tier 1 (#13–#18, #41) fixed in worktrees and shipped.
+  offline repros, 39 issues filed (#13–#51); Tier 1 (#13–#18, #41) and wave 2 (#19–#25) fixed in
+  worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
 - **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
   (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
   KPI figures never wrap; `bluegill` merged.

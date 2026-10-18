@@ -7,6 +7,27 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — the audit's wave 2 (#19–#25)
+
+Same method as Tier 1 below: one worktree agent per issue from its repro, reviewed, cherry-picked.
+
+- **#19** (`d2febb7`): `realized_rows_from_closed_lots` records lots it cannot price in
+  `last_realized_skipped`; attribution, XIRR and the timeline count them as unpriced, closed
+  positions and the tax report's closed-lot estimate warn.
+- **#20** (`3ca13ea`): `app/services/fx_policy.py` owns `FX_MAX_CARRY_DAYS` (14) and
+  `published_rows()`; both FX paths age a carry from the newest published rate.
+- **#21** (`8891db8`): `analyst_rating_repository.STALE_AFTER` and one scoped `_stale`
+  serve the sync and `/status`; a family test ties each `/status` count to its sync.
+- **#22 + #23** (`8079162`): `lib/queryCache.ts` — a currency switch resets every money
+  query, a manual sync refreshes everything a statement writes; one summary/positions staleTime.
+- **#24** (`45112c6`): Positions sorts through `compareNullsLast`; the family test now
+  catches a hand-rolled comparator.
+- **#25** (`464a0eb`): the rate limiter keys on the proxy-appended forwarded entry from a
+  private peer only, counts table overflow, and exempts logo images.
+
+Verified offline: backend 2392 passed / 8 skipped plus the deploy-script tests, frontend 1065
+passed, build green.
+
 ## Shipped 2026-10-18 — the audit's Tier 1 (#13–#18, #41)
 
 Five read-only review agents (sync, figures, frontend, duplication, ops) produced ~55 findings;

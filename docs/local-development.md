@@ -92,6 +92,11 @@ for q in ['select count(*) from securities','select count(*) from taxlots where 
 Moved from STATUS.md on 2026-10-14. Each of these cost real time at least once; add the one you
 lose time to.
 
+- **Git Bash's `TZ=Europe/Berlin date` prints UTC.** It does not know the zone name and falls
+  back silently (labelled `GMT`), two hours behind Berlin in summer. The deploy rule (never push
+  within ~10 minutes of an `ALL_SYNC_HOURS` slot) needs Berlin time: `python -c "from datetime
+  import datetime; from zoneinfo import ZoneInfo; print(datetime.now(ZoneInfo('Europe/Berlin')))"`.
+  A push made 3 minutes before 11:00 on 2026-10-18 this way was held back by the auto-deploy guard.
 - **Playwright: the LAST registered `page.route` wins.** A catch-all that proxies a local build's
   `/api/` to production, added after the two `abort()` routes for `/api/dividends/summary` and
   `/api/portfolio/benchmark`, forwards both to the live site — rule 1. Refuse those two paths
