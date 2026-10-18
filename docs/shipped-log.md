@@ -12,6 +12,8 @@
 - **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
   (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
   contributions and summary were identical before and after.
+- **#71** (`ed88c38`): nine shares through `share_pct(digits=)`, the scan over all of `app/`;
+  `cash_service.is_valuable`; `IBKR_SOURCE`/`YFINANCE_SOURCE` for 38 literals.
 - **#70** (`bce65f5`): phone-card logos through DataTable's title `avatar`; weights absent until the
   summary loads; one `ABSENT`, one `formatSigned`, shared query options (family tests); the
   ResizeObserver stub in `testSetup.ts`.

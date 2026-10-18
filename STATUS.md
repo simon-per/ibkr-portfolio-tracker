@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; waves 1–3 (#53–#70, #73, #79) shipped that evening.
+code trace; waves 1–3 (#53–#71, #73, #79) shipped that evening.
 
 ---
 
@@ -176,6 +176,8 @@ Only what is still unverified.
   - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
     refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
   - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
+  - Shares (#71): nine published percentages (dividend yields and shares, crypto weights) now
+    round half-to-even through `share_pct`; only exact ties at the published precision move.
   - UI polish (#70): every table's phone cards carry logos; Positions weights show a dash until
     the summary loads; a zero prints unsigned ("CHF 0", "0.0%") everywhere.
   - Earnings (#69): one calendar/history row per company and day (GOOG folds with GOOGL/ABEA
@@ -269,7 +271,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #71, #72 and #74–#78** (`gh issue list`), in
+1. **The second audit round's open issues, #72 and #74–#78** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
