@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; wave 1 (#53–#57, #59, #67) shipped that evening.
+code trace; waves 1 and 2 (#53–#59, #62–#64, #66–#68) shipped that evening.
 
 ---
 
@@ -31,7 +31,11 @@ code trace; wave 1 (#53–#57, #59, #67) shipped that evening.
   This clone's `core.hooksPath` still points at the pre-rename folder
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
   today. CI refuses a tracked SQLite file either way.
-- **Tell the `ibkr-sync-validator` routine about the weekend schedule (#9).** Its prompt lives
+- **Confirm Taiwan's DA-1 treaty rate (#62).** The tax report splits TW withholding at 15%
+  (art. 10(2) of the 2007 agreement), added on review with medium confidence; check it against
+  the ESTV's DA-1 country list before a filing relies on the split.
+- **Tell the `ibkr-sync-validator` routine about the weekend schedule (#9)** — and that
+  `/api/scheduler/history?limit=0` (or negative) answers 422 since #64 (it used to clamp to 1). Its prompt lives
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
@@ -162,6 +166,16 @@ Only what is still unverified.
     `1025` holds presses and slots 12 h, a request-step `1001` holds presses until midnight ET.
   - Charts (#67): money axes print exact, distinct labels; bar charts' ticks follow the shared
     ladder, so their positions moved.
+- **Audit round 2, wave 2 on production:**
+  - Tax (#62, #63): by-country rows show Rate / Creditable / Excess; holdings and realized rows
+    carry logos; a Cash line sits under the holdings. `dividend_payments.withholding_country` fills
+    from the next statement (Tue 18:00, 30 days back); older rows need an `ingest_flex_xml`
+    re-run of a Client Portal download covering them.
+  - Trades (#58): no cancellation row exists on production (2026-10-18), so nothing moves; the
+    assumed sign convention (a `SELL (Ca.)` row carries negated amounts) is unverified until one does.
+  - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
+    refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
+  - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
 - **#38's first deploy:** a full uncached build (the dependency layer is new), the log shows
   `docker compose build --pull`, `docker builder prune` and, from the second deploy on,
   "Skipping npm ci"; `docker system df` on the VPS a week later shows build cache bounded to about
@@ -241,7 +255,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #58, #60–#66, #68–#79** (`gh issue list`), in
+1. **The second audit round's open issues, #60, #61, #65, #69–#79** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
