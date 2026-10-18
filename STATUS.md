@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; all but #72 shipped that evening (waves 1–3 and the product issues #74–#78).
+code trace; all of them shipped that evening (waves 1–3, the product issues #74–#78, #72).
 
 ---
 
@@ -282,12 +282,18 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's last open issue, #72** (tooling) (`gh issue list`), in
+1. **Low leftovers from audit round 2** (not filed): analyst ratings re-ask a security on every
+   non-429 error and the GLEIF loop continues past a 429 (#66's siblings); the rate limiter logs
+   every rejection (two lines per refused request); `allocation_service` builds percentages from
+   float fractions outside `share_pct`; `currencyExposure.ts` publishes 0 for "nothing priced";
+   the Starlette TestClient warns to move to `httpx2` (the last 16 test warnings); KS 36's
+   derivatives indicator needs the Flex ingest to keep non-STK trades; accumulating funds'
+   taxable income (ESTV Kursliste) is not in the tax report (2025/2026 filings). (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-3. **Tooling (#72).** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an
-   image build. `alembic check` fails on naming drift only.
+3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
+   `alembic check`.
 4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
     over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
@@ -313,6 +319,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-18 (audit round 2, agent team)** — six reviewers, #53–#79 filed after offline repros,
+  all fixed and deployed the same day with the owner's VPS actions; health-watch's cron had
+  starved auto-deploy of its lock (moved to `2-59/5`).
 - **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
   offline repros, 39 issues filed (#13–#51, plus #52); Tier 1 and waves 2–4 (#13–#37, #41, #52)
   fixed in worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
@@ -323,5 +332,3 @@ One line each, newest first; drop the oldest.
   themed thin one; Watchlist pins the Stock column (`DataTable` `pinFirstColumn`). Seen at 1366.
 - **2026-10-17 (fintech UI, agent team)** — design foundation, then four tabs' areas in parallel
   worktrees; logos by ISIN; every `--viz-*` token replaced by one ten-slot palette.
-- **2026-10-17 (merge)** — the fintech pass merged into `main` over the owner's batch; two
-  held helpers made one (`security_repository.held`).

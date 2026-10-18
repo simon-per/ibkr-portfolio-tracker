@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — #72, tooling (pushed alone; audit round 2 closed)
+
+- **#72** (`f2c47ab`): models aligned to the migrations (`alembic check` clean, now a test;
+  production's index names read and matching); `ConfigDict` (test warnings 308 → 16); ruff `F`
+  in CI; `tests/memory_db.py` for 103 copied engine blocks, `tests/ast_scope.py`.
+- The same evening's #75 follow-up (`LEVEL_CHANGE_TOLERANCE`): the raises feed's first
+  production read listed every payer daily as a 0.0% raise from `level_eur` rounding; after the
+  fix it holds 8 real moves.
+
+Verified offline: backend 2911 passed / 8 skipped (16 warnings), 29 deploy-script tests, ruff,
+frontend 1182 passed, build and lint.
+
 ## Shipped 2026-10-18 — audit round 2, the product issues (#74–#78) and #70, #71
 
 - **#77 + #78** (`5b235de`): `projected` on the current year's tax report from the breakdown's
