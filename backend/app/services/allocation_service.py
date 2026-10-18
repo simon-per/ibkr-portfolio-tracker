@@ -345,6 +345,7 @@ class AllocationService:
             symbol: str,
             description: str,
             is_etf_contribution: bool = False,
+            security_id: Optional[int] = None,
         ):
             if category_name not in store:
                 store[category_name] = {"weight": 0.0, "market_value_eur": 0.0, "positions": []}
@@ -358,6 +359,9 @@ class AllocationService:
             else:
                 store[category_name]["positions"].append({
                     "symbol": symbol,
+                    # The row's security, for its logo; the first listing's when two
+                    # listings share the symbol and merge into one row. None for cash.
+                    "security_id": security_id,
                     "description": description,
                     "weight": weight,
                     "market_value_eur": market_value,
@@ -400,19 +404,22 @@ class AllocationService:
             asset_type = (
                 etf_data['asset_type'] if etf_data else security.asset_type
             ) or 'Unknown'
-            _add_to_category(asset_alloc, asset_type, pos_weight, pos_value, sym, desc)
+            _add_to_category(asset_alloc, asset_type, pos_weight, pos_value, sym, desc,
+                             security_id=security_id)
 
             # Funds: distribute across sectors/regions
             if etf_data:
                 for sector, pct in etf_data['sector'].items():
                     w = pos_weight * (pct / 100)
                     mv = pos_value * (pct / 100)
-                    _add_to_category(sector_alloc, sector, w, mv, sym, desc, is_etf_contribution=True)
+                    _add_to_category(sector_alloc, sector, w, mv, sym, desc, is_etf_contribution=True,
+                                     security_id=security_id)
 
                 for region, pct in etf_data['geographic'].items():
                     w = pos_weight * (pct / 100)
                     mv = pos_value * (pct / 100)
-                    _add_to_category(geo_alloc, region, w, mv, sym, desc, is_etf_contribution=True)
+                    _add_to_category(geo_alloc, region, w, mv, sym, desc, is_etf_contribution=True,
+                                     security_id=security_id)
             else:
                 # `or 'Unknown'`, not `if security.sector:` — a holding with no sector on
                 # record is still part of the portfolio, and dropping it made these two
@@ -429,9 +436,11 @@ class AllocationService:
                 # from the `.info` it already fetches (`apply_allocation`), so the gap
                 # lasts until its next 05:00 run rather than until someone clicks.
                 _add_to_category(
-                    sector_alloc, security.sector or 'Unknown', pos_weight, pos_value, sym, desc)
+                    sector_alloc, security.sector or 'Unknown', pos_weight, pos_value, sym, desc,
+                    security_id=security_id)
                 _add_to_category(
-                    geo_alloc, security.country or 'Unknown', pos_weight, pos_value, sym, desc)
+                    geo_alloc, security.country or 'Unknown', pos_weight, pos_value, sym, desc,
+                    security_id=security_id)
 
         # Cash, into all three, so the three denominators stay one denominator.
         if cash_slice > 0:

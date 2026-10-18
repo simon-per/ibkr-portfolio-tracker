@@ -3,6 +3,7 @@ import { Crosshair } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { readStored, writeStored, useRememberedOpen } from '@/lib/storage'
 import { TARGETS_KEY, readTargets } from '@/lib/rebalanceTargets'
@@ -105,12 +106,15 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         mobile: 'title',
         cell: (row, view) =>
           view === 'table' ? (
-            <>
-              <span className="font-medium">{row.symbol}</span>
-              <span className="block text-xs text-muted-foreground">
-                {row.unpriced ? 'No price' : displayName(row.description)}
-              </span>
-            </>
+            <div className="flex items-center gap-2.5">
+              <TickerAvatar symbol={row.symbol} securityId={row.securityId} className="h-7 w-7 text-[10px]" />
+              <div className="min-w-0">
+                <span className="font-medium">{row.symbol}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {row.unpriced ? 'No price' : displayName(row.description)}
+                </span>
+              </div>
+            </div>
           ) : (
             row.symbol
           ),

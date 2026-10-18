@@ -11,6 +11,7 @@ import { Blocks, Globe, RefreshCw, Shapes, X, type LucideIcon } from 'lucide-rea
 import { RebalanceCard } from './RebalanceCard'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import {
   allocationSectorPaint, assetTypePaint, regionPaint, type SectorPaint,
@@ -131,7 +132,15 @@ function drillDownColumns(deps: {
       shortHeader: 'Symbol',
       mobile: 'title',
       cellClassName: 'font-medium',
-      cell: (pos) => pos.symbol,
+      cell: (pos, view) =>
+        view === 'table' && pos.security_id != null ? (
+          <div className="flex items-center gap-2.5">
+            <TickerAvatar symbol={pos.symbol} securityId={pos.security_id} className="h-7 w-7 text-[10px]" />
+            {pos.symbol}
+          </div>
+        ) : (
+          pos.symbol
+        ),
     },
     {
       key: 'description',

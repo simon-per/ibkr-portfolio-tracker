@@ -341,3 +341,17 @@ async def test_an_unmapped_holding_still_reads_its_own_column(db):
 
     assert any(p["symbol"] == "NOTAFUND"
                for p in allocation["asset_type_allocation"]["Bond"]["positions"])
+
+
+@pytest.mark.asyncio
+async def test_every_position_row_carries_its_security_for_the_logo(db):
+    """The drill-down draws each row's logo by security id; cash has none."""
+    known = await _hold(db, symbol="KNOWN", isin="US0000000001", conid=1,
+                        sector="Technology", country="United States")
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    for key in BREAKDOWNS:
+        rows = [p for cat in allocation[key].values() for p in cat["positions"]]
+        assert {p["security_id"] for p in rows if p["symbol"] == "KNOWN"} == {known.id}
+        assert all(p["security_id"] is None for p in rows if p["symbol"] == "CASH")
