@@ -226,12 +226,13 @@ async def test_the_split_is_per_payment_not_on_the_country_sums(db):
 
 
 @pytest.mark.asyncio
-async def test_the_stated_country_keys_the_row_and_an_unlisted_one_is_not_split(db):
+async def test_the_stated_country_keys_the_row(db):
+    # An unlisted country's row is not split: residual_rate_pct("??") / creditable_split above.
     await _book(db)
     rows = _by_country(await TaxService(db).get_tax_report(YEAR))
     tw = rows["TW"]
     assert tw["withholding"] == 21.0 and tw["rate_pct"] == 21.0
-    assert (tw["residual_pct"], tw["creditable"], tw["excess"]) == (None, None, None)
+    assert (tw["residual_pct"], tw["creditable"], tw["excess"]) == (15.0, 15.0, 6.0)
     # The ADR's withholding is not filed under its ISIN's country.
     assert rows["US"]["payments"] == 2
 
@@ -264,4 +265,4 @@ async def test_the_csv_carries_the_split(db):
                       "Treaty rate (%),Creditable (EUR),Excess (EUR),Net (EUR),"
                       "Estimated payments")
     assert next(l for l in lines if l.startswith("KR,")) == "KR,1,300.0,66.0,22.0,15.0,45.0,21.0,234.0,"
-    assert next(l for l in lines if l.startswith("TW,")) == "TW,1,100.0,21.0,21.0,,,,79.0,"
+    assert next(l for l in lines if l.startswith("TW,")) == "TW,1,100.0,21.0,21.0,15.0,15.0,6.0,79.0,"

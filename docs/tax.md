@@ -149,7 +149,8 @@ creditable, 0 is excess, whatever the treaty), so an unlisted country still spli
 withheld nothing. An estimate is left out of the split exactly as it is left out of the
 withholding, and a country whose payments are all estimates has every one of the four null.
 Switzerland is deliberately absent: Swiss withholding is refunded through the securities statement,
-not DA-1. Taiwan is absent pending verification (believed 15%, art. 10(2) of the 2007 agreement).
+not DA-1. Taiwan (15%, art. 10(2) of the 2007 agreement) was added on review with medium
+confidence — confirm against the ESTV's DA-1 country list before a filing relies on it.
 The fields are in the CSV (`Rate (%)`, `Treaty rate (%)`, `Creditable`, `Excess`, blank when null)
 and the tab shows Rate / Creditable / Excess, the treaty rate as the Rate cell's hover.
 
