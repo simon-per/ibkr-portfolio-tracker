@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; waves 1 and 2 (#53–#64, #66–#68) shipped that evening.
+code trace; waves 1–3 (#53–#69, #73, #79) shipped that evening.
 
 ---
 
@@ -176,6 +176,13 @@ Only what is still unverified.
   - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
     refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
   - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
+  - Earnings (#69): one calendar/history row per company and day (GOOG folds with GOOGL/ABEA
+    once Alphabet's LEI is cached); a moved event's old row clears on the security's next fetch.
+  - Sync routes (#65, #79): a weekend manual market sync no longer re-downloads closes;
+    `dividend_sync` rows appear in `/api/scheduler/history`; the 18:00 record warns only about
+    baskets still stale after its refresh.
+  - The health-watch cron runs at `2-59/5` since 17:2x UTC 2026-10-18: on `*/5` it took the deploy
+    lock first every tick and nothing deployed for an hour. Pushes since deploy normally.
   - Dividends (#61): estimate-era years now read net of the ladder's withholding, so the
     2025 and boundary-year nets, TTM and the YoY chips across the splice drop by roughly the
     withholding rate, and the forecast history's TTM line steps down once at the deploy (older
@@ -260,7 +267,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #65, #69–#79** (`gh issue list`), in
+1. **The second audit round's open issues, #70–#72 and #74–#78** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.

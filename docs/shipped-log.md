@@ -7,6 +7,18 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — audit round 2, wave 3 (#65, #69, #73, #79)
+
+- **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
+  (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
+  contributions and summary were identical before and after.
+- **#69** (`8d9c719`): earnings grouped by the look-through's company identity
+  (`identity_service.group_companies`), future events replaced per fetch, `utc_iso` dates.
+- **#65 + #79** (`6de291d`): the manual market and dividend syncs call the scheduler's steps
+  (family test over the routes); `full_sync` checks stale baskets after refreshing them.
+- **Ops:** health-watch's cron moved to `2-59/5` — on the same minute as auto-deploy it won the
+  shared lock every tick, so auto-deploy exited silently (found when a push did not deploy).
+
 ## Shipped 2026-10-18 — audit round 2, wave 2 (#58, #60–#64, #66, #68)
 
 - **#58** (`cf964b8`): `trade_kind`/`sale_sign`/`uncancelled_sales` beside the model and one
