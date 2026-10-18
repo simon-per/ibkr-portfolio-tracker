@@ -1,0 +1,13 @@
+# Correctness only (issue #39): syntax errors, undefined names, `is` against a literal,
+# a misplaced return/yield/break. CI runs it as part of the deploy gate, so a rule joins
+# this list only once the tree is clean against it; style rules are not the point.
+target-version = "py311"
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[lint.per-file-ignores]
+# `Mapped["Security"]` and friends: SQLAlchemy resolves those strings through the mapper
+# registry at configure time, so they are not undefined at runtime. Scoped to the models
+# so an undefined name anywhere else still fails.
+"app/models/*.py" = ["F821"]

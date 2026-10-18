@@ -71,18 +71,22 @@ if ($ahead -eq 0) { Warn 'Nothing to push - skipping to the verification step.' 
 # A deploy rebuilding during a Berlin sync slot used to lose that sync outright. The
 # persistent job store now recovers a miss under 30 min, but it is not live until this
 # very deploy lands, so the first push still has to dodge the slots by hand.
+#
+# Minutes past midnight for each slot. Keep in step with the Bash twin and
+# ops/auto-deploy.sh; all three are copies of ALL_SYNC_HOURS in
+# backend/app/services/scheduler_service.py, and tests/test_deploy_guard_hours.py fails
+# if any of them disagrees. The fallback sentence below reads this list rather than
+# spelling the hours a fourth time (that copy missed 05:00).
+# 00:00  04:00  05:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
+$SlotMinutes = @(0, 240, 300, 480, 660, 780, 900, 1080, 1200, 1320)
 $berlin = Get-BerlinTime
 if ($null -eq $berlin) {
     Warn 'Could not resolve the Europe/Berlin timezone, so the sync-slot check was skipped.'
-    Warn 'Slots are on the hour at 00/04/08/11/13/15/18/20/22 Berlin.'
+    Warn ('Slots are on the hour at {0} Berlin.' -f (($SlotMinutes | ForEach-Object { '{0:00}' -f [int][Math]::Floor($_ / 60) }) -join '/'))
     if (-not (Ask 'Continue anyway?')) { Die 'Stopped.' }
 } else {
     $nowMin = $berlin.Hour * 60 + $berlin.Minute
-    # Keep in step with the Bash twin and ops/auto-deploy.sh; all three are copies of
-    # ALL_SYNC_HOURS in backend/app/services/scheduler_service.py, and
-    # tests/test_deploy_guard_hours.py fails if any of them disagrees.
-    # 00:00  04:00  05:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
-    $near = @(0, 240, 300, 480, 660, 780, 900, 1080, 1200, 1320) | Where-Object {
+    $near = $SlotMinutes | Where-Object {
         $d = [Math]::Abs($nowMin - $_)
         # Wrap around midnight, so 23:55 is 5 minutes from the 00:00 slot, not 1435.
         if ($d -gt 720) { $d = 1440 - $d }

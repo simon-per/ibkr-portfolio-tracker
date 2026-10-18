@@ -74,6 +74,8 @@ by 200+ on both halves before:
 ```bash
 cd backend && ./venv/Scripts/python.exe -m pytest tests/ -q -n auto --dist worksteal -m "not deploy_scripts"
 cd frontend && npx tsc -b && npm run test && npm run build
+cd frontend && npm run lint         # ESLint; CI runs it
+cd backend && ruff check .          # correctness rules only (backend/ruff.toml); CI pins ruff 0.16.0
 ```
 The backend runs in parallel under `pytest-xdist`: ~25 s on Windows, against 5½ min serial.
 `-m "not deploy_scripts"` deselects the 20 tests that run `deploy.sh` and `ops/auto-deploy.sh`
@@ -136,7 +138,7 @@ lose time to.
   seen 2026-09-27 and again 2026-09-28: `Cannot read properties of undefined (reading 'clear')`).
   Node's own experimental `localStorage` global shadows jsdom's. Not a regression in the code:
   `NODE_OPTIONS=--no-experimental-webstorage npx vitest run` from `frontend/` runs the suite green,
-  as does `npx -y node@22 node_modules/vitest/vitest.mjs run`. CI uses Node 20 and is unaffected.
+  as does `npx -y node@22 node_modules/vitest/vitest.mjs run`. CI uses Node 22 and is unaffected.
   Read the failing files before trusting a red count.
 - **A fresh checkout or worktree has no `backend/venv`, no `backend/.env` and no
   `frontend/node_modules`.** Use Python 3.11, which the image and CI run (docs/local-development.md

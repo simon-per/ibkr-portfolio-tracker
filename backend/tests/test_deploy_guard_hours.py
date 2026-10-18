@@ -30,11 +30,14 @@ Offline: filesystem plus one import, no scheduler started, no network.
 
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from app.services.scheduler_service import ALL_SYNC_HOURS
+from tests.test_deploy_restart_slot_wait import BASH
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AUTO_DEPLOY = REPO_ROOT / "ops" / "auto-deploy.sh"
@@ -96,11 +99,11 @@ def test_deploy_guard_covers_exactly_the_scheduled_slots():
     )
 
 
-@pytest.mark.parametrize("path,pattern", [
-    (FINISH_SH, r"for slot in ([\d ]+); do"),
-    (FINISH_PS1, r"\$near = @\(([\d, ]+)\) \| Where-Object"),
+@pytest.mark.parametrize("path,pattern,guard_loop", [
+    (FINISH_SH, r"(?m)^SLOT_MINUTES=\(([\d ]+)\)$", 'for slot in "${SLOT_MINUTES[@]}"; do'),
+    (FINISH_PS1, r"(?m)^\$SlotMinutes = @\(([\d, ]+)\)$", "$near = $SlotMinutes | Where-Object"),
 ])
-def test_both_finish_deploy_twins_warn_about_exactly_the_scheduled_slots(path, pattern):
+def test_both_finish_deploy_twins_warn_about_exactly_the_scheduled_slots(path, pattern, guard_loop):
     """
     The interactive guard a human runs before pushing, in its two equivalent forms.
 
@@ -113,6 +116,10 @@ def test_both_finish_deploy_twins_warn_about_exactly_the_scheduled_slots(path, p
     """
     if not path.exists():
         pytest.skip(f"{path.name} not present")
+    assert guard_loop in path.read_text(encoding="utf-8"), (
+        f"{path.name}'s guard no longer iterates its minute list, so the list this test "
+        f"pins is not the one it checks the clock against."
+    )
     warned = _finish_deploy_hours(path, pattern)
     scheduled = _scheduled_hours()
 
@@ -120,6 +127,76 @@ def test_both_finish_deploy_twins_warn_about_exactly_the_scheduled_slots(path, p
         f"{path.name} warns about {sorted(warned)}:00 Europe/Berlin but the scheduler "
         f"runs at {sorted(scheduled)}:00. Missing slots let a push land on a sync; "
         f"extra ones train the operator to click through the warning."
+    )
+
+
+# The sentence each twin prints when it cannot tell the Berlin time. It used to spell the
+# hours itself — a fifth and sixth copy that nothing read — and it missed 05:00 from the day
+# that slot was added (issue #39). It is now built from the twin's own minute list: the
+# first test keeps a literal from coming back, the second renders it with the real shell.
+_FALLBACK = re.compile(r"Slots are on the hour at ([\d/]+) Berlin")
+PWSH = shutil.which("pwsh")
+
+
+def _fallback_line(path: Path) -> str:
+    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines()
+             if "Slots are on the hour" in l and not l.lstrip().startswith("#")]
+    assert len(lines) == 1, f"expected one fallback slot sentence in {path.name}, found {lines}"
+    return lines[0]
+
+
+@pytest.mark.parametrize("path", [FINISH_SH, FINISH_PS1])
+def test_the_fallback_sentence_spells_no_hours_of_its_own(path):
+    if not path.exists():
+        pytest.skip(f"{path.name} not present")
+    assert not _FALLBACK.search(_fallback_line(path)), (
+        f"{path.name}'s fallback sentence carries a literal hour list again. Build it from "
+        f"the script's minute list, which test_both_finish_deploy_twins_... pins."
+    )
+
+
+def _render_fallback_sh(tmp_path: Path) -> str:
+    text = FINISH_SH.read_text(encoding="utf-8")
+    slots = re.search(r"(?m)^SLOT_MINUTES=\(.*\)$", text)
+    func = re.search(r"(?ms)^slot_hours_text\(\) \{$.*?^\}$", text)
+    assert slots and func, "SLOT_MINUTES or slot_hours_text() not found in finish-deploy.sh"
+    script = "\n".join([
+        "set -euo pipefail",
+        "warn() { printf '%s\\n' \"$*\"; }",
+        slots.group(0), func.group(0), _fallback_line(FINISH_SH), "",
+    ])
+    return subprocess.run([BASH, "-s"], input=script.encode(), capture_output=True,
+                          timeout=60, check=True).stdout.decode()
+
+
+def _render_fallback_ps1(tmp_path: Path) -> str:
+    text = FINISH_PS1.read_text(encoding="utf-8")
+    slots = re.search(r"(?m)^\$SlotMinutes = @\(.*\)$", text)
+    assert slots, "$SlotMinutes not found in finish-deploy.ps1"
+    script = tmp_path / "fallback.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "function Warn { param($m) Write-Output $m }",
+        slots.group(0), _fallback_line(FINISH_PS1), "",
+    ]), encoding="utf-8")
+    return subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script)],
+                          capture_output=True, timeout=120, check=True).stdout.decode()
+
+
+@pytest.mark.deploy_scripts
+@pytest.mark.parametrize("path,shell,render", [
+    (FINISH_SH, BASH, _render_fallback_sh),
+    (FINISH_PS1, PWSH, _render_fallback_ps1),
+], ids=["finish-deploy.sh", "finish-deploy.ps1"])
+def test_finish_deploy_fallback_text_names_every_slot(path, shell, render, tmp_path):
+    if shell is None or not path.exists():
+        pytest.skip(f"needs {path.name} and its shell")
+    match = _FALLBACK.search(render(tmp_path))
+    assert match, f"{path.name}'s fallback sentence did not render"
+    stated = [int(h) for h in match.group(1).split("/")]
+    assert set(stated) == _scheduled_hours(), (
+        f"{path.name} tells the operator {sorted(stated)}, the scheduler runs "
+        f"{sorted(_scheduled_hours())}"
     )
 
 

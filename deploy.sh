@@ -44,10 +44,13 @@ echo ""
 echo "--- Rebuilding frontend ---"
 cd "$REPO_DIR/frontend"
 
-# Install Node.js if not present
+# Install Node.js if not present. The major matches CI's setup-node and
+# frontend/package.json's `engines`; move all three together. An existing Node is left
+# alone, so a host that already has an older one is upgraded by hand (npm ci warns
+# EBADENGINE when it is below `engines`).
 if ! command -v node &> /dev/null; then
     echo "Node.js not found, installing via NodeSource..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y nodejs
 fi
 

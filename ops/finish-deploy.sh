@@ -70,23 +70,35 @@ berlin_hhmm() {
   return 1
 }
 
+# Minutes past midnight for each slot. A THIRD copy of the scheduler's hours, after
+# ops/auto-deploy.sh and this file's PowerShell twin — and the two here were stale
+# for four days: written with 13:00/20:00 on the day those were retired for
+# 00:00/06:00, so the guard both waved pushes through the two live overnight slots
+# and blocked them at two that no longer ran. Only auto-deploy.sh was under test.
+# tests/test_deploy_guard_hours.py now reads all three against ALL_SYNC_HOURS.
+# 00:00  04:00  05:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
+SLOT_MINUTES=(0 240 300 480 660 780 900 1080 1200 1320)
+
+# "00/04/05/…" for the operator, from the list above. The sentence used to spell the
+# hours itself, a copy nothing read, and it missed 05:00 when that slot was added.
+slot_hours_text() {
+  local minute out=""
+  for minute in "${SLOT_MINUTES[@]}"; do
+    out+="${out:+/}$(printf '%02d' $(( minute / 60 )))"
+  done
+  printf '%s' "$out"
+}
+
 slot_guard() {
   local now_min berlin
   if ! berlin="$(berlin_hhmm)"; then
     warn "Could not determine Berlin time (no usable python), so the sync-slot check"
-    warn "was skipped. Slots are on the hour at 00/04/08/11/13/15/18/20/22 Berlin."
+    warn "was skipped. Slots are on the hour at $(slot_hours_text) Berlin."
     ask "Continue anyway?" || die "Stopped."
     return
   fi
   now_min=$(( 10#${berlin%:*} * 60 + 10#${berlin#*:} ))
-  # Minutes past midnight for each slot. A THIRD copy of the scheduler's hours, after
-  # ops/auto-deploy.sh and this file's PowerShell twin — and the two here were stale
-  # for four days: written with 13:00/20:00 on the day those were retired for
-  # 00:00/06:00, so the guard both waved pushes through the two live overnight slots
-  # and blocked them at two that no longer ran. Only auto-deploy.sh was under test.
-  # tests/test_deploy_guard_hours.py now reads all three against ALL_SYNC_HOURS.
-  # 00:00  04:00  05:00  08:00  11:00  13:00  15:00  18:00  20:00  22:00
-  for slot in 0 240 300 480 660 780 900 1080 1200 1320; do
+  for slot in "${SLOT_MINUTES[@]}"; do
     local delta=$(( now_min - slot ))
     [ "$delta" -lt 0 ] && delta=$(( -delta ))
     # Wrap around midnight, or 23:55 is measured as 1435 minutes from the 00:00 slot

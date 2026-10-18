@@ -209,6 +209,14 @@ The rules:
 - **`DEPLOY_IGNORE_SLOTS=1 ./deploy.sh`** skips the check for a manual deploy that must go now. A
   plain manual `./deploy.sh` waits like the unattended one.
 
+**What CI runs** (`.github/workflows/ci.yml`, read-only token): `backend` — the tracked-SQLite
+refusal, ruff, the whole pytest suite including `deploy_scripts`; `frontend` — ESLint, Vitest,
+`npm run build` (the type check); `image` — `docker build` of `backend/Dockerfile` and an
+`import app.main` inside it, never pushed. The gate below reads every job's conclusion, so each
+of the three can hold a deploy. `image` exists because the `backend` job installs
+`requirements.txt` on the runner and says nothing about the Dockerfile; a broken image used to
+surface first as a failed `deploy.sh` on the VPS.
+
 **The CI gate asks GitHub's check-runs API for the commit's verdict before the backup.**
 Red (`failed:`) is refused, `pending` defers a tick, and green deploys. The other two answers
 **fail open on purpose** — a gate that blocks every deploy because GitHub is down, or because a
