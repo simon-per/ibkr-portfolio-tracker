@@ -222,40 +222,8 @@ async def test_status_counts_the_holdings_a_sync_walks(db, fetched):
     assert fetched == ["NEW"], f"the sync fetched {fetched}, not what /status reported missing"
 
 
-@pytest.mark.asyncio
-async def test_the_threshold_lives_in_one_place(db):
-    """
-    The repository default and what the service asks for must be the same number, or the
-    two drift apart again the first time someone changes one of them.
-    """
-    import inspect
-    from app.repositories.fundamentals_repository import (
-        FundamentalsRepository, STALE_AFTER,
-    )
-    from app.services import fundamentals_service as fs
-
-    default = inspect.signature(
-        FundamentalsRepository.get_stale_metrics
-    ).parameters["older_than"].default
-    assert default == STALE_AFTER
-    assert inspect.signature(
-        FundamentalsRepository.count_stale_metrics
-    ).parameters["older_than"].default == STALE_AFTER
-    # And no call site may reintroduce a literal of its own. Checked by AST, not by a
-    # text scan: the first version of this assertion matched the *docstring* that
-    # explains the old bug, which quotes `get_stale_metrics(days_old=1)` verbatim.
-    import ast
-    offenders = []
-    for module in (fs, __import__(
-        "app.repositories.fundamentals_repository", fromlist=["x"]
-    )):
-        for node in ast.walk(ast.parse(inspect.getsource(module))):
-            if (isinstance(node, ast.Call)
-                    and getattr(node.func, "attr", "") in
-                    ("get_stale_metrics", "count_stale_metrics")
-                    and (node.args or node.keywords)):
-                offenders.append(f"{module.__name__}:{node.lineno}")
-    assert not offenders, f"a call site passes its own staleness threshold: {offenders}"
+# The threshold-in-one-place guard (repository defaults, no call site passing its own)
+# is the family form in `tests/test_staleness_predicate_family.py`, with ratings.
 
 
 # ---------------------------------------------------------------------------

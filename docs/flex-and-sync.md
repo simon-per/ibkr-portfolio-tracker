@@ -528,7 +528,14 @@ warning on the row (`logos_result`), never the status.
 - **Stale means 20 hours** (`fundamentals_repository.STALE_AFTER`), not a day: a row written at
   05:02 is 23 h 58 m old at the next 05:00, and a one-day rule refreshed each security every other
   pass. A manual Refresh pressed the same day spends nothing on rows the morning wrote. Ratings
-  keep their 3-day rule, so a rating is re-asked every third or fourth pass.
+  keep their 3-day rule (`analyst_rating_repository.STALE_AFTER`, the one copy), so a rating is
+  re-asked every third or fourth pass.
+- **One stale predicate per table, scoped like the sync.** Each repository's `_stale` is "older
+  than `STALE_AFTER` *and* in `fundamentals_repository.sync_scope()`" (held and Yahoo-eligible,
+  the scope both passes walk), and each `/status` counts through it (`count_stale_metrics`,
+  `count_stale_ratings`) — `/api/analyst-ratings/status`'s total, fresh and oldest/newest are
+  scoped the same way. An unscoped count kept a sold position's or an opt-out's row "stale"
+  forever (issue #21). `tests/test_staleness_predicate_family.py` pins it for both tables.
 - A pass a 429 cut short is resumed by the next one — what the services' rate-limit warning
   promises.
 

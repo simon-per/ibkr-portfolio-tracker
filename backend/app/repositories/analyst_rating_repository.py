@@ -5,10 +5,25 @@ Handles database operations for analyst ratings.
 from typing import List, Optional
 from datetime import timedelta
 from app.clock import utcnow
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analyst_rating import AnalystRating
+from app.models.security import Security
+from app.repositories.fundamentals_repository import sync_scope
+
+#: How old a rating row has to be before a sync will refresh it.
+#:
+#: One number, because there were four copies of "3 days": this method's default, the
+#: service wrapper's default, the literal `sync_stale_ratings` passed, and
+#: `/api/analyst-ratings/status`'s own query — which also counted every row while the
+#: sync walks only `sync_scope()`, so a sold position's rating stayed "stale" forever.
+#: Three days is the value all four copies agreed on, kept as is. It is not
+#: `fundamentals_repository.STALE_AFTER` although both passes run in the same daily
+#: `fundamentals_refresh` job, so a row written by one pass is re-asked only at the
+#: pass three or more days later. Whether it should follow fundamentals is the
+#: owner's call (issue #21); either way it changes here and nowhere else.
+STALE_AFTER = timedelta(days=3)
 
 
 class AnalystRatingRepository:
@@ -88,13 +103,38 @@ class AnalystRatingRepository:
             return True
         return False
 
-    async def get_stale_ratings(self, days_old: int = 3) -> List[AnalystRating]:
-        """
-        Get ratings that haven't been updated in the specified number of days.
-        Useful for determining which ratings need to be refreshed.
-        """
-        cutoff_date = utcnow() - timedelta(days=days_old)
+    async def get_stale_ratings(
+        self, older_than: timedelta = STALE_AFTER
+    ) -> List[AnalystRating]:
+        """The rows a sync would refresh (`_stale`)."""
         result = await self.session.execute(
-            select(AnalystRating).where(AnalystRating.last_updated < cutoff_date)
+            select(AnalystRating).where(self._stale(older_than))
         )
         return list(result.scalars().all())
+
+    async def count_stale_ratings(self, older_than: timedelta = STALE_AFTER) -> int:
+        """
+        How many rows a sync would refresh. `/status` counts through this so it cannot
+        answer with a different query than the sync asks.
+        """
+        result = await self.session.execute(
+            select(func.count(AnalystRating.id)).where(self._stale(older_than))
+        )
+        return int(result.scalar() or 0)
+
+    @staticmethod
+    def in_scope():
+        """Rows of a security the ratings sync walks (`sync_scope`)."""
+        return AnalystRating.security_id.in_(select(Security.id).where(sync_scope()))
+
+    @staticmethod
+    def _stale(older_than: timedelta):
+        """
+        A row a sync would refresh: older than `older_than`, of a security the sync walks.
+        Without the scope a sold position's or a `price_source` opt-out's row was counted
+        stale forever, since nothing refreshes it — the defect fundamentals had first.
+        """
+        return and_(
+            AnalystRating.last_updated < utcnow() - older_than,
+            AnalystRatingRepository.in_scope(),
+        )

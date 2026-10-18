@@ -3,10 +3,10 @@ Analyst Ratings Router
 API endpoints for syncing and retrieving analyst ratings.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from app.clock import utcnow
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.sync_run_repository import utc_iso
 from app.services.analyst_rating_service import AnalystRatingService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
@@ -63,7 +63,8 @@ async def sync_analyst_ratings(db: AsyncSession = Depends(get_db)):
 @router.post("/sync-stale")
 async def sync_stale_analyst_ratings(db: AsyncSession = Depends(get_db)):
     """
-    Sync only analyst ratings that are stale (older than 3 days) or missing.
+    Sync only analyst ratings that are stale (`analyst_rating_repository.STALE_AFTER`)
+    or missing, for held, Yahoo-eligible securities.
 
     The scheduler runs the same pass daily (`fundamentals_refresh`). It only fetches
     ratings that haven't been updated recently, reducing API calls and respecting rate
@@ -103,26 +104,24 @@ async def get_analyst_ratings_status(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import select, func
     from app.models.analyst_rating import AnalystRating
-    from datetime import timedelta
 
-    # Get total count
-    result = await db.execute(select(func.count(AnalystRating.id)))
-    total_ratings = result.scalar() or 0
-
-    # Get count of stale ratings (older than 3 days)
-    three_days_ago = utcnow() - timedelta(days=3)
+    # Every figure here covers the rows of securities the sync walks
+    # (`AnalystRatingRepository.in_scope`), so `fresh = total - stale` stays coherent.
+    # The stale count goes through the repository: this route ran its own 3-day query
+    # over every row, so a sold position's rating — never refreshed again — was
+    # counted stale forever (GitHub issue #21).
+    repo = AnalystRatingRepository(db)
     result = await db.execute(
-        select(func.count(AnalystRating.id))
-        .where(AnalystRating.last_updated < three_days_ago)
+        select(func.count(AnalystRating.id)).where(repo.in_scope())
     )
-    stale_ratings = result.scalar() or 0
+    total_ratings = result.scalar() or 0
+    stale_ratings = await repo.count_stale_ratings()
 
-    # Get oldest and newest update times
     result = await db.execute(
         select(
             func.min(AnalystRating.last_updated),
             func.max(AnalystRating.last_updated)
-        )
+        ).where(repo.in_scope())
     )
     oldest_update, newest_update = result.one()
 

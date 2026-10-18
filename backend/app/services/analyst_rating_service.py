@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from app.etf_mappings import allocation_for_fund_isin
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
-from app.repositories.security_repository import held
+from app.repositories.fundamentals_repository import sync_scope
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
@@ -110,7 +110,8 @@ class AnalystRatingService:
     Uses yfinance library to fetch aggregated analyst recommendations
     showing counts of: strong buy, buy, hold, sell, strong sell.
 
-    Caches ratings in the database; a rating older than 3 days is stale, so the scheduled
+    Caches ratings in the database; a rating older than the repository's `STALE_AFTER`
+    is stale, so the scheduled
     refresh asks again for every security but a fund (`_fund_ids`), whose no-rating row
     is re-stamped without a request.
     """
@@ -235,8 +236,8 @@ class AnalystRatingService:
         """
         # Get securities
         # yahoo_eligible() on both branches, including the explicit-ids one: a
-        # caller passing an id is not asserting Yahoo covers it. "All" means all held,
-        # the scope of the scheduled pass.
+        # caller passing an id is not asserting Yahoo covers it. "All" means
+        # `sync_scope()` (held and eligible), the scope of the scheduled pass.
         if security_ids:
             result = await self.db.execute(
                 select(Security).where(
@@ -244,9 +245,7 @@ class AnalystRatingService:
                 )
             )
         else:
-            result = await self.db.execute(
-                select(Security).where(yahoo_eligible(), held())
-            )
+            result = await self.db.execute(select(Security).where(sync_scope()))
 
         securities = list(result.scalars().all())
 
@@ -363,16 +362,10 @@ class AnalystRatingService:
             ]
         return result
 
-    async def get_stale_ratings(self, days_old: int = 3) -> List[AnalystRating]:
-        """
-        Get ratings that need to be refreshed (older than specified days).
-        Default is 3 days for twice-weekly updates.
-        """
-        return await self.rating_repo.get_stale_ratings(days_old)
-
     async def sync_stale_ratings(self) -> Dict:
         """
-        Sync ratings that are stale (3+ days old) **or missing entirely**.
+        Sync ratings that are stale (older than the repository's `STALE_AFTER`) **or
+        missing entirely**.
 
         The work list used to come only from `get_stale_ratings`, which selects
         rows that already exist — so a security that had never been rated was
@@ -391,17 +384,16 @@ class AnalystRatingService:
         The lesson is about the citation rather than the code — a fix justified by
         a sibling's supposed correctness should read the sibling's entry point.
         """
-        # yahoo_eligible(): this builds the candidate list for a Yahoo fetch, so an
-        # ineligible security must never enter it -- otherwise it is "missing a
-        # rating" forever and re-queued on every pass. held(): the same scope as the
-        # fundamentals pass it runs after, so a sold position is not re-rated daily.
-        result = await self.db.execute(
-            select(Security).where(yahoo_eligible(), held())
-        )
+        # `sync_scope()`, the fundamentals pass's own predicate (held and Yahoo-eligible):
+        # this builds the candidate list for a Yahoo fetch, so an ineligible security
+        # must never enter it -- otherwise it is "missing a rating" forever and re-queued
+        # on every pass -- and a sold position is not re-rated daily. The stale query
+        # and `/status`'s count are scoped by the same predicate, so they agree.
+        result = await self.db.execute(select(Security).where(sync_scope()))
         all_securities = list(result.scalars().all())
 
         rated_ids = {r.security_id for r in await self.rating_repo.get_all()}
-        stale_ids = {r.security_id for r in await self.get_stale_ratings(days_old=3)}
+        stale_ids = {r.security_id for r in await self.rating_repo.get_stale_ratings()}
         # Funds stay candidates, so their row keeps the staleness every other row has
         # (`/api/analyst-ratings/status`), but `sync_ratings_for_securities` re-stamps
         # them without a request.
