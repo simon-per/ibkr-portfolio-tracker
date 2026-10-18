@@ -83,6 +83,10 @@ Only what is still unverified.
   strip's shadow on scroll was measured in both themes. Look-through's constituent logos were
   filled on 2026-10-18 (docs/logos.md *Filled*); companies beyond those baskets' top 100 stay
   monograms.
+- **The two UI fixes (`bluegill`, 2026-10-18), in a real browser:** verified on production at
+  1366 dark — the Watchlist's Stock column stays pinned while the table scrolls sideways, and
+  Dividends *Expected next* no longer overflows sideways. Unseen: the calendar's thin themed
+  scrollbar (headless Chromium draws none) and both fixes in light mode.
 - **Watchlist logos for names never held:** fetched 2026-10-18 and seen on production (CATL,
   TSM, SOFI, SNDK); a ticker no basket lists stays a monogram.
 
