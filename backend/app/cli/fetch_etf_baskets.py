@@ -40,6 +40,7 @@ from typing import Dict, List, Tuple
 import httpx
 
 from app.etf_sources import FUND_SOURCES, FundSource
+from app.logging_setup import configure_logging
 from app.services.etf_basket_fetch import (  # noqa: F401 — re-exported for callers and tests
     AUTOMATED_ADAPTERS,
     BETWEEN_REQUESTS_S,
@@ -179,7 +180,7 @@ async def fetch_baskets(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("funds", nargs="*", help="Fund symbols or ISINs (default: none)")

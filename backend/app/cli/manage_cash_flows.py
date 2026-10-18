@@ -36,6 +36,7 @@ from typing import Dict, Optional, Tuple
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.cash_flow import (
     CashFlow, DEPOSIT_WITHDRAW, TRANSFER, TRANSFER_IN, TRANSFER_OUT, TRANSFER_TYPES,
 )
@@ -199,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(message)s")
     return asyncio.run(run(build_parser().parse_args()))
 
 

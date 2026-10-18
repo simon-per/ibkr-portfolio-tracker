@@ -27,6 +27,7 @@ from sqlalchemy import select
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_MANUAL
 from app.repositories.security_logo_repository import SecurityLogoRepository
@@ -98,7 +99,7 @@ async def import_logo(isin: str, path: Path, dry_run: bool = False) -> int:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("isin", help="The ISIN the logo belongs to")

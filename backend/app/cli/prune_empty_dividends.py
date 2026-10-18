@@ -42,6 +42,7 @@ from typing import Optional
 from sqlalchemy import delete, func, select
 
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
 from app.repositories.sync_run_repository import SyncRunRepository
@@ -171,7 +172,7 @@ async def prune(dry_run: bool) -> int:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

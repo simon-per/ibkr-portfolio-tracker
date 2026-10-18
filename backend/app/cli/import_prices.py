@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.security import Security
 from app.cli.security_lookup import resolve_security
 from app.repositories.market_price_repository import MarketPriceRepository
@@ -204,7 +205,7 @@ async def import_prices(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("json_path", type=Path, help="JSON file of daily closes")
     parser.add_argument(

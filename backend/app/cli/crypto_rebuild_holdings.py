@@ -47,6 +47,7 @@ from sqlalchemy import delete, select
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.crypto import (
     HOLDINGS_FROM_SNAPSHOT,
     HOLDINGS_FROM_TRANSACTIONS,
@@ -567,7 +568,7 @@ async def run(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--probe", action="store_true",

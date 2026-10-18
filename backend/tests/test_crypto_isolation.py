@@ -44,6 +44,7 @@ ALLOWED_SHARED = {
     "app.clock",
     "app.config",
     "app.database",
+    "app.logging_setup",
     "app.redact",
     "app.single_flight",
     # The paced GET every API client shares (2026-10-17): transport only, no data.

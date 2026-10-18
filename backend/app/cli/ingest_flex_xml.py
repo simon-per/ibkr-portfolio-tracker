@@ -38,6 +38,7 @@ from app.clock import utcnow
 from pathlib import Path
 
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import ingest_flex_statement
@@ -124,7 +125,7 @@ def _print_warnings(warnings) -> None:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xml_path", type=Path, help="Flex statement XML downloaded from IBKR")
     parser.add_argument(

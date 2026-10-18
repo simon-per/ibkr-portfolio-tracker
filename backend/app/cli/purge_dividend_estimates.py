@@ -43,6 +43,7 @@ from app.clock import utcnow
 from typing import Optional
 
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.security import Security
 from app.cli.security_lookup import resolve_security
 from app.repositories.dividend_repository import DividendRepository
@@ -140,7 +141,7 @@ async def purge(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

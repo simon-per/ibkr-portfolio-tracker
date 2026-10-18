@@ -50,6 +50,7 @@ from typing import Dict, List, Optional
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
@@ -232,7 +233,7 @@ async def run(start: Optional[date], dry_run: bool,
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

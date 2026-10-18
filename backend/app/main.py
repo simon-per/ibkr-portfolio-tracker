@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.auth import log_write_auth_state, write_auth_enabled, write_auth_middleware
 from app.config import settings
 from app.database import engine
+from app.logging_setup import configure_logging
 from app.observability import request_id_middleware, unhandled_exception_handler
 from app.rate_limit import rate_limit_middleware
 
@@ -33,15 +34,14 @@ def _configure_logging() -> None:
     and job pruning worked — are INFO. They could not be read, which is part of why a job
     store that never opened looked healthy for two days.
 
-    Deliberately `force=True`: uvicorn installs its own handlers before the app is
-    imported, and without it basicConfig is a no-op whenever any handler already exists.
+    `configure_logging` forces the root config (uvicorn's handlers exist before the app is
+    imported) and redacts secrets from every line, uvicorn's own included.
     """
     level = getattr(logging, str(settings.log_level).upper(), logging.INFO)
-    logging.basicConfig(
+    configure_logging(
         level=level,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         stream=sys.stdout,
-        force=True,
     )
     for name in _NOISY_AT_INFO:
         logging.getLogger(name).setLevel(max(level, logging.WARNING))

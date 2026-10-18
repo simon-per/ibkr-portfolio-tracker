@@ -1111,9 +1111,24 @@ a failed SendRequest carries it — and those went verbatim into `sync_runs.mess
 scrubbed 2026-07-28; **rotate the token if this ever recurs** — that instruction is about a *new* leak, which would mean the redaction below had failed. The 07-28 exposure itself the owner decided on 2026-08-17 to accept rather than rotate; STATUS.md records why, and it is not to be re-raised). `SyncRunRepository.record()` redacts on
 write and `to_dict()` again on read, so rows written before the fix or restored from a backup can't leak
 either; the routers redact their `HTTPException` details. The `q=` query id stays readable — public in
-these docs and useless alone. The CoinStats key and share token are literal masks too — belt and
-braces, since they travel only in headers ([crypto.md](crypto.md)); the six-digit share passcode is
-deliberately not one. Tests: `tests/test_secret_redaction.py`.
+these docs and useless alone. Two URL parameters are masked by pattern, Flex's `t=` and Alpha Vantage's
+`apikey=`. The literal value of every configured secret is masked too (`_LITERAL_SECRET_SETTINGS`):
+`ibkr_token`, `coin_stats_api_key`, `coin_stats_share_token`, `coin_stats_share_passcode`,
+`coingecko_api_key`, `logo_dev_secret_key`, `alpha_vantage_api_key`, `openfigi_api_key`,
+`api_admin_token`. A value shorter than 8 characters is never substring-replaced, so a six-digit
+share passcode stays unmasked while a password-style one is masked. The header-borne ones are belt
+and braces ([crypto.md](crypto.md)). Tests: `tests/test_secret_redaction.py`.
+
+**The container log is redacted at the formatter (`RedactingFormatter`, GitHub issue #14).** A call-site
+`redact_secrets(str(e))` misses three paths: an f-string interpolating a transport error, the
+traceback `exc_info=True`/`logger.exception` appends (a sanitised `RuntimeError(...) from e` still
+prints the chained `e`), and uvicorn's own `uvicorn`/`uvicorn.access` handlers (`propagate=False`),
+which log the 500's traceback a second time after Starlette re-raises it. `RedactingFormatter` redacts
+the fully formatted line, traceback and `stack_info` included. `app/logging_setup.configure_logging()`
+is the only way logging is configured: `app/main.py` and every CLI under `app/cli/` call it, and it
+puts the formatter on the root handler and wraps uvicorn's formatters (uvicorn configures them before
+it imports the app, so they exist by then). A bare `logging.basicConfig` anywhere else in `app/` fails
+`tests/test_log_redaction.py`, whose cases assert on handler-formatted output, never `getMessage()`.
 
 **A price that never arrives is otherwise silent.** `portfolio_service` values a position with no price
 at **0.00** and moves on, so deleting SBI's poisoned prices took 446.93 CHF off the total with nothing
@@ -1353,8 +1368,8 @@ last, so a rejection from any of them still carries a correlation id:
   it only splits the forger's own bucket. `/health` is exempt: the deploy script polls it.
 - **`app/observability.py`** stamps `X-Request-ID` (reusing a plausible inbound one so it correlates
   across a proxy) and installs the handler for unhandled exceptions — the one path where `str(e)`
-  still reached the client unredacted. The body is a fixed string plus the id; the log line goes
-  through `redact_secrets`.
+  still reached the client unredacted. The body is a fixed string plus the id; the log line,
+  traceback included, is redacted by `RedactingFormatter` (above).
 
 `tests/conftest.py` neutralises the limiter's process-lifetime window state and the job-store path for
 the whole suite, or one module's traffic would 429 another's. Tests: `tests/test_api_hardening.py`.

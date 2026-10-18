@@ -54,6 +54,7 @@ from typing import Optional
 from app.clock import utcnow
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.identity_service import GLEIF_MIN_INTERVAL_S, IdentityService, held_isins
 from app.services.lookthrough_service import LookthroughService
@@ -187,7 +188,7 @@ async def resolve_identities(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dry-run", action="store_true",

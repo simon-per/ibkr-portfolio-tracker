@@ -39,6 +39,7 @@ from sqlalchemy import func, select
 
 from app.cli.security_lookup import ambiguity, matching_securities
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
 from app.models.security import Security
@@ -681,7 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     # `test` and `set` probe Yahoo; share the app's on-disk yfinance cache (app/yf_cache.py).
     configure_yfinance_cache()
     return asyncio.run(run(build_parser().parse_args()))

@@ -38,6 +38,31 @@ def test_literal_token_value_is_masked_outside_url_shapes(monkeypatch):
     assert FAKE_TOKEN not in out
 
 
+@pytest.mark.parametrize(
+    "setting", ["alpha_vantage_api_key", "openfigi_api_key", "api_admin_token"]
+)
+def test_every_configured_secret_is_masked(monkeypatch, setting):
+    """These three were missing from the literal list until GitHub issue #14."""
+    from app.config import settings
+    value = "LONGSECRETVALUE-" + setting
+    monkeypatch.setattr(settings, setting, value, raising=False)
+    assert value not in redact_secrets(f"error mentioning {value}")
+
+
+def test_the_alpha_vantage_apikey_param_is_masked_even_when_unconfigured(monkeypatch):
+    """httpx's HTTPStatusError stringifies with the full URL, `apikey=` included."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "alpha_vantage_api_key", "", raising=False)
+    out = redact_secrets(
+        "Server error '503 Service Unavailable' for url "
+        "'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=AMZN"
+        "&apikey=ALPHAVANTAGEKEY1234567'"
+    )
+    assert "ALPHAVANTAGEKEY1234567" not in out
+    assert "&apikey=[REDACTED]'" in out
+    assert "symbol=AMZN" in out
+
+
 def test_a_short_token_is_never_substring_replaced(monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "ibkr_token", "t")

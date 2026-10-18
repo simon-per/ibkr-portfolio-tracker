@@ -31,6 +31,7 @@ from typing import List, Optional
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.logo_service import MAX_LOOKUPS_PER_PASS, LogoService, is_configured
 
@@ -90,7 +91,7 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     # httpx logs every request URL at INFO, and a download URL carries logo.dev's signature.
     # The app quiets the same loggers (`app.main._NOISY_AT_INFO`); the per-ISIN lines below
     # are the run's record.

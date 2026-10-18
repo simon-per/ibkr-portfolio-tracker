@@ -35,6 +35,7 @@ from pathlib import Path
 from app.accounts import PILLAR3A
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.currency_service import CurrencyService
 from app.services.finpension_ingest import SYNC_TYPE, ingest_finpension_report
@@ -108,7 +109,7 @@ async def ingest(path: Path, account: str, dry_run: bool, force: bool) -> int:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("csv_path", type=Path,

@@ -46,6 +46,7 @@ from typing import List, Optional
 
 from app.clock import utcnow
 from app.database import AsyncSessionLocal
+from app.logging_setup import configure_logging
 from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
 from app.etf_sources import source_for_fund_isin
 from app.repositories.etf_basket_repository import (
@@ -204,7 +205,7 @@ async def import_basket(
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    configure_logging(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("fund_isin", help="ISIN of the fund the file describes")

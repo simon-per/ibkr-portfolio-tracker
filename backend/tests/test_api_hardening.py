@@ -326,13 +326,19 @@ def test_an_implausible_inbound_id_is_replaced(client):
     assert len(r.headers[REQUEST_ID_HEADER]) <= 64
 
 
-def test_an_unhandled_error_is_correlatable_and_redacted(monkeypatch, caplog):
+def test_an_unhandled_error_is_correlatable_and_redacted(
+    monkeypatch, caplog, production_log_handlers
+):
     """
     The one path where `str(e)` still reached the client unredacted. Routers already
     redact their HTTPException details and SyncRunRepository redacts what it stores,
     but an exception escaping a handler went through FastAPI's default 500 — and a
     failed Flex request stringifies with the token in a `t=` URL parameter, which is
     exactly how production leaked it once.
+
+    The log is checked as the production handlers format it, traceback included:
+    `getMessage()` alone was clean while `logger.exception` appended the raw traceback
+    (GitHub issue #14), and uvicorn's error handler prints the same traceback again.
     """
     import logging
 
@@ -361,11 +367,13 @@ def test_an_unhandled_error_is_correlatable_and_redacted(monkeypatch, caplog):
 
     # And the log line too: the container log is not public, but it gets pasted into
     # issues and chats, and this repo is public.
-    logged = "\n".join(rec.getMessage() for rec in caplog.records)
-    assert "SUPERSECRETTOKENVALUE123" not in logged
-    assert r.headers[REQUEST_ID_HEADER] in logged
-    # The query id stays readable — public in the docs and useless without the token.
-    assert "q=1234" in logged
+    for handler in (production_log_handlers.root, production_log_handlers.uvicorn):
+        logged = "\n".join(handler.format(rec) for rec in caplog.records)
+        assert "Traceback" in logged
+        assert "SUPERSECRETTOKENVALUE123" not in logged
+        assert r.headers[REQUEST_ID_HEADER] in logged
+        # The query id stays readable — public in the docs and useless without the token.
+        assert "q=1234" in logged
 
     app.router.routes = [
         route for route in app.router.routes
