@@ -53,9 +53,18 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     (`app/cli/ingest_flex_xml.py`) would have made it a third copy, and three copies of
     the reconciliation order is how the views drift apart.
 
-    Deliberately does **no** network I/O and does **not** commit — the caller owns the
-    transaction, so a failure anywhere here leaves the database untouched. Currency
-    conversion reads the cached `exchange_rates` table via CurrencyService.
+    Makes **no** Flex request and never touches Yahoo, and does **not** commit — the
+    caller owns the transaction, so a failure anywhere here leaves the database untouched.
+    Currency conversion goes through CurrencyService: the cached `exchange_rates` table
+    first, and on a cache miss a Frankfurter request (plus the fallback provider for
+    recent dates) from inside this open transaction.
+
+    **A statement older than the book** (`to_date` before `last_sync_to_date`) is only
+    partly applied, by design. Its ledgers are additive and idempotent, so they are
+    ingested — that is what a prior-range download is for. Its OpenPositions and
+    OpenDividendAccruals are snapshots of its own `to_date`, not of now: reconciling them
+    would close everything bought since as a heuristic sale and reopen everything sold
+    since, so they are skipped and a warning says so. `last_sync_to_date` never moves back.
 
     Raises EmptyStatementError (from reconcile_taxlots) if the statement has no tax lots
     while the database still holds open ones — the wipe guard, which every caller must
@@ -76,6 +85,12 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     trade_repo = TradeRepository(db)
     corp_action_repo = CorporateActionRepository(db)
     app_settings = AppSettingsRepository(db)
+
+    # Read before anything moves: is this statement older than the book? Equal is not
+    # older — re-ingesting the latest statement is the idempotent case.
+    last_sync_date = await app_settings.get_last_sync_to_date()
+    to_date = flex_data.get('to_date')
+    superseded = bool(last_sync_date and to_date and to_date < last_sync_date)
 
     # Securities first: everything downstream is keyed on conid -> security_id.
     securities_data = await ibkr_service.extract_securities(flex_data)
@@ -113,10 +128,14 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     # unconditionally like the cash sections below, so enabling the section in the portal
     # needs no code change; an absent section is an empty list and a supported state.
     # These are NOT income and never reach `dividend_payments` — see the model docstring.
-    accruals_data = await ibkr_service.extract_dividend_accruals(flex_data)
-    accrual_result = await DividendService(db).sync_dividend_accruals(
-        accruals_data, conid_to_security_id
-    )
+    # A snapshot, stored by `replace_all`: an older statement's would bring back accruals
+    # since paid and drop ones announced since, so it is skipped (docstring above).
+    accrual_result: Dict = {}
+    if not superseded:
+        accruals_data = await ibkr_service.extract_dividend_accruals(flex_data)
+        accrual_result = await DividendService(db).sync_dividend_accruals(
+            accruals_data, conid_to_security_id
+        )
     # IBKR's own (ex-date, pay date) per dividend, from <ChangeInDividendAccruals>: a log
     # that grows, read only to measure each security's ex→pay lag exactly.
     date_pairs_result = await DividendService(db).sync_dividend_date_pairs(
@@ -157,34 +176,51 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
             flex_data['from_date']
         )
 
-    last_sync_date = await app_settings.get_last_sync_to_date()
-    taxlots_data = await ibkr_service.extract_taxlots(flex_data)
-
-    recon = await reconcile_taxlots(
-        taxlot_repo=taxlot_repo,
-        currency_service=currency_service,
-        conid_to_security_id=conid_to_security_id,
-        taxlots_data=taxlots_data,
-        report_to_date=flex_data['to_date'],
-        trade_repo=trade_repo,
-        corp_action_repo=corp_action_repo,
-        last_sync_date=last_sync_date,
-    )
-
-    # Remember this statement's to_date as the next sync's window start.
-    if flex_data.get('to_date'):
-        await app_settings.set_last_sync_to_date(flex_data['to_date'])
-
     warnings: List[str] = []
+    if superseded:
+        # The open book is not this statement's to rewrite (docstring above). Phase E of
+        # the reconcile still runs: it is additive, and the trades just ingested are
+        # exactly what lets it give an old heuristic closure its real sale date.
+        recon = {
+            "taxlots_synced": 0,
+            "taxlots_skipped": 0,
+            "skipped_currencies": set(),
+            "lots_closed_full": 0,
+            "lots_closed_partial": 0,
+            "lots_restamped": await restamp_unsourced_closed_lots(taxlot_repo, trade_repo),
+            "total_cost_basis_eur": None,
+        }
+        warnings.append(
+            f"Statement ends {to_date}, before the last sync ({last_sync_date}): its "
+            f"trades, cash and dividends were ingested, its open positions and dividend "
+            f"accruals were not applied"
+        )
+    else:
+        recon = await reconcile_taxlots(
+            taxlot_repo=taxlot_repo,
+            currency_service=currency_service,
+            conid_to_security_id=conid_to_security_id,
+            taxlots_data=await ibkr_service.extract_taxlots(flex_data),
+            report_to_date=to_date,
+            trade_repo=trade_repo,
+            corp_action_repo=corp_action_repo,
+            last_sync_date=last_sync_date,
+        )
+
+    # Remember this statement's to_date as the next sync's window start. The setter is
+    # monotonic, so an older statement leaves it where it is.
+    if to_date:
+        await app_settings.set_last_sync_to_date(to_date)
+
     if recon["skipped_currencies"]:
         warnings.append(
-            f"Skipped {recon['taxlots_skipped']} taxlot(s) with unsupported currencies: "
+            f"Skipped {recon['taxlots_skipped']} taxlot(s) with no FX rate available for: "
             f"{', '.join(sorted(recon['skipped_currencies']))}"
         )
     if flows["skipped_currencies"]:
         warnings.append(
-            f"Skipped {flows['cash_flows_skipped']} deposit/withdrawal(s) with unsupported "
-            f"currencies: {', '.join(sorted(flows['skipped_currencies']))}"
+            f"Skipped {flows['cash_flows_skipped']} deposit/withdrawal(s) with no FX rate "
+            f"available for: {', '.join(sorted(flows['skipped_currencies']))}"
         )
     if flows["deposits_reclassified_as_transfer"]:
         warnings.append(
@@ -230,7 +266,12 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         # been enabled — which says "the portal edit did not take" about an edit that
         # did. A count nobody can act on is worse than no count.
         "cash_balances_seen": len(cash_balances),
-        "total_cost_basis_eur": float(recon["total_cost_basis_eur"]),
+        # None when the open positions were not applied (an older statement): no lots
+        # were read, so there is no total to report.
+        "total_cost_basis_eur": (
+            float(recon["total_cost_basis_eur"])
+            if recon["total_cost_basis_eur"] is not None else None
+        ),
         "account_id": flex_data['account_id'],
         "data_from": str(flex_data['from_date']) if flex_data['from_date'] else None,
         "data_to": str(flex_data['to_date']) if flex_data['to_date'] else None,
@@ -441,7 +482,7 @@ async def persist_cash_flows(
                 )
             except ValueError as e:
                 logger.warning(
-                    f"Skipping cash flow with unsupported currency {flow['currency']}: {e}"
+                    f"Skipping cash flow, no FX rate for {flow['currency']}: {e}"
                 )
                 skipped_currencies.add(flow["currency"] or "?")
                 skipped += 1
@@ -791,7 +832,7 @@ async def reconcile_taxlots(
             )
         except ValueError as e:
             logger.warning(
-                f"Skipping taxlot with unsupported currency {lot_data['currency']}: {e}"
+                f"Skipping taxlot, no FX rate for {lot_data['currency']}: {e}"
             )
             skipped_currencies.add(lot_data["currency"])
             taxlots_skipped += 1

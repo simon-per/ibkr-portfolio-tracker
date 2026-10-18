@@ -28,8 +28,8 @@ from app.services.flex_generation import (
     generation_brings_new_trading_day,
     is_trading_day,
     next_generation_opens_at,
+    newest_coverage,
     next_new_trading_day_generation_opens_at,
-    oldest_uncovered_trading_day,
 )
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
@@ -779,8 +779,12 @@ class SchedulerService:
         with a failed Saturday is two days old by Sunday, and under a narrow window the
         skipped Sunday and Monday make that warning the one that matters.
 
+        Read through `newest_coverage`, which keys on the newest `data_to` a run covered
+        rather than on when it finished, so an old-range download ingested today does not
+        silence it.
+
         Uses `IBKR_SYNC_TYPES`, so an offline `ibkr_manual_xml` ingest **closes** the
-        gap. That is the opposite choice from the guard in `flex_generation.py`, which
+        gap when it covers it. That is the opposite choice from the guard in `flex_generation.py`, which
         excludes it — deliberately, and the two questions are genuinely different. A
         browser download refreshes the data (so the alarm should quieten) while costing
         no generation (so the guard must not skip the day's attempt). Getting this
@@ -793,19 +797,11 @@ class SchedulerService:
         """
         as_of = as_of or utcnow()
 
-        latest = await db.execute(
-            select(func.max(SyncRun.finished_at)).where(
-                and_(
-                    SyncRun.sync_type.in_(IBKR_SYNC_TYPES),
-                    SyncRun.status == 'success',
-                )
-            )
-        )
-        newest = latest.scalar_one_or_none()
-        if newest is None:
+        coverage = await newest_coverage(db)
+        if coverage is None:
             return []
 
-        at_risk_from = oldest_uncovered_trading_day(et_date(newest))
+        newest, at_risk_from = coverage
         missed = (et_date(as_of) - at_risk_from).days
 
         window = await flex_window_days(db)
@@ -862,23 +858,17 @@ class SchedulerService:
 
         Counts only sync types that actually reach IBKR (`IBKR_SYNC_TYPES`), including the
         offline `ibkr_manual_xml` path — ingesting a browser download genuinely refreshes
-        the data, so it should reset the clock exactly like an API sync.
+        the data, so it should reset the clock exactly like an API sync. Read through
+        `newest_coverage`, like the gap alarm: the clock is the run that brought the
+        newest data, so a prior-range download ingested today does not reset it.
 
         Returns `warnings[]`-ready strings, like the sibling detectors.
         """
         as_of = as_of or utcnow()
 
-        latest = await db.execute(
-            select(func.max(SyncRun.finished_at)).where(
-                and_(
-                    SyncRun.sync_type.in_(IBKR_SYNC_TYPES),
-                    SyncRun.status == 'success',
-                )
-            )
-        )
-        newest = latest.scalar_one_or_none()
+        coverage = await newest_coverage(db)
 
-        if newest is None:
+        if coverage is None:
             # No successful IBKR sync on record at all. Silent on a fresh install, where
             # an empty history is expected rather than alarming — the first sync fixes it.
             has_any = await db.execute(
@@ -891,12 +881,13 @@ class SchedulerService:
                 "being updated — check the Flex token and the query configuration"
             ]
 
+        newest = coverage[0]
         age = (as_of - newest).days
         if age < IBKR_SYNC_STALE_DAYS:
             return []
 
         return [
-            f"IBKR: last successful sync was {newest:%Y-%m-%d} ({age} days ago). "
+            f"IBKR: the newest data is from the sync of {newest:%Y-%m-%d} ({age} days ago). "
             f"Positions and trades are stale. If the Flex Query period is bounded, "
             f"trades older than that window will be lost permanently — ingest a browser "
             f"download via app/cli/ingest_flex_xml.py rather than waiting"

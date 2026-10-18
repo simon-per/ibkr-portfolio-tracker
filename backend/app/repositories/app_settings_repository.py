@@ -172,7 +172,17 @@ class AppSettingsRepository:
             return None
 
     async def set_last_sync_to_date(self, to_date: date) -> None:
-        if to_date is not None:
+        """
+        Move the next sync's trade-window start forward, never back.
+
+        An older statement (a prior-range Client Portal download, or the API statement the
+        day after a custom range ending today) rewinding it would reopen the window over
+        sales already booked, and the next sync would close them a second time.
+        """
+        if to_date is None:
+            return
+        existing = await self.get_last_sync_to_date()
+        if existing is None or to_date > existing:
             await self.set(LAST_IBKR_SYNC_TO_DATE_KEY, to_date.isoformat())
 
     async def get_dividend_forecast_growth_from(self) -> Optional[date]:

@@ -256,6 +256,51 @@ def _statement_span(details: Optional[dict]) -> Optional[tuple[date, date]]:
     return None
 
 
+async def newest_coverage(db: AsyncSession) -> Optional[tuple[datetime, date]]:
+    """
+    The successful IBKR run whose statement reaches furthest forward, as
+    `(its finished_at, the oldest trading day it does not cover)`. None if none succeeded.
+
+    **Keyed on what a run covered, not on when it finished.** An `ibkr_manual_xml` ingest
+    of a prior-range download finishes today and covers nothing recent; counting from its
+    `finished_at` told both staleness alarms the data was fresh while every trade since
+    the last API statement was still at risk (GitHub issue #13).
+
+    A run's reach is the trading day after its recorded `data_to`, capped by the one
+    its finish date implies: no statement covers a day after it was generated, and a
+    custom range ending today does not cover trades booked after the download. A run
+    with no recorded span falls back to the cap alone — the finished_at count this
+    replaced. Walked newest first and stopped once no older run's cap can beat the best
+    reach so far, which is usually the second row.
+    """
+    result = await db.stream(
+        select(SyncRun.finished_at, SyncRun.details)
+        .where(
+            and_(
+                SyncRun.sync_type.in_(IBKR_SYNC_TYPES),
+                SyncRun.status == 'success',
+                SyncRun.finished_at.isnot(None),
+            )
+        )
+        .order_by(SyncRun.finished_at.desc())
+    )
+    best: Optional[tuple[datetime, date]] = None
+    try:
+        async for finished_at, details in result:
+            cap = oldest_uncovered_trading_day(et_date(finished_at))
+            if best is not None and cap <= best[1]:
+                break
+            span = _statement_span(details)
+            reach = cap if span is None else min(
+                cap, oldest_uncovered_trading_day(span[1] + timedelta(days=1))
+            )
+            if best is None or reach > best[1]:
+                best = (finished_at, reach)
+    finally:
+        await result.close()
+    return best
+
+
 async def flex_window_days(
     db: AsyncSession, as_of: Optional[datetime] = None
 ) -> Optional[int]:

@@ -13,8 +13,15 @@ Runs the exact same pipeline as `POST /api/sync/ibkr`: it shares `parse_flex_xml
 the empty-statement wipe guard and the idempotent upserts all behave identically. Safe to
 re-run: everything is keyed on `ib_key` / `isin + exchange`.
 
-Touches **no** network: no Flex request and no Yahoo (so rule 1 in CLAUDE.md does not
-apply). FX conversion reads the cached `exchange_rates` table.
+A statement ending **before** the last sync (`app_settings.last_sync_to_date`) — a
+prior-range download — has its trades, corporate actions, cash and dividends ingested,
+but its open positions and dividend accruals are its own `to_date`'s snapshot and are
+**not applied**; the run's warnings say so, and `last_sync_to_date` never moves back.
+
+No Flex request and no Yahoo (so rules 1 and 2 in CLAUDE.md do not apply). FX conversion
+reads the cached `exchange_rates` table first; a cache miss asks Frankfurter (and, for
+recent dates, the fallback provider), so a row in a currency/date the cache lacks is
+skipped with a "no FX rate" warning when offline.
 
 Usage, inside the container:
 

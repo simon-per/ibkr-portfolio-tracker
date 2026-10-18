@@ -328,7 +328,9 @@ day in New York. Twenty minutes later the 06:00 Berlin `ibkr_only_sync_job` — 
 missing day without anyone doing anything. **Check `toDate` in the file header before ingesting
 a manual download**; the generation time tells you nothing on its own. Only a **custom date range**
 ending today can reach the current day, which is a portal edit that has to be set back afterwards —
-worth it for a prior-year backfill, not for waiting one night.
+worth it for a prior-year backfill, not for waiting one night. The next day's API statement then
+ends a day *before* that download, and is ingested as an older statement (*Offline ingest*, below):
+its ledgers land, its open positions do not.
 
 ### Offline ingest — the escape hatch from a locked token
 
@@ -346,8 +348,25 @@ docker exec backend-portfolio-backend-1 python -m app.cli.ingest_flex_xml /tmp/s
 `app/cli/ingest_flex_xml.py` reuses `IBKRService.parse_flex_xml()` and
 `sync_helper.ingest_flex_statement()` — the *same* functions `POST /api/sync/ibkr` and the scheduled jobs
 use — so reconciliation order, the empty-statement wipe guard and the idempotent upserts all apply
-identically. It records a `sync_runs` row with `sync_type='ibkr_manual_xml'`. Touches no network at all
-(no Flex, no Yahoo). `--dry-run` reports counts without writing. Tests: `tests/test_manual_xml_ingest.py`.
+identically. It records a `sync_runs` row with `sync_type='ibkr_manual_xml'`. No Flex request and no
+Yahoo; FX reads the cached `exchange_rates` table, but **a cache miss asks Frankfurter** (and, for recent
+dates, the fallback provider) from inside the ingest's transaction — offline, such a row is skipped with a
+"no FX rate available" warning (GitHub issue #41). `--dry-run` reports counts without writing. Tests:
+`tests/test_manual_xml_ingest.py`, `tests/test_ingest_fx_network.py`.
+
+**A statement older than the book is only partly applied (GitHub issue #13).** When its `to_date` is
+before `app_settings.last_sync_to_date`, its OpenPositions and OpenDividendAccruals are the snapshot of
+*its* day, not of now. Reconciling them closed every position bought since as a heuristic "sale" dated
+before its own open date, reopened every position sold since, and the accruals `replace_all` brought back
+paid ones. So `ingest_flex_statement` ingests the additive, idempotent ledgers (securities, trades,
+corporate actions, cash transactions and dividends, cash flows and transfers, cash balances, the date-pair
+log, and the restamp of old heuristic closures), **skips `reconcile_taxlots` and the accruals**, and adds a
+`warnings[]` line. `set_last_sync_to_date` is **monotonic**: a rewound date reopened the next sync's trade
+window over sales already booked, and closed them a second time. The statement is not refused, because the
+same path is reached by the scheduled API sync the day after a custom range ending today (its `to_date` is
+one day older), and a refusal there would record a failed run and spend another generation; refusing would
+also lose the prior-range backfill. Equal `to_date` is not older — re-ingesting the latest statement stays
+the idempotent case. Tests: `tests/test_stale_statement_ingest.py`.
 
 There is deliberately **no upload endpoint**: `/api/` is proxied publicly, and a route that rewrites tax
 lots is a far larger surface than a CLI run over ssh — write auth (below) narrows that surface but does
@@ -930,6 +949,15 @@ calendar days, so counting only the Tuesday-to-Saturday generation days would pu
 after the trades had gone. A real outage spanning a weekend counts every day of it: a Friday
 success is two days old on Sunday, which at N=3 is the warning that matters now that Sunday and
 Monday are not asked.
+
+**"The last statement" is the run that covered the most, not the one that finished last**
+(`flex_generation.newest_coverage`, GitHub issue #13). Counting from `finished_at` let an
+`ibkr_manual_xml` ingest of a prior-range download, finished an hour ago, silence the alarm while
+nothing after the last API statement had been fetched. A run's reach is the trading day after its
+recorded `data_to`, capped by the day its finish implies (no statement covers a day after it was
+generated, and a custom range ending today misses that day's later trades); a run with no recorded
+span falls back to the cap, which is the old count. `find_stale_ibkr_sync` reads the same clock, so
+the two alarms cannot disagree on what "fresh" means.
 
 **`full_sync` runs its 730-day market-data pass whether or not IBKR succeeded, and gating it
 was a silent outage (fixed 2026-08-07).** `_full_sync_job_locked` used to wrap step 3 in
