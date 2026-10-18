@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import Iterable, List, Dict, Optional, Tuple
 from datetime import datetime, timezone
 from app.clock import utcnow
 from app.repositories.sync_run_repository import utc_iso
@@ -15,11 +15,13 @@ from app.repositories.fundamentals_repository import (
     sync_scope,
 )
 from app.repositories.security_repository import held
+from app.services.identity_service import companies_of_securities
 from app.services.allocation_service import allocation_from_info, apply_allocation
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
+from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.services.yahoo_estimates import (
     EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
@@ -296,11 +298,12 @@ class FundamentalsService:
                     record_fundamentals_miss(security, utcnow())
                     no_data += 1
 
-                # Extract and save earnings
+                # Extract and save earnings: this answer replaces the security's future
+                # events, so a moved event leaves no stale twin (issue #69).
                 earnings_data = self._extract_earnings(security, earnings_df)
-                for event_data in earnings_data:
-                    await self.repo.upsert_earnings_event(event_data)
-                    earnings_updated += 1
+                earnings_updated += await self.repo.replace_earnings_events(
+                    security.id, earnings_data
+                )
 
                 await self.db.commit()
 
@@ -494,41 +497,79 @@ class FundamentalsService:
 
         return portfolio_data
 
-    async def _held_ids(self) -> set:
-        return set((await self.db.execute(
-            select(Security.id).where(held())
-        )).scalars().all())
+    async def _one_per_company(
+        self, events: Iterable[EarningsEvent]
+    ) -> List[Tuple[EarningsEvent, List[str]]]:
+        """
+        One event per company and earnings day among the **held** securities' `events`,
+        each with the symbols of every held listing of that company, its own first.
+
+        Rows are stored per security, so a company held on several listings — GOOGL,
+        GOOG and ABEA; ASML in New York and Amsterdam — had its one report listed once
+        per listing (issue #69). "Same company" is `identity_service.companies_of_securities`,
+        the look-through table's fold, so the two cannot disagree about which listings
+        are one company. The day is the UTC calendar date rather than the instant: each
+        listing is fetched under its own ticker, and nothing obliges Yahoo to stamp the
+        same release with the same time on every venue — and a company reports once a
+        quarter, not twice a day.
+
+        The event shown is the listing's with the most figures, then the lowest symbol,
+        then the lowest id — deterministic, so the row does not change between requests.
+        Order follows `events` (the repository's date order), by each day's first row.
+        """
+        securities = list((await self.db.execute(select(Security).where(held()))).scalars().all())
+        by_id = {s.id: s for s in securities}
+        company_of = await companies_of_securities(self.db, securities)
+
+        buckets: Dict[Tuple[str, object], List[EarningsEvent]] = {}
+        for ev in events:
+            if ev.security_id not in by_id:
+                continue
+            key = (company_of[ev.security_id].key, ev.earnings_date.date())
+            buckets.setdefault(key, []).append(ev)
+
+        out = []
+        for group in buckets.values():
+            shown = min(group, key=lambda e: (
+                -sum(v is not None for v in (e.reported_eps, e.eps_estimate, e.surprise_percent)),
+                by_id[e.security_id].symbol,
+                e.security_id,
+            ))
+            listings = company_of[shown.security_id].members
+            others = sorted({
+                by_id[int(m.ref.removeprefix("sec:"))].symbol for m in listings
+            } - {by_id[shown.security_id].symbol})
+            out.append((shown, [by_id[shown.security_id].symbol, *others]))
+        return out
 
     async def get_earnings_calendar(self, days_ahead: int = 90) -> List[Dict]:
-        """Upcoming earnings of held securities, with security info (eagerly loaded)."""
+        """Upcoming earnings of held companies, one row per company and day."""
         events = await self.repo.get_upcoming_earnings(days_ahead)
-        held = await self._held_ids()
         result = []
-        for ev in events:
-            if ev.security_id not in held:
-                continue
+        for ev, symbols in await self._one_per_company(events):
             result.append({
                 'security_id': ev.security_id,
                 'symbol': ev.security.symbol,
+                'symbols': symbols,
                 'description': ev.security.description,
-                'earnings_date': ev.earnings_date.isoformat(),
+                # Naive UTC in the column; a bare isoformat() is read by the browser as
+                # local time (issue #69).
+                'earnings_date': utc_iso(ev.earnings_date),
                 'eps_estimate': ev.eps_estimate,
             })
         return result
 
     async def get_earnings_history(self, days_back: int = 365) -> List[Dict]:
-        """Past earnings of held securities, with surprise data (eagerly loaded)."""
+        """Past earnings of held companies with surprise data, one row per company and day."""
         events = await self.repo.get_recent_earnings(days_back)
-        held = await self._held_ids()
         result = []
-        for ev in events:
-            if ev.security_id not in held:
-                continue
+        for ev, symbols in await self._one_per_company(events):
             result.append({
                 'security_id': ev.security_id,
                 'symbol': ev.security.symbol,
+                'symbols': symbols,
                 'description': ev.security.description,
-                'earnings_date': ev.earnings_date.isoformat(),
+                'earnings_date': utc_iso(ev.earnings_date),
                 'eps_estimate': ev.eps_estimate,
                 'reported_eps': ev.reported_eps,
                 'surprise_percent': ev.surprise_percent,

@@ -241,8 +241,12 @@ async def _seed(session: AsyncSession) -> None:
                                    last_updated=now))
     # Earnings both sides of now, so the two earnings lists serve rows, not `[]`: ASML
     # reports in ten days, TSMC beat a month ago, and AAPL (sold) is filtered out of both.
+    # ASML's report is stored under both venues, as each is fetched under its own ticker,
+    # and the calendar serves it once (issue #69).
     session.add(EarningsEvent(security_id=1, earnings_date=datetime.combine(
         TODAY + timedelta(days=10), time(12)), eps_estimate=5.1, is_upcoming=True))
+    session.add(EarningsEvent(security_id=2, earnings_date=datetime.combine(
+        TODAY + timedelta(days=10), time(5)), eps_estimate=5.1, is_upcoming=True))
     session.add(EarningsEvent(security_id=4, earnings_date=datetime.combine(
         TODAY - timedelta(days=30), time(6)), eps_estimate=1.0, reported_eps=1.1,
         surprise_percent=10.0, is_upcoming=False))
@@ -1048,6 +1052,16 @@ def test_the_fundamentals_lists_build_exactly_their_response_model(
     assert [r["security_id"] for r in response.json()] == [r["security_id"] for r in built]
     # Held only: AAPL (3) was sold, so its earnings rows stay off both lists.
     assert 3 not in {r["security_id"] for r in built}
+
+
+def test_the_earnings_lists_serve_a_company_once_in_utc(client):
+    """ASML is held on two venues and its report is stored under both; one row, naming
+    the listing, its date stamped UTC so the browser converts rather than guesses."""
+    upcoming = client.get("/api/fundamentals/earnings/upcoming").json()
+    asml = [row for row in upcoming if row["symbol"] == "ASML"]
+    assert len(asml) == 1 and asml[0]["symbols"] == ["ASML"]
+    history = client.get("/api/fundamentals/earnings/history").json()
+    assert all(r["earnings_date"].endswith("+00:00") for r in upcoming + history)
 
 
 def test_fundamentals_status_says_whether_a_sync_is_running(client, monkeypatch):

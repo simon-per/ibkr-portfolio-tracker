@@ -644,6 +644,24 @@ warning on the row (`logos_result`), never the status.
   `_stale` query in `FundamentalsRepository._due`), and `/status` reports such a security as
   `securities_unavailable` — neither data nor "no data yet", so it raises no amber line and no
   Update button the back-off would answer with nothing. `tests/test_fundamentals_miss_backoff.py`.
+- **Each fetch replaces a security's future earnings; the past is only added to** (issue #69).
+  `earnings_events` is keyed on the exact datetime, so when Yahoo moved an upcoming event (a
+  placeholder date replaced by the confirmed one) the upsert wrote the new row beside the old, and
+  the calendar listed the company twice until the old date passed.
+  `FundamentalsRepository.replace_earnings_events` deletes the security's rows after now that the
+  answer no longer carries, then upserts the answer; it is the only write path (the upsert is
+  private). A past row is never deleted — Yahoo's frame is a window of recent quarters — and an
+  empty answer (a frame that failed to load, or parsed to nothing) replaces nothing.
+- **The earnings lists show one row per company and day, naming every held listing**
+  (`symbols`, the shown listing first). Rows are per security, so GOOGL, GOOG and ABEA each listed
+  Alphabet's report. `_one_per_company` folds on `identity_service.companies_of_securities` — the
+  look-through table's company ([lookthrough.md](lookthrough.md)), not a third notion — and the
+  UTC calendar day rather than the instant, since each listing is fetched under its own ticker and
+  nothing obliges Yahoo to stamp one release identically on every venue. The row shown is the
+  listing's with the most figures, then the lowest symbol, then the lowest id. Pure DB: GOOG
+  joins only once the identity pass has cached Alphabet's LEI. `earnings_date` is served through
+  `utc_iso` (it was a bare `isoformat()`, which the browser parsed as local time).
+  `tests/test_earnings_one_row_per_event.py`.
 
 *Yahoo budget per pass*: **`.info` is three requests**, not one — quoteSummary, the v7 quote and a
 fundamentals-timeseries call for `trailingPegRatio` alone (yfinance's `_fetch_info` +

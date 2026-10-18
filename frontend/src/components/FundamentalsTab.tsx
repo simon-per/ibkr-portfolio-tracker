@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
-import { cn, formatShortDateTime, marketCapParts } from '@/lib/utils'
+import { cn, formatDate, formatShortDateTime, marketCapParts, parseLocalDate } from '@/lib/utils'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
@@ -112,7 +112,14 @@ function BeatRate({ data }: { data: EarningsHistoryItem[] }) {
 }
 
 /** The symbol with its logo, as every holdings table in the app draws it. */
-function SymbolWithAvatar({ symbol, securityId, sub }: { symbol: string; securityId: number; sub?: string }) {
+/** Every held listing of an earnings row's company — "GOOG · ABEA · GOOGL". */
+function listings(row: { symbols: string[] }): string {
+  return row.symbols.join(' · ')
+}
+
+function SymbolWithAvatar({ symbol, securityId, sub, label }: {
+  symbol: string; securityId: number; sub?: string; label?: string
+}) {
   return (
     <div className={cn('flex items-center', sub ? 'gap-3' : 'gap-2')}>
       {/* One line: 20px, the line's own height, so the history table's measured row
@@ -123,7 +130,7 @@ function SymbolWithAvatar({ symbol, securityId, sub }: { symbol: string; securit
         className={sub ? 'h-8 w-8 text-[10px]' : 'h-5 w-5 text-[8px]'}
       />
       <div className="min-w-0">
-        <div className="font-medium">{symbol}</div>
+        <div className="font-medium whitespace-nowrap">{label ?? symbol}</div>
         {sub && <div className="text-xs text-muted-foreground truncate max-w-[180px]">{sub}</div>}
       </div>
     </div>
@@ -381,7 +388,7 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
 
   // Group by date
   const grouped = data.reduce<Record<string, EarningsCalendarItem[]>>((acc, item) => {
-    const dateStr = new Date(item.earnings_date).toLocaleDateString('en-US', {
+    const dateStr = parseLocalDate(item.earnings_date).toLocaleDateString('en-US', {
       weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
     })
     if (!acc[dateStr]) acc[dateStr] = []
@@ -406,7 +413,7 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
                   className="inline-flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-sm"
                 >
                   <TickerAvatar symbol={item.symbol} securityId={item.security_id} className="h-6 w-6 text-[9px]" />
-                  <span className="font-medium">{item.symbol}</span>
+                  <span className="font-medium">{listings(item)}</span>
                   {/* No currency symbol: EPS is in the issuer's reporting currency, which
                       this row does not carry, and a `$` on a Nestlé figure is a claim. */}
                   {item.eps_estimate !== null && (
@@ -447,7 +454,9 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     mobile: 'title',
     cellClassName: 'font-medium',
     cell: (row, view) =>
-      view === 'table' ? <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} /> : row.symbol,
+      view === 'table'
+        ? <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} label={listings(row)} />
+        : listings(row),
   },
   {
     key: 'date',
@@ -455,12 +464,7 @@ const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
     shortHeader: 'Date',
     mobile: 'meta',
     cellClassName: 'text-muted-foreground',
-    cell: (row) =>
-      new Date(row.earnings_date).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      }),
+    cell: (row) => formatDate(row.earnings_date),
   },
   {
     key: 'surprise',

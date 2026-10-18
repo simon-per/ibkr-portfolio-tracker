@@ -51,9 +51,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.config import settings
-from app.etf_sources import user_agent
+from app.etf_sources import ISSUER_OVERRIDES, user_agent
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
+from app.services.company_identity import CompanyGroup, IdentityMember, company_groups
 from app.services.paced_http import PacedGet
 from app.services.security_identifiers import identifier_kind
 
@@ -546,3 +547,66 @@ async def held_isins(db: AsyncSession, funds: Optional[bool] = False) -> List[st
     if funds is None:
         return isins
     return [i for i in isins if is_known_etf_isin(i) == funds]
+
+
+async def group_companies(
+    db: AsyncSession, members: List[IdentityMember]
+) -> List[CompanyGroup]:
+    """
+    Fold `members` into companies: each member's LEI / shareClassFIGI / names from the
+    `isin_identities` cache, then `company_groups` with `ISSUER_OVERRIDES`.
+
+    The one way the app answers "is this the same company" — the look-through table and the
+    earnings lists (issue #69) both ask here, so a listing folded in one is folded in the
+    other. `tests/test_company_grouping_family.py` fails a `company_groups` call anywhere
+    else under `app/`: a caller that skipped the cache would fold GOOGL with ABEA (one ISIN)
+    but leave GOOG apart (only the LEI joins it), and one that skipped the overrides would
+    split TSMC from its ADR. Pure DB: the cache is filled by the identity passes, never here.
+    """
+    repo = IsinIdentityRepository(db)
+    known = await repo.get_map([m.isin for m in members if m.isin])
+    attached: List[IdentityMember] = []
+    for member in members:
+        row = known.get((member.isin or "").strip().upper())
+        if row is None:
+            attached.append(member)
+            continue
+        attached.append(
+            IdentityMember(
+                ref=member.ref,
+                isin=member.isin,
+                # `or member.share_class_figi` because this rebuild drops anything it does
+                # not list, and a constituent can arrive already carrying a FIGI resolved
+                # from its CINS. The cache wins when it has one, since it was keyed by a
+                # real ISIN.
+                share_class_figi=row.share_class_figi or member.share_class_figi,
+                lei=row.lei,
+                legal_name=row.issuer_name,
+                figi_name=row.figi_name,
+                fallback_name=member.fallback_name,
+                weight=member.weight,
+            )
+        )
+    return company_groups(attached, ISSUER_OVERRIDES)
+
+
+async def companies_of_securities(
+    db: AsyncSession, securities: Iterable[Any]
+) -> Dict[int, CompanyGroup]:
+    """
+    `security.id` -> the company it is a listing of, over `securities` (anything with
+    `id`, `isin`, `symbol`, `description`). Two ids map to one group exactly when
+    `group_companies` folds them: GOOGL@NASDAQ and ABEA@IBIS on their shared ISIN, GOOG on
+    the LEI, ASML's two ISINs on theirs. A security with no ISIN is a company of its own.
+    """
+    members = [
+        IdentityMember(
+            ref=f"sec:{s.id}", isin=s.isin, fallback_name=s.description or s.symbol,
+        )
+        for s in securities
+    ]
+    out: Dict[int, CompanyGroup] = {}
+    for group in await group_companies(db, members):
+        for member in group.members:
+            out[int(member.ref.removeprefix("sec:"))] = group
+    return out

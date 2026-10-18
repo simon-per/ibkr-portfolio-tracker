@@ -676,17 +676,25 @@ export interface FundamentalMetrics {
   last_updated: string | null;
 }
 
+/**
+ * One company's report: listings of one company (GOOGL/GOOG/ABEA) are folded server-side
+ * on the look-through identity, `symbols` naming every held listing, `symbol` first.
+ * `earnings_date` is a UTC-stamped timestamp.
+ */
 export interface EarningsCalendarItem {
   security_id: number;
   symbol: string;
+  symbols: string[];
   description: string;
   earnings_date: string;
   eps_estimate: number | null;
 }
 
+/** Folded and stamped like `EarningsCalendarItem`. */
 export interface EarningsHistoryItem {
   security_id: number;
   symbol: string;
+  symbols: string[];
   description: string;
   earnings_date: string;
   eps_estimate: number | null;

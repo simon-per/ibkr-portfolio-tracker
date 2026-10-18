@@ -397,9 +397,10 @@ class FundamentalMetricsResponse(BaseModel):
 
 
 class EarningsCalendarItem(BaseModel):
-    """Upcoming earnings event"""
+    """Upcoming earnings event: one per company and day, `symbols` its held listings"""
     security_id: int
     symbol: str
+    symbols: List[str]
     description: str
     earnings_date: str
     eps_estimate: Optional[float] = None
@@ -409,9 +410,10 @@ class EarningsCalendarItem(BaseModel):
 
 
 class EarningsHistoryItem(BaseModel):
-    """Past earnings event with surprise data"""
+    """Past earnings event with surprise data: one per company and day"""
     security_id: int
     symbol: str
+    symbols: List[str]
     description: str
     earnings_date: str
     eps_estimate: Optional[float] = None

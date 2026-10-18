@@ -53,11 +53,11 @@ describe('FundamentalsTab EPS figures', () => {
   it("prints EPS as a bare figure, since the issuer's currency is not known here", async () => {
     vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue([])
     vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([
-      { security_id: 1, symbol: 'NESN', description: 'Nestlé SA', earnings_date: '2026-10-15', eps_estimate: 1.23 },
+      { security_id: 1, symbol: 'NESN', symbols: ['NESN'], description: 'Nestlé SA', earnings_date: '2026-10-15T05:00:00+00:00', eps_estimate: 1.23 },
     ])
     vi.spyOn(api, 'getEarningsHistory').mockResolvedValue([
       {
-        security_id: 1, symbol: 'NESN', description: 'Nestlé SA', earnings_date: '2026-07-24',
+        security_id: 1, symbol: 'NESN', symbols: ['NESN'], description: 'Nestlé SA', earnings_date: '2026-07-24T05:00:00+00:00',
         eps_estimate: 2.45, reported_eps: 2.5, surprise_percent: 2.0, beat_or_miss: 'Beat',
       },
     ])
@@ -70,6 +70,33 @@ describe('FundamentalsTab EPS figures', () => {
     expect(screen.getByText('2.50')).toBeTruthy()
     // And nothing on the tab claims a dollar figure anywhere.
     expect(document.body.textContent).not.toMatch(/\$\s?\d/)
+  })
+})
+
+describe('FundamentalsTab earnings rows', () => {
+  it("names every held listing of a company once, and dates both lists by the same instant", async () => {
+    // Late in the UTC day, so a parse as local time would land on another day somewhere.
+    const upcoming = '2026-10-28T23:30:00+00:00'
+    const past = '2026-07-23T23:30:00+00:00'
+    vi.spyOn(api, 'getPortfolioFundamentals').mockResolvedValue([])
+    vi.spyOn(api, 'getUpcomingEarnings').mockResolvedValue([
+      { security_id: 3, symbol: 'GOOG', symbols: ['GOOG', 'ABEA', 'GOOGL'], description: 'Alphabet',
+        earnings_date: upcoming, eps_estimate: 2.2 },
+    ])
+    vi.spyOn(api, 'getEarningsHistory').mockResolvedValue([
+      { security_id: 3, symbol: 'GOOG', symbols: ['GOOG', 'ABEA', 'GOOGL'], description: 'Alphabet',
+        earnings_date: past, eps_estimate: 2.0, reported_eps: 2.1, surprise_percent: 5.0, beat_or_miss: 'Beat' },
+    ])
+    vi.spyOn(api, 'getFundamentalsStatus').mockResolvedValue(STATUS)
+    withProviders(<FundamentalsTab />)
+
+    expect(await screen.findAllByText('GOOG · ABEA · GOOGL')).toHaveLength(2)
+    // The viewer's own day of each instant, whatever zone the runner is in.
+    const day = (iso: string, weekday: boolean) => new Date(iso).toLocaleDateString('en-US', {
+      ...(weekday && { weekday: 'short' as const }), year: 'numeric', month: 'short', day: 'numeric',
+    })
+    expect(screen.getByText(day(upcoming, true))).toBeTruthy()
+    expect(screen.getByText(day(past, false))).toBeTruthy()
   })
 })
 

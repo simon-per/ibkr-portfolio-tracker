@@ -48,12 +48,12 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
-from app.etf_sources import ISSUER_OVERRIDES, basket_proxy_for, source_for_fund_isin
+from app.etf_sources import basket_proxy_for, source_for_fund_isin
 from app.repositories.etf_basket_repository import EtfBasketRepository
-from app.repositories.isin_identity_repository import IsinIdentityRepository
 from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UninvestedCash
-from app.services.company_identity import IdentityMember, company_groups
+from app.services.company_identity import IdentityMember
+from app.services.identity_service import group_companies
 from app.services.etf_basket_parsers import counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
 from app.clock import utc_today
@@ -376,8 +376,7 @@ class LookthroughService:
                     )
                 )
 
-        members = await self._attach_identities(members)
-        groups = company_groups(members, ISSUER_OVERRIDES)
+        groups = await group_companies(self.db, members)
         rows_out, aggregates = self._build_rows(groups, contributions, total)
 
         shown = rows_out[:limit]
@@ -665,38 +664,6 @@ class LookthroughService:
             else:
                 company += weight
         return company, nested
-
-    # ---------------------------------------------------------------------- identities
-
-    async def _attach_identities(
-        self, members: List[IdentityMember]
-    ) -> List[IdentityMember]:
-        """Fill each member's LEI / shareClassFIGI / names from the identity cache."""
-        repo = IsinIdentityRepository(self.db)
-        known = await repo.get_map([m.isin for m in members if m.isin])
-        out = []
-        for member in members:
-            row = known.get((member.isin or "").strip().upper())
-            if row is None:
-                out.append(member)
-                continue
-            out.append(
-                IdentityMember(
-                    ref=member.ref,
-                    isin=member.isin,
-                    # `or member.share_class_figi` because this rebuild drops anything it does
-                    # not list, and a constituent can arrive already carrying a FIGI resolved
-                    # from its CINS. The cache wins when it has one, since it was keyed by a
-                    # real ISIN.
-                    share_class_figi=row.share_class_figi or member.share_class_figi,
-                    lei=row.lei,
-                    legal_name=row.issuer_name,
-                    figi_name=row.figi_name,
-                    fallback_name=member.fallback_name,
-                    weight=member.weight,
-                )
-            )
-        return out
 
     # ------------------------------------------------------------------------- assembly
 

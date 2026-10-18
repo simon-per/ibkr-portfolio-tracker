@@ -3,7 +3,7 @@ import { earningsBeats } from './earningsBeats'
 import type { EarningsHistoryItem } from './api'
 
 const item = (beat_or_miss: string | null): EarningsHistoryItem => ({
-  security_id: 1, symbol: 'AAA', description: '', earnings_date: '2026-07-24',
+  security_id: 1, symbol: 'AAA', symbols: ['AAA'], description: '', earnings_date: '2026-07-24',
   eps_estimate: null, reported_eps: null, surprise_percent: null, beat_or_miss,
 })
 

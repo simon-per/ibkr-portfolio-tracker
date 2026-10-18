@@ -37,6 +37,13 @@ Order-independence is a property, not an accident: the module is pure and
 `test_company_identity.py` shuffles the input 25 times and asserts the grouping and every
 display name are byte-identical.
 
+**`identity_service.group_companies` is the one caller** — it attaches the `isin_identities`
+cache and passes `ISSUER_OVERRIDES`, and this table and the Fundamentals earnings lists both fold
+through it (the earnings lists via `companies_of_securities`, issue #69). Pure, `company_groups`
+folds only on what it is handed: a caller skipping the cache folds GOOGL with ABEA but leaves GOOG
+apart. `tests/test_company_grouping_family.py` fails a `company_groups` call anywhere else under
+`app/`.
+
 ### Both identity providers are required, and they fail in opposite directions
 
 Measured against this account's own ISINs on 2026-08-14, both keyless:

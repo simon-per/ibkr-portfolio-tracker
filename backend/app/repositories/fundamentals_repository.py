@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.clock import utcnow
-from sqlalchemy import select, and_
+from sqlalchemy import delete, select, and_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -153,7 +153,42 @@ class FundamentalsRepository:
 
     # --- EarningsEvent ---
 
-    async def upsert_earnings_event(self, data: dict) -> EarningsEvent:
+    async def replace_earnings_events(
+        self, security_id: int, events: List[dict], now: Optional[datetime] = None
+    ) -> int:
+        """
+        Store one fetch's earnings rows for `security_id`: its **future** events become
+        exactly what Yahoo returned, and its past events are only ever added to or updated.
+
+        A row is keyed on its exact datetime, so when Yahoo moves an upcoming event — a
+        placeholder date replaced by the confirmed one, a time added to a bare date — the
+        upsert alone wrote the new row beside the old, and the old one stayed "upcoming"
+        until it passed: the calendar listed the company twice (issue #69). So a future row
+        this answer no longer carries is deleted. The past is history and is never deleted:
+        Yahoo's frame is a window of recent quarters, and a quarter falling out of it is
+        not a quarter that did not happen.
+
+        An empty answer replaces nothing — a frame that failed to load (`read_optional`
+        answers None) or parsed to no rows is no statement about the future, and wiping
+        the calendar on it would turn a transient miss into a missing event.
+        Returns the number of rows written.
+        """
+        if not events:
+            return 0
+        now = now or utcnow()
+        returned_future = [e['earnings_date'] for e in events if e['earnings_date'] > now]
+        await self.session.execute(
+            delete(EarningsEvent).where(
+                EarningsEvent.security_id == security_id,
+                EarningsEvent.earnings_date > now,
+                EarningsEvent.earnings_date.notin_(returned_future),
+            )
+        )
+        for event in events:
+            await self._upsert_earnings_event({**event, 'security_id': security_id})
+        return len(events)
+
+    async def _upsert_earnings_event(self, data: dict) -> EarningsEvent:
         result = await self.session.execute(
             select(EarningsEvent).where(
                 and_(
