@@ -12,6 +12,8 @@
 - **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
   (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
   contributions and summary were identical before and after.
+- **#76** (`3f345f8`): forecast income per 1,000 of money in on the Next 12 months tile
+  (`lib/incomePerMoneyIn.ts`), client-side from the forecast history and contributions.
 - **#71** (`ed88c38`): nine shares through `share_pct(digits=)`, the scan over all of `app/`;
   `cash_service.is_valuable`; `IBKR_SOURCE`/`YFINANCE_SOURCE` for 38 literals.
 - **#70** (`bce65f5`): phone-card logos through DataTable's title `avatar`; weights absent until the
