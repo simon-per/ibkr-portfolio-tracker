@@ -20,6 +20,19 @@ unknown suffix resolves nothing. `/api/watchlist` rows carry `security_id` (ours
 the logo pass targets those ISINs too, so a name added to the watchlist gets its logo at the next
 05:00 pass.
 
+**What a watchlist response costs is bounded by the watchlist, not the security table** (issue
+#32). `WatchlistService.security_ids_by_ticker` builds its held map and its full map together,
+in two queries: the eligible securities, held ones first, and the active mappings once, through
+`MarketDataService.yahoo_tickers_for` ([pricing-and-fx.md](pricing-and-fx.md)). Before, it ran
+one `ticker_mappings` SELECT per security ever held. Held first decides a tie: when a sold and a
+held security resolve to the same ticker (a conid change, a recycled symbol), the row carries the
+held one's id, and so its logo. `isins_by_yahoo_ticker` narrows the basket read in SQL to lines
+whose ticker contains the asked base's characters in order (`LIKE '%B%R%K%B%'`, a superset of
+what normalises to it) and whose ISIN country the suffix admits. Python still decides. It asks
+nothing when every row is ours. POST shares one service between its sync (`_held_closes`) and
+its response, so the index is built once. `tests/test_watchlist_read_cost.py` pins the statement
+count exactly.
+
 **A CN ISIN is told apart by code length** (`CN_CODE_DIGITS`, issue #27). `.HK` admits CN ISINs
 because H-shares carry `CNE…` ones, but so does every mainland A-share, and with the zeros
 stripped Vanke's A-share "000002" is CLP's `0002.HK`; the heavier line won, and with only the

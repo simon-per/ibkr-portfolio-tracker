@@ -13,6 +13,15 @@ suffix → try variations (`.DE`, `.F`, `.L`, bare), then auto-save what worked.
 `TSE` is Tokyo (`.T`) **except** for CAD listings, where IBKR means Toronto (`.TO`). Add new exchanges
 here when a security has no prices, and verify a ticker in a browser first.
 
+**One resolver, two ways in** (issue #32). `yahoo_ticker_for(security, mapping)` is the pure first two
+tiers. `_get_yahoo_ticker` reads the one mapping fresh and calls it; every Yahoo loop goes through
+this. `yahoo_tickers_for(securities)` reads every active mapping once
+(`TickerMappingRepository.active_mappings`, keyed `(symbol, exchange)`) and calls it per security;
+it is for readers that resolve the whole security table, today the watchlist index. There is **no
+memo inside `_get_yahoo_ticker`**, because the price sync auto-saves a mapping mid-pass and the next
+lookup must see it. `tests/test_ticker_resolution_agrees.py` pins the bulk form, the single form and
+the watchlist index against each other.
+
 **A wrong auto-discovered mapping is sticky and silent** — the failure that put `SBI@TSE` (Toronto, CAD)
 on a US fund for months. The last variation tried is the **bare symbol**, which readily matches an
 unrelated US listing of the same ticker; it fetched cleanly, so it was auto-saved — and because tier 1

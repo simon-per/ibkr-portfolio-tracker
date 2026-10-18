@@ -142,3 +142,50 @@ async def test_a_security_with_no_exchange_still_resolves(db):
     symbol, which is right for a US listing reported without an exchange."""
     sec = security("AMZN", None, "USD")
     assert await AllocationService(db)._get_yahoo_ticker(sec) == "AMZN"
+
+
+async def _mapped_suffixed_and_bare(db):
+    """A mapped, an inactively mapped, suffixed and exchange-less securities, persisted."""
+    db.add_all([
+        TickerMapping(ibkr_symbol="SBI", ibkr_exchange="TSE", yahoo_ticker="SBI.TO",
+                      is_active=True, source="manual"),
+        TickerMapping(ibkr_symbol="XNAS", ibkr_exchange="IBIS2", yahoo_ticker="XNAS.F",
+                      is_active=False, source="manual"),
+        # Same symbol, another exchange: the mapping is keyed by both.
+        TickerMapping(ibkr_symbol="AMZ", ibkr_exchange="FWB", yahoo_ticker="AMZ.F",
+                      is_active=True, source="manual"),
+    ])
+    secs = [security("SBI", "TSE", "CAD"), security("XNAS", "IBIS2", "EUR")]
+    secs += [security(s, e, c) for s, e, c, _ in CASES]
+    secs.append(security("AMZN", None, "USD"))
+    for i, sec in enumerate(secs, start=1):
+        sec.conid, sec.isin = i, f"XX{i:010d}"
+    db.add_all(secs)
+    await db.commit()
+    return secs
+
+
+@pytest.mark.asyncio
+async def test_the_bulk_resolver_agrees_with_the_single_one(db):
+    """`yahoo_tickers_for` (mappings read once) must answer what `_get_yahoo_ticker` (one
+    SELECT per security) answers: they share `yahoo_ticker_for`, and this pins that neither
+    grows its own lookup."""
+    secs = await _mapped_suffixed_and_bare(db)
+    market = MarketDataService(db)
+    single = [await market._get_yahoo_ticker(s) for s in secs]
+    assert await market.yahoo_tickers_for(secs) == single
+    assert single[:2] == ["SBI.TO", "XNAS.DE"]  # the active mapping wins; an inactive is ignored
+
+
+@pytest.mark.asyncio
+async def test_the_watchlist_index_agrees_with_the_price_path(db):
+    """The watchlist keys a row to a security by its Yahoo ticker (`security_ids_by_ticker`):
+    every eligible security must be keyed by the ticker the price path resolves for it."""
+    from app.services.watchlist_service import WatchlistService
+
+    secs = await _mapped_suffixed_and_bare(db)
+    market = MarketDataService(db)
+    index = await WatchlistService(db).security_ids_by_ticker()
+    for sec in secs:
+        ticker = (await market._get_yahoo_ticker(sec)).upper()
+        assert ticker in index, f"{sec.symbol}@{sec.exchange}: {ticker!r} is not in the index"

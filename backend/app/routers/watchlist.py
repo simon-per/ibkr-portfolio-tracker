@@ -23,7 +23,7 @@ async def get_watchlist(db: AsyncSession = Depends(get_db)):
     """Get all watchlist items."""
     service = WatchlistService(db)
     items = await service.get_all_items()
-    return await _responses(db, items)
+    return await _responses(db, items, service)
 
 
 @router.post("", response_model=WatchlistItemResponse, status_code=201)
@@ -49,16 +49,17 @@ async def add_to_watchlist(
     # Yahoo trigger, and without it rapid-fire adds of distinct tickers are exactly
     # the unthrottled fetch storm the gate exists to stop. Busy or cooling: the add
     # itself still succeeds, last_synced stays null, and the next sync fills it in.
+    # One service for the sync and the response, so the ticker index is built once.
+    service = WatchlistService(db)
     try:
         with single_flight(SYNC_PIPELINE, cooldown_seconds=60):
-            service = WatchlistService(db)
             await service.sync_item(item.yahoo_ticker, force=True)
     except SyncBusy:
         pass
 
     # Re-fetch with cached data
     item = await repo.get_by_id(item.id)
-    return (await _responses(db, [item]))[0]
+    return (await _responses(db, [item], service))[0]
 
 
 @router.patch("/{item_id}", response_model=WatchlistItemResponse)
@@ -89,7 +90,7 @@ async def update_watchlist_item(
         await db.commit()
         await db.refresh(item)
 
-    return (await _responses(db, [item]))[0]
+    return (await _responses(db, [item], WatchlistService(db)))[0]
 
 
 @router.delete("/{item_id}")
@@ -151,13 +152,16 @@ def _compute_peg(item):
     return read_time_peg(item.peg_ratio, item.trailing_pe, item.fwd_eps_growth)
 
 
-async def _responses(db: AsyncSession, items) -> list[WatchlistItemResponse]:
+async def _responses(db: AsyncSession, items,
+                     service: WatchlistService) -> list[WatchlistItemResponse]:
     """The items as served, each market cap also in the base currency (`market_cap.py`):
-    a KRW or JPY cap printed bare reads like a dollar figure."""
+    a KRW or JPY cap printed bare reads like a dollar figure. `service` is the caller's, so a
+    ticker index it already built (POST's sync) is reused."""
     to_base = await market_cap_to_base(db)
     # A ticker that is one of our securities carries its id, for the stored logo; any other
     # carries the ISIN the stored fund baskets give it, which keys a logo just the same.
-    security_ids = await WatchlistService(db).security_ids_by_ticker()
+    # (`isins_by_yahoo_ticker` asks nothing when every row is ours.)
+    security_ids = await service.security_ids_by_ticker()
     isins = await isins_by_yahoo_ticker(
         db, [i.yahoo_ticker for i in items if i.yahoo_ticker.upper() not in security_ids]
     )

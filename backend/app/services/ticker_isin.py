@@ -20,7 +20,7 @@ Pure database; touches no upstream.
 """
 from typing import Dict, Iterable, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.etf_basket import EtfHolding
@@ -69,6 +69,20 @@ def split_yahoo_ticker(yahoo_ticker: str) -> Tuple[str, Optional[Tuple[str, ...]
     return normalise(base), SUFFIX_COUNTRIES.get(suffix)
 
 
+def _candidates(base: str, countries: Tuple[str, ...]):
+    """
+    SQL superset of the basket lines `base` can match in `countries`; Python decides. The
+    separators defeat an equality, but `normalise` only drops characters (and a code's
+    leading zeros), so every line that normalises to "BRKB" contains B, R, K, B in that
+    order: `LIKE '%B%R%K%B%'`. The ISIN's country is compared as Python reads it. A non-ASCII
+    base keeps the country filter only: SQL's `upper` and `LIKE` fold ASCII alone.
+    """
+    country = func.substr(func.upper(func.trim(EtfHolding.constituent_isin)), 1, 2).in_(countries)
+    if not base.isascii():
+        return country
+    return and_(func.upper(EtfHolding.constituent_ticker).like(f"%{'%'.join(base)}%"), country)
+
+
 def code_fits(suffix: str, isin: str, constituent_ticker: str) -> bool:
     """False for a CN ISIN whose code, as the issuer wrote it, is not this market's shape."""
     digits = CN_CODE_DIGITS.get(suffix)
@@ -89,12 +103,15 @@ async def isins_by_yahoo_ticker(db: AsyncSession, yahoo_tickers: Iterable[str]) 
     if not wanted:
         return {}
     bases = {base for base, _, _ in wanted.values()}
+    asked = {(base, countries) for base, countries, _ in wanted.values()}
     rows = (await db.execute(
         select(EtfHolding.constituent_ticker, EtfHolding.constituent_isin, EtfHolding.weight_pct)
-        .where(EtfHolding.constituent_isin.is_not(None), EtfHolding.constituent_ticker.is_not(None))
+        .where(EtfHolding.constituent_isin.is_not(None), EtfHolding.constituent_ticker.is_not(None),
+               or_(*(_candidates(base, countries) for base, countries in sorted(asked))))
     )).all()
-    # base -> [(weight, isin, ticker as written)], only for the bases asked about: ~10k rows,
-    # normalised in Python because the issuers' separators cannot be matched by one SQL expression.
+    # base -> [(weight, isin, ticker as written)], only for the bases asked about. SQL narrows
+    # the ~10k basket lines to candidates (`_candidates`); they are normalised in Python because
+    # the issuers' separators cannot be matched by one SQL expression.
     by_base: Dict[str, list] = {}
     for ticker, isin, weight in rows:
         key = normalise(ticker)

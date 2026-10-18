@@ -40,8 +40,9 @@ class WatchlistService:
     # nightly runs, and never a whole earnings season late.
     ESTIMATES_REFRESH_AFTER = timedelta(days=7)
 
-    # Yahoo ticker -> security id, built once per service (a pass builds its own), keyed by
-    # `held_only`: `_held_closes` reads the held map, the served rows' logo id every security.
+    # Yahoo ticker -> security id, both maps built together once per service (a pass, or a
+    # POST's sync and response, shares one), keyed by `held_only`: `_held_closes` reads the
+    # held map, the served rows' logo id every security.
     _ticker_index: Optional[Dict[bool, Dict[str, int]]] = None
 
     # Latched the first time Yahoo answers with a rate limit, mirroring
@@ -258,8 +259,8 @@ class WatchlistService:
         A year of closes from `market_prices` when `yahoo_ticker` is a held security's own
         Yahoo ticker — the price pass already fetches them, so `history("1y")` would be a
         request for rows on disk. None when nothing held resolves to it, or fewer than the
-        RSI needs are stored. Resolved like every Yahoo caller (`_get_yahoo_ticker`) over
-        held, Yahoo-eligible securities, once per service.
+        RSI needs are stored. Resolved like every Yahoo caller over held, Yahoo-eligible
+        securities (`security_ids_by_ticker`), once per service.
         """
         security_id = (await self.security_ids_by_ticker(held_only=True)).get(yahoo_ticker.upper())
         if security_id is None:
@@ -279,23 +280,33 @@ class WatchlistService:
     async def security_ids_by_ticker(self, held_only: bool = False) -> Dict[str, int]:
         """
         Upper-cased Yahoo ticker -> security id over Yahoo-eligible securities, held ones only
-        when asked, resolved like every Yahoo caller (`_get_yahoo_ticker`). The held map feeds
-        `_held_closes`; the full one gives a served row its security's logo (a sold holding's
-        logo is stored too). Pure database; built once per service and flag.
+        when asked, resolved like every Yahoo caller (`MarketDataService.yahoo_tickers_for`).
+        The held map feeds `_held_closes`; the full one gives a served row its security's logo
+        (a sold holding's logo is stored too), a held security's id ahead of a sold one's.
+        Pure database; both maps built together, once per service, in two queries.
         """
         if self._ticker_index is None:
-            self._ticker_index = {}
-        if held_only not in self._ticker_index:
             from app.services.market_data_service import MarketDataService
 
-            market = MarketDataService(self.db)
-            query = select(Security).where(yahoo_eligible()).order_by(Security.id)
-            if held_only:
-                query = query.where(held())
-            index: Dict[str, int] = {}
-            for security in (await self.db.execute(query)).scalars().all():
-                index.setdefault((await market._get_yahoo_ticker(security)).upper(), security.id)
-            self._ticker_index[held_only] = index
+            # One query for both maps, held first: when a sold and a held security resolve
+            # to the same ticker (a conid change, a recycled symbol) the held one's id wins
+            # the full map too, and so its logo. Resolved through the bulk form, which reads
+            # the mappings once — one SELECT per security made every read cost grow with
+            # every security ever held (GitHub issue #32).
+            is_held = held()
+            rows = (await self.db.execute(
+                select(Security, is_held.label("is_held"))
+                .where(yahoo_eligible())
+                .order_by(is_held.desc(), Security.id)
+            )).all()
+            tickers = await MarketDataService(self.db).yahoo_tickers_for([s for s, _ in rows])
+            held_index: Dict[str, int] = {}
+            every_index: Dict[str, int] = {}
+            for (security, security_held), ticker in zip(rows, tickers):
+                if security_held:
+                    held_index.setdefault(ticker.upper(), security.id)
+                every_index.setdefault(ticker.upper(), security.id)
+            self._ticker_index = {True: held_index, False: every_index}
         return self._ticker_index[held_only]
 
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:

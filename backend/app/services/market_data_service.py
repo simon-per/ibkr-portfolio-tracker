@@ -19,6 +19,7 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.models.security import Security
 from app.models.taxlot import TaxLot
+from app.models.ticker_mapping import TickerMapping
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
 from sqlalchemy import func, select
@@ -217,35 +218,45 @@ class MarketDataService:
         # yfinance 1.1.0+ handles sessions and User-Agent headers internally
         # No need to create a custom session
 
+    def yahoo_ticker_for(self, security: Security, mapping: Optional[TickerMapping]) -> str:
+        """
+        The resolver itself, pure: IBKR security info to a Yahoo Finance ticker ("AMZN",
+        "AMZ.DE", "HSBA.L", "XNAS.DE"). No exchange: the symbol as-is. Otherwise the
+        security's active `ticker_mappings` row (`mapping`, looked up by the caller on
+        `(symbol, exchange)`), else the exchange suffix logic. `_get_yahoo_ticker` and
+        `yahoo_tickers_for` are its only two ways in, so they cannot drift.
+        """
+        if not security.exchange:
+            return security.symbol
+        if mapping is not None:
+            return mapping.yahoo_ticker
+        return f"{security.symbol}{self._get_exchange_suffix(security)}"
+
     async def _get_yahoo_ticker(self, security: Security) -> str:
         """
-        Convert IBKR security info to Yahoo Finance ticker format.
-        Checks custom ticker mappings first, then falls back to exchange suffix logic.
-
-        Args:
-            security: Security object with symbol and exchange
-
-        Returns:
-            Yahoo Finance ticker (e.g., "AMZN", "AMZ.DE", "HSBA.L", "XNAS.DE")
+        One security's Yahoo ticker (`yahoo_ticker_for`), its mapping read fresh. The Yahoo
+        loop goes through this rather than a memo: the price sync auto-saves mappings
+        mid-pass (a variation that worked), and the next lookup must see them.
         """
-        symbol = security.symbol
-        exchange = security.exchange
-
-        if not exchange:
-            # No exchange info, try symbol as-is
-            return symbol
-
-        # First, check for custom ticker mapping in database
-        mapping = await self.ticker_mapping_repo.get_mapping(symbol, exchange)
+        if not security.exchange:
+            return security.symbol
+        mapping = await self.ticker_mapping_repo.get_mapping(security.symbol, security.exchange)
         if mapping:
-            logger.debug(f"Using custom ticker mapping: {symbol}@{exchange} -> {mapping.yahoo_ticker}")
-            return mapping.yahoo_ticker
+            logger.debug(f"Using custom ticker mapping: {security.symbol}@{security.exchange} "
+                         f"-> {mapping.yahoo_ticker}")
+        return self.yahoo_ticker_for(security, mapping)
 
-        # Fall back to exchange suffix logic
-        suffix = self._get_exchange_suffix(security)
-        ticker = f"{symbol}{suffix}"
-
-        return ticker
+    async def yahoo_tickers_for(self, securities: List[Security]) -> List[str]:
+        """
+        `_get_yahoo_ticker` for many securities in one query: the active mappings are read
+        once, then each security resolves through `yahoo_ticker_for`. For a reader
+        that resolves the whole security table (the watchlist index), where one mapping
+        SELECT per security made the cost grow with every security ever held.
+        """
+        mappings = await self.ticker_mapping_repo.active_mappings()
+        return [
+            self.yahoo_ticker_for(s, mappings.get((s.symbol, s.exchange))) for s in securities
+        ]
 
     def _get_yahoo_ticker_variations(self, security: Security) -> list[str]:
         """

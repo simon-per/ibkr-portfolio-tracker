@@ -848,8 +848,9 @@ re-point onto the general palette would have to redo, and the section above stil
   **The history page-size loop is fixed**: the left card is `self-start`, so its height is its
   content's and not the grid row's; stretched, it fed back until the history showed all ~170
   rows. `HISTORY_ROW_H` is 41 (measured), not 37.
-- **Watchlist**: since 2026-10-18 rows carry `security_id` (a ticker that is ours) or `isin`
-  (from the stored baskets, `ticker_isin.py`), so the avatar shows the logo. `% 52w High` and `vs MA200` are pills on the column's existing verdict
+- **Watchlist**: since 2026-10-18 rows carry `security_id` (a ticker that is ours, a held
+  security's ahead of a sold one's on the same ticker) or `isin` (from the stored baskets,
+  `ticker_isin.py`), so the avatar shows the logo ([logos.md](logos.md)). `% 52w High` and `vs MA200` are pills on the column's existing verdict
   (`signalTone`: ±5 plain, below the high/MA is the good side); no `tabular-nums` on them, which
   under Inter gives the hyphen a figure's width. The header counts the list into the Score
   column's three bands (`scoreTone`).

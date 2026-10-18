@@ -2,7 +2,7 @@
 Ticker Mapping Repository
 Manages custom ticker mappings for Yahoo Finance.
 """
-from typing import Optional
+from typing import Dict, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,17 @@ class TickerMappingRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def active_mappings(self) -> Dict[Tuple[str, str], TickerMapping]:
+        """
+        Every active mapping keyed `(ibkr_symbol, ibkr_exchange)` — `get_mapping` for many
+        securities in one query. The unique constraint makes the key unique, and the dict
+        lookup is as exact as `get_mapping`'s `=` (SQLite's default BINARY collation).
+        """
+        result = await self.session.execute(
+            select(TickerMapping).where(TickerMapping.is_active == True)  # noqa: E712
+        )
+        return {(m.ibkr_symbol, m.ibkr_exchange): m for m in result.scalars()}
 
     async def create_mapping(
         self,
