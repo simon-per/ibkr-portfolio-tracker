@@ -644,3 +644,13 @@ async def test_a_proxied_fund_fills_from_the_basket_it_borrows(db, keyed, monkey
     fake = FakeLogoDev({("isin", isins[0]): 200})
     result = await _service(db, fake).refresh(baskets=["CH0000000001"], limit=10)
     assert result["unknown_baskets"] == [] and result["stored"] == 1
+
+
+@pytest.mark.asyncio
+async def test_named_isins_reach_a_basket_constituent_nobody_holds(db, keyed):
+    """A Look-through company outside the filled baskets, asked for by ISIN."""
+    isins = await _basket(db, [1.0, 2.0])
+    fake = FakeLogoDev({("isin", isins[0]): 200})
+    result = await _service(db, fake).refresh(isins=[isins[0].lower()], limit=10)
+    assert fake.lookups == [("isin", isins[0])] and result["stored"] == 1
+    assert (await _service(db, FakeLogoDev()).refresh(isins=["US999999999X"]))["targets"] == 0

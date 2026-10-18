@@ -20,6 +20,7 @@ Usage, inside the container:
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --dry-run
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --isin US02079K3059 --force
+    docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --isin US74762E1029 --isin CH0012221716
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --basket QQQM --basket VT --top 100 --limit 150
 """
 import argparse
@@ -39,7 +40,7 @@ SYNC_TYPE = "manual_logo_fetch"
 
 
 async def fetch_logos(dry_run: bool = False, force: bool = False,
-                      isin: Optional[str] = None, baskets: Optional[List[str]] = None,
+                      isins: Optional[List[str]] = None, baskets: Optional[List[str]] = None,
                       top: Optional[int] = None, limit: int = MAX_LOOKUPS_PER_PASS) -> int:
     started_at = utcnow()
     if not dry_run and not is_configured():
@@ -49,7 +50,7 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
     async with AsyncSessionLocal() as db:
         try:
             summary = await LogoService(db).refresh(
-                dry_run=dry_run, force=force, isin=isin, baskets=baskets, top=top, limit=limit,
+                dry_run=dry_run, force=force, isins=isins, baskets=baskets, top=top, limit=limit,
             )
         except Exception as e:
             await db.rollback()
@@ -60,8 +61,9 @@ async def fetch_logos(dry_run: bool = False, force: bool = False,
             print(f"FAILED: {e}", file=sys.stderr)
             return 1
 
-        if isin and not summary.get("targets"):
-            print(f"No security carries ISIN {isin}.", file=sys.stderr)
+        if isins and not summary.get("targets"):
+            print(f"No security or basket constituent carries {', '.join(isins)}.",
+                  file=sys.stderr)
             return 1
         if summary.get("unknown_baskets"):
             print(f"No stored basket for: {', '.join(summary['unknown_baskets'])}",
@@ -101,8 +103,9 @@ def main() -> int:
     parser.add_argument("--force", action="store_true",
                         help="Ask again even when the ISIN was checked within 90 days "
                              "(never a manual logo)")
-    parser.add_argument("--isin", default=None,
-                        help="Only this ISIN (any security carrying it, held or not)")
+    parser.add_argument("--isin", action="append", default=None,
+                        help="Only this ISIN — a security carrying it, held or not, or a basket "
+                             "constituent; repeatable")
     parser.add_argument("--basket", action="append", default=None, metavar="FUND",
                         help="The constituents of this stored fund basket (fund ISIN or "
                              "symbol); repeatable")
@@ -116,7 +119,7 @@ def main() -> int:
     if args.top is not None and not args.basket:
         parser.error("--top needs --basket")
     return asyncio.run(fetch_logos(
-        dry_run=args.dry_run, force=args.force, isin=args.isin, baskets=args.basket,
+        dry_run=args.dry_run, force=args.force, isins=args.isin, baskets=args.basket,
         top=args.top, limit=args.limit,
     ))
 

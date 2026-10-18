@@ -258,11 +258,16 @@ class LogoService:
         self._transport = transport
         self._sleep = sleep
 
-    async def _targets(self, isin: Optional[str]) -> Dict[str, LogoTarget]:
-        """ISIN -> one security carrying it: every security, or the one ISIN asked for."""
+    async def _targets(self, isins: Optional[Sequence[str]]) -> Dict[str, LogoTarget]:
+        """
+        ISIN -> its target: every security (and the watchlist), or only the ISINs asked for —
+        a security carrying one, else a basket constituent (a Look-through company we do not
+        hold), else nothing.
+        """
+        wanted = sorted({i.strip().upper() for i in isins}) if isins else None
         query = select(Security).order_by(Security.id)
-        if isin is not None:
-            query = query.where(Security.isin == isin.strip().upper())
+        if wanted is not None:
+            query = query.where(Security.isin.in_(wanted))
         held_ids = set((await self.db.execute(select(Security.id).where(held()))).scalars())
         out: Dict[str, LogoTarget] = {}
         for security in (await self.db.execute(query)).scalars().all():
@@ -272,7 +277,17 @@ class LogoService:
                 security.isin.strip().upper(), LogoTarget(security.symbol, security)
             )
             target.held = target.held or security.id in held_ids
-        if isin is None:
+        if wanted is not None:
+            for row in (await self.db.execute(
+                select(EtfHolding)
+                .where(EtfHolding.constituent_isin.in_([i for i in wanted if i not in out]))
+                .order_by(EtfHolding.weight_pct.desc())
+            )).scalars().all():
+                out.setdefault(row.constituent_isin.strip().upper(), LogoTarget(
+                    (row.constituent_ticker or row.constituent_name)[:10],
+                    ticker=row.constituent_ticker,
+                ))
+        else:
             # Watchlist names, by the ISIN the stored baskets give their ticker; a name that
             # is one of our securities is already above under the same ISIN.
             from app.services.ticker_isin import isins_by_yahoo_ticker
@@ -329,7 +344,7 @@ class LogoService:
         *,
         dry_run: bool = False,
         force: bool = False,
-        isin: Optional[str] = None,
+        isins: Optional[Sequence[str]] = None,
         baskets: Optional[Sequence[str]] = None,
         top: Optional[int] = None,
         limit: int = MAX_LOOKUPS_PER_PASS,
@@ -351,7 +366,7 @@ class LogoService:
         if baskets:
             targets, unknown_baskets = await self._basket_targets(baskets, top)
         else:
-            targets = await self._targets(isin)
+            targets = await self._targets(isins)
         due = await self.repo.due(targets, now, None if force else RECHECK_AFTER)
         # Held first (a stable sort keeps ISIN order within each half): a pass's budget goes
         # to a new purchase before the back catalogue of sold securities.

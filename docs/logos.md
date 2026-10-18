@@ -132,7 +132,9 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
 **Fetch now** instead of waiting for 05:00. `--dry-run` lists what is due and makes **no
 request** (a dry run that asked would pay twice for the same answer); the real run prints each
 ISIN's outcome. `--force` ignores the 90 days (never a manual row); `--isin X` asks about one
-ISIN, held or not; `--limit N` raises the 30-lookup cap for one run. Records
+ISIN (repeatable) — a security carrying it, held or not, or else a basket constituent, so a
+single Look-through company can be fetched without filling its whole basket; `--limit N` raises
+the 30-lookup cap for one run. Records
 `sync_type='manual_logo_fetch'`.
 
 **Fill ahead from a fund basket:** `--basket FUND` (a fund ISIN or symbol, repeatable) asks about
