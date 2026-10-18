@@ -49,6 +49,22 @@ describe('compact money labels', () => {
     }
     expect(offenders).toEqual([])
   })
+
+  // The dividend forecast axis printed `${curSym}${Math.round(value)}`: "CHF 1234", no
+  // separator and no compact unit.
+  it('reach the currency symbol only through formatAxisMoney', () => {
+    const sources = import.meta.glob('./**/*.tsx', { query: '?raw', import: 'default', eager: true })
+    const offenders: string[] = []
+    for (const [path, src] of Object.entries(sources)) {
+      if (path.endsWith('.test.tsx')) continue
+      for (const match of (src as string).matchAll(/<[XY]Axis\b[\s\S]*?\/>/g)) {
+        if (/curSym/.test(match[0]) && !/formatAxisMoney\(/.test(match[0])) {
+          offenders.push(`${path}: ${match[0].replace(/\s+/g, ' ')}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
 })
 
 /** Every chart draws one grid — see `CHART_GRID_PROPS`. */

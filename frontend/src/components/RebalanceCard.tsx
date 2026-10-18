@@ -4,10 +4,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { readStored, writeStored, useRememberedOpen } from '@/lib/storage'
 import { TARGETS_KEY, readTargets } from '@/lib/rebalanceTargets'
-import { formatCount } from '@/lib/utils'
+import { formatMoneyWhole } from '@/lib/utils'
 import {
   DEFAULT_BAND_PP,
   computeRebalancePlan,
@@ -44,7 +44,7 @@ interface RebalanceCardProps {
 }
 
 export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardProps) {
-  const curSym = useCurrencySymbol()
+  const { baseCurrency } = useBaseCurrency()
   const [targets, setTargets] = useState<TargetMap>(() => readTargets())
   const [bandPp, setBandPp] = useState(() => {
     const saved = Number(readStored(BAND_KEY))
@@ -134,7 +134,7 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         align: 'right',
         mobile: 'value',
         cell: (row) =>
-          row.unpriced ? '—' : `${curSym}${formatCount(Math.round(row.marketValue))}`,
+          row.unpriced ? '—' : formatMoneyWhole(row.marketValue, baseCurrency),
       },
       {
         key: 'drift',
@@ -181,13 +181,13 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         cell: (row) =>
           row.tradeValue === null
             ? '—'
-            : `${row.tradeValue > 0 ? '+' : '-'}${curSym}${formatCount(Math.round(Math.abs(row.tradeValue)))}`,
+            : `${row.tradeValue > 0 ? '+' : ''}${formatMoneyWhole(row.tradeValue, baseCurrency)}`,
       },
     ],
     // `setTarget` is deliberately out of the deps: it only ever calls setTargets with a
     // functional update, so a stale closure over it cannot go wrong, and including it
     // would rebuild every column on each keystroke.
-    [curSym]
+    [baseCurrency]
   )
 
   const shortfall = targetShortfallPp(plan)

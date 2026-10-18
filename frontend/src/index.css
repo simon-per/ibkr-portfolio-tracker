@@ -16,6 +16,8 @@
  */
 @layer base {
   :root {
+    /* Native scrollbars and <select> popups follow the theme only through this. */
+    color-scheme: light;
     --background: 220 20% 97%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
@@ -60,6 +62,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 224 32% 7%;
     --foreground: 214 20% 94%;
     --card: 224 28% 10%;

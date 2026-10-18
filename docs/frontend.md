@@ -429,8 +429,9 @@ did not cause.
 - **`overflow-y-auto` makes `overflow-x` auto too.** The Dividends *Expected next* list's rows
   bleed `-mx-1.5` for their hover wash; with only `pr-1` on the scroller they overflowed it by
   2px and bought a sideways scrollbar. The scroller bleeds `-mx-1.5 px-1.5` so the wash fits
-  inside it, and its scrollbar is thin and themed (`scrollbar-color`), since the native one is
-  white in dark mode (no `color-scheme` is set).
+  inside it, and its scrollbar is thin and themed (`scrollbar-color`). Native scrollbars and
+  `<select>` popups rendered light in dark mode until `index.css` declared `color-scheme` on
+  `:root` and `.dark` (#49); `lib/displayFamily.test.ts` pins both.
 - **A pinned column must be opaque and repaint the row's hover.** `DataTable`'s
   `pinFirstColumn` (Watchlist) makes the first column `sticky left-0` with `bg-card`, which
   hides the `<tr>`'s `bg-muted/40` wash — so the cell repaints it as a gradient image over its
@@ -639,7 +640,9 @@ insight. What that settled, on top of the product pass:
 - **One chart look, enforced.** Every `<CartesianGrid>` spreads `CHART_GRID_PROPS` (solid
   hairlines along the value axis) and every money axis label goes through `formatAxisMoney`
   ("CHF 150k", "€1.2M", one decimal at most); `components/chartAxisFamily.test.ts` refuses a hand
-  rolled copy of either. The value series is the one gradient area, and the crypto chart now draws
+  rolled copy of either. Off the axes, money is `formatCurrency` or, in whole units,
+  `formatMoneyWhole` (`useFormatMoneyWhole`), never `${curSym}${n}`: that put the sign after the
+  symbol ("CHF -1,234") at 23 sites, and `lib/displayFamily.test.ts` refuses a new one. The value series is the one gradient area, and the crypto chart now draws
   its value the same way. Portfolio lines and benchmarks are coloured by identity (*Colour by
   identity* above).
 - **A collapsible section remembers being opened** on this browser (`useRememberedOpen` in

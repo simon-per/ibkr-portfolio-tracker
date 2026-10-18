@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { HandCoins, Loader2 } from 'lucide-react'
-import { cn, formatCount } from '@/lib/utils'
+import { ABSENT, cn } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useFormatCurrency, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import type { DividendSummaryResponse } from '@/lib/api'
 import { ScrollableTable } from '@/components/ui/ScrollableTable'
 import { useRememberedOpen } from '@/lib/storage'
@@ -29,12 +29,9 @@ function getAmountColor(amount: number, maxAmount: number): string {
   return 'bg-teal-500 dark:bg-teal-600 text-white'
 }
 
-function formatEur(amount: number): string {
-  return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 export function DividendSummary() {
-  const curSym = useCurrencySymbol()
+  const formatMoney = useFormatCurrency()
+  const formatWhole = useFormatMoneyWhole()
   const [open, setOpen] = useRememberedOpen('dividend-income')
 
   const { data, isLoading, isError } = useQuery<DividendSummaryResponse>({
@@ -93,14 +90,14 @@ export function DividendSummary() {
     if (data.ytd_eur > 0) {
       parts.push(
         <span key="ytd">
-          YTD: <span className="text-teal-600 dark:text-teal-400">{curSym}{formatEur(data.ytd_eur)}</span>
+          YTD: <span className="text-teal-600 dark:text-teal-400">{formatMoney(data.ytd_eur)}</span>
         </span>
       )
     }
     if (data.total_eur > 0) {
       parts.push(
         <span key="total">
-          {parts.length > 0 ? ' \u00B7 ' : ''}Total: <span className="text-teal-600 dark:text-teal-400">{curSym}{formatEur(data.total_eur)}</span>
+          {parts.length > 0 ? ' \u00B7 ' : ''}Total: <span className="text-teal-600 dark:text-teal-400">{formatMoney(data.total_eur)}</span>
         </span>
       )
     }
@@ -168,12 +165,12 @@ export function DividendSummary() {
                                   'rounded px-1.5 py-1 text-center text-xs font-medium',
                                   getAmountColor(amount, maxMonthlyAmount)
                                 )}
-                                title={`${MONTH_LABELS[i]} ${row.year}: ${curSym}${formatEur(amount)}`}
+                                title={`${MONTH_LABELS[i]} ${row.year}: ${formatMoney(amount)}`}
                               >
-                                {curSym}{amount < 10 ? formatEur(amount) : formatCount(Math.round(amount))}
+                                {amount < 10 ? formatMoney(amount) : formatWhole(amount)}
                               </div>
                             ) : (
-                              <div className="text-center text-xs text-muted-foreground py-1">{'\u2013'}</div>
+                              <div className="text-center text-xs text-muted-foreground py-1">{ABSENT}</div>
                             )}
                           </td>
                         ))}
@@ -188,12 +185,12 @@ export function DividendSummary() {
                                 'rounded px-1.5 py-1 text-center text-xs font-medium',
                                 getAmountColor(row.yearTotal, maxYearTotal)
                               )}
-                              title={`Total ${row.year}: ${curSym}${formatEur(row.yearTotal)}`}
+                              title={`Total ${row.year}: ${formatMoney(row.yearTotal)}`}
                             >
-                              {curSym}{formatEur(row.yearTotal)}
+                              {formatMoney(row.yearTotal)}
                             </div>
                           ) : (
-                            <div className="text-center text-xs text-muted-foreground py-1">{'\u2013'}</div>
+                            <div className="text-center text-xs text-muted-foreground py-1">{ABSENT}</div>
                           )}
                         </td>
                       </tr>

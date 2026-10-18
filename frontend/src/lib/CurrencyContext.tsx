@@ -1,5 +1,9 @@
 import { createContext, useCallback, useContext } from 'react'
-import { formatCurrency as formatCurrencyUtil, currencySymbol as currencySymbolUtil } from './utils'
+import {
+  formatCurrency as formatCurrencyUtil,
+  formatMoneyWhole as formatMoneyWholeUtil,
+  currencySymbol as currencySymbolUtil,
+} from './utils'
 
 export interface CurrencyContextValue {
   baseCurrency: string
@@ -62,6 +66,14 @@ export function useFormatCurrency() {
       formatCurrencyUtil(value, currencyOverride ?? baseCurrency),
     [baseCurrency],
   )
+}
+
+/** Returns a whole-unit formatter (`formatMoneyWhole`) bound to the current base currency. */
+export function useFormatMoneyWhole() {
+  const { baseCurrency } = useContext(CurrencyContext)
+  // Stable per base currency, like useFormatCurrency (#48): a new function per render
+  // invalidates every memo it is a dependency of.
+  return useCallback((value: number) => formatMoneyWholeUtil(value, baseCurrency), [baseCurrency])
 }
 
 /** Returns the short symbol/prefix for the current base currency. */

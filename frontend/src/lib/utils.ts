@@ -41,6 +41,23 @@ export function formatCurrency(value: number, currency: string = "EUR"): string 
 }
 
 /**
+ * A money amount in whole units: "CHF 1,234", "-€56", "$0".
+ *
+ * Twenty-odd sites built this by hand as `${curSym}${formatCount(v)}`, which puts the
+ * sign after the symbol ("CHF -1,234") where `formatCurrency` puts it before — ActivityTab
+ * had already fixed the same copy once. `Intl` places the sign; an amount that rounds to
+ * zero prints unsigned, as `formatAxisMoney` does, rather than "-CHF 0".
+ */
+export function formatMoneyWhole(value: number, currency: string = "EUR"): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.abs(value) < 0.5 ? 0 : value)
+}
+
+/**
  * A per-unit price that keeps its significant digits.
  *
  * `formatCurrency` is fixed at two decimals, which is right for amounts and wrong for a

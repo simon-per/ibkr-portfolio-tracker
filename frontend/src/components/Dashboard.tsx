@@ -454,7 +454,7 @@ export function Dashboard() {
       {/* Constrained and centred: at 1440px and wider a full-bleed grid reads as a
           spreadsheet, and every reference app constrains its content. */}
       <div className="mx-auto w-full max-w-[1400px] flex-1 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
-          {/* Performance Tab */}          {/* Performance Tab */}
+          {/* Performance Tab */}
           <TabsContent value="performance" className="mt-0 space-y-6">
             {/* The headline, the range's gain, the chart and what the headline is made of. */}
             <PortfolioHero

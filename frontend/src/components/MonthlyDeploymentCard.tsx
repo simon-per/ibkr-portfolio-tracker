@@ -12,7 +12,7 @@ import { BanknoteArrowUp } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { chartColor } from '@/lib/chartPalette'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
-import { useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useFormatCurrency, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { formatAxisMoney } from '@/lib/utils'
@@ -38,11 +38,6 @@ function monthLabel(month: string): string {
 const BAR_COLOR = chartColor(0)
 
 type ChartRow = ContributionMonthlyItem & { label: string }
-
-/** Whole units — cents on a monthly figure are noise, and the tooltip keeps them. */
-function whole(value: number): string {
-  return value.toLocaleString('en-US', { maximumFractionDigits: 0 })
-}
 
 /** "YYYY-MM" of the reader's calendar month — the key `monthly[]` rows carry. */
 function monthKey(date: Date): string {
@@ -78,7 +73,7 @@ function monthKey(date: Date): string {
  * in with nothing else on the screen able to disagree.
  */
 export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeploymentCardProps) {
-  const curSym = useCurrencySymbol()
+  const formatWhole = useFormatMoneyWhole()
   const isCompact = useIsCompact()
   const [open, setOpen] = useRememberedOpen('money-in-per-month')
 
@@ -124,7 +119,8 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // It reads `avg_money_in_per_month_eur` now rather than `avg_deployed_per_month_eur`,
   // so this figure and the strip's are the same quantity as well as the same number.
   const twelveMonth = data?.windows.find(w => w.label === '12m')
-  const money = (v: number | null | undefined) => (v == null ? '—' : `${curSym}${whole(v)}`)
+  // Whole units — cents on a monthly figure are noise, and the tooltip keeps them.
+  const money = (v: number | null | undefined) => (v == null ? '—' : formatWhole(v))
   let summaryText: React.ReactNode = hasMoneyIn ? 'Money in per month' : 'Capital deployed per month'
   if (isError) {
     summaryText = 'Could not load contributions'
@@ -235,13 +231,11 @@ function DeploymentTooltip(
   { active, payload, hasMoneyIn }:
   { active?: boolean; payload?: Array<{ payload: ChartRow }>; hasMoneyIn?: boolean }
 ) {
-  const curSym = useCurrencySymbol()
+  const fmt = useFormatCurrency()
   if (!active || !payload || payload.length === 0) return null
 
   const d = payload[0].payload
   const released = d.deployed_eur - d.net_eur
-  const fmt = (v: number) =>
-    `${curSym}${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   return (
     <div className="bg-popover border rounded-lg shadow-md p-3 text-sm space-y-1">

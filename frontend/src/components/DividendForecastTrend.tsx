@@ -30,7 +30,7 @@ import {
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useResizableHeight } from '@/lib/useResizableHeight'
 import { useIsCompact } from '@/lib/useMediaQuery'
-import { cn, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { cn, formatAxisMoney, formatDate, parseLocalDate, tooltipValue } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 
 /** The chart's height when first opened, and the range a drag may take it to. */
@@ -160,8 +160,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   className="text-xs"
                   tick={{ fill: 'hsl(var(--muted-foreground))' }}
                   // The headline carries the currency; on a phone the axis has no room to repeat it.
-                  tickFormatter={(value: number) =>
-                    isCompact ? String(Math.round(value)) : `${curSym}${Math.round(value)}`}
+                  tickFormatter={(value: number) => formatAxisMoney(value, isCompact ? '' : curSym)}
                   domain={axis.domain}
                   ticks={axis.ticks}
                   width="auto"

@@ -12,9 +12,9 @@ import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { summaryQuery } from '@/lib/queryCache'
-import { formatCount, formatAxisMoney } from '@/lib/utils'
+import { formatAxisMoney } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
-import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
+import { useBaseCurrency, useCurrencySymbol, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import { readStored, writeStored } from '@/lib/storage'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -97,7 +97,7 @@ const MONEY_IN_COLOR = NEUTRAL_COLOR
  * the chart's included every gain ever made. Both render a dash rather than a figure when
  * the baseline could not be loaded, because a 0 would claim nothing was ever paid in.
  */
-const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
+const projectionColumns = (money: (value: number) => string): Column<ProjectionRow>[] => [
   {
     key: 'horizon',
     header: 'Horizon',
@@ -113,7 +113,7 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
     align: 'right',
     mobile: 'value',
     cellClassName: 'font-semibold',
-    cell: (p) => `${curSym}${formatCount(p.value)}`,
+    cell: (p) => money(p.value),
   },
   {
     key: 'gains',
@@ -125,7 +125,7 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
     tone: (p) =>
       p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
     hint: { description: 'Value minus money in' },
-    cell: (p) => (p.gains === null ? '—' : `${curSym}${formatCount(p.gains)}`),
+    cell: (p) => (p.gains === null ? '—' : money(p.gains)),
   },
   {
     key: 'moneyIn',
@@ -133,12 +133,13 @@ const projectionColumns = (curSym: string): Column<ProjectionRow>[] => [
     shortHeader: 'Money in',
     align: 'right',
     hint: { description: 'Paid in plus projected contributions' },
-    cell: (p) => (p.moneyIn === null ? '—' : `${curSym}${formatCount(p.moneyIn)}`),
+    cell: (p) => (p.moneyIn === null ? '—' : money(p.moneyIn)),
   },
 ]
 
 export function ForecastTab() {
   const curSym = useCurrencySymbol()
+  const money = useFormatMoneyWhole()
   const { baseCurrency } = useBaseCurrency()
   const [chosenContribution, setChosenContribution] = useState(readChosenContribution)
   const [expectedReturn, setExpectedReturn] = useState(() => readNumber(STORAGE_KEYS.expectedReturn, 8, 0, 30))
@@ -325,7 +326,7 @@ export function ForecastTab() {
                       : 'bg-card hover:bg-muted'
                   }`}
                 >
-                  My pace · {curSym}{formatCount(pace)}
+                  My pace · {money(pace)}
                 </button>
               )}
             </div>
@@ -371,9 +372,9 @@ export function ForecastTab() {
                 options={[
                   {
                     value: 'current',
-                    label: `Current (${summaryError ? 'unavailable' : `${curSym}${formatCount(Math.round(current.startValue))}`})`,
+                    label: `Current (${summaryError ? 'unavailable' : money(current.startValue)})`,
                   },
-                  { value: 'zero', label: `${curSym}0` },
+                  { value: 'zero', label: money(0) },
                 ]}
               />
             </div>
@@ -390,21 +391,21 @@ export function ForecastTab() {
             hero
             icon={Telescope}
             label={`Value in ${yearsLabel}`}
-            value={`${curSym}${formatCount(horizon.value)}`}
+            value={money(horizon.value)}
             sparkline={monthlyData.map((d) => d.value)}
           />
           <KpiCard
             tile
             icon={Wallet}
             label="Money in"
-            value={horizon.moneyIn === null ? null : `${curSym}${formatCount(horizon.moneyIn)}`}
+            value={horizon.moneyIn === null ? null : money(horizon.moneyIn)}
           />
           <KpiCard
             tile
             icon={Sprout}
             label="Gains"
             tone={horizon.gains === null ? 'neutral' : horizon.gains < 0 ? 'negative' : 'positive'}
-            value={horizon.gains === null ? null : `${curSym}${formatCount(horizon.gains)}`}
+            value={horizon.gains === null ? null : money(horizon.gains)}
           />
         </KpiPanel>
       )}
@@ -415,7 +416,7 @@ export function ForecastTab() {
           icon={ChartArea}
           title="Projected growth"
           description={
-            <>{expectedReturn}% a year · {curSym}{formatCount(monthlyContribution)} a month · {yearsLabel}</>
+            <>{expectedReturn}% a year · {money(monthlyContribution)} a month · {yearsLabel}</>
           }
         />
         <CardContent className="pt-2">
@@ -451,7 +452,7 @@ export function ForecastTab() {
               />
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number | undefined) => value != null ? `${curSym}${formatCount(value)}` : '—'}
+                formatter={(value: number | undefined) => value != null ? money(value) : '—'}
                 labelFormatter={(label) => `In ${Number(label)} ${Number(label) === 1 ? 'year' : 'years'}`}
               />
               {/* This two-series area had no legend at all, at any width — the grey band
@@ -508,7 +509,7 @@ export function ForecastTab() {
         <CardContent>
           <DataTable
             rows={projections}
-            columns={projectionColumns(curSym)}
+            columns={projectionColumns(money)}
             getRowKey={(proj) => proj.year}
             label="Projection by time horizon"
             density="comfortable"
@@ -527,7 +528,7 @@ export function ForecastTab() {
                 tile
                 icon={scenario.icon}
                 label={scenario.name}
-                value={`${curSym}${formatCount(scenario.value)}`}
+                value={money(scenario.value)}
                 sub={`${scenario.rate}% a year`}
               />
             ))}
