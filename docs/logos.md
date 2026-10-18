@@ -155,7 +155,9 @@ docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --basket Q
 (IWDA, `IE00B4L5Y983`), of VT and of VOO (`US9229083632`, the S&P 500 basket kept as DBPG's
 donor). Measured afterwards against the stored baskets: **100 of the S&P 500's top 100** and
 **94 of the Nasdaq-100's 95** constituents with an ISIN carry a logo — the one miss, AGPXX, is a
-money-market cash line. 225 logos in all, every security ever held included. Re-measure with a
+money-market cash line. On the live listings: the Look-through company table's top 100 100/100
+(ten from the thematic and EM baskets fetched by `--isin`), the Watchlist 24/24, Positions
+35/35. 235 logos in all, every security ever held included. Re-measure with a
 read-only join of `etf_holdings` (by `fund_isin`, heaviest first) on `security_logos.isin`.
 
 **Import by hand** a logo logo.dev misses or gets wrong (e.g. a PNG from Flaticon, ≤ 100 KB,

@@ -23,9 +23,9 @@ on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
-- **Holding logos: look at them.** 225 companies carry a logo (2026-10-18): every security
-  ever held (the two Swisscanto funds by hand), the S&P 500's top 100 (100/100) and the
-  Nasdaq-100 (94/95, the miss a cash line), plus the top 100 of the MSCI World and VT. Every table listing securities shows them, the Watchlist included
+- **Holding logos: look at them.** 235 companies carry a logo (2026-10-18), measured on the
+  live listings: Look-through top 100 100/100, Watchlist 24/24, Positions 35/35; the S&P 500's
+  top 100 100/100 and the Nasdaq-100 94/95 (the miss a cash line). Every table listing securities shows them, the Watchlist included
   (docs/logos.md *Where*). Judge the avatar styling (white circle, hairline ring) with real
   logos; GOOG/GOOGL/ABEA carry Alphabet's red "A" — the Google "G" is one domain lookup away
   if wanted.
