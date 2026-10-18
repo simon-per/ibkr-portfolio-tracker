@@ -1327,6 +1327,19 @@ tax *lots* while the swept one walks *securities*, so it counts a **set of ids**
 report 110 for a holding split across 110 lots and break that equivalence. The field is declared on
 `PortfolioValuePoint`, without which the `response_model` would have dropped it silently.
 
+**The log line is now one per unpriced security per walk, not per day** (GitHub #64). Both walks
+still logged a WARNING per security per day, and the price lookup a second one: 21 unpriced days were
+42 lines, a 5-year read with one long-unpriced holding thousands — in a container log capped by
+rotation (`max-size 10m × 5`), pushing out the sync evidence an incident needs. Both walks now note
+misses in an `UnpricedDayLog` (`portfolio_service.py`) and flush one line per security — day count,
+first and last day, the reason (no price, or no rate for a named currency) — at the end of the walk;
+the timeline flushes once per walk, XIRR once across its two dates, a lone point valuation once per
+call. Days are a set, for the lots-vs-securities reason above. `_get_market_price_with_fallback` and
+`_get_exchange_rate_with_fallback` log a miss at **DEBUG**: they are lookups called per security per
+day, and every caller reports a miss itself (the walks through the log, the snapshot and closed-lot
+paths with their own line, attribution as `unpriced` on the response). Test:
+`tests/test_unpriced_log_once.py`.
+
 **`/api/portfolio/attribution` carries the field too, and it was the worst place it was
 missing.** `get_eur_value` returned `0.0` when either the price or the FX rate was absent, so a
 still-held position whose feed went stale read as **`-start_value`** — the exact shape the disposal
@@ -1542,6 +1555,12 @@ last, so a rejection from any of them still carries a correlation id:
   it) and **GETs under `/api/logos/`** — one image per avatar, up to a hundred on the look-through
   page, which on a cold cache spent the budget the page's data requests needed. The manifest
   `GET /api/logos` (no trailing slash) is still counted. Tests: `tests/test_rate_limit_client_key.py`.
+  **The exemption stays, and 404s on it get no limit of their own** (decided 2026-10-18, #64). What
+  made it a hazard was an id past int64 answering 500 with a traceback (below); with that a 422 from
+  validation, an image request costs one primary-key or ISIN lookup and writes one uvicorn access
+  line, whatever it answers. A 404-only counter would not shrink the log: every request writes that
+  line, exempt or counted, and a rejected one adds the limiter's own `Rate limited` WARNING — a 429
+  costs the log two lines where a 404 costs one.
 - **`app/observability.py`** stamps `X-Request-ID` (reusing a plausible inbound one so it correlates
   across a proxy) and installs the handler for unhandled exceptions — the one path where `str(e)`
   still reached the client unredacted. The body is a fixed string plus the id; the log line,
@@ -1549,5 +1568,16 @@ last, so a rejection from any of them still carries a correlation id:
 
 `tests/conftest.py` neutralises the limiter's process-lifetime window state and the job-store path for
 the whole suite, or one module's traffic would 429 another's. Tests: `tests/test_api_hardening.py`.
+
+**Every integer the URL carries is bounded to what SQLite can bind** (`app/routers/_params.py`, #64).
+SQLite's INTEGER is signed 64-bit; past it the driver raised `OverflowError`, so
+`GET /api/logos/99999999999999999999` was a 500 whose traceback the app's handler and uvicorn each
+logged — on the exempt route, so an anonymous loop could fill the log's rotation cap.
+`/api/analyst-ratings/{id}` and the keyed watchlist `PATCH`/`DELETE` had the same hole. A path id is
+`DbId` (`Path(ge=1, le=DB_INT_MAX)`, so 0 and negatives are 422 too); an int query parameter carries
+both bounds with the upper at most `DB_INT_MAX` (`/scheduler/history`'s `limit` keeps its repository
+clamp to 200 inside that). `tests/test_int_param_bounds_family.py` walks the live route table, so a
+new route with a bare `int` fails there, and sends every int path route out-of-range ids expecting
+422 with nothing logged at ERROR.
 
 ---

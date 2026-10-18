@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.security_logo import SecurityLogo
+from app.routers._params import DbId
 from app.repositories.security_logo_repository import VERSION_CHARS, SecurityLogoRepository
 
 router = APIRouter()
@@ -45,7 +46,7 @@ async def logo_image_by_isin(
 
 @router.get("/{security_id}")
 async def logo_image(
-    security_id: int, request: Request, v: Optional[str] = None,
+    security_id: DbId, request: Request, v: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """The stored bytes of a security's logo."""

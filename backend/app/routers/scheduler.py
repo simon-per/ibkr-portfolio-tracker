@@ -4,12 +4,13 @@ API endpoints for managing the automated sync scheduler.
 """
 import logging
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.redact import redact_secrets
+from app.routers._params import DB_INT_MAX
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.scheduler_service import (
     SCHEDULED_JOB_TYPES,
@@ -143,7 +144,12 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/history", response_model=Dict)
-async def get_sync_history(limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def get_sync_history(
+    # Bounded to what SQLite can bind (`_params.py`); the repository still clamps
+    # the page to 1..200, so a large value keeps its old meaning.
+    limit: int = Query(20, ge=1, le=DB_INT_MAX),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Recent sync attempts, newest first — the durable record of what ran and what broke.
 

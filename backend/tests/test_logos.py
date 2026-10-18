@@ -508,9 +508,18 @@ def test_a_matching_etag_answers_304(client):
     assert r.status_code == 304 and r.content == b""
 
 
-@pytest.mark.parametrize("security_id", [3, 99])
+@pytest.mark.parametrize("security_id", [3, 99, 2**63 - 1])
 def test_no_logo_is_a_404(client, security_id):
     assert client.get(f"/api/logos/{security_id}").status_code == 404
+
+
+@pytest.mark.parametrize("security_id", ["99999999999999999999", str(2**63), "0", "-1"])
+def test_an_id_sqlite_cannot_bind_is_a_422_not_a_500(client, security_id):
+    """
+    GitHub #64: past int64 the bind raised `OverflowError`, a 500 and a logged traceback
+    per request, on a route the rate limiter exempts. Validation refuses it first.
+    """
+    assert client.get(f"/api/logos/{security_id}").status_code == 422
 
 
 # --------------------------------------------------------------------- the reply shape

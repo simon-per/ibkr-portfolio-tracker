@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.database import get_db
+from app.routers._params import DB_INT_MAX
 from app.services.tax_service import TaxService
 
 router = APIRouter()
@@ -40,7 +41,7 @@ def _resolve_year(year: Optional[int]) -> int:
 
 @router.get("/report")
 async def get_tax_report(
-    year: Optional[int] = Query(default=None, ge=_MIN_YEAR),
+    year: Optional[int] = Query(default=None, ge=_MIN_YEAR, le=DB_INT_MAX),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the tax report for a calendar year in the configured base currency."""
@@ -49,7 +50,7 @@ async def get_tax_report(
 
 @router.get("/report.csv", response_class=PlainTextResponse)
 async def get_tax_report_csv(
-    year: Optional[int] = Query(default=None, ge=_MIN_YEAR),
+    year: Optional[int] = Query(default=None, ge=_MIN_YEAR, le=DB_INT_MAX),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the tax report as a downloadable CSV."""

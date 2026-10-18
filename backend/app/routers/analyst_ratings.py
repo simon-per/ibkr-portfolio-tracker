@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
+from app.routers._params import DbId
 from app.repositories.sync_run_repository import utc_iso
 from app.services.analyst_rating_service import AnalystRatingService
 from app.single_flight import PUBLIC_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
@@ -135,7 +136,7 @@ async def get_analyst_ratings_status(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{security_id}")
-async def get_analyst_rating(security_id: int, db: AsyncSession = Depends(get_db)):
+async def get_analyst_rating(security_id: DbId, db: AsyncSession = Depends(get_db)):
     """
     Get analyst rating for a specific security.
 

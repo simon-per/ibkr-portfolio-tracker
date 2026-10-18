@@ -88,6 +88,44 @@ def _shift_months(from_date: date, months: int) -> date:
     return date(year, month, min(from_date.day, calendar.monthrange(year, month)[1]))
 
 
+class UnpricedDayLog:
+    """
+    The valuation walks' unpriced holdings, logged once per security per walk (GitHub #64).
+
+    Both walks (`_calculate_timeline_swept`, `_calculate_daily_value`) used to log a
+    WARNING per unpriced security per day, and the price lookup a second one: one
+    5-year read with a single long-unpriced holding wrote thousands of lines into a
+    container log capped by rotation, pushing out the sync evidence an incident needs.
+    The response already carries the figure (`unpriced_holdings` on every point); the
+    log only has to say which security, over which days and why.
+
+    A SET of dates per security, not a counter: `_calculate_daily_value` walks lots, so
+    a holding split across many lots would otherwise be counted once per lot.
+    """
+
+    def __init__(self) -> None:
+        # security id -> (symbol, days, reasons)
+        self._by_security: Dict[int, Tuple[str, Set[date], Set[str]]] = {}
+
+    def note(self, security_id: int, symbol: str, on: date, reason: str) -> None:
+        _, days, reasons = self._by_security.setdefault(security_id, (symbol, set(), set()))
+        days.add(on)
+        reasons.add(reason)
+
+    def flush(self, context: str) -> int:
+        """One WARNING per security noted, then empty. Returns how many lines it wrote."""
+        for sid, (symbol, days, reasons) in sorted(self._by_security.items()):
+            logger.warning(
+                "%s: security %s (%s) left out of the market value on %d day(s), "
+                "%s..%s: %s",
+                context, sid, symbol, len(days), min(days), max(days),
+                "; ".join(sorted(reasons)),
+            )
+        written = len(self._by_security)
+        self._by_security.clear()
+        return written
+
+
 class PortfolioService:
     """
     Service for portfolio analytics and calculations.
@@ -449,6 +487,7 @@ class PortfolioService:
         # Securities whose disposal is missing from `pending_flow`; they ride to the
         # same emitted row the flow does.
         pending_skipped: set = set()
+        unpriced_log = UnpricedDayLog()
         while d <= end_date:
             while i < len(events) and events[i][0] <= d:
                 _, sid, dq, dc = events[i]
@@ -492,10 +531,8 @@ class PortfolioService:
                     price = self._get_market_price_with_fallback(sid, d, price_cache)
                     if not price:
                         unpriced.add(sid)
-                        sec = securities_by_id[sid]
-                        logger.warning(
-                            f"Skipping position for security {sid} ({sec.symbol}) on {d}: "
-                            f"no market price available"
+                        unpriced_log.note(
+                            sid, securities_by_id[sid].symbol, d, "no market price"
                         )
                         continue
                     sec = securities_by_id[sid]
@@ -509,9 +546,8 @@ class PortfolioService:
                         )
                         if not rate:
                             unpriced.add(sid)
-                            logger.warning(
-                                f"Skipping position for security {sid} on {d}: "
-                                f"no exchange rate for {price_currency}"
+                            unpriced_log.note(
+                                sid, sec.symbol, d, f"no exchange rate for {price_currency}"
                             )
                             continue
                         mv_eur += qty * price * rate
@@ -572,6 +608,7 @@ class PortfolioService:
                 pending_skipped = set()
             d += timedelta(days=1)
 
+        unpriced_log.flush(f"Timeline {start_date}..{end_date}")
         return timeline
 
     async def get_current_portfolio_summary(self) -> Dict:
@@ -1568,16 +1605,18 @@ class PortfolioService:
 
         # Get portfolio market values on effective start and end dates
         position_start = await self._load_position_start_dates()
+        unpriced_log = UnpricedDayLog()
         start_value = self._calculate_daily_value(
             effective_start_date, taxlots_with_securities, price_cache, exchange_rate_cache,
             price_currency_cache=price_currency_cache, base_fx=base_fx,
-            position_start=position_start,
+            position_start=position_start, unpriced_log=unpriced_log,
         )
         end_value = self._calculate_daily_value(
             effective_end_date, taxlots_with_securities, price_cache, exchange_rate_cache,
             price_currency_cache=price_currency_cache, base_fx=base_fx,
-            position_start=position_start,
+            position_start=position_start, unpriced_log=unpriced_log,
         )
+        unpriced_log.flush(f"XIRR {effective_start_date}..{effective_end_date}")
 
         start_mv = start_value["market_value_eur"]
         end_mv = end_value["market_value_eur"]
@@ -2229,8 +2268,11 @@ class PortfolioService:
                 )
                 return market_price
 
-        # No price found within lookback window
-        logger.warning(
+        # No price within the lookback window. DEBUG, not WARNING: this is a lookup
+        # called per security per day by the valuation walks, and every caller reports a
+        # miss itself — the walks once per security (`UnpricedDayLog`), the responses
+        # as `unpriced_holdings` (GitHub #64).
+        logger.debug(
             f"No price found for security {security_id} on {target_date} "
             f"(checked {max_lookback_days} days back)"
         )
@@ -2260,7 +2302,8 @@ class PortfolioService:
         """
         rate = eur_rate_on(exchange_rate_cache, from_currency, target_date, max_lookback_days)
         if rate is None:
-            logger.warning(
+            # DEBUG for the reason `_get_market_price_with_fallback` gives.
+            logger.debug(
                 f"No exchange rate found for {from_currency} on {target_date} "
                 f"(checked {max_lookback_days} days back)"
             )
@@ -2275,6 +2318,7 @@ class PortfolioService:
         price_currency_cache: Optional[Dict] = None,
         base_fx: Optional[BaseFx] = None,
         position_start: Optional[Dict[int, date]] = None,
+        unpriced_log: Optional[UnpricedDayLog] = None,
     ) -> Dict:
         """
         Calculate portfolio value for a specific date using cached data.
@@ -2283,7 +2327,13 @@ class PortfolioService:
         Values are returned in the base (display) currency: cost basis is converted
         at each lot's open_date, market value at target_date. When base is EUR this
         is a pass-through. Output keys keep the historical *_eur suffix.
+
+        ``unpriced_log`` lets a caller valuing several dates for one request log each
+        unpriced security once across all of them, and flush it itself; without one,
+        this call logs its own (`UnpricedDayLog`).
         """
+        own_log = unpriced_log is None
+        unpriced_log = UnpricedDayLog() if own_log else unpriced_log
         base_fx = base_fx or BaseFx("EUR", {})
         position_start = position_start or {}
         total_cost_basis = Decimal("0.0")      # in base currency
@@ -2339,20 +2389,20 @@ class PortfolioService:
                         total_market_value_eur += position_value * rate
                     else:
                         unpriced_securities.add(security.id)
-                        # Log but skip this position if no exchange rate available
-                        logger.warning(
-                            f"Skipping position for security {security.id} on {target_date}: "
-                            f"no exchange rate for {price_currency}"
+                        unpriced_log.note(
+                            security.id, security.symbol, target_date,
+                            f"no exchange rate for {price_currency}",
                         )
                 else:
                     total_market_value_eur += position_value
             else:
                 unpriced_securities.add(security.id)
-                # Log but skip this position if no market price available
-                logger.warning(
-                    f"Skipping position for security {security.id} ({security.symbol}) on {target_date}: "
-                    f"no market price available"
+                unpriced_log.note(
+                    security.id, security.symbol, target_date, "no market price"
                 )
+
+        if own_log:
+            unpriced_log.flush(f"Valuation {target_date}")
 
         # Market value converts at the valuation date
         total_market_value = base_fx.convert(total_market_value_eur, target_date)

@@ -150,6 +150,11 @@ are gone logo.dev answers 402 and every pass stops at its first lookup.
   avatars used to spend the per-client budget and 429 the page's own data requests — a 429 on an
   image also flips that avatar to its monogram for the session. They are primary-key/ISIN lookups,
   served `immutable` once versioned.
+- The id is `DbId` (`app/routers/_params.py`): 0, a negative or anything past int64 is a **422**
+  from validation. Past int64 it used to reach the SQLite bind and answer 500 with a logged
+  traceback per request, on this exempt route (#64). 404s get no limit of their own — one lookup and
+  one access-log line each, fewer lines than a 429 writes (docs/flex-and-sync.md, *`/api/`
+  protections*).
 - Frontend: `lib/useLogos.ts` (TanStack Query, `staleTime` 1 h) and `TickerAvatar`
   (`securityId`, else `isin`): the image
   `object-contain` on a white circle with a hairline ring, in the monogram's box (no layout

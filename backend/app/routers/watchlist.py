@@ -15,6 +15,7 @@ from app.single_flight import (
 )
 from app.repositories.sync_run_repository import utc_iso
 from app.repositories.watchlist_repository import WatchlistRepository
+from app.routers._params import DbId
 from app.schemas.portfolio import (
     WatchlistItemResponse,
     AddWatchlistItemRequest,
@@ -70,7 +71,7 @@ async def add_to_watchlist(
 
 @router.patch("/{item_id}", response_model=WatchlistItemResponse)
 async def update_watchlist_item(
-    item_id: int,
+    item_id: DbId,
     request: UpdateWatchlistItemRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -101,7 +102,7 @@ async def update_watchlist_item(
 
 @router.delete("/{item_id}")
 async def remove_from_watchlist(
-    item_id: int,
+    item_id: DbId,
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a stock from the watchlist."""

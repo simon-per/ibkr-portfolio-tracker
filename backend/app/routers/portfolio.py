@@ -10,6 +10,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.routers._params import DB_INT_MAX
 from app.routers._windows import default_window, validate_window
 from app.services.activity_service import (
     ActivityService,
@@ -179,7 +180,7 @@ async def get_activity(
     kind: str = Query(default=None, description=f"Comma-separated subset of: {', '.join(KINDS)}"),
     symbol: str = Query(default=None, description="Exact ticker match"),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=DB_INT_MAX),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -205,7 +206,7 @@ async def get_activity_csv(
     kind: str = Query(default=None),
     symbol: str = Query(default=None),
     limit: int = Query(default=MAX_LIMIT, ge=1, le=MAX_LIMIT),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=DB_INT_MAX),
     db: AsyncSession = Depends(get_db),
 ):
     """
