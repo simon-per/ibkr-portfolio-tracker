@@ -6,6 +6,15 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * A region still showing the previous response while the next one loads
+ * (`useKeepPreviousData`, #68): dimmed, never swapped for a skeleton. Pair it with
+ * `aria-busy` on the same region.
+ */
+export function placeholderDim(isPlaceholderData: boolean): string {
+  return cn('transition-opacity', isPlaceholderData && 'opacity-50')
+}
+
+/**
  * The one glyph for an absent figure. `KpiCard` and the tables already drew an em dash;
  * a hyphen in the watchlist and an en dash in the heatmap read as three different
  * states, and a lone `-` beside signed figures looks like a stray minus.

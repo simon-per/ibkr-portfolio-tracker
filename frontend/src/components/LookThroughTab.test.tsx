@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LookThroughTab } from './LookThroughTab'
 import { unresolvedTone } from '@/lib/lookthroughTone'
 import { CurrencyProvider } from '@/lib/CurrencyProvider'
+import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { api } from '@/lib/api'
 import type { LookthroughResponse } from '@/lib/api'
 
@@ -748,5 +749,132 @@ describe('LookThroughTab coverage tone', () => {
     await screen.findByText('Company exposure')
     expect(screen.queryByText('Where the value sits')).toBeNull()
     expect(screen.queryByRole('img', { name: /Portfolio composition/ })).toBeNull()
+  })
+})
+
+describe('LookThroughTab Top N switch (GitHub #68)', () => {
+  /**
+   * Keyed on the limit with no placeholder, so pressing Top 100 blanked the tab to skeletons:
+   * the pressed button left the DOM (focus fell to <body>) and the page collapsed under the
+   * reader. The previous rows now stay, dimmed and busy, until the new ones arrive.
+   */
+  const companyRows = () => document.querySelectorAll('tbody tr').length
+  const withMicrosoft = (over: Partial<LookthroughResponse> = {}) => {
+    const base = response(over)
+    return {
+      ...base,
+      companies: [
+        ...base.companies,
+        { ...base.companies[1], company_key: 'US5949181045', name: 'MICROSOFT CORP', isins: ['US5949181045'] },
+      ],
+    }
+  }
+
+  it('keeps the pressed button focused and the previous rows until the new ones arrive', async () => {
+    let release: (r: LookthroughResponse) => void = () => {}
+    const spy = vi.spyOn(api, 'getLookthrough').mockImplementation((limit) =>
+      limit === 50 ? Promise.resolve(response()) : new Promise((resolve) => { release = resolve }),
+    )
+    withProviders(<LookThroughTab />)
+    const top100 = await screen.findByRole('button', { name: 'Top 100' })
+    await waitFor(() => expect(companyRows()).toBe(2))
+
+    top100.focus()
+    fireEvent.click(top100)
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(100))
+
+    expect(top100.isConnected).toBe(true)
+    expect(document.activeElement).toBe(top100)
+    expect(companyRows()).toBe(2)
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull()
+
+    await act(async () => release(withMicrosoft()))
+    await screen.findAllByText('Microsoft')
+    expect(companyRows()).toBe(3)
+    expect(document.querySelector('[aria-busy]')).toBeNull()
+    expect(document.activeElement).toBe(top100)
+  })
+})
+
+describe('LookThroughTab base-currency switch (GitHub #22 under #68)', () => {
+  /**
+   * Keeping the previous rows must never carry them across a currency switch: EUR figures
+   * under the CHF label is #22 again. Two routes reach it. The plain one (rows on screen,
+   * then the switch) is closed by the reset alone; the second (a Top N fetch still in
+   * flight, so a placeholder is ALREADY showing) is reused by TanStack without asking the
+   * placeholder function again unless that function changes with the currency.
+   */
+  let serverBase = 'EUR'
+  const settings = (base: string) => ({
+    base_currency: base,
+    supported_currencies: ['EUR', 'CHF', 'USD'],
+    dividend_forecast_withholding_pct: 15,
+  })
+  const companyRows = () => document.querySelectorAll('tbody tr').length
+
+  function CurrencySwitch() {
+    const { baseCurrency, setBaseCurrency } = useBaseCurrency()
+    return (
+      <>
+        <p data-testid="label">{baseCurrency}</p>
+        <button onClick={() => setBaseCurrency('CHF')}>to CHF</button>
+      </>
+    )
+  }
+
+  beforeEach(() => {
+    serverBase = 'EUR'
+    vi.spyOn(api, 'getSettings').mockImplementation(async () => settings(serverBase) as never)
+    vi.spyOn(api, 'updateBaseCurrency').mockImplementation(async () => {
+      serverBase = 'CHF'
+      return settings('CHF') as never
+    })
+  })
+
+  /** The first request answers in EUR; every later one waits until the test releases it. */
+  function mockLookthrough() {
+    let calls = 0
+    let release: () => void = () => {}
+    const spy = vi.spyOn(api, 'getLookthrough').mockImplementation(() => {
+      calls += 1
+      const answer = response({ base_currency: serverBase })
+      return calls === 1
+        ? Promise.resolve(answer)
+        : new Promise((resolve) => { release = () => resolve(answer) })
+    })
+    return { spy, release: () => release() }
+  }
+
+  it('blanks the figures instead of relabelling them', async () => {
+    const { release } = mockLookthrough()
+    withProviders(<><LookThroughTab /><CurrencySwitch /></>)
+    await waitFor(() => expect(companyRows()).toBe(2))
+    await waitFor(() => expect(screen.getByTestId('label').textContent).toBe('EUR'))
+
+    fireEvent.click(screen.getByText('to CHF'))
+    await waitFor(() => expect(screen.getByTestId('label').textContent).toBe('CHF'))
+    expect(companyRows()).toBe(0)
+    expect(screen.queryByRole('button', { name: 'Top 100' })).toBeNull()
+
+    await act(async () => release())
+    await waitFor(() => expect(companyRows()).toBe(2))
+  })
+
+  it('blanks them too when the switch lands while another Top N is loading', async () => {
+    const { spy, release } = mockLookthrough()
+    withProviders(<><LookThroughTab /><CurrencySwitch /></>)
+    await waitFor(() => expect(companyRows()).toBe(2))
+    await waitFor(() => expect(screen.getByTestId('label').textContent).toBe('EUR'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Top 100' }))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(100))
+    expect(companyRows()).toBe(2) // the EUR rows, kept while Top 100 loads
+
+    fireEvent.click(screen.getByText('to CHF'))
+    await waitFor(() => expect(screen.getByTestId('label').textContent).toBe('CHF'))
+    expect(companyRows()).toBe(0)
+
+    await act(async () => release())
+    await waitFor(() => expect(companyRows()).toBe(2))
   })
 })

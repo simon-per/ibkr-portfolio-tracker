@@ -311,7 +311,10 @@ describe('Dividend chart controls', () => {
     expect(screen.queryByText(/No dividends recorded/)).toBeNull()
   })
 
-  it('does not show the old TTM or an empty-history message while a new range loads', async () => {
+  it('keeps the old range dimmed and busy, never an empty-history message, while a new range loads', async () => {
+    // Since #68 the previous range stays on screen until the next one arrives — blanking it
+    // unmounted the controls inside it — but marked as loading, and an empty window is still
+    // never claimed for a range that has not answered yet.
     vi.spyOn(api, 'getDividendBreakdown')
       .mockResolvedValueOnce(response(2026))
       .mockImplementationOnce(() => new Promise(() => {}))
@@ -319,10 +322,35 @@ describe('Dividend chart controls', () => {
     mount()
     await screen.findByText(/Received/)
     await user.click(screen.getByRole('button', { name: 'TTM' }))
-    expect(screen.getByLabelText('Latest rolling 12 months')).toBeTruthy()
+    expect(screen.getByLabelText('Latest rolling 12 months').closest('[aria-busy]')).toBeNull()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Dividend period' }), '24m')
-    expect(screen.queryByLabelText('Latest rolling 12 months')).toBeNull()
+    expect(screen.getByLabelText('Latest rolling 12 months').closest('[aria-busy="true"]')).not.toBeNull()
     expect(screen.queryByText(/No twelve-month window is covered/)).toBeNull()
+  })
+
+  it('keeps the pressed year bar focused while that year loads (#68)', async () => {
+    // The bars sit inside the data branch: blanking it to a skeleton removed the bar just
+    // pressed, so focus fell to <body> and the page collapsed under the reader.
+    let release: () => void = () => {}
+    const request = vi.spyOn(api, 'getDividendBreakdown').mockImplementation((year) =>
+      year === 2026
+        ? Promise.resolve(response(2026))
+        : new Promise((resolve) => { release = () => resolve(response(year)) }),
+    )
+    const user = userEvent.setup()
+    mount()
+    const annual = await screen.findByRole('region', { name: 'Dividends per year' })
+    const bar = within(annual).getByRole('button')
+    await user.click(bar)
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith(2025, undefined))
+
+    expect(bar.isConnected).toBe(true)
+    expect(document.activeElement).toBe(bar)
+    expect(screen.getByRole('region', { name: /Per-position dividend table/ })).toBeTruthy()
+
+    release()
+    await waitFor(() => expect(bar.closest('[aria-busy]')).toBeNull())
+    expect(document.activeElement).toBe(bar)
   })
 
   it('shows a measured zero TTM and its decline instead of hiding the point', async () => {

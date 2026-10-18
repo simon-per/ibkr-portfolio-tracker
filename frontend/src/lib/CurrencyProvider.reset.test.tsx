@@ -163,3 +163,23 @@ describe('a refetch that fails after the switch', () => {
     expect(client.getQueryData(['portfolio', 'positions'])).toBeUndefined()
   })
 })
+
+describe('a placeholder kept across a refetch (#68)', () => {
+  it('goes through useKeepPreviousData everywhere, never TanStack keepPreviousData directly', () => {
+    // A placeholder already on screen is reused while its function stays the same one, so
+    // a function that outlives a currency switch shows the old figures under the new label
+    // (LookThroughTab.test.tsx pins that route). `useKeepPreviousData` is one per currency.
+    const sources = import.meta.glob('../**/*.{ts,tsx}', {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }) as Record<string, string>
+    const offenders = Object.entries(sources)
+      .filter(([path]) => !/\.test\.tsx?$/.test(path) && !/(^|\/)CurrencyContext\.tsx$/.test(path))
+      .filter(([, source]) =>
+        /\bkeepPreviousData\b/.test(source)
+        || (/\bplaceholderData\s*:/.test(source) && !/\buseKeepPreviousData\(\)/.test(source)))
+      .map(([path]) => path)
+    expect(offenders).toEqual([])
+  })
+})

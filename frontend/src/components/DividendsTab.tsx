@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { api } from '@/lib/api'
 import type { DividendSecurityRow } from '@/lib/api'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { useFormatCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import {
   buildChartSeries, dividendMonthLabel as monthLabel, duplicatedSymbols, FC, legendEntries, OTHER,
 } from '@/lib/dividendChart'
@@ -27,7 +27,7 @@ import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
 import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
-import { cn } from '@/lib/utils'
+import { cn, placeholderDim } from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { displayName } from '@/lib/securityName'
@@ -259,8 +259,9 @@ export function DividendsTab() {
     }
   }
   const formatCurrency = useFormatCurrency()
+  const keepPrevious = useKeepPreviousData()
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, isPlaceholderData } = useQuery({
     queryKey: ['dividends', 'breakdown', year],
     // Forecast is always fetched; the toggle only hides it, so flipping is instant.
     queryFn: () => api.getDividendBreakdown(
@@ -268,6 +269,10 @@ export function DividendsTab() {
       year === '24m' ? '24m' : undefined,
     ),
     staleTime: 30 * 60 * 1000,
+    // The last period stays while the next one loads (#68): the year bars below and the
+    // withholding control sit inside the data branch, so blanking it unmounted the bar just
+    // pressed and collapsed the page under it.
+    placeholderData: keepPrevious,
   })
 
   // Extracted so it can be unit-tested: this transformation already carried one
@@ -431,7 +436,7 @@ export function DividendsTab() {
         title="Dividends"
         description={
               data && hasAnything ? (
-                <>
+                <span className={placeholderDim(isPlaceholderData)}>
                   Received {formatCurrency(data.total_net_eur)} net
                   {year === '24m' && data.months.length > 0 && (
                     <> · {monthLabel(data.months[0].month, true)} – {monthLabel(data.months[data.months.length - 1].month, true)}</>
@@ -439,7 +444,7 @@ export function DividendsTab() {
                   {showForecast && data.total_forecast_net_eur > 0 && (
                     <> · projected +{formatCurrency(data.total_forecast_net_eur)}</>
                   )}
-                </>
+                </span>
               ) : (
                 'Net dividend income by month and stock'
               )
@@ -493,7 +498,10 @@ export function DividendsTab() {
             </button>
           </div>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent
+        className={cn('space-y-6', placeholderDim(isPlaceholderData))}
+        aria-busy={isPlaceholderData || undefined}
+      >
         {isError ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             Couldn't load dividends — the server didn't respond. Try again in a moment.

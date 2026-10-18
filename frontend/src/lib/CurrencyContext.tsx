@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext } from 'react'
+import { keepPreviousData } from '@tanstack/react-query'
 import {
   formatCurrency as formatCurrencyUtil,
   formatMoneyWhole as formatMoneyWholeUtil,
@@ -75,6 +76,27 @@ export function useFormatMoneyWhole() {
   // invalidates every memo it is a dependency of.
   return useCallback((value: number) => formatMoneyWholeUtil(value, baseCurrency), [baseCurrency])
 }
+
+/**
+ * `keepPreviousData` that never carries a figure across a base-currency switch (#68, #22).
+ *
+ * A query keyed on a control (Top 25/50/100, a page, a year) keeps its last rows on screen
+ * while the next ones load, so the control the reader pressed stays mounted. The switch
+ * resets every money query, which leaves this function nothing to keep — but TanStack reuses
+ * a placeholder ALREADY on screen without calling the function again while it is the same
+ * function (query-core `createResult`). So it is one function per base currency: the render
+ * that relabels the figures also replaces it, and the reset has emptied what it would keep.
+ */
+export function useKeepPreviousData(): typeof keepPreviousData {
+  const { baseCurrency } = useContext(CurrencyContext)
+  let keep = keepersByCurrency.get(baseCurrency)
+  if (!keep) {
+    keep = (previous) => keepPreviousData(previous)
+    keepersByCurrency.set(baseCurrency, keep)
+  }
+  return keep
+}
+const keepersByCurrency = new Map<string, typeof keepPreviousData>()
 
 /** Returns the short symbol/prefix for the current base currency. */
 export function useCurrencySymbol() {

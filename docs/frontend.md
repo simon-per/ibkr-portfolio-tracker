@@ -301,6 +301,19 @@ missing it costs a wrong figure.
   `health` and `logos`. **The crypto book is reset too**: it is stored in USD but served in the base
   currency. Keying every money query on the currency was rejected: about 55 key sites, and one that
   forgot would bring the bug back. `CurrencyProvider.reset.test.tsx` pins it.
+- **A query keyed on a control keeps its last response while the next one loads**
+  (`useKeepPreviousData` in `CurrencyContext.tsx`, #68). Look-through's Top 25/50/100, Activity's
+  pages and the Dividends period rendered skeletons until the new response arrived, so the control
+  just pressed left the DOM (Top N with the whole tab, Previous/Next and the year bars with the
+  branch they sit in): focus fell to `<body>` and the page collapsed under the reader. A skeleton
+  now means no data at all; a kept response is dimmed and `aria-busy` (`placeholderDim`,
+  `lib/utils.ts`) over everything the control scopes. **Never across a currency switch.** The
+  reset empties what the function would keep, but query-core reuses a placeholder already on
+  screen without asking again while the function is the same one, so a Top N load in flight when
+  the switch landed kept EUR rows under the CHF label. Hence one function per base currency; a
+  bare `keepPreviousData` or a `placeholderData` not built on the hook fails the family test in
+  `CurrencyProvider.reset.test.tsx`. Activity keeps a page across a page turn only: its figures
+  strip sums the rows against the kind filter, so old rows under a new filter are wrong figures.
 - **A manual IBKR sync invalidates every reader of the rows it wrote** (`readsIbkrRows`, #23). It
   used to invalidate only `['portfolio']`. The statement also writes cash transactions, trades and
   positions, so `['dividends', …]` (two of them on the Performance tab beside the positions),

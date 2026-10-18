@@ -1,6 +1,6 @@
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { hashKey, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -11,15 +11,21 @@ import {
   ArrowDownToLine, ArrowLeftRight, ArrowRightLeft, ArrowUpFromLine, Banknote, Download,
   CircleDollarSign, HandCoins, Hash, Minus, Plus, ShoppingCart, Split, Tag, Wallet, type LucideIcon,
 } from 'lucide-react'
-import { cn, formatCount, formatCurrency, formatDate } from '@/lib/utils'
+import { cn, formatCount, formatCurrency, formatDate, placeholderDim } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { useBaseCurrency } from '@/lib/CurrencyContext'
+import { useBaseCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import { rangeFor, type TimeRange } from '@/lib/dateRanges'
 import { isSell, summarizeActivity, type ActivitySummary } from '@/lib/activitySummary'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
-import type { ActivityKind, ActivityRow } from '@/lib/api'
+import type { ActivityKind, ActivityParams, ActivityRow } from '@/lib/api'
 
 const PAGE_SIZE = 100
+
+/** Two ledger requests that differ in nothing but the page. */
+function isPageTurn(previous: unknown, next: ActivityParams): boolean {
+  if (typeof previous !== 'object' || previous === null) return false
+  return hashKey([{ ...previous, offset: 0 }]) === hashKey([{ ...next, offset: 0 }])
+}
 
 /**
  * The figures strip needs every row of the window, so a window longer than one page is
@@ -344,10 +350,17 @@ export function ActivityTab() {
     [window, kinds, symbol, page]
   )
 
-  const { data, isLoading, isError } = useQuery({
+  const keepPrevious = useKeepPreviousData()
+  const { data, isLoading, isError, isPlaceholderData } = useQuery({
     queryKey: ['portfolio', 'activity', params],
     queryFn: () => api.getActivity(params),
     staleTime: 5 * 60 * 1000,
+    // The last page stays while the next one loads (#68): Previous/Next sit under the table,
+    // so blanking it unmounted the button just pressed. Only across a page turn: the figures
+    // strip sums the rows against the kind filter, and old rows under a new filter would be
+    // wrong figures, not merely stale ones.
+    placeholderData: (previous, previousQuery) =>
+      isPageTurn(previousQuery?.queryKey[2], params) ? keepPrevious(previous) : undefined,
   })
 
   /** Any filter change invalidates the page number — page 4 of a narrower result is
@@ -490,7 +503,7 @@ export function ActivityTab() {
           </div>
         </div>
 
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4" aria-busy={isPlaceholderData || undefined}>
           {summary && !isError && (
             <ActivityFigures summary={summary} currency={data?.base_currency || baseCurrency} />
           )}
@@ -519,6 +532,7 @@ export function ActivityTab() {
                   row.ib_key ?? `${row.kind}-${row.date}-${row.symbol ?? ''}-${index}`
                 }
                 label="Activity table"
+                className={placeholderDim(isPlaceholderData)}
                 density="normal"
                 caption={`Account activity from ${data.start_date} to ${data.end_date}, newest first`}
               />

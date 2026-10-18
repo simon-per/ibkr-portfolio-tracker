@@ -11,7 +11,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader'
 import { api } from '@/lib/api'
 import type { LookthroughCompanyRow, LookthroughFundCoverage, LookthroughResponse } from '@/lib/api'
 import { displayName } from '@/lib/securityName'
-import { useFormatCurrency } from '@/lib/CurrencyContext'
+import { useFormatCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTable'
@@ -23,7 +23,7 @@ import { paintBackground } from '@/lib/chartPaint'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
 import { listingTickers } from '@/lib/lookthroughIdentity'
-import { formatCount } from '@/lib/utils'
+import { cn, formatCount, placeholderDim } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { unresolvedTone } from '@/lib/lookthroughTone'
 import { TONE_CHIP } from '@/lib/tone'
@@ -396,11 +396,15 @@ export function LookThroughTab() {
   // Collapsed by default — see the module docstring for why the notes live in here.
   const [coverageOpen, setCoverageOpen] = useRememberedOpen('fund-coverage')
   const formatCurrency = useFormatCurrency()
+  const keepPrevious = useKeepPreviousData()
 
-  const { data, isLoading, isError } = useQuery({
+  // The last rows stay while another Top N loads (#68): blanking the tab to skeletons
+  // unmounted the button just pressed (focus fell to <body>) and collapsed the page under it.
+  const { data, isError, isPlaceholderData } = useQuery({
     queryKey: ['portfolio', 'lookthrough', limit],
     queryFn: () => api.getLookthrough(limit),
     staleTime: 30 * 60 * 1000,
+    placeholderData: keepPrevious,
   })
 
   const companyColumns = useMemo(
@@ -480,7 +484,7 @@ export function LookThroughTab() {
 
   return (
     <div className="space-y-6">
-      {isLoading || !data ? (
+      {!data ? (
         <>
           <KpiPanel columns={4}>
             <KpiCardSkeleton tile count={4} />
@@ -589,7 +593,10 @@ export function LookThroughTab() {
             )}
           </KpiPanel>
 
-          <InsightStrip data={data} formatCurrency={formatCurrency} />
+          {/* Two of its figures read the loaded rows, so it is scoped by Top N too. */}
+          <div className={placeholderDim(isPlaceholderData)} aria-busy={isPlaceholderData || undefined}>
+            <InsightStrip data={data} formatCurrency={formatCurrency} />
+          </div>
 
           {/*
             The itemised `warnings[]` used to render here as a `role="alert"` block. They are
@@ -626,7 +633,10 @@ export function LookThroughTab() {
                 />
               }
             />
-            <CardContent className="space-y-4">
+            <CardContent
+              className={cn('space-y-4', placeholderDim(isPlaceholderData))}
+              aria-busy={isPlaceholderData || undefined}
+            >
               {data.companies.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   No company exposure yet. Sync your IBKR data to see your holdings.

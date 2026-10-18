@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ActivityTab } from './ActivityTab'
 import { api } from '@/lib/api'
@@ -174,5 +174,59 @@ describe('ActivityTab figures strip', () => {
     expect(tile.textContent).toContain('—')
     expect(screen.getByText('900')).toBeTruthy()
     expect(getActivity).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ActivityTab paging (GitHub #68)', () => {
+  /** A window of 250 rows: three pages, and the figures strip's whole-window request. */
+  function mockLedger() {
+    let release: () => void = () => {}
+    const getActivity = vi.spyOn(api, 'getActivity').mockImplementation((params) => {
+      const rows = (from: number, n: number) =>
+        Array.from({ length: n }, (_, i) => cashRow(1, true, `r${from + i}`))
+      if (params?.limit === 500) return Promise.resolve(page(rows(0, 250), 250, 500))
+      if (!params?.offset) return Promise.resolve(page(rows(0, 100), 250))
+      return new Promise((resolve) => {
+        release = () => resolve({ ...page(rows(params.offset ?? 0, 100), 250), offset: params.offset ?? 0 })
+      })
+    })
+    return { getActivity, release: () => release() }
+  }
+  const tableRows = () => document.querySelectorAll('tbody tr').length
+
+  it('keeps Next focused and the current page on screen while the next page loads', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
+    const { getActivity, release } = mockLedger()
+    withProviders(<ActivityTab />)
+    const next = await screen.findByRole('button', { name: 'Next' })
+    await waitFor(() => expect(tableRows()).toBe(100))
+
+    next.focus()
+    fireEvent.click(next)
+    await waitFor(() => expect(getActivity.mock.calls.some(([p]) => p?.offset === 100)).toBe(true))
+
+    expect(next.isConnected).toBe(true)
+    expect(document.activeElement).toBe(next)
+    expect(tableRows()).toBe(100)
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull()
+
+    release()
+    await waitFor(() => expect(document.querySelector('[aria-busy]')).toBeNull())
+    expect(screen.getByText(/101–200 of/)).toBeTruthy()
+  })
+
+  it('blanks a filter change rather than summing old rows against the new filter', async () => {
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
+    vi.spyOn(api, 'getActivity').mockImplementation((params) =>
+      params?.kinds ? new Promise(() => {}) : Promise.resolve(page([cashRow(500, true, 'd')])),
+    )
+    withProviders(<ActivityTab />)
+    await waitFor(() => expect(tableRows()).toBe(1))
+
+    fireEvent.click(screen.getByRole('button', { name: /Trades/ }))
+    await waitFor(() => expect(tableRows()).toBe(0))
+    expect(screen.queryByText('Net deposits')).toBeNull()
   })
 })

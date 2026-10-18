@@ -210,7 +210,9 @@ through funds, with what the funds add). Every share is the rows' own `pct_of_po
 whole book, summed and never divided. An unpriced book or an empty ranking gives dashes. **No
 sector figure, deliberately**: a "largest sector" headline would be the portfolio-level rollup
 the next section declines. The first two are decided inside the top 25 rows, so the Top 25/50/100
-control never moves them; the last two read the loaded rows and can change with it.
+control never moves them; the last two read the loaded rows and can change with it. While another
+Top N loads, the strip and the company card keep the previous rows, dimmed
+([frontend.md](frontend.md), *The query cache*).
 
 Each company wears its logo by ISIN (`ConstituentAvatar` → `TickerAvatar isin`): a folded
 company carries several ISINs and the store may hold a mark for any one, so the first with a
