@@ -564,6 +564,117 @@ async def test_a_convertible_sale_alongside_an_unconvertible_one_still_counts():
         await engine.dispose()
 
 
+# ── SELL trades convert through NativeToBase (GitHub issue #46) ─────────
+#
+# The realized loop was a hand-written copy of the native->EUR->base two-step: two rate
+# lookups per sale, and a sale in the base currency round-tripped through EUR. A foreign
+# sale's figures must not move; a base-currency sale's become its own amounts exactly.
+
+SALE_DAY = date(2026, 5, 4)
+#: A CHF->EUR rate and an EUR->CHF rate that are not exact inverses (0.9375 * 1.0640 =
+#: 0.99750): the two separately rounded series every real round trip goes through.
+CHF_TO_EUR = Decimal("0.9375")
+EUR_TO_CHF = Decimal("1.0640")
+USD_TO_EUR = Decimal("0.9100")
+
+
+class _CountingRates:
+    """A `CurrencyService` stand-in that counts lookups, keyed by native currency."""
+
+    def __init__(self, rates):
+        self.rates = rates
+        self.calls = 0
+
+    async def get_exchange_rate(self, currency, on_date, to_currency="EUR"):
+        self.calls += 1
+        return self.rates[currency]
+
+
+async def _report_under_chf(monkeypatch, session, rates):
+    from app.services.base_fx import BaseFx
+    from app.services.portfolio_service import PortfolioService
+
+    async def _chf(self):
+        return BaseFx("CHF", {SALE_DAY: EUR_TO_CHF})
+
+    monkeypatch.setattr(PortfolioService, "_load_base_fx", _chf)
+    service = TaxService(session)
+    service.currency_service = rates
+    return await service.get_tax_report(SALE_DAY.year)
+
+
+async def _sell(session, key, currency, proceeds, pnl):
+    await TradeRepository(session).upsert({
+        "ib_key": key, "conid": "100", "security_id": 1, "symbol": "AAA",
+        "trade_date": SALE_DAY, "buy_sell": "SELL", "quantity": Decimal("-1"),
+        "price": proceeds, "proceeds": proceeds, "commission": Decimal("0"),
+        "currency": currency, "realized_pnl": pnl, "asset_category": "STK",
+    })
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_sale_converts_exactly_as_the_old_two_step_did(monkeypatch):
+    engine, session = await _make_session()
+    try:
+        await _sell(session, "TX-USD", "USD", Decimal("1234.56"), Decimal("210.98"))
+        await session.commit()
+
+        report = await _report_under_chf(monkeypatch, session, _CountingRates({"USD": USD_TO_EUR}))
+
+        # The removed code, written out: to EUR at the trade date, then EUR -> CHF.
+        old_proceeds = Decimal("1234.56") * USD_TO_EUR * EUR_TO_CHF
+        old_gain = Decimal("210.98") * USD_TO_EUR * EUR_TO_CHF
+        old_cost = (Decimal("1234.56") - Decimal("210.98")) * USD_TO_EUR * EUR_TO_CHF
+        (row,) = report["realized_gains"]
+        assert (row["proceeds"], row["cost_basis"], row["gain_loss"]) == (
+            round(float(old_proceeds), 2), round(float(old_cost), 2), round(float(old_gain), 2),
+        ) == (1195.35, 991.07, 204.28)
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_sale_in_the_base_currency_is_its_own_amount_not_a_round_trip(monkeypatch):
+    engine, session = await _make_session()
+    try:
+        await _sell(session, "TX-CHF", "CHF", Decimal("4500.00"), Decimal("300.00"))
+        await session.commit()
+
+        rates = _CountingRates({"CHF": CHF_TO_EUR})
+        report = await _report_under_chf(monkeypatch, session, rates)
+
+        (row,) = report["realized_gains"]
+        assert (row["proceeds"], row["cost_basis"], row["gain_loss"]) == (4500.0, 4200.0, 300.0)
+        # The old round trip read 4,488.75 / 4,189.50 / 299.25 — 0.25% low on every
+        # figure, on the line a reader checks against the broker statement.
+        assert round(float(Decimal("4500.00") * CHF_TO_EUR * EUR_TO_CHF), 2) == 4488.75
+        # And it asked for no rate at all.
+        assert rates.calls == 0
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sales_on_one_currency_and_date_cost_one_rate_lookup(monkeypatch):
+    engine, session = await _make_session()
+    try:
+        for i in range(5):
+            await _sell(session, f"TX-USD-{i}", "USD", Decimal("100"), Decimal("10"))
+        await session.commit()
+
+        rates = _CountingRates({"USD": USD_TO_EUR})
+        report = await _report_under_chf(monkeypatch, session, rates)
+
+        assert len(report["realized_gains"]) == 5
+        # Two lookups per sale (proceeds and gain) before NativeToBase's memo: 10.
+        assert rates.calls == 1
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_a_failed_holdings_snapshot_is_flagged_not_reported_as_zero(monkeypatch):
     engine, session = await _make_session()

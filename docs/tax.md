@@ -68,6 +68,28 @@ timeline. Positions with no resolvable price near that date are **omitted**, not
 structurally invisible unless rendered: `TaxTab` shows it as a banner and `to_csv()` writes a WARNINGS
 block. Tests: `tests/test_tax_service.py`, plus the shape assertions in `tests/test_api_smoke.py`.
 
+**A SELL trade converts through `native_amounts.NativeToBase`** (2026-10-18, GitHub issue #46).
+`trades` store proceeds and realized P&L in the trade's own currency, so they take the
+native→EUR→base two-step; the realized loop had its own copy (`to_eur_or_none` twice, then
+`base_fx.convert` three times). Now it builds one `NativeToBase` per report and converts proceeds
+and gain through it, with `cost = proceeds − gain` in base. What that changed:
+
+- **A sale in a non-base currency: identical figures.** The same rate times the same rate;
+  `test_a_foreign_sale_converts_exactly_as_the_old_two_step_did` writes the old formula out.
+- **A sale in the base currency itself: now exact, where it was a round trip.** A CHF sale under
+  a CHF base went CHF→EUR→CHF on two separately rounded rate series, which are not inverses, so
+  every figure moved by their product's distance from 1 — inside the ≤0.3% the owner accepted in
+  2026-09 (`docs/troubleshooting.md`), and a near miss on the number a reader checks against the
+  broker statement. It is its own amount now (CHF 4,500.00 rather than 4,488.75 in the test's
+  rates). An EUR sale under an EUR base was already exact. This is the one change to the report's
+  figures, and it moves them toward the statement, not away from it.
+- **Rate lookups:** one per `(currency, trade date)` instead of two per sale, and none for a
+  base-currency sale.
+
+The skip-and-count rule is unchanged: a sale with no rate is omitted and named in `warnings[]`.
+`tests/test_eur_conversion_family.py` fails any module outside `native_amounts` that feeds a
+to-EUR result into a second `.convert(...)`.
+
 Frontend: `TaxTab.tsx`. It's a filing aid, not tax advice.
 
 **An estimated row's withholding is absent, not 0.00** (2026-10-14; the backend half 2026-10-17).

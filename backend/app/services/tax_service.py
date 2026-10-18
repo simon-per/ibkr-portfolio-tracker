@@ -26,9 +26,8 @@ from app.models.trade import Trade
 from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
-from app.services.eur_conversion import to_eur_or_none
 from app.services.dividend_service import DividendService
-from app.services.native_amounts import cash_flow_in_base
+from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.portfolio_service import PortfolioService
 
 logger = logging.getLogger(__name__)
@@ -194,29 +193,31 @@ class TaxService:
         warnings: List[str] = []
         trades_skipped = 0
         skipped_currencies = set()
+        # Trade money is in the trade's own currency, so it takes the native->EUR->base
+        # two-step `NativeToBase` owns: one rate lookup per (currency, date), and a
+        # sale already in the base currency is its own amount rather than a round trip
+        # through EUR (GitHub issue #46 — this loop was a hand-written copy of it).
+        to_base = NativeToBase(self.currency_service, base_fx)
         for t, sec in trade_rows:
             if (t.buy_sell or "").upper() != "SELL":
                 continue
-            # Through the one shared rule (`eur_conversion`). It returned the
-            # *unconverted* amount on failure until 2026-07-30, reporting a foreign
-            # figure as base currency — a TWD sale ~35x high in a filing aid badged
-            # realized_source='trades', the badge that means authoritative.
-            proceeds_e = await to_eur_or_none(
-                self.currency_service, t.proceeds or Decimal("0"), t.currency, t.trade_date
+            # The conversion returned the *unconverted* amount on failure until
+            # 2026-07-30, reporting a foreign figure as base currency — a TWD sale ~35x
+            # high in a filing aid badged realized_source='trades', the badge that
+            # means authoritative. `None` is the only answer to a missing rate now.
+            proceeds = await to_base.convert(
+                t.proceeds or Decimal("0"), t.currency, t.trade_date
             )
-            gain_e = await to_eur_or_none(
-                self.currency_service, t.realized_pnl or Decimal("0"), t.currency, t.trade_date
+            gain = await to_base.convert(
+                t.realized_pnl or Decimal("0"), t.currency, t.trade_date
             )
-            if proceeds_e is None or gain_e is None:
+            if proceeds is None or gain is None:
                 # Reporting the raw foreign amount would be worse than omitting
                 # it: the figure looks plausible and the badge says authoritative.
                 trades_skipped += 1
                 skipped_currencies.add(t.currency or "?")
                 continue
-            cost_e = proceeds_e - gain_e
-            proceeds = base_fx.convert(proceeds_e, t.trade_date)
-            gain = base_fx.convert(gain_e, t.trade_date)
-            cost = base_fx.convert(cost_e, t.trade_date)
+            cost = proceeds - gain
             r_proceeds += proceeds
             r_cost += cost
             r_gain += gain

@@ -160,9 +160,10 @@ decision; read the entry before "fixing" one.
   tokens and a visible dark-mode change to that tab, which is its own piece of work.
 - **FX drifts under 0.3% are accepted — owner decision, 2026-09-12.** A security quoted in the
   base currency is valued through native→EUR→base with two independently rounded ECB quotes,
-  ~0.12% high, at the five valuation sites the timeline-equivalence test pins; the same round trip
-  sits in the tax report's SELL-trade conversion, and `BaseFx`'s rate cache starts at the first tax
-  lot (a pre-lot deposit uses a rate up to a week off). **None of the three is a task.** If a
+  ~0.12% high, at the five valuation sites the timeline-equivalence test pins; and `BaseFx`'s rate
+  cache starts at the first tax lot (a pre-lot deposit uses a rate up to a week off). **Neither is
+  a task.** (The tax report's SELL-trade conversion had the same round trip until 2026-10-18; it
+  goes through `NativeToBase` now, so a base-currency sale is exact — `docs/tax.md`.) If a
   figure ever drifts *past* 0.3%, the fix is the `NativeToBase` short-circuit at the valuation
   sites, and `test_timeline_equivalence.py` is the net.
 - **The realized-P&L headline switches source all-or-nothing, unscoped by account** — found
