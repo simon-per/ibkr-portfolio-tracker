@@ -230,6 +230,8 @@ async def _seed(session: AsyncSession) -> None:
     session.add(WatchlistItem(yahoo_ticker="NVDA", symbol="NVDA", company_name="NVIDIA",
                               market_cap=4_000_000_000_000, data_currency="USD",
                               currency="USD"))
+    # A watchlist name that is one of our securities (AAPL, sold): served with its id.
+    session.add(WatchlistItem(yahoo_ticker="AAPL", symbol="AAPL", company_name="Apple"))
 
     session.add(CashFlow(
         ib_key="C1", flow_date=START + timedelta(days=1), flow_type=DEPOSIT_WITHDRAW,
@@ -831,9 +833,14 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
 
     # The watchlist serves the same conversion (`app/services/market_cap.py`), so a cap
     # in another currency no longer reaches the page as a bare native number.
-    (nvda,) = client.get("/api/watchlist").json()
+    watch = {row["yahoo_ticker"]: row for row in client.get("/api/watchlist").json()}
+    nvda = watch["NVDA"]
     assert nvda["market_cap"] == 4_000_000_000_000
     assert nvda["market_cap_base"] == int(4_000_000_000_000 * 0.9 * 0.94)
+    # A ticker that is one of our securities carries its id, for its logo; one that is
+    # not carries none.
+    assert watch["AAPL"]["security_id"] == 3
+    assert nvda["security_id"] is None
     ratings = client.get("/api/analyst-ratings/status").json()
     assert ratings["newest_update"].endswith("+00:00")
     assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")

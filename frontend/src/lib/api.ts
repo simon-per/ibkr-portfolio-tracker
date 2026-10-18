@@ -702,6 +702,8 @@ export interface FundamentalsSyncResponse {
 export interface WatchlistItem {
   id: number;
   yahoo_ticker: string;
+  /** The security this ticker is, when it is one of ours — for its logo. */
+  security_id?: number | null;
   symbol: string | null;
   company_name: string | null;
   notes: string | null;

@@ -154,16 +154,22 @@ async def _responses(db: AsyncSession, items) -> list[WatchlistItemResponse]:
     """The items as served, each market cap also in the base currency (`market_cap.py`):
     a KRW or JPY cap printed bare reads like a dollar figure."""
     to_base = await market_cap_to_base(db)
+    # A ticker that is one of our securities carries its id, for the stored logo.
+    security_ids = await WatchlistService(db).security_ids_by_ticker()
     return [
-        _item_to_response(item, await to_base(item.market_cap, item.data_currency))
+        _item_to_response(
+            item, await to_base(item.market_cap, item.data_currency),
+            security_ids.get(item.yahoo_ticker.upper()),
+        )
         for item in items
     ]
 
 
-def _item_to_response(item, market_cap_base=None) -> WatchlistItemResponse:
+def _item_to_response(item, market_cap_base=None, security_id=None) -> WatchlistItemResponse:
     return WatchlistItemResponse(
         id=item.id,
         yahoo_ticker=item.yahoo_ticker,
+        security_id=security_id,
         symbol=item.symbol,
         company_name=item.company_name,
         notes=item.notes,

@@ -397,6 +397,8 @@ class WatchlistItemResponse(BaseModel):
     """Watchlist item with cached fundamentals and technical indicators"""
     id: int
     yahoo_ticker: str
+    # The security this ticker is, when it is one of ours (held or sold) — for its logo.
+    security_id: Optional[int] = None
     symbol: Optional[str] = None
     company_name: Optional[str] = None
     notes: Optional[str] = None

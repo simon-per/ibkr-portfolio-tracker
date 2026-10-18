@@ -40,8 +40,9 @@ class WatchlistService:
     # nightly runs, and never a whole earnings season late.
     ESTIMATES_REFRESH_AFTER = timedelta(days=7)
 
-    # `_held_closes`' ticker map, built once per service (a pass builds its own).
-    _held_by_ticker: Optional[Dict[str, int]] = None
+    # Yahoo ticker -> security id, built once per service (a pass builds its own), keyed by
+    # `held_only`: `_held_closes` reads the held map, the served rows' logo id every security.
+    _ticker_index: Optional[Dict[bool, Dict[str, int]]] = None
 
     # Latched the first time Yahoo answers with a rate limit, mirroring
     # `MarketDataService.rate_limited`. On the class as well as the instance so a
@@ -260,17 +261,7 @@ class WatchlistService:
         RSI needs are stored. Resolved like every Yahoo caller (`_get_yahoo_ticker`) over
         held, Yahoo-eligible securities, once per service.
         """
-        if self._held_by_ticker is None:
-            from app.services.market_data_service import MarketDataService
-
-            market = MarketDataService(self.db)
-            securities = (await self.db.execute(
-                select(Security).where(yahoo_eligible(), held())
-            )).scalars().all()
-            self._held_by_ticker = {
-                (await market._get_yahoo_ticker(s)).upper(): s.id for s in securities
-            }
-        security_id = self._held_by_ticker.get(yahoo_ticker.upper())
+        security_id = (await self.security_ids_by_ticker(held_only=True)).get(yahoo_ticker.upper())
         if security_id is None:
             return None
         rows = (await self.db.execute(
@@ -284,6 +275,28 @@ class WatchlistService:
         if len(rows) < RSI_MIN_CLOSES:
             return None
         return np.array([float(c) for c in rows])
+
+    async def security_ids_by_ticker(self, held_only: bool = False) -> Dict[str, int]:
+        """
+        Upper-cased Yahoo ticker -> security id over Yahoo-eligible securities, held ones only
+        when asked, resolved like every Yahoo caller (`_get_yahoo_ticker`). The held map feeds
+        `_held_closes`; the full one gives a served row its security's logo (a sold holding's
+        logo is stored too). Pure database; built once per service and flag.
+        """
+        if self._ticker_index is None:
+            self._ticker_index = {}
+        if held_only not in self._ticker_index:
+            from app.services.market_data_service import MarketDataService
+
+            market = MarketDataService(self.db)
+            query = select(Security).where(yahoo_eligible()).order_by(Security.id)
+            if held_only:
+                query = query.where(held())
+            index: Dict[str, int] = {}
+            for security in (await self.db.execute(query)).scalars().all():
+                index.setdefault((await market._get_yahoo_ticker(security)).upper(), security.id)
+            self._ticker_index[held_only] = index
+        return self._ticker_index[held_only]
 
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:
         """Remove outlier prices (likely currency-mixed data)."""
