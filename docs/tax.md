@@ -26,7 +26,10 @@ Two honesty flags, both badged in the UI and CSV:
   it would resurrect the double-count. The two sources are never summed for the same period; each
   income row carries its `source`.
 - `realized_source`: `trades` (IBKR FIFO) vs `closed_lot_estimate` (market price at close date — was
-  ~8% off on a spot check, hence the badge)
+  ~8% off on a spot check, hence the badge). A closed lot the estimate cannot price or convert near
+  its close date is omitted, and since 2026-10-18 (GitHub issue #19) a `warnings[]` line names the
+  count, read from `PortfolioService.last_realized_skipped` right after the call — the realized
+  totals are then partial, in either direction.
 
 **A partial Steuerwert says so.** `holdings_snapshot_as_of` omits a lot it cannot price or
 convert — correct, and stated below — but until 2026-08-05 it omitted it *silently*, so a wealth-tax

@@ -253,6 +253,18 @@ class TaxService:
                     "cost_basis": round(float(cost), 2),
                     "gain_loss": round(float(gain), 2),
                 })
+            # Read the latch right after the loop: per-run state, like
+            # `last_snapshot_skipped` below. A lot with no price near its close date is
+            # missing from the rows above, so the year's realized totals are partial.
+            unpriced_lots = sum(
+                len(d) for d in portfolio.last_realized_skipped.values()
+            )
+            if unpriced_lots:
+                warnings.append(
+                    f"{unpriced_lots} closed lot(s) could not be priced at their close "
+                    f"date and are omitted from the realized gains estimate, so the "
+                    f"realized totals below cover only part of the year's sales."
+                )
 
         if trades_skipped:
             currencies = ", ".join(sorted(skipped_currencies))

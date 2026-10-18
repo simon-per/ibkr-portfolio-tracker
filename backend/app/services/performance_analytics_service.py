@@ -244,7 +244,7 @@ class PerformanceAnalyticsService:
         if unpriced:
             warnings.append(
                 f"{unpriced} holding{'s' if unpriced != 1 else ''} could not be priced at "
-                f"an endpoint and {'are' if unpriced != 1 else 'is'} left out of every leg, "
+                f"an endpoint or sale and {'are' if unpriced != 1 else 'is'} left out of every leg, "
                 f"so the figures cover less than the whole book."
             )
         if unsplit_count:
@@ -449,7 +449,8 @@ class PerformanceAnalyticsService:
         if computed["unpriced"]:
             n = len(computed["unpriced"])
             warnings.append(
-                f"{n} holding{'s' if n != 1 else ''} could not be priced at an endpoint and "
+                f"{n} holding{'s' if n != 1 else ''} could not be priced at an endpoint or "
+                f"sale and "
                 f"{'are' if n != 1 else 'is'} left out of every segment."
             )
         if SECTOR_UNKNOWN in by_sector or UNKNOWN_COUNTRY in by_country:
@@ -493,8 +494,19 @@ class PerformanceAnalyticsService:
         """
         base_fx = await self.portfolio._load_base_fx()
         rows = await self.portfolio.realized_rows_from_closed_lots(base_fx)
+        # Read the latch immediately: a lot with no price near its close date is not
+        # in `rows`, so its security is missing or shows only some of its lots.
+        unpriced_lots = sum(len(d) for d in self.portfolio.last_realized_skipped.values())
+        unpriced_warning = (
+            f"{unpriced_lots} closed lot{'s' if unpriced_lots != 1 else ''} could not be "
+            f"priced at {'their' if unpriced_lots != 1 else 'its'} close date and "
+            f"{'are' if unpriced_lots != 1 else 'is'} left out."
+        ) if unpriced_lots else None
         if not rows:
-            return self._closed_empty(base_fx.base_currency)
+            empty = self._closed_empty(base_fx.base_currency)
+            if unpriced_warning:
+                empty["warnings"].append(unpriced_warning)
+            return empty
 
         open_lot_sids = {
             sid for (sid,) in (await self.db.execute(
@@ -606,6 +618,8 @@ class PerformanceAnalyticsService:
         post_judged = [p for p in positions if p["post_sale_pct"] is not None]
 
         warnings: List[str] = []
+        if unpriced_warning:
+            warnings.append(unpriced_warning)
         if trade_fx_missing:
             warnings.append(
                 f"{len(trade_fx_missing)} security's SELL trades had no FX rate on the "

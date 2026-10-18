@@ -4,7 +4,7 @@ Calculates cost basis and market value for the portfolio over time.
 """
 import calendar
 from collections import defaultdict
-from typing import List, Dict, Optional, Sequence, Tuple
+from typing import List, Dict, Optional, Sequence, Set, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy import select, and_, or_, func
@@ -75,12 +75,20 @@ class PortfolioService:
     # too, so a sixth return value would be six edits to say one thing.
     last_xirr_unpriced: int = 0
 
+    # Closed lots `realized_rows_from_closed_lots` could not price (or convert) at their
+    # close date, on its most recent run: security id -> the close dates of its skipped
+    # lots. The ids feed the window readers' `unpriced` counts and the dates put the
+    # timeline's flag on the day whose flow is short. A latch rather than a tuple for
+    # the reason above — six callers, the tax report and the tests unpack the rows.
+    last_realized_skipped: Dict[int, Set[date]] = {}
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.market_data_service = MarketDataService(db)
         self.currency_service = CurrencyService(db)
         self.last_snapshot_skipped = []
         self.last_xirr_unpriced = 0
+        self.last_realized_skipped = {}
 
     async def get_base_currency(self) -> str:
         """Return the configured base (display) currency."""
@@ -213,6 +221,12 @@ class PortfolioService:
         ):
             d = row["close_date"]
             disposals_by_day[d] = disposals_by_day.get(d, Decimal("0")) + row["proceeds"]
+        # A disposal that could not be priced leaves that day's flow short; the day is
+        # flagged instead of claiming to be complete.
+        realized_skipped_by_day: Dict[date, set] = {}
+        for sid, close_dates in self.last_realized_skipped.items():
+            for d in close_dates:
+                realized_skipped_by_day.setdefault(d, set()).add(sid)
 
         # Uninvested cash, and the contributions line that is its honest partner.
         # Both are running balances over the whole history, so they are built once here
@@ -235,6 +249,7 @@ class PortfolioService:
             start_date, end_date, taxlots_with_securities, price_cache,
             exchange_rate_cache, price_currency_cache, base_fx,
             disposals_by_day=disposals_by_day,
+            realized_skipped_by_day=realized_skipped_by_day,
             position_start=await self._load_position_start_dates(),
             cash_events=cash_events,
             money_in_legs=contributions["money_in_legs"],
@@ -260,6 +275,7 @@ class PortfolioService:
         price_currency_cache: Optional[Dict],
         base_fx: BaseFx,
         disposals_by_day: Optional[Dict[date, Decimal]] = None,
+        realized_skipped_by_day: Optional[Dict[date, set]] = None,
         position_start: Optional[Dict[int, date]] = None,
         cash_events: Optional[List[Tuple[date, Decimal]]] = None,
         money_in_legs: Optional[List[Tuple[date, Decimal]]] = None,
@@ -289,6 +305,7 @@ class PortfolioService:
         events.sort(key=lambda e: e[0])
 
         disposals_by_day = disposals_by_day or {}
+        realized_skipped_by_day = realized_skipped_by_day or {}
         position_start = position_start or {}
         # Cash and money-in are running BALANCES, not per-day flows, so events before
         # the window are carried into the opening total rather than discarded the way
@@ -316,6 +333,9 @@ class PortfolioService:
         # Flows accumulate until the next emitted row: only weekdays are emitted,
         # so a purchase or sale dated on a weekend belongs to the following one.
         pending_flow = Decimal("0")
+        # Securities whose disposal is missing from `pending_flow`; they ride to the
+        # same emitted row the flow does.
+        pending_skipped: set = set()
         while d <= end_date:
             while i < len(events) and events[i][0] <= d:
                 _, sid, dq, dc = events[i]
@@ -327,6 +347,7 @@ class PortfolioService:
                     pending_flow += dc
                 i += 1
             pending_flow -= disposals_by_day.get(d, Decimal("0"))
+            pending_skipped |= realized_skipped_by_day.get(d, set())
 
             while ci < len(cash_events) and cash_events[ci][0] <= d:
                 cash_running += cash_events[ci][1]
@@ -341,7 +362,9 @@ class PortfolioService:
                 # resolved. Counted rather than only logged: a 730-day window over 40
                 # securities can emit ~29k of those warnings, which is noise, while the
                 # response carried no sign that its market value was a partial sum.
-                unpriced = 0
+                # Starts from today's unpriceable disposals, a set so a partly sold
+                # security that is also unpriced as a holding counts once.
+                unpriced = set(pending_skipped)
                 for sid, qty in qty_by_sec.items():
                     if qty <= 0:
                         continue
@@ -355,7 +378,7 @@ class PortfolioService:
                         continue
                     price = self._get_market_price_with_fallback(sid, d, price_cache)
                     if not price:
-                        unpriced += 1
+                        unpriced.add(sid)
                         sec = securities_by_id[sid]
                         logger.warning(
                             f"Skipping position for security {sid} ({sec.symbol}) on {d}: "
@@ -372,7 +395,7 @@ class PortfolioService:
                             price_currency, d, exchange_rate_cache
                         )
                         if not rate:
-                            unpriced += 1
+                            unpriced.add(sid)
                             logger.warning(
                                 f"Skipping position for security {sid} on {d}: "
                                 f"no exchange rate for {price_currency}"
@@ -403,8 +426,9 @@ class PortfolioService:
                     # past the last cached price every holding drops out and the point
                     # reads market value 0 / −100%, which is a fabricated wipeout rather
                     # than a gap; the partial case is worse, because a plausible
-                    # +15% invites no doubt at all.
-                    "unpriced_holdings": unpriced,
+                    # +15% invites no doubt at all. Also counts a sale today whose
+                    # proceeds could not be priced, so `external_flow_eur` is short.
+                    "unpriced_holdings": len(unpriced),
                     # Uninvested cash. A sale moves value from `market_value_eur` to
                     # here rather than out of the account, which is why `total_value_eur`
                     # is flat across a rotation while the holdings line falls off a
@@ -432,6 +456,7 @@ class PortfolioService:
                     ),
                 })
                 pending_flow = Decimal("0")
+                pending_skipped = set()
             d += timedelta(days=1)
 
         return timeline
@@ -887,6 +912,8 @@ class PortfolioService:
         closed before the <Trades> section was enabled): proceeds are approximated
         as quantity × market_price × fx_rate on close_date. Lots that can't
         be priced within the 14-day fallback window are skipped and not counted.
+        They land in `last_realized_skipped`, but this fallback has no `warnings[]`
+        surface to carry them, so here the skip stays silent (GitHub issue #19).
 
         Values are returned in the base currency (proceeds converted at close_date,
         cost basis at open_date). Output keys keep the *_eur suffix.
@@ -1057,8 +1084,16 @@ class PortfolioService:
         within [start, end].
 
         Shared by the portfolio realized totals and the tax report's fallback so
-        the two views can never disagree about the same closed lots. Lots that
-        can't be priced (or converted) are skipped, exactly as before.
+        the two views can never disagree about the same closed lots.
+
+        A lot that can't be priced (or converted) near its close date is left out of
+        the rows and **recorded in `self.last_realized_skipped`** (security id -> close
+        dates), which resets on entry. Read it immediately after the call. Every window
+        reader uses these rows as its disposal term, so a silent skip read the sale as
+        a total loss (`pnl = -start_value`) while the response claimed to be complete:
+        attribution adds the ids to its `unpriced` set, XIRR to `last_xirr_unpriced`,
+        the timeline flags the close day, and closed positions and the tax report
+        each carry a warning.
 
         ``exclude_accounts`` is passed only by the tax report, and it must be
         passed there: the fallback and the authoritative trade path answer the
@@ -1067,6 +1102,8 @@ class PortfolioService:
         where it came from. The portfolio's own realized totals blend, as they
         should — that is a return figure, not a tax one.
         """
+        # Reset before the early return too: per-run state, like `last_snapshot_skipped`.
+        self.last_realized_skipped = {}
         conditions = [TaxLot.is_open == False, TaxLot.close_date.isnot(None)]
         if exclude_accounts:
             conditions.append(Security.account.notin_(tuple(exclude_accounts)))
@@ -1096,6 +1133,7 @@ class PortfolioService:
         )
 
         rows: List[Dict] = []
+        skipped: Dict[int, Set[date]] = {}
         for lot, security in closed_lots:
             price = self._get_market_price_with_fallback(
                 security.id, lot.close_date, price_cache
@@ -1105,6 +1143,7 @@ class PortfolioService:
                     f"Skipping realized calc for closed lot {lot.id} "
                     f"({security.symbol}): no price near {lot.close_date}"
                 )
+                skipped.setdefault(security.id, set()).add(lot.close_date)
                 continue
 
             price_currency = price_currency_cache.get(security.id, security.currency)
@@ -1119,6 +1158,7 @@ class PortfolioService:
                         f"Skipping realized calc for closed lot {lot.id} "
                         f"({security.symbol}): no FX rate for {price_currency} near {lot.close_date}"
                     )
+                    skipped.setdefault(security.id, set()).add(lot.close_date)
                     continue
 
             proceeds_local = lot.quantity * price
@@ -1135,6 +1175,7 @@ class PortfolioService:
                 "proceeds_local": proceeds_local,
                 "price_currency": price_currency,
             })
+        self.last_realized_skipped = skipped
         return rows
 
     async def get_positions_breakdown(self) -> List[Dict]:
@@ -1399,6 +1440,10 @@ class PortfolioService:
         for row in realized:
             dates.append(row["close_date"])
             amounts.append(float(row["proceeds"]))
+        # A sale that could not be priced is a missing inflow, so the return reads low
+        # exactly as it does for an unpriced terminal value. Added to the endpoint count
+        # rather than unioned for the reason given above — there are no ids to union.
+        self.last_xirr_unpriced += len(self.last_realized_skipped)
 
         # Inflows: net dividends received in the window. Era-spliced exactly like
         # the dividend views, so the two sources never double-count a payment.
@@ -1475,7 +1520,8 @@ class PortfolioService:
               "effective_start": date, "effective_end": date,
               "base_fx": BaseFx,
               "securities": {sid: Security},
-              "unpriced": set(sid),             # held at an endpoint but unvaluable there
+              "unpriced": set(sid),             # unvaluable at an endpoint, or a sale in
+                                                # the window whose proceeds could not be priced
               "rows": {sid: {
                   "price_currency": str,
                   "start_mv_base", "end_mv_base",           # Decimal, base currency
@@ -1656,6 +1702,10 @@ class PortfolioService:
                 # A mixed-currency price history (a repair state) — the base figure is
                 # still right, the local split is not knowable.
                 entry["local_complete"] = False
+        # A sale inside the window is held at neither endpoint, so the endpoint checks
+        # above can never see one whose proceeds could not be priced — and without its
+        # disposal it reads `pnl = -start_value`. Excluded from both sides and counted.
+        unpriced_securities |= set(self.last_realized_skipped)
 
         rows: Dict[int, Dict] = {}
         for sid, entry in security_map.items():
@@ -1799,7 +1849,8 @@ class PortfolioService:
             "end_date": effective_end.isoformat(),
             "total_pnl_eur": round(total_pnl, 2),
             # > 0 means securities were left out because they could not be valued at an
-            # endpoint, so total_pnl_eur covers less than the whole book. Same signal
+            # endpoint or at a sale inside the window, so total_pnl_eur covers less than
+            # the whole book. Same signal
             # and same name as the timeline's and the summary's.
             "unpriced_holdings": len(computed["unpriced"]),
             "attributions": attributions

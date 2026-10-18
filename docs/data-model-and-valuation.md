@@ -190,11 +190,29 @@ annualizing a few days of noise. Attribution takes the same disposal term
 (`pnl = value_change + disposals − new_investment`), without which a position sold at a profit read as
 `−start_value`. Tests: `tests/test_xirr.py`, `tests/test_attribution.py`.
 
+**A disposal that cannot be priced is counted, not dropped** (GitHub issue #19).
+`realized_rows_from_closed_lots()` leaves out a lot with no price (14-day lookback) or no FX rate
+near its close date — a sold security whose price history has a gap of 15+ days right before the
+sale. Until 2026-10-18 that was only a log line, so every window reader lost the sale's proceeds
+and still called itself complete: attribution read `pnl = −start_value` with `unpriced_holdings: 0`
+(the security is held at neither endpoint, so the endpoint checks never saw it), and XIRR read low
+with `last_xirr_unpriced = 0`. The skipped lots now land in `PortfolioService.last_realized_skipped`
+(security id → close dates), a per-run latch reset on entry like `last_snapshot_skipped` — a tuple
+was rejected because six callers, the tax report and the tests unpack the rows. Read it right after
+the call. Attribution adds the ids to its `unpriced` set (excluded from both sides and counted, so
+the decomposition and segments follow), XIRR adds the count to `last_xirr_unpriced`, and the
+timeline counts the security in `unpriced_holdings` on the row whose `external_flow_eur` is short
+(a weekend close rides to the next weekday, as its flow does). Closed positions and the tax
+estimate each carry a `warnings[]` line; `get_realized_totals`' fallback has no warnings surface
+and stays silent. Test: `tests/test_realized_skip_counted.py`.
+
 **The attribution's per-security loop is `attribution_rows()` and there is one of it** (since
 2026-09-13). `get_performance_attribution` presents it; `PerformanceAnalyticsService` splits it
 into price and FX and folds it onto sectors. It keeps both base-currency and price-currency
 Decimals so the split can be made downstream, and `realized_rows_from_closed_lots` carries
-`proceeds_local` and `price_currency` for the same reason. The convention for the split, and
+`proceeds_local` and `price_currency` for the same reason. Its `unpriced` set holds a security
+unvaluable at an endpoint **or** sold inside the window with proceeds that could not be priced
+(above). The convention for the split, and
 why the local leg is `None` rather than 0 when an input is missing, are in
 [performance-analytics.md](performance-analytics.md). Change the disposal window or the
 close-date rule here and every consumer moves with it.

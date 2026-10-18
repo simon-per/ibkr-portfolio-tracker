@@ -129,6 +129,11 @@ Realized P&L is **IBKR's own FIFO figure** summed over the security's SELL trade
 exist (`realized_source: trade`), otherwise the market-price approximation over its closed
 lots that the tax report also uses (`closed_lots`). Cost is the closed lots' cost basis in
 both cases, so `return_pct` is against what was paid. Holding days are cost-weighted.
+A closed lot with no price near its close date is missing from those rows, so its security is
+absent or shows only some of its lots; `warnings[]` names the count
+(`last_realized_skipped`, [data-model-and-valuation.md](data-model-and-valuation.md)), on the
+empty response too. The same skip counts in the decomposition's and segments' "could not be
+priced at an endpoint or sale" line.
 
 `post_sale_pct` compares two rows of the security's **own price history in its quote
 currency** — the last close on or before the sale date against the newest close after it.
