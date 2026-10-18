@@ -700,6 +700,19 @@ owns the scope, so the scheduled pass and `POST /api/market-data/sync` share it:
   invalidation, `--purge-prices` — it is fetched to the last close only. Once complete it is priced
   to today, one request a day, for `post_sale_pct` (the owner's call on the issue: 18:00 only rather
   than letting that figure stop at the grace).
+- **A close date with no bar does not count as a gap** (GitHub issue #33, 2026-10-18). A holiday on
+  the listing's exchange (a heuristic close carries the statement's US `to_date`) or a delisting or
+  merger effective date is a *trailing* gap of the held span, which the holiday rule never
+  forgives. The repair fetch then returned only already-cached buffer days: no row written, no miss
+  stamped, no back-off, so the security asked for its span every day forever and never reached
+  `post_sale_pct`. The repair probe alone now passes `trailing_grace_weekdays=REPAIR_TRAILING_GRACE_WEEKDAYS`
+  (5, one trading week) to `get_missing_dates`: once the close is older than `HOLIDAY_GRACE_DAYS`
+  and an earlier bar exists, a trailing run of at most that many weekdays is forgiven. Valuation
+  looks back `PRICE_LOOKBACK_DAYS` from the close, so the earlier bar is read instead. A longer
+  trailing gap, a leading gap, or a younger close still repairs, and every other caller still sees
+  trailing gaps, so a purge refills. Stamping a miss when a fetch writes nothing was rejected: the
+  back-off bounds the cost but never ends it, and the security still never graduates.
+  `tests/test_sold_close_date_without_bar.py`.
 - **An empty answer from every provider backs the security off.** `fetch_and_cache_prices` stamps
   `securities.price_checked_at` and increments `price_miss_count` when Yahoo (every variation) and
   the AV fallback all came back empty for a non-empty missing range; `price_backoff_until` then

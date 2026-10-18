@@ -41,6 +41,19 @@ PRICE_FETCH_BUFFER_DAYS = 5
 # is priced by the long 18:00 pass only (`sync_securities`).
 SOLD_PRICE_GRACE_DAYS = MarketPriceRepository.PROVISIONAL_PRICE_DAYS + 14
 
+# The 18:00 pass repairs a sold security's held span (first open .. last close) while it
+# has a gap. A close date the feed has no bar for — a holiday on the listing's exchange
+# (a heuristic close carries the statement's US to_date), a delisting or merger effective
+# date — is a trailing gap of that span, which the holiday rule never forgives, so the
+# security was re-fetched up to its close every day, forever, writing nothing (GitHub
+# issue #33). The span end is fixed, and valuation looks back PRICE_LOOKBACK_DAYS from a
+# close date, so once the close is older than HOLIDAY_GRACE_DAYS the repair probe
+# forgives a trailing run of up to this many weekdays: one trading week, the longest
+# routine exchange closure (Golden Week, most Lunar New Year closures). A longer trailing
+# gap, a leading one, or a younger close still repairs. `tests/test_sold_close_date_without_bar.py`
+# pins that it stays inside the lookback.
+REPAIR_TRAILING_GRACE_WEEKDAYS = 5
+
 # Back-off after every provider came back empty for a sold security's missing dates: one
 # day, doubling per consecutive miss, capped at 30 days. Less a few hours of slack so a
 # security stamped during a pass is due again at the same slot a day later, not the one
@@ -1039,7 +1052,8 @@ class MarketDataService:
         - The long pass (18:00, 730 days) also takes every security sold before that.
           One whose held span (first open .. last close, inside the window) still has a
           gap — first seen already closed, a split invalidation, `--purge-prices` — is
-          fetched up to its last close only. One with a complete span is priced to
+          fetched up to its last close only. A short trailing run with no bar at an old
+          close date is not a gap (`REPAIR_TRAILING_GRACE_WEEKDAYS`). One with a complete span is priced to
           today, for `post_sale_pct`: one request a day rather than seven.
         - A security every provider last came back empty for is skipped while
           `price_backoff_until` says so, and counted in `skipped_backoff`.
@@ -1081,7 +1095,8 @@ class MarketDataService:
                     continue
                 first_open, last_close = spans.get(security.id, (None, None))
                 if not sibling and last_close is not None and await self.market_price_repo.get_missing_dates(
-                    security.id, max(window_start, first_open or window_start), last_close
+                    security.id, max(window_start, first_open or window_start), last_close,
+                    trailing_grace_weekdays=REPAIR_TRAILING_GRACE_WEEKDAYS,
                 ):
                     repair_end = last_close
             until = price_backoff_until(security, security.id in held_ids)

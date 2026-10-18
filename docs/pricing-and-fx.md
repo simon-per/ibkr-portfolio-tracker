@@ -66,7 +66,9 @@ docker exec backend-portfolio-backend-1 python -m app.cli.manage_mappings set CH
   the row stops being consulted while the record of what was tried survives. **`--purge-prices`** is the
   whole recovery in one step: drop the prices **and the yfinance dividend estimates** the bad mapping
   produced, and let a scheduled job refill them — incremental caching fetches only missing dates, so
-  it costs **no ad-hoc Yahoo call**. IBKR dividend rows are never touched. It purged prices only
+  it costs **no ad-hoc Yahoo call**. A sold security's purged span refills too: the 18:00 repair
+  probe forgives only a trailing run of a few weekdays at an old close date (issue #33,
+  [flex-and-sync.md](flex-and-sync.md), *Sync schedule*), never a whole purged span. IBKR dividend rows are never touched. It purged prices only
   until 2026-07-30, which is how SBI's poisoned estimates outlived its mapping fix.
 - `--dry-run` on both mutating commands; every edit records a `sync_runs` row (`manual_mapping`),
   because a mapping change being invisible is why SBI went unnoticed for months.

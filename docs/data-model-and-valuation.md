@@ -266,7 +266,10 @@ and the split invalidation above still heal normally. A trailing gap that can ne
 delisted ticker — is bounded by the price loop instead: a sold security leaves the intraday passes
 after `SOLD_PRICE_GRACE_DAYS`, its held span is fetched only up to its last close, and an empty
 answer from every provider backs it off for up to 30 days (`price_backoff_until`;
-[flex-and-sync.md](flex-and-sync.md), *Sync schedule*). `BenchmarkService` applies the same rule via its
+[flex-and-sync.md](flex-and-sync.md), *Sync schedule*). The one trailing gap forgiven is in that
+repair probe only: a run of at most `REPAIR_TRAILING_GRACE_WEEKDAYS` at a close date older than
+`HOLIDAY_GRACE_DAYS` (the close itself an exchange holiday or a delisting date; issue #33), via
+`get_missing_dates(trailing_grace_weekdays=…)`, off by default. `BenchmarkService` applies the same rule via its
 own `_missing_business_days()`, shared by its price *and* FX paths. Tests:
 `tests/test_missing_dates_holidays.py`, `tests/test_benchmark_fx_window.py`.
 

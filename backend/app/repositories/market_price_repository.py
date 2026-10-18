@@ -93,6 +93,7 @@ class MarketPriceRepository:
         as_of: Optional[date] = None,
         sources: Optional[Collection[str]] = None,
         refresh_provisional: bool = True,
+        trailing_grace_weekdays: int = 0,
     ) -> List[date]:
         """
         Dates in range that need fetching: no cached price, or a provisional one.
@@ -117,6 +118,13 @@ class MarketPriceRepository:
         every day between two of them into a holiday after 30 days — days no fetch
         had ever been tried for, never asked for again (found 2026-10-12).
 
+        ``trailing_grace_weekdays`` forgives a trailing run of at most that many weekdays
+        after the last cached date, when ``end_date`` is older than HOLIDAY_GRACE_DAYS and
+        an earlier bar exists. Off by default, because a trailing gap is what a purge
+        looks like; only the 18:00 pass's repair probe for a sold security's held span
+        passes it, where the span end is a fixed close date the feed may have no bar for
+        (GitHub issue #33).
+
         ``as_of`` is injectable purely for tests.
         """
         as_of = as_of or date.today()
@@ -138,6 +146,15 @@ class MarketPriceRepository:
         last_cached = max(existing_dates) if existing_dates else None
         holiday_cutoff = as_of - timedelta(days=self.HOLIDAY_GRACE_DAYS)
         provisional_from = as_of - timedelta(days=self.PROVISIONAL_PRICE_DAYS)
+        forgive_trailing = (
+            trailing_grace_weekdays > 0
+            and last_cached is not None
+            and end_date < holiday_cutoff
+            and sum(
+                1 for offset in range(1, (end_date - last_cached).days + 1)
+                if (last_cached + timedelta(days=offset)).weekday() < 5
+            ) <= trailing_grace_weekdays
+        )
 
         # Generate all dates in range (excluding weekends for market data)
         missing_dates = []
@@ -150,7 +167,10 @@ class MarketPriceRepository:
                         first_cached is not None
                         and first_cached < current_date < last_cached
                     )
-                    if not (interior and current_date < holiday_cutoff):
+                    trailing = last_cached is not None and current_date > last_cached
+                    if not (interior and current_date < holiday_cutoff) and not (
+                        trailing and forgive_trailing
+                    ):
                         missing_dates.append(current_date)
                 elif refresh_provisional and current_date >= provisional_from:
                     # Cached, but recent enough that the row may be a mid-session
