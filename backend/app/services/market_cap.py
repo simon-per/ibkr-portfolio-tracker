@@ -9,7 +9,8 @@ cannot come to disagree about a rate or a refusal (`tests/test_market_cap_family
 
 Two steps through EUR like every other read path (`native_amounts`), on the newest
 **cached** rate only — a GET must never reach a provider — and refused past
-`CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS`. `sync_exchange_rates` keeps the rates of
+`fx_policy.FX_MAX_CARRY_DAYS`, counted from the newest *published* rate (a carried copy
+dated today would make any rate look fresh). `sync_exchange_rates` keeps the rates of
 every quoted currency warm for exactly this (`quoted_currencies`).
 
 None, not a guess, for a minor-unit quote (`GBp`, `ZAc`, `ILA`): whether Yahoo states such
@@ -22,6 +23,7 @@ from typing import Awaitable, Callable, Dict, Optional, Set
 from sqlalchemy import select
 
 from app.clock import utcnow
+from app.services.fx_policy import FX_MAX_CARRY_DAYS
 
 MarketCapToBase = Callable[[Optional[int], Optional[str]], Awaitable[Optional[int]]]
 
@@ -51,7 +53,7 @@ async def market_cap_to_base(db) -> MarketCapToBase:
                 from_currency, today, to_currency
             )
             fresh = recent is not None and (
-                (today - recent[2]).days <= CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS
+                (today - recent[2]).days <= FX_MAX_CARRY_DAYS
             )
             memo[key] = recent[0] if fresh and recent[0] else None
         return memo[key]

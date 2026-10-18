@@ -22,6 +22,7 @@ from app.services.native_amounts import NativeToBase, cash_flow_in_base
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
+from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.fx_preload import eur_rate_on, preload_eur_rates
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
@@ -1948,7 +1949,7 @@ class PortfolioService:
         securities: set,
         start_date: date,
         end_date: date,
-        lookback_days: int = 14,
+        lookback_days: int = FX_MAX_CARRY_DAYS,
         price_currency_cache: Optional[Dict] = None
     ) -> Dict:
         """
@@ -1983,7 +1984,7 @@ class PortfolioService:
         security_id: int,
         target_date: date,
         price_cache: Dict,
-        max_lookback_days: int = 14
+        max_lookback_days: int = PRICE_LOOKBACK_DAYS
     ) -> Optional[Decimal]:
         """
         Get market price for a date with forward-fill fallback.
@@ -1995,7 +1996,7 @@ class PortfolioService:
             security_id: ID of the security
             target_date: Date to get price for
             price_cache: Pre-loaded price cache {security_id: {date: price}}
-            max_lookback_days: Maximum days to look back (default: 7)
+            max_lookback_days: Maximum days to look back (default: PRICE_LOOKBACK_DAYS)
 
         Returns:
             Price as Decimal, or None if no price found within lookback window
@@ -2028,7 +2029,7 @@ class PortfolioService:
         from_currency: str,
         target_date: date,
         exchange_rate_cache: Dict,
-        max_lookback_days: int = 14
+        max_lookback_days: int = FX_MAX_CARRY_DAYS
     ) -> Optional[Decimal]:
         """
         Get exchange rate for a date with forward-fill fallback.
@@ -2040,7 +2041,7 @@ class PortfolioService:
             from_currency: Currency to convert from (e.g., 'USD')
             target_date: Date to get rate for
             exchange_rate_cache: Pre-loaded rate cache {(currency, date): rate}
-            max_lookback_days: Maximum days to look back (default: 7)
+            max_lookback_days: Maximum days to look back (default: FX_MAX_CARRY_DAYS)
 
         Returns:
             Exchange rate as Decimal, or None if no rate found within lookback window

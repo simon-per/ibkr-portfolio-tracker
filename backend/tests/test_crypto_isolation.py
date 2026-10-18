@@ -54,6 +54,7 @@ ALLOWED_SHARED = {
     "app.repositories.sync_run_repository",
     "app.services.base_fx",
     "app.services.currency_service",
+    "app.services.fx_policy",
     "app.services.fx_preload",
     "app.services.native_amounts",
     # The router asks the scheduler for the crypto group's next run time.

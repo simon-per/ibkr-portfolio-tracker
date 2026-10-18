@@ -21,6 +21,8 @@ from app.models.taxlot import TaxLot
 from app.models.security import Security
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.exchange_rate import ExchangeRate
+from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 
@@ -358,7 +360,8 @@ class BenchmarkService:
             return None
 
     async def _preload_benchmark_prices(
-        self, ticker: str, start_date: date, end_date: date, lookback_days: int = 14
+        self, ticker: str, start_date: date, end_date: date,
+        lookback_days: int = PRICE_LOOKBACK_DAYS,
     ) -> Dict[date, Decimal]:
         """Load benchmark prices into {date: price} dict."""
         extended_start = start_date - timedelta(days=lookback_days)
@@ -375,10 +378,12 @@ class BenchmarkService:
         return {bp.date: bp.close_price for bp in result.scalars().all()}
 
     async def _preload_fx_rates(
-        self, from_currency: str, start_date: date, end_date: date, lookback_days: int = 14
+        self, from_currency: str, start_date: date, end_date: date,
+        lookback_days: int = FX_MAX_CARRY_DAYS,
     ) -> Dict[date, Decimal]:
         """Load from_currency→EUR exchange rates into {date: rate} dict. The query is
-        `fx_preload`'s, shared with the portfolio and crypto readers."""
+        `fx_preload`'s, shared with the portfolio and crypto readers; read it back with
+        `_get_with_fallback(..., FX_MAX_CARRY_DAYS)`, the bound every FX path shares."""
         from app.services.fx_preload import preload_eur_rates
 
         cache = await preload_eur_rates(
@@ -388,7 +393,7 @@ class BenchmarkService:
 
     @staticmethod
     def _get_with_fallback(
-        cache: Dict[date, Decimal], target_date: date, max_lookback: int = 14
+        cache: Dict[date, Decimal], target_date: date, max_lookback: int = PRICE_LOOKBACK_DAYS
     ) -> Optional[Decimal]:
         """Forward-fill: try exact date, then look back."""
         for days_back in range(0, max_lookback + 1):
@@ -722,7 +727,9 @@ class BenchmarkService:
         if is_eur_benchmark:
             seed_shares = seed_eur / index_price
         else:
-            seed_shares = (seed_eur / self._get_with_fallback(fx_rates, anchor)) / index_price
+            seed_shares = (
+                seed_eur / self._get_with_fallback(fx_rates, anchor, FX_MAX_CARRY_DAYS)
+            ) / index_price
 
         self.last_anchor = WindowAnchor(
             on_date=anchor,
@@ -757,7 +764,8 @@ class BenchmarkService:
             if (
                 d.weekday() < 5
                 and self._get_with_fallback(bench_prices, d)
-                and (is_eur_benchmark or self._get_with_fallback(fx_rates, d))
+                and (is_eur_benchmark
+                     or self._get_with_fallback(fx_rates, d, FX_MAX_CARRY_DAYS))
             ):
                 return d
             d += timedelta(days=1)
@@ -805,7 +813,7 @@ class BenchmarkService:
             if is_eur_benchmark:
                 shares = amount_eur / index_price
             else:
-                fx_rate = self._get_with_fallback(fx_rates, leg_date)
+                fx_rate = self._get_with_fallback(fx_rates, leg_date, FX_MAX_CARRY_DAYS)
                 if not fx_rate or fx_rate == 0:
                     logger.warning(
                         f"Cannot compute benchmark shares for the contribution on "
@@ -911,7 +919,7 @@ class BenchmarkService:
             if is_eur_benchmark:
                 bench_value_eur = running_shares * index_price
             else:
-                fx_rate = self._get_with_fallback(fx_rates, on_date)
+                fx_rate = self._get_with_fallback(fx_rates, on_date, FX_MAX_CARRY_DAYS)
                 if not fx_rate:
                     return None
                 bench_value_foreign = running_shares * index_price

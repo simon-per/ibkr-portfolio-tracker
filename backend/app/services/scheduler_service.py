@@ -116,7 +116,7 @@ MANUAL_PRICE_STALE_DAYS = 40
 #: miss before `find_stale_exchange_rates` says so. Not one: the warm-up re-asks at
 #: every slot, so a provider blip the next slot heals is recorded in the run's
 #: `fx_result` (`frankfurter_failed`, `fallback_available`) and never warns. Three is
-#: three working days of every slot failing, well inside CARRY_FORWARD_MAX_AGE_DAYS.
+#: three working days of every slot failing, well inside `fx_policy.FX_MAX_CARRY_DAYS`.
 FX_STALE_PUBLICATION_DAYS = 3
 
 # How long IBKR may go without a *successful* sync before we say so.

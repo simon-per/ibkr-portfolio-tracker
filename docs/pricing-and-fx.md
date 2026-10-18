@@ -89,6 +89,38 @@ Tests: `tests/test_mapping_cli.py`, `tests/test_cli_security_lookup.py`.
 Batch-fetches date ranges (one call per ~30 days) and carries the last known rate forward across
 weekends/holidays.
 
+**One carry bound, counted from the published rate, on both FX paths** (2026-10-18, issue #20).
+`app/services/fx_policy.py` owns `FX_MAX_CARRY_DAYS` (**14**) and the `+carried` tag. A rate may
+stand in for a date at most 14 days after the date it was *published* for — on
+`CurrencyService.get_exchange_rate` (activity, cash, tax, dividends, the sync), on `fx_preload`
+(timeline, benchmark, crypto history) and in `market_cap`. The verdict for a date is a function of
+the published rows alone, whichever path asks first:
+
+- *Why one value:* the live path carried 30 days and **persisted** its copy, the preload path
+  filled 14 and read those copies, so a date 15–30 days past the newest rate was unpriced on the
+  value chart until someone opened the ledger, and priced after — `unpriced_holdings` depended on
+  read order. `PortfolioService` and `BenchmarkService` restated 14 as literal defaults besides.
+- *Why 14, not 30:* it is the bound the read path always had, and the price path's
+  (`PRICE_LOOKBACK_DAYS`), so a holding leaves the chart at the same age whether its price or its
+  rate stopped. Every gap the ECB itself leaves is a few days (a weekend, Easter, the Christmas
+  closing days), and a held currency's outage warns after three missed publication days
+  (`find_stale_exchange_rates`), well before a refusal. Past it a rate stamped onto a persisted
+  `cost_basis_eur` or `amount_eur` is a mis-valuation that never self-corrects, while a refused lot
+  is skipped with a warning and heals when the providers return.
+- *Why from the published rate:* a carried copy is a cached verdict, never an anchor
+  (`fx_policy.published_rows()`, used by `_get_most_recent_rate`, `_published_span` and
+  `preload_eur_rates`). Measured from the newest row of any source, each day's copy restarted the
+  clock, so daily carries chained past any bound; and a reader filling from a copy accepted a rate
+  up to twice the bound old. A copy already stored for the requested date is re-derived from its
+  anchor on every read, without a fetch: refreshed to the anchor's current value (so it no longer
+  keeps a stand-in's value after the quote replaced it), or **deleted** once the anchor is past
+  the bound — which is how copies stored under the 30-day rule, or chained, age out. That costs
+  one indexed query per read of a carried date.
+
+Tests: `tests/test_fx_carry_bound_family.py` (read-order invariance at bound−1 and bound+1, no
+chaining, no preload fill from a copy; and an AST check that no other module defines the bound or
+an FX function restates it as a literal default).
+
 **Every Frankfurter request is EUR-based, and every pair is derived from it** (2026-10-17, issue
 #2). `_fetch_ecb_range` asks `/{start}..{end}?from=EUR&to=A,B,…` — the ECB's own figures — and
 stores each pair in the direction readers match exactly: `X -> EUR` as the inverse, `EUR -> CHF`
@@ -156,8 +188,8 @@ refuses older dates rather than backdating a current rate onto an old tax lot. N
 **cache → Frankfurter → carry-forward → fallback → carry-forward → raise.**
 
 - Carry-forward comes *before* the fallback because Friday's real ECB rate beats today's
-  approximation over a weekend. It preserves the source tag of the row it copies, plus
-  `+carried`.
+  approximation over a weekend. It copies the newest *published* row within `FX_MAX_CARRY_DAYS`
+  and preserves that row's source tag, plus `+carried`.
 - **A stand-in gives way to the published quote.** A fallback row or a carried copy fills a date
   before the ECB has published it; when a later Frankfurter range fetch returns that date (the
   warm-up, at every slot, spans from the pair's newest *published* day, so every stand-in after it

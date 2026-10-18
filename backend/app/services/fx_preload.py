@@ -13,6 +13,9 @@ Extracted on 2026-09-28 from the two copies that already existed —
 `BenchmarkService._preload_fx_rates` — which now delegate here. The crypto view's history
 would have been the third copy (see CLAUDE.md on why the third is the one to stop).
 `tests/test_exchange_rate_readers.py` pins which modules may select `ExchangeRate` rows.
+
+The fill's bound and what it may fill from are `fx_policy`'s, shared with
+`CurrencyService`'s carry-forward: the same date gets the same verdict on either path.
 """
 from datetime import date, timedelta
 from decimal import Decimal
@@ -22,10 +25,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.exchange_rate import ExchangeRate
-
-# How far back a missing rate may be filled from. Covers a weekend, a holiday cluster
-# and a provider outage of a few days; past it, a rate is missing rather than stale.
-FX_LOOKBACK_DAYS = 14
+from app.services.fx_policy import FX_MAX_CARRY_DAYS, published_rows
 
 RateCache = Dict[Tuple[str, date], Decimal]
 
@@ -35,12 +35,15 @@ async def preload_eur_rates(
     currencies: Iterable[str],
     start: date,
     end: date,
-    lookback_days: int = FX_LOOKBACK_DAYS,
+    lookback_days: int = FX_MAX_CARRY_DAYS,
 ) -> RateCache:
     """
-    Every cached `currency -> EUR` rate from `start - lookback_days` to `end`, as
+    Every published `currency -> EUR` rate from `start - lookback_days` to `end`, as
     `{(currency, date): rate}`. The window reaches back so the first days of the range
     can forward-fill from before it. EUR itself needs no rate and is skipped.
+
+    A carried copy is left out: filling from it would measure the age from the copy's
+    date, not the rate's, and accept a rate up to twice the bound old.
     """
     wanted = {c for c in currencies if c and c != "EUR"}
     if not wanted:
@@ -54,6 +57,7 @@ async def preload_eur_rates(
                 ExchangeRate.to_currency == "EUR",
                 ExchangeRate.date >= extended_start,
                 ExchangeRate.date <= end,
+                published_rows(),
             )
         )
     )
@@ -64,7 +68,7 @@ def eur_rate_on(
     cache: RateCache,
     currency: str,
     target_date: date,
-    max_lookback_days: int = FX_LOOKBACK_DAYS,
+    max_lookback_days: int = FX_MAX_CARRY_DAYS,
 ) -> Optional[Decimal]:
     """The rate on `target_date`, else the most recent one up to `max_lookback_days`
     earlier, else None — never a guess from further away."""
@@ -86,7 +90,7 @@ class PreloadedRates:
     turns into `None`: the amount is reported missing, never zeroed.
     """
 
-    def __init__(self, cache: RateCache, max_lookback_days: int = FX_LOOKBACK_DAYS):
+    def __init__(self, cache: RateCache, max_lookback_days: int = FX_MAX_CARRY_DAYS):
         self._cache = cache
         self._max_lookback_days = max_lookback_days
 

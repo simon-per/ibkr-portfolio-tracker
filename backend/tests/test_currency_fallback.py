@@ -26,6 +26,7 @@ import app.models  # noqa: F401
 from app.models.exchange_rate import ExchangeRate
 from app.services import currency_service as cs
 from app.services.currency_service import CurrencyService
+from app.services.fx_policy import FX_MAX_CARRY_DAYS
 
 
 # EUR-based snapshot, shaped like open.er-api.com's payload.
@@ -236,14 +237,14 @@ async def test_carry_forward_preserves_the_provider_tag(monkeypatch, session):
 
 
 @pytest.mark.asyncio
-async def test_carry_forward_refuses_a_month_stale_rate(monkeypatch, session):
+async def test_carry_forward_refuses_a_rate_past_the_bound(monkeypatch, session):
     """
     With both providers down, a rate older than the carry bound must raise —
     silently stamping it onto a new lot's persisted cost_basis_eur would be a
     permanent mis-valuation, while a skipped lot self-heals on the next sync.
     """
     install_fake_http(monkeypatch, payload={"result": "error"})
-    stale_day = date.today() - timedelta(days=CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS + 10)
+    stale_day = date.today() - timedelta(days=FX_MAX_CARRY_DAYS + 10)
     session.add(ExchangeRate(
         date=stale_day, from_currency="TWD", to_currency="EUR",
         rate=Decimal("0.02716"), source=CurrencyService.FALLBACK_SOURCE,
@@ -257,7 +258,7 @@ async def test_carry_forward_refuses_a_month_stale_rate(monkeypatch, session):
 @pytest.mark.asyncio
 async def test_carry_forward_covers_a_gap_inside_the_bound(monkeypatch, session):
     install_fake_http(monkeypatch, payload={"result": "error"})
-    recent = date.today() - timedelta(days=CurrencyService.CARRY_FORWARD_MAX_AGE_DAYS - 1)
+    recent = date.today() - timedelta(days=FX_MAX_CARRY_DAYS - 1)
     session.add(ExchangeRate(
         date=recent, from_currency="TWD", to_currency="EUR",
         rate=Decimal("0.02716"), source=CurrencyService.FALLBACK_SOURCE,

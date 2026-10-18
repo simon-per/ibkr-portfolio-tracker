@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.exchange_rate import ExchangeRate
+from app.services.fx_policy import CARRIED_SUFFIX, FX_MAX_CARRY_DAYS, published_rows
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +55,8 @@ class CurrencyService:
     FALLBACK_SOURCE = "er-api-latest"
     FALLBACK_MAX_AGE_DAYS = 7
 
-    # Appended to the origin's tag when a rate is copied onto a later date. A copy is a
-    # stand-in exactly like a fallback row — the day's real quote may simply not have been
-    # published yet — and `_store_published_rate` has to be able to tell it apart from a
-    # quote for that day, or the copy outlives the quote it was standing in for.
-    CARRIED_SUFFIX = "+carried"
+    # The tag a carried copy wears; owned by `fx_policy`, which the preload path shares.
+    CARRIED_SUFFIX = CARRIED_SUFFIX
 
     # The scale of `exchange_rates.rate` (Numeric(18, 8)). A rate derived from the ECB
     # table is rounded to it here, so the value held in the session is the one a later
@@ -128,9 +126,20 @@ class CurrencyService:
 
         # Check database cache first. This runs before the provider split so a rate
         # already cached from either provider is reused without another request.
-        cached_rate = await self._get_cached_rate(from_currency, target_date, to_currency)
-        if cached_rate:
-            return cached_rate
+        cached = await self._get_cached_row(from_currency, target_date, to_currency)
+        if cached is not None and cached.rate and not cached.source.endswith(self.CARRIED_SUFFIX):
+            return cached.rate
+        if cached is not None:
+            # A carried copy caches a verdict, not a rate: re-derived from the published
+            # rate it stands in for, without a fetch (it is what keeps a weekend read off
+            # the network), so it can neither outlive the bound nor go on carrying a
+            # stand-in's value after the quote replaced it. Refused, it is gone and the
+            # date is resolved like any other miss.
+            carried = await self._carry_forward(
+                from_currency, target_date, to_currency, existing=cached
+            )
+            if carried is not None:
+                return carried
 
         if from_currency in self.SUPPORTED_CURRENCIES:
             # If not in cache, try to fetch a range of recent rates (batch fetch)
@@ -165,43 +174,47 @@ class CurrencyService:
 
         raise ValueError(f"No exchange rate available for {from_currency} on or before {target_date}")
 
-    # A carried rate is an approximation that ages. Friday's rate over a weekend
-    # (or a holiday cluster) is the designed case; a month-old rate silently
-    # stamped onto a new lot's *persisted* cost_basis_eur is not — the fallback
-    # provider bounds itself at FALLBACK_MAX_AGE_DAYS while this path had no bound
-    # at all. Past this, refuse and let get_exchange_rate() raise: the caller's
-    # skip-with-warning path takes over and self-heals when providers recover.
-    CARRY_FORWARD_MAX_AGE_DAYS = 30
-
     async def _carry_forward(
         self,
         from_currency: str,
         target_date: date,
-        to_currency: str
+        to_currency: str,
+        existing: Optional[ExchangeRate] = None,
     ) -> Optional[Decimal]:
         """
-        Reuse the most recent rate on or before ``target_date`` (weekends, holidays),
-        refusing once the newest available rate is older than
-        CARRY_FORWARD_MAX_AGE_DAYS.
+        Reuse the newest *published* rate on or before ``target_date`` (weekends,
+        holidays), refusing once it is older than `fx_policy.FX_MAX_CARRY_DAYS` — the
+        bound the preload path applies too, so a date's verdict does not depend on which
+        path asked first. A carried rate is an approximation that ages: a stale rate
+        stamped onto a new lot's *persisted* cost_basis_eur is a permanent mis-valuation,
+        while a refusal lets the caller's skip-with-warning path take over and self-heal
+        when providers recover.
 
         Caches it under the requested date keeping the provider tag of the row it came
         from, so the audit trail survives the copy, plus `CARRIED_SUFFIX`, so the copy can
-        be replaced once that day's real quote is published.
+        be replaced once that day's real quote is published. ``existing`` is a copy
+        already stored for the date: refreshed from the anchor, or deleted on a refusal.
         """
         recent = await self._get_most_recent_rate(from_currency, target_date, to_currency)
-        if not recent:
+        age = (target_date - recent[2]).days if recent else None
+        if recent is None or age > FX_MAX_CARRY_DAYS:
+            if recent is not None:
+                logger.warning(
+                    f"Refusing to carry a {age}-day-old {from_currency}/{to_currency} rate "
+                    f"({recent[2]}) onto {target_date} — beyond {FX_MAX_CARRY_DAYS} days"
+                )
+            if existing is not None:
+                await self.session.delete(existing)
+                await self.session.flush()
             return None
-        rate, source, rate_date = recent
-        age = (target_date - rate_date).days
-        if age > self.CARRY_FORWARD_MAX_AGE_DAYS:
-            logger.warning(
-                f"Refusing to carry a {age}-day-old {from_currency}/{to_currency} rate "
-                f"({rate_date}) onto {target_date} — beyond {self.CARRY_FORWARD_MAX_AGE_DAYS} days"
-            )
-            return None
-        if not source.endswith(self.CARRIED_SUFFIX):
-            source = f"{source}{self.CARRIED_SUFFIX}"
-        await self._cache_rate(from_currency, to_currency, target_date, rate, source=source)
+        rate, source, _ = recent
+        source = f"{source}{self.CARRIED_SUFFIX}"
+        if existing is None:
+            await self._cache_rate(from_currency, to_currency, target_date, rate, source=source)
+        elif existing.rate != rate or existing.source != source:
+            existing.rate = rate
+            existing.source = source
+            await self.session.flush()
         return rate
 
     async def _get_cached_rate(
@@ -211,6 +224,16 @@ class CurrencyService:
         to_currency: str
     ) -> Optional[Decimal]:
         """Get exchange rate from database cache"""
+        exchange_rate = await self._get_cached_row(from_currency, target_date, to_currency)
+        return exchange_rate.rate if exchange_rate else None
+
+    async def _get_cached_row(
+        self,
+        from_currency: str,
+        target_date: date,
+        to_currency: str
+    ) -> Optional[ExchangeRate]:
+        """The row cached for exactly ``target_date``, of any source."""
         result = await self.session.execute(
             select(ExchangeRate).where(
                 ExchangeRate.date == target_date,
@@ -218,8 +241,7 @@ class CurrencyService:
                 ExchangeRate.to_currency == to_currency
             )
         )
-        exchange_rate = result.scalar_one_or_none()
-        return exchange_rate.rate if exchange_rate else None
+        return result.scalar_one_or_none()
 
     async def _get_most_recent_rate(
         self,
@@ -228,9 +250,14 @@ class CurrencyService:
         to_currency: str
     ) -> Optional[Tuple[Decimal, str, date]]:
         """
-        Get the most recent exchange rate on or before the target date, with the
-        provider that produced it and the date it belongs to. Used for
+        Get the most recent *published* exchange rate on or before the target date, with
+        the provider that produced it and the date it belongs to. Used for
         weekends/holidays when the specific date isn't available.
+
+        A carried copy is skipped (`fx_policy.published_rows`): its date is not the
+        rate's, so an age measured from it restarts at every carry and daily copies chain
+        past `FX_MAX_CARRY_DAYS` — and a cache-only reader that sizes staleness from this
+        (`market_cap`) would be fooled the same way.
 
         The `date <= target_date` bound is what stops a currency we only learned
         about recently from being projected backwards onto older lots: a rate first
@@ -242,7 +269,8 @@ class CurrencyService:
             .where(
                 ExchangeRate.date <= target_date,
                 ExchangeRate.from_currency == from_currency,
-                ExchangeRate.to_currency == to_currency
+                ExchangeRate.to_currency == to_currency,
+                published_rows(),
             )
             .order_by(ExchangeRate.date.desc())
             .limit(1)
@@ -375,7 +403,7 @@ class CurrencyService:
             ExchangeRate.from_currency == from_currency,
             ExchangeRate.to_currency == to_currency,
             ExchangeRate.date <= on_or_before,
-            ExchangeRate.source.notlike(f"%{self.CARRIED_SUFFIX}"),
+            published_rows(),
         ]
         if not fallback_counts:
             criteria.append(ExchangeRate.source != self.FALLBACK_SOURCE)

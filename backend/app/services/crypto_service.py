@@ -97,7 +97,8 @@ from app.services.crypto_book import (
     peg_for,
 )
 from app.services.currency_service import CurrencyService
-from app.services.fx_preload import FX_LOOKBACK_DAYS, PreloadedRates, preload_eur_rates
+from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.services.fx_preload import PreloadedRates, preload_eur_rates
 from app.services.native_amounts import NativeToBase
 
 logger = logging.getLogger(__name__)
@@ -958,7 +959,7 @@ class CryptoSyncService:
         Never raises.
         """
         warnings: List[str] = []
-        window_start = CRYPTO_HISTORY_START - timedelta(days=FX_LOOKBACK_DAYS)
+        window_start = CRYPTO_HISTORY_START - timedelta(days=FX_MAX_CARRY_DAYS)
         pairs = [("USD", "EUR")] + [("EUR", b) for b in SUPPORTED_BASE_CURRENCIES if b != "EUR"]
         for from_currency, to_currency in pairs:
             try:
@@ -1139,7 +1140,7 @@ class CryptoService:
         # has a rate on or before the window's first day, and never backfills from inside
         # a GET.
         base_fx = await load_base_fx(
-            self.db, self.currency_service, base, start - timedelta(days=FX_LOOKBACK_DAYS),
+            self.db, self.currency_service, base, start - timedelta(days=FX_MAX_CARRY_DAYS),
             backfill=False,
         )
         rates = await preload_eur_rates(self.db, {"USD"}, start, end)

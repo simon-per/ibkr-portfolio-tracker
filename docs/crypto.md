@@ -293,7 +293,7 @@ earlier is computed, fetched or drawn.
 
 A GET must not reach the network or take SQLite's write lock. `CryptoService` converts through
 the same `NativeToBase` every reader uses, over `fx_preload.PreloadedRates`: one query for the
-window, then a bounded (14-day) forward-fill. `BaseFx` is loaded from a fortnight before the
+window, then a forward-fill bounded by `fx_policy.FX_MAX_CARRY_DAYS` (14), the bound every FX path shares. `BaseFx` is loaded from a fortnight before the
 window with `backfill=False`, and when its window holds no EUR→base rate the figure is reported
 unconvertible rather than served as euros under another currency's label. A base with no EUR→base
 rate stored *anywhere* never gets this far: the whole app reports in EUR then
