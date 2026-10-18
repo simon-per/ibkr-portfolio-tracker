@@ -7,6 +7,35 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — the audit's Tier 1 (#13–#18, #41)
+
+Five read-only review agents (sync, figures, frontend, duplication, ops) produced ~55 findings;
+five verification agents confirmed each with an offline repro test or a code trace before 39
+issues were filed (#13–#51, numbered in fix order). Tier 1 was fixed by one worktree agent per
+issue, each starting from its repro, reviewed and cherry-picked onto `main`.
+
+- **#13 + #41** (`cba4c7f`): a Flex statement older than `last_sync_to_date` ingests its additive
+  ledgers only — no `reconcile_taxlots`, no accruals `replace_all`, a `warnings[]` line — and the
+  setter is monotonic; both staleness alarms count from `flex_generation.newest_coverage`
+  (statement coverage, not `finished_at`). Ingest docstrings no longer claim "no network".
+- **#14** (`3bef145`): `RedactingFormatter` on every handler, uvicorn's included, through
+  `app/logging_setup.configure_logging` (main and all 14 CLIs; bare `basicConfig` banned by test);
+  Alpha Vantage, OpenFIGI and admin-token values and `apikey=` masked.
+- **#15** (`7f1d99b`): our own tolerant `FlexStatementResponse` parser; an unparseable SendRequest
+  reply fails fast; `_REQUEST_RETRYABLE_CODES = {"1018"}`. No outcome re-sends more than before.
+- **#16** (`fbf04de`): scheduled entries poll the `SYNC_PIPELINE` gate every 15 s for up to 9 min
+  before `skipped / pipeline_busy`; manual triggers still 429 at once.
+- **#17** (`f834dcd`): `fx_result` records `frankfurter_failed` / `fallback_available` and reaches
+  `_collect_warnings` in all three jobs; the warning is `find_stale_exchange_rates` (a held or base
+  pair three ECB publication days behind).
+- **#18** (`4c4ec79`): `/api/fundamentals/status` gains `sync_running` and its `response_model`, and counts
+  `fundamentals_repository.sync_scope()` (held & Yahoo-eligible) like the sync; the tab ends
+  "Updating" on a newer row, a post-click poll saying nothing runs, or 15 minutes.
+
+Verified offline: backend 2363 passed / 8 skipped (deploy-script tests 44 passed with `-n 4`;
+two of them time out only under a fully parallel run, pre-existing), frontend 1051 passed, build
+green. Production checks are in STATUS.md *Watch after the next deploy*.
+
 ## Shipped 2026-10-17 (late night) — the fintech UI pass
 
 The owner's goal: a clean fintech look with icons, colour and insights, every function and figure

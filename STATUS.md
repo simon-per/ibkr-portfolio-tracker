@@ -11,9 +11,10 @@
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
-docs/shipped-log.md 2026-10-17. The GitHub issues are being worked through one worktree each:
-#2–#12 all shipped the same night; no issue is open. The fintech UI pass shipped the same night
-on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-17 late night).
+docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech UI pass on every
+tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
+verified first by an offline repro; the Tier 1 six (#13–#18, plus #41) shipped the same morning
+(docs/shipped-log.md 2026-10-18). #19–#51 are open, numbered in fix order.
 
 ---
 
@@ -112,11 +113,23 @@ Only what is still unverified.
   does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
   read off the API, not the database.
 - **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
+- **The audit's Tier 1 (#13–#18) on production:**
+  - Container log lines keep their layout (`INFO:     …` from uvicorn, `asctime level name:` from
+    the app) and no `t=` / `apikey=` value appears in any line or traceback (#14).
+  - A scheduled job that met a dashboard-started pass shows a late start, not `skipped /
+    pipeline_busy` (#16); `skipped` now means the gate stayed held for 9 minutes.
+  - Every `market_data_only` / `full_sync` / `ibkr_sync` row carries `fx_result.frankfurter_failed`
+    and `fallback_available`; a "no published exchange rate since" warning appears only after three
+    ECB publication days without a rate for a held or base currency (#17).
+  - Fundamentals: no "N holdings have no data yet" line for the 3a funds; Update/Refresh never
+    leaves the banner up (#18).
+  - The IBKR staleness messages now read "the newest data is from the sync of …" (#13).
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
-  `Code=1004`–`1009` or "failed after it may have reached IBKR" at 18:00 is now an `error` after
-  one SendRequest, recovered at 00:00 — expected, not a regression.
+  `Code=1004`–`1009`, `1019`, `1021`, an unparseable SendRequest reply (#15) or "failed after it
+  may have reached IBKR" at 18:00 is now an `error` after one SendRequest, recovered at 00:00 —
+  expected, not a regression. "SendRequest reply not understood" in the log is #15's new line.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.
@@ -184,8 +197,9 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **Pin what every production build re-resolves:** `yfinance`, `lxml`, `pyxirr` float in
-   `backend/requirements.txt` and `deploy.sh` builds `--no-cache`. A constraints file.
+1. **The open audit issues, #19–#51, in number order** (`gh issue list`). Each carries its
+   repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
+   tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 3. **Tooling.** ESLint is clean; `positionColumns` and `lookthroughColumns` are its one named
@@ -222,6 +236,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
+  offline repros, 39 issues filed (#13–#51); Tier 1 (#13–#18, #41) fixed in worktrees and shipped.
 - **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
   (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
   KPI figures never wrap; `bluegill` merged.
@@ -231,5 +247,3 @@ One line each, newest first; drop the oldest.
   worktrees; logos by ISIN; every `--viz-*` token replaced by one ten-slot palette.
 - **2026-10-17 (merge)** — the fintech pass merged into `main` over the owner's batch; two
   held helpers made one (`security_repository.held`).
-- **2026-10-17 (owner's batch)** — raises/timing (funds' changes are timing), resizable forecast
-  chart, base-currency market caps, daily held-only fundamentals; deployed; logos next.
