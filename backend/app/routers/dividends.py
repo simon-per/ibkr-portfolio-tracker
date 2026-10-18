@@ -6,13 +6,14 @@ from typing import Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import AsyncSessionLocal, get_db
+from app.database import get_db
 from app.schemas.portfolio import (
     DividendBreakdownResponse,
     DividendForecastHistoryResponse,
     DividendSummaryResponse,
 )
 from app.services.dividend_service import DividendService
+from app.services.scheduler_service import get_scheduler
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
     SYNC_PIPELINE,
@@ -45,21 +46,23 @@ _last_auto_sync: Optional[datetime] = None
 
 async def _run_dividend_sync_background() -> None:
     """
-    Run dividend sync + compute in background with its own DB session.
+    Run the dividend pass in the background: `SchedulerService.dividend_sync_locked`.
 
     Holds the shared pipeline gate, not just the module flag: the 18:00 Berlin
     full_sync_job runs sync_dividends() too, and a dashboard load that finds a
     security due would otherwise start a second yfinance pass straight through it.
+
+    The gate and the cooldown are all this adds (GitHub issue #65). It used to run
+    sync-then-compute itself, dropping the `rate_limited` flag and the warnings
+    `sync_dividends` hoists and recording no `sync_runs` row, so a pass Yahoo cut short
+    left no trace; the scheduler's body records one (`dividend_sync`).
     """
     global _sync_in_progress
     try:
         with single_flight(SYNC_PIPELINE, cooldown_seconds=PUBLIC_SYNC_COOLDOWN_SECONDS):
             _sync_in_progress = True
             try:
-                async with AsyncSessionLocal() as db:
-                    service = DividendService(db)
-                    await service.sync_dividend_data()
-                    await service.compute_dividend_income()
+                await get_scheduler().dividend_sync_locked()
             except Exception as e:
                 logger.error(f"Background dividend sync failed: {e}")
             finally:

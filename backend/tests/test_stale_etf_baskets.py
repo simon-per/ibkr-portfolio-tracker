@@ -288,3 +288,137 @@ def test_every_path_that_syncs_market_data_collects_the_diagnostics():
         f"{offenders} sweep the securities for prices but never collect the sync "
         "diagnostics, so a stale or unpriced holding goes unreported on that path"
     )
+
+
+# --- the full sync takes the verdict after its own refresh (GitHub issue #79) --------
+#
+# `full_sync` runs the price pass first and the look-through refresh last. The basket
+# verdict used to ride the price pass's diagnostics, so the run record warned about
+# baskets the same run refreshed minutes later — on production every fund the 18:00
+# record named was in that record's `lookthrough_result.baskets.refreshed`. A warning
+# that is wrong on the one run a day that fixes it teaches the reader to skip it.
+
+
+async def _stale_iwda_database(monkeypatch):
+    """IWDA held, its basket past the warn threshold, behind the scheduler's session."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    from app.database import Base
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as seed:
+        await _hold(seed, 1, IWDA, "IWDA")
+        await _basket(seed, IWDA, "blackrock", age_days=stale_after_days("blackrock") + 5)
+        await seed.commit()
+    monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", maker)
+    return engine, maker
+
+
+def _offline_steps(monkeypatch, svc):
+    """Everything but the price pass's diagnostics and the basket check is stubbed."""
+    async def _ok(*_a, **_k):
+        return {"status": "success"}
+
+    for name in ("sync_ibkr_data", "sync_exchange_rates", "sync_dividends",
+                 "record_dividend_forecast"):
+        monkeypatch.setattr(svc, name, _ok)
+
+    async def _sweep(self, securities, **_kw):
+        return {"total_prices": 0, "processed": len(securities),
+                "planned": len(securities), "errors": [], "rate_limited_after": None,
+                "skipped_sold": 0, "skipped_backoff": 0}
+
+    monkeypatch.setattr(
+        "app.services.market_data_service.MarketDataService.sync_securities", _sweep,
+    )
+    recorded = []
+
+    async def _record(result, _started):
+        recorded.append(result)
+
+    monkeypatch.setattr(svc, "_record_run", _record)
+    return recorded
+
+
+def _basket_warnings(warnings):
+    return [w for w in warnings or [] if "IWDA" in w and "basket" in w and "days old" in w]
+
+
+@pytest.mark.asyncio
+async def test_a_basket_the_full_sync_refreshes_does_not_warn_on_its_record(monkeypatch):
+    from sqlalchemy import update
+
+    engine, maker = await _stale_iwda_database(monkeypatch)
+    try:
+        svc = SchedulerService()
+        recorded = _offline_steps(monkeypatch, svc)
+
+        async def _refresh():
+            async with maker() as db:
+                await db.execute(
+                    update(EtfBasket).where(EtfBasket.fund_isin == IWDA)
+                    .values(as_of_date=utc_today())
+                )
+                await db.commit()
+            return {"status": "success",
+                    "baskets": {"refreshed": [IWDA], "failed": [], "unchanged": []}}
+
+        monkeypatch.setattr(svc, "refresh_lookthrough_data", _refresh)
+
+        await svc.full_sync_job()
+
+        assert len(recorded) == 1 and recorded[0]["type"] == "full_sync"
+        assert _basket_warnings(recorded[0].get("warnings")) == []
+        assert _basket_warnings(recorded[0]["market_result"].get("warnings")) == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_basket_the_full_sync_fails_to_refresh_still_warns(monkeypatch):
+    engine, _maker = await _stale_iwda_database(monkeypatch)
+    try:
+        svc = SchedulerService()
+        recorded = _offline_steps(monkeypatch, svc)
+
+        async def _refresh():
+            return {"status": "success",
+                    "warnings": ["IWDA: basket refresh failed (ConnectError)"]}
+
+        monkeypatch.setattr(svc, "refresh_lookthrough_data", _refresh)
+
+        await svc.full_sync_job()
+
+        warnings = recorded[0]["warnings"]
+        assert "IWDA: basket refresh failed (ConnectError)" in warnings
+        assert len(_basket_warnings(warnings)) == 1, "said once, after the refresh"
+        assert _basket_warnings(recorded[0]["market_result"].get("warnings")) == []
+    finally:
+        await engine.dispose()
+
+
+async def _ok_step(*_a, **_k):
+    return {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_the_market_data_slots_keep_the_basket_check(monkeypatch):
+    """No refresh follows them, so their own diagnostics still carry it."""
+    engine, _maker = await _stale_iwda_database(monkeypatch)
+    try:
+        svc = SchedulerService()
+        recorded = _offline_steps(monkeypatch, svc)
+        monkeypatch.setattr(svc, "sync_benchmark_prices", _ok_step)
+
+        await svc.market_data_only_sync_job()
+
+        assert len(_basket_warnings(recorded[0]["warnings"])) == 1
+    finally:
+        await engine.dispose()

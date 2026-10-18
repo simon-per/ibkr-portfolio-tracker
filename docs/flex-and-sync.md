@@ -577,7 +577,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | Time | ET | Job | Touches Yahoo? |
 |---|---|---|---|
 | 08:00, 11:00, 13:00, 15:00, 20:00, 22:00, **Mon–Fri**; 08:00 also Saturday | | `market_data_only_sync_job` (7d) + benchmark warm-up (first slot after a session only) | yes |
-| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data (missing dates only on a Berlin weekend) + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF) | **yes** |
+| **18:00** | **12:00** | `full_sync_job` — IBKR + FX + 730d market data (missing dates only on a Berlin weekend) + dividends + look-through upkeep (issuer sites, OpenFIGI, GLEIF), then the stale-basket check | **yes** |
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every hour above, daily | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
@@ -728,7 +728,12 @@ production's weekend passes reported `51 of 51` and rewrote the same ~140 rows, 
   through `sync_market_data` → `sync_securities` → `fetch_and_cache_prices` / `sync_sibling_prices` →
   `get_missing_dates`. A warm security costs no request; one new in Saturday's statement, or a split
   purge, still gets its history. It is keyed on the calendar, never on the IBKR result — that gate
-  was a silent outage. `collect_market_data_diagnostics` still runs at its end.
+  was a silent outage. The rule is `sync_market_data`'s **default** (`refresh_provisional=None`), so
+  `POST /api/market-data/sync`, which runs the same step (GitHub issue #65), gets the same answer; the
+  `market_data_only` job passes `True` explicitly, because its Saturday 08:00 slot is the one that
+  settles Friday's close. `collect_market_data_diagnostics` still runs at its end — without the
+  stale-basket check, which the full sync takes after its look-through refresh (issue #79,
+  docs/lookthrough.md).
 - **The dividend step is unchanged on weekends.** Since issue #6 it asks only about securities due
   a full read (`needs_dividend_check`), so skipping it saves nothing: the due ones would be asked on Monday instead, or
   sooner by a weekend dashboard load, since `GET /api/dividends/summary` enqueues a pass while
@@ -1303,6 +1308,24 @@ out; it mirrors the fundamentals route since 2026-09-12 (`SYNC_COOLDOWN_SECONDS 
 Since GitHub issue #6 it also enqueues only while `needs_dividend_check` selects a security — the
 pass's own predicate (below, under *Sync schedule*) — so a dashboard load right after a pass starts
 nothing.
+
+**The public sync routes run the scheduler's bodies; the gate and the cooldown are all they add**
+(GitHub issue #65, 2026-10-18). `POST /api/market-data/sync` kept its own copy of the market-data
+step — status rule, result dict, rate-limit warning, diagnostics — after the loop itself had been
+extracted, and it had drifted: it never passed `refresh_provisional`, so a weekend manual sync
+re-downloaded every cached close that could no longer change, and its rate-limit warning said
+something else. It now returns `SchedulerService.sync_market_data(days_back=…)` under
+`SYNC_PIPELINE` with the public cooldown, answering a step `status: "error"` with the 500 it always
+gave (the response gained the step's `timestamp`). `POST /api/dividends/sync` — and the pass
+`GET /api/dividends/summary` enqueues — ran sync-then-compute itself and dropped `rate_limited` and
+the warnings `sync_dividends` hoists, with no `sync_runs` row, so a pass Yahoo cut short left no
+trace; the background task now runs `SchedulerService.dividend_sync_locked`, which records a
+`dividend_sync` row with those warnings. That type is outside `SCHEDULED_JOB_TYPES` and never sets
+`last_sync_result`, so it is never the dashboard's "last sync". The POST still answers `started` at
+once; the row is where its outcome lands. `tests/test_sync_routes_reach_scheduler.py` walks the
+live route table: every `POST …/sync` route reaches a `SchedulerService` method, or is named in
+`NO_SCHEDULER_BODY` with the reason it has none (allocation, the full ratings and fundamentals
+passes, the watchlist, crypto) — and an exemption that stops being true fails too.
 
 **Errors are redacted before they are stored or served (`app/redact.py`).** Flex sends the token as a
 `t=` URL parameter and `requests` transport errors stringify with the full URL, so a plain `str(e)` from

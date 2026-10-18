@@ -89,9 +89,10 @@ def _stub_dividend_pass(monkeypatch, release: asyncio.Event, started: asyncio.Ev
         async def sync_dividend_data(self):
             started.set()
             await release.wait()        # a Yahoo loop still running at 18:00
+            return {}
 
         async def compute_dividend_income(self):
-            return None
+            return {}
 
     class _NullSession:
         async def __aenter__(self):
@@ -100,8 +101,12 @@ def _stub_dividend_pass(monkeypatch, release: asyncio.Event, started: asyncio.Ev
         async def __aexit__(self, *exc):
             return False
 
-    monkeypatch.setattr(div_router, "DividendService", SlowDividendService)
-    monkeypatch.setattr(div_router, "AsyncSessionLocal", lambda: _NullSession())
+    # The pass is `SchedulerService.dividend_sync_locked` (issue #65), which imports the
+    # service from its module at call time and opens the scheduler's session.
+    monkeypatch.setattr(
+        "app.services.dividend_service.DividendService", SlowDividendService,
+    )
+    monkeypatch.setattr(sched, "AsyncSessionLocal", lambda: _NullSession())
 
 
 @pytest.mark.asyncio
@@ -132,7 +137,10 @@ async def test_a_dashboard_triggered_dividend_pass_delays_the_scheduled_full_syn
         f"the scheduled full sync did not run: {result.get('status')}/{result.get('reason')}"
     )
     assert slept == [SCHEDULED_GATE_POLL_SECONDS]
-    assert svc.recorded == [], "a run that went ahead recorded a skip"
+    # The dividend pass records its own run; nothing else may have been recorded.
+    assert [r["type"] for r in svc.recorded] == ["dividend_sync"], (
+        "a run that went ahead recorded a skip"
+    )
 
 
 @pytest.mark.asyncio

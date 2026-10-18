@@ -461,7 +461,15 @@ whose refresh keeps failing, where the saved body is what makes the failure debu
 
 **A stale basket does warn now** (`SchedulerService.find_stale_etf_baskets`, 2026-08-17), hung off
 the market-data job beside its four siblings for the documented reason: those slots succeed while
-Flex is refusing. Four rules carry it, and each is wrong the other way round:
+Flex is refusing. **The 18:00 full sync is the exception, and takes it last** (GitHub issue #79,
+2026-10-18): its price pass runs first and the refresh after it, so a verdict taken among the price
+pass's diagnostics warned about baskets the same run brought current minutes later — on production
+every fund the record named was in its own `lookthrough_result.baskets.refreshed`. The full sync
+passes `stale_baskets=False` to `sync_market_data` and asks `check_stale_etf_baskets` once
+`refresh_lookthrough_data` has returned, so on that record a basket warning means the refresh did
+not bring it current. The market-data slots keep the check inside their diagnostics; no refresh
+follows them. Tests: the issue-#79 block in `tests/test_stale_etf_baskets.py`. Four rules carry it,
+and each is wrong the other way round:
 
 - **Held funds only**, mirroring `find_stale_priced_securities`' restriction to open lots — a basket
   for a fund nobody holds moves no figure.

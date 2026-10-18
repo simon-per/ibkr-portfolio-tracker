@@ -531,10 +531,13 @@ class SchedulerService:
                     "timestamp": utc_iso(utcnow())
                 }
 
-    async def collect_market_data_diagnostics(self, db) -> list[str]:
+    async def collect_market_data_diagnostics(
+        self, db, stale_baskets: bool = True,
+    ) -> list[str]:
         """
         Every "nobody would otherwise notice" check that belongs after a market-data
-        pass, in one place because there are now two callers.
+        pass, in one place: `sync_market_data` runs it, and so does every path that
+        prices — the scheduled jobs and `POST /api/market-data/sync` alike.
 
         The scheduled job ran all five; `POST /api/market-data/sync` ran none. The loop
         itself was extracted to `MarketDataService.sync_securities` after the 2026-08-04
@@ -542,7 +545,12 @@ class SchedulerService:
         answered `{"status": "success", "securities_processed": 40}` and said nothing,
         at the exact moment someone reaches for it: seeing a holding at 0.00 and
         clicking Sync Market Data is precisely when `find_stale_priced_securities` would
-        have named the security and its `ticker_mappings` row.
+        have named the security and its `ticker_mappings` row. Since GitHub issue #65
+        the route runs `sync_market_data` itself rather than a copy of it.
+
+        `stale_baskets=False` leaves out the basket check, for the one caller that
+        refreshes the baskets *after* its price pass: the 18:00 full sync asks
+        `check_stale_etf_baskets` once its look-through upkeep is done (issue #79).
 
         They belong to the **market-data** pass specifically, and that is not an
         accident of where they were written: those slots succeed while Flex is refusing,
@@ -589,28 +597,44 @@ class SchedulerService:
         # The look-through's baskets are the one decaying dataset with no alarm:
         # a CLI snapshot that ages in place while the tab keeps serving it. Same
         # slot and same separate guard as the four above.
-        try:
-            diagnostics += await self.find_stale_etf_baskets(db)
-        except Exception as e:
-            logger.warning(f"Could not check ETF basket freshness: {e}")
+        if stale_baskets:
+            try:
+                diagnostics += await self.find_stale_etf_baskets(db)
+            except Exception as e:
+                logger.warning(f"Could not check ETF basket freshness: {e}")
         return diagnostics
 
     async def sync_market_data(
-        self, days_back: int = 730, refresh_provisional: bool = True,
+        self, days_back: int = 730, refresh_provisional: Optional[bool] = None,
+        stale_baskets: bool = True,
     ) -> dict:
         """
         Sync market prices from Yahoo Finance for all securities.
         Only fetches missing dates (incremental sync).
 
+        The price step of the scheduled jobs **and** the whole body of
+        `POST /api/market-data/sync`, which adds only the shared gate and the public
+        cooldown (GitHub issue #65). The route used to carry its own copy of this body —
+        status rule, result dict, rate-limit warning, diagnostics — and it had drifted:
+        it never passed `refresh_provisional`, so a weekend manual sync re-downloaded
+        closes that could not change.
+
         Args:
             days_back: Number of days to look back (default 730 = 2 years)
-            refresh_provisional: False asks only for dates with no row at all — the
-                weekend full sync, when no cached close can still change
+            refresh_provisional: False asks only for dates with no row at all. None (the
+                default) is the calendar's answer, `is_berlin_trading_day()`: on a Berlin
+                non-trading day no cached close can still change (issue #9). Only the
+                Saturday 08:00 market-data slot overrides it, with True — it is the one
+                that settles Friday's US close.
+            stale_baskets: False leaves the basket check out of the diagnostics, for the
+                full sync, which takes it after its look-through refresh (issue #79)
 
         Returns:
             Summary of synced data
         """
-        logger.info("Starting scheduled market data sync...")
+        logger.info("Starting market data sync...")
+        if refresh_provisional is None:
+            refresh_provisional = is_berlin_trading_day()
 
         async with AsyncSessionLocal() as db:
             try:
@@ -630,10 +654,9 @@ class SchedulerService:
                         "timestamp": utc_iso(utcnow())
                     }
 
-                # The loop itself lives on the service, shared with
-                # POST /api/market-data/sync — it fetches the dates we are missing plus
-                # the trailing few whose cached close may still be a mid-session price,
-                # and stops early if Yahoo rate-limits.
+                # The loop itself lives on the service — it fetches the dates we are
+                # missing plus the trailing few whose cached close may still be a
+                # mid-session price, and stops early if Yahoo rate-limits.
                 swept = await market_data_service.sync_securities(
                     securities, days_back=days_back,
                     refresh_provisional=refresh_provisional,
@@ -678,7 +701,9 @@ class SchedulerService:
                 #
                 # Guarded on its own: this is a diagnostic, and it must never be the
                 # reason a sync that actually fetched prices reports failure.
-                diagnostics = await self.collect_market_data_diagnostics(db)
+                diagnostics = await self.collect_market_data_diagnostics(
+                    db, stale_baskets=stale_baskets,
+                )
                 if diagnostics:
                     # Append: the rate-limit abort above may already have put a
                     # warning here, and a plain assignment would drop the one
@@ -1135,6 +1160,32 @@ class SchedulerService:
                 ],
             }
 
+    async def check_stale_etf_baskets(self) -> dict:
+        """
+        `find_stale_etf_baskets` as a step of its own, which the 18:00 full sync takes
+        **after** `refresh_lookthrough_data` (GitHub issue #79).
+
+        The full sync's price pass runs first, and its diagnostics used to carry this
+        check — so the run record warned about baskets the same run refreshed minutes
+        later (production, 2026-10-18 18:00: every fund the warnings named was listed in
+        that record's `lookthrough_result.baskets.refreshed`, and the tab showed none of
+        them stale). Asked after the refresh, a warning means what it says: the refresh
+        failed, the issuer served nothing newer, or there is no automated route. The
+        market-data slots keep the check inside their diagnostics; no refresh follows them.
+
+        Guarded like its siblings: a diagnostic never decides a job's status.
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                warnings = await self.find_stale_etf_baskets(db)
+        except Exception as e:
+            logger.warning(f"Could not check ETF basket freshness: {e}")
+            return {"status": "error", "message": f"{type(e).__name__}: {e}"}
+        result = {"status": "success"}
+        if warnings:
+            result["warnings"] = warnings
+        return result
+
     async def sync_exchange_rates(self, days_back: int = 30) -> dict:
         """
         Sync exchange rates from Frankfurter API for all non-EUR currencies
@@ -1387,6 +1438,34 @@ class SchedulerService:
                     "timestamp": utc_iso(utcnow())
                 }
 
+    async def dividend_sync_locked(self) -> dict:
+        """
+        `sync_dividends` as a run of its own, with a `sync_runs` row: the body of
+        `POST /api/dividends/sync` and of the pass `GET /api/dividends/summary` enqueues.
+        The caller holds `SYNC_PIPELINE` with the public cooldown; the gate and the
+        cooldown are the only things the route adds (GitHub issue #65).
+
+        The route used to run sync-then-compute itself and drop what `sync_dividends`
+        hoists — `rate_limited` and the warnings — with no row recorded, so a pass Yahoo
+        cut short left no trace anywhere. Recorded as `dividend_sync`, which is not in
+        SCHEDULED_JOB_TYPES and never sets `last_sync_result`: it is not the portfolio's
+        "last sync".
+        """
+        started_at = utcnow()
+        div_result = await self.sync_dividends()
+        result = {
+            "type": "dividend_sync",
+            "timestamp": utc_iso(started_at),
+            "status": div_result.get("status", "error"),
+            "message": div_result.get("message")
+            or (div_result.get("sync") or {}).get("message"),
+            "rate_limited": bool(div_result.get("rate_limited")),
+            "dividend_result": div_result,
+        }
+        _collect_warnings(result, div_result)
+        await self._record_run(result, started_at)
+        return result
+
     async def record_dividend_forecast(self) -> dict:
         """
         Record today's dividend forecast figures (docs/dividends.md, *The forecast's
@@ -1476,6 +1555,8 @@ class SchedulerService:
            ordering still matters on the days step 1 works: a security created there
            must exist before this prices it. Missing dates only on a Berlin weekend.
         3. Dividend sync (Yahoo Finance ex-dates + EUR income)
+        4. Look-through upkeep (issuer baskets, identities), then the stale-basket
+           check — after the refresh, not among step 2's diagnostics (issue #79)
         """
         return await self._gated_job("full_sync", self._full_sync_job_locked, scheduled=scheduled)
 
@@ -1517,12 +1598,14 @@ class SchedulerService:
         # On a Berlin weekend, missing dates only (GitHub issue #9): no cached close can
         # still change, and re-fetching the provisional ones was a request per security
         # for nothing. A security new in Saturday's statement, or a split purge, still
-        # gets its history. Keyed on the calendar, never on the IBKR result above —
-        # gating this half on that was a silent outage (see above).
+        # gets its history. Keyed on the calendar — `sync_market_data`'s default, so
+        # `POST /api/market-data/sync` gets the same answer — never on the IBKR result
+        # above: gating this half on that was a silent outage (see above).
+        #
+        # Without the stale-basket check: step 5 refreshes the baskets, and a verdict
+        # taken now would warn about baskets this run brings current (issue #79).
         logger.info("Syncing market data (730 days)...")
-        market_result = await self.sync_market_data(
-            days_back=730, refresh_provisional=is_berlin_trading_day(),
-        )
+        market_result = await self.sync_market_data(days_back=730, stale_baskets=False)
         logger.info(f"Market Data Sync Result: {market_result}")
 
         # Step 4: Sync dividends (always — yfinance-based, computes against existing tax lots)
@@ -1548,6 +1631,9 @@ class SchedulerService:
         lookthrough_result = await self.refresh_lookthrough_data()
         logger.info(f"Look-through Upkeep Result: {lookthrough_result}")
 
+        # The stale-basket verdict the price pass left out, now that the refresh has run.
+        basket_check = await self.check_stale_etf_baskets()
+
         # Track result
         self.last_sync_result = {
             "type": "full_sync",
@@ -1566,7 +1652,7 @@ class SchedulerService:
             self.last_sync_result["reason"] = ibkr_result["reason"]
         _collect_warnings(
             self.last_sync_result, ibkr_result, fx_result, market_result, div_result,
-            lookthrough_result, forecast_result,
+            lookthrough_result, basket_check, forecast_result,
         )
         await self._record_run(self.last_sync_result, started_at)
 
@@ -1597,7 +1683,10 @@ class SchedulerService:
         fx_result = await self.sync_exchange_rates(days_back=7)
         logger.info(f"Exchange Rate Sync Result: {fx_result}")
 
-        market_result = await self.sync_market_data(days_back=7)
+        # Always refreshing provisional closes, weekend or not: this job runs on a
+        # Saturday only at 08:00, and that slot exists to settle Friday's US close,
+        # which the 22:00 pass wrote seconds after the bell (issue #9).
+        market_result = await self.sync_market_data(days_back=7, refresh_provisional=True)
         logger.info(f"Market Data Sync Result: {market_result}")
 
         # Sync benchmark prices (only previously used benchmarks)

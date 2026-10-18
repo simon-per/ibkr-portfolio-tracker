@@ -109,6 +109,8 @@ def spy(monkeypatch):
                         s.make('benchmarks', {"status": "success"}))
     monkeypatch.setattr(svc, 'refresh_lookthrough_data',
                         s.make('lookthrough', {"status": "success"}))
+    monkeypatch.setattr(svc, 'check_stale_etf_baskets',
+                        s.make('basket_check', {"status": "success"}))
     monkeypatch.setattr(svc, 'record_dividend_forecast',
                         s.make('dividend_forecast', {"status": "success"}))
     return svc, s
@@ -377,24 +379,36 @@ def test_both_sync_paths_share_one_sweep():
     A source check because that is the only thing that can see it: both copies worked
     perfectly well while disagreeing about whether to stop on a 429, and a behavioural
     test of one says nothing about the other. Keyed on `sync_securities` appearing in
-    both and `sync_security_prices` in neither — the latter is the inner call a
+    the scheduler and `sync_security_prices` in neither — the latter is the inner call a
     hand-rolled loop would have to make.
+
+    Since GitHub issue #65 the route goes one level further and runs the scheduler's
+    step itself, so it must not reach the sweep at all: a router calling
+    `sync_securities` is a second copy of the step's body growing back.
     """
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    for rel in ("app/services/scheduler_service.py", "app/routers/market_data.py"):
-        source = (root / rel).read_text(encoding="utf-8")
-        assert "sync_securities(" in source, (
-            f"{rel} no longer delegates to MarketDataService.sync_securities — if it "
-            f"has its own securities loop again, the rate-limit breaker is optional "
-            f"in exactly one of the two paths."
-        )
+    scheduler = (root / "app/services/scheduler_service.py").read_text(encoding="utf-8")
+    router = (root / "app/routers/market_data.py").read_text(encoding="utf-8")
+    assert "sync_securities(" in scheduler, (
+        "scheduler_service.py no longer delegates to MarketDataService.sync_securities — "
+        "if it has its own securities loop again, the rate-limit breaker is optional."
+    )
+    assert "get_scheduler().sync_market_data(" in router, (
+        "POST /api/market-data/sync no longer runs SchedulerService.sync_market_data"
+    )
+    for rel, source in (("app/services/scheduler_service.py", scheduler),
+                        ("app/routers/market_data.py", router)):
         assert "sync_security_prices(" not in source, (
             f"{rel} calls sync_security_prices directly, i.e. it is iterating "
             f"securities itself. Use sync_securities so the breaker and the pacing "
             f"cannot drift between the scheduled job and the public route."
         )
+    assert "sync_securities(" not in router, (
+        "the market-data route sweeps the securities itself again instead of running "
+        "the scheduler's step — the copy GitHub issue #65 removed"
+    )
 
 
 # --- stale / missing prices ---------------------------------------------------------
@@ -694,22 +708,54 @@ async def test_the_weekend_full_sync_prices_missing_dates_only(spy, monkeypatch,
     (issues #6, #11), so skipping it would move those requests, not save them.
     """
     svc, s = spy
-    asked = []
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    async def market(*args, **kwargs):
-        s.called.append('market_data')
-        asked.append(kwargs)
-        return {"status": "success"}
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.scheduler_service.AsyncSessionLocal", maker)
+    try:
+        async with maker() as seed:
+            seed.add(Security(
+                id=1, isin="US0000000001", symbol="S1", description="S1",
+                currency="USD", conid=1001, asset_category="STK", exchange="NASDAQ",
+            ))
+            await seed.commit()
 
-    monkeypatch.setattr(svc, 'sync_market_data', market)
-    monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
-    _pin_berlin(monkeypatch, day, FULL_SYNC_HOUR)
+        # The real price step, so the calendar rule is read where it now lives — the
+        # step's own default, shared with POST /api/market-data/sync (issue #65) —
+        # down to the sweep's arguments.
+        monkeypatch.setattr(svc, 'sync_market_data',
+                            SchedulerService.sync_market_data.__get__(svc))
+        asked = []
 
-    await svc.full_sync_job()
+        async def _sweep(self, securities, **kwargs):
+            s.called.append('market_data')
+            asked.append(kwargs)
+            return {"total_prices": 0, "processed": 1, "planned": 1, "errors": [],
+                    "rate_limited_after": None, "skipped_sold": 0, "skipped_backoff": 0}
 
-    assert asked == [{"days_back": 730, "refresh_provisional": trading}]
-    assert {'ibkr', 'fx', 'market_data', 'dividends', 'dividend_forecast',
-            'lookthrough'} <= set(s.called)
+        async def _diagnostics(db, **_kw):
+            return []
+
+        monkeypatch.setattr(
+            "app.services.market_data_service.MarketDataService.sync_securities", _sweep,
+        )
+        monkeypatch.setattr(svc, "collect_market_data_diagnostics", _diagnostics)
+        monkeypatch.setattr(svc, '_record_run', lambda *a, **k: _noop())
+        _pin_berlin(monkeypatch, day, FULL_SYNC_HOUR)
+
+        await svc.full_sync_job()
+
+        assert asked == [{"days_back": 730, "refresh_provisional": trading}]
+        assert {'ibkr', 'fx', 'market_data', 'dividends', 'dividend_forecast',
+                'lookthrough'} <= set(s.called)
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -747,7 +793,7 @@ async def test_a_missing_only_pass_still_runs_the_diagnostics(monkeypatch):
         )
         svc = SchedulerService()
 
-        async def _diagnostics(db):
+        async def _diagnostics(db, **_kw):
             return ["Flex gap"]
 
         monkeypatch.setattr(svc, "collect_market_data_diagnostics", _diagnostics)

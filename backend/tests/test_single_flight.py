@@ -104,7 +104,10 @@ async def test_the_dividend_card_does_not_start_a_second_yahoo_pass(monkeypatch)
         async def __aexit__(self, *a):
             return False
 
-    monkeypatch.setattr(div, "AsyncSessionLocal", lambda: _Boom())
+    # The pass is the scheduler's body (issue #65), which opens its session there.
+    monkeypatch.setattr(
+        "app.services.scheduler_service.AsyncSessionLocal", lambda: _Boom(),
+    )
 
     with single_flight(SYNC_PIPELINE):          # a scheduled job owns the pipeline
         await div._run_dividend_sync_background()
@@ -287,7 +290,16 @@ async def test_rapid_fire_dividend_syncs_get_one_pass_not_n(monkeypatch):
         passes.append("compute")
         return {}
 
-    monkeypatch.setattr(div, "AsyncSessionLocal", lambda: _Session())
+    async def _no_record(self, result, started_at):
+        return None
+
+    from app.services.scheduler_service import SchedulerService
+
+    # The pass is the scheduler's body (issue #65): its session, its run record.
+    monkeypatch.setattr(
+        "app.services.scheduler_service.AsyncSessionLocal", lambda: _Session(),
+    )
+    monkeypatch.setattr(SchedulerService, "_record_run", _no_record)
     monkeypatch.setattr(div.DividendService, "sync_dividend_data", _sync)
     monkeypatch.setattr(div.DividendService, "compute_dividend_income", _compute)
     await div._run_dividend_sync_background()

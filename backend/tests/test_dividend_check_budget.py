@@ -26,6 +26,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 import app.routers.dividends as div_router
 import app.services.dividend_service as ds
+import app.services.scheduler_service as sched
 import app.services.yahoo_rate_limit as yahoo_hold
 import app.single_flight as sf
 from app.clock import utcnow as real_utcnow
@@ -141,7 +142,12 @@ def _install(monkeypatch, session, clock, answers):
     monkeypatch.setattr(yahoo_hold, "utcnow", clock)
     monkeypatch.setattr(DividendService, "_get_yahoo_ticker", _ticker)
     monkeypatch.setattr(DividendService, "compute_dividend_income", _no_compute)
-    monkeypatch.setattr(div_router, "AsyncSessionLocal", lambda: _SharedSession())
+    async def _no_record(self, result, started_at):
+        return None
+
+    # The enqueued pass is the scheduler's body (issue #65): its session, its run record.
+    monkeypatch.setattr(sched, "AsyncSessionLocal", lambda: _SharedSession())
+    monkeypatch.setattr(sched.SchedulerService, "_record_run", _no_record)
     monkeypatch.setattr(div_router, "_last_auto_sync", None)
     monkeypatch.setattr(div_router, "_sync_in_progress", False)
     return asked
