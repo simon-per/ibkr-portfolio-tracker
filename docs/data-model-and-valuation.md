@@ -85,10 +85,39 @@ Migrations: `cd backend && alembic upgrade head` (the container CMD runs this on
 
 ## Reconciliation & realized P&L
 
-`reconcile_taxlots()` (`sync_helper.py`) explains quantity changes in priority order:
-1. **SELL trades** → close lots FIFO with the real date/proceeds/`fifoPnlRealized`; `close_source='trade'`
+`reconcile_taxlots()` (`sync_helper.py`) first works out **which lots lost shares**, then explains
+the loss for the security as a whole, in priority order:
+1. **SELL trades** → close the shares those lots lost, stamped with the latest SELL date in the
+   window; `close_source='trade'`
 2. **Corporate actions** → deterministic reclassification (split/spinoff/merger), not a sale
 3. **Fallback heuristic** (quantity drop + `COST_CONSERVED_RATIO`) → `close_source='heuristic'`
+
+**The diff is per lot, not per security** (GitHub issue #54, 2026-10-18). `_missing_per_lot`
+measures, for each snapshot lot, the shares the statement no longer reports **on that lot's
+`open_date`**: snapshot shares on the date minus incoming shares on it. Within one date it pairs
+lots by `(open_date, price_per_unit)` first, so of two same-day lots the one IBKR stopped
+reporting is the one that closes; lots with no price counterpart (spinoff drift moves every
+price) absorb the rest in snapshot order. The open date is the identity because IBKR keeps it
+through every restatement, while the price drifts and a split moves both quantity and price.
+Until then Phase D compared the security's **net** quantity and closed FIFO, which broke two
+ways. A **sale and a rebuy inside one window** (a failed slot, a lockout, the ET Sun/Mon skip, or
+just a sale and a rebuy a day apart) netted to zero, so nothing closed — and Phase B had already
+deleted the old lot, so every valuation before the rebuy held none of it: timeline, a past
+31 December Steuerwert, XIRR, attribution, contributions, benchmark, with nothing counted
+anywhere. And a **sale IBKR matched to a newer lot** (any lot-matching method but FIFO) closed
+the oldest lot, which IBKR still reports open, so it existed twice and every date before the sale
+held it double while the lot actually sold vanished. Open lots are still deleted and re-inserted
+from the statement (nothing keys on `taxlots.id`, and it keeps Phase B one statement); only the
+closures changed.
+
+**Without a SELL on record, inference still needs the holding to have shrunk.** A lot that
+changed shape while the net quantity did not fall — IBKR re-lotting, or a sale and rebuy with no
+`<Trades>` to show for it — books no disposal, exactly as the net comparison concluded. So the
+per-lot diff never records a sale on less evidence than before; a sale-and-rebuy is recorded only
+where its SELL is in `trades`, which is every sync since `<Trades>` was enabled. Lots already lost
+to the old rule before this change do not come back. Pinned in `tests/test_sync_helper.py`,
+including the family property: across a reconcile the statement explains, **no date before the
+window gains or loses shares** and the window's end holds what IBKR reports.
 
 **That order is the code's order, and it wasn't until 2026-07-30.** The trade lookup used to run
 *third*, supplying only a date and a provenance tag after 2 and 3 had already decided — so a trim of
@@ -97,7 +126,9 @@ SELL sat in `trades` for that window (200 shares at 20,000 sold down by 2 leaves
 `19800 >= 20000 * 0.99`). The disposal then never reached `calculate_xirr()`'s `+proceeds` inflow, the
 attribution's disposal term, that day's `external_flow_eur`, or the tax report's `closed_lot_estimate`.
 The two inferences now run **only when no SELL is on record**, so the reverse-split and cash-in-lieu
-protections are untouched — pinned from both sides in `tests/test_sync_helper.py`.
+protections are untouched — pinned from both sides in `tests/test_sync_helper.py`. Both still
+decide for the security as a whole: the cost-conservation ratio compares the security's total
+incoming cost with its snapshot cost, not a lot's.
 
 **`open_date` comes off `position.openDateTime`, parsed by ibflex.** It used to be scraped from the raw
 XML into a separate list and matched back by position index, but that list kept only STK rows carrying

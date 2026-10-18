@@ -3,12 +3,13 @@ Regression tests for reconcile_taxlots (backend/app/services/sync_helper.py).
 
 Focus: a per-share cost-basis change (e.g. the S&P Global -> Mobility Global
 spinoff, which makes IBKR re-allocate costBasisPrice for days) must NOT be
-mistaken for a sale. Reconciliation is by quantity held per security, so price
-drift creates no phantom closed lots. Genuine quantity reductions still close
-lots FIFO.
+mistaken for a sale. Reconciliation is by quantity held per lot open date, so
+price drift creates no phantom closed lots. Genuine quantity reductions close the
+lots that lost the shares -- not FIFO from the security's net quantity (#54).
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -24,6 +25,7 @@ from app.models.corporate_action import CorporateAction
 from app.repositories.taxlot_repository import TaxLotRepository
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
+from app.repositories.security_repository import lot_held_at
 from app.services.sync_helper import reconcile_taxlots, EmptyStatementError
 
 
@@ -231,7 +233,7 @@ async def test_partial_sale_closes_sold_qty_fifo():
         await _seed_open_lot(repo, 1, date(2025, 11, 6), 3, 492.47)
         await _seed_open_lot(repo, 1, date(2025, 12, 29), 2, 530.31)
 
-        # Incoming total = 4 (sold 1). Lot composition is irrelevant; only total qty matters.
+        # Incoming total = 4: the older lot lost 1 share, so that is the lot that closes.
         incoming = [
             _incoming("100", date(2025, 11, 6), 2, 492.47),
             _incoming("100", date(2025, 12, 29), 2, 530.31),
@@ -612,6 +614,218 @@ async def test_reconcile_round_trips_do_not_scale_with_security_count(n_securiti
         # is the refresh SELECT that used to accompany each one.
         assert statements.count("INSERT") == total_lots
         assert len(statements) == total_lots + 2
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+# --- Lot identity (GitHub issue #54) -------------------------------------------------
+# Phase D used to compare the security's NET quantity and close FIFO. A sale and a
+# rebuy inside one window then netted to zero and the old lot vanished from history;
+# a sale IBKR matched to a newer lot closed the oldest one, which IBKR still reports
+# open, so it existed twice.
+
+WINDOW_START = date(2026, 6, 9)    # last_sync_date
+WINDOW_END = date(2026, 6, 12)     # report_to_date
+
+
+async def _trade(trade_repo, key, side, trade_date, quantity, price, security_id=1, conid="100"):
+    q = Decimal(str(quantity))
+    p = Decimal(str(price))
+    signed = -q if side == "SELL" else q
+    await trade_repo.upsert({
+        "ib_key": key, "conid": conid, "security_id": security_id, "symbol": "AAA",
+        "trade_date": trade_date, "buy_sell": side, "quantity": signed,
+        "price": p, "proceeds": -signed * p, "commission": Decimal("-1"),
+        "currency": "USD", "realized_pnl": Decimal("0"), "asset_category": "STK",
+    })
+
+
+async def _all_lots(repo, security_id=1):
+    return (await repo.get_by_security_id(security_id, is_open=True)
+            + await repo.get_by_security_id(security_id, is_open=False))
+
+
+def _held_on(lots, d):
+    return sum((lot.quantity for lot in lots if lot_held_at(lot, d)), Decimal("0"))
+
+
+async def _reconcile_window(repo, trade_repo, corp_repo, incoming, conid_map=None):
+    return await reconcile_taxlots(
+        repo, FakeCurrencyService(),
+        conid_to_security_id=conid_map or {"100": 1},
+        taxlots_data=incoming,
+        report_to_date=WINDOW_END,
+        trade_repo=trade_repo,
+        corp_action_repo=corp_repo,
+        last_sync_date=WINDOW_START,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sell_and_rebuy_in_one_window_keeps_the_old_lots_history():
+    """Net quantity is unchanged, but the old lot was sold: it closes on the SELL's date."""
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 1, 6), 10, 100)
+        await _trade(trade_repo, "S1", "SELL", date(2026, 6, 10), 10, 120)
+        await _trade(trade_repo, "B1", "BUY", date(2026, 6, 11), 10, 120)
+        incoming = [_incoming("100", date(2026, 6, 11), 10, 120)]
+
+        result = await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        assert result["lots_closed_full"] == 1
+        closed = await repo.get_by_security_id(1, is_open=False)
+        assert [(lot.open_date, lot.quantity, lot.close_date, lot.close_source) for lot in closed] == [
+            (date(2025, 1, 6), Decimal("10"), date(2026, 6, 10), "trade"),
+        ]
+        lots = await _all_lots(repo)
+        assert _held_on(lots, date(2026, 1, 1)) == Decimal("10")   # was 0
+        assert _held_on(lots, date(2026, 6, 10)) == Decimal("0")   # sold at that close
+        assert _held_on(lots, WINDOW_END) == Decimal("10")         # the rebuy
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_non_fifo_disposal_closes_the_lot_ibkr_no_longer_reports():
+    """IBKR matched the sale to the newer lot: that lot closes, the older stays open once."""
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 1, 6), 10, 100)   # A
+        await _seed_open_lot(repo, 1, date(2026, 3, 2), 10, 150)   # C
+        await _trade(trade_repo, "S1", "SELL", date(2026, 6, 10), 10, 160)
+        incoming = [_incoming("100", date(2025, 1, 6), 10, 100)]   # A only
+
+        await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        closed = await repo.get_by_security_id(1, is_open=False)
+        assert [(lot.open_date, lot.quantity, lot.cost_basis) for lot in closed] == [
+            (date(2026, 3, 2), Decimal("10"), Decimal("1500")),
+        ]
+        lots = await _all_lots(repo)
+        assert _held_on(lots, date(2025, 6, 1)) == Decimal("10")   # was 20
+        assert _held_on(lots, date(2026, 4, 1)) == Decimal("20")
+        assert _held_on(lots, WINDOW_END) == Decimal("10")
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_of_two_same_day_lots_the_one_no_longer_reported_closes():
+    """Same open date, different prices: the price still reported keeps its lot."""
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 6, 17), 1, 100)
+        await _seed_open_lot(repo, 1, date(2025, 6, 17), 1, 102)
+        await _trade(trade_repo, "S1", "SELL", date(2026, 6, 10), 1, 110)
+        incoming = [_incoming("100", date(2025, 6, 17), 1, 100)]
+
+        await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        closed = await repo.get_by_security_id(1, is_open=False)
+        assert [(lot.price_per_unit, lot.quantity) for lot in closed] == [
+            (Decimal("102"), Decimal("1")),
+        ]
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_relotted_holding_with_no_sell_on_record_books_no_sale():
+    """
+    The per-lot diff must not manufacture disposals: a lot that changed open date
+    while the holding did not shrink, with no SELL in the window, is a restatement
+    (what the net comparison always concluded), not a sale.
+    """
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 1, 6), 10, 100)
+        incoming = [_incoming("100", date(2025, 1, 7), 10, 100)]
+
+        result = await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        assert result["lots_closed_full"] + result["lots_closed_partial"] == 0
+        assert await repo.get_by_security_id(1, is_open=False) == []
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+# Each scenario: snapshot lots and incoming lots as {security_id: [(open_date, qty, price)]},
+# and the window's trades as (side, date, qty) on security 1. Every one is a change
+# the statement explains -- trades for every quantity move, drift for price moves.
+_A = (date(2025, 1, 6), 10, 100)
+_C = (date(2026, 3, 2), 10, 150)
+_OTHER = {2: [(date(2025, 1, 6), 5, 100)]}
+_EXPLAINED_SCENARIOS = {
+    "unchanged": ({1: [_A]}, [], {1: [_A]}),
+    "price drift": ({1: [_A, _C]}, [], {1: [(_A[0], 10, 95), (_C[0], 10, 142)]}),
+    "a buy": ({1: [_A]}, [("BUY", date(2026, 6, 10), 5)],
+              {1: [_A, (date(2026, 6, 10), 5, 120)]}),
+    "FIFO partial sale": ({1: [_A, _C]}, [("SELL", date(2026, 6, 10), 4)],
+                          {1: [(_A[0], 6, 100), _C]}),
+    "non-FIFO sale": ({1: [_A, _C]}, [("SELL", date(2026, 6, 10), 10)], {1: [_A]}),
+    "sell and rebuy": ({1: [_A]}, [("SELL", date(2026, 6, 10), 10), ("BUY", date(2026, 6, 11), 10)],
+                       {1: [(date(2026, 6, 11), 10, 120)]}),
+    "partial sell and smaller rebuy": (
+        {1: [_A, _C]}, [("SELL", date(2026, 6, 10), 10), ("BUY", date(2026, 6, 11), 4)],
+        {1: [_C, (date(2026, 6, 11), 4, 120)]}),
+    "one of two same-day lots": (
+        {1: [(_A[0], 1, 100), (_A[0], 1, 102)]}, [("SELL", date(2026, 6, 10), 1)],
+        {1: [(_A[0], 1, 102)]}),
+    "sale under price drift": ({1: [_A, _C]}, [("SELL", date(2026, 6, 10), 6)],
+                               {1: [(_A[0], 10, 95), (_C[0], 4, 142)]}),
+    "full sale": ({1: [_A], **_OTHER}, [("SELL", date(2026, 6, 10), 10)], dict(_OTHER)),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", sorted(_EXPLAINED_SCENARIOS))
+async def test_an_explained_reconcile_moves_no_history_date(scenario):
+    """
+    The family property: when the statement explains every change, no date before
+    the window gains or loses shares, and the window's end holds what IBKR reports.
+    A reconcile only ever *adds* the window's events; it never rewrites the past.
+    """
+    snapshot, trades, incoming = _EXPLAINED_SCENARIOS[scenario]
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        for security_id, lots in snapshot.items():
+            for open_date, qty, price in lots:
+                await _seed_open_lot(repo, security_id, open_date, qty, price)
+        for n, (side, trade_date, qty) in enumerate(trades):
+            await _trade(trade_repo, f"T{n}", side, trade_date, qty, 120)
+        conid_map = {"100": 1, "2": 2}
+        incoming_rows = [
+            _incoming("100" if security_id == 1 else str(security_id), open_date, qty, price)
+            for security_id, lots in incoming.items() for open_date, qty, price in lots
+        ]
+        before = {
+            sid: [SimpleNamespace(open_date=lot.open_date, close_date=lot.close_date,
+                                  quantity=lot.quantity)
+                  for lot in await _all_lots(repo, sid)]
+            for sid in snapshot
+        }
+
+        await _reconcile_window(repo, trade_repo, corp_repo, incoming_rows, conid_map)
+
+        probes = {WINDOW_START, date(2025, 6, 1), date(2026, 1, 1)}
+        for lots in list(snapshot.values()) + list(incoming.values()):
+            for open_date, _, _ in lots:
+                probes |= {open_date - timedelta(days=1), open_date, open_date + timedelta(days=1)}
+        history = sorted(d for d in probes if d <= WINDOW_START)
+
+        for sid in snapshot:
+            after = await _all_lots(repo, sid)
+            moved = {d: (_held_on(before[sid], d), _held_on(after, d))
+                     for d in history if _held_on(before[sid], d) != _held_on(after, d)}
+            assert moved == {}, f"{scenario}: security {sid} history moved (before, after): {moved}"
+            reported = sum((Decimal(str(q)) for _, q, _ in incoming.get(sid, [])), Decimal("0"))
+            assert _held_on(after, WINDOW_END) == reported
     finally:
         await session.close()
         await engine.dispose()

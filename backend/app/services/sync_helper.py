@@ -7,16 +7,17 @@ this module:
 1. Snapshots existing open lots (grouped per security)
 2. Deletes only open lots
 3. Creates new lots from IBKR data
-4. Detects sold positions by comparing the total quantity held per security
-   (snapshot vs incoming), NOT by matching individual lot prices
-5. Creates closed lot records (FIFO) for the sold quantity
+4. Detects sold shares lot by lot: the quantity each snapshot lot is missing from
+   the incoming lots with the same open date, NOT a match on lot prices
+5. Creates closed lot records for exactly those lots
 
-Why quantity-based reconciliation:
+Why open-date quantities rather than prices:
 A genuine sale reduces the number of shares held. A corporate action (e.g. the
 S&P Global -> Mobility Global spinoff) makes IBKR re-allocate the per-share cost
 basis for days afterwards, so ``costBasisPrice`` drifts daily without any sale.
 Matching lots on price therefore produced phantom "closed" lots on every drift
-day. Comparing total quantity per security is immune to that drift.
+day. Quantities per open date are immune to that drift, and unlike the security's
+net quantity (used until issue #54) a rebuy cannot hide a sale.
 """
 import logging
 from collections import defaultdict
@@ -706,6 +707,65 @@ POSITION_CREATING_ACTIONS = {
 }
 
 
+def _missing_per_lot(snap_lots: List[Dict], incoming_lots: List[Dict]) -> List[Decimal]:
+    """
+    How many shares of each snapshot lot the incoming statement no longer holds,
+    aligned with ``snap_lots``.
+
+    A lot's identity is its ``open_date``. IBKR keeps it through every restatement,
+    while ``price_per_unit`` drifts for days after a spinoff and a split moves both
+    quantity and price. So the shortfall is measured per open date -- snapshot shares
+    on that date minus incoming shares on it -- and a rebuy, which opens a lot on a
+    new date, can never offset the sale of an old one.
+
+    Within one date the shortfall goes first to the lots whose (open_date,
+    price_per_unit) still has an incoming counterpart, by as much as that counterpart
+    shrank, then to the lots with none, in snapshot order: of several same-day lots,
+    the one IBKR stopped reporting is the one that closes. Pairing is list-preserving,
+    one incoming lot to one snapshot lot, like the grouping in Phase A.
+    """
+    missing = [Decimal("0")] * len(snap_lots)
+    incoming_by_date: Dict[date, List[Dict]] = defaultdict(list)
+    for lot in incoming_lots:
+        incoming_by_date[lot["open_date"]].append(lot)
+    snapshot_by_date: Dict[date, List[int]] = defaultdict(list)
+    for i, lot in enumerate(snap_lots):
+        snapshot_by_date[lot["open_date"]].append(i)
+
+    for open_date, indices in snapshot_by_date.items():
+        unpaired_incoming = list(incoming_by_date.get(open_date, ()))
+        shortfall = (
+            sum((snap_lots[i]["quantity"] for i in indices), Decimal("0"))
+            - sum((lot["quantity"] for lot in unpaired_incoming), Decimal("0"))
+        )
+        if shortfall <= 0:
+            continue
+
+        shrunk: List[tuple] = []     # (index, shares its counterpart lost)
+        vanished: List[tuple] = []   # (index, all its shares): no counterpart at this price
+        for i in indices:
+            lot = snap_lots[i]
+            match = next(
+                (j for j, inc in enumerate(unpaired_incoming)
+                 if inc["price_per_unit"] == lot["price_per_unit"]),
+                None,
+            )
+            if match is None:
+                vanished.append((i, lot["quantity"]))
+            else:
+                counterpart = unpaired_incoming.pop(match)
+                shrunk.append((i, max(lot["quantity"] - counterpart["quantity"], Decimal("0"))))
+
+        for i, deficit in shrunk + vanished:
+            take = min(deficit, shortfall)
+            if take > 0:
+                missing[i] = take
+                shortfall -= take
+            if shortfall <= 0:
+                break
+    return missing
+
+
 async def reconcile_taxlots(
     taxlot_repo: TaxLotRepository,
     currency_service: CurrencyService,
@@ -719,8 +779,10 @@ async def reconcile_taxlots(
     """
     Reconcile incoming IBKR tax lots against existing open lots.
 
-    Preserves closed lot history and detects newly sold positions by comparing
-    the total quantity held per security (snapshot vs incoming).
+    Preserves closed lot history and detects newly sold shares lot by lot: each
+    snapshot lot is diffed against the incoming lots with its ``open_date``
+    (``_missing_per_lot``), so what closes is the lot that left, never a FIFO
+    guess from the security's net quantity.
 
     When ``trade_repo``/``corp_action_repo`` and ``last_sync_date`` are provided,
     a detected share-count drop is classified against the authoritative IBKR data
@@ -813,6 +875,7 @@ async def reconcile_taxlots(
     # --- Phase C: Create new lots from IBKR data, track incoming quantity + cost per security ---
     incoming_qty: Dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
     incoming_cost: Dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    incoming_lots: Dict[int, List[Dict]] = defaultdict(list)
     new_open_lots: List[Dict] = []
 
     for lot_data in taxlots_data:
@@ -850,6 +913,7 @@ async def reconcile_taxlots(
         }
 
         new_open_lots.append(taxlot_data)
+        incoming_lots[security_id].append(taxlot_data)
         taxlots_count += 1
         total_cost_basis_eur += cost_basis_eur
         incoming_qty[security_id] += lot_data["quantity"]
@@ -859,10 +923,16 @@ async def reconcile_taxlots(
     # which is two round trips per lot for an object every caller here discards.
     await taxlot_repo.create_many(new_open_lots)
 
-    # --- Phase D: Reconcile — detect sold positions by quantity drop per security ---
-    # A sale is a reduction in shares held. Price drift (corporate actions) does
-    # not change quantity, so it never triggers a closure here. Sold quantity is
-    # attributed FIFO (oldest open_date first) across the snapshot lots.
+    # --- Phase D: Reconcile — diff every snapshot lot against the incoming lots ---
+    # A sale is shares a lot no longer holds. Price drift (corporate actions) does
+    # not change quantity, so it never triggers a closure here. This compared the
+    # security's NET quantity and closed FIFO until issue #54, which missed two
+    # shapes: a sale and a rebuy inside one window (net zero, so no closure -- and
+    # Phase B had already deleted the old lot, so every date before the rebuy held
+    # nothing), and a sale IBKR matched to a newer lot (FIFO closed the oldest, which
+    # IBKR still reports open, so it existed twice and history before the sale
+    # doubled). `_missing_per_lot` says which lots shrank; whether that is a sale is
+    # still decided for the security as a whole, below.
     close_date = report_to_date
     new_closed_lots: List[Dict] = []
 
@@ -876,12 +946,14 @@ async def reconcile_taxlots(
         security_id_to_conid = {sid: str(conid) for sid, conid in rows if conid is not None}
 
     for security_id, snap_lots in snapshot.items():
-        snapshot_qty = sum((lot["quantity"] for lot in snap_lots), Decimal("0"))
-        sold_qty = snapshot_qty - incoming_qty.get(security_id, Decimal("0"))
+        missing = _missing_per_lot(snap_lots, incoming_lots.get(security_id, []))
+        sold_qty = sum(missing, Decimal("0"))
 
         if sold_qty <= 0:
-            # No net reduction: unchanged holding, a buy, forward split, or pure price drift.
+            # Every lot still held in full: unchanged, a buy, forward split, or pure price drift.
             continue
+        snapshot_qty = sum((lot["quantity"] for lot in snap_lots), Decimal("0"))
+        net_drop = snapshot_qty - incoming_qty.get(security_id, Decimal("0"))
 
         conid = security_id_to_conid.get(security_id)
 
@@ -907,6 +979,17 @@ async def reconcile_taxlots(
         # With no SELL on record the drop has to be explained by inference, in
         # the documented order: corporate action first, cost conservation last.
         if close_source != "trade":
+            # Inference needs the holding to have shrunk. Lots that changed shape
+            # while it did not (IBKR re-lotting, a sale and rebuy with no <Trades>
+            # to show for it) are restated rather than sold -- what the net
+            # comparison always did, so nothing is booked on less evidence than before.
+            if net_drop <= 0:
+                logger.info(
+                    f"security_id={security_id}: {sold_qty} share(s) left their lots but "
+                    f"the holding did not shrink and no SELL is on record; not a sale"
+                )
+                continue
+
             # (2) Deterministic corporate-action reclassification. If a split-like
             # action (split/reverse-split/spinoff/symbol change) occurred for this
             # security in the window since the last sync, the share-count change is
@@ -916,7 +999,7 @@ async def reconcile_taxlots(
                 if any((a.action_type or "") in SPLIT_LIKE_ACTIONS for a in actions):
                     types = ",".join(sorted({a.action_type for a in actions if a.action_type}))
                     logger.info(
-                        f"security_id={security_id}: qty dropped {sold_qty} but a split-like "
+                        f"security_id={security_id}: qty dropped {net_drop} but a split-like "
                         f"corporate action ({types}) occurred — reclassifying, not a sale"
                     )
                     continue
@@ -928,7 +1011,7 @@ async def reconcile_taxlots(
             inc_cost = incoming_cost.get(security_id, Decimal("0"))
             if snapshot_cost > 0 and inc_cost >= snapshot_cost * COST_CONSERVED_RATIO:
                 logger.info(
-                    f"security_id={security_id}: qty dropped {sold_qty} but cost basis "
+                    f"security_id={security_id}: qty dropped {net_drop} but cost basis "
                     f"conserved ({inc_cost}/{snapshot_cost}) — split/consolidation, not a sale"
                 )
                 continue
@@ -941,11 +1024,7 @@ async def reconcile_taxlots(
             )
             continue
 
-        remaining = sold_qty
-        for lot in sorted(snap_lots, key=lambda l: l["open_date"]):
-            if remaining <= 0:
-                break
-            take = min(lot["quantity"], remaining)
+        for lot, take in zip(snap_lots, missing):
             if take <= 0:
                 continue
 
@@ -972,18 +1051,9 @@ async def reconcile_taxlots(
             else:
                 lots_closed_partial += 1
             logger.info(
-                f"Closed lot (FIFO): security_id={lot['security_id']}, "
+                f"Closed lot: security_id={lot['security_id']}, "
                 f"open_date={lot['open_date']}, sold_qty={take}, "
                 f"close_date={effective_close_date}, source={close_source}"
-            )
-            remaining -= take
-
-        if remaining > 0:
-            # Snapshot didn't hold enough shares to cover the reported drop.
-            # This shouldn't happen; log it for visibility rather than silently drop.
-            logger.warning(
-                f"Reconcile: security_id={security_id} sold_qty exceeded snapshot "
-                f"by {remaining}; closed lots may understate the sale"
             )
 
     # Written before Phase E, which queries closed lots back out of the DB.
