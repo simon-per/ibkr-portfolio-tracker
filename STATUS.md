@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-17.** Both of the day's branches are on `main`: the owner's batch
+**Last updated: 2026-10-18.** Both of the day's branches are on `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
@@ -23,10 +23,12 @@ on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
-- **Holding logos (#12): look at them.** Every held ISIN has a logo (2026-10-17): 33 from
-  logo.dev, the two Swisscanto pillar 3a funds imported by hand (`manual`, logo.dev's
-  `swisscanto.com` mark). Look at Positions, Dividends and Activity — the avatar styling (white circle,
-  hairline ring) was never seen with real logos.
+- **Holding logos: look at them.** About 200 companies carry a logo (2026-10-18): every
+  security ever held (the two Swisscanto funds by hand), the whole Nasdaq-100 and the top 100 of
+  the MSCI World and VT. Every table listing securities shows them, the Watchlist included
+  (docs/logos.md *Where*). Judge the avatar styling (white circle, hairline ring) with real
+  logos; GOOG/GOOGL/ABEA carry Alphabet's red "A" — the Google "G" is one domain lookup away
+  if wanted.
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
@@ -78,9 +80,13 @@ Only what is still unverified.
 - **The fintech UI pass with the owner's own eyes** (2026-10-17): every tab was screenshotted in
   both themes against production data through a routed preview; the dividend summary, the
   benchmarks and the crypto reads were seen only with made-up fixtures (Yahoo / the key). The sticky
-  strip's shadow on scroll was measured in both themes. Open: constituent logos by ISIN on
-  Look-through once the owner runs the basket fill-ahead (docs/logos.md; it spends logo.dev
-  credits) — most are monograms until then.
+  strip's shadow on scroll was measured in both themes. Look-through's constituent logos were
+  filled on 2026-10-18 (docs/logos.md *Filled*); companies beyond those baskets' top 100 stay
+  monograms.
+- **Watchlist logos for names never held (2026-10-18):** CATL (`300750.SZ`), SOFI, SNDK, the
+  Taiwanese names and `8306.T` resolve through the baskets and are fetched by Tuesday's 05:00
+  logo pass (or `fetch_logos` now); `SBI.TO` and any ticker no basket lists stay monograms.
+  MBGL answered `not indexed yet` and is re-asked by the same pass.
 
 - **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
