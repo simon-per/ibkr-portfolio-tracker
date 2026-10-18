@@ -149,6 +149,18 @@ const ALIGN_CELL: Record<Align, string> = {
   center: 'text-center',
 }
 
+/**
+ * The pinned first column. A sticky cell needs an opaque background or the columns
+ * sliding under it show through, so it repaints the card colour — and the row's hover
+ * wash as an image layer over it, since `bg-muted/40` on the `<tr>` is hidden behind
+ * that opaque cell. The edge shadow only appears once something has scrolled beneath it.
+ */
+const PINNED_CELL = cn(
+  'sticky left-0 z-[1] bg-card',
+  '[[data-scrolled]_&]:shadow-[1px_0_0_hsl(var(--border)),6px_0_8px_-6px_rgb(0_0_0/0.35)]',
+)
+const PINNED_ROW_HOVER = 'group-hover:bg-[linear-gradient(hsl(var(--muted)/0.4),hsl(var(--muted)/0.4))]'
+
 export interface DataTableProps<Row, SortKey extends string = never> {
   rows: readonly Row[]
   columns: readonly Column<Row, SortKey>[]
@@ -163,6 +175,12 @@ export interface DataTableProps<Row, SortKey extends string = never> {
    * table is `w-full`, which is why eighteen columns got squeezed rather than scrolled.
    */
   minWidthClassName?: string
+  /**
+   * Desktop only: the first visible column stays put while the table scrolls sideways,
+   * so a row keeps its identity on screen. A flag on the table rather than on a column:
+   * `left-0` is only right for the first one.
+   */
+  pinFirstColumn?: boolean
   footer?: readonly FooterCell[]
   rowActions?: (row: Row) => React.ReactNode
   /**
@@ -204,6 +222,7 @@ export function DataTable<Row, SortKey extends string = never>({
   caption,
   sort,
   minWidthClassName,
+  pinFirstColumn,
   footer,
   rowActions,
   expandedRow,
@@ -251,6 +270,7 @@ export function DataTable<Row, SortKey extends string = never>({
             caption={caption}
             sort={sort}
             minWidthClassName={minWidthClassName}
+            pinFirstColumn={pinFirstColumn}
             footer={footer}
             rowActions={rowActions}
             expandedRow={expandedRow}
@@ -272,6 +292,7 @@ function WideTable<Row, SortKey extends string>({
   caption,
   sort,
   minWidthClassName,
+  pinFirstColumn = false,
   footer,
   rowActions,
   expandedRow,
@@ -279,21 +300,22 @@ function WideTable<Row, SortKey extends string>({
 }: Required<Pick<DataTableProps<Row, SortKey>, 'rows' | 'columns' | 'getRowKey' | 'label' | 'density'>> &
   Pick<
     DataTableProps<Row, SortKey>,
-    'caption' | 'sort' | 'minWidthClassName' | 'footer' | 'rowActions' | 'expandedRow'
+    'caption' | 'sort' | 'minWidthClassName' | 'pinFirstColumn' | 'footer' | 'rowActions' | 'expandedRow'
   >) {
   const visible = columns.filter(c => c.desktop !== 'hide')
   const pad = DENSITY[density]
   const columnCount = visible.length + (rowActions ? 1 : 0)
+  const pinned = (index: number) => pinFirstColumn && index === 0
 
   return (
-    <ScrollableTable label={label}>
+    <ScrollableTable label={label} pinnedStart={pinFirstColumn}>
       <table className={cn('w-full text-sm', minWidthClassName)}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
           {/* Headers a step smaller and quieter than the figures, so the eye lands on
               the data; the rule under them is the one full-strength line in the table. */}
           <tr className="border-b border-border text-xs text-muted-foreground">
-            {visible.map(col => {
+            {visible.map((col, index) => {
               const align = col.align ?? 'left'
               if (col.sortKey && sort) {
                 return (
@@ -306,7 +328,7 @@ function WideTable<Row, SortKey extends string>({
                     onSort={sort.onSort}
                     align={align}
                     title={col.hint?.description}
-                    className={cn(pad, 'whitespace-nowrap', col.headerClassName)}
+                    className={cn(pad, 'whitespace-nowrap', pinned(index) && PINNED_CELL, col.headerClassName)}
                     iconClassName="h-3 w-3"
                   />
                 )
@@ -320,6 +342,7 @@ function WideTable<Row, SortKey extends string>({
                     'font-medium',
                     pad,
                     ALIGN_CELL[align],
+                    pinned(index) && PINNED_CELL,
                     col.headerClassName,
                   )}
                 >
@@ -340,17 +363,18 @@ function WideTable<Row, SortKey extends string>({
                     reads as part of its row rather than as a detached band below a rule. */}
                 <tr
                   className={cn(
-                    'transition-colors hover:bg-muted/40',
+                    'group transition-colors hover:bg-muted/40',
                     !expansion && 'border-b border-border/60 last:border-0',
                   )}
                 >
-                  {visible.map(col => (
+                  {visible.map((col, colIndex) => (
                     <td
                       key={col.key}
                       className={cn(
                         pad,
                         ALIGN_CELL[col.align ?? 'left'],
                         (col.align ?? 'left') === 'right' && 'tabular-nums',
+                        pinned(colIndex) && [PINNED_CELL, PINNED_ROW_HOVER],
                         col.tone?.(row),
                         col.cellClassName,
                       )}
@@ -387,13 +411,19 @@ function WideTable<Row, SortKey extends string>({
                       pad,
                       ALIGN_CELL[slot.cell.align ?? 'left'],
                       (slot.cell.align ?? 'left') === 'right' && 'tabular-nums',
+                      // Only a cell under the first column alone: a sticky multi-column span would pin its neighbours too.
+                      pinned(i) && slot.colSpan === 1 && PINNED_CELL,
                       slot.cell.tone,
                     )}
                   >
                     {slot.cell.content}
                   </td>
                 ) : (
-                  <td key={`pad-${i}`} className={pad} colSpan={slot.colSpan} />
+                  <td
+                    key={`pad-${i}`}
+                    className={cn(pad, pinned(i) && slot.colSpan === 1 && PINNED_CELL)}
+                    colSpan={slot.colSpan}
+                  />
                 ),
               )}
             </tr>
