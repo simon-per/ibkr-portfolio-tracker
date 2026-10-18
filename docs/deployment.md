@@ -334,7 +334,10 @@ run re-runs, which is a second generation (rule 2).
 ```bash
 #!/bin/bash
 # /root/health-watch.sh: restart a backend that stays unhealthy.
-# Install: chmod 755 /root/health-watch.sh; root crontab:  */5 * * * * /root/health-watch.sh
+# Install: chmod 755 /root/health-watch.sh; root crontab:  2-59/5 * * * * /root/health-watch.sh
+# OFFSET from auto-deploy's */5, never the same minute: both take the lock below, and on
+# 2026-10-18 health-watch won it a few ms ahead on every tick, so auto-deploy exited at its
+# flock silently and nothing deployed for an hour.
 set -u
 N="${HEALTH_WATCH_TICKS:-3}"             # consecutive unhealthy ticks before a restart
 STATE=/root/.health-watch-count
