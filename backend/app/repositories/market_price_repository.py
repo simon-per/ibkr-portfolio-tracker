@@ -2,15 +2,21 @@
 MarketPrice Repository
 Handles database operations for historical market prices.
 """
-from typing import Collection, List, Optional
+from typing import Collection, Dict, List, Mapping, Optional, Tuple
 from datetime import date, timedelta
-from sqlalchemy import select, and_, delete, func
+from sqlalchemy import select, and_, or_, delete, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from decimal import Decimal
 
 from app.models.market_price import MarketPrice
 from app.clock import utc_today
+
+
+#: Windows per query in `get_price_ranges`. Each window is one `AND` term of an `OR`
+#: chain, and SQLite parses that chain into a tree it caps at a depth of 1000
+#: (SQLITE_MAX_EXPR_DEPTH), so a long list is split rather than refused.
+_WINDOWS_PER_QUERY = 200
 
 
 class MarketPriceRepository:
@@ -43,6 +49,31 @@ class MarketPriceRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_latest_prices(
+        self, security_ids: Collection[int]
+    ) -> Dict[int, MarketPrice]:
+        """
+        `get_latest_price` for many securities in one query: {security_id: newest row}.
+        A security with no price is absent. `(security_id, date)` is unique, so the
+        newest date names exactly one row.
+        """
+        ids = list(security_ids)
+        if not ids:
+            return {}
+        newest = (
+            select(MarketPrice.security_id, func.max(MarketPrice.date).label("newest"))
+            .where(MarketPrice.security_id.in_(ids))
+            .group_by(MarketPrice.security_id)
+            .subquery()
+        )
+        result = await self.session.execute(
+            select(MarketPrice).join(newest, and_(
+                MarketPrice.security_id == newest.c.security_id,
+                MarketPrice.date == newest.c.newest,
+            ))
+        )
+        return {p.security_id: p for p in result.scalars().all()}
+
     async def get_price_range(
         self, security_id: int, start_date: date, end_date: date
     ) -> List[MarketPrice]:
@@ -59,6 +90,34 @@ class MarketPriceRepository:
             .order_by(MarketPrice.date.asc())
         )
         return list(result.scalars().all())
+
+    async def get_price_ranges(
+        self, windows: Mapping[int, Tuple[date, date]]
+    ) -> Dict[int, List[MarketPrice]]:
+        """
+        `get_price_range` for many securities, each over its own ``(start, end)``:
+        {security_id: rows oldest first}, an empty list for a window with no rows.
+        One query per `_WINDOWS_PER_QUERY` windows rather than one per security.
+        """
+        out: Dict[int, List[MarketPrice]] = {sid: [] for sid in windows}
+        items = list(windows.items())
+        for i in range(0, len(items), _WINDOWS_PER_QUERY):
+            chunk = items[i:i + _WINDOWS_PER_QUERY]
+            result = await self.session.execute(
+                select(MarketPrice)
+                .where(or_(*(
+                    and_(
+                        MarketPrice.security_id == sid,
+                        MarketPrice.date >= start,
+                        MarketPrice.date <= end,
+                    )
+                    for sid, (start, end) in chunk
+                )))
+                .order_by(MarketPrice.security_id.asc(), MarketPrice.date.asc())
+            )
+            for p in result.scalars().all():
+                out[p.security_id].append(p)
+        return out
 
     # An interior weekday hole that stayed empty this long is a market holiday
     # (the exchange never produced a close) — every daily sync since then has

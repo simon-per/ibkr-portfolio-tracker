@@ -48,6 +48,19 @@ with the same rules the presenter always had: a lot sold on D is not held at D's
 disposal window is `(start, end]`, and a security held at an endpoint that cannot be valued
 there is in `unpriced` and **excluded from both sides**.
 
+**The decomposition reads its inputs once** (GitHub #47). It asks for the window and one window
+per calendar year, and each `attribution_rows` call used to reload every lot, both price and FX
+caches, `_load_base_fx` and the closed lots (48 queries, eight of them tax lots, for a window
+and one year). `load_attribution_inputs(span_start, end)` now reads them once over the span the
+timeline already covers, and the timeline and every window take them as `preloaded=`. It is
+still the one loop — `get_performance_attribution` and segments call it without the argument.
+**Each window cuts out exactly the rows its own queries would have read**, never the wider set:
+a wider price cache would let the 14-day fallback from an effective start that sits before the
+window reach a price the window's own load could not see, a wider FX cache the same for a rate,
+and a newer row would decide a mixed-currency history's price currency. A window the span does
+not hold queries for itself. `tests/test_read_path_query_cost.py` builds both edges and compares
+every window, the closed-lot rows and the whole decomposition with the preload switched off.
+
 ## The price / FX split — a convention, stated
 
 ```
@@ -151,6 +164,8 @@ priced at an endpoint or sale" line.
 
 `post_sale_pct` compares two rows of the security's **own price history in its quote
 currency** — the last close on or before the sale date against the newest close after it.
+Both come from two queries for all sold securities together (`get_latest_prices`, then
+`get_price_ranges` over each one's 14 days up to its last close), not two per security (#47).
 Base-currency proceeds cannot serve as the reference (they carry FX), and a quote in a
 different currency is refused rather than compared. It is `None` without a later price. Since
 2026-10-17 (GitHub issue #10) the market-data sync prices a sold security in the six 7-day
@@ -193,6 +208,8 @@ sale with IBKR's realized figure, an unpriced holding, a basket with a cash row,
 deposit before the first purchase and a measured cash balance three francs off the derived
 one; the identity on the rounded figures; the CHF-base FX leg; the wire shape in both
 directions), `tests/test_closed_positions_partial_fx.py` (none, one or both of a security's two
-SELLs unconvertible), the three routes in `tests/test_api_smoke.py`, `frontend/src/lib/rollingRisk.test.ts`,
+SELLs unconvertible), `tests/test_read_path_query_cost.py` (query bounds, and the preloaded and
+bulk paths against the ones they replaced), the three routes in `tests/test_api_smoke.py`,
+`frontend/src/lib/rollingRisk.test.ts`,
 and `frontend/src/components/AnalyticsTab.test.tsx` (dashes for absences, caveats on the
 surface, the segment toggle, and that the benchmark is never requested unselected).

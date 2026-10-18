@@ -184,6 +184,17 @@ and `measured_corrections` share `_derived_events`; neither caches the other's r
 because they are called from different requests and a stale cache would let the corrections
 drift from the balance they explain.
 
+What *is* memoized is the rows, **per `CashService` instance** and never per module (GitHub
+#47): `trades`, `cash_flows` and `cash_balances` are each read once, and `_corrections_for`
+filters its account out of the one `cash_balances` read. An instance serves one request, so a
+sync between two requests is seen by the next. The summary builds one instance and hands its
+`all_trades()` to `get_realized_totals(trades=)` as well, so one summary reads `trades` once
+(it was three reads, plus two of `cash_flows` and three of `cash_balances`).
+`_accounts_with_activity` and `derived_source` answer off those rows when the instance has
+them, else with a `UNION` of distinct account names and two counts — never by loading every
+Trade and CashFlow to collect a label. Pinned, with the before/after figures, in
+`tests/test_read_path_query_cost.py`.
+
 **`cash_source` is per point, not per response.** The Flex window is bounded, so measured
 history starts whenever the section was enabled and can never reach the account's start;
 stamping `ibkr` on the years before it because the tail is measured is the same overclaim

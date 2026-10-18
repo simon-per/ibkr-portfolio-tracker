@@ -110,20 +110,29 @@ class PerformanceAnalyticsService:
         span_start = start_date
         if first_open is not None:
             span_start = min(span_start, date(first_open.year, 1, 1) - timedelta(days=1))
-        timeline = await self.portfolio.get_portfolio_value_over_time(span_start, end_date)
+        # Lots, price and FX caches and `base_fx` read once over that span, for the
+        # timeline and every window's `attribution_rows` (GitHub #47) — each window
+        # still cuts out exactly the rows its own load would have read.
+        preloaded = await self.portfolio.load_attribution_inputs(
+            span_start, end_date, base_fx=base_fx
+        )
+        timeline = await self.portfolio.get_portfolio_value_over_time(
+            span_start, end_date, preloaded=preloaded
+        )
         by_date = {date.fromisoformat(p["date"]): p for p in timeline}
-        cash_source = await CashService(self.db).cash_source()
+        cash_service = CashService(self.db)
+        cash_source = await cash_service.cash_source()
 
         dividends = [
             (when, base_fx.convert(net_eur, when))
             for when, net_eur in await DividendService(self.db).ibkr_cash_receipts()
         ]
-        corrections = await CashService(self.db).measured_corrections(base_fx)
+        corrections = await cash_service.measured_corrections(base_fx)
         flows: List[Tuple[date, Decimal]] = inputs["money_in_legs"]
 
         async def window(ws: date, we: date) -> Dict:
             return await self._decompose_window(
-                ws, we, by_date, dividends, corrections, flows, cash_source,
+                ws, we, by_date, dividends, corrections, flows, cash_source, preloaded,
             )
 
         result = await window(start_date, end_date)
@@ -158,8 +167,11 @@ class PerformanceAnalyticsService:
         corrections: List[Tuple[date, Decimal, str]],
         flows: List[Tuple[date, Decimal]],
         cash_source: str,
+        preloaded=None,
     ) -> Dict:
-        computed = await self.portfolio.attribution_rows(start_date, end_date)
+        computed = await self.portfolio.attribution_rows(
+            start_date, end_date, preloaded=preloaded
+        )
         eff_start = computed["effective_start"]
         eff_end = computed["effective_end"]
         warnings: List[str] = []
@@ -551,7 +563,16 @@ class PerformanceAnalyticsService:
             g["last_close"] = max(g["last_close"], r["close_date"])
             g["weighted_days"] += r["cost_basis"] * (r["close_date"] - r["open_date"]).days
 
+        # The post-sale prices in two queries for every sold security together, not two
+        # per security (GitHub #47): each one's newest close, then the closes in the 14
+        # days up to its last sale for those that have a later price.
         price_repo = MarketPriceRepository(self.db)
+        latest_by_sid = await price_repo.get_latest_prices(list(grouped))
+        around_close_by_sid = await price_repo.get_price_ranges({
+            sid: (g["last_close"] - timedelta(days=14), g["last_close"])
+            for sid, g in grouped.items()
+            if sid in latest_by_sid and latest_by_sid[sid].date > g["last_close"]
+        })
         positions: List[Dict] = []
         fx_fallbacks = 0
         for sid, g in grouped.items():
@@ -581,11 +602,9 @@ class PerformanceAnalyticsService:
             # rather than compared.
             post_sale_pct: Optional[float] = None
             post_sale_days: Optional[int] = None
-            latest = await price_repo.get_latest_price(sid)
+            latest = latest_by_sid.get(sid)
             if latest is not None and latest.date > g["last_close"]:
-                around_close = await price_repo.get_price_range(
-                    sid, g["last_close"] - timedelta(days=14), g["last_close"]
-                )
+                around_close = around_close_by_sid[sid]
                 ref = around_close[-1] if around_close else None
                 if (
                     ref is not None and ref.close_price and ref.close_price > 0

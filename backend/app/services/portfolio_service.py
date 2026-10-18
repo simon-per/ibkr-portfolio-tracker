@@ -4,6 +4,7 @@ Calculates cost basis and market value for the portfolio over time.
 """
 import calendar
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Sequence, Set, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
@@ -11,6 +12,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
+from app.models.corporate_action import CorporateAction
 from app.models.taxlot import TaxLot
 from app.models.security import Security
 from app.models.trade import Trade
@@ -23,11 +25,14 @@ from app.services.native_amounts import NativeToBase, cash_flow_in_base
 # benchmark_service import it from.
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
-from app.services.fx_preload import eur_rate_on, preload_eur_rates
+from app.services.fx_preload import (
+    RateCache, eur_rate_on, preload_eur_rates, slice_eur_rates, wanted_currencies,
+)
 from app.services.percentages import share_pct
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
+from app.repositories.trade_repository import TradeRepository
 from app.repositories.security_repository import held_at, lot_held_at
 from app.services.sync_helper import POSITION_CREATING_ACTIONS
 from app.clock import utc_today
@@ -42,6 +47,34 @@ _DAYS_PER_MONTH = 365.25 / 12
 # query this many days before the window, and _find_latest_price_date must not
 # search deeper — the search cannot see past what the preload fetched.
 PRICE_LOOKBACK_DAYS = 14
+
+
+@dataclass(frozen=True)
+class AttributionInputs:
+    """
+    Everything `attribution_rows` loads, read **once** over a span that holds every
+    window a caller will ask about — the decomposition asks for its window and one per
+    calendar year, and used to reload all lots, both price and FX caches, `base_fx` and
+    the closed lots once per window (GitHub #47). Built by `load_attribution_inputs`.
+
+    Each window still sees exactly what its own queries would have returned:
+    `_preload_market_prices`, `_preload_exchange_rates` and
+    `realized_rows_from_closed_lots` cut their window's rows out of these, and query as
+    before for a window the span does not hold. Cutting is what keeps the figures
+    identical — a wider cache would let a price fallback reach past the 14 days the
+    window's own load allowed, and let a newer row decide a mixed-currency history's
+    price currency.
+    """
+    taxlots_with_securities: list
+    base_fx: BaseFx
+    security_ids: frozenset
+    price_rows: list            # MarketPrice rows over [prices_from, prices_to]
+    prices_from: date
+    prices_to: date
+    rates: RateCache            # `preload_eur_rates` over [rates_from, rates_to]
+    rate_currencies: frozenset
+    rates_from: date
+    rates_to: date
 
 
 def _shift_months(from_date: date, months: int) -> date:
@@ -154,20 +187,30 @@ class PortfolioService:
         rolling Flex window) simply keeps the old, loud behaviour. That is the right
         default: the floor is driven by recorded fact, and no record means no licence to
         drop a holding quietly.
+
+        The quantity held at each action's date is one grouped query over all of them,
+        not one `SUM` per action (GitHub #47): the summary runs this on every load.
         """
-        actions = await CorporateActionRepository(self.db).get_by_types(
-            POSITION_CREATING_ACTIONS
-        )
+        actions = [
+            a for a in await CorporateActionRepository(self.db).get_by_types(
+                POSITION_CREATING_ACTIONS
+            )
+            if a.security_id is not None and a.quantity and a.quantity > 0
+        ]
+        held_by_action: Dict[int, Decimal] = {}
+        if actions:
+            held_by_action = dict((await self.db.execute(
+                select(CorporateAction.id, func.sum(TaxLot.quantity))
+                .join(TaxLot, and_(
+                    TaxLot.security_id == CorporateAction.security_id,
+                    held_at(CorporateAction.action_date),
+                ))
+                .where(CorporateAction.id.in_([a.id for a in actions]))
+                .group_by(CorporateAction.id)
+            )).all())
         starts: Dict[int, date] = {}
         for action in actions:
-            if action.security_id is None or not action.quantity or action.quantity <= 0:
-                continue
-            held = (await self.db.execute(
-                select(func.sum(TaxLot.quantity)).where(
-                    TaxLot.security_id == action.security_id,
-                    held_at(action.action_date),
-                )
-            )).scalar() or Decimal("0")
+            held = held_by_action.get(action.id) or Decimal("0")
             if held > action.quantity:
                 continue
             previous = starts.get(action.security_id)
@@ -177,32 +220,96 @@ class PortfolioService:
             logger.info(f"Position start dates from corporate actions: {starts}")
         return starts
 
-    async def get_portfolio_value_over_time(
-        self,
-        start_date: date,
-        end_date: date
-    ) -> List[Dict]:
-        """
-        Calculate portfolio value (cost basis and market value) for each day in range.
-        Uses optimized caching for fast performance.
-        Includes both open AND closed tax lots for correct historical values.
-        """
-        # Get ALL taxlots (open + closed) for historical accuracy
+    async def _all_lots_with_securities(self) -> list:
+        """Every tax lot (open and closed) with its security, oldest open first — what
+        the timeline and `attribution_rows` walk."""
         result = await self.db.execute(
             select(TaxLot, Security)
             .join(Security, TaxLot.security_id == Security.id)
             .order_by(TaxLot.open_date.asc())
         )
-        taxlots_with_securities = result.all()
+        return result.all()
+
+    async def load_attribution_inputs(
+        self, span_start: date, span_end: date, base_fx: Optional[BaseFx] = None
+    ) -> AttributionInputs:
+        """
+        Read `AttributionInputs` once for every window inside ``[span_start, span_end]``.
+
+        The price rows reach back two lookbacks: a window's effective start can sit up
+        to `PRICE_LOOKBACK_DAYS` before it, and its disposals' prices look back another
+        one from there. The rates reach back one price lookback plus their own carry for
+        the same reason. A window the span does not hold is still answered — by its
+        own queries.
+        """
+        lots = await self._all_lots_with_securities()
+        security_ids = frozenset(sec.id for _, sec in lots)
+        prices_from = span_start - timedelta(days=2 * PRICE_LOOKBACK_DAYS)
+        price_rows: list = []
+        if security_ids:
+            from app.models.market_price import MarketPrice
+            price_rows = list((await self.db.execute(
+                select(MarketPrice).where(
+                    and_(
+                        MarketPrice.security_id.in_(security_ids),
+                        MarketPrice.date >= prices_from,
+                        MarketPrice.date <= span_end,
+                    )
+                )
+            )).scalars().all())
+        rate_currencies = frozenset(wanted_currencies(
+            {sec.currency for _, sec in lots} | {p.currency for p in price_rows}
+        ))
+        rates_start = span_start - timedelta(days=PRICE_LOOKBACK_DAYS)
+        rates = await preload_eur_rates(
+            self.db, rate_currencies, rates_start, span_end, FX_MAX_CARRY_DAYS
+        )
+        return AttributionInputs(
+            taxlots_with_securities=lots,
+            base_fx=base_fx if base_fx is not None else await self._load_base_fx(),
+            security_ids=security_ids,
+            price_rows=price_rows,
+            prices_from=prices_from,
+            prices_to=span_end,
+            rates=rates,
+            rate_currencies=rate_currencies,
+            rates_from=rates_start - timedelta(days=FX_MAX_CARRY_DAYS),
+            rates_to=span_end,
+        )
+
+    async def get_portfolio_value_over_time(
+        self,
+        start_date: date,
+        end_date: date,
+        preloaded: Optional[AttributionInputs] = None,
+    ) -> List[Dict]:
+        """
+        Calculate portfolio value (cost basis and market value) for each day in range.
+        Uses optimized caching for fast performance.
+        Includes both open AND closed tax lots for correct historical values.
+
+        `preloaded` hands over lots, caches and `base_fx` a caller already read over a
+        span holding this range (the decomposition), so they are not read again.
+        """
+        # Get ALL taxlots (open + closed) for historical accuracy
+        if preloaded is not None:
+            taxlots_with_securities = preloaded.taxlots_with_securities
+        else:
+            taxlots_with_securities = await self._all_lots_with_securities()
 
         if not taxlots_with_securities:
             return []
 
         # Pre-load all data once
         unique_securities = {security for _, security in taxlots_with_securities}
-        price_cache, price_currency_cache = await self._preload_market_prices(unique_securities, start_date, end_date)
-        exchange_rate_cache = await self._preload_exchange_rates(unique_securities, start_date, end_date, price_currency_cache=price_currency_cache)
-        base_fx = await self._load_base_fx()
+        price_cache, price_currency_cache = await self._preload_market_prices(
+            unique_securities, start_date, end_date, preloaded=preloaded
+        )
+        exchange_rate_cache = await self._preload_exchange_rates(
+            unique_securities, start_date, end_date,
+            price_currency_cache=price_currency_cache, preloaded=preloaded,
+        )
+        base_fx = preloaded.base_fx if preloaded is not None else await self._load_base_fx()
 
         # Proceeds of lots closed in the range, so each day can report the real
         # external flow rather than leaving the frontend to infer one from the
@@ -215,7 +322,8 @@ class PortfolioService:
         # held. Change all three together.
         disposals_by_day: Dict[date, Decimal] = {}
         for row in await self.realized_rows_from_closed_lots(
-            base_fx, start=start_date + timedelta(days=1), end=end_date
+            base_fx, start=start_date + timedelta(days=1), end=end_date,
+            preloaded=preloaded,
         ):
             d = row["close_date"]
             disposals_by_day[d] = disposals_by_day.get(d, Decimal("0")) + row["proceeds"]
@@ -475,13 +583,19 @@ class PortfolioService:
         )
         taxlots_with_securities = result.all()
 
+        # One CashService for the request: the realized totals and the cash balance read
+        # the same `trades` rows, so they are read once (GitHub #47).
+        cash_service = CashService(self.db)
+
         if not taxlots_with_securities:
-            realized = await self.get_realized_totals(base_fx=base_fx)
+            realized = await self.get_realized_totals(
+                base_fx=base_fx, trades=await cash_service.all_trades()
+            )
             # Nothing held is NOT the same as nothing owned: an account that has sold
             # everything holds its whole value in cash, which is the state this feature
             # exists for. Reporting 0.00 here would be the reassuring zero in its purest
             # form — a liquidated account rendered as an empty one.
-            cash = await self._cash_summary(base_fx, today)
+            cash = await self._cash_summary(base_fx, today, cash_service)
             return {
                 "total_cost_basis_eur": 0.0,
                 "total_market_value_eur": 0.0,
@@ -507,9 +621,11 @@ class PortfolioService:
             position_start=await self._load_position_start_dates(),
         )
 
-        realized = await self.get_realized_totals(base_fx=base_fx)
+        realized = await self.get_realized_totals(
+            base_fx=base_fx, trades=await cash_service.all_trades()
+        )
 
-        cash = await self._cash_summary(base_fx, today)
+        cash = await self._cash_summary(base_fx, today, cash_service)
 
         return {
             "total_cost_basis_eur": daily_value["cost_basis_eur"],
@@ -534,14 +650,17 @@ class PortfolioService:
             **realized,
         }
 
-    async def _cash_summary(self, base_fx: BaseFx, on_date: date) -> Dict:
+    async def _cash_summary(
+        self, base_fx: BaseFx, on_date: date, service: Optional[CashService] = None
+    ) -> Dict:
         """
         The uninvested balance and its provenance, for the headline cards.
 
         Split from the caller only because both return paths need it — including the
-        empty-portfolio one, where cash is the *entire* value of the account.
+        empty-portfolio one, where cash is the *entire* value of the account. `service`
+        is the caller's own instance, so its ledger rows are read once per request.
         """
-        service = CashService(self.db)
+        service = service or CashService(self.db)
         events = await service.balance_events(base_fx)
         cash = service.balance_as_of(events, on_date)
         return {
@@ -852,7 +971,9 @@ class PortfolioService:
             "base_currency": base_fx.base_currency,
         }
 
-    async def _realized_from_trades(self, base_fx: BaseFx) -> Optional[Dict]:
+    async def _realized_from_trades(
+        self, base_fx: BaseFx, trades: Optional[Sequence[Trade]] = None
+    ) -> Optional[Dict]:
         """
         Compute realized totals from authoritative IBKR SELL trades, or return
         None if no trades have been ingested yet (caller then falls back to the
@@ -867,8 +988,12 @@ class PortfolioService:
         counted in `unpriced_disposals` (GitHub issue #26): until then it was only a
         log line, and the summary's realized headline understated with nothing to
         say so — the shape `tax_service` already warns about per year.
+
+        `trades` is every trade when the caller has already read them — the summary
+        shares `CashService.all_trades()`, so the table is read once per request.
         """
-        trades = (await self.db.execute(select(Trade))).scalars().all()
+        if trades is None:
+            trades = await TradeRepository(self.db).get_all()
         # "Some trades exist" is not "realized figures exist": a statement can
         # carry BUYs long before any sale. Guarding on any-trade made a BUY-only
         # table return hard zeros and permanently mask the closed-lot fallback,
@@ -911,7 +1036,11 @@ class PortfolioService:
             "unpriced_disposals": unconvertible,
         }
 
-    async def get_realized_totals(self, base_fx: Optional[BaseFx] = None) -> Dict:
+    async def get_realized_totals(
+        self,
+        base_fx: Optional[BaseFx] = None,
+        trades: Optional[Sequence[Trade]] = None,
+    ) -> Dict:
         """
         Aggregate realized gain/loss from closed tax lots.
 
@@ -929,12 +1058,13 @@ class PortfolioService:
 
         When authoritative IBKR <Trades> have been ingested, realized P&L is taken
         straight from each SELL trade's fifoPnlRealized/proceeds (exact, IBKR's own
-        FIFO) instead of the market-price approximation below.
+        FIFO) instead of the market-price approximation below. `trades`, when given,
+        is every trade (see `_realized_from_trades`).
         """
         if base_fx is None:
             base_fx = await self._load_base_fx()
 
-        trade_based = await self._realized_from_trades(base_fx)
+        trade_based = await self._realized_from_trades(base_fx, trades=trades)
         if trade_based is not None:
             return trade_based
 
@@ -1087,6 +1217,7 @@ class PortfolioService:
         start: Optional[date] = None,
         end: Optional[date] = None,
         exclude_accounts: Optional[Sequence[str]] = None,
+        preloaded: Optional[AttributionInputs] = None,
     ) -> List[Dict]:
         """
         Per-closed-lot realized figures using the market-price approximation
@@ -1111,35 +1242,55 @@ class PortfolioService:
         other would make `realized_source` change what the figure covers as well as
         where it came from. The portfolio's own realized totals blend, as they
         should — that is a return figure, not a tax one.
+
+        ``preloaded`` (see `AttributionInputs`) filters the closed lots out of the lots
+        already read instead of querying them; never combined with
+        ``exclude_accounts``, which only the tax report passes and which queries.
         """
         # Reset before the early return too: per-run state, like `last_snapshot_skipped`.
         self.last_realized_skipped = {}
-        conditions = [TaxLot.is_open == False, TaxLot.close_date.isnot(None)]
-        if exclude_accounts:
-            conditions.append(Security.account.notin_(tuple(exclude_accounts)))
-        if start is not None:
-            conditions.append(TaxLot.close_date >= start)
-        if end is not None:
-            conditions.append(TaxLot.close_date <= end)
+        if preloaded is not None and not exclude_accounts:
+            # The query's own conditions, on the lots already in hand. `== False`
+            # rather than `not`, to keep SQL's reading of a NULL flag.
+            closed_lots = sorted(
+                (
+                    (lot, security)
+                    for lot, security in preloaded.taxlots_with_securities
+                    if lot.is_open == False  # noqa: E712
+                    and lot.close_date is not None
+                    and (start is None or lot.close_date >= start)
+                    and (end is None or lot.close_date <= end)
+                ),
+                key=lambda pair: pair[0].close_date,
+            )
+        else:
+            preloaded = None
+            conditions = [TaxLot.is_open == False, TaxLot.close_date.isnot(None)]
+            if exclude_accounts:
+                conditions.append(Security.account.notin_(tuple(exclude_accounts)))
+            if start is not None:
+                conditions.append(TaxLot.close_date >= start)
+            if end is not None:
+                conditions.append(TaxLot.close_date <= end)
 
-        result = await self.db.execute(
-            select(TaxLot, Security)
-            .join(Security, TaxLot.security_id == Security.id)
-            .where(and_(*conditions))
-            .order_by(TaxLot.close_date.asc())
-        )
-        closed_lots = result.all()
+            result = await self.db.execute(
+                select(TaxLot, Security)
+                .join(Security, TaxLot.security_id == Security.id)
+                .where(and_(*conditions))
+                .order_by(TaxLot.close_date.asc())
+            )
+            closed_lots = result.all()
         if not closed_lots:
             return []
 
         close_dates = [lot.close_date for lot, _ in closed_lots]
         unique_securities = {security for _, security in closed_lots}
         price_cache, price_currency_cache = await self._preload_market_prices(
-            unique_securities, min(close_dates), max(close_dates)
+            unique_securities, min(close_dates), max(close_dates), preloaded=preloaded
         )
         exchange_rate_cache = await self._preload_exchange_rates(
             unique_securities, min(close_dates), max(close_dates),
-            price_currency_cache=price_currency_cache,
+            price_currency_cache=price_currency_cache, preloaded=preloaded,
         )
 
         rows: List[Dict] = []
@@ -1512,6 +1663,7 @@ class PortfolioService:
         self,
         start_date: date,
         end_date: date,
+        preloaded: Optional[AttributionInputs] = None,
     ) -> Dict:
         """
         The per-security window arithmetic behind `/api/portfolio/attribution`, kept as
@@ -1555,6 +1707,9 @@ class PortfolioService:
         move against them added or took away. Both are conventions; this one makes a
         security that did not move in its own currency contribute a price effect of
         exactly zero, which is the reading a chart viewer expects.
+
+        `preloaded` is what a caller asking for several windows read once
+        (`load_attribution_inputs`); each window's figures are the same either way.
         """
         empty = {
             "empty": True,
@@ -1566,20 +1721,23 @@ class PortfolioService:
             "rows": {},
         }
         # Get ALL taxlots (open + closed) for correct historical attribution
-        result = await self.db.execute(
-            select(TaxLot, Security)
-            .join(Security, TaxLot.security_id == Security.id)
-            .order_by(TaxLot.open_date.asc())
-        )
-        taxlots_with_securities = result.all()
+        if preloaded is not None:
+            taxlots_with_securities = preloaded.taxlots_with_securities
+        else:
+            taxlots_with_securities = await self._all_lots_with_securities()
         if not taxlots_with_securities:
             return empty
 
         # Pre-load caches
         unique_securities = {security for _, security in taxlots_with_securities}
-        price_cache, price_currency_cache = await self._preload_market_prices(unique_securities, start_date, end_date)
-        exchange_rate_cache = await self._preload_exchange_rates(unique_securities, start_date, end_date, price_currency_cache=price_currency_cache)
-        base_fx = await self._load_base_fx()
+        price_cache, price_currency_cache = await self._preload_market_prices(
+            unique_securities, start_date, end_date, preloaded=preloaded
+        )
+        exchange_rate_cache = await self._preload_exchange_rates(
+            unique_securities, start_date, end_date,
+            price_currency_cache=price_currency_cache, preloaded=preloaded,
+        )
+        base_fx = preloaded.base_fx if preloaded is not None else await self._load_base_fx()
         empty["base_fx"] = base_fx
 
         # Find effective dates with actual price data
@@ -1695,6 +1853,7 @@ class PortfolioService:
         disposals_local_by_sec: Dict[int, Decimal] = {}
         for r in await self.realized_rows_from_closed_lots(
             base_fx, start=effective_start + timedelta(days=1), end=effective_end,
+            preloaded=preloaded,
         ):
             sid = r["security_id"]
             disposals_by_sec[sid] = disposals_by_sec.get(sid, Decimal("0")) + r["proceeds"]
@@ -1890,13 +2049,17 @@ class PortfolioService:
         securities: set,
         start_date: date,
         end_date: date,
-        lookback_days: int = PRICE_LOOKBACK_DAYS
+        lookback_days: int = PRICE_LOOKBACK_DAYS,
+        preloaded: Optional[AttributionInputs] = None,
     ) -> Tuple[Dict, Dict]:
         """
         Pre-load all market prices for securities in date range.
 
         Extends the date range backwards by lookback_days to support
         forward-fill fallback logic when prices are missing.
+
+        With `preloaded` holding these securities over this range, the same rows are
+        cut from it instead of queried (see `AttributionInputs`).
 
         Returns: (
             {security_id: {date: price}},
@@ -1910,18 +2073,29 @@ class PortfolioService:
         # Extend start_date backwards to support forward-fill
         extended_start_date = start_date - timedelta(days=lookback_days)
 
-        result = await self.db.execute(
-            select(MarketPrice)
-            .where(
-                and_(
-                    MarketPrice.security_id.in_(security_ids),
-                    MarketPrice.date >= extended_start_date,
-                    MarketPrice.date <= end_date
+        if (
+            preloaded is not None
+            and preloaded.security_ids.issuperset(security_ids)
+            and preloaded.prices_from <= extended_start_date
+            and end_date <= preloaded.prices_to
+        ):
+            wanted = set(security_ids)
+            all_prices = [
+                p for p in preloaded.price_rows
+                if p.security_id in wanted and extended_start_date <= p.date <= end_date
+            ]
+        else:
+            result = await self.db.execute(
+                select(MarketPrice)
+                .where(
+                    and_(
+                        MarketPrice.security_id.in_(security_ids),
+                        MarketPrice.date >= extended_start_date,
+                        MarketPrice.date <= end_date
+                    )
                 )
             )
-        )
-
-        all_prices = result.scalars().all()
+            all_prices = result.scalars().all()
 
         # Build nested dict: {security_id: {date: price}}
         price_cache = {}
@@ -1960,7 +2134,8 @@ class PortfolioService:
         start_date: date,
         end_date: date,
         lookback_days: int = FX_MAX_CARRY_DAYS,
-        price_currency_cache: Optional[Dict] = None
+        price_currency_cache: Optional[Dict] = None,
+        preloaded: Optional[AttributionInputs] = None,
     ) -> Dict:
         """
         Pre-load all exchange rates for currencies in date range.
@@ -1985,6 +2160,16 @@ class PortfolioService:
 
         # One query over the window, extended backwards for the forward-fill; the query
         # and the fill are `fx_preload`'s, shared with the benchmark and crypto readers.
+        # A `preloaded` load holding this window and these currencies is sliced instead.
+        if (
+            preloaded is not None
+            and preloaded.rate_currencies.issuperset(wanted_currencies(currencies))
+            and preloaded.rates_from <= start_date - timedelta(days=lookback_days)
+            and end_date <= preloaded.rates_to
+        ):
+            return slice_eur_rates(
+                preloaded.rates, currencies, start_date, end_date, lookback_days
+            )
         return await preload_eur_rates(
             self.db, currencies, start_date, end_date, lookback_days
         )

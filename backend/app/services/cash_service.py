@@ -58,9 +58,13 @@ from decimal import Decimal
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
+from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR
+from app.models.cash_balance import CashBalance
+from app.models.cash_flow import CashFlow
+from app.models.trade import Trade
 from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.trade_repository import TradeRepository
@@ -118,9 +122,41 @@ class UninvestedCash:
 
 
 class CashService:
+    """
+    The three ledgers and the measured levels are each read **once per instance**: one
+    summary request used to read `trades` three times, `cash_balances` three times and
+    `cash_flows` twice (GitHub #47). The memo lives on the instance, never the module —
+    an instance serves one request, so a sync landing between two requests is seen by
+    the next one.
+    """
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.currency_service = CurrencyService(db)
+        self._trades: Optional[List[Trade]] = None
+        self._flows: Optional[List[CashFlow]] = None
+        self._balances: Optional[List[CashBalance]] = None
+
+    async def all_trades(self) -> List[Trade]:
+        """Every trade, oldest first — read once per instance. Shared with the realized
+        totals of the same summary request, so `trades` is read once for both."""
+        if self._trades is None:
+            self._trades = await TradeRepository(self.db).get_all()
+        return self._trades
+
+    async def _all_flows(self) -> List[CashFlow]:
+        if self._flows is None:
+            self._flows = await CashFlowRepository(self.db).get_all()
+        return self._flows
+
+    async def _measured_rows(self, account: Optional[str] = None) -> List[CashBalance]:
+        """Every measured balance oldest first, optionally one account's — the same rows
+        `CashBalanceRepository.get_all(account=)` returns, filtered from one read."""
+        if self._balances is None:
+            self._balances = await CashBalanceRepository(self.db).get_all()
+        if account is None:
+            return self._balances
+        return [row for row in self._balances if row.account == account]
 
     async def balance_events(self, base_fx) -> List[Tuple[date, Decimal]]:
         """
@@ -146,10 +182,7 @@ class CashService:
         # levels, not just the former: a Flex query can carry the Cash Report
         # section while <Trades> and <CashTransactions> are still off, and an
         # account whose only evidence is IBKR's own figure must still get it.
-        accounted = set(by_account) | {
-            row.account
-            for row in await CashBalanceRepository(self.db).get_all()
-        }
+        accounted = set(by_account) | {row.account for row in await self._measured_rows()}
         merged: List[Tuple[date, Decimal]] = []
         for account in sorted(accounted):
             events = sorted(by_account.get(account, []), key=lambda e: e[0])
@@ -170,7 +203,7 @@ class CashService:
         #    sell — and `commission` is separately signed (negative), so the sum is the
         #    net cash effect. The same expression `ActivityService._trades` renders as
         #    `amount_base`, so the ledger and the balance cannot disagree about a trade.
-        for t in await TradeRepository(self.db).get_all():
+        for t in await self.all_trades():
             amount = await to_base.convert(
                 (t.proceeds or Decimal("0")) + (t.commission or Decimal("0")),
                 t.currency, t.trade_date,
@@ -188,7 +221,7 @@ class CashService:
         #    asks "did cash move", where a transfer's cash leg genuinely did. The in-kind
         #    rows this account holds carry a zero amount and so contribute nothing either
         #    way, which is the correct answer rather than a lucky one.
-        for f in await CashFlowRepository(self.db).get_all():
+        for f in await self._all_flows():
             by_account[f.account].append((f.flow_date, cash_flow_in_base(f, base_fx)))
 
         # 3. Dividends actually paid into the account. IBKR rows only, and the rule for
@@ -214,11 +247,12 @@ class CashService:
         """
         # Re-gathers the derived events rather than caching them from `balance_events`:
         # the two are called from different requests, and a stale cache would let the
-        # corrections drift from the balance they explain.
+        # corrections drift from the balance they explain. Only the ledger *rows* are
+        # memoized, and only per instance (see the class docstring).
         by_account, to_base = await self._derived_events(base_fx)
         out: List[Tuple[date, Decimal, str]] = []
         for account in sorted(
-            set(by_account) | {r.account for r in await CashBalanceRepository(self.db).get_all()}
+            set(by_account) | {r.account for r in await self._measured_rows()}
         ):
             events = sorted(by_account.get(account, []), key=lambda e: e[0])
             for when, amount in await self._corrections_for(events, to_base, account):
@@ -256,7 +290,7 @@ class CashService:
         self, events, to_base, account
     ) -> List[Tuple[date, Decimal]]:
         """The correction events for one account — see `_apply_measured`."""
-        measured = await CashBalanceRepository(self.db).get_all(account=account)
+        measured = await self._measured_rows(account)
         if not measured:
             return []
 
@@ -310,10 +344,7 @@ class CashService:
         that half of which the broker has never seen as `ibkr` is precisely the
         provenance overclaim `derived_source` was split out to avoid.
         """
-        measured_accounts = {
-            row.account
-            for row in await CashBalanceRepository(self.db).get_all()
-        }
+        measured_accounts = {row.account for row in await self._measured_rows()}
         if not measured_accounts:
             return await self.derived_source()
 
@@ -321,10 +352,18 @@ class CashService:
         return MIXED if derived_only else MEASURED
 
     async def _accounts_with_activity(self) -> set:
-        """Every account with a trade or a cash flow — anything a balance derives from."""
-        accounts = {t.account for t in await TradeRepository(self.db).get_all()}
-        accounts |= {f.account for f in await CashFlowRepository(self.db).get_all()}
-        return accounts
+        """
+        Every account with a trade or a cash flow — anything a balance derives from.
+
+        Off the memoized rows when this instance has already read them (the summary has,
+        through `balance_events`), else one query for the distinct names — never every
+        Trade and CashFlow loaded as an object to collect a label (GitHub #47).
+        """
+        if self._trades is not None and self._flows is not None:
+            return {t.account for t in self._trades} | {f.account for f in self._flows}
+        return set((await self.db.execute(
+            union(select(Trade.account), select(CashFlow.account))
+        )).scalars())
 
     async def derived_source(self) -> str:
         """
@@ -334,6 +373,8 @@ class CashService:
         separately: using `cash_source()` there would stamp `ibkr` on the whole history
         the moment one measured row landed at the end of it.
         """
+        if self._trades is not None and self._flows is not None:
+            return DERIVED if self._trades or self._flows else UNKNOWN
         if await TradeRepository(self.db).count():
             return DERIVED
         if await CashFlowRepository(self.db).count():

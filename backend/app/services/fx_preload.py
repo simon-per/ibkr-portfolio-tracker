@@ -45,7 +45,7 @@ async def preload_eur_rates(
     A carried copy is left out: filling from it would measure the age from the copy's
     date, not the rate's, and accept a rate up to twice the bound old.
     """
-    wanted = {c for c in currencies if c and c != "EUR"}
+    wanted = wanted_currencies(currencies)
     if not wanted:
         return {}
 
@@ -62,6 +62,33 @@ async def preload_eur_rates(
         )
     )
     return {(r.from_currency, r.date): r.rate for r in result.scalars().all()}
+
+
+def wanted_currencies(currencies: Iterable[str]) -> set:
+    """The currencies `preload_eur_rates` loads for: named and not EUR."""
+    return {c for c in currencies if c and c != "EUR"}
+
+
+def slice_eur_rates(
+    cache: RateCache,
+    currencies: Iterable[str],
+    start: date,
+    end: date,
+    lookback_days: int = FX_MAX_CARRY_DAYS,
+) -> RateCache:
+    """
+    Exactly what `preload_eur_rates(db, currencies, start, end, lookback_days)` returns,
+    cut from a `cache` that call already loaded over a window and currency set holding
+    this one — the caller checks that. A reader asked for several windows (the
+    decomposition's window and years) loads once and slices, rather than querying per
+    window; the slice keeps each window's lookups bounded as its own load bounded them.
+    """
+    wanted = wanted_currencies(currencies)
+    extended_start = start - timedelta(days=lookback_days)
+    return {
+        key: rate for key, rate in cache.items()
+        if key[0] in wanted and extended_start <= key[1] <= end
+    }
 
 
 def eur_rate_on(

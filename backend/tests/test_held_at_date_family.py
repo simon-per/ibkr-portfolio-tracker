@@ -26,7 +26,9 @@ OWNER = "repositories/security_repository.py"  # held_at, lot_held_at, held(clos
 # (module, enclosing function) -> (matches, reason).
 NOT_IN_THE_FAMILY = {
     ("services/portfolio_service.py", "realized_rows_from_closed_lots"): (
-        2, "the disposal window `start <= close_date <= end` — sold inside it, not held at a date",
+        4, "the disposal window `start <= close_date <= end` — sold inside it, not held at a date; "
+        "once in SQL, once on `AttributionInputs`' preloaded lots (pinned equal in "
+        "test_read_path_query_cost.py)",
     ),
     ("services/sync_helper.py", "restamp_unsourced_closed_lots"): (
         1, "matches a SELL trade to the lot it closed (`trade_date <= close_date`)",
