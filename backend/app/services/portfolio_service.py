@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import List, Dict, Optional, Sequence, Set, Tuple
 from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -28,6 +28,7 @@ from app.services.percentages import share_pct
 from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
+from app.repositories.security_repository import held_at, lot_held_at
 from app.services.sync_helper import POSITION_CREATING_ACTIONS
 from app.clock import utc_today
 
@@ -163,14 +164,8 @@ class PortfolioService:
                 continue
             held = (await self.db.execute(
                 select(func.sum(TaxLot.quantity)).where(
-                    and_(
-                        TaxLot.security_id == action.security_id,
-                        TaxLot.open_date <= action.action_date,
-                        or_(
-                            TaxLot.close_date.is_(None),
-                            TaxLot.close_date > action.action_date,
-                        ),
-                    )
+                    TaxLot.security_id == action.security_id,
+                    held_at(action.action_date),
                 )
             )).scalar() or Decimal("0")
             if held > action.quantity:
@@ -1002,11 +997,10 @@ class PortfolioService:
             .join(Security, TaxLot.security_id == Security.id)
             .where(
                 and_(
-                    TaxLot.open_date <= on_date,
                     # Exclude-on-close, same window as _calculate_daily_value: a
                     # position sold on 31 Dec is not held at year-end — it belongs
                     # to that year's realized gains, not its Steuerwert.
-                    or_(TaxLot.close_date.is_(None), TaxLot.close_date > on_date),
+                    held_at(on_date),
                     *([Security.account.notin_(exclude_accounts)]
                       if exclude_accounts else []),
                     *([Security.account.in_(only_accounts)]
@@ -1654,33 +1648,30 @@ class PortfolioService:
                     return None
                 return local * rate, local
 
-            # Tax lot contributes to start value if opened on or before effective_start
-            # AND still held at effective_start (exclude-on-close)
-            if taxlot.open_date <= effective_start:
-                if not (taxlot.close_date and taxlot.close_date <= effective_start):
-                    price = self._get_market_price_with_fallback(sid, effective_start, price_cache)
-                    pair = valued(taxlot.quantity, price, effective_start)
-                    if pair is None:
-                        unpriced_securities.add(sid)
-                    else:
-                        entry["start_market_value"] += pair[0]
-                        entry["start_mv_local"] += pair[1]
+            # Tax lot contributes to start value if held at effective_start's close
+            # (opened on or before it, exclude-on-close)
+            if lot_held_at(taxlot, effective_start):
+                price = self._get_market_price_with_fallback(sid, effective_start, price_cache)
+                pair = valued(taxlot.quantity, price, effective_start)
+                if pair is None:
+                    unpriced_securities.add(sid)
+                else:
+                    entry["start_market_value"] += pair[0]
+                    entry["start_mv_local"] += pair[1]
 
-            # Tax lot contributes to end value if opened on or before effective_end
-            # AND still held at effective_end (exclude-on-close)
+            # Tax lot contributes to end value if held at effective_end's close
             #
             # A lot held at NEITHER date never reaches `valued`, so a fully-sold
             # position keeps its legitimate zero end value and is never confused with
             # one that simply could not be priced.
-            if taxlot.open_date <= effective_end:
-                if not (taxlot.close_date and taxlot.close_date <= effective_end):
-                    price = self._get_market_price_with_fallback(sid, effective_end, price_cache)
-                    pair = valued(taxlot.quantity, price, effective_end)
-                    if pair is None:
-                        unpriced_securities.add(sid)
-                    else:
-                        entry["end_market_value"] += pair[0]
-                        entry["end_mv_local"] += pair[1]
+            if lot_held_at(taxlot, effective_end):
+                price = self._get_market_price_with_fallback(sid, effective_end, price_cache)
+                pair = valued(taxlot.quantity, price, effective_end)
+                if pair is None:
+                    unpriced_securities.add(sid)
+                else:
+                    entry["end_market_value"] += pair[0]
+                    entry["end_mv_local"] += pair[1]
 
             # New investment: opened during (effective_start, effective_end] (base, at open_date)
             if effective_start < taxlot.open_date <= effective_end:
@@ -2105,15 +2096,12 @@ class PortfolioService:
         unpriced_securities: set = set()
 
         for taxlot, security in taxlots_with_securities:
-            # Only include taxlots opened on or before this date
-            if taxlot.open_date > target_date:
-                continue
-
-            # A lot sold on D is no longer held at D's close: exclude ON the close
-            # date. This is what stops a same-day rotation from double-counting the
-            # day (old A still active + new B open), keeps Steuerwert and realized
-            # gains disjoint at year-end, and matches the benchmark's convention.
-            if taxlot.close_date and taxlot.close_date <= target_date:
+            # Only lots opened on or before this date, and — a lot sold on D is no
+            # longer held at D's close — excluded ON the close date. This is what stops
+            # a same-day rotation from double-counting the day (old A still active + new
+            # B open), keeps Steuerwert and realized gains disjoint at year-end, and
+            # matches the benchmark's convention.
+            if not lot_held_at(taxlot, target_date):
                 continue
 
             # Cost basis converts at the lot's open_date (stable, FX-independent line)

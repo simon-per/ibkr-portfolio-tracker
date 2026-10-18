@@ -54,13 +54,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Awaitable, Callable, Dict, List, Optional, Sequence
 
-from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
+from app.etf_mappings import symbol_for_fund_isin
 from app.etf_sources import FundSource, basket_proxy_for, source_for_fund_isin
-from app.models.security import Security
-from app.models.taxlot import TaxLot
 from app.repositories.etf_basket_repository import (
     BasketReplaceRefused,
     EtfBasketRepository,
@@ -123,18 +120,6 @@ class StaleBasket:
         return self.adapter in AUTOMATED_ADAPTERS
 
 
-async def _held_fund_isins(db: AsyncSession) -> List[str]:
-    held = await db.execute(
-        select(distinct(Security.isin))
-        .join(TaxLot, TaxLot.security_id == Security.id)
-        .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
-    )
-    return sorted({
-        isin.strip().upper() for (isin,) in held.all()
-        if isin and is_known_etf_isin(isin)
-    })
-
-
 def _route_for_missing(isin: str, source: Optional[FundSource]):
     """
     Which basket a fund with none of its own would read once fetched, and how to fetch it.
@@ -183,7 +168,7 @@ async def stale_basket_verdicts(
       bought fund looks like and one evening clears it.
     """
     as_of = as_of or utc_today()
-    fund_isins = await _held_fund_isins(db)
+    fund_isins = await held_isins(db, funds=True)
     if not fund_isins:
         return []
 
@@ -381,7 +366,7 @@ async def resolve_pending_identities(
     constituents converges over a few.
     """
     service = IdentityService(db)
-    targets = await held_isins(db, include_funds=False)
+    targets = await held_isins(db, funds=False)
     constituents = await LookthroughService(db).material_constituent_isins()
     known = set(targets)
     targets = targets + [i for i in constituents if i not in known]

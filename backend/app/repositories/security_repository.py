@@ -4,7 +4,7 @@ Handles database operations for Securities.
 """
 from datetime import timedelta
 from typing import List, Optional
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.sql.elements import ColumnElement
@@ -31,6 +31,37 @@ def held(closed_within_days: Optional[int] = None) -> ColumnElement[bool]:
     if closed_within_days is not None:
         lots = or_(lots, TaxLot.close_date >= utc_today() - timedelta(days=closed_within_days))
     return Security.id.in_(select(TaxLot.security_id).where(lots))
+
+
+def held_at(d: date) -> ColumnElement[bool]:
+    """
+    SQLAlchemy criterion on **TaxLot rows**: the lot is held at the close of ``d``,
+    ``open_date <= d < close_date`` (an open lot has no close date).
+
+    The one SQL form of docs/data-model-and-valuation.md's close-date convention, "a lot
+    sold on D is not held at D's close"; `lot_held_at` is the same rule for a loaded
+    lot, and the two are pinned equal (`tests/test_close_date_boundary.py`). Use it on a
+    select over `TaxLot` — ``select(TaxLot, Security).join(...).where(held_at(d))`` —
+    never bare beside `Security`, which would be a cartesian product. For a dividend,
+    ``d`` is the ex-date: a buy on the ex-date counts, a sale on it does not (kept so by
+    the owner on 2026-10-18 — docs/dividends.md).
+    """
+    return and_(
+        TaxLot.open_date <= d,
+        or_(TaxLot.close_date.is_(None), TaxLot.close_date > d),
+    )
+
+
+def lot_held_at(lot, d: date) -> bool:
+    """
+    Is this lot held at the close of ``d``? ``open_date <= d < close_date``.
+
+    The Python twin of `held_at`, for code that already holds the lots (anything with
+    ``open_date`` and ``close_date``). Every valuation, attribution gate and dividend
+    share count asks this; none of them writes the comparison itself
+    (`tests/test_held_at_date_family.py`).
+    """
+    return lot.open_date <= d and (lot.close_date is None or lot.close_date > d)
 
 
 class SecurityRepository:

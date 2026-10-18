@@ -449,7 +449,7 @@ async def test_a_cli_run_killed_mid_gleif_keeps_every_answer_already_given(provi
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async def _held(db, include_funds=False):
+    async def _held(db, funds=False):
         return [apple, microsoft]
 
     monkeypatch.setattr(cli, "AsyncSessionLocal",
@@ -468,3 +468,31 @@ async def test_a_cli_run_killed_mid_gleif_keeps_every_answer_already_given(provi
     assert rows[apple].figi_checked_at and rows[microsoft].figi_checked_at
     assert rows[apple].lei == "HWUPKR0MPOU8FGXBT394"
     assert rows[microsoft].lei_checked_at is None, "the unanswered ISIN must stay unasked"
+
+
+@pytest.mark.asyncio
+async def test_held_isins_splits_one_held_set_into_companies_and_funds(session):
+    """
+    The identity pass (companies), the basket refresh (funds) and the CLI's
+    `--include-funds` (both) read one held set — `security_repository.held()` — and only
+    split it. Until 2026-10-18 the basket refresh queried its own copy (GitHub issue #42).
+    """
+    from app.models.security import Security
+    from app.models.taxlot import TaxLot
+    from app.services.identity_service import held_isins
+
+    fund, company, sold = "IE00B4L5Y983", "US0378331005", "US5949181045"
+    for sid, isin, closed in ((1, fund.lower() + " ", None), (2, company, None),
+                              (3, sold, date(2026, 5, 4))):
+        session.add(Security(id=sid, isin=isin, symbol=f"S{sid}", description=f"S{sid}",
+                             currency="EUR", conid=100 + sid, asset_category="STK",
+                             exchange="XETRA"))
+        session.add(TaxLot(security_id=sid, open_date=date(2025, 1, 2), close_date=closed,
+                           is_open=closed is None, quantity=Decimal("1"),
+                           cost_basis=Decimal("1"), cost_basis_eur=Decimal("1"),
+                           price_per_unit=Decimal("1"), currency="EUR"))
+    await session.flush()
+
+    assert await held_isins(session) == [company]
+    assert await held_isins(session, funds=True) == [fund]
+    assert await held_isins(session, funds=None) == sorted([fund, company])

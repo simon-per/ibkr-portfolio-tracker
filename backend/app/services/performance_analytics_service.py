@@ -44,10 +44,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
 from app.etf_sources import basket_proxy_for
 from app.models.security import Security
-from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.market_price_repository import MarketPriceRepository
+from app.repositories.security_repository import held
 from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.dividend_service import DividendService
@@ -509,11 +509,9 @@ class PerformanceAnalyticsService:
                 empty["warnings"].append(unpriced_warning)
             return empty
 
-        open_lot_sids = {
-            sid for (sid,) in (await self.db.execute(
-                select(TaxLot.security_id).where(TaxLot.is_open == True).distinct()  # noqa: E712
-            )).all()
-        }
+        open_lot_sids = set((await self.db.execute(
+            select(Security.id).where(held())
+        )).scalars())
         securities: Dict[int, Security] = {
             s.id: s for s in (await self.db.execute(
                 select(Security).where(Security.id.in_({r["security_id"] for r in rows}))

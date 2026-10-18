@@ -28,7 +28,7 @@ from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
 )
 from app.repositories.dividend_repository import DividendRepository
-from app.repositories.security_repository import held
+from app.repositories.security_repository import held, lot_held_at
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
@@ -101,6 +101,16 @@ def needs_dividend_check() -> ColumnElement[bool]:
             remapped,
         ),
     )
+
+
+def shares_held_at(lots: Iterable[TaxLot], d: date) -> Decimal:
+    """
+    Shares held at the close of ``d`` across ``lots`` — for a dividend, ``d`` is the
+    ex-date. `lot_held_at` decides each lot, so a buy on the ex-date counts and a sale on
+    it does not (*Shares held on the ex-date* in docs/dividends.md). The estimate sizing
+    and the forecast both count shares through this.
+    """
+    return sum((lot.quantity for lot in lots if lot_held_at(lot, d)), Decimal("0"))
 
 
 def pre_ownership_cutoff(first_lot: Optional[date]) -> Optional[date]:
@@ -615,15 +625,7 @@ class DividendService:
                 if dp.source == "ibkr":
                     continue
 
-                # Sum shares held on ex_date: open_date <= ex_date AND (close_date IS NULL OR close_date > ex_date)
-                lots = taxlots_by_security.get(dp.security_id, [])
-                shares = Decimal("0")
-                for lot in lots:
-                    if lot.open_date > dp.ex_date:
-                        continue
-                    if lot.close_date and lot.close_date <= dp.ex_date:
-                        continue
-                    shares += lot.quantity
+                shares = shares_held_at(taxlots_by_security.get(dp.security_id, []), dp.ex_date)
 
                 if shares <= 0:
                     # No shares held on ex-date — set to 0 so it's not re-processed
@@ -1472,14 +1474,7 @@ class DividendService:
             lots_by_sec[tl.security_id].append(tl)
 
         def shares_at(sid: int, d: date) -> Decimal:
-            total = Decimal("0")
-            for lot in lots_by_sec.get(sid, []):
-                if lot.open_date > d:
-                    continue
-                if lot.close_date and lot.close_date <= d:
-                    continue
-                total += lot.quantity
-            return total
+            return shares_held_at(lots_by_sec.get(sid, []), d)
 
         wht_by_sec = self._withholding_rates(
             raw_payments, securities, accruals_by_sec, net_factor

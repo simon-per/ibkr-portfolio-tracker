@@ -145,6 +145,19 @@ and the attribution endpoint are therefore `(start, end]` — a lot sold *on* th
 proceeds precisely because the end valuation no longer carries it. Change these together.
 Tests: `tests/test_close_date_boundary.py`.
 
+**"Held at D" is written once** (GitHub issue #43, 2026-10-18): `security_repository.lot_held_at(lot,
+d)` in Python and `security_repository.held_at(d)` — a criterion on `TaxLot` rows — in SQL, both
+`open_date <= D < close_date` and pinned equal over D−1, D and D+1. `_calculate_daily_value`, the
+attribution gates, `holdings_snapshot_as_of()`, the spinoff floor's quantity check and both dividend
+share counts (*Shares held on the ex-date* in [dividends.md](dividends.md)) call them; the swept
+timeline applies the same rule as a removal event on the close date and is pinned to
+`_calculate_daily_value` by `tests/test_timeline_equivalence.py`. `tests/test_held_at_date_family.py`
+fails on any other comparison against a `close_date` in `app/` unless it is listed with its reason (the
+realized disposal window, the trade-to-lot restamp match). Its sibling for the security set is
+`security_repository.held()` — "has an open lot" — which every held-securities reader uses;
+`tests/test_held_predicate_family.py` fails on a hand-written `TaxLot.is_open == True` /
+`close_date IS NULL` outside the repositories (GitHub issue #42).
+
 **A spun-off line is not held before the action that created it, even though its lots say it
 was.** IBKR reports received spinoff shares against the *parent's* tax lots — the child
 inherits the parent's `openDateTime`, because the holding period carries over, plus the slice

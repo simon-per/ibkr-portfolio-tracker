@@ -46,7 +46,6 @@ from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.sync_run import SyncRun
-from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
 from app.models.security import PRICE_SOURCE_MANUAL
 from app.services.finpension_ingest import CARRIED_PRICE_SOURCES, CARRY_HORIZON_DAYS
@@ -731,14 +730,11 @@ class SchedulerService:
         # market_prices multiplies them — a security with 100 open lots and 730 cached
         # closes is 73,000 rows to aggregate, and the portfolio holds 972 lots against
         # 21,000 prices. Two indexed scans and a dict lookup cost nothing by comparison.
-        held = await db.execute(
+        held_rows = (await db.execute(
             select(Security.id, Security.symbol, Security.exchange,
                    Security.price_source)
-            .join(TaxLot, TaxLot.security_id == Security.id)
-            .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
-            .group_by(Security.id)
-        )
-        held_rows = held.all()
+            .where(held())
+        )).all()
         if not held_rows:
             return []
 
@@ -970,13 +966,9 @@ class SchedulerService:
 
         Returns `warnings[]`-ready strings, like its price-side counterpart.
         """
-        held = await db.execute(
-            select(Security.id, Security.symbol, Security.exchange)
-            .join(TaxLot, TaxLot.security_id == Security.id)
-            .where(TaxLot.is_open == True)  # noqa: E712 — SQLAlchemy needs the operator
-            .group_by(Security.id)
-        )
-        held_rows = held.all()
+        held_rows = (await db.execute(
+            select(Security.id, Security.symbol, Security.exchange).where(held())
+        )).all()
         if not held_rows:
             return []
 

@@ -262,6 +262,19 @@ security with **no lots** is left entirely alone, since there is no cutoff to in
 computation (`shares_held IS NULL`) are still never touched. Tests:
 `tests/test_prune_preserves_forecast_basis.py`.
 
+**Shares held on the ex-date are the shares held at the ex-date's close: `open_date <= ex_date <
+close_date`.** The close-date convention of [data-model-and-valuation.md](data-model-and-valuation.md),
+unchanged: a lot **bought on** the ex-date counts, a lot **sold on** it does not. Strictly the
+entitlement goes the other way — it belongs to the holder at the close of the trading day *before* the
+ex-date — and the owner decided on 2026-10-18 to keep the convention anyway: only `yfinance_estimate`
+sizing reads it (`compute_dividend_income`, and the forecast's "gross over the shares held on the
+ex-date" in *Sizing*), only a trade exactly on an ex-date is affected, and an IBKR row carries the
+broker's own entitlement. Both readers count through `shares_held_at`, which asks
+`security_repository.lot_held_at` per lot — there is no lot loop of its own in `dividend_service`
+(GitHub issue #43). The two edges are pinned in `tests/test_close_date_boundary.py`
+(`test_ex_date_shares_count_a_buy_on_the_ex_date_and_drop_a_sale_on_it`), so changing the rule is a
+deliberate act that moves every valuation with it.
+
 ### The Yahoo pass — each holding at most once a month; new ex-dates ride the price pass
 
 **New ex-dates come from the price responses** (GitHub issue #11, item a, 2026-10-17). Every price

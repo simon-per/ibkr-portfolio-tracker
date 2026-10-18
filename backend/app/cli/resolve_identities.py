@@ -75,7 +75,7 @@ async def resolve_identities(
     async with AsyncSessionLocal() as db:
         try:
             service = IdentityService(db)
-            targets = await held_isins(db, include_funds)
+            targets = await held_isins(db, funds=None if include_funds else False)
             direct_count = len(targets)
             constituent_count = 0
             if constituents:

@@ -120,14 +120,15 @@ async def run(per_security: bool, held_only: bool) -> int:
         rows = (await db.execute(
             select(DividendPayment).where(DividendPayment.amount_per_share.isnot(None))
         )).scalars().all()
-        held: Optional[set] = None
+        held_ids: Optional[set] = None
         if held_only:
-            from app.models.taxlot import TaxLot
-            held = {
-                tl.security_id for tl in (await db.execute(
-                    select(TaxLot).where(TaxLot.close_date.is_(None))
-                )).scalars()
-            }
+            # security_repository.held(): an open lot (`is_open`). This read
+            # `close_date IS NULL` until 2026-10-18 — the same set under every writer,
+            # but a second definition of "held" (GitHub issue #42).
+            from app.repositories.security_repository import held
+            held_ids = set((await db.execute(
+                select(Security.id).where(held())
+            )).scalars())
 
     series: Dict[int, List[HistPayment]] = defaultdict(list)
     for r in rows:
@@ -144,7 +145,7 @@ async def run(per_security: bool, held_only: bool) -> int:
     all_specials = []
     scored = 0
     for sid, hist in sorted(series.items(), key=lambda kv: securities[kv[0]].symbol):
-        if held is not None and sid not in held:
+        if held_ids is not None and sid not in held_ids:
             continue
         result, specials, points = score_security(hist)
         sym = securities[sid].symbol
