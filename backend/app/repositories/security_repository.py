@@ -2,7 +2,7 @@
 Security Repository
 Handles database operations for Securities.
 """
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import List, Optional
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
