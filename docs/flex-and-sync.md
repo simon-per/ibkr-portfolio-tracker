@@ -154,6 +154,57 @@ transport error's treatment and message; mid-poll it is polled again as before. 
 the parser, which changes polling only by stopping sooner: a `1025` or terminal code carrying an
 extra field used to be polled to the deadline as garbled.
 
+**A generation is recorded as spent the moment IBKR serves it** (2026-10-18, GitHub issue #55).
+Until then the only record was the run's final `success` row, written after the ingest, and for
+`full_sync` after FX, the 730-day pass, dividends and the look-through. A statement whose parse or
+ingest failed (the wipe guard, a new required ibflex field, a locked DB), or a restart in that long
+tail, left the ET day looking unspent. The 00:00 slot and every manual press then sent SendRequest
+again, and IBKR refused it with a counted `1001`. A deterministic ingest failure would have cost one
+failed generation per trading day, plus one per press. Now `fetch_flex_data` calls
+`flex_generation.record_generation_served()` as soon as the download returns bytes, before
+`parse_flex_xml`. That call writes a `sync_runs` row of type **`ibkr_generation`**
+(`FLEX_GENERATION_SYNC_TYPE`, status `success`, `details` = byte count and file name) in its **own
+committed session**, never the caller's, which rolls back with the ingest. It also keeps the raw
+statement as **`flex-statements/flex-<UTC>Z.xml` beside the database** (`/app/data/flex-statements/`
+on the production mount, the newest `FLEX_STATEMENTS_KEPT` = 5, written to `.part` and renamed). So a
+failed ingest is re-run through `app/cli/ingest_flex_xml.py` (*Offline ingest*, below) with no token
+spend. `last_generation_today` counts it (`FLEX_WEB_SERVICE_SYNC_TYPES`). It is deliberately in
+neither `FLEX_API_SYNC_TYPES` nor `IBKR_SYNC_TYPES`, so the staleness alarms, `newest_coverage`,
+`flex_window_days` and the dashboard's "last sync" (`SCHEDULED_JOB_TYPES`) never see it: it means
+the generation was spent, not that the data was refreshed. It does appear in
+`/api/scheduler/history`. Recording is best effort and fails open, like `generation_already_spent`:
+an unwritable row or disk costs at most the refusal it exists to prevent, and never the statement.
+
+**A refusal is remembered** (same issue). Before this, the manual sync's only fence after a `1025` was
+its 120 s start cooldown, so a press two minutes later sent SendRequest into the locked token.
+`flex_generation.flex_refusal_hold()` reads the newest success or error among
+`FLEX_WEB_SERVICE_SYNC_TYPES`; a skip asked nothing, so it neither holds nor lifts. That row
+**holds** non-`force` attempts when it is:
+
+- a `Code=1025` younger than **`FLEX_LOCKOUT_HOLD_HOURS` = 12**, for manual presses *and* every
+  scheduled slot. That covers the 00:00 slot six hours
+  after an 18:00 lockout and the presses a lockout invites (one lasted ~14 h). It is shorter than the
+  18 h from the 00:00 slot to the next 18:00 one, so a lockout met at 00:00 never costs the next
+  day's primary slot. A skip writes no outcome, so only the bound lifts the hold. Pinned by
+  `test_a_lockout_met_at_the_recovery_slot_never_costs_the_next_primary_slot`.
+- a **`1001` at the SendRequest step** in the same ET day, for **manual presses only**. IBKR refused
+  that day's generation, and pressing again is another counted failure; the hold lifts at the next
+  midnight ET. The scheduled slots ignore this half (`request_refusals=False`): after an 18:00
+  request-step `1001`, the 00:00 slot of the same ET day keeps its **one** fresh SendRequest — "fail
+  fast and let the next slot ask fresh" (rule 2), and the same-ET-day recoveries of 08-02 and 08-03
+  were exactly this. One automatic retry a day is the schedule's budget; a press is not in it.
+
+Any later success, including an `ibkr_generation` row, or any other error lifts it.
+`POST /api/sync/ibkr` answers **429** with the reason and a `Retry-After` on either half. Every
+scheduled IBKR path returns `skipped`, `reason="flex_refusal_hold"`, from
+`SchedulerService.sync_ibkr_data` on the `1025` half only; `POST /api/scheduler/trigger` goes
+through it too, so it follows the scheduled rule. `force=true` overrides it, as it does the
+already-generated skip. The two refusal messages are classified by the phrases they are built from
+(`FLEX_LOCKOUT_PHRASE`, `FLEX_REQUEST_REFUSED_PHRASE`, defined in `flex_generation` and imported by
+`ibkr_service`), never by a bare `Code=1025`, because the other refusal messages *mention* `1025`.
+The classifier therefore also reads the rows recorded before the change. Tests:
+`tests/test_flex_generation_spend.py`.
+
 ### The two-step rule (why we don't use `client.download()`)
 
 Flex is a two-step protocol: **`SendRequest`** asks IBKR to generate the statement and returns a
@@ -417,6 +468,17 @@ one day older), and a refusal there would record a failed run and spend another 
 also lose the prior-range backfill. Equal `to_date` is not older — re-ingesting the latest statement stays
 the idempotent case. Tests: `tests/test_stale_statement_ingest.py`.
 
+**A statement the API served is already on disk** (since 2026-10-18, issue #55). `fetch_flex_data`
+keeps every served statement, before parsing it, under `flex-statements/` beside the database. When
+a sync failed *after* IBKR served the day's generation, the history shows an `ibkr_generation`
+`success` row followed by the run's error, and the next slot reads `already_generated_today`. Re-run
+the file instead of asking IBKR again:
+
+```bash
+docker exec backend-portfolio-backend-1 ls /app/data/flex-statements
+docker exec backend-portfolio-backend-1 python -m app.cli.ingest_flex_xml /app/data/flex-statements/flex-<UTC>Z.xml
+```
+
 There is deliberately **no upload endpoint**: `/api/` is proxied publicly, and a route that rewrites tax
 lots is a far larger surface than a CLI run over ssh — write auth (below) narrows that surface but does
 not change the judgement.
@@ -669,7 +731,11 @@ Three details are load-bearing:
   question "was the data refreshed?" — includes it, and is defined as an extension of it so the two
   cannot drift into separate literals.
 - **A failure does not spend the day either.** The guard keys on a *successful* run, so a day full
-  of `1001`s leaves every later slot free to try.
+  of failures leaves every later slot free to try. Two refinements since 2026-10-18 (issue #55,
+  *A generation is recorded as spent* above). A statement IBKR served counts the moment it is
+  served (`ibkr_generation`), even when its ingest then fails. A recent `1025` holds the later
+  slots (`reason="flex_refusal_hold"`) rather than leaving them free. A request-step `1001` does
+  not: the 00:00 slot still asks once after an 18:00 refusal, and only manual presses are held.
 - **The job's status becomes `skipped`, not `success`**, so `find_stale_ibkr_sync` (which counts
   successes) is untouched by it. `trigger_sync_now` had to be narrowed at the same time: it raised
   `SyncBusy` → 429 on any `skipped` status, which had only ever meant a pipeline collision, so it

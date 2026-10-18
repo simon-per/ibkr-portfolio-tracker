@@ -12,7 +12,12 @@ from app.clock import utcnow
 
 from app.database import get_db
 from app.redact import redact_secrets
-from app.services.flex_generation import generation_already_spent, next_generation_opens_at
+from app.services.flex_generation import (
+    describe_refusal_hold,
+    flex_refusal_in_force,
+    generation_already_spent,
+    next_generation_opens_at,
+)
 from app.services.ibkr_service import IBKRService
 from app.single_flight import IBKR_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
 from app.services.sync_helper import ingest_flex_statement
@@ -42,9 +47,17 @@ async def sync_ibkr_data(force: bool = False, db: AsyncSession = Depends(get_db)
     refuses the rest with `Code=1001` at the SendRequest step, so the old behaviour was
     to spend a *failed generation* (what `Code=1025` counts) in order to show the user a
     red banner. Nothing is fetched and nothing is lost: the day's statement is already
-    ingested.
+    ingested, or, when its ingest failed, kept on disk for `app/cli/ingest_flex_xml.py`.
 
-    `force=true` overrides it, for the one case the recorded history shows really does
+    Answers **429** while the newest Flex outcome on record is a refusal that asking
+    again would only repeat (`flex_generation.flex_refusal_hold`): a `Code=1025` lockout
+    younger than `FLEX_LOCKOUT_HOLD_HOURS`, or a `1001` at the SendRequest step in the
+    same ET day. Without it the 120 s cooldown was the only fence, and a press two
+    minutes after a lockout sent SendRequest into the locked token (GitHub issue #55).
+    The scheduled slots hold on the `1025` half only: the 00:00 recovery slot keeps its
+    one fresh SendRequest after an 18:00 request-step `1001`.
+
+    `force=true` overrides both, for the one case the recorded history shows really does
     allow a second generation in a day — editing the query definition in the IBKR
     portal. It costs lockout budget if the assumption is wrong, which is why it is not
     the default.
@@ -72,6 +85,14 @@ async def sync_ibkr_data(force: bool = False, db: AsyncSession = Depends(get_db)
                 "last_success_at": utc_iso(spent),
                 "next_attempt_after": utc_iso(next_at),
             }
+
+        hold = await flex_refusal_in_force(db)
+        if hold is not None:
+            retry_after = max(1, int((hold.until - utcnow()).total_seconds()) + 1)
+            raise HTTPException(
+                status_code=429, detail=describe_refusal_hold(hold),
+                headers={"Retry-After": str(retry_after)},
+            )
 
     try:
         # Shared pipeline gate + cooldown: this route is public and one Flex

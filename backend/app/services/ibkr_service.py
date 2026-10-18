@@ -20,6 +20,8 @@ from ibflex.client import ResponseCodeError, BadResponseError
 from app.config import settings
 from app.redact import redact_secrets
 from app.clock import utc_today
+from app.services import flex_generation
+from app.services.flex_generation import FLEX_LOCKOUT_PHRASE, FLEX_REQUEST_REFUSED_PHRASE
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +369,7 @@ class IBKRService:
     def _lockout_error(e: ResponseCodeError) -> RuntimeError:
         """Turn IBKR's undocumented Code=1025 into something actionable."""
         return RuntimeError(
-            f"IBKR has temporarily locked this Flex token (Code=1025: {e.msg}). "
+            f"IBKR {FLEX_LOCKOUT_PHRASE} (Code=1025: {e.msg}). "
             "It follows too many *failed* statement generations in a short window — IBKR "
             "allows one request per second and 10 per minute per token. Wait before syncing "
             "again, as repeated attempts can extend the lockout; if it persists beyond ~24h "
@@ -678,7 +680,7 @@ class IBKRService:
                     # Re-requesting after a 1001 is how we locked the token before, so
                     # stop and let the next scheduled job ask for a fresh statement.
                     raise RuntimeError(
-                        f"IBKR did not hand back a Flex statement reference (Code={e.code}: "
+                        f"IBKR {FLEX_REQUEST_REFUSED_PHRASE} (Code={e.code}: "
                         f"{e.msg}). Not re-requesting: repeating SendRequest after a failed "
                         "generation is what trips the Code=1025 token lockout. The next "
                         "scheduled sync will try again."
@@ -729,6 +731,10 @@ class IBKRService:
                 )
                 await asyncio.sleep(delay)
 
+        # IBKR has served the day's generation: record that, and keep the bytes, before
+        # anything below can fail — a parse error or a failed ingest must not leave the
+        # day looking unspent to the next slot and the next press (GitHub issue #55).
+        await flex_generation.record_generation_served(response)
         return self.parse_flex_xml(response)
 
     def parse_flex_xml(self, xml_content: bytes) -> Dict:

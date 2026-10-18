@@ -29,6 +29,12 @@ Usage, inside the container:
         python -m app.cli.ingest_flex_xml /tmp/App_OpenLots.xml
 
 Add `--dry-run` to parse and report what *would* be ingested without writing anything.
+
+Every statement the Flex Web Service serves is also kept, before it is parsed, under
+`flex-statements/` beside the database (`/app/data/flex-statements/flex-<UTC>Z.xml` in the
+container, the newest `FLEX_STATEMENTS_KEPT`; `app/services/flex_generation.py`). When a
+sync's ingest failed after IBKR served the day's generation, re-run that file here: the
+day's generation is already spent, so asking IBKR again would only be refused.
 """
 import argparse
 import asyncio

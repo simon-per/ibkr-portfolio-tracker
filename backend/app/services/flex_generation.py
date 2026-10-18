@@ -32,16 +32,23 @@ Naive-UTC in, naive-UTC out, per `app/clock.py`: these values are compared again
 `sync_runs.finished_at`, which is naive UTC.
 """
 
+import asyncio
 import logging
+import re
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Optional
+from pathlib import Path
+from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.config import settings
+from app.database import AsyncSessionLocal
+from app.db_guard import sqlite_database_path
 from app.models.sync_run import SyncRun
+from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +76,30 @@ FLEX_API_SYNC_TYPES = ('ibkr', 'ibkr_sync', 'full_sync')
 # as an extension of the set above rather than as a second literal, because two tuples
 # listing overlapping sync types is precisely how this codebase's duplicated logic drifts.
 IBKR_SYNC_TYPES = FLEX_API_SYNC_TYPES + ('ibkr_manual_xml',)
+
+# The row `IBKRService.fetch_flex_data` writes the moment IBKR hands back statement bytes,
+# in its own committed session, before anything parses or ingests them (GitHub issue #55).
+# Until then the spend was recorded only by the run's final `success` row — after the
+# ingest, and for `full_sync` after FX, the 730-day pass, dividends and the look-through —
+# so a failed ingest or a restart in that tail left the day looking unspent, and the 00:00
+# slot and every manual press sent another SendRequest: a `1001`, which `1025` counts.
+#
+# In neither tuple above, on purpose: it says a generation was *spent*, not that the data
+# was refreshed (the ingest may have failed), so the staleness alarms, `newest_coverage`,
+# `flex_window_days` and the dashboard's "last sync" must not see it.
+FLEX_GENERATION_SYNC_TYPE = 'ibkr_generation'
+
+# Every row that records an exchange with the Flex Web Service: what `last_generation_today`
+# counts (its successes) and what `flex_refusal_hold` reads the newest outcome from.
+FLEX_WEB_SERVICE_SYNC_TYPES = FLEX_API_SYNC_TYPES + (FLEX_GENERATION_SYNC_TYPE,)
+
+# The raw statement `record_generation_served` keeps, so a failed ingest can be re-run by
+# `app/cli/ingest_flex_xml.py` with no token spend. A subdirectory beside the database —
+# `/app/data/flex-statements` on the production mount — for the reason `app/yf_cache.py`
+# gives: `db_guard`, `db-layout.sh` and the backup look at `portfolio.db` by name only.
+# Bounded, because a statement is account data and only the newest few are worth re-running.
+FLEX_STATEMENT_DIRNAME = 'flex-statements'
+FLEX_STATEMENTS_KEPT = 5
 
 
 def et_date(moment: datetime) -> date:
@@ -170,7 +201,9 @@ async def last_generation_today(
 
     Keys on a **successful** run: a day full of failures has not consumed anything, and
     must not stop the next slot from trying. That is the case the 08-02 and 08-03
-    recoveries depended on.
+    recoveries depended on. "Successful" includes the `FLEX_GENERATION_SYNC_TYPE` row
+    written the moment IBKR served bytes, so a statement whose ingest then failed still
+    counts: IBKR would refuse the next request of the day with a counted `1001`.
     """
     as_of = as_of or utcnow()
     start, end = et_day_bounds_utc(as_of)
@@ -178,7 +211,7 @@ async def last_generation_today(
     result = await db.execute(
         select(func.max(SyncRun.finished_at)).where(
             and_(
-                SyncRun.sync_type.in_(FLEX_API_SYNC_TYPES),
+                SyncRun.sync_type.in_(FLEX_WEB_SERVICE_SYNC_TYPES),
                 SyncRun.status == 'success',
                 SyncRun.finished_at >= start,
                 SyncRun.finished_at < end,
@@ -212,6 +245,180 @@ async def generation_already_spent(
             "anyway rather than skipping a sync", e,
         )
         return None
+
+
+def flex_statement_dir() -> Optional[Path]:
+    """`flex-statements/` beside the SQLite database, absolute; None for a non-file database."""
+    db_path = sqlite_database_path(settings.database_url)
+    if db_path is None:
+        return None
+    return (db_path.parent / FLEX_STATEMENT_DIRNAME).resolve()
+
+
+def _keep_statement(xml: bytes, served_at: datetime) -> Optional[Path]:
+    """
+    Write `xml` as `flex-<UTC stamp>Z.xml` and delete all but the newest
+    `FLEX_STATEMENTS_KEPT`. Written under a `.part` name and renamed, so a crash cannot
+    leave a truncated file that looks re-runnable.
+    """
+    directory = flex_statement_dir()
+    if directory is None:
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"flex-{served_at:%Y%m%dT%H%M%S}Z.xml"
+    partial = path.with_name(path.name + '.part')
+    partial.write_bytes(xml)
+    partial.replace(path)
+    for old in sorted(directory.glob('flex-*.xml'))[:-FLEX_STATEMENTS_KEPT]:
+        old.unlink(missing_ok=True)
+    return path
+
+
+async def record_generation_served(xml: bytes) -> None:
+    """
+    Record that IBKR served a generation, and keep the statement — before anything parses it.
+
+    Called by `IBKRService.fetch_flex_data` the moment the download returns bytes, so what
+    follows (the parse, the wipe guard, the ingest, a `full_sync`'s long tail, a restart)
+    can fail without the day looking unspent. Its own session and commit, never the
+    caller's: the caller's transaction is the ingest's, and rolls back with it.
+
+    Best effort, failing open like `generation_already_spent`: a row that cannot be written
+    costs at most the refused request this exists to prevent, while raising here would
+    throw away a statement IBKR has already served.
+    """
+    served_at = utcnow()
+    kept: Optional[Path] = None
+    try:
+        kept = await asyncio.get_running_loop().run_in_executor(
+            None, _keep_statement, xml, served_at
+        )
+    except Exception as e:
+        logger.warning(f"Could not keep the served Flex statement on disk: {e}")
+    try:
+        async with AsyncSessionLocal() as db:
+            await SyncRunRepository(db).record(
+                sync_type=FLEX_GENERATION_SYNC_TYPE,
+                status='success',
+                message=(
+                    f"IBKR served a Flex statement; raw XML kept as {kept.name}" if kept
+                    else "IBKR served a Flex statement; raw XML not kept"
+                ),
+                details={'bytes': len(xml), 'xml_file': kept.name if kept else None},
+                started_at=served_at,
+            )
+    except Exception as e:
+        logger.warning(f"Could not record the served Flex generation: {e}")
+
+
+# ── Remembering a refusal ─────────────────────────────────────────────────────
+#
+# Until GitHub issue #55 nothing did: after a `1025` the manual sync's only fence was its
+# 120 s start cooldown, so a press two minutes later sent SendRequest into the locked
+# token — "retrying can extend it". Now the newest Flex outcome on record is read first.
+# A `1025` holds the manual endpoint and every scheduled IBKR path alike. A request-step
+# `1001` holds manual presses only: the 00:00 recovery slot keeps its one fresh SendRequest
+# after an 18:00 refusal ("fail fast and let the next slot ask fresh"), which is how the
+# same-ET-day recoveries of 08-02 and 08-03 succeeded.
+#
+# The phrases IBKRService builds its two refusal messages from. Defined here and imported
+# there, so the classifier and the messages cannot drift apart; matching the phrase and
+# not a bare `Code=1025` matters, because the other refusal messages *mention* `1025`.
+FLEX_LOCKOUT_PHRASE = 'has temporarily locked this Flex token'
+FLEX_REQUEST_REFUSED_PHRASE = 'did not hand back a Flex statement reference'
+_REFUSAL_MESSAGE = re.compile(
+    rf"(?:{re.escape(FLEX_LOCKOUT_PHRASE)}|{re.escape(FLEX_REQUEST_REFUSED_PHRASE)})"
+    r" \(Code=(\d+)"
+)
+
+# How long a recorded `Code=1025` holds every non-force attempt. Long enough to cover the
+# 00:00 recovery slot six hours after an 18:00 lockout and the hours of button presses a
+# lockout invites (one lasted ~14 h). **Shorter than 18 h**, the gap from the 00:00 slot to
+# the next 18:00 one, so a lockout met at 00:00 never costs the next day's primary slot:
+# a skip writes no Flex outcome, so nothing but this bound lifts the hold.
+FLEX_LOCKOUT_HOLD_HOURS = 12
+
+
+class FlexRefusalHold(NamedTuple):
+    code: str              # '1025', or '1001' refused at the request step
+    refused_at: datetime   # naive UTC, the refusal's `finished_at`
+    until: datetime        # naive UTC, when asking is allowed again
+
+
+def flex_refusal_code(message: Optional[str]) -> Optional[str]:
+    """The code of a lockout or request-step refusal recorded in `message`, else None."""
+    match = _REFUSAL_MESSAGE.search(message or '')
+    return match.group(1) if match else None
+
+
+async def flex_refusal_hold(
+    db: AsyncSession, as_of: Optional[datetime] = None, request_refusals: bool = True
+) -> Optional[FlexRefusalHold]:
+    """
+    Whether the newest Flex Web Service outcome on record says not to ask IBKR yet.
+
+    Reads the newest success or error among `FLEX_WEB_SERVICE_SYNC_TYPES` — a skip asked
+    nothing, so it neither holds nor lifts. It holds when that row is a `Code=1025` younger
+    than `FLEX_LOCKOUT_HOLD_HOURS`, or — only with `request_refusals`, i.e. for a manual
+    press — a `1001` at the SendRequest step in the same ET day (IBKR refused that day's
+    generation; pressing again is another counted failure, and the next ET day is a new
+    generation). The scheduled slots pass `request_refusals=False`: the recovery slot's
+    one fresh request after a refusal is the schedule's design. Any later success, or any
+    other error, lifts it.
+    """
+    as_of = as_of or utcnow()
+    row = (await db.execute(
+        select(SyncRun.status, SyncRun.message, SyncRun.finished_at)
+        .where(
+            and_(
+                SyncRun.sync_type.in_(FLEX_WEB_SERVICE_SYNC_TYPES),
+                SyncRun.status.in_(('success', 'error')),
+                SyncRun.finished_at <= as_of,
+            )
+        )
+        .order_by(SyncRun.finished_at.desc(), SyncRun.id.desc())
+        .limit(1)
+    )).first()
+    if row is None or row.status != 'error':
+        return None
+    code = flex_refusal_code(row.message)
+    if code == '1025':
+        until = row.finished_at + timedelta(hours=FLEX_LOCKOUT_HOLD_HOURS)
+    elif code == '1001' and request_refusals:
+        until = next_generation_opens_at(row.finished_at)
+    else:
+        return None
+    return FlexRefusalHold(code, row.finished_at, until) if as_of < until else None
+
+
+async def flex_refusal_in_force(
+    db: AsyncSession, as_of: Optional[datetime] = None, request_refusals: bool = True
+) -> Optional[FlexRefusalHold]:
+    """`flex_refusal_hold`, failing open for `generation_already_spent`'s reason."""
+    try:
+        return await flex_refusal_hold(db, as_of, request_refusals)
+    except Exception as e:
+        logger.warning(
+            "Could not read the last Flex refusal (%s) — asking IBKR anyway rather than "
+            "skipping a sync", e,
+        )
+        return None
+
+
+def describe_refusal_hold(hold: FlexRefusalHold) -> str:
+    """The one message both callers give for a hold. Must not match `_REFUSAL_MESSAGE`."""
+    if hold.code == '1025':
+        what = (
+            f"IBKR locked the Flex token (Code=1025) at {utc_iso(hold.refused_at)}, and "
+            "asking during a lockout can extend it."
+        )
+    else:
+        what = (
+            f"IBKR refused today's statement at the request step (Code={hold.code}) at "
+            f"{utc_iso(hold.refused_at)}, and another refusal counts toward the Code=1025 "
+            "lockout."
+        )
+    return f"{what} Not asking IBKR again before {utc_iso(hold.until)}; force=true overrides."
 
 
 # Fallback window length, in calendar days, when no successful statement is on record

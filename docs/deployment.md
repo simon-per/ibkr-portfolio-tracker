@@ -152,6 +152,13 @@ lifespan and in `manage_mappings`. It is a **subdirectory**, never a file beside
 and backups do not copy it. Deleting it costs one timezone request per ticker, never data; if it
 cannot be written yfinance falls back to a dummy cache and logs it.
 
+**`data/flex-statements/` holds the newest five statements the Flex API served** (GitHub issue #55,
+2026-10-18). Each one is written before it is parsed, so a failed ingest is re-run through
+`app/cli/ingest_flex_xml.py` with no token spend (docs/flex-and-sync.md). It is account data:
+`backend/data/` and `*.xml` are gitignored, and the `.dockerignore` whitelist never sends it to a
+build. It is the same kind of subdirectory as `yf-cache/`, and backups do not copy it either.
+Deleting it loses nothing the database does not hold.
+
 **A fresh install** (no database anywhere, on purpose): `ALLOW_NEW_DATABASE=1 ./deploy.sh` once.
 Without the flag, `preflight` refuses and nothing is stopped. Restoring a backup instead: put the
 snapshot at `backend/data/portfolio.db` (with the backend down, no `-wal`/`-shm` beside it) and

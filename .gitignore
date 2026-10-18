@@ -50,6 +50,8 @@ htmlcov/
 backend/data/
 # yfinance's cache beside a local backend/portfolio.db (app/yf_cache.py).
 backend/yf-cache/
+# Flex statements kept beside a local backend/portfolio.db (app/services/flex_generation.py).
+backend/flex-statements/
 
 # Generated portfolio data exports
 portfolio_data*.json

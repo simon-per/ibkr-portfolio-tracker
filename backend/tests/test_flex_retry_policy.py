@@ -15,12 +15,24 @@ import pytest
 
 from ibflex.client import ResponseCodeError, BadResponseError
 
+from app.services import flex_generation
 from app.services import ibkr_service as ibkr_module
 from app.services.ibkr_service import (
     IBKRService,
     FLEX_RETRY_DELAYS_PATIENT,
     _FLEX_RETRY_DELAYS,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_spend_record(monkeypatch):
+    """These tests count HTTP requests. The record a served statement now leaves (GitHub
+    issue #55, pinned in test_flex_generation_spend.py) would otherwise write into the
+    suite's database and beside it."""
+    async def _skip(xml):
+        return None
+
+    monkeypatch.setattr(flex_generation, 'record_generation_served', _skip)
 
 
 @pytest.fixture

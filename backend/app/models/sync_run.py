@@ -23,7 +23,8 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    # 'ibkr' (manual endpoint) | 'full_sync' | 'ibkr_sync' | 'market_data_only' | the CLIs'
+    # 'ibkr' (manual endpoint) | 'full_sync' | 'ibkr_sync' | 'market_data_only' |
+    # 'ibkr_generation' (IBKR served a statement: docs/flex-and-sync.md) | the CLIs'
     # own types | 'crypto_sync' (docs/crypto.md: type, status, reason and message only, and
     # left out of the public /api/scheduler endpoints)
     sync_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

@@ -23,7 +23,9 @@ from app.services.ibkr_service import IBKRService, FLEX_RETRY_DELAYS_PATIENT
 from app.services.flex_generation import (
     FLEX_WINDOW_DAYS_FALLBACK,
     IBKR_SYNC_TYPES,
+    describe_refusal_hold,
     et_date,
+    flex_refusal_in_force,
     flex_window_days,
     generation_already_spent,
     generation_brings_new_trading_day,
@@ -419,6 +421,12 @@ class SchedulerService:
         the failed generations clustered (`flex_generation.generation_brings_new_trading_day`).
         Every scheduled IBKR path comes through here, so this is the one place it is asked.
 
+        Also `status="skipped"`, `reason="flex_refusal_hold"`, while the newest Flex
+        outcome on record is a `Code=1025` younger than `FLEX_LOCKOUT_HOLD_HOURS` — the
+        lockout half of the rule `POST /api/sync/ibkr` answers 429 on (GitHub issue #55).
+        Not the request-step `1001` half: after an 18:00 refusal the 00:00 slot keeps its
+        one fresh SendRequest, the recovery this slot exists for.
+
         `force` exists for the one case the history shows really does allow a second
         generation in a day: editing the query definition in the IBKR portal (07-31).
         Nothing scheduled passes it.
@@ -433,7 +441,7 @@ class SchedulerService:
                 spent = await generation_already_spent(db)
                 if spent is not None:
                     message = (
-                        f"IBKR already generated today's statement (last successful sync "
+                        f"IBKR already generated today's statement (generation spent "
                         f"{utc_iso(spent)}). It issues one per US-Eastern day; the next is "
                         f"available from {utc_iso(next_generation_opens_at())}."
                     )
@@ -444,6 +452,18 @@ class SchedulerService:
                         "message": message,
                         "last_success_at": utc_iso(spent),
                         "next_attempt_after": utc_iso(next_generation_opens_at()),
+                        "timestamp": utc_iso(utcnow()),
+                    }
+
+                hold = await flex_refusal_in_force(db, request_refusals=False)
+                if hold is not None:
+                    message = describe_refusal_hold(hold)
+                    logger.info(f"IBKR sync skipped: {message}")
+                    return {
+                        "status": "skipped",
+                        "reason": "flex_refusal_hold",
+                        "message": message,
+                        "next_attempt_after": utc_iso(hold.until),
                         "timestamp": utc_iso(utcnow()),
                     }
 
