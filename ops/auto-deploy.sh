@@ -14,7 +14,7 @@
 # Runs from root's crontab every 5 minutes (`*/5`; every 10 until 2026-10-04).
 # A tick that finds a deploy still running exits at the `flock` below, so a build
 # longer than the cadence neither overlaps nor queues. deploy.sh is expensive (docker
-# compose down + build --no-cache + npm ci), so this only invokes it when
+# compose build + down + up, and npm ci when the lockfile moved), so this only invokes it when
 # origin/main is genuinely AHEAD of the checkout — never on an unchanged tick,
 # and never when the VPS is ahead (which happens legitimately after a local
 # commit here; a bare inequality test would loop-deploy while `git pull` fails).
@@ -81,8 +81,8 @@ SYNC_HOURS="0 4 5 8 11 13 15 18 20 22"
 # Minutes either side of a slot to stay clear of. A rebuild takes ~2-5 minutes and
 # APScheduler is in-process, so a deploy overlapping a slot loses that run. The
 # persistent job store (2026-08-01) recovers a misfire up to 30 minutes late, so this
-# is now a second line of defence rather than the only one — but a `--no-cache` rebuild
-# can exceed that grace, so it still earns its keep. 10 covers the rebuild plus the job.
+# is now a second line of defence rather than the only one — but a rebuild that misses
+# the layer cache (a lock change, a base-image update) can exceed that grace, so it still earns its keep. 10 covers the rebuild plus the job.
 SLOT_MARGIN_MIN=10
 
 log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S') UTC] $*" >> "$LOG"; }
@@ -147,7 +147,7 @@ fi
 # A rollback that WORKS creates a problem the broken one never had: the checkout is
 # back at the last good commit while origin/main still holds the bad one, so the very
 # next tick sees "behind origin/main", passes the ancestor check, and redeploys the
-# commit that just failed — on every tick, each time with a full --no-cache rebuild
+# commit that just failed — on every tick, each time with a full rebuild
 # and an outage. (The old rollback avoided this only by accident: its `git pull` left
 # HEAD at the broken commit, so the next tick saw nothing to do.)
 #

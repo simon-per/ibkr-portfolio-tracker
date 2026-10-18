@@ -13,14 +13,27 @@
 `deploy.sh` → health check → **roll back to the previous commit if health fails**. Log:
 `/root/auto-deploy.log`.
 
-`deploy.sh` is expensive (`npm ci`, `build --no-cache`), which is why the cron guards on an actual
-change. **Since 2026-09-08 it builds before it stops anything**: the frontend goes to `dist.next`
+`deploy.sh` is expensive (an image build, and `npm ci` when `frontend/package-lock.json` moved),
+which is why the cron guards on an actual change. **Since 2026-09-08 it builds before it stops anything**: the frontend goes to `dist.next`
 and the image is built while the old containers keep serving, then `down`, swap `dist`, `up`. Before
 that `down` came first and the site was offline for the whole build — minutes per push, and the
 window that loses a scheduled sync. (A bind mount follows the directory inode, so the swap has to
 sit between `down` and `up`, and `dist.old` is removed only after `up`.) Its own health check fires a
 few seconds after start and often reports FAILED spuriously — check `/health` again after ~15s
 before believing it.
+
+**Builds reuse Docker's layer cache, and `deploy.sh` prunes it** (issue #38, 2026-10-18). It
+runs `docker compose build --pull`: the image installs the hash-pinned `requirements.lock`
+(docs/tech-stack.md *Dependencies*), so a cached layer is exactly what a rebuild would produce and
+the dependency layer rebuilds only when the lock changes, while `--pull` still brings in
+`python:3.11-slim` patches. Until then it was `--no-cache`, which re-resolved every floating
+package on each deploy and recorded a cache entry per step that nothing pruned (measured 11.92 GB,
+143 entries). After `up -d` it runs `docker builder prune -f --filter until=168h`, never fatal, so
+the cache holds about a week of layers; it is in `deploy.sh` rather than `ops/auto-deploy.sh` so
+the rollback and a manual deploy prune too. `npm ci` runs only when
+`frontend/node_modules/.deploy-npm-ci-stamp` (Node version + `package-lock.json` sha256, written
+after a successful `npm ci`) does not match; `DEPLOY_FORCE_NPM_CI=1 ./deploy.sh` forces it, and
+deleting `node_modules` does the same.
 
 - SSH: `ssh -i ~/.ssh/id_ed25519_hostinger root@portfolio.srv1211053.hstgr.cloud`
 - Secrets live only in `/root/IBKR_investment_tracker/backend/.env` (`IBKR_TOKEN`, `IBKR_QUERY_ID`,
@@ -130,7 +143,7 @@ only while `data/` holds nothing, so a copy installed before the move does not f
 **`data/yf-cache/` is yfinance's cache, and it is disposable** (GitHub issue #11, 2026-10-17).
 yfinance keeps each ticker's exchange timezone, Yahoo's A3 cookie and its ISIN lookups in three
 small SQLite files. By default they sat in `/root/.cache/py-yfinance` inside the container's
-writable layer, so every `build --no-cache` / `down` / `up` started empty and each ticker's first
+writable layer, so every rebuild / `down` / `up` started empty and each ticker's first
 `history()` paid an extra `chart?range=1d` request for its timezone, plus a fresh cookie fetch.
 `app/yf_cache.py` points them at `yf-cache/` beside the database (derived from `DATABASE_URL`, so
 `/app/data/yf-cache` on the mount; `backend/yf-cache/` locally, gitignored), called first in the
@@ -225,7 +238,7 @@ refusal, ruff, the whole pytest suite including `deploy_scripts`; `frontend` —
 `npm run build` (the type check); `image` — `docker build` of `backend/Dockerfile` and an
 `import app.main` inside it, never pushed. The gate below reads every job's conclusion, so each
 of the three can hold a deploy. `image` exists because the `backend` job installs
-`requirements.txt` on the runner and says nothing about the Dockerfile; a broken image used to
+`requirements.lock` on the runner and says nothing about the Dockerfile; a broken image used to
 surface first as a failed `deploy.sh` on the VPS.
 
 **The CI gate asks GitHub's check-runs API for the commit's verdict before the backup.**

@@ -4,7 +4,7 @@ Where yfinance keeps its on-disk cache: beside the database, so it outlives a de
 yfinance caches each ticker's exchange timezone, the A3 cookie from fc.yahoo.com and its
 ISIN lookups in three small SQLite files under `platformdirs.user_cache_dir()/py-yfinance`
 — `/root/.cache` in the container, which has no `USER`. That is the image's writable
-layer, and `deploy.sh` rebuilds with `--no-cache` and runs `down` / `up -d`, so every
+layer, and `deploy.sh` rebuilds and runs `down` / `up -d`, so every
 deploy started with an empty cache: each ticker's first `history()` then paid an extra
 `chart?range=1d` request to learn its timezone, and the cookie was fetched again
 (GitHub issue #11, item f). The crumb is per process and is unaffected.

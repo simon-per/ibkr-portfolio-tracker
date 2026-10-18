@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from bash_finder import find_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AUTO_DEPLOY = REPO_ROOT / "ops" / "auto-deploy.sh"
@@ -139,7 +140,7 @@ def test_a_rolled_back_commit_is_quarantined():
     The old rollback left HEAD at the broken commit (that was the bug), so the next tick
     saw nothing to do. A rollback that genuinely returns to the last good commit leaves
     the checkout *behind* origin/main again — so ten minutes later the ancestor check
-    passes and the same broken commit is rebuilt, with a --no-cache build and an outage,
+    passes and the same broken commit is rebuilt, with a full build and an outage,
     every ten minutes, indefinitely.
 
     So the failed sha is recorded and refused until origin/main moves past it.
@@ -358,23 +359,7 @@ def test_a_red_commit_is_refused_and_a_pending_one_only_deferred():
 # `CRITICAL: rollback also failed`, which is the production failure STATUS.md described.
 
 
-def _find_bash() -> str | None:
-    """Git Bash on Windows, never System32's bash.exe (that one is WSL)."""
-    if os.name != "nt":
-        return shutil.which("bash")
-    roots = []
-    git = shutil.which("git")
-    if git:
-        roots.append(Path(git).resolve().parents[1])
-    roots.append(Path(r"C:\Program Files\Git"))
-    for root in roots:
-        candidate = root / "bin" / "bash.exe"
-        if candidate.exists():
-            return str(candidate)
-    return None
-
-
-BASH = _find_bash()
+BASH = find_bash()
 BACKUP_DB = REPO_ROOT / "ops" / "backup-db.sh"
 
 _needs_bash = pytest.mark.skipif(

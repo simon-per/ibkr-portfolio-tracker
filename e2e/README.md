@@ -11,8 +11,8 @@ rounding to `0`/`-0`. All three are pinned in `ledger.mjs`.
 
 ## Why this is a separate package
 
-It cannot be a `frontend` devDependency: `deploy.sh` runs `npm ci` inside `frontend/` on every
-`--no-cache` rebuild, and Playwright's postinstall pulls ~150 MB of Chromium — which would tax a
+It cannot be a `frontend` devDependency: `deploy.sh` runs `npm ci` inside `frontend/` whenever
+`package-lock.json` changes, and Playwright's postinstall pulls ~150 MB of Chromium — which would tax a
 deploy that already runs every 10 minutes. Nothing in the deploy path touches this directory.
 
 ```bash

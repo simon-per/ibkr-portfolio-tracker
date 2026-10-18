@@ -90,7 +90,7 @@ def test_deploy_guard_covers_exactly_the_scheduled_slots():
         f"ops/auto-deploy.sh does not guard {sorted(unguarded)}:00 Europe/Berlin, but the "
         f"scheduler runs a sync then. A deploy landing there loses that run — the "
         f"persistent job store recovers a misfire only within 30 minutes, and a "
-        f"--no-cache rebuild can exceed that. Update SYNC_HOURS."
+        f"rebuild that misses the layer cache can exceed that. Update SYNC_HOURS."
     )
     assert not stale, (
         f"ops/auto-deploy.sh guards {sorted(stale)}:00 Europe/Berlin, but no sync runs "
@@ -277,7 +277,7 @@ def test_deploy_sh_reads_the_slots_rather_than_copying_them():
 @pytest.mark.skipif(not AUTO_DEPLOY.exists(), reason="ops/auto-deploy.sh not present")
 def test_the_margin_is_wide_enough_for_a_rebuild():
     """
-    `deploy.sh` does `docker compose down`, `build --no-cache` and `npm ci`. Anything
+    `deploy.sh` does `docker compose build`, `down`, `up` and possibly `npm ci`. Anything
     under a few minutes either side of a slot would let a rebuild straddle it, which is
     the whole failure this guard exists to prevent.
     """

@@ -1,7 +1,10 @@
+# The runtime's top-level requirements. Nothing installs this file directly: the image and
+# CI install requirements.lock, compiled from it (docs/tech-stack.md, "Bumping a
+# dependency"). Test-only packages live in requirements-dev.txt.
+
 # FastAPI and server
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-python-multipart==0.0.32
 
 # Database
 sqlalchemy==2.0.52
@@ -30,9 +33,3 @@ pyxirr>=0.10.0
 
 # Scheduling
 APScheduler==3.11.3
-
-# Testing
-pytest==9.1.1
-pytest-asyncio==1.4.0
-pytest-cov==7.1.0
-pytest-xdist==3.8.0

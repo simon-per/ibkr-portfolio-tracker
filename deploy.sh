@@ -54,7 +54,24 @@ if ! command -v node &> /dev/null; then
     apt-get install -y nodejs
 fi
 
-npm ci
+# `npm ci` only when node_modules was not installed from this exact package-lock.json by
+# this Node. It wipes node_modules and reinstalls every time, which on a push that touches
+# no frontend dependency is the slowest step of the frontend half for nothing. The stamp
+# lives INSIDE node_modules and is written only after `npm ci` succeeds, so a deleted or
+# half-installed node_modules has no stamp and reinstalls; a rollback across a lockfile
+# change does too, since the hash moves with it. The Node version is in the stamp because
+# a Node upgrade can change what an install produces. DEPLOY_FORCE_NPM_CI=1 always runs it.
+install_frontend_deps() {
+    local stamp="node_modules/.deploy-npm-ci-stamp" want
+    want="node $(node --version) package-lock.json sha256 $(sha256sum package-lock.json | cut -d' ' -f1)"
+    if [ "${DEPLOY_FORCE_NPM_CI:-0}" != "1" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        echo "--- Skipping npm ci: node_modules is already installed from this package-lock.json ---"
+        return 0
+    fi
+    npm ci
+    printf '%s\n' "$want" > "$stamp"
+}
+install_frontend_deps
 # Built beside `dist/`, not into it. The nginx container bind-mounts `dist/`, and
 # `vite build` empties its output directory first — so building in place served 404s for
 # every asset while the build ran, and then the backend image build below kept the site
@@ -88,9 +105,17 @@ export GIT_COMMIT
 echo "Deploying commit: $GIT_COMMIT"
 
 # Build first, while the old containers keep serving. `down` used to come first, which
-# took the site offline for the whole `--no-cache` image build — minutes per push, and
-# the window that loses a scheduled sync — when the swap itself takes seconds.
-docker compose build --no-cache
+# took the site offline for the whole image build — minutes per push, and the window that
+# loses a scheduled sync — when the swap itself takes seconds.
+#
+# Layer cache on, `--pull` on. Until 2026-10-18 this was `--no-cache`, which re-resolved
+# every floating dependency against PyPI on each deploy (shipping whatever it served that
+# minute, not what CI tested) and still recorded a cache entry per step that nothing ever
+# pruned — 11.92 GB of it on the VPS (issue #38). The image now installs the hash-pinned
+# requirements.lock, so a cached layer is exactly what a rebuild would produce, and the
+# dependency layer rebuilds only when the lock changes. `--pull` keeps python:3.11-slim's
+# security patches arriving, which `--no-cache` used to deliver as a side effect.
+docker compose build --pull
 
 # --- Sync-slot re-check, right before the restart --------------------------------------
 # ops/auto-deploy.sh refuses to START a deploy within SLOT_MARGIN_MIN of a Berlin sync slot,
@@ -199,6 +224,13 @@ mv dist.next dist
 cd "$REPO_DIR/backend"
 docker compose up -d
 rm -rf "$REPO_DIR/frontend/dist.old"
+
+# Bound Docker's build cache to about a week of layers. Here rather than in
+# ops/auto-deploy.sh because that script calls this one for the deploy AND the rollback,
+# and a manual deploy runs it too. After `up`, and never fatal: the new containers are
+# already serving, and a failed prune must not read as a failed deploy (which auto-deploy
+# would answer with a rollback).
+docker builder prune -f --filter until=168h || echo "WARNING: docker builder prune failed; build cache not pruned"
 
 # 5. Status check
 echo ""

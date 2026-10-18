@@ -3,7 +3,7 @@
 #     install -m 644 ops/logrotate-ibkr /etc/logrotate.d/ibkr
 #
 # `/root/auto-deploy.log` had no rotation at all and is appended with the *entire*
-# output of `deploy.sh` — `npm ci` plus `docker compose build --no-cache` — on every
+# output of `deploy.sh` — `docker compose build`, and `npm ci` when it runs — on every
 # deploy. It was 3.7 MB when this was written and only ever grows, on the same disk
 # that holds the database and its backups. `docker-compose.yml` already caps the
 # container logs at 10m x 5; this is the one log CLAUDE.md tells you to read, and it

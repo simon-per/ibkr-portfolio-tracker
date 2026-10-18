@@ -1,0 +1,10 @@
+# Test-only top-level packages: CI and local development, never the image. CI installs
+# requirements-dev.lock, compiled from this file with `-c requirements.lock` so a test
+# package can never move a runtime package off what ships (docs/tech-stack.md, "Bumping a
+# dependency"). The constraint is on the compile command, not here: a hashed constraints
+# file would put a plain local `pip install -r requirements-dev.txt` into hash-checking mode.
+
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+pytest-xdist==3.8.0

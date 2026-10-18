@@ -2,8 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.lock, never requirements.txt: every package pinned and hash-checked, so the
+# image holds exactly what CI tested and a rebuild resolves nothing. No test tooling
+# (requirements-dev.lock is CI's). Bumping a pin: docs/tech-stack.md.
+COPY requirements.lock .
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY app/ ./app/
 COPY alembic/ ./alembic/

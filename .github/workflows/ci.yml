@@ -52,7 +52,9 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.lock
+            backend/requirements-dev.lock
 
       # The repo is public; a SQLite file under a name .gitignore misses is account data
       # (issue #36). Content check, stdlib only, so it runs first and fails fast. It runs
@@ -61,10 +63,14 @@ jobs:
       - name: Refuse a tracked SQLite database
         run: python ../ops/check_no_sqlite.py
 
-      - run: pip install -r requirements.txt
+      # The image's own lock, byte for byte, plus the test tooling's, in one hash-checked
+      # pass: pip refuses if the two disagree on a shared package, so the tests run against
+      # exactly the versions that ship. requirements.txt / requirements-dev.txt are only
+      # the inputs the locks are compiled from (docs/tech-stack.md, "Bumping a dependency").
+      - run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 
-      # Correctness rules only (backend/ruff.toml). Ruff is not in requirements.txt, which
-      # is what the image installs, so it is pinned here; 0.16.0 is what the tree was
+      # Correctness rules only (backend/ruff.toml). Ruff is in neither lock (the image
+      # installs requirements.lock), so it is pinned here; 0.16.0 is what the tree was
       # checked clean with.
       - name: Ruff
         run: |
@@ -125,8 +131,8 @@ jobs:
       # `npm run build` is `tsc -b && vite build`, so this is the type check too.
       - run: npm run build
 
-  # The image deploy.sh builds on the VPS. The backend job installs requirements.txt on
-  # the runner, which says nothing about the Dockerfile itself — a broken COPY or an
+  # The image deploy.sh builds on the VPS. The backend job installs the same lock on the
+  # runner, which says nothing about the Dockerfile itself — a broken COPY or an
   # install that fails only on python:3.11-slim used to surface first as a failed deploy
   # (rolled back, but only after a build there). Built locally, never pushed.
   image:

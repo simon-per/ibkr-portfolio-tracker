@@ -1397,7 +1397,7 @@ a **separate** sqlite file: the store is synchronous SQLAlchemy while the app is
   `ensure_jobstore_parent()` runs first. Pinned structurally by
   `tests/test_scheduler_jobstore_path.py`, which reads the compose file — no runtime assertion can.
 
-Thirty minutes is chosen from both ends: long enough for a `build --no-cache` rebuild, short enough
+Thirty minutes is chosen from both ends: long enough for a full uncached rebuild, short enough
 that a real outage doesn't dump four stale slots onto a cold container.
 
 **The failure mode to fear here is that the fallback looks exactly like success.** When the store

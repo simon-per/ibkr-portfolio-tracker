@@ -25,7 +25,6 @@ words in a shell script is how this repository's deploy tests first passed their
 """
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -36,6 +35,7 @@ import pytest
 import yaml
 
 from app.db_guard import refusal, sqlite_database_path
+from bash_finder import find_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = REPO_ROOT / "backend"
@@ -160,18 +160,7 @@ def test_the_checkpoints_ask_the_container_where_its_database_is(script):
     assert "/app/portfolio.db" not in line, line
 
 
-def _bash() -> str | None:
-    found = shutil.which("bash")
-    if found and "system32" in found.lower():  # WSL's launcher, not a POSIX bash for these paths
-        found = None
-    if not found and sys.platform == "win32":
-        for candidate in (r"C:\Program Files\Git\usr\bin\bash.exe", r"C:\Program Files\Git\bin\bash.exe"):
-            if Path(candidate).exists():
-                return candidate
-    return found
-
-
-BASH = _bash()
+BASH = find_bash()
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
 
 

@@ -101,7 +101,7 @@ def test_deploy_checkpoints_inside_the_running_container_before_down():
     auto-checkpoint, which is exactly what `down` used to destroy.
     """
     text = DEPLOY_SH.read_text(encoding="utf-8")
-    build = text.index("docker compose build --no-cache")
+    build = text.index("docker compose build --pull")
     checkpoint = text.index(CHECKPOINT)
     down = text.index("docker compose down")
     assert build < checkpoint < down, "the WAL checkpoint must sit between build and down"

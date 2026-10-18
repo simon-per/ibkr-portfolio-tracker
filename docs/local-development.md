@@ -19,7 +19,9 @@ from a dev machine.
 
 **Python 3.11** is what the image (`backend/Dockerfile`) and CI (`.github/workflows/ci.yml`) run;
 a fresh venv: `uv venv --python 3.11 backend/venv`, then
-`uv pip install --python backend/venv/Scripts/python.exe -r backend/requirements.txt`. 3.12 has
+`uv pip install --python backend/venv/Scripts/python.exe -r backend/requirements.txt -r backend/requirements-dev.txt`
+(the inputs: the locks are resolved for the Linux image and do not install on Windows, see
+docs/tech-stack.md *Dependencies*). 3.12 has
 also worked locally; the global interpreter has not (its FastAPI is too old for the suite). `settings.scheduler_enabled` defaults to **True** so production is unaffected, and
 a disabled scheduler logs a warning because otherwise it looks exactly like a healthy site whose data
 has quietly stopped moving. Pinned by `test_scheduler_is_enabled_by_default`.
@@ -233,7 +235,8 @@ lose time to.
   `venv\Scripts\activate && uvicorn ...` and a bare `alembic upgrade head` fail while
   `./venv/Scripts/python.exe -m pytest` keeps passing — python.exe resolves its own prefix, the shims
   do not. Recreate rather than patch, and **`pip freeze` first**: `requirements.txt` floats
-  `yfinance`, `lxml` and `pyxirr`, so reinstalling from it quietly drifts the local env. Then
+  `yfinance`, `lxml` and `pyxirr` (only the Linux-only lock pins them), so reinstalling from it
+  quietly drifts the local env. Then
   `python -m venv venv --clear` and install the freeze. A plain `python -m venv venv` regenerates
   `activate` and leaves the shims broken, which is the worst of the three states.
 

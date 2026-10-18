@@ -24,35 +24,21 @@ import asyncio
 import json
 import os
 import re
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app.services.scheduler_service import ALL_SYNC_HOURS
+from bash_finder import find_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = REPO_ROOT / "deploy.sh"
 AUTO_DEPLOY = REPO_ROOT / "ops" / "auto-deploy.sh"
 
 
-def _bash():
-    """A real bash. On Windows that is Git Bash; `System32\\bash.exe` is WSL's launcher."""
-    found = shutil.which("bash")
-    if found and not found.lower().endswith("system32\\bash.exe"):
-        return found
-    if sys.platform == "win32":
-        for candidate in (r"C:\Program Files\Git\bin\bash.exe",
-                          r"C:\Program Files (x86)\Git\bin\bash.exe"):
-            if Path(candidate).exists():
-                return candidate
-    return None
-
-
-BASH = _bash()
+BASH = find_bash()
 
 pytestmark = pytest.mark.skipif(
     BASH is None or not DEPLOY.exists() or not AUTO_DEPLOY.exists(),

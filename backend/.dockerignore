@@ -9,7 +9,7 @@
 # `!` line, and CI's `image` job fails the build until it has one.
 # tests/test_db_directory_mount.py pins this list against the Dockerfile's COPY lines.
 *
-!requirements.txt
+!requirements.lock
 !app/
 !alembic/
 !alembic.ini

@@ -853,7 +853,7 @@ async def test_a_missed_slot_is_still_worth_running_for_half_an_hour(jobstore_ur
     """
     A deploy overlapping a Berlin slot used to lose that sync outright — the 08:00
     full_sync on 2026-07-30 went that way. The grace window has to cover a
-    `build --no-cache` rebuild and no more: a genuinely long outage must not dump four
+    full uncached rebuild and no more: a genuinely long outage must not dump four
     stale slots onto a cold container.
     """
     svc = SchedulerService()

@@ -185,7 +185,7 @@ FLEX_GENERATION_GAP_WARN_DAYS = FLEX_GENERATION_GAP_WARN_DAYS_FLOOR
 # job store the missed run time survives the restart, and this is the window in which
 # it is still worth running.
 #
-# Thirty minutes is chosen from both ends. A `build --no-cache` rebuild takes a couple
+# Thirty minutes is chosen from both ends. A full uncached rebuild takes a couple
 # of minutes, so it comfortably covers a deploy. And it is short enough that a genuinely
 # long outage does *not* dump four missed slots onto a cold container: anything older is
 # dropped, so only the slot the outage actually straddled is recovered. `coalesce` then
