@@ -41,6 +41,7 @@ const STATUS: FundamentalsStatus = {
   total_securities: 1,
   securities_with_data: 1,
   securities_without_data: 0,
+  securities_unavailable: 0,
   stale_metrics: 0,
   total_earnings_events: 2,
   oldest_update: null,

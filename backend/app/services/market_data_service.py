@@ -20,6 +20,7 @@ from app.repositories.security_repository import held
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
+from app.services.miss_backoff import miss_backoff_until
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
 from app.services.yahoo_minor_units import (
@@ -62,16 +63,6 @@ SOLD_PRICE_GRACE_DAYS = MarketPriceRepository.PROVISIONAL_PRICE_DAYS + 14
 # pins that it stays inside the lookback.
 REPAIR_TRAILING_GRACE_WEEKDAYS = 5
 
-# Back-off after every provider came back empty for a sold security's missing dates: one
-# day, doubling per consecutive miss, capped at 30 days. Less a few hours of slack so a
-# security stamped during a pass is due again at the same slot a day later, not the one
-# after (the fundamentals' 20-hour STALE_AFTER, for the same reason). A held security
-# never backs off: Yahoo soft-throttling with empty answers rather than a 429 would
-# otherwise freeze every holding's price for a day, and a holding with a broken mapping
-# is already surfaced by the stale-price warning.
-PRICE_MISS_BACKOFF_SOLD_CAP_DAYS = 30
-PRICE_MISS_BACKOFF_SLACK = timedelta(hours=4)
-
 # Alpha Vantage's free tier serves `outputsize=compact` only: the latest 100 trading
 # days, which span at least 137 calendar days. A gap reaching further back than this
 # cannot be filled by it, so the fallback is not asked at all.
@@ -103,12 +94,18 @@ def chart_actions(hist, scale: Decimal) -> Tuple[List[Tuple], List[date], Decima
 
 
 def price_backoff_until(security: Security, is_held: bool) -> Optional[datetime]:
-    """When the price loop may next ask about `security`, or None when it is not backing off."""
-    misses = security.price_miss_count or 0
-    if is_held or security.price_checked_at is None or misses < 1:
+    """
+    When the price loop may next ask about `security`, or None when it is not backing off.
+
+    After every provider came back empty for a sold security's missing dates, the shared
+    rule (`miss_backoff.miss_backoff_until`: one day, doubling, capped at 30). A held
+    security never backs off: Yahoo soft-throttling with empty answers rather than a 429
+    would otherwise freeze every holding's price for a day, and a holding with a broken
+    mapping is already surfaced by the stale-price warning.
+    """
+    if is_held:
         return None
-    days = min(2 ** min(misses - 1, 10), PRICE_MISS_BACKOFF_SOLD_CAP_DAYS)
-    return security.price_checked_at + timedelta(days=days) - PRICE_MISS_BACKOFF_SLACK
+    return miss_backoff_until(security.price_checked_at, security.price_miss_count)
 
 
 def clear_price_backoff(security: Security) -> None:

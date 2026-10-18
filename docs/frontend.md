@@ -661,7 +661,9 @@ insight. What that settled, on top of the product pass:
   back with the next sync after it is bought again). `/api/fundamentals/status` counts holdings
   with the sync's own predicate (`fundamentals_repository.sync_scope`: held **and** Yahoo-eligible):
   counted through `held()` alone, a `price_source` opt-out (the pillar 3a funds) was "no data yet"
-  for good, so the amber line and the Update button never went away (GitHub issue #18).
+  for good, so the amber line and the Update button never went away (GitHub issue #18). For the
+  same reason a holding Yahoo was asked about and had nothing for is `securities_unavailable`, not
+  "no data yet" (issue #66; it backs off, so Update would ask nothing).
 - **A background fundamentals sync ends three ways** (`FundamentalsTab`): a row newer than the
   click; a status poll *asked* after the click reporting `sync_running: false`
   (`single_flight.is_running(SYNC_PIPELINE)` — any pipeline, which is honest because a pass queued

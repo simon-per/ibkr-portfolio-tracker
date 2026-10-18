@@ -50,6 +50,7 @@ const STATUS: FundamentalsStatus = {
   total_securities: 2,
   securities_with_data: 1,
   securities_without_data: 1,
+  securities_unavailable: 0,
   stale_metrics: 0,
   total_earnings_events: 0,
   oldest_update: '2026-10-11T02:05:00Z',

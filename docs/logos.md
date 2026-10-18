@@ -116,9 +116,19 @@ must be https, and the secret key is never sent to it (another host).
   API lookups a pass**, each request paced `MIN_INTERVAL_S` (1 s) after the previous one
   finished — by `paced_http.PacedGet`, the one paced GET the crypto clients share too. The
   rest are deferred to the next pass.
-- **401/402/403/429 stop the pass** with a warning. **202 leaves the ISIN for the next pass**,
-  never sleeping on `Retry-After`. A failed request (transport, 5xx) is not remembered, so it is
-  asked again next pass; it is a warning.
+- **401/402/403/429 from `api.logo.dev` stop the pass** with a warning (`STOP_STATUSES`, the API's
+  answers only). **202 leaves the ISIN for the next pass**, never sleeping on `Retry-After`. A
+  failed request (transport, a 5xx from the API) is not remembered, so it is asked again next
+  pass; it is a warning.
+- **A download never stops the pass.** The signed URL is another host and carries no key, so
+  its 401/403/429 says nothing about the key or the credits. Until issue #66 it raised
+  `LogoDevStop`: the pass stopped at an ISIN left unstamped, which sorted first again, so every
+  pass re-bought that one lookup and stopped, and no ISIN after it was ever asked. Now **a 4xx
+  from the download (401/402/403/404/410/429 …) is that ISIN's refusal** (`LogoRefused`):
+  stamped (`checked_at`), a warning, and the pass goes on. **A 5xx or a 408, or a download that
+  never answered (transport), stays retryable** (`is_retryable_download_status`): not stamped,
+  a warning, the pass goes on to the next ISIN, and that ISIN is asked again next pass — bounded
+  by the daily cadence, at the cost of re-buying its lookup.
 - Writes commit as they happen, so a crash keeps what was already paid for.
 - **No `LOGO_DEV_SECRET_KEY`: `skipped: not configured`, no warning, no query.** A warning that
   is always present teaches the reader to skip it.
@@ -214,6 +224,7 @@ docker exec backend-portfolio-backend-1 python -m app.cli.import_logo TW00023300
    — never `restart`, which does not re-read `.env` (docs/deployment.md); confirm on `/health`.
 4. `fetch_logos --dry-run`, then without it; check the logos on Positions and Dividends.
 
-Tests: `tests/test_logos.py` (refusals, budget, stop, re-ask, manual rows, CLIs, routes),
+Tests: `tests/test_logos.py` (refusals, a refused or failed download, budget, stop, re-ask, manual rows,
+CLIs, routes),
 `tests/test_scheduler_jobs.py` (the step), `tests/test_api_smoke.py` (both reads),
 `frontend/src/components/ui/TickerAvatar.test.tsx`.

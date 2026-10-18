@@ -410,6 +410,11 @@ async def refresh_lookthrough_data(db: AsyncSession, as_of: Optional[date] = Non
         result["identities"] = await resolve_pending_identities(
             db, after_refresh=bool(baskets.get("refreshed"))
         )
+        if result["identities"].get("openfigi_rate_limited"):
+            result["warnings"].append(
+                "OpenFIGI answered HTTP 429; both identity passes stopped asking it and the "
+                "rest waits for the next run"
+            )
     except Exception as e:
         try:
             await db.rollback()

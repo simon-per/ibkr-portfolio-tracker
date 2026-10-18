@@ -300,14 +300,89 @@ async def test_a_refused_image_stores_nothing_and_is_not_rebought(db, keyed, ima
 
 
 @pytest.mark.asyncio
-async def test_a_failed_download_is_retried_next_pass(db, keyed):
+async def test_a_download_that_never_answered_is_retried_next_pass(db, keyed):
     [isin] = await _hold(db)
-    fake = FakeLogoDev({("isin", isin): 200}, download_status=500)
-    result = await _service(db, fake).refresh()
+    fake = FakeLogoDev({("isin", isin): 200})
+
+    def handler(request):
+        if request.url.host != "api.logo.dev":
+            raise httpx.ConnectError("unreachable", request=request)
+        return fake.handler(request)
+
+    async def sleep(_s):
+        return None
+
+    service = LogoService(db, transport=httpx.MockTransport(handler), sleep=sleep)
+    result = await service.refresh()
     assert result["errors"] == 1 and result["warnings"]
     assert (await db.execute(select(SecurityLogo))).first() is None
-    await _service(db, fake).refresh()
+    await LogoService(db, transport=httpx.MockTransport(handler), sleep=sleep).refresh()
     assert len(fake.lookups) == 2
+
+
+async def _three_passes_with_the_first_download_answering(db, status):
+    """Three ISINs logo.dev finds; the CDN answers `status` to the very first download
+    only. Three daily passes; returns (isins, fake, results)."""
+    isins = await _hold(db, n=3)
+    fake = FakeLogoDev({("isin", i): 200 for i in isins})
+    answered = []
+
+    def handler(request):
+        if request.url.host != "api.logo.dev" and not answered:
+            answered.append(str(request.url))
+            return httpx.Response(status, content=b"no")
+        return fake.handler(request)
+
+    async def sleep(_s):
+        return None
+
+    results = [
+        await LogoService(db, transport=httpx.MockTransport(handler), sleep=sleep).refresh()
+        for _ in range(3)
+    ]
+    return isins, fake, results
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 402, 403, 404, 410, 429])
+async def test_a_4xx_download_is_that_isins_refusal_and_the_pass_goes_on(db, keyed, status):
+    """
+    The signed download is another host and carries no key, so its 401/402/403/429 says
+    nothing about the key or the credits (issue #66). It stopped the pass, left the ISIN
+    unstamped to sort first again, and every later pass re-bought that one lookup and
+    stopped: no ISIN after it was ever asked. Now a 4xx is that ISIN's refusal — stamped —
+    and the pass goes on, so over three passes each ISIN is looked up exactly once.
+    """
+    isins, fake, results = await _three_passes_with_the_first_download_answering(db, status)
+
+    first = results[0]
+    assert first["stopped"] is None
+    assert (first["refused"], first["errors"], first["stored"]) == (1, 0, 2)
+    assert any(f"HTTP {status}" in w for w in first["warnings"])
+    assert fake.lookups == [("isin", i) for i in isins]   # once each, over three passes
+    rows = {r.isin: r for r in (await db.execute(select(SecurityLogo))).scalars()}
+    assert rows[isins[0]].image is None and rows[isins[0]].checked_at is not None
+    assert rows[isins[1]].image == PNG and rows[isins[2]].image == PNG
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [408, 500, 502, 503])
+async def test_a_5xx_or_408_download_is_retried_next_pass_and_the_pass_goes_on(
+    db, keyed, status
+):
+    """The CDN failing says nothing about the image: not stamped, the later ISINs are still
+    stored that pass, and the ISIN is asked again on the next one."""
+    isins, fake, results = await _three_passes_with_the_first_download_answering(db, status)
+
+    first = results[0]
+    assert first["stopped"] is None
+    assert (first["refused"], first["errors"], first["stored"]) == (0, 1, 2)
+    assert first["warnings"]
+    # Asked again on the second pass (and stored then); nothing left for the third.
+    assert fake.lookups == [("isin", i) for i in isins] + [("isin", isins[0])]
+    assert (results[1]["stored"], results[2]["due"]) == (1, 0)
+    rows = {r.isin: r for r in (await db.execute(select(SecurityLogo))).scalars()}
+    assert all(rows[i].image == PNG for i in isins)
 
 
 @pytest.mark.asyncio

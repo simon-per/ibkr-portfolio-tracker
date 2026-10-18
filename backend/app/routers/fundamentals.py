@@ -145,6 +145,18 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
     )
     total_metrics = metrics_result.scalar() or 0
 
+    # Asked, and Yahoo had nothing usable (`fundamentals_checked_at`, issue #66): no row,
+    # so not data — and not "no data yet" either, which offers an Update that the
+    # back-off would answer with no request, an amber line that never went away.
+    unavailable_result = await db.execute(
+        select(func.count(Security.id)).where(
+            sync_scope(),
+            Security.fundamentals_checked_at.isnot(None),
+            Security.id.not_in(select(FundamentalMetrics.security_id)),
+        )
+    )
+    unavailable = unavailable_result.scalar() or 0
+
     # Through the repository, so this reports the same threshold a sync acts on. It
     # used to run its own 7-day query while the sync refreshed anything over a day old,
     # so `stale_metrics: 0` could sit beside a sync that would rewrite every row.
@@ -166,7 +178,8 @@ async def get_fundamentals_status(db: AsyncSession = Depends(get_db)):
     return {
         "total_securities": total_securities,
         "securities_with_data": total_metrics,
-        "securities_without_data": total_securities - total_metrics,
+        "securities_without_data": total_securities - total_metrics - unavailable,
+        "securities_unavailable": unavailable,
         "stale_metrics": stale_metrics,
         "total_earnings_events": total_earnings,
         # Through `utc_iso`: these are naive UTC, and the tab compares `newest_update`

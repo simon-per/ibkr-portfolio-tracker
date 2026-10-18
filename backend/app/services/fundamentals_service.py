@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.etf_mappings import allocation_for_fund_isin
-from app.repositories.fundamentals_repository import FundamentalsRepository, sync_scope
+from app.repositories.fundamentals_repository import (
+    FundamentalsRepository, backing_off, clear_fundamentals_backoff, record_fundamentals_miss,
+    sync_scope,
+)
 from app.repositories.security_repository import held
 from app.services.allocation_service import allocation_from_info, apply_allocation
 from app.services.market_cap import market_cap_to_base
@@ -87,8 +90,12 @@ class FundamentalsService:
 
     def _extract_metrics(self, security: Security, info: Dict, quarterly_financials=None,
                          eps_trend_growth=None, revenue_estimate=None) -> Optional[Dict]:
-        """Extract fundamental metrics from a Yahoo Finance info dict."""
-        if not info:
+        """
+        Extract fundamental metrics from a Yahoo Finance info dict, or None when it carries
+        nothing: empty, or every value None — yfinance has answered an unknown symbol with
+        `{'trailingPegRatio': None}`, which used to become a row of stand-ins typed EQUITY.
+        """
+        if not info or all(value is None for value in info.values()):
             logger.info(f"No fundamental data available for {security.symbol}")
             return None
 
@@ -205,9 +212,15 @@ class FundamentalsService:
         metrics_updated = 0
         allocations_updated = 0
         earnings_updated = 0
+        no_data = 0
         errors = 0
 
-        # Determine which securities need updating
+        # Determine which securities need updating. A security waiting out a miss
+        # (`fundamentals_repository.backing_off`, issue #66) is left out whether it has a
+        # row or not: `get_stale_metrics` applies the predicate to the rows, this to the
+        # securities that have none. A forced refresh is a person asking: it asks all.
+        now = utcnow()
+        backing = 0 if force_refresh else sum(1 for s in securities if backing_off(s, now))
         if not force_refresh:
             stale_metrics = await self.repo.get_stale_metrics()
             stale_ids = {m.security_id for m in stale_metrics}
@@ -215,7 +228,7 @@ class FundamentalsService:
             existing_ids = {m.security_id for m in all_metrics}
             needs_update = [
                 s for s in securities
-                if s.id not in existing_ids or s.id in stale_ids
+                if s.id in stale_ids or (s.id not in existing_ids and not backing_off(s, now))
             ]
             if not needs_update:
                 logger.info("All fundamentals are fresh")
@@ -223,7 +236,9 @@ class FundamentalsService:
                     'securities_processed': 0,
                     'metrics_updated': 0,
                     'earnings_updated': 0,
+                    'no_data': 0,
                     'errors': 0,
+                    'backing_off': backing,
                     'message': 'All fundamentals are up to date',
                 }
         else:
@@ -264,6 +279,7 @@ class FundamentalsService:
                 metrics_data = self._extract_metrics(security, info, quarterly_financials, eps_trend_growth, revenue_estimate)
                 if metrics_data:
                     await self.repo.upsert_metrics(metrics_data)
+                    clear_fundamentals_backoff(security)
                     metrics_updated += 1
                     # The allocation sync's sector/industry/country/asset type are in this
                     # same `.info`; writing them here spares it three requests a security.
@@ -271,6 +287,14 @@ class FundamentalsService:
                     if not allocation_for_fund_isin(security.isin):
                         apply_allocation(security, allocation_from_info(info))
                         allocations_updated += 1
+                else:
+                    # Yahoo answered and had nothing usable. Stamped, so the next pass does
+                    # not ask again before `fundamentals_backoff_until` (issue #66: it was
+                    # re-asked every pass, three to six requests, for good). No row is
+                    # written — the security stays absent, never a row of stand-ins — and a
+                    # row it already has keeps its figures.
+                    record_fundamentals_miss(security, utcnow())
+                    no_data += 1
 
                 # Extract and save earnings
                 earnings_data = self._extract_earnings(security, earnings_df)
@@ -312,13 +336,16 @@ class FundamentalsService:
                     )
                     break
                 logger.error(f"Error processing {symbol}: {e}")
+                # Any other failure is this security's miss, as on the price path: a
+                # delisted or mis-mapped ticker answering 404 is not re-asked every pass.
+                await self._record_miss(security_id, symbol)
                 continue
 
         logger.info(
             f"Fundamentals Sync Complete: "
             f"processed={len(needs_update)}, metrics={metrics_updated}, "
-            f"earnings={earnings_updated}, errors={errors}, "
-            f"rate_limited={self.rate_limited}"
+            f"earnings={earnings_updated}, no_data={no_data}, errors={errors}, "
+            f"backing_off={backing}, rate_limited={self.rate_limited}"
         )
 
         result = {
@@ -326,9 +353,15 @@ class FundamentalsService:
             'metrics_updated': metrics_updated,
             'allocations_updated': allocations_updated,
             'earnings_updated': earnings_updated,
+            'no_data': no_data,
             'errors': errors,
+            'backing_off': backing,
             'rate_limited': self.rate_limited,
-            'message': f'Synced {metrics_updated}/{len(needs_update)} fundamentals, {earnings_updated} earnings events',
+            'message': (
+                f'Synced {metrics_updated}/{len(needs_update)} fundamentals, '
+                f'{earnings_updated} earnings events'
+                + (f', {no_data} with no data from Yahoo' if no_data else '')
+            ),
         }
         if self.rate_limited:
             # Surfaced the same way the market-data pass surfaces it, so the UI's
@@ -339,6 +372,18 @@ class FundamentalsService:
                 'Do not retry manually — the next scheduled run resumes where it stopped.'
             ]
         return result
+
+    async def _record_miss(self, security_id: int, symbol: str) -> None:
+        """Stamp a failed fetch (`record_fundamentals_miss`) after the loop's rollback, as
+        the only write. Its own failure costs the stamp, never the pass."""
+        try:
+            security = await self.db.get(Security, security_id)
+            if security is not None:
+                record_fundamentals_miss(security, utcnow())
+                await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Could not stamp the failed fundamentals fetch of {symbol}: {e}")
 
     async def sync_stale_fundamentals(self) -> Dict:
         """

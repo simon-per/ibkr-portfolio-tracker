@@ -321,11 +321,13 @@ ASML_CINS = "N07059210"
 
 
 class _Response:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
         return self._payload
@@ -334,10 +336,11 @@ class _Response:
 class _FakeProviders:
     """Stands in for `httpx.AsyncClient`: OpenFIGI by `idValue`, GLEIF by ISIN."""
 
-    def __init__(self, figis=None, leis=None, fail=()):
+    def __init__(self, figis=None, leis=None, fail=(), throttle=()):
         self.figis = figis or {}
         self.leis = leis or {}
         self.fail = set(fail)
+        self.throttle = set(throttle)  # an OpenFIGI batch carrying one of these -> 429
         self.asked = []
 
     def AsyncClient(self, *a, **k):
@@ -354,6 +357,8 @@ class _FakeProviders:
         self.asked.append(values)
         if self.fail & set(values):
             raise ConnectionError("openfigi unreachable")
+        if self.throttle & set(values):
+            return _Response({"error": "Too Many Requests"}, status_code=429)
         return _Response([
             {"data": [{"shareClassFIGI": self.figis[v]}]} if v in self.figis
             else {"warning": "No identifier found."}
@@ -424,6 +429,123 @@ async def test_a_failed_request_is_not_remembered_as_a_miss(session, providers):
 
     assert summary["identifiers_errors"] == 1
     assert await service.pending_constituent_identifiers() == [ASML_CINS]
+
+
+# ------------------------------------------------- one OpenFIGI loop, one 429 breaker
+#
+# Both passes ask through `_openfigi_batches` on one paced client (issue #66): each used
+# to carry its own copy of the loop and its own pacer, and `continue` past a 429.
+
+
+@pytest.fixture
+def one_job_batches(monkeypatch):
+    """Keyless (a key in the developer's environment would change batch and pacing), one
+    job per request, so each batch is one identifier."""
+    from app.config import settings
+    from app.services import identity_service
+
+    monkeypatch.setattr(settings, "openfigi_api_key", "", raising=False)
+    monkeypatch.setattr(identity_service, "OPENFIGI_BATCH", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_429_in_the_isin_pass_stops_both_passes(session, providers, one_job_batches):
+    from app.models.isin_identity import IsinIdentity
+
+    await EtfBasketRepository(session).replace_basket(basket([
+        row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
+    ]))
+    apple, microsoft = "US0378331005", "US5949181045"
+    providers.throttle = {apple}
+    service = IdentityService(session)
+
+    first = await service.resolve([apple, microsoft])
+    second = await service.resolve_constituent_identifiers()
+
+    openfigi_asks = [a for a in providers.asked if isinstance(a, list)]
+    assert openfigi_asks == [[apple]], "asked OpenFIGI again after its 429"
+    assert first["openfigi_rate_limited"] and second["openfigi_rate_limited"]
+    assert first["openfigi_errors"] == 0 and second["identifiers_errors"] == 0
+    # Nothing it was not asked about is remembered as answered: all of it is asked next run.
+    stamped = (await session.execute(
+        select(IsinIdentity).where(IsinIdentity.figi_checked_at.is_not(None))
+    )).scalars().all()
+    assert stamped == []
+    assert await service.pending_constituent_identifiers() == [ASML_CINS]
+    # GLEIF is another provider: the OpenFIGI breaker does not touch it.
+    assert apple in providers.asked and microsoft in providers.asked
+
+
+@pytest.mark.asyncio
+async def test_a_429_in_the_identifier_pass_stops_its_remaining_batches(
+    session, providers, one_job_batches
+):
+    await EtfBasketRepository(session).replace_basket(basket([
+        row(1, "Eaton Corporation Plc", "60", identifier=EATON_CINS),
+        row(2, "ASML Holding NV", "40", identifier=ASML_CINS),
+    ]))
+    providers.throttle = {EATON_CINS}
+    service = IdentityService(session)
+
+    summary = await service.resolve_constituent_identifiers()
+
+    assert providers.asked == [[EATON_CINS]]
+    assert summary["openfigi_rate_limited"] and summary["identifiers_errors"] == 0
+    pending = await service.pending_constituent_identifiers()
+    assert sorted(pending) == sorted([ASML_CINS, EATON_CINS])
+    # And the same service asks OpenFIGI nothing more this run.
+    await service.resolve(["US0378331005"])
+    assert [a for a in providers.asked if isinstance(a, list)] == [[EATON_CINS]]
+
+
+@pytest.mark.asyncio
+async def test_the_second_pass_is_paced_against_the_first(session, providers, monkeypatch):
+    """One client for both passes: the CINS pass's first request waits out the interval
+    from the ISIN pass's last, which two pacers never did."""
+    from app.config import settings
+    from app.services import identity_service
+
+    monkeypatch.setattr(settings, "openfigi_api_key", "", raising=False)
+    await EtfBasketRepository(session).replace_basket(basket([
+        row(1, "ASML Holding NV", "100", identifier=ASML_CINS),
+    ]))
+    monkeypatch.setattr(identity_service, "OPENFIGI_MIN_INTERVAL_S", 2.6)
+    service = IdentityService(session)
+    sleeps = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+
+    service._openfigi._sleep = _sleep
+    service._openfigi._clock = lambda: 100.0   # no time passes between the two requests
+
+    await service.resolve(["US0378331005"])
+    await service.resolve_constituent_identifiers()
+
+    assert [a for a in providers.asked if isinstance(a, list)] == [
+        ["US0378331005"], [ASML_CINS],
+    ]
+    assert sleeps == [2.6]
+
+
+def test_there_is_one_openfigi_loop():
+    """Every OpenFIGI request goes through `OpenFigiClient.map`, called from one place."""
+    import ast
+    import inspect
+
+    from app.services import identity_service
+
+    tree = ast.parse(inspect.getsource(identity_service))
+    posts, maps = [], []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and node.id == "OPENFIGI_URL"
+                and isinstance(node.ctx, ast.Load)):
+            posts.append(node.lineno)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "map"):
+            maps.append(node.lineno)
+    assert len(posts) == 1, f"OPENFIGI_URL used at lines {posts}: a second OpenFIGI loop"
+    assert len(maps) == 1, f"OpenFigiClient.map called at lines {maps}"
 
 
 # ------------------------------------------------------- a killed CLI run keeps its work

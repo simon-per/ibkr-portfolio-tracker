@@ -146,6 +146,9 @@ async def resolve_identities(
                 f"{summary['openfigi_not_found']} no match, "
                 f"{summary['openfigi_errors']} failed"
             )
+            if summary.get("openfigi_rate_limited"):
+                print("OpenFIGI answered HTTP 429: nothing more was asked of it this run; "
+                      "the rest is still unasked and the next run resumes it.")
             print(
                 f"GLEIF: {summary['gleif_resolved']} resolved, "
                 f"{summary['gleif_not_found']} no record, "

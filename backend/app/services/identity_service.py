@@ -27,13 +27,23 @@ re-asks the four permanently-absent ISINs forever, which is the loop the holiday
 `get_missing_dates()` and `UPSTREAM_RETRY_COOLDOWN_SECONDS` in `benchmark_service` both
 exist to stop.
 
+**A 429 from OpenFIGI ends every OpenFIGI request of the run** (issue #66). Both passes —
+ISINs and CINS/SEDOL — ask through one `_openfigi_batches` on the service's one paced
+`OpenFigiClient`, so the second pass's first request is spaced from the first pass's last,
+and a refusal in either latches `openfigi_rate_limited` for both. Each used to carry its
+own copy of the loop and its own pacer, and `continue` past a 429 to the next batch.
+
 Never raises into its caller: an unresolvable ISIN degrades to grouping on the ISIN alone,
 which is correct and merely less complete.
 """
 import asyncio
 import logging
+import time
+from contextlib import aclosing, asynccontextmanager
 from datetime import timedelta
-from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import (
+    Any, AsyncIterator, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+)
 
 import httpx
 from sqlalchemy import select
@@ -44,6 +54,7 @@ from app.config import settings
 from app.etf_sources import user_agent
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
+from app.services.paced_http import PacedGet
 from app.services.security_identifiers import identifier_kind
 
 logger = logging.getLogger(__name__)
@@ -103,12 +114,65 @@ def rotating_window(items: List[str], limit: int, turn: int) -> List[str]:
     return (items[start:] + items[:start])[:limit]
 
 
+class OpenFigiRateLimited(Exception):
+    """OpenFIGI answered 429: no further OpenFIGI request this run, from either pass."""
+
+
+class OpenFigiClient(PacedGet):
+    """
+    The OpenFIGI mapping endpoint, paced by the shared `paced_http.PacedGet`.
+
+    One per `IdentityService`, outliving each pass's HTTP session (`session`), so its
+    `_last_request_at` spaces the CINS/SEDOL pass's first request from the ISIN pass's
+    last. A POST, so `PacedGet._send` (a GET) is not used; `_paced` is.
+    """
+
+    def __init__(
+        self,
+        sleep: Callable[[float], Any] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self._min_interval_s = OPENFIGI_MIN_INTERVAL_S
+        self._sleep = sleep
+        self._clock = clock
+        self._last_request_at: Optional[float] = None
+        self._client = None
+
+    @asynccontextmanager
+    async def session(self, headers: Dict[str, str], interval: float) -> AsyncIterator[None]:
+        """One pass's HTTP client; the pacing state stays on this object across passes."""
+        self._min_interval_s = interval
+        async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
+            self._client = client
+            try:
+                yield
+            finally:
+                self._client = None
+
+    async def map(self, jobs: List[Tuple[str, str]]) -> Any:
+        """POST one batch of `(idType, idValue)` jobs; the decoded body, or raises."""
+        async with self._paced():
+            response = await self._client.post(
+                OPENFIGI_URL, json=[{"idType": t, "idValue": v} for t, v in jobs],
+            )
+        if response.status_code == 429:
+            raise OpenFigiRateLimited()
+        response.raise_for_status()
+        return response.json()
+
+
 class IdentityService:
     """Fetches and caches company identity for ISINs."""
+
+    # Latched by the first OpenFIGI 429 and read by both passes (`_openfigi_batches`). On
+    # the class as well, so a service built through `__new__` in a test can read it.
+    openfigi_rate_limited = False
 
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = IsinIdentityRepository(db)
+        self.openfigi_rate_limited = False
+        self._openfigi = OpenFigiClient()
 
     @property
     def _openfigi_pacing(self) -> Tuple[Dict[str, str], int, float]:
@@ -118,6 +182,52 @@ class IdentityService:
             return ({"X-OPENFIGI-APIKEY": key},
                     OPENFIGI_BATCH_KEYED, OPENFIGI_MIN_INTERVAL_KEYED_S)
         return ({}, OPENFIGI_BATCH, OPENFIGI_MIN_INTERVAL_S)
+
+    async def _openfigi_batches(
+        self, jobs: List[Tuple[str, str]]
+    ) -> AsyncIterator[Tuple[List[str], Optional[list]]]:
+        """
+        Ask OpenFIGI about `(idType, idValue)` jobs in batches; yield each batch's values
+        with its answer, positionally aligned — or None when the request failed or the
+        answer was not one block per job, which the caller counts and stamps nothing for.
+
+        The one OpenFIGI loop, for both passes, on the service's one `OpenFigiClient`. A 429
+        latches `openfigi_rate_limited` and ends this and every later call on the service:
+        what was not asked is simply still unasked, and the next run resumes it.
+        """
+        if self.openfigi_rate_limited or not jobs:
+            return
+        extra, batch_size, interval = self._openfigi_pacing
+        headers = {"Content-Type": "application/json", "User-Agent": user_agent(), **extra}
+        async with self._openfigi.session(headers, interval):
+            for index in range(0, len(jobs), batch_size):
+                batch = jobs[index:index + batch_size]
+                values = [value for _, value in batch]
+                try:
+                    payload = await self._openfigi.map(batch)
+                except OpenFigiRateLimited:
+                    self.openfigi_rate_limited = True
+                    logger.warning(
+                        f"OpenFIGI answered HTTP 429; no further OpenFIGI request this run "
+                        f"({len(jobs) - index} of {len(jobs)} jobs left unasked)"
+                    )
+                    return
+                except Exception as e:
+                    logger.warning(f"OpenFIGI batch of {len(batch)} failed: {e}")
+                    yield values, None
+                    continue
+                if not isinstance(payload, list) or len(payload) != len(batch):
+                    # The response is POSITIONALLY aligned with the request, so a length
+                    # mismatch would attach one identifier's FIGI to another. Refuse it.
+                    logger.warning(
+                        f"OpenFIGI returned "
+                        f"{len(payload) if isinstance(payload, list) else '?'} results for "
+                        f"{len(batch)} jobs; refusing the batch rather than risking a "
+                        f"positional mismatch"
+                    )
+                    yield values, None
+                    continue
+                yield values, payload
 
     async def resolve(
         self,
@@ -163,6 +273,7 @@ class IdentityService:
             await self._resolve_gleif(need_lei, summary, written, on_batch)
 
         summary["rows_written"] = len(written)
+        summary["openfigi_rate_limited"] = self.openfigi_rate_limited
         return summary
 
     async def _persist(self, rows: List[Dict], written: Set[str], on_batch) -> None:
@@ -179,36 +290,13 @@ class IdentityService:
     async def _resolve_openfigi(
         self, isins: List[str], summary: Dict, written: Set[str], on_batch=None
     ) -> None:
-        extra, batch_size, interval = self._openfigi_pacing
-        headers = {"Content-Type": "application/json", "User-Agent": user_agent(), **extra}
-        async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
-            for index in range(0, len(isins), batch_size):
-                batch = isins[index:index + batch_size]
-                if index:
-                    await asyncio.sleep(interval)
-                try:
-                    response = await client.post(
-                        OPENFIGI_URL,
-                        json=[{"idType": "ID_ISIN", "idValue": i} for i in batch],
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                except Exception as e:
+        jobs = [("ID_ISIN", isin) for isin in isins]
+        async with aclosing(self._openfigi_batches(jobs)) as batches:
+            async for batch, payload in batches:
+                if payload is None:
                     # No checked_at stamp: the question was never answered, so it must be
                     # asked again rather than remembered as "nothing found".
                     summary["openfigi_errors"] += len(batch)
-                    logger.warning(f"OpenFIGI batch of {len(batch)} failed: {e}")
-                    continue
-
-                if not isinstance(payload, list) or len(payload) != len(batch):
-                    # The response is POSITIONALLY aligned with the request, so a length
-                    # mismatch would attach one ISIN's FIGI to another. Refuse the batch.
-                    summary["openfigi_errors"] += len(batch)
-                    logger.warning(
-                        f"OpenFIGI returned {len(payload) if isinstance(payload, list) else '?'} "
-                        f"results for {len(batch)} jobs; refusing the batch rather than "
-                        f"risking a positional mismatch"
-                    )
                     continue
 
                 stamp = utcnow()
@@ -294,68 +382,47 @@ class IdentityService:
             "identifiers_not_found": 0,
             "identifiers_errors": 0,
             "holdings_updated": 0,
+            "openfigi_rate_limited": self.openfigi_rate_limited,
         }
         if not pending:
             return summary
 
-        by_kind: Dict[str, List[str]] = {}
+        jobs: List[Tuple[str, str]] = []
         for value in pending:
             id_type = OPENFIGI_ID_TYPES.get(identifier_kind(value) or "")
             if id_type:
-                by_kind.setdefault(id_type, []).append(value)
+                jobs.append((id_type, value))
             # Anything else was never an identifier; it is left alone rather than guessed at.
+        # Grouped by idType, as the batches were when each kind had its own loop. Each job
+        # names its own idType, so a batch spanning two kinds is still one valid request.
+        jobs.sort(key=lambda job: job[0])
 
-        extra, batch_size, interval = self._openfigi_pacing
-        headers = {"Content-Type": "application/json", "User-Agent": user_agent(), **extra}
-        async with httpx.AsyncClient(headers=headers, timeout=REQUEST_TIMEOUT_S) as client:
-            first = True
-            for id_type, values in sorted(by_kind.items()):
-                for index in range(0, len(values), batch_size):
-                    batch = values[index:index + batch_size]
-                    if not first:
-                        await asyncio.sleep(interval)
-                    first = False
-                    try:
-                        response = await client.post(
-                            OPENFIGI_URL,
-                            json=[{"idType": id_type, "idValue": v} for v in batch],
-                        )
-                        response.raise_for_status()
-                        payload = response.json()
-                    except Exception as e:
-                        summary["identifiers_errors"] += len(batch)
-                        logger.warning(f"OpenFIGI {id_type} batch of {len(batch)} failed: {e}")
-                        continue
+        async with aclosing(self._openfigi_batches(jobs)) as batches:
+            async for batch, payload in batches:
+                if payload is None:
+                    # Unanswered, so nothing is stamped and it is asked again next run.
+                    summary["identifiers_errors"] += len(batch)
+                    continue
 
-                    if not isinstance(payload, list) or len(payload) != len(batch):
-                        # Positionally aligned, exactly as the ISIN path is, so a length
-                        # mismatch would attach one company's ISIN to another's row — the one
-                        # error this feature cannot tolerate.
-                        summary["identifiers_errors"] += len(batch)
-                        logger.warning(
-                            f"OpenFIGI returned a differently-sized result for {len(batch)} "
-                            f"{id_type} jobs; refusing the batch"
-                        )
-                        continue
+                found: Dict[str, str] = {}
+                missed: List[str] = []
+                for value, block in zip(batch, payload):
+                    scfigi, _, _ = self._pick_figi(block)
+                    if scfigi:
+                        found[value] = scfigi
+                        summary["identifiers_resolved"] += 1
+                    else:
+                        missed.append(value)
+                        summary["identifiers_not_found"] += 1
 
-                    found: Dict[str, str] = {}
-                    missed: List[str] = []
-                    for value, block in zip(batch, payload):
-                        scfigi, _, _ = self._pick_figi(block)
-                        if scfigi:
-                            found[value] = scfigi
-                            summary["identifiers_resolved"] += 1
-                        else:
-                            missed.append(value)
-                            summary["identifiers_not_found"] += 1
-
-                    if found:
-                        summary["holdings_updated"] += await repo.apply_resolved_identifiers(found)
-                        await repo.forget_identifier_misses(found)
-                    if missed:
-                        await repo.record_identifier_misses(missed, utcnow())
-                    if on_batch is not None:
-                        await on_batch()
+                if found:
+                    summary["holdings_updated"] += await repo.apply_resolved_identifiers(found)
+                    await repo.forget_identifier_misses(found)
+                if missed:
+                    await repo.record_identifier_misses(missed, utcnow())
+                if on_batch is not None:
+                    await on_batch()
+        summary["openfigi_rate_limited"] = self.openfigi_rate_limited
         return summary
 
     @staticmethod

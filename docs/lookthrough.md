@@ -391,6 +391,16 @@ off the 18:00 job as its last step, and four things about it are load-bearing:
   "no match" and the pass skips it for `IDENTIFIER_MISS_RECHECK_DAYS` (30) — the same
   `*_checked_at` split `isin_identities` makes. A failed request stamps nothing; a later hit
   deletes the row. Misses only: a found FIGI lives on the holdings, not in a second copy.
+- **One OpenFIGI loop, one 429 breaker, both passes** (issue #66). The ISIN pass and the
+  CINS/SEDOL pass each carried their own copy of the batch loop with its own pacer — so the second
+  pass's first request was not spaced from the first's last — and both `continue`d past a 429 to
+  the next batch. Now both ask through `IdentityService._openfigi_batches(jobs)` on the service's
+  one `OpenFigiClient` (`paced_http.PacedGet`, so the pacing state outlives each pass's HTTP
+  session); a 429 latches `openfigi_rate_limited`, ends that pass and makes every later OpenFIGI
+  call on the service ask nothing. What was not asked is stamped nothing, so the next run resumes
+  it; the summary carries `openfigi_rate_limited`, the evening job turns it into a warning, and
+  `resolve_identities` prints it. GLEIF, another provider, is not stopped by it. A CINS/SEDOL
+  batch may now span two idTypes: each job names its own, and the jobs stay grouped by kind.
 
   **The cap and the reset together starved it, 2026-09-12 → 2026-10-15.** `replace_basket` cleared
   every FIGI ("re-derivable from one request"), the Invesco feeds were replaced on every refresh, and the
@@ -717,7 +727,8 @@ everything on the next one.
 
 Tests: `test_company_identity.py`, `test_lookthrough_partition.py`, `test_etf_source_registry.py`,
 `test_etf_basket_import.py` and `test_us_issuer_adapters.py` (the poison fixtures),
-`test_security_identifiers.py`, `test_constituent_identifier_resolution.py`, plus the look-through
+`test_security_identifiers.py`, `test_constituent_identifier_resolution.py` (including the OpenFIGI
+429 breaker across both passes and the shared pacing), plus the look-through
 case in `test_api_smoke.py` and `LookThroughTab.test.tsx`.
 
 ---

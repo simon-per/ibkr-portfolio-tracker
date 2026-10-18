@@ -1009,6 +1009,8 @@ class FundamentalsStatus(BaseModel):
     total_securities: int
     securities_with_data: int
     securities_without_data: int
+    # Asked, and Yahoo had nothing usable: neither data nor "no data yet" (issue #66).
+    securities_unavailable: int
     stale_metrics: int
     total_earnings_events: int
     oldest_update: Optional[str] = None

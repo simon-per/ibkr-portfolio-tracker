@@ -1,7 +1,7 @@
 from typing import List, Optional
-from datetime import timedelta
+from datetime import datetime, timedelta
 from app.clock import utcnow
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -10,6 +10,7 @@ from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.repositories.security_repository import held
+from app.services.miss_backoff import miss_backoff_until
 from app.services.yahoo_eligibility import yahoo_eligible
 
 #: How old a metrics row has to be before a sync will refresh it.
@@ -41,6 +42,37 @@ def sync_scope() -> ColumnElement[bool]:
     return and_(yahoo_eligible(), held())
 
 
+def fundamentals_backoff_until(security: Security) -> Optional[datetime]:
+    """
+    When the fundamentals pass may next ask about `security`, or None when it is not
+    backing off: the price loop's rule (`miss_backoff`), on its own pair of columns.
+
+    No held exemption, unlike prices: every security this pass walks is held, and a
+    holding's ratios a few days old cost nothing, while an unservable one re-asked every
+    pass cost three to six Yahoo requests a day for good (issue #66).
+    """
+    return miss_backoff_until(security.fundamentals_checked_at, security.fundamentals_miss_count)
+
+
+def backing_off(security: Security, now: datetime) -> bool:
+    """True while `security` waits out a fundamentals miss. The one predicate the sync's
+    work list and `/status`'s stale count both apply."""
+    until = fundamentals_backoff_until(security)
+    return until is not None and now < until
+
+
+def record_fundamentals_miss(security: Security, now: datetime) -> None:
+    """Yahoo answered nothing usable, or failed with something not a rate limit."""
+    security.fundamentals_miss_count = (security.fundamentals_miss_count or 0) + 1
+    security.fundamentals_checked_at = now
+
+
+def clear_fundamentals_backoff(security: Security) -> None:
+    """A row was written or the mapping changed: the next pass asks again."""
+    security.fundamentals_checked_at = None
+    security.fundamentals_miss_count = None
+
+
 class FundamentalsRepository:
     """Repository for FundamentalMetrics and EarningsEvent model operations."""
 
@@ -62,21 +94,31 @@ class FundamentalsRepository:
     async def get_stale_metrics(
         self, older_than: timedelta = STALE_AFTER
     ) -> List[FundamentalMetrics]:
-        result = await self.session.execute(
-            select(FundamentalMetrics).where(self._stale(older_than))
-        )
-        return list(result.scalars().all())
+        """The rows a sync would refresh (`_due`)."""
+        return await self._due(older_than)
 
     async def count_stale_metrics(self, older_than: timedelta = STALE_AFTER) -> int:
         """
         How many rows a sync would refresh. Exists so `/status` cannot answer that
         question with a different query than the sync asks — which is exactly how the
-        two came to use different thresholds.
+        two came to use different thresholds. Counted off the same `_due` rows since the
+        back-off (issue #66), so the two cannot part over a row backing off.
         """
+        return len(await self._due(older_than))
+
+    async def _due(self, older_than: timedelta) -> List[FundamentalMetrics]:
+        """
+        `_stale` rows, less a security waiting out a miss (`backing_off`). The back-off is
+        computed per row, so it is applied here, after the query, rather than restated in
+        SQL.
+        """
+        now = utcnow()
         result = await self.session.execute(
-            select(func.count(FundamentalMetrics.id)).where(self._stale(older_than))
+            select(FundamentalMetrics, Security)
+            .join(Security, Security.id == FundamentalMetrics.security_id)
+            .where(self._stale(older_than))
         )
-        return int(result.scalar() or 0)
+        return [metrics for metrics, security in result.all() if not backing_off(security, now)]
 
     @staticmethod
     def _stale(older_than: timedelta):

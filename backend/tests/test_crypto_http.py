@@ -17,6 +17,7 @@ from pathlib import Path
 
 from app.services.coingecko_client import CoinGeckoClient
 from app.services.coinstats_client import CoinStatsClient
+from app.services.identity_service import OpenFigiClient
 from app.services.logo_service import LogoDevClient
 from app.services.paced_http import PacedGet
 
@@ -92,7 +93,7 @@ def test_the_stamp_walk_flags_a_stamp_and_spares_a_constructor():
 
 
 def test_every_client_takes_the_shared_transport():
-    for client in (CoinStatsClient, CoinGeckoClient, LogoDevClient):
+    for client in (CoinStatsClient, CoinGeckoClient, LogoDevClient, OpenFigiClient):
         assert issubclass(client, PacedGet), client
         assert client._pace is PacedGet._pace
         assert client._paced is PacedGet._paced

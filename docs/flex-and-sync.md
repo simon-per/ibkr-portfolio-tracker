@@ -629,6 +629,21 @@ warning on the row (`logos_result`), never the status.
   forever (issue #21). `tests/test_staleness_predicate_family.py` pins it for both tables.
 - A pass a 429 cut short is resumed by the next one — what the services' rate-limit warning
   promises.
+- **A security Yahoo cannot serve backs off** (issue #66). An empty `.info` — or one carrying only
+  Nones, which yfinance has answered an unknown symbol with — and any non-429 error (a 404 for a
+  delisted ticker) used to write no row and stamp nothing, so the security was re-asked every pass,
+  three to six requests, for good. Now either stamps `securities.fundamentals_checked_at` and
+  increments `fundamentals_miss_count`, and the pass skips it by the price loop's rule
+  (`fundamentals_repository.fundamentals_backoff_until` → `miss_backoff.miss_backoff_until`: asked
+  on days 0, 1, 3, 7, 15, then every 30). **No held exemption**, unlike prices: every security
+  here is held, and ratios a few days old cost nothing. **No row is written**, so the security
+  stays absent on the tab, and a row it already has keeps its figures and its as-of. A data
+  answer clears both stamps, as do `manage_mappings set`/`disable`; a rate limit stamps nothing;
+  a forced refresh (`?force_refresh=true`, a person asking) asks it anyway. One predicate,
+  `backing_off`, drives the sync's work list and `/status`'s `stale_metrics` (applied after the
+  `_stale` query in `FundamentalsRepository._due`), and `/status` reports such a security as
+  `securities_unavailable` — neither data nor "no data yet", so it raises no amber line and no
+  Update button the back-off would answer with nothing. `tests/test_fundamentals_miss_backoff.py`.
 
 *Yahoo budget per pass*: **`.info` is three requests**, not one — quoteSummary, the v7 quote and a
 fundamentals-timeseries call for `trailingPegRatio` alone (yfinance's `_fetch_info` +
@@ -806,7 +821,9 @@ owns the scope, so the scheduled pass and `POST /api/market-data/sync` share it:
   `securities.price_checked_at` and increments `price_miss_count` when Yahoo (every variation) and
   the AV fallback all came back empty for a non-empty missing range; `price_backoff_until` then
   skips a **sold** security for one day, doubling per consecutive miss, capped at **30 days**, less
-  four hours so a security stamped during a pass is due at the same slot. **A held security never
+  four hours so a security stamped during a pass is due at the same slot — the rule is
+  `miss_backoff.miss_backoff_until`, shared with the fundamentals pass since issue #66
+  (`tests/test_miss_backoff_family.py` fails a second doubling). **A held security never
   backs off**: Yahoo soft-throttling with empty answers instead of a 429 would otherwise freeze
   every holding's price for a day, and a holding with a broken mapping already shows as a stale
   price. **A rate

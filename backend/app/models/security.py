@@ -71,6 +71,12 @@ class Security(Base):
     # reads them, so a delisted ticker is not re-asked at every pass forever.
     price_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     price_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The same pair for the fundamentals pass (issue #66): when Yahoo last answered its
+    # `.info` with nothing usable, or failed with something not a rate limit, and how many
+    # times running. `fundamentals_repository.fundamentals_backoff_until` reads them through
+    # the shared `miss_backoff` rule; a data answer and a mapping change clear them.
+    fundamentals_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    fundamentals_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # When the Alpha Vantage fallback was last asked about it: at most once a UTC day.
     alpha_vantage_asked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 

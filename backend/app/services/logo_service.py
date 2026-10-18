@@ -16,11 +16,12 @@ have never held are targets too, by the ISIN the baskets give their ticker (`tic
 **Bounded, because every found logo is billed** (about $0.02; the free plan carries $5 of
 credits a month): an ISIN is asked about only when it has no row or its row is older than
 `RECHECK_AFTER`; a pass makes at most `MAX_LOOKUPS_PER_PASS` lookups, paced
-`MIN_INTERVAL_S` apart; 401/402/403/429 stop the pass; a 202 (`not_indexed`) leaves the
-ISIN for the next pass and never sleeps on `Retry-After`. "Nothing there" and a refused
-image are remembered (`checked_at`) so they are not re-bought every pass; a failed request
-is not, so it is retried next pass. A manual row (`app/cli/import_logo.py`) is never
-asked about again.
+`MIN_INTERVAL_S` apart; 401/402/403/429 from the API stop the pass; a 202 (`not_indexed`)
+leaves the ISIN for the next pass and never sleeps on `Retry-After`. "Nothing there", a
+refused image and a download refused with a 4xx are remembered (`checked_at`) so they are
+not re-bought every pass; a failed request (transport, a 5xx or 408 from either host) is
+not, so it is retried next pass. A manual row (`app/cli/import_logo.py`) is never asked
+about again.
 
 **Refuse whole** (`validate_logo`): PNG, JPEG or WebP only — never SVG, which served from
 our own origin could carry script — at most `MAX_LOGO_BYTES`, and the magic bytes must be
@@ -64,9 +65,17 @@ MAX_LOOKUPS_PER_PASS = 30
 MIN_INTERVAL_S = 1.0
 MAX_LOGO_BYTES = 100 * 1024
 
-# HTTP statuses after which no further request is made this pass: the key is wrong (401,
-# 403), the credits are spent (402), or the rate limit is reached (429).
+# HTTP statuses from `API_URL` after which no further request is made this pass: the key
+# is wrong (401, 403), the credits are spent (402), or the rate limit is reached (429).
+# The API's answers only: the signed download is another host and carries no key, so the
+# same status there says nothing about the key or the credits (`download`).
 STOP_STATUSES = frozenset({401, 402, 403, 429})
+
+
+def is_retryable_download_status(status: int) -> bool:
+    """A download answer that says nothing about the image: the CDN failed (5xx) or timed
+    the request out (408). Retried next pass; any other non-200 is that ISIN's refusal."""
+    return status >= 500 or status == 408
 
 # Whitelist, by magic bytes. WebP is RIFF....WEBP, so its check reads two places.
 _MAGIC: Dict[str, Callable[[bytes], bool]] = {
@@ -82,7 +91,7 @@ class LogoRefused(ValueError):
 
 
 class LogoDevStop(Exception):
-    """logo.dev refused the pass as a whole (`STOP_STATUSES`)."""
+    """logo.dev's API refused the pass as a whole (`STOP_STATUSES`)."""
 
     def __init__(self, status: int):
         super().__init__(f"HTTP {status}")
@@ -210,6 +219,14 @@ class LogoDevClient(PacedGet):
         """
         Fetch the signed URL with `DOWNLOAD_PARAMS`. Reads at most one byte past
         `MAX_LOGO_BYTES`, so an oversized answer is refused without being held in full.
+
+        **Never `LogoDevStop`.** The URL carries no key, so a 401/403/429 here is not
+        logo.dev refusing the key or the credits; it stopped the pass at an ISIN left
+        unstamped, which sorted first again, re-bought its lookup every pass, and kept every
+        ISIN after it from being asked (issue #66). A 4xx (and any other non-200 that is not
+        retryable) is this ISIN's refusal (`LogoRefused`: stamped, the pass goes on); a 5xx,
+        a 408 or a transport failure is `LogoDevError` — not stamped, the pass goes on, and
+        the ISIN is asked again next pass (`is_retryable_download_status`).
         """
         target = httpx.URL(url)
         if target.scheme != "https":
@@ -221,10 +238,10 @@ class LogoDevClient(PacedGet):
             try:
                 async with self._client.stream("GET", target) as response:
                     status = response.status_code
-                    if status in STOP_STATUSES:
-                        raise LogoDevStop(status)
-                    if status != 200:
+                    if is_retryable_download_status(status):
                         raise LogoDevError(f"download answered HTTP {status}")
+                    if status != 200:
+                        raise LogoRefused(f"the download answered HTTP {status}")
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
                         body.extend(chunk)

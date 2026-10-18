@@ -1055,6 +1055,8 @@ def test_fundamentals_status_says_whether_a_sync_is_running(client, monkeypatch)
     assert status["sync_running"] is False
     # Held and Yahoo-eligible: ASML on both venues and TSMC; AAPL was sold.
     assert (status["total_securities"], status["securities_with_data"]) == (3, 2)
+    # Never asked, so "no data yet"; nothing Yahoo answered empty for (issue #66).
+    assert (status["securities_without_data"], status["securities_unavailable"]) == (1, 0)
 
     monkeypatch.setattr(sf, "_running", {sf.SYNC_PIPELINE})
     assert client.get("/api/fundamentals/status").json()["sync_running"] is True

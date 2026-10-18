@@ -699,6 +699,8 @@ export interface FundamentalsStatus {
   total_securities: number;
   securities_with_data: number;
   securities_without_data: number;
+  /** Asked, and Yahoo had nothing usable: neither data nor "no data yet". */
+  securities_unavailable: number;
   stale_metrics: number;
   total_earnings_events: number;
   oldest_update: string | null;
