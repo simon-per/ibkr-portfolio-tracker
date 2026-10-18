@@ -12,8 +12,8 @@ bare coroutine outside the job store entirely.
 Everything that can reach IBKR or Yahoo shares ONE gate name (SYNC_PIPELINE):
 two pipelines racing each other is exactly the failure mode, regardless of
 which endpoint started them. Scheduled jobs enter with no cooldown (their slots
-are hours apart; a colliding job records itself as skipped and the next slot
-recovers); the public endpoints add per-route cooldowns so rapid-fire POSTs
+are hours apart; a colliding job waits a bounded time for the gate, then records
+itself as skipped and the next slot recovers); the public endpoints add per-route cooldowns so rapid-fire POSTs
 get a 429 instead of a queue of pipelines.
 
 In-process by design: the deployment is a single uvicorn worker (the dividends

@@ -2,6 +2,7 @@
 Scheduler Service
 Handles automated daily synchronization of IBKR data and market prices.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from app.clock import utcnow
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
+from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 from app.services.ibkr_service import IBKRService, FLEX_RETRY_DELAYS_PATIENT
 from app.services.flex_generation import (
     FLEX_WINDOW_DAYS_FALLBACK,
@@ -184,6 +185,22 @@ FLEX_GENERATION_GAP_WARN_DAYS = FLEX_GENERATION_GAP_WARN_DAYS_FLOOR
 # collapses repeats of the same job into one.
 MISFIRE_GRACE_SECONDS = 30 * 60
 
+# How long a *scheduled* job waits for a held SYNC_PIPELINE gate before recording
+# `skipped / pipeline_busy` (GitHub issue #16). Public GETs hold that gate too — the
+# dividend card's background pass, the benchmark's lazy fetch — so a dashboard load just
+# before 18:00 used to cost the day its 730-day pass and look-through upkeep. Manual
+# triggers never wait: they answer 429 at once.
+#
+# Strictly under `SLOT_MARGIN_MIN` in ops/auto-deploy.sh (10): a job that only starts
+# its work after the deploy guard's window has closed can be killed by a deploy
+# (`test_the_gate_wait_ends_inside_the_deploy_guard_window`). Slots are an hour or more
+# apart, so a waiting job never reaches the next one, and APScheduler's max_instances=1
+# counts the wait as the running instance of a job that next fires hours later.
+SCHEDULED_GATE_WAIT_SECONDS = 9 * 60
+SCHEDULED_GATE_POLL_SECONDS = 15
+# The wait's sleep, a module name so tests replace it instead of sleeping for real.
+_gate_sleep = asyncio.sleep
+
 # ── The schedule, in Europe/Berlin hours ──────────────────────────────────────
 #
 # The constants below are the single source of truth for when anything runs. They
@@ -272,7 +289,8 @@ WATCHLIST_REFRESH_DAYS = 'tue-sat'
 #
 # Tuesday to Saturday, once after each US close, like the watchlist — and an hour after
 # it, so the two most expensive Yahoo loops never share a pass (a watchlist pass takes minutes,
-# and the shared SYNC_PIPELINE gate would turn an overlap into a skipped day). 05:00
+# and the shared SYNC_PIPELINE gate would turn an overlap longer than
+# SCHEDULED_GATE_WAIT_SECONDS into a skipped day). 05:00
 # still leaves three quiet hours before the 08:00 repricing. A new hour, so the deploy
 # guard's copies in ops/ carry it too (`tests/test_deploy_guard_hours.py`).
 FUNDAMENTALS_REFRESH_HOUR = 5
@@ -1334,7 +1352,7 @@ class SchedulerService:
                 ],
             }
 
-    async def _gated_job(self, job_type: str, run) -> Optional[dict]:
+    async def _gated_job(self, job_type: str, run, scheduled: bool = False) -> Optional[dict]:
         """
         Run one pipeline job under the shared sync-pipeline gate.
 
@@ -1343,6 +1361,14 @@ class SchedulerService:
         pipelines would race the Flex budget toward a Code=1025 lockout and
         double-hit Yahoo. The next scheduled slot recovers the freshness.
 
+        `scheduled=True` (the APScheduler entry points only) first polls the gate every
+        SCHEDULED_GATE_POLL_SECONDS for up to SCHEDULED_GATE_WAIT_SECONDS, so a pass a
+        public GET started moments before the slot delays the job instead of skipping
+        it. The default fails fast, which `trigger_sync_now`'s 429 depends on. Polling
+        `is_running` rather than retrying `single_flight` keeps a SyncBusy raised
+        *inside* `run()` from re-running the job; nothing awaits between the last poll
+        and the entry, so the hand-over is atomic.
+
         `reason` distinguishes this skip from the other one a job can now report.
         `sync_ibkr_data` also returns `status="skipped"` when IBKR has already
         generated today's statement, and the two mean opposite things: this one is
@@ -1350,6 +1376,10 @@ class SchedulerService:
         `trigger_sync_now` keys on the reason, because answering 429 *busy* to a day
         that simply had nothing left to sync is a misleading error.
         """
+        waited = 0
+        while scheduled and is_running(SYNC_PIPELINE) and waited < SCHEDULED_GATE_WAIT_SECONDS:
+            await _gate_sleep(SCHEDULED_GATE_POLL_SECONDS)
+            waited += SCHEDULED_GATE_POLL_SECONDS
         try:
             with single_flight(SYNC_PIPELINE):
                 return await run()
@@ -1365,7 +1395,7 @@ class SchedulerService:
             await self._record_run(skipped, utcnow())
             return skipped
 
-    async def full_sync_job(self) -> Optional[dict]:
+    async def full_sync_job(self, scheduled: bool = False) -> Optional[dict]:
         """
         Full sync job that runs once daily at 18:00 Europe/Berlin.
 
@@ -1383,7 +1413,7 @@ class SchedulerService:
            must exist before this prices it. Missing dates only on a Berlin weekend.
         3. Dividend sync (Yahoo Finance ex-dates + EUR income)
         """
-        return await self._gated_job("full_sync", self._full_sync_job_locked)
+        return await self._gated_job("full_sync", self._full_sync_job_locked, scheduled=scheduled)
 
     async def _full_sync_job_locked(self) -> dict:
         logger.info("=" * 80)
@@ -1481,7 +1511,7 @@ class SchedulerService:
         logger.info("=" * 80)
         return self.last_sync_result
 
-    async def market_data_only_sync_job(self) -> Optional[dict]:
+    async def market_data_only_sync_job(self, scheduled: bool = False) -> Optional[dict]:
         """
         Market-data-only sync job, at each of MARKET_DATA_HOURS (Europe/Berlin).
 
@@ -1490,7 +1520,7 @@ class SchedulerService:
         mid-session prices that a later slot restates; that is by design and rests on
         MarketPriceRepository.PROVISIONAL_PRICE_DAYS. Also syncs exchange rates.
         """
-        return await self._gated_job("market_data_only", self._market_data_only_locked)
+        return await self._gated_job("market_data_only", self._market_data_only_locked, scheduled=scheduled)
 
     async def _market_data_only_locked(self) -> dict:
         logger.info("=" * 80)
@@ -1532,7 +1562,7 @@ class SchedulerService:
         logger.info("=" * 80)
         return self.last_sync_result
 
-    async def watchlist_refresh_job(self) -> Optional[dict]:
+    async def watchlist_refresh_job(self, scheduled: bool = False) -> Optional[dict]:
         """
         The watchlist's scheduled refresh, at WATCHLIST_REFRESH_HOUR (Europe/Berlin).
 
@@ -1541,7 +1571,7 @@ class SchedulerService:
         `WatchlistService.sync_all` — its pacing, its per-item cache and its
         abandon-the-pass-on-429 latch — and nothing here re-implements any of it.
         """
-        return await self._gated_job("watchlist_refresh", self._watchlist_refresh_locked)
+        return await self._gated_job("watchlist_refresh", self._watchlist_refresh_locked, scheduled=scheduled)
 
     async def _watchlist_refresh_locked(self) -> dict:
         started_at = utcnow()
@@ -1581,7 +1611,7 @@ class SchedulerService:
         logger.info(f"Watchlist refresh: {result.get('status')} — {result.get('message')}")
         return result
 
-    async def fundamentals_refresh_job(self) -> Optional[dict]:
+    async def fundamentals_refresh_job(self, scheduled: bool = False) -> Optional[dict]:
         """
         The daily fundamentals and analyst-ratings refresh, at FUNDAMENTALS_REFRESH_HOUR
         on FUNDAMENTALS_REFRESH_DAYS (Europe/Berlin).
@@ -1592,7 +1622,7 @@ class SchedulerService:
         limit in the fundamentals pass skips the ratings pass: it is the same IP. The logo
         pass (`LogoService.refresh`, logo.dev) follows either way.
         """
-        return await self._gated_job("fundamentals_refresh", self._fundamentals_refresh_locked)
+        return await self._gated_job("fundamentals_refresh", self._fundamentals_refresh_locked, scheduled=scheduled)
 
     async def _fundamentals_refresh_locked(self) -> dict:
         # Imported here to avoid any import cycle at module load
@@ -1688,8 +1718,8 @@ class SchedulerService:
         except Exception as e:
             logger.warning(f"Could not persist sync run: {e}")
 
-    async def ibkr_only_sync_job(self) -> Optional[dict]:
-        return await self._gated_job("ibkr_sync", self._ibkr_only_sync_locked)
+    async def ibkr_only_sync_job(self, scheduled: bool = False) -> Optional[dict]:
+        return await self._gated_job("ibkr_sync", self._ibkr_only_sync_locked, scheduled=scheduled)
 
     async def _ibkr_only_sync_locked(self) -> dict:
         """
@@ -2133,15 +2163,15 @@ def get_scheduler() -> SchedulerService:
 
 
 async def full_sync_job_entry() -> dict:
-    return await get_scheduler().full_sync_job()
+    return await get_scheduler().full_sync_job(scheduled=True)
 
 
 async def ibkr_only_sync_job_entry() -> dict:
-    return await get_scheduler().ibkr_only_sync_job()
+    return await get_scheduler().ibkr_only_sync_job(scheduled=True)
 
 
 async def market_data_only_sync_job_entry() -> dict:
-    return await get_scheduler().market_data_only_sync_job()
+    return await get_scheduler().market_data_only_sync_job(scheduled=True)
 
 
 async def crypto_sync_job_entry() -> Optional[dict]:
@@ -2149,8 +2179,8 @@ async def crypto_sync_job_entry() -> Optional[dict]:
 
 
 async def watchlist_refresh_job_entry() -> Optional[dict]:
-    return await get_scheduler().watchlist_refresh_job()
+    return await get_scheduler().watchlist_refresh_job(scheduled=True)
 
 
 async def fundamentals_refresh_job_entry() -> Optional[dict]:
-    return await get_scheduler().fundamentals_refresh_job()
+    return await get_scheduler().fundamentals_refresh_job(scheduled=True)

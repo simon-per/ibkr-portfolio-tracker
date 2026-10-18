@@ -506,8 +506,8 @@ on that row, never its status. It sits in the `upkeep` job group and outside
 **Fundamentals and analyst ratings refresh daily at 05:00, Tuesday to Saturday, for held
 securities only** (2026-10-17 at the owner's request; weekly on Sundays from 2026-10-14, and
 before that only a click refreshed them). Same days as the watchlist, an hour later: the two
-most expensive loops never share a pass, and since both hold `SYNC_PIPELINE` an overlap would
-record the second as `skipped` for the day — a watchlist pass takes minutes. 05:00 is an hour of
+most expensive loops never share a pass, and since both hold `SYNC_PIPELINE` an overlap longer
+than the scheduled gate wait (9 min, below) would record the second as `skipped` for the day. 05:00 is an hour of
 its own in `ALL_SYNC_HOURS`, so the three deploy-guard copies (`ops/auto-deploy.sh` and both
 `ops/finish-deploy.*`) carry it, and `/root/auto-deploy.sh` must be refreshed from `ops/` to
 learn it. The job is `FundamentalsService.sync_stale_fundamentals` then
@@ -1064,8 +1064,19 @@ dispatches, and `POST /api/scheduler/trigger` ran `full_sync_job()` as a bare co
 store entirely — so a stranger could overlap the 08:00 run or spam Flex requests toward a `1025`
 lockout. Everything that can reach IBKR or Yahoo shares the `sync-pipeline` gate; two pipelines racing
 is the failure mode regardless of which endpoint started them. Scheduled jobs enter with **no cooldown**
-and, on collision, record a `status="skipped"` run rather than running concurrently (the next slot
-recovers freshness). The public routes add cooldowns (ibkr 120s; market-data / trigger / fundamentals /
+and, on collision, **wait for the gate** — polled every `SCHEDULED_GATE_POLL_SECONDS` (15) for up to
+`SCHEDULED_GATE_WAIT_SECONDS` (9 min) — and only then record a `status="skipped"`,
+`reason="pipeline_busy"` run rather than running concurrently (issue #16, 2026-10-18). Public GETs
+hold this gate too (the dividend card's background pass, the benchmark's lazy fetch), so before the
+wait a dashboard load just before 18:00 cost the day its 730-day pass and look-through upkeep. The
+wait is the APScheduler entry points' alone (`*_job_entry` pass `scheduled=True` to `_gated_job`);
+`POST /api/scheduler/trigger` and every other manual path still fail fast with 429. It stays under
+`SLOT_MARGIN_MIN` in `ops/auto-deploy.sh`, because a job that starts its work after the deploy
+guard's window can be killed by a deploy; slots are an hour or more apart, so a waiting job never
+meets the next one, and `max_instances=1` simply counts the wait as the running instance
+(`misfire_grace_time` governs only the start). It polls `is_running` rather than retrying
+`single_flight`, so a `SyncBusy` raised inside the job never re-runs it. Tests:
+`tests/test_scheduled_job_waits_for_gate.py`. The public routes add cooldowns (ibkr 120s; market-data / trigger / fundamentals /
 ratings / allocation / watchlist / dividends 300s) and answer **429 with `Retry-After`**. In-process by design —
 single uvicorn worker, and the check-and-set has no `await` between test and set. A backgrounded route
 (fundamentals `/sync`) checks `is_running()` in the handler and holds the lock inside the task, so the
