@@ -3,6 +3,7 @@ import type { Position } from '@/lib/api'
 import { formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
+import { compareNullsLast, type SortDirection } from '@/lib/nullsLast'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -41,7 +42,6 @@ interface PositionsListProps {
 }
 
 type SortColumn = 'symbol' | 'description' | 'rating' | 'quantity' | 'cost_basis_eur' | 'market_value_eur' | 'gain_loss_eur' | 'gain_loss_percent' | 'portfolio_percent' | 'yield_on_cost'
-type SortDirection = 'asc' | 'desc'
 
 /** A soft chip per consensus: the rating is context for a holding, not an alarm. */
 const getRatingBadgeColor = (consensus: string): string => {
@@ -98,6 +98,48 @@ const gainTone = (p: Position) =>
   cannotValue(p) ? 'text-muted-foreground' : p.gain_loss_eur >= 0 ? 'text-gain' : 'text-loss'
 
 /**
+ * A row's share of the account, or `null` with no weight to compute — a 0.00% would read
+ * as "a negligible part of the book", which is a claim, and `RebalanceCard`'s Current
+ * column already prints a dash for the same row. The cell and the sort both read this.
+ */
+const weightOf = (p: Position, totalMarketValue: number): number | null =>
+  cannotValue(p) || totalMarketValue <= 0 ? null : (p.market_value_eur / totalMarketValue) * 100
+
+/**
+ * What a column sorts by: what its cell shows, with a dash as `null`.
+ *
+ * An unvalued holding arrives with `market_value_eur: 0`, `gain_loss_eur: -cost` and
+ * `gain_loss_percent: -100`. Its cells print dashes; sorting it by those stand-ins ranked it
+ * the cheapest holding and the worst loser. Likewise an absent yield on cost was `-1`, so
+ * ascending listed every non-payer first. `compareNullsLast` puts both last either way.
+ *
+ * The rating keeps `getRatingScore`'s unrated sentinel, so unrated rows lead ascending
+ * here — pinned on purpose by `ratingSortFamily.test.tsx`.
+ */
+function positionSortValue(
+  p: Position,
+  column: SortColumn,
+  deps: { totalMarketValue: number; yieldOnCost: Map<number, number | null> },
+): number | string | null {
+  switch (column) {
+    case 'symbol': return p.symbol
+    case 'description': return displayName(p.description) || p.symbol
+    case 'rating': return getRatingScore(p.analyst_rating?.consensus)
+    case 'quantity': return p.quantity
+    case 'cost_basis_eur': return p.cost_basis_eur
+    case 'market_value_eur': return cannotValue(p) ? null : p.market_value_eur
+    case 'gain_loss_eur': return cannotValue(p) ? null : p.gain_loss_eur
+    case 'gain_loss_percent': return cannotValue(p) ? null : p.gain_loss_percent
+    case 'portfolio_percent': return weightOf(p, deps.totalMarketValue)
+    case 'yield_on_cost': return deps.yieldOnCost.get(p.security_id) ?? null
+  }
+}
+
+/** A new column starts in the direction a reader wants first: names A–Z, figures biggest. */
+const initialDirection = (column: SortColumn): SortDirection =>
+  column === 'symbol' || column === 'description' ? 'asc' : 'desc'
+
+/**
  * The positions table, described once for both renderings.
  *
  * A factory rather than a module constant because every cell closes over the currency
@@ -130,13 +172,6 @@ export function positionColumns(deps: {
   maxWeightPct?: number | null
 }): Column<Position, SortColumn>[] {
   const { formatCurrency, totalMarketValue, yieldOnCost, maxWeightPct } = deps
-  // `null` rather than 0 for a holding with no weight to compute — a 0.00% here reads
-  // as "this is a negligible part of the book", which is a claim, and `RebalanceCard`'s
-  // Current column already prints a dash for the same row.
-  const weightOf = (p: Position): number | null =>
-    cannotValue(p) || totalMarketValue <= 0
-      ? null
-      : (p.market_value_eur / totalMarketValue) * 100
   const yocOf = (p: Position) => yieldOnCost.get(p.security_id) ?? null
 
   return [
@@ -276,7 +311,7 @@ export function positionColumns(deps: {
       align: 'right',
       cellClassName: 'text-muted-foreground',
       cell: (p, view) => {
-        const w = weightOf(p)
+        const w = weightOf(p, totalMarketValue)
         if (w === null) return NO_VALUE
         const text = `${w.toFixed(2)}%`
         if (view !== 'table') return text
@@ -347,79 +382,23 @@ export function PositionsList({
       // Toggle direction if clicking the same column
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
     } else {
-      // Default to descending for new column
       setSortColumn(column)
-      setSortDirection('desc')
+      setSortDirection(initialDirection(column))
     }
   }
 
   const sortedPositions = useMemo(() => {
     if (!positions || positions.length === 0) return []
-
-    const sorted = [...positions].sort((a, b) => {
-      let aValue: string | number
-      let bValue: string | number
-
-      switch (sortColumn) {
-        case 'symbol':
-          aValue = a.symbol.toLowerCase()
-          bValue = b.symbol.toLowerCase()
-          break
-        case 'description':
-          aValue = displayName(a.description).toLowerCase()
-          bValue = displayName(b.description).toLowerCase()
-          break
-        case 'rating':
-          aValue = getRatingScore(a.analyst_rating?.consensus)
-          bValue = getRatingScore(b.analyst_rating?.consensus)
-          break
-        case 'quantity':
-          aValue = a.quantity
-          bValue = b.quantity
-          break
-        case 'cost_basis_eur':
-          aValue = a.cost_basis_eur
-          bValue = b.cost_basis_eur
-          break
-        case 'market_value_eur':
-          aValue = a.market_value_eur
-          bValue = b.market_value_eur
-          break
-        case 'gain_loss_eur':
-          aValue = a.gain_loss_eur
-          bValue = b.gain_loss_eur
-          break
-        case 'gain_loss_percent':
-          aValue = a.gain_loss_percent
-          bValue = b.gain_loss_percent
-          break
-        case 'portfolio_percent':
-          aValue = totalMarketValue > 0 ? (a.market_value_eur / totalMarketValue) * 100 : 0
-          bValue = totalMarketValue > 0 ? (b.market_value_eur / totalMarketValue) * 100 : 0
-          break
-        case 'yield_on_cost':
-          // A sentinel below every real yield, so descending — the default, and the
-          // direction someone clicking this column wants — puts the 17 rows with no rate
-          // beneath the 19 that have one. Ascending puts them first, which is the same
-          // trade-off `getRatingScore` makes for the `rating` column and is honest enough
-          // here: a holding that distributes nothing really is at the bottom of this ranking.
-          aValue = yieldOnCost.get(a.security_id) ?? -1
-          bValue = yieldOnCost.get(b.security_id) ?? -1
-          break
-        default:
-          return 0
-      }
-
-      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
-      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
-      return 0
-    })
-
-    return sorted
-    // `totalMarketValue` and `yieldOnCost` are read by two of the cases above, so they
-    // belong here. The former was already missing — harmless only because a change in
-    // the total always came with a change in `positions`; adding a case that reads a
-    // separately-fetched map would have made the omission actually bite.
+    const deps = { totalMarketValue, yieldOnCost }
+    // Ties fall back to the symbol, then the security, so equal rows cannot swap between
+    // renders — the tie-break `lib/dividendTable.ts` uses.
+    return [...positions].sort((a, b) =>
+      compareNullsLast(
+        positionSortValue(a, sortColumn, deps), positionSortValue(b, sortColumn, deps), sortDirection,
+      ) || a.symbol.localeCompare(b.symbol) || a.security_id - b.security_id,
+    )
+    // `totalMarketValue` and `yieldOnCost` are read by the weight and yield keys, so they
+    // belong here.
   }, [positions, sortColumn, sortDirection, totalMarketValue, yieldOnCost])
 
   const maxWeightPct = useMemo(() => {

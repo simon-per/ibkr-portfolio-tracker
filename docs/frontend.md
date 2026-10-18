@@ -354,6 +354,16 @@ and pulling them in would need a `sortValue` per column, a fourth thing to keep 
 Rows arrive sorted. The contract every table already implemented and nothing stated: `onSort(active)`
 flips direction, which is what makes the phone's single direction button correct.
 
+**Each table's comparator is `lib/nullsLast.compareNullsLast` over a per-column sort value, then a
+tie-break of its own** (2026-10-18). The sort value is what the cell shows, with a dash as `null`:
+Positions returns `null` on value, gain, return and weight for an `isUnpriced` row and for an absent
+yield on cost, so a holding the backend could not value sorts last in both directions instead of
+first as the cheapest holding and the worst loser (its stand-ins are value 0.00, gain −cost,
+−100%). A text column's first click is A→Z, a figure's is biggest first. The one exception kept on
+purpose is the rating's unrated sentinel (`getRatingScore`, pinned by `ratingSortFamily.test.tsx`).
+`nullsLast.test.ts` fails a direction-flipping comparator written by hand and any table passing
+`sort` to `DataTable` that reaches `compareNullsLast` neither itself nor through a module it imports.
+
 Three tables deliberately stay tables, each argued in its own file: `CurrencyExposureCard` (the
 comparison *between* rows is the point, and there is no identity column to promote), and the two
 12-month x N-year matrices (`MonthlyReturnsHeatmap`, `DividendSummary`). They get a designed

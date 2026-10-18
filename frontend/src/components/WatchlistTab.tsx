@@ -131,7 +131,7 @@ export function WatchlistTab() {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
     } else {
       setSortColumn(column)
-      setSortDirection('desc')
+      setSortDirection(column === 'symbol' ? 'asc' : 'desc')
     }
   }
 
