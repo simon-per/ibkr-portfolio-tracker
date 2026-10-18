@@ -35,6 +35,10 @@ def test_no_module_doubles_a_backoff_of_its_own():
         for node in ast.walk(tree):
             if not isinstance(node, ast.BinOp) or not isinstance(node.left, ast.Constant):
                 continue
+            # A doubling backoff raises 2 to a COUNT; a constant exponent is a fixed
+            # number (routers/_params.DB_INT_MAX = 2**63 - 1), not a backoff.
+            if isinstance(node.right, ast.Constant):
+                continue
             if ((isinstance(node.op, ast.Pow) and node.left.value == 2)
                     or (isinstance(node.op, ast.LShift) and node.left.value == 1)):
                 offenders.append(f"{path.relative_to(APP_DIR)}:{node.lineno}")
