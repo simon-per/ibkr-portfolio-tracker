@@ -11,6 +11,7 @@ import {
   formatSigned,
   formatSignedPercent,
   formatShortDateTime,
+  formatShortDay,
   parseLocalDate,
   tooltipValue,
   formatMarketCap,
@@ -118,6 +119,17 @@ describe('formatDate', () => {
 
   it('accepts a Date as given', () => {
     expect(formatDate(new Date(2026, 2, 14))).toBe('Mar 14, 2026')
+  })
+})
+
+describe('formatShortDay', () => {
+  it('names the day the string says, without the year', () => {
+    expect(formatShortDay('2026-01-01')).toBe('Jan 1')
+    expect(formatShortDay('2026-08-28')).toBe('Aug 28')
+  })
+
+  it('is empty for a string that is not a date, rather than throwing', () => {
+    expect(formatShortDay('not a date')).toBe('')
   })
 })
 

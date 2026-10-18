@@ -556,7 +556,8 @@ is that rule's **third** reader after the strip's windows and the chart's daily 
 draws money in as its bar, drops `deployed_eur` and `net_eur` to the tooltip where the latter's own
 docstring already said it belonged, and names the largest rotation month in prose under the chart — the
 **largest** rather than the latest, so the note cannot vanish while the spike it explains is still on
-screen.
+screen. The Dividends tab reads the same series, summed cumulatively, as the divisor of the forecast
+*per 1,000 in* ([dividends.md](dividends.md), since 2026-10-18).
 
 **"Secondary" became "off the surface" on 2026-09-07, one day later, and the reasoning is worth keeping
 because it is not the reasoning above.** Deployed shipped as a *second bar* beside money in, and as the

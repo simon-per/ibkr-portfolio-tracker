@@ -30,17 +30,11 @@ import {
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useResizableHeight } from '@/lib/useResizableHeight'
 import { useIsCompact } from '@/lib/useMediaQuery'
-import { cn, formatAxisMoney, formatDate, formatSigned, parseLocalDate, tooltipValue } from '@/lib/utils'
+import { cn, formatAxisMoney, formatDate, formatShortDay, formatSigned, tooltipValue } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 
 /** The chart's height when first opened, and the range a drag may take it to. */
 const CHART_HEIGHT = { storageKey: 'dividendForecastTrendHeight', initial: 260, min: 120, max: 560 }
-
-function shortDay(iso: string): string {
-  const date = parseLocalDate(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 
 /**
  * The next-12-month forecast since the day growth is measured from.
@@ -114,7 +108,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
         <DeltaChip
           variant="pill"
           pct={trend.sincePct}
-          label={`since ${shortDay(trend.start)}`}
+          label={`since ${formatShortDay(trend.start)}`}
           flatBand={0}
           projected
           className="text-sm"
@@ -148,7 +142,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   dataKey="date"
                   className="text-xs"
                   tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                  tickFormatter={shortDay}
+                  tickFormatter={formatShortDay}
                   interval="preserveStartEnd"
                   minTickGap={isCompact ? 44 : 60}
                 />
@@ -202,7 +196,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
 
           {trend.parts.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              Of the change{trend.partsSince ? ` since ${shortDay(trend.partsSince)}` : ''}:{' '}
+              Of the change{trend.partsSince ? ` since ${formatShortDay(trend.partsSince)}` : ''}:{' '}
               {trend.parts.map((part, i) => (
                 <span key={part.key}>
                   {i > 0 && ' · '}

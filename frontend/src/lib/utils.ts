@@ -183,6 +183,17 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
+ * A `YYYY-MM-DD` as "Aug 28", for a label beside a figure ("since Aug 28") or a chart tick.
+ * Empty for a string that is not a date, where formatting one throws. Two components each
+ * had their own copy, one without that guard.
+ */
+export function formatShortDay(iso: string): string {
+  const date = parseLocalDate(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+}
+
+/**
  * A timestamp as a short local date and time — "Aug 9, 6:00 AM", with the year only when
  * it is not this one ("Dec 30, 2025, 6:00 AM") — pinned to `en-US` like every other
  * formatter here. The month is spelled because "8/9/26" is 9 August to an American and

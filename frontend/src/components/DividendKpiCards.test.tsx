@@ -71,3 +71,53 @@ describe('the growth furniture', () => {
     expect(chip.className).toContain('bg-muted')
   })
 })
+
+describe('per 1,000 in', () => {
+  const row = () => tile('Next 12 months').querySelector<HTMLElement>('[data-per-money-in]')
+  const forecast = [1100, 1234.5]
+
+  it('prints the latest figure, its change since the first measured day and its own line', () => {
+    render(<DividendKpiCards growth={growth()} trend={{
+      received: [100, 130], forecast,
+      perMoneyIn: { values: [27.5, 30.86], latest: 30.86, change: 3.36, since: '2026-08-28' },
+    }} />)
+    const text = row()?.textContent ?? ''
+    expect(text).toContain('€30.86')
+    expect(text).toContain('per €1,000 in')
+    expect(text).toContain('+€3.36 since Aug 28')
+    expect(row()?.querySelectorAll('svg')).toHaveLength(1)
+    expect(row()?.querySelector('.text-green-600')?.textContent).toContain('+€3.36')
+  })
+
+  it('colours a fall, and leaves a change that prints as zero uncoloured', () => {
+    render(<DividendKpiCards growth={growth()} trend={{
+      received: [100, 130], forecast,
+      perMoneyIn: { values: [30, 28.8], latest: 28.8, change: -1.2, since: '2026-08-28' },
+    }} />)
+    expect(row()?.querySelector('.text-red-600')?.textContent).toContain('−€1.20')
+    cleanup()
+    render(<DividendKpiCards growth={growth()} trend={{
+      received: [100, 130], forecast,
+      perMoneyIn: { values: [30, 30.001], latest: 30.001, change: 0.001, since: '2026-08-28' },
+    }} />)
+    expect(row()?.textContent).toContain('€0.00 since Aug 28')
+    expect(row()?.textContent).not.toContain('+')
+    expect(row()?.querySelector('.text-green-600, .text-red-600')).toBeNull()
+  })
+
+  it('shows the absent glyph, and no change, while money in is not above zero', () => {
+    render(<DividendKpiCards growth={growth()} trend={{
+      received: [100, 130], forecast,
+      perMoneyIn: { values: [null, null], latest: null, change: null, since: null },
+    }} />)
+    expect(row()?.textContent).toContain('—')
+    expect(row()?.textContent).toContain('per €1,000 in')
+    expect(row()?.textContent).not.toContain('since')
+  })
+
+  it('has no row at all while money in is unknown', () => {
+    render(<DividendKpiCards growth={growth()} trend={{ received: [100, 130], forecast, perMoneyIn: null }} />)
+    expect(row()).toBeNull()
+    expect(tile('Next 12 months').textContent).not.toContain('per €1,000 in')
+  })
+})

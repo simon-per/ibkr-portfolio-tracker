@@ -485,6 +485,29 @@ describe('One "Next 12 months" figure', () => {
       expect(surface.textContent).not.toContain('€150.00')
     }
   })
+
+  it('divides the same days by the money in through each one, ending on the live figure', async () => {
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
+    vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue({
+      base_currency: 'EUR', growth_from: '2026-08-28',
+      points: [snapshot('2026-08-28', 120, null), snapshot('2026-10-13', 150, 25)],
+    })
+    vi.spyOn(api, 'getContributions').mockResolvedValue({
+      windows: [],
+      monthly: [
+        { month: '2026-08', money_in_eur: 4000, deployed_eur: 4000, net_eur: 4000 },
+        { month: '2026-10', money_in_eur: 1000, deployed_eur: 1000, net_eur: 1000 },
+      ],
+      first_contribution_date: '2026-08-03', coverage_from: null, deposits_from: null,
+      transfer_in_date: null, base_currency: 'EUR',
+    })
+    mount()
+    // 120 / 4,000 and 150 / 5,000 are 30 per 1,000; the live 160 / 5,000 is 32.
+    const tile = (await screen.findByText(/per €1,000 in/)).closest<HTMLElement>('[title]')!
+    expect(tile.textContent).toContain('Next 12 months')
+    expect(tile.textContent).toContain('€32.00')
+    expect(tile.textContent).toContain('+€2.00 since Aug 28')
+  })
 })
 
 describe('The per-position table', () => {

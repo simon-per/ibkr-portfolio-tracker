@@ -906,7 +906,12 @@ re-point onto the general palette would have to redo, and the section above stil
   tab). *Last 12 months* and *Next 12 months* draw sparklines from the forecast history
   (`forecastTrend(history, live)` — unwindowed like the tiles, ending on the live figure); a
   sparkline from the selected range would move under a figure that does not. The DividendsTab
-  and the forecast card share the `['dividends', 'forecast-history']` query.
+  and the forecast card share the `['dividends', 'forecast-history']` query. Under the *Next 12
+  months* sparkline sits the forecast **per 1,000 in** (#76, `lib/incomePerMoneyIn.ts`): the same
+  points divided by cumulative money in from the shared `contributionsQuery`, with its own
+  line-only sparkline and its change since the first measured day. Rules in
+  [dividends.md](dividends.md), *Per 1,000 in*. Day labels like "since Aug 28" are
+  `formatShortDay` in `lib/utils.ts` (two components had their own copy).
 - **Inside the Dividends card**, blocks take `DividendSubheading` (small well, `text-sm`), one
   step below the card's `SectionHeader`. The card's controls sit in their own wrapping row, not in
   `SectionHeader`'s `aside`: the aside was `shrink-0` then, and four controls wider than a phone

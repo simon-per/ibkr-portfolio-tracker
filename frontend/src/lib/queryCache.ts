@@ -62,7 +62,7 @@ export const valueOverTimeQuery = (range: DateRange) =>
     staleTime: VALUATION_STALE_TIME,
   })
 
-/** Money in by month and the first contribution date (Performance, Activity, Tax, Forecast). */
+/** Money in by month and the first contribution date (Performance, Activity, Tax, Forecast, Dividends). */
 export const contributionsQuery = queryOptions({
   queryKey: ['portfolio', 'contributions'],
   queryFn: () => api.getContributions(),

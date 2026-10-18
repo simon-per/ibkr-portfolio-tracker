@@ -13,7 +13,7 @@ import { toLocalISODate } from '@/lib/dateRanges'
 import { largestHolding, nextDividend, topMover } from '@/lib/performanceInsights'
 import { displayName } from '@/lib/securityName'
 import { TONE_TEXT, type Tone } from '@/lib/tone'
-import { ABSENT, cn, formatSigned, parseLocalDate } from '@/lib/utils'
+import { ABSENT, cn, formatShortDay, formatSigned } from '@/lib/utils'
 
 interface PerformanceInsightsProps {
   /** The selected range's attribution; `undefined` while loading or after a failure. */
@@ -30,9 +30,6 @@ interface PerformanceInsightsProps {
   /** `YYYY-MM-DD`; the viewer's local today by default. A prop so a test can pin it. */
   today?: string
 }
-
-const shortDay = (iso: string) =>
-  new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parseLocalDate(iso))
 
 /**
  * Four compact figures under the hero: the range's best and worst contributor, the largest
@@ -95,7 +92,7 @@ export function PerformanceInsights({
           </>
         )}
         absent={dividend}
-        who={dividend && { symbol: dividend.symbol, securityId: dividend.securityId, detail: shortDay(dividend.date) }}
+        who={dividend && { symbol: dividend.symbol, securityId: dividend.securityId, detail: formatShortDay(dividend.date) }}
       />
     </KpiPanel>
   )

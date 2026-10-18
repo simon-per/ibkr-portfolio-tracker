@@ -2,9 +2,13 @@ import { CalendarCheck, CalendarClock, ChartColumn, Coins } from 'lucide-react'
 import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { DeltaChip } from './DeltaChip'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
+import { Sparkline } from '@/components/ui/Sparkline'
 import type { DividendGrowth } from '@/lib/api'
 import { FLAT_BAND_PCT } from '@/lib/delta'
 import { dividendAmount } from '@/lib/dividendFormat'
+import { PER_MONEY_IN, type IncomePerMoneyIn } from '@/lib/incomePerMoneyIn'
+import { TONE_TEXT, type Tone } from '@/lib/tone'
+import { ABSENT, cn, formatShortDay, formatSigned } from '@/lib/utils'
 
 /**
  * The two series the forecast history already carries, oldest first, ending on today's
@@ -15,6 +19,39 @@ export interface DividendKpiTrend {
   received: number[]
   /** The next-12-month forecast, per day: the "Next 12 months" tile's own history. */
   forecast: number[]
+  /** `forecast` per 1,000 of money in, on the same days; absent while money in is unknown. */
+  perMoneyIn?: IncomePerMoneyIn | null
+}
+
+/**
+ * The forecast per 1,000 put in, under the "Next 12 months" figure (#76): it rises only when
+ * the income outgrows the deposits, which the figure above it cannot show.
+ */
+function PerMoneyIn({ data, curSym }: { data: IncomePerMoneyIn; curSym: string }) {
+  const amount = (value: number) => dividendAmount(value, curSym)
+  const change = data.change != null && data.since != null
+    ? { text: formatSigned(data.change, amount), up: data.change > 0, since: data.since }
+    : null
+  // `formatSigned`'s own zero rule: a change that prints as zero is not coloured.
+  const tone: Tone = change == null || !/[1-9]/.test(change.text)
+    ? 'muted'
+    : change.up ? 'positive' : 'negative'
+  return (
+    <div className="mt-1 border-t border-border/60 pt-2" data-per-money-in="">
+      <div className="flex flex-wrap items-baseline gap-x-1.5 text-xs">
+        <span className={cn('font-semibold', data.latest == null && 'text-muted-foreground')}>
+          {data.latest == null ? ABSENT : amount(data.latest)}
+        </span>
+        <span className="text-muted-foreground">per {amount(PER_MONEY_IN)} in</span>
+        {change != null && (
+          <span className={cn('whitespace-nowrap', TONE_TEXT[tone])}>
+            {change.text} since {formatShortDay(change.since)}
+          </span>
+        )}
+      </div>
+      <Sparkline values={data.values} area={false} className="mt-1 h-6" />
+    </div>
+  )
 }
 
 interface DividendKpiCardsProps {
@@ -125,6 +162,7 @@ export function DividendKpiCards({ growth, isLoading, trend }: DividendKpiCardsP
           flatBand: FLAT_BAND_PCT,
         }}
         sparkline={trend?.forecast}
+        footer={trend?.perMoneyIn && <PerMoneyIn data={trend.perMoneyIn} curSym={curSym} />}
       />
 
       <KpiCard

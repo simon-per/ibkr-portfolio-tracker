@@ -1110,6 +1110,34 @@ which stores one row per **UTC date** — the next twelve months and the trailin
 Tests: `tests/test_dividend_forecast_snapshot.py`, plus the wiring cases at the end of
 `tests/test_scheduler_jobs.py`.
 
+### Per 1,000 in — the forecast with the deposits taken out
+
+Since 2026-10-18 (#76). On a book still being funded, *Next 12 months* grows mostly because money
+went in, and a growth figure that a deposit moves reads as growth (the KPI audit). The *Next 12
+months* tile therefore carries a second, smaller figure under its sparkline: **the forecast per
+1,000 of money in**, its own line on the same days, and its change since the first measured day
+(`formatSigned`, toned by sign, uncoloured when it prints as zero). It rises only when the income
+grows faster than the deposits.
+
+- **Client-side, from two responses already served** — no endpoint, no Yahoo.
+  `lib/incomePerMoneyIn.ts` divides `forecastTrend(history, live).points` (so it starts at
+  `growth_from` and ends on the live figure, like the tile's own sparkline) by the cumulative
+  `/api/portfolio/contributions` `monthly[].money_in_eur`: `value ÷ Σ money in of every month up
+  to and including the day's month × 1,000`.
+- **One currency or nothing.** Both responses are already in the base currency — the history at
+  each day's own rate, money in at each leg's own date — and the division happens only when their
+  `base_currency` fields agree; one refetched after a switch and the other not yet is no figure.
+- **A day counts its whole month's money in**, because money in is published per month. A deposit
+  late in a month lowers that month's earlier points before the shares it buys reach the forecast:
+  the error is a dip, never a deposit read as growth, and today's point is the all-time Money In
+  (the server's months stop at today).
+- **Absent, never zero**: a day with money in ≤ 0 is a gap in the line; ≤ 0 today prints the absent
+  glyph and no change; no contributions response, a currency mismatch or a backend without
+  per-month `money_in_eur` hides the row.
+
+Tests: `lib/incomePerMoneyIn.test.ts`, the *per 1,000 in* cases in `DividendKpiCards.test.tsx`,
+and the wiring case in `DividendsTab.test.tsx`.
+
 ### What the forecast's growth was made of — `dividend_forecast_snapshot_lines`
 
 Since 2026-10-13. Two totals a day cannot say why the figure moved, and on a book still

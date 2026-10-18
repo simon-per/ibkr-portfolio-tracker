@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChartColumnStacked, HandCoins, ListOrdered } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/SectionHeader'
-import { dividendBreakdownQuery, forecastHistoryQuery } from '@/lib/queryCache'
+import { contributionsQuery, dividendBreakdownQuery, forecastHistoryQuery } from '@/lib/queryCache'
 import type { DividendSecurityRow } from '@/lib/api'
 import { useFormatCurrency, useKeepPreviousData } from '@/lib/CurrencyContext'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/lib/dividendChart'
 import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { forecastTrend, type LiveForecast } from '@/lib/dividendForecastTrend'
+import { incomePerMoneyIn } from '@/lib/incomePerMoneyIn'
 import { deltaColor } from '@/lib/delta'
 import { payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
 import {
@@ -357,15 +358,19 @@ export function DividendsTab() {
 
   // The KPI sparklines: the forecast history's two series, ending on `live`. Same query key
   // as the forecast card, so the two share one request and one cache entry.
+  // Money in by month divides the forecast into "per 1,000 in" on the same days (#76).
   const { data: forecastHistory } = useQuery(forecastHistoryQuery)
+  const { data: contributions } = useQuery(contributionsQuery)
   const kpiTrend = useMemo<DividendKpiTrend | null>(() => {
     const trend = forecastTrend(forecastHistory, live)
-    if (!trend) return null
+    if (!trend || !forecastHistory) return null
     return {
       received: trend.points.map((p) => p.received),
       forecast: trend.points.map((p) => p.value),
+      // `forecastTrend` drops `live` in another currency, so every point is the history's.
+      perMoneyIn: incomePerMoneyIn(trend.points, forecastHistory.base_currency, contributions),
     }
-  }, [forecastHistory, live])
+  }, [forecastHistory, live, contributions])
 
   // A ticker listed on two venues is two securities and two rows; only the table
   // needs the venue, and only where it actually disambiguates.
