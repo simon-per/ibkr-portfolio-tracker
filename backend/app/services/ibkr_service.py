@@ -56,10 +56,16 @@ _RETRIEVE_PENDING_CODES = {
 # that is not counted. All of them fail fast at the request step (fetch_flex_data) and
 # stay in _RETRIEVE_PENDING_CODES, where re-polling the same reference is right.
 #
-# What remains are busy answers, not refusals: 1018 is the rate limit itself (always
-# waited past the minute window), 1019 "generation in progress", 1021 "could not be
-# retrieved".
-_REQUEST_RETRYABLE_CODES = {"1018", "1019", "1021"}
+# 1019 ("statement generation in progress") and 1021 ("statement could not be retrieved
+# at this time") went on 2026-10-18 (issue #15), by the same argument: no evidence either
+# way was ever recorded that IBKR does not count them, and giving up costs only
+# freshness. At the request step 1019 also says a generation already exists that we hold
+# no reference for, so a re-send cannot attach to it — it can only start another. Both
+# stay in _RETRIEVE_PENDING_CODES, where they mean "keep polling".
+#
+# What remains is 1018, the rate limit itself: a refusal to *look* at the request, not a
+# failed generation, and always waited past the minute window before the re-send.
+_REQUEST_RETRYABLE_CODES = {"1018"}
 
 # (connect, read) timeouts for one Flex GET. A tuple, so a slow *answer* is not mistaken
 # for an unreachable host — ibflex's submit_request() uses a scalar 5/10/15 s covering
@@ -83,12 +89,42 @@ def _flex_get(url: str, token: str, query: str, timeout: Tuple[int, int]) -> req
 
 
 def _parse_flex_reply(response: requests.Response) -> client.StatementAccess:
-    """A `FlexStatementResponse` through ibflex's own parser; a Fail/Warn raises
-    `ResponseCodeError` with IBKR's code, a garbled body `BadResponseError`."""
-    stmt_access = client.parse_stmt_response(response)
-    if isinstance(stmt_access, client.StatementError):
-        raise ResponseCodeError(stmt_access.ErrorCode, stmt_access.ErrorMessage)
-    return stmt_access
+    """
+    Read a `FlexStatementResponse` envelope: a Success returns its reference, a Fail or
+    Warn raises `ResponseCodeError` with IBKR's code, anything else `BadResponseError`.
+
+    Tolerant on purpose, and not `ibflex.client.parse_stmt_response` (used until
+    2026-10-18, issue #15). That wraps its whole body in `except Exception: raise
+    BadResponseError`, and builds 3-field dataclasses from every child plus a timestamp
+    it only understands in EST/EDT — so a reply IBKR really sent became "garbled" the
+    moment it carried one extra element or another zone. From SendRequest that hid a
+    Success (a generation running) or a Fail 1001 (a counted failed generation) behind
+    an exception the request step re-sent. Here the five fields are read by tag, unknown
+    children are ignored and the timestamp is not read: nothing downstream uses it.
+
+    `BadResponseError` is left for a reply that is not an envelope we can act on — no
+    `FlexStatementResponse` root (an empty body, an HTML page), or one without a known
+    Status, a Success without a ReferenceCode, a Fail without an ErrorCode. Each step
+    decides what that means: the request step fails fast, the poll step polls again.
+    """
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        raise BadResponseError(response) from e
+    if root.tag != "FlexStatementResponse":
+        raise BadResponseError(response)
+
+    def field(tag: str) -> Optional[str]:
+        return (root.findtext(tag) or "").strip() or None
+
+    status = field("Status")
+    if status == "Success" and field("ReferenceCode"):
+        return client.StatementAccess(
+            timestamp=None, ReferenceCode=field("ReferenceCode"), Url=field("Url")
+        )
+    if status in {"Fail", "Warn"} and field("ErrorCode"):
+        raise ResponseCodeError(field("ErrorCode"), field("ErrorMessage") or "")
+    raise BadResponseError(response)
 
 
 def _never_reached_ibkr(exc: requests.exceptions.RequestException) -> bool:
@@ -129,8 +165,8 @@ def send_flex_request(token: str, query_id: str) -> client.StatementAccess:
     2026-09-12 by reading the installed ibflex 0.15 source; the re-send announces itself
     with a bare `print()`, so it never appeared under any logger in the container log.
 
-    One GET, one attempt, a (connect, read) timeout pair; the reply goes through ibflex's
-    own parser so callers see the same exception types as before (`ResponseCodeError`,
+    One GET, one attempt, a (connect, read) timeout pair; the reply goes through
+    `_parse_flex_reply`, so callers see ibflex's exception types (`ResponseCodeError`,
     `BadResponseError`, `requests.exceptions.RequestException`).
     """
     return _parse_flex_reply(
@@ -337,6 +373,18 @@ class IBKRService:
             "with no further attempts, contact IBKR — the block may be account-scoped."
         )
 
+    @staticmethod
+    def _possibly_delivered_error(e: Exception) -> RuntimeError:
+        """SendRequest ended in something that may have started a generation. The
+        message names the type only: a transport error's text carries the URL, token
+        included."""
+        return RuntimeError(
+            f"IBKR Flex SendRequest failed after it may have reached IBKR "
+            f"({type(e).__name__}). Not re-requesting: the request may already "
+            "have started a generation, and repeating SendRequest is what trips "
+            "the Code=1025 token lockout. The next scheduled sync will try again."
+        )
+
     def _download_statement(self, deadline_seconds: int) -> bytes:
         """
         Download the Flex statement using IBKR's documented 2-step protocol, blocking.
@@ -388,8 +436,8 @@ class IBKRService:
             except (requests.exceptions.RequestException, BadResponseError) as e:
                 # Either a transport failure (DNS hiccup, reset, timeout — whether or not
                 # it reached IBKR, a repeated GetStatement only retrieves), or a reply we
-                # couldn't parse — ibflex raises BadResponseError for an empty/garbled
-                # body, which is usually the server being busy. Both happen *after* a
+                # couldn't parse — _parse_flex_reply raises BadResponseError for an
+                # empty/garbled body, usually the server being busy. Both happen *after* a
                 # reference code exists, so the statement is still being generated:
                 # recover by polling the same reference. Letting either escape to the
                 # outer loop would re-issue SendRequest and start a second generation
@@ -624,12 +672,12 @@ class IBKRService:
                 if e.code == "1025":
                     raise self._lockout_error(e) from e
                 if e.code not in _REQUEST_RETRYABLE_CODES and e.code in _RETRIEVE_PENDING_CODES:
-                    # 1001 and 1004-1009: "not ready" while polling, but here a failed
-                    # *generation*, which is what 1025 counts. Re-requesting after a 1001
-                    # is how we locked the token before, so stop and let the next
-                    # scheduled job ask for a fresh statement.
+                    # 1001, 1004-1009, 1019 and 1021: "not ready" while polling, but here
+                    # a failed or unattachable *generation*, which is what 1025 counts.
+                    # Re-requesting after a 1001 is how we locked the token before, so
+                    # stop and let the next scheduled job ask for a fresh statement.
                     raise RuntimeError(
-                        f"IBKR could not generate the Flex statement right now (Code={e.code}: "
+                        f"IBKR did not hand back a Flex statement reference (Code={e.code}: "
                         f"{e.msg}). Not re-requesting: repeating SendRequest after a failed "
                         "generation is what trips the Code=1025 token lockout. The next "
                         "scheduled sync will try again."
@@ -648,30 +696,24 @@ class IBKRService:
             except BadResponseError as e:
                 # Only reachable from SendRequest itself — a malformed reply *during*
                 # polling is handled inside _download_statement against the same
-                # reference code. Here no statement exists yet, so re-requesting is the
-                # only option and is safe.
-                if attempt == max_attempts - 1:
-                    raise
-                delay = delays[attempt]
+                # reference code. A reply did come back, so the GET reached something:
+                # an empty body or an HTML error page may or may not have come from
+                # IBKR's app server after it accepted the request. That is the
+                # possibly-delivered transport error's case, and gets its treatment.
+                # Re-sent up to three times until 2026-10-18 (issue #15) as "no
+                # statement exists yet", while ibflex's parser was also turning real
+                # Success and 1001 envelopes into this exception.
                 logger.warning(
-                    f"IBKR Flex bad/empty response ({redact_secrets(str(e))}); "
-                    f"attempt {attempt + 1}/{max_attempts}, retrying in {delay}s"
+                    f"IBKR Flex SendRequest reply not understood: {redact_secrets(str(e))[:500]}"
                 )
-                await asyncio.sleep(delay)
+                raise self._possibly_delivered_error(e) from e
             except requests.exceptions.RequestException as e:
                 if not _never_reached_ibkr(e):
                     # The GET may have reached IBKR — a read timeout, a reset or a reply
                     # dropped after it went out — so a generation may already be running,
                     # and re-issuing SendRequest is exactly what 1025 counts. Same
                     # treatment as a 1001: fail fast, and let the next slot ask fresh.
-                    # The message names the type only: a transport error's text carries
-                    # the URL, token included.
-                    raise RuntimeError(
-                        f"IBKR Flex SendRequest failed after it may have reached IBKR "
-                        f"({type(e).__name__}). Not re-requesting: the request may already "
-                        "have started a generation, and repeating SendRequest is what trips "
-                        "the Code=1025 token lockout. The next scheduled sync will try again."
-                    ) from e
+                    raise self._possibly_delivered_error(e) from e
                 # Provably never left the machine — a DNS or connection failure, or a
                 # connect timeout (a blip like this cost the whole 20:00 job on
                 # 2026-07-25). No statement was generated and nothing counted against

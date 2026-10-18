@@ -96,9 +96,13 @@ re-requesting costs a lockout of every sync.
 They sat in `_REQUEST_RETRYABLE_CODES` with no recorded reason while this paragraph named only four
 codes, so one scheduled slot could send four SendRequests on an answer that means what `1001` means.
 `1009` was the open question; nothing shows a refusal worded like `1001` is not counted, and giving
-up costs only freshness, so it went too. All of them stay in `_RETRIEVE_PENDING_CODES`. The codes
-still retryable at the request step are `1018` (the rate limit itself, waited past the minute),
-`1019` and `1021` — busy answers, not refusals.
+up costs only freshness, so it went too. All of them stay in `_RETRIEVE_PENDING_CODES`.
+**`1019` ("generation in progress") and `1021` ("could not be retrieved") followed on 2026-10-18
+(issue #15)** by the same argument — no evidence either way was ever recorded that IBKR does not
+count them — and at the request step `1019` also says a generation exists that we hold no reference
+for, so a re-send cannot attach to it, only start another. Both stay in `_RETRIEVE_PENDING_CODES`.
+**The only code still re-sent at the request step is `1018`**, the rate limit itself, waited past
+the minute window.
 
 **Transport errors at the request step are retried only when they provably never left the
 machine** — a whitelist in `_never_reached_ibkr`: a `ConnectTimeout`, or a `ConnectionError`
@@ -111,6 +115,21 @@ lost *after* the GET went out: a reset or `RemoteDisconnected` while awaiting th
 `ContentDecodingError` fail fast too. Until 2026-10-17 the handler retried all of them as "never
 reached IBKR". **Mid-poll every transport error is retried** against the same reference, after the
 usual wait: a repeated GetStatement only retrieves.
+
+**A reply SendRequest sent is read tolerantly, and one we cannot act on fails fast** (since
+2026-10-18, issue #15). ibflex's `parse_stmt_response` wraps its whole body in `except Exception:
+raise BadResponseError` and builds 3-field dataclasses from every child plus an EST/EDT-only
+timestamp, so a real **Success** (a generation running) or a real **Fail `1001`** became
+"garbled" the moment it carried one extra element or another zone — and the request step re-sent
+a `BadResponseError` up to three times as "no statement exists yet". `_parse_flex_reply` now reads
+`Status`, `ReferenceCode`, `Url`, `ErrorCode` and `ErrorMessage` by tag, ignores unknown children
+and never reads the timestamp: a Success polls, a Fail/Warn goes through the code handling above.
+`BadResponseError` is left for a reply that is not an envelope we can act on — no
+`FlexStatementResponse` root (empty body, HTML page) or no known `Status`, a Success with no
+`ReferenceCode`, a Fail with no `ErrorCode`. At the request step that gets the possibly-delivered
+transport error's treatment and message; mid-poll it is polled again as before. Both steps share
+the parser, which changes polling only by stopping sooner: a `1025` or terminal code carrying an
+extra field used to be polled to the deadline as garbled.
 
 ### The two-step rule (why we don't use `client.download()`)
 
@@ -131,7 +150,7 @@ one layer up. "We never saw a `1018`" was long cited here as evidence, and prove
 nothing and left the timeout's `last` reason unchanged — the code path could not report one.
 
 So `IBKRService._download_statement()` drives the two steps itself, each GET issued once by
-`_flex_get` and parsed with ibflex's `parse_stmt_response` (`send_flex_request`,
+`_flex_get` and parsed by `_parse_flex_reply` (`send_flex_request`,
 `retrieve_flex_statement`): **SendRequest once**, then poll the *same* `ReferenceCode` for every
 `_RETRIEVE_PENDING_CODES` hit, waiting `_RETRIEVE_POLL_DELAY` before each GetStatement (60 s after a
 `1018`) and logging every not-ready code, bounded by a
@@ -151,9 +170,9 @@ slot could issue **up to twelve SendRequests in ~19 minutes**. The line-62 comme
 the inner 3-try loop, as a reason to keep the *outer* retries sparse, without drawing the conclusion
 for the request step. The re-send announces itself with a bare `print()`, so it never appeared under
 any logger. Now `send_flex_request` issues **one GET** with `_SEND_REQUEST_TIMEOUT = (10, 60)` and
-parses the reply with ibflex's own parser (same exception types), and `fetch_flex_data` fails fast
-on a `ReadTimeout` the way it does on a `1001` (since 2026-10-17, on every transport error that may
-have been sent — above). Pinned by the "SendRequest is one HTTP request" block in
+parses the reply into ibflex's exception types (with ibflex's own parser until 2026-10-18 —
+above), and `fetch_flex_data` fails fast on a `ReadTimeout` the way it does on a `1001` (since
+2026-10-17, on every transport error that may have been sent — above). Pinned by the "SendRequest is one HTTP request" block in
 `tests/test_flex_retry_policy.py`, including a source guard on call sites.
 
 **The poll step left ibflex on 2026-10-17 (issue #5)**, for the per-token rate. It fired its first
@@ -170,8 +189,9 @@ retrieves, so the fixed cadence stayed.
 
 **Flex error codes:** `1001` statement not ready (transient, expected — poll, don't re-request),
 `1004`–`1008` incomplete / settlement, FIFO or MTM data not ready and `1009` heavy load (the same:
-poll, don't re-request), `1003` not available (terminal), `1018` rate limit (1/sec, 10/min per token),
-`1019`/`1021` transient,
+poll, don't re-request), `1003` not available (terminal), `1018` rate limit (1/sec, 10/min per token;
+the one code re-sent at the request step, after >= 60 s), `1019` generation in progress and `1021`
+could not be retrieved (poll, don't re-request — since 2026-10-18),
 `1025` **undocumented** token lockout from repeated failures (fatal, never retry), `1012` token expired,
 `1013` IP restriction, `1015` bad token. The official table stops at 1021 — 1025 appears nowhere in it.
 

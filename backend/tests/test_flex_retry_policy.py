@@ -380,10 +380,12 @@ def test_retrieve_gives_up_at_the_deadline(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_custom_retry_delays_control_attempt_count(monkeypatch, no_sleep):
-    # BadResponseError wraps a requests.Response, so hand it something with .content
-    calls = _always_raise(monkeypatch, BadResponseError(SimpleNamespace(content=b'')))
+    """The budget, on a failure that provably never left the machine. Until 2026-10-18 this
+    used a BadResponseError, which pinned four SendRequests on a reply IBKR may have sent
+    (issue #15); that now fails fast, below."""
+    calls = _always_raise(monkeypatch, _dns_failure())
 
-    with pytest.raises(BadResponseError):
+    with pytest.raises(type(_dns_failure())):
         await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=[1, 2, 3])
 
     assert calls['n'] == 4
@@ -526,7 +528,9 @@ _BUDGETS = [None, FLEX_RETRY_DELAYS_PATIENT]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
-@pytest.mark.parametrize("code", ["1001", "1004", "1005", "1006", "1007", "1008", "1009"])
+@pytest.mark.parametrize(
+    "code", ["1001", "1004", "1005", "1006", "1007", "1008", "1009", "1019", "1021"]
+)
 async def test_not_ready_family_at_the_request_step_is_never_re_requested(
     monkeypatch, code, budget
 ):
@@ -634,6 +638,170 @@ def test_never_reached_ibkr_is_a_whitelist():
         assert ibkr_module._never_reached_ibkr(exc), exc
     for exc in _sent_then_lost().values():
         assert not ibkr_module._never_reached_ibkr(exc), exc
+
+
+# --- What SendRequest answered, read tolerantly ------------------------------------------
+#
+# Issue #15 (2026-10-18). ibflex's parse_stmt_response wraps its whole body in `except
+# Exception: raise BadResponseError`, so a real Success (a generation running) or a real
+# Fail 1001 (a counted failed generation) became "garbled" the moment it carried one
+# element its 3-field dataclasses do not model, or a timestamp outside EST/EDT — and the
+# request step re-sent a BadResponseError up to three times. The envelope is now read by
+# tag; a reply that is still not one fails fast like a possibly-delivered transport error.
+
+_GET_STATEMENT_URL = (
+    'https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement'
+)
+_SUCCESS = (
+    '<Status>Success</Status>', '<ReferenceCode>REF123</ReferenceCode>',
+    f'<Url>{_GET_STATEMENT_URL}</Url>',
+)
+
+
+def _fail(code, msg='Statement could not be generated at this time.'):
+    return ('<Status>Fail</Status>', f'<ErrorCode>{code}</ErrorCode>',
+            f'<ErrorMessage>{msg}</ErrorMessage>')
+
+
+def _envelope(*children, timestamp='17 October, 2026 12:00 PM EDT'):
+    attr = '' if timestamp is None else f' timestamp="{timestamp}"'
+    return f'<FlexStatementResponse{attr}>{"".join(children)}</FlexStatementResponse>'.encode()
+
+
+def _unmodelled(children):
+    """Real envelopes ibflex 0.15 cannot build its dataclasses from."""
+    return {
+        "extra-field": _envelope(*children, '<Note>x</Note>'),
+        "other-zone": _envelope(*children, timestamp='17 October, 2026 04:00 PM GMT'),
+        "no-timestamp": _envelope(*children, timestamp=None),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
+@pytest.mark.parametrize("kind", list(_unmodelled(_SUCCESS)))
+async def test_a_success_ibflex_cannot_model_is_polled_not_re_sent(monkeypatch, kind, budget):
+    body = _unmodelled(_SUCCESS)[kind]
+    # The premise: the pinned library calls this reply garbled.
+    with pytest.raises(BadResponseError):
+        ibkr_module.client.parse_stmt_response(SimpleNamespace(content=body))
+
+    server = _FakeFlexServer([_STATEMENT], send_results=[body]).install(monkeypatch)
+    monkeypatch.setattr(IBKRService, 'parse_flex_xml', lambda self, xml: {'xml': xml})
+
+    result = await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert result == {'xml': _STATEMENT}
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 1  # REF123 — the fake asserts the reference
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
+@pytest.mark.parametrize("kind", list(_unmodelled(_fail('1001'))))
+async def test_a_1001_ibflex_cannot_model_is_never_re_requested(monkeypatch, kind, budget):
+    body = _unmodelled(_fail('1001'))[kind]
+    with pytest.raises(BadResponseError):
+        ibkr_module.client.parse_stmt_response(SimpleNamespace(content=body))
+
+    server = _FakeFlexServer(send_results=[body]).install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match='Code=1001.*Not re-requesting'):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 0
+    assert server.clock.sleeps == []
+
+
+_NOT_AN_ENVELOPE = {
+    "empty": b'',
+    "html": b'<html><body>Service Unavailable</body></html>',
+    "html-not-well-formed": b'<html><body>502 Bad Gateway<br></body></html>',
+    "plain-text": b'Service Unavailable',
+    "no-status": _envelope('<ReferenceCode>REF123</ReferenceCode>'),
+    "unknown-status": _envelope('<Status>Pending</Status>', '<ReferenceCode>REF123</ReferenceCode>'),
+    "success-without-reference": _envelope('<Status>Success</Status>'),
+    "fail-without-code": _envelope('<Status>Fail</Status>', '<ErrorMessage>x</ErrorMessage>'),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", _BUDGETS, ids=["interactive", "patient"])
+@pytest.mark.parametrize("kind", list(_NOT_AN_ENVELOPE))
+async def test_a_reply_that_is_not_an_envelope_fails_fast_at_the_request_step(
+    monkeypatch, kind, budget
+):
+    server = _FakeFlexServer(send_results=[_NOT_AN_ENVELOPE[kind]]).install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match='BadResponseError.*Not re-requesting'):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 0
+    assert server.clock.sleeps == []
+
+
+def test_a_warn_envelope_carries_ibkrs_code():
+    body = _envelope('<Status>Warn</Status>', '<ErrorCode> 1018 </ErrorCode>',
+                     '<ErrorMessage>Too many requests.</ErrorMessage>', '<Note>x</Note>')
+
+    with pytest.raises(ResponseCodeError) as exc:
+        ibkr_module._parse_flex_reply(SimpleNamespace(content=body))
+    assert (exc.value.code, exc.value.msg) == ("1018", "Too many requests.")
+
+
+def test_only_the_rate_limit_is_re_sent_at_the_request_step():
+    """1019 and 1021 went on 2026-10-18 (issue #15): see the constant's comment."""
+    assert ibkr_module._REQUEST_RETRYABLE_CODES == {"1018"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "budget, expected_sleeps",
+    [(None, [60]), (FLEX_RETRY_DELAYS_PATIENT, FLEX_RETRY_DELAYS_PATIENT)],
+    ids=["interactive", "patient"],
+)
+async def test_rate_limit_1018_at_the_request_step_is_re_sent_past_the_minute(
+    monkeypatch, budget, expected_sleeps
+):
+    server = _FakeFlexServer(
+        send_results=[_reply('1018', 'Too many requests have been made from this token.')]
+    ).install(monkeypatch)
+
+    with pytest.raises(ResponseCodeError):
+        await IBKRService(token='t', query_id='q').fetch_flex_data(retry_delays=budget)
+
+    assert server.request_calls == len(expected_sleeps) + 1
+    assert server.clock.sleeps == expected_sleeps
+    assert min(server.clock.sleeps) >= 60
+
+
+def test_an_envelope_ibflex_cannot_model_keeps_its_pending_meaning_mid_poll(monkeypatch):
+    """The shared parser changes nothing about polling: 1001 and 1019 still mean "keep
+    retrieving the same reference" there, extra fields or not."""
+    server = _FakeFlexServer([
+        _unmodelled(_fail('1001'))["extra-field"],
+        _unmodelled(_fail('1019', 'Statement generation in progress.'))["other-zone"],
+        _STATEMENT,
+    ]).install(monkeypatch)
+
+    assert IBKRService(token='t', query_id='q')._download_statement(60) == _STATEMENT
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 3
+
+
+def test_a_lockout_ibflex_cannot_model_mid_poll_stops_the_poll(monkeypatch):
+    """Read as garbled, this 1025 used to be polled until the deadline."""
+    server = _FakeFlexServer([
+        _unmodelled(_fail('1025', 'Too many failed attempts.'))["extra-field"],
+    ]).install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match='temporarily locked'):
+        IBKRService(token='t', query_id='q')._download_statement(900)
+
+    assert server.request_calls == 1
+    assert server.retrieve_calls == 1
 
 
 # --- The poll step: paced, and reading IBKR's own code ----------------------------------
