@@ -13,14 +13,23 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
 docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech UI pass on every
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
-verified first by an offline repro; Tier 1 (#13–#18, #41), wave 2 (#19–#25) and wave 3
-(#26–#31) shipped the same day (docs/shipped-log.md 2026-10-18). #32–#40, #42–#52 are open,
-numbered in fix order (#52 found during #28).
+verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
+the same day (docs/shipped-log.md 2026-10-18). #38–#40 and #42–#51 are open, numbered in fix
+order.
 
 ---
 
 ## Needs a human
 
+- **Refresh `/root/auto-deploy.sh` from the repo (#37's CI gate)** once `/health` shows the wave-4
+  commit — the VPS runs a copy, so until then the old gate (error reply = "no checks", 180 s
+  commit-age proxy) is still live. docs/deployment.md has the atomic-rename snippet:
+  `cp ops/auto-deploy.sh /root/auto-deploy.sh.new && chmod 755 /root/auto-deploy.sh.new && mv -f /root/auto-deploy.sh.new /root/auto-deploy.sh`
+  (run in `/root/IBKR_investment_tracker`).
+- **Install the SQLite pre-commit hook in your clone (#36):** `git config core.hooksPath ops/hooks`.
+  This clone's `core.hooksPath` still points at the pre-rename folder
+  (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
+  today. CI refuses a tracked SQLite file either way.
 - **Tell the `ibkr-sync-validator` routine about the weekend schedule (#9).** Its prompt lives
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
@@ -143,6 +152,12 @@ Only what is still unverified.
   - Percentages with nothing to divide by show a dash, not 0.0% (#29); the hero's Realized gain
     carries "N sale(s) unpriced" only if a sale could not be priced or converted (#26).
   - A window over 5 years or before 1900 answers 400 on every window route (#30).
+- **The audit's wave 4 (#32–#37, #52) on production:**
+  - The next push after `/root/auto-deploy.sh` is refreshed logs `WAIT: no CI checks yet … deferring`
+    for a tick or two instead of "deploying ungated" (#37); `/root/.auto-deploy-ci-wait` exists
+    only while one is pending.
+  - `/api/watchlist` answers noticeably faster; rows keep their logos (#32).
+  - The 18:00 `market_result` stops re-listing a sold security whose close date has no bar (#33).
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
@@ -216,7 +231,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #32–#40 and #42–#52, in number order** (`gh issue list`). Each carries its
+1. **The open audit issues, #38–#40 and #42–#51, in number order** (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
@@ -256,8 +271,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 One line each, newest first; drop the oldest.
 
 - **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
-  offline repros, 39 issues filed (#13–#51); Tier 1 (#13–#18, #41) and waves 2–3 (#19–#31) fixed
-  in worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
+  offline repros, 39 issues filed (#13–#51, plus #52); Tier 1 and waves 2–4 (#13–#37, #41, #52)
+  fixed in worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
 - **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
   (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
   KPI figures never wrap; `bluegill` merged.

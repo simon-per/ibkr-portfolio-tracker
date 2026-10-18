@@ -7,6 +7,27 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — the audit's wave 4 (#32–#37, #52)
+
+- **#32** (`8e01543`): `yahoo_ticker_for` / `yahoo_tickers_for` split; the watchlist index is
+  built once, held first; 5 statements per GET at any size (was 1 + one per security).
+- **#33** (`3eaf994`): the 18:00 repair probe forgives a trailing run of up to 5 weekdays at
+  an old close date (`REPAIR_TRAILING_GRACE_WEEKDAYS`).
+- **#34** (`5145dc5`): `app/services/coinstats_parse.py`, one copy for the sync, the rebuild
+  CLI and the probe.
+- **#35** (`03cc4c0`): `app/services/yahoo_minor_units.py`; dividends scaled like prices.
+- **#36** (`c569ffb`): wider `.gitignore`; `ops/check_no_sqlite.py` in CI, a test and
+  `ops/hooks/pre-commit`.
+- **#37** (`ffe3f0d`): the auto-deploy CI gate reads a non-200 as unavailable and defers a
+  missing verdict up to 30 minutes for a commit carrying the workflow. **Needs
+  `/root/auto-deploy.sh` refreshed** (STATUS.md *Needs a human*).
+- **#52** (`000cd47`): Positions' weight denominator uses in-book cash (`inBookCash`), the
+  server's rule.
+
+Verified offline: backend 2540 passed / 8 skipped plus 24 deploy-script tests, frontend 1088
+passed, build green. One xdist collection flake from the new #36 test (a gzip mtime in a
+parametrize id) fixed in `28fa8b9`.
+
 ## Shipped 2026-10-18 — the audit's wave 3 (#26–#31)
 
 - **#26** (`a7a1268`): closed positions fall back to closed lots when any SELL is
