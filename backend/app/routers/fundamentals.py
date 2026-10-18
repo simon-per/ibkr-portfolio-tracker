@@ -1,4 +1,5 @@
 import logging
+from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal, get_db
 from app.repositories.fundamentals_repository import FundamentalsRepository, sync_scope
 from app.repositories.sync_run_repository import utc_iso
-from app.schemas.portfolio import FundamentalsStatus
+from app.schemas.portfolio import (
+    EarningsCalendarItem,
+    EarningsHistoryItem,
+    FundamentalMetricsResponse,
+    FundamentalsStatus,
+)
 from app.services.fundamentals_service import FundamentalsService
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
@@ -89,14 +95,14 @@ async def sync_stale_fundamentals(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to sync stale fundamentals: {str(e)}")
 
 
-@router.get("/portfolio")
+@router.get("/portfolio", response_model=List[FundamentalMetricsResponse])
 async def get_portfolio_fundamentals(db: AsyncSession = Depends(get_db)):
     """Get fundamental metrics for all portfolio securities."""
     service = FundamentalsService(db)
     return await service.get_fundamentals_for_portfolio()
 
 
-@router.get("/earnings/upcoming")
+@router.get("/earnings/upcoming", response_model=List[EarningsCalendarItem])
 async def get_upcoming_earnings(
     days_ahead: int = Query(90, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -106,7 +112,7 @@ async def get_upcoming_earnings(
     return await service.get_earnings_calendar(days_ahead)
 
 
-@router.get("/earnings/history")
+@router.get("/earnings/history", response_model=List[EarningsHistoryItem])
 async def get_earnings_history(
     days_back: int = Query(365, ge=1, le=1825),
     db: AsyncSession = Depends(get_db),

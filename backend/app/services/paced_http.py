@@ -15,9 +15,16 @@ Neutral on purpose (moved out of the crypto-only `crypto_http` on 2026-10-17, wh
 logo.dev client became the third user): transport only, no table, no figure, so the crypto
 book may import it (`tests/test_crypto_isolation.py`, `ALLOWED_SHARED`) and a stock-side
 client may too without importing crypto code. `tests/test_crypto_http.py` fails any module
-that defines its own `_pace` again.
+that defines its own `_pace` again, or stamps `_last_request_at` outside this one.
+
+Pace-then-stamp is `_paced()`, a context manager, rather than inline in `_send`, because
+logo.dev's image download cannot go through `_send`: it streams (an oversized answer is
+cut off, never held in full) and its error must not carry the signed URL. It carried its
+own copy of the pace and the `finally` stamp until GitHub issue #44; now both requests
+enter the same block.
 """
-from typing import Any, Dict, Optional, Type
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, Optional, Type
 
 import httpx
 
@@ -29,11 +36,24 @@ class PacedGet:
     """
 
     async def _pace(self) -> None:
-        # `_last_request_at` is when the previous call *finished* (see `_send`).
+        # `_last_request_at` is when the previous call *finished* (see `_paced`).
         if self._last_request_at is not None:
             wait = self._min_interval_s - (self._clock() - self._last_request_at)
             if wait > 0:
                 await self._sleep(wait)
+
+    @asynccontextmanager
+    async def _paced(self) -> AsyncIterator[None]:
+        """
+        Wrap one request: wait out the interval on entry, stamp when it *finished* on exit
+        — success, error or a body abandoned half-read alike, so a slow or failed call
+        still spaces the next one.
+        """
+        await self._pace()
+        try:
+            yield
+        finally:
+            self._last_request_at = self._clock()
 
     async def _send(
         self,
@@ -43,13 +63,11 @@ class PacedGet:
         headers: Dict[str, str],
         transient: Type[Exception],
     ) -> httpx.Response:
-        await self._pace()
-        try:
-            return await self._client.get(path, params=params, headers=headers)
-        except httpx.HTTPError as e:
-            raise transient(f"{path}: {type(e).__name__}: {e}") from e
-        finally:
-            self._last_request_at = self._clock()
+        async with self._paced():
+            try:
+                return await self._client.get(path, params=params, headers=headers)
+            except httpx.HTTPError as e:
+                raise transient(f"{path}: {type(e).__name__}: {e}") from e
 
 
 def json_body(path: str, response: httpx.Response, transient: Type[Exception]) -> Any:

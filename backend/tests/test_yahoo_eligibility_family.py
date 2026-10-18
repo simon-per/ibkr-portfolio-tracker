@@ -24,14 +24,14 @@ from app.models.security import PRICE_SOURCE_MANUAL, PRICE_SOURCE_YAHOO, Securit
 from app.services.yahoo_eligibility import is_yahoo_eligible, yahoo_eligible
 
 
-SERVICES = pathlib.Path(__file__).resolve().parents[1] / "app" / "services"
+APP = pathlib.Path(__file__).resolve().parents[1] / "app"
 
 # Modules the walk matches but which are not in the family, each with the reason.
 # A reason is mandatory and an *unused* entry fails the test below, which is what
 # keeps this from becoming the stale exemption list that structural tests rot into:
 # it can only shrink by someone fixing a module, never by someone forgetting one.
 NOT_IN_THE_FAMILY = {
-    "benchmark_service.py": (
+    "services/benchmark_service.py": (
         "Fetches by *benchmark ticker* from the hardcoded BENCHMARKS dict, never by "
         "portfolio security. Its only Security select is `select(TaxLot, Security)` "
         "for the money-in basis, which must blend across accounts — filtering it "
@@ -39,6 +39,20 @@ NOT_IN_THE_FAMILY = {
         "contributions."
     ),
 }
+
+
+def _app_modules():
+    """
+    Every module under `app/` — services, routers, the CLIs and the top level. The walk
+    covered `app/services` alone until GitHub issue #44, so a router or CLI handing
+    securities to Yahoo would have passed unopened; `cli/manage_mappings.py` reaches
+    Yahoo from the command line.
+    """
+    return sorted(APP.rglob("*.py"))
+
+
+def _label(path: pathlib.Path) -> str:
+    return path.relative_to(APP).as_posix()
 
 
 def _imports_yfinance(tree: ast.AST) -> bool:
@@ -76,13 +90,13 @@ def test_every_yahoo_service_that_selects_securities_consults_the_predicate():
     never heard of it, which is the failure that actually happens.
     """
     offenders = []
-    for path in sorted(SERVICES.glob("*.py")):
+    for path in _app_modules():
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
         if not (_imports_yfinance(tree) and _selects_security(tree)):
             continue
-        if "yahoo_eligible" not in source and path.name not in NOT_IN_THE_FAMILY:
-            offenders.append(path.name)
+        if "yahoo_eligible" not in source and _label(path) not in NOT_IN_THE_FAMILY:
+            offenders.append(_label(path))
 
     assert not offenders, (
         f"{offenders} select securities and hand them to Yahoo without consulting "
@@ -102,7 +116,7 @@ def test_no_exemption_outlives_its_reason():
     true. Fails in *both* directions: a stale entry, and one that lost its reason.
     """
     matched = {
-        path.name for path in sorted(SERVICES.glob("*.py"))
+        _label(path) for path in _app_modules()
         if _imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
         and _selects_security(tree)
     }
@@ -127,7 +141,7 @@ def test_the_family_is_not_empty():
     count cannot fail. Pin that the walk actually finds the modules it is about.
     """
     matched = [
-        path.name for path in sorted(SERVICES.glob("*.py"))
+        _label(path) for path in _app_modules()
         if _imports_yfinance(tree := ast.parse(path.read_text(encoding="utf-8")))
         and _selects_security(tree)
     ]

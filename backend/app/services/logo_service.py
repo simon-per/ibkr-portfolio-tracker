@@ -215,25 +215,25 @@ class LogoDevClient(PacedGet):
         if target.scheme != "https":
             raise LogoRefused("the download URL is not https")
         target = target.copy_merge_params(DOWNLOAD_PARAMS)
-        await self._pace()
-        try:
-            async with self._client.stream("GET", target) as response:
-                status = response.status_code
-                if status in STOP_STATUSES:
-                    raise LogoDevStop(status)
-                if status != 200:
-                    raise LogoDevError(f"download answered HTTP {status}")
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > MAX_LOGO_BYTES:
-                        break
-                return bytes(body), response.headers.get("content-type")
-        except httpx.HTTPError as e:
-            # Never str(e): it would carry the signed URL and its signature.
-            raise LogoDevError(f"download failed: {type(e).__name__}") from e
-        finally:
-            self._last_request_at = self._clock()
+        # Not `_send`: this streams, and its error must not carry the URL. The pacing is
+        # still the shared one (`PacedGet._paced`).
+        async with self._paced():
+            try:
+                async with self._client.stream("GET", target) as response:
+                    status = response.status_code
+                    if status in STOP_STATUSES:
+                        raise LogoDevStop(status)
+                    if status != 200:
+                        raise LogoDevError(f"download answered HTTP {status}")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > MAX_LOGO_BYTES:
+                            break
+                    return bytes(body), response.headers.get("content-type")
+            except httpx.HTTPError as e:
+                # Never str(e): it would carry the signed URL and its signature.
+                raise LogoDevError(f"download failed: {type(e).__name__}") from e
 
 
 @dataclass

@@ -43,6 +43,7 @@ from app.models.dividend_forecast_snapshot import (
 )
 from app.models.dividend_payment import DividendPayment
 from app.models.analyst_rating import AnalystRating
+from app.models.earnings_event import EarningsEvent
 from app.models.exchange_rate import ExchangeRate
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.market_price import MarketPrice
@@ -82,6 +83,8 @@ READ_ENDPOINTS = [
     "/api/allocation/status",
     "/api/fundamentals/status",
     "/api/fundamentals/portfolio",
+    "/api/fundamentals/earnings/upcoming",
+    "/api/fundamentals/earnings/history",
     "/api/watchlist",
     "/api/dividends/summary",
     "/api/dividends/breakdown",
@@ -227,6 +230,16 @@ async def _seed(session: AsyncSession) -> None:
     session.add(FundamentalMetrics(security_id=4, quote_type="EQUITY",
                                    market_cap=10_000_000_000, data_currency="TWD",
                                    last_updated=now))
+    # Earnings both sides of now, so the two earnings lists serve rows, not `[]`: ASML
+    # reports in ten days, TSMC beat a month ago, and AAPL (sold) is filtered out of both.
+    session.add(EarningsEvent(security_id=1, earnings_date=datetime.combine(
+        TODAY + timedelta(days=10), time(12)), eps_estimate=5.1, is_upcoming=True))
+    session.add(EarningsEvent(security_id=4, earnings_date=datetime.combine(
+        TODAY - timedelta(days=30), time(6)), eps_estimate=1.0, reported_eps=1.1,
+        surprise_percent=10.0, is_upcoming=False))
+    session.add(EarningsEvent(security_id=3, earnings_date=datetime.combine(
+        TODAY - timedelta(days=30), time(20)), eps_estimate=1.5, reported_eps=1.6,
+        surprise_percent=6.7, is_upcoming=False))
     # A watchlist name quoted in USD: its cap is served in the base currency too.
     session.add(WatchlistItem(yahoo_ticker="NVDA", symbol="NVDA", company_name="NVIDIA",
                               market_cap=4_000_000_000_000, data_currency="USD",
@@ -915,6 +928,44 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     ratings = client.get("/api/analyst-ratings/status").json()
     assert ratings["newest_update"].endswith("+00:00")
     assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")
+
+
+@pytest.mark.parametrize("path, method, model_name", [
+    ("/api/fundamentals/portfolio", "get_fundamentals_for_portfolio",
+     "FundamentalMetricsResponse"),
+    ("/api/fundamentals/earnings/upcoming", "get_earnings_calendar", "EarningsCalendarItem"),
+    ("/api/fundamentals/earnings/history", "get_earnings_history", "EarningsHistoryItem"),
+])
+def test_the_fundamentals_lists_build_exactly_their_response_model(
+    client, monkeypatch, path, method, model_name
+):
+    """
+    These three routes returned bare dicts until GitHub issue #44 attached their models.
+    A `response_model` is a filter — a key the service adds and the model lacks is
+    dropped, and a key the model declares with a default is filled in — so the wire
+    alone cannot show drift. Compare what the service builds, in both directions.
+    """
+    import app.schemas.portfolio as schemas
+    from app.services.fundamentals_service import FundamentalsService
+
+    built = []
+    original = getattr(FundamentalsService, method)
+
+    async def _spy(self, *args, **kwargs):
+        rows = await original(self, *args, **kwargs)
+        built.extend(rows)
+        return rows
+
+    monkeypatch.setattr(FundamentalsService, method, _spy)
+    response = client.get(path)
+    assert response.status_code == 200, response.text
+    assert built, "the fixture must give this list rows, or the comparison is vacuous"
+    declared = set(getattr(schemas, model_name).model_fields)
+    for row in built:
+        assert set(row) == declared, (set(row) ^ declared)
+    assert [r["security_id"] for r in response.json()] == [r["security_id"] for r in built]
+    # Held only: AAPL (3) was sold, so its earnings rows stay off both lists.
+    assert 3 not in {r["security_id"] for r in built}
 
 
 def test_fundamentals_status_says_whether_a_sync_is_running(client, monkeypatch):

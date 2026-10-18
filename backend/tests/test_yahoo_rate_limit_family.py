@@ -11,7 +11,7 @@ security, the most expensive of the four), `AnalystRatingService` and `Watchlist
 all caught the error, logged it, and continued through the whole list.
 
 **These tests are written against the family, not the instances.** The last one walks the
-source for any service that loops and calls Yahoo and asserts it consults the shared
+source for any module under `app/` that calls Yahoo and asserts it consults the shared
 predicate — so a fifth service added later is caught without anyone remembering to
 extend this file. That is the lesson CLAUDE.md draws from the same bug appearing twice.
 
@@ -283,32 +283,68 @@ async def _ticker(security):
 
 
 # ── The family rule ─────────────────────────────────────────────────────────
+#
+# The walks below cover every module under `app/` — services, routers, the CLIs and the
+# top level — not `app/services` alone. A narrower glob passed while
+# `app/cli/manage_mappings.py` loops `yf.Ticker(...).history` over tickers (it conforms,
+# but nothing checked) and `app/yf_cache.py` imports yfinance (GitHub issue #44): the
+# rule is about who reaches Yahoo, and a directory is not that.
+
+APP = pathlib.Path(__file__).resolve().parents[1] / "app"
+
+# Modules the walks match that make no Yahoo request, each with the reason. A reason is
+# mandatory and an entry that no longer imports yfinance fails
+# `test_no_rate_limit_exemption_outlives_its_reason`, so this can only shrink by
+# someone fixing a module, never by someone forgetting one.
+NOT_IN_THE_FAMILY = {
+    "yf_cache.py": (
+        "Imports yfinance only to call `yf.set_tz_cache_location`, which points the "
+        "library's on-disk caches at a directory: a local setting, not a request, made "
+        "once at startup. There is no 429 for it to swallow and no loop to abandon."
+    ),
+}
+
+
+def _app_modules():
+    return sorted(APP.rglob("*.py"))
+
+
+def _label(path: pathlib.Path) -> str:
+    """`cli/manage_mappings.py`, not `manage_mappings.py`: the walk spans directories."""
+    return path.relative_to(APP).as_posix()
+
+
+def _imports_yfinance(tree: ast.AST) -> bool:
+    # An AST import, not the word "yfinance" — three pure helper modules
+    # (peg_ratio, safe_numbers, ttm_growth) only mention it in prose, and matching
+    # those would make this assertion noise that gets silenced rather than read.
+    return any(
+        (isinstance(n, ast.Import) and any(a.name.split(".")[0] == "yfinance" for a in n.names))
+        or (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "yfinance")
+        for n in ast.walk(tree)
+    )
+
+
+def _yahoo_modules() -> list:
+    return [
+        path for path in _app_modules()
+        if _imports_yfinance(ast.parse(path.read_text(encoding="utf-8")))
+    ]
+
 
 def test_every_yahoo_looping_service_consults_the_shared_predicate():
     """
     The check that survives a fifth service being added.
 
-    Any service module that both imports yfinance and loops is in this family, and must
-    reach the one definition of "rate limited" rather than rolling its own keyword list
-    — which is how `market_data_service`'s copy sat alone for months.
+    Any module that imports yfinance is in this family, and must reach the one
+    definition of "rate limited" rather than rolling its own keyword list — which is how
+    `market_data_service`'s copy sat alone for months.
     """
-    root = pathlib.Path(__file__).resolve().parents[1] / "app"
-    offenders = []
-    for path in sorted(list((root / "services").glob("*.py"))):
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        # An AST import, not the word "yfinance" — three pure helper modules
-        # (peg_ratio, safe_numbers, ttm_growth) only mention it in prose, and matching
-        # those would make this assertion noise that gets silenced rather than read.
-        imports_yahoo = any(
-            (isinstance(n, ast.Import) and any(a.name.split(".")[0] == "yfinance" for a in n.names))
-            or (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "yfinance")
-            for n in ast.walk(tree)
-        )
-        if not imports_yahoo:
-            continue
-        if "is_rate_limit" not in source:
-            offenders.append(path.name)
+    offenders = [
+        _label(path) for path in _yahoo_modules()
+        if "is_rate_limit" not in path.read_text(encoding="utf-8")
+        and _label(path) not in NOT_IN_THE_FAMILY
+    ]
     assert not offenders, (
         f"{offenders} call Yahoo but never consult yahoo_rate_limit.is_rate_limit. "
         "A loop that keeps asking after a 429 is what turns a short block into a long "
@@ -316,14 +352,35 @@ def test_every_yahoo_looping_service_consults_the_shared_predicate():
     )
 
 
+def test_the_walk_reaches_past_app_services():
+    """
+    A structural test that matches nothing passes vacuously, and one that matches only
+    `app/services` passes on a CLI it never opens. Pin both: the known services, and the
+    CLI that loops Yahoo from the command line.
+    """
+    matched = {_label(path) for path in _yahoo_modules()}
+    assert "cli/manage_mappings.py" in matched, sorted(matched)
+    assert len({m for m in matched if m.startswith("services/")}) >= 5, sorted(matched)
+
+
+def test_no_rate_limit_exemption_outlives_its_reason():
+    """An exemption nothing exercises is a claim nobody is checking; and each says why."""
+    matched = {_label(path) for path in _yahoo_modules()}
+    stale = set(NOT_IN_THE_FAMILY) - matched
+    assert not stale, (
+        f"{sorted(stale)} are exempted from the rate-limit family but no longer import "
+        "yfinance. Delete the entry."
+    )
+    assert all(reason.strip() for reason in NOT_IN_THE_FAMILY.values())
+
+
 def test_nobody_has_reintroduced_a_private_keyword_list():
     """
     Extract, don't sync: a second copy of the marker list is the failure this module was
     created to end, and it would drift silently because both copies keep working.
     """
-    services = pathlib.Path(__file__).resolve().parents[1] / "app" / "services"
     offenders = []
-    for path in sorted(services.glob("*.py")):
+    for path in _app_modules():
         if path.name == "yahoo_rate_limit.py":
             continue
         source = path.read_text(encoding="utf-8")
@@ -334,7 +391,7 @@ def test_nobody_has_reintroduced_a_private_keyword_list():
                 values = [e.value for e in node.elts
                           if isinstance(e, ast.Constant) and isinstance(e.value, str)]
                 if any("too many requests" in v.lower() for v in values):
-                    offenders.append(f"{path.name}:{node.lineno}")
+                    offenders.append(f"{_label(path)}:{node.lineno}")
     assert not offenders, (
         f"a private rate-limit marker list reappeared at {offenders}; "
         "import is_rate_limit instead"
@@ -414,7 +471,6 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
     happen is the text going nowhere, because then no caller can tell the two cases
     apart no matter how carefully it is written.
     """
-    root = pathlib.Path(__file__).resolve().parents[1] / "app"
     offenders = []
 
     def ticker_names(tree) -> set:
@@ -474,7 +530,9 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
                             return False
         return True
 
-    for path in sorted((root / "services").glob("*.py")):
+    for path in _app_modules():
+        if _label(path) in NOT_IN_THE_FAMILY:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         tickers = frozenset(ticker_names(tree))
         for node in ast.walk(tree):
@@ -485,7 +543,7 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
                     continue
                 if not _discards_the_exception(handler):
                     continue
-                offenders.append(f"{path.name}:{handler.lineno}")
+                offenders.append(f"{_label(path)}:{handler.lineno}")
 
     assert not offenders, (
         "these handlers wrap a yfinance call, catch everything, and never ask whether "
