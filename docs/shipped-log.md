@@ -7,6 +7,14 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — #47, read paths read each table once
+
+`f23a71a`: `/summary` 33 → 9 queries (CashService per-instance memo, one grouped start-date query),
+closed positions 106 → 8 (bulk price queries), decomposition 48 → 27 (`load_attribution_inputs`).
+Every figure proven identical offline against the old paths; on production the summary, positions
+and closed-positions responses were fingerprinted before and after the deploy (`fingerprint.py`
+pattern: sorted JSON minus volatile keys, hashed — no figures leave the server).
+
 ## Shipped 2026-10-18 — #39 and the audit's wave 6 part one (#48–#50)
 
 - **#39** (`870634e`, pushed alone): Node 22, `permissions: contents: read`, actions pinned

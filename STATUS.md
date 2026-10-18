@@ -15,7 +15,7 @@ docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
-#38, #47 and #51 are open.
+#47 followed; #38 and #51 are open.
 
 ---
 
@@ -242,7 +242,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #38, #47 and #51** (`gh issue list`). Each carries its
+1. **The open audit issues, #38 and #51** (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
