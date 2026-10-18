@@ -23,6 +23,18 @@ describe('KpiCard', () => {
     expect(screen.getByText('Risk-adjusted return')).toBeTruthy()
   })
 
+  it('keeps a figure on one line, and six tiles in a row only where they fit', () => {
+    // "-CHF 57,244.07" broke after its ASCII hyphen in a six-tile strip at 1280px: the
+    // sign alone on one line, the amount on the next.
+    const { container } = render(
+      <KpiPanel columns={6}><KpiCard tile label="Bought" value="-CHF 57,244.07" /></KpiPanel>,
+    )
+    expect(screen.getByText('-CHF 57,244.07').className).toContain('whitespace-nowrap')
+    const grid = container.querySelector('.grid') as HTMLElement
+    expect(grid.className).toContain('xl:grid-cols-6')
+    expect(grid.className).not.toContain('lg:grid-cols-6')
+  })
+
   it('renders an absent value as a dash, never a zero', () => {
     // The invariant three of the four files each implemented separately — and disagreed
     // on. An absent metric means "unknown"; rendering 0 would assert a fact.

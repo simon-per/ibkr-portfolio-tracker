@@ -34,9 +34,12 @@ export type KpiTone = Tone
  * The hero keeps its size because it has the whole row to itself.
  */
 /* No `tabular-nums` on a lone figure: Inter gives the hyphen a full figure width under it,
-   which opened a gap in every negative value, and one figure has nothing to align with. */
-const VALUE_CLASS = 'text-lg font-semibold leading-tight tracking-tight sm:text-[1.375rem]'
-const HERO_VALUE_CLASS = 'text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-[2rem]'
+   which opened a gap in every negative value, and one figure has nothing to align with.
+   `whitespace-nowrap`: a formatted figure carries an ASCII hyphen ("-CHF 57,244.07"), and a
+   browser may break a line after a hyphen — in a narrow tile the sign sat alone above the
+   amount. A panel too narrow for its figures takes fewer columns instead (`KpiPanel`). */
+const VALUE_CLASS = 'whitespace-nowrap text-lg font-semibold leading-tight tracking-tight sm:text-[1.375rem]'
+const HERO_VALUE_CLASS = 'whitespace-nowrap text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-[2rem]'
 const LABEL_CLASS = 'text-xs font-medium text-muted-foreground'
 
 export interface KpiCardProps {
@@ -108,6 +111,7 @@ export function KpiCard({
     <>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <div
+          data-kpi-value=""
           className={cn(
             hero ? HERO_VALUE_CLASS : VALUE_CLASS,
             TONE_TEXT[absent ? 'muted' : tone],
@@ -198,7 +202,9 @@ export function KpiPanel({
     3: 'md:grid-cols-3',
     4: 'md:grid-cols-2 lg:grid-cols-4',
     5: 'md:grid-cols-3 lg:grid-cols-5',
-    6: 'md:grid-cols-3 lg:grid-cols-6',
+    // Six in a row only from `xl`, at `text-lg`: at `lg` a sixth of the page is ~120px of
+    // tile, narrower than "-CHF 57,244.07" at any size that still reads as a headline.
+    6: 'md:grid-cols-3 xl:grid-cols-6 xl:[&_[data-kpi-value]]:text-lg',
   }[columns]
   return (
     <div className={cn('overflow-hidden rounded-2xl border border-border/80 bg-border/70 shadow-card', className)}>
