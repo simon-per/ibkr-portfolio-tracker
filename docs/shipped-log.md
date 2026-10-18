@@ -12,6 +12,9 @@
 - **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
   (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
   contributions and summary were identical before and after.
+- **#74 + #75** (`073ce4e`): `upcoming[].per_share_change_pct` on announced accruals;
+  `attribute_holding()` per security, so the forecast history serves `raises[]` from the
+  breakdown's own arithmetic; `payoutVerdict` the one client definition of a raise.
 - **#76** (`3f345f8`): forecast income per 1,000 of money in on the Next 12 months tile
   (`lib/incomePerMoneyIn.ts`), client-side from the forecast history and contributions.
 - **#71** (`ed88c38`): nine shares through `share_pct(digits=)`, the scan over all of `app/`;

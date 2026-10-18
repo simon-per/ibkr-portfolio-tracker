@@ -176,6 +176,9 @@ Only what is still unverified.
   - Fundamentals (#66): `/api/fundamentals/status` gains `securities_unavailable`; a logo the CDN
     refuses with a 4xx is stamped, a 5xx retried; OpenFIGI's two passes share one paced client.
   - Look-through (#68): Top 25/50/100 keeps the previous rows dimmed while loading.
+  - Dividends (#74, #75): an announced raise carries "+x%" in the calendar; "Raises & cuts N"
+    beside the payouts count opens the feed (annual level per share, old → new, %, /yr). A
+    reverse split would read as a raise there (documented gap).
   - Dividends (#76): the Next 12 months tile shows the forecast "per 1,000 in" with its own line
     and change since the first measured day — the owner's eye on whether it reads as growth.
   - Shares (#71): nine published percentages (dividend yields and shares, crypto weights) now
@@ -273,7 +276,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #72, #74, #75, #77 and #78** (`gh issue list`), in
+1. **The second audit round's open issues, #72, #77 and #78** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
