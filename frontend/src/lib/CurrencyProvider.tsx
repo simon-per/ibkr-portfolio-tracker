@@ -4,6 +4,7 @@ import { api } from './api'
 import {
   CurrencyContext, DEFAULT_SUPPORTED, FALLBACK_CURRENCY, type CurrencyContextValue,
 } from './CurrencyContext'
+import { dependsOnBaseCurrency } from './queryCache'
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
@@ -18,9 +19,11 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     mutationFn: (currency: string) => api.updateBaseCurrency(currency),
     onSuccess: (updated) => {
       queryClient.setQueryData(['settings'], updated)
-      // Every money figure depends on the base currency — refetch all data so
-      // portfolio, dividends, allocation, benchmarks, etc. re-render in the new base.
-      queryClient.invalidateQueries()
+      // Reset, not invalidate: no query key carries the base currency, so invalidating
+      // kept every old-currency figure on screen under the new label until its refetch
+      // landed — and for good if that refetch failed. A reset drops the data: active
+      // queries show their loading state, inactive ones fetch fresh on mount.
+      queryClient.resetQueries({ predicate: dependsOnBaseCurrency })
     },
   })
 

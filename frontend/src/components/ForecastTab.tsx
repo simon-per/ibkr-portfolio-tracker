@@ -11,6 +11,7 @@ import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { summaryQuery } from '@/lib/queryCache'
 import { formatCount, formatAxisMoney } from '@/lib/utils'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol } from '@/lib/CurrencyContext'
@@ -170,11 +171,7 @@ export function ForecastTab() {
   // Two reads, both under the keys Dashboard already fetches with, so neither costs a
   // request once the Performance tab has loaded. The summary query used to carry no
   // `staleTime` and refetched on every visit to this tab.
-  const { data: summary, isError: summaryError } = useQuery({
-    queryKey: ['portfolio', 'summary'],
-    queryFn: () => api.getPortfolioSummary(),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: summary, isError: summaryError } = useQuery(summaryQuery)
   const { data: contributions, isPending: contributionsPending } = useQuery({
     queryKey: ['portfolio', 'contributions'],
     queryFn: () => api.getContributions(),

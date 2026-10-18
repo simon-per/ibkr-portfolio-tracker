@@ -138,19 +138,17 @@ describe('CurrencyProvider', () => {
   })
 
   describe('changing the currency', () => {
-    it('writes the new settings and invalidates everything', async () => {
-      // Every money figure depends on the base currency, so a partial
-      // invalidation would leave surfaces disagreeing with the label.
+    it('writes the new settings and resets every query but the settings', async () => {
+      // Every money figure depends on the base currency and no key carries it, so
+      // cached data must go, not merely refetch: an invalidated query keeps showing
+      // its old-currency figures under the new label (CurrencyProvider.reset.test).
       const USD_SETTINGS = {
         base_currency: 'USD',
         supported_currencies: ['EUR', 'CHF', 'USD'],
         dividend_forecast_withholding_pct: 15,
       }
-      // `invalidateQueries()` invalidates *everything*, `['settings']` included, so
-      // the optimistic `setQueryData` is immediately overwritten by a refetch. The
-      // server's answer therefore wins — which is right, because the value was just
-      // persisted there. The mock has to change with it or it would assert that a
-      // stale server reply is honoured.
+      // The mock follows the server, so the test holds whether or not `['settings']`
+      // is refetched after the switch.
       let stored: unknown = CHF_SETTINGS
       vi.spyOn(api, 'getSettings').mockImplementation(async () => stored as never)
       const update = vi.spyOn(api, 'updateBaseCurrency').mockImplementation(async () => {
@@ -166,7 +164,8 @@ describe('CurrencyProvider', () => {
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
       })
-      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const reset = vi.spyOn(client, 'resetQueries')
+      client.setQueryData(['portfolio', 'summary'], { cached: true })
       render(
         <QueryClientProvider client={client}>
           <CurrencyProvider><Probe /><Changer /></CurrencyProvider>
@@ -177,7 +176,10 @@ describe('CurrencyProvider', () => {
       await act(async () => { screen.getByText('change').click() })
       await waitFor(() => expect(read('base')).toBe('USD'))
       expect(update).toHaveBeenCalledWith('USD')
-      expect(invalidate).toHaveBeenCalled()
+      expect(reset).toHaveBeenCalledTimes(1)
+      // The money figure is gone; the settings just written are kept, not reset.
+      expect(client.getQueryData(['portfolio', 'summary'])).toBeUndefined()
+      expect(client.getQueryData<{ base_currency: string }>(['settings'])?.base_currency).toBe('USD')
     })
 
     it('reports a failed change and keeps showing the previous currency', async () => {

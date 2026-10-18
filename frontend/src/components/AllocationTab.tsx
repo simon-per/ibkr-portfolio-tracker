@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api'
+import { positionsQuery } from '@/lib/queryCache'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import type { AllocationCategory } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -401,10 +402,7 @@ export function AllocationTab() {
 
   // The same key the Dashboard uses, so this is a cache hit rather than a
   // second request for data already on the page.
-  const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery({
-    queryKey: ['portfolio', 'positions'],
-    queryFn: () => api.getPositions(),
-  })
+  const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery(positionsQuery)
 
   const syncMutation = useMutation({
     mutationFn: () => api.syncAllocationData(false),

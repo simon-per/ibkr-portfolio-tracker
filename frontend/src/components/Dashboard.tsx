@@ -1,6 +1,7 @@
 import { useState, useMemo, lazy } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { positionsQuery, readsIbkrRows, summaryQuery } from '@/lib/queryCache'
 import type { BenchmarkDataset } from './PortfolioValueChart'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -107,11 +108,7 @@ export function Dashboard() {
   )
 
   // Fetch portfolio summary
-  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery({
-    queryKey: ['portfolio', 'summary'],
-    queryFn: () => api.getPortfolioSummary(),
-    staleTime: 30 * 60 * 1000,
-  })
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useQuery(summaryQuery)
 
   // Fetch portfolio value over time
   const { data: valueOverTime, isLoading: chartLoading, isError: chartError } = useQuery({
@@ -121,10 +118,7 @@ export function Dashboard() {
   })
 
   // Fetch positions
-  const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery({
-    queryKey: ['portfolio', 'positions'],
-    queryFn: () => api.getPositions(),
-  })
+  const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery(positionsQuery)
 
   // Fetch benchmark comparisons (dynamic based on selection)
   const benchmarkQueries = useQueries({
@@ -323,8 +317,9 @@ export function Dashboard() {
       // refetching the whole portfolio to display "already up to date" would make the
       // cheapest outcome the most expensive one.
       if (data.status === 'skipped') return
-      // Invalidate all queries to refresh data
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+      // The statement writes positions, trades and cash transactions, so the dividend,
+      // tax and allocation reads go stale with the portfolio ones.
+      queryClient.invalidateQueries({ predicate: readsIbkrRows })
     },
   })
 

@@ -283,6 +283,38 @@ The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, 
 
 ---
 
+## The query cache — what a write refreshes
+
+TanStack Query, `refetchOnWindowFocus: false` and a 5-minute default `staleTime` (`App.tsx`); most
+reads set 30 minutes. The Dashboard stays mounted for the session, so a cache entry nobody refreshes
+can stay on screen until the tab is reloaded. `lib/queryCache.ts` decides what two app-wide writes
+refresh. Both predicates **name what they leave out**: a list of roots to refresh is how the bugs
+below happened, and a root added later is refreshed by default. Refreshing it anyway costs a request;
+missing it costs a wrong figure.
+
+- **The base-currency switch resets, never invalidates** (`dependsOnBaseCurrency`, #22). No query
+  key carries the base currency. An invalidated query keeps its data while it refetches, so every
+  figure showed straight away under the new label over old-currency numbers (EUR amounts printed as
+  CHF), and kept doing so if the refetch failed. Lazy tabs served the same cache on their next mount.
+  `resetQueries` drops the data: active queries show their loading state, inactive ones fetch fresh
+  on mount, a failed refetch is an error state. Left out: `settings` (just written by the mutation),
+  `health` and `logos`. **The crypto book is reset too**: it is stored in USD but served in the base
+  currency. Keying every money query on the currency was rejected: about 55 key sites, and one that
+  forgot would bring the bug back. `CurrencyProvider.reset.test.tsx` pins it.
+- **A manual IBKR sync invalidates every reader of the rows it wrote** (`readsIbkrRows`, #23). It
+  used to invalidate only `['portfolio']`. The statement also writes cash transactions, trades and
+  positions, so `['dividends', …]` (two of them on the Performance tab beside the positions),
+  `['tax', …]` and `['allocation', …]` kept their pre-sync figures. Left out: the three roots above
+  and `crypto` (its own tables and sync). A `skipped` sync refreshes nothing. The one active reader
+  that can reach Yahoo is `GET /api/dividends/summary`, throttled server-side, so a sync's refetch
+  costs what a page load costs. `Dashboard.sync.test.tsx` pins it.
+- **`summaryQuery` and `positionsQuery` are defined once** in the same module, with one
+  `staleTime`. Positions used to fall back to the 5-minute default at both of its readers. Opening
+  the Allocation tab after 5 minutes then refetched positions but not the summary, and the hero's
+  `unpriced_holdings` and the positions table's own count could come from different valuations.
+
+---
+
 ## Visual hierarchy and KPI panels
 
 The dashboard canvas and surface colours live in `index.css`; semantic gain, loss and warning text
