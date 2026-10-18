@@ -528,6 +528,10 @@ def test_the_shapes_that_broke_production_serialize(client):
     # chart quietly falling back to its pre-cash lines.
     for key in ("total_cash_eur", "total_value_eur", "cash_source"):
         assert key in summary_now, f"response_model dropped {key}"
+    # The realized headline's completeness, same reasoning (GitHub issue #26).
+    assert isinstance(summary_now.get("unpriced_disposals"), int), (
+        "response_model dropped unpriced_disposals"
+    )
     assert summary_now["total_value_eur"] == pytest.approx(
         summary_now["total_market_value_eur"] + summary_now["total_cash_eur"]
     )

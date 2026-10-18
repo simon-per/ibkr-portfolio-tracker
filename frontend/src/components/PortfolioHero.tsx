@@ -135,6 +135,8 @@ export function PortfolioHero({
   // Holdings the backend could not value today: their cost still counts, so the total is
   // a partial sum while cost basis is whole.
   const unpriced = summary?.unpriced_holdings ?? 0
+  // Sales the realized figure could not price or convert: it is a partial sum.
+  const unpricedSales = summary?.unpriced_disposals ?? 0
 
   return (
     <Card className="overflow-hidden">
@@ -215,6 +217,11 @@ export function PortfolioHero({
             label="Realized gain"
             value={signed(summary.total_realized_gain_loss_eur)}
             tone={summary.total_realized_gain_loss_eur >= 0 ? GAIN : LOSS}
+            sub={
+              unpricedSales > 0
+                ? `${unpricedSales} ${unpricedSales === 1 ? 'sale' : 'sales'} unpriced`
+                : undefined
+            }
           />
           {hasCash && <Stat label="Cash" value={formatCurrency(cash)} />}
           <Stat label="Positions" value={String(summary.num_positions)} />

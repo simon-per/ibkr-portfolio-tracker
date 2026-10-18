@@ -155,3 +155,13 @@ async def test_the_tax_estimate_warns_about_an_unpriceable_closed_lot(db):
     assert report["realized_source"] == "closed_lot_estimate"
     assert [r["symbol"] for r in report["realized_gains"]] == ["GOOD"]
     assert any("1 closed lot(s) could not be priced" in w for w in report["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_the_summary_counts_the_unpriceable_closed_lot(db):
+    # The closed-lot fallback of the summary's realized headline: no SELL trades, so
+    # the count comes off the latch (GitHub issue #26 gave the summary the surface).
+    await _seed(db, with_good_sale=True)
+    totals = await PortfolioService(db).get_realized_totals()
+    assert totals["num_closed_positions"] == 1
+    assert totals["unpriced_disposals"] == 1

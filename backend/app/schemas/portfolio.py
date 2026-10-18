@@ -306,6 +306,16 @@ class PortfolioSummary(BaseModel):
     total_realized_proceeds_eur: float = Field(0.0, description="Approximate proceeds from closed positions (qty × close-date price × FX)")
     total_realized_cost_basis_eur: float = Field(0.0, description="Cost basis of closed positions")
     num_closed_positions: int = Field(0, description="Number of unique securities with closed lots")
+    unpriced_disposals: int = Field(
+        0,
+        description=(
+            "Sales left out of the total_realized_* figures: SELL trades with no FX rate "
+            "for their trade date when realized comes from IBKR's trades, or closed lots "
+            "with no price or FX rate near their close date on the closed-lot fallback. "
+            "Above 0 the realized figures are a PARTIAL sum and understate by those "
+            "sales (GitHub issues #19 and #26)."
+        ),
+    )
     total_cash_eur: float = Field(
         0.0,
         description=(

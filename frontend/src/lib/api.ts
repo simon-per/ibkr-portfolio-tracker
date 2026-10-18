@@ -123,6 +123,12 @@ export interface PortfolioSummary {
   total_realized_proceeds_eur: number;
   total_realized_cost_basis_eur: number;
   num_closed_positions: number;
+  /**
+   * Sales left out of the `total_realized_*` figures because they could not be priced
+   * or converted. Above 0 those figures are a partial sum. Optional: a backend older
+   * than 2026-10-18 does not send it.
+   */
+  unpriced_disposals?: number;
 }
 
 export interface TaxLotInfo {

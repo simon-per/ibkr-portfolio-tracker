@@ -134,6 +134,15 @@ Realized P&L is **IBKR's own FIFO figure** summed over the security's SELL trade
 exist (`realized_source: trade`), otherwise the market-price approximation over its closed
 lots that the tax report also uses (`closed_lots`). Cost is the closed lots' cost basis in
 both cases, so `return_pct` is against what was paid. Holding days are cost-weighted.
+
+`trade` needs **every** SELL of the security converted to the base currency. One with no FX
+rate on its trade date sends the whole security to `closed_lots`, and `warnings[]` counts the
+positions that fell back (GitHub issue #26). Until 2026-10-18 the convertible trades stayed
+summed and served as `trade` — a partial figure under the label that means authoritative,
+beside a warning claiming the fallback had happened — and `return_pct`, winners/losers, the hit
+rate and `total_realized_eur` all inherited it. Refused whole, per security, not per trade:
+IBKR's per-trade FIFO figures and the closed-lot estimates do not split along the same lines,
+so mixing the two inside one security would add numbers measured differently.
 A closed lot with no price near its close date is missing from those rows, so its security is
 absent or shows only some of its lots; `warnings[]` names the count
 (`last_realized_skipped`, [data-model-and-valuation.md](data-model-and-valuation.md)), on the
@@ -183,6 +192,7 @@ Only returns after `firstValuedPoint` are walked, for the reason documented in
 sale with IBKR's realized figure, an unpriced holding, a basket with a cash row, a 3a lot, a
 deposit before the first purchase and a measured cash balance three francs off the derived
 one; the identity on the rounded figures; the CHF-base FX leg; the wire shape in both
-directions), the three routes in `tests/test_api_smoke.py`, `frontend/src/lib/rollingRisk.test.ts`,
+directions), `tests/test_closed_positions_partial_fx.py` (none, one or both of a security's two
+SELLs unconvertible), the three routes in `tests/test_api_smoke.py`, `frontend/src/lib/rollingRisk.test.ts`,
 and `frontend/src/components/AnalyticsTab.test.tsx` (dashes for absences, caveats on the
 surface, the segment toggle, and that the benchmark is never requested unselected).

@@ -117,6 +117,13 @@ specifically**, not on the table being non-empty: a BUY-only statement returned 
 permanently suppressed the fallback, while the tax report (which decides per year) still showed real
 gains. Pinned by `tests/test_realized_totals.py`.
 
+**A sale the realized totals leave out is counted, on either source** (GitHub issue #26). The trade
+path drops a SELL with no FX rate near its trade date — until 2026-10-18 only a log line, so the
+`/summary` realized headline understated with nothing to say so. Both paths now return
+`unpriced_disposals`: the trade path its unconvertible SELLs, the closed-lot fallback the lots in
+`last_realized_skipped` (below). `/summary` has no `warnings[]`, so the count is the surface; the
+hero tags *Realized gain* with "N sales unpriced". Test: `tests/test_closed_positions_partial_fx.py`.
+
 **A lot sold on D is not held at D's close.** One convention, everywhere: `_calculate_daily_value`,
 `holdings_snapshot_as_of()` and the attribution gates all exclude **on** the close date, matching what
 the benchmark always did. Under the old include-on-close rule a same-day rotation double-counted that
@@ -203,8 +210,8 @@ the call. Attribution adds the ids to its `unpriced` set (excluded from both sid
 the decomposition and segments follow), XIRR adds the count to `last_xirr_unpriced`, and the
 timeline counts the security in `unpriced_holdings` on the row whose `external_flow_eur` is short
 (a weekend close rides to the next weekday, as its flow does). Closed positions and the tax
-estimate each carry a `warnings[]` line; `get_realized_totals`' fallback has no warnings surface
-and stays silent. Test: `tests/test_realized_skip_counted.py`.
+estimate each carry a `warnings[]` line, and `get_realized_totals`' fallback counts them in
+`unpriced_disposals` (since issue #26, above). Test: `tests/test_realized_skip_counted.py`.
 
 **The attribution's per-security loop is `attribution_rows()` and there is one of it** (since
 2026-09-13). `get_performance_attribution` presents it; `PerformanceAnalyticsService` splits it

@@ -74,6 +74,24 @@ describe('the incomplete-total notice', () => {
   })
 })
 
+describe('the realized gain', () => {
+  it('carries no tag when every sale was priced or the backend does not say', () => {
+    renderWith({ unpriced_disposals: 0 })
+    expect(screen.queryByText(/unpriced/)).toBeNull()
+    cleanup()
+    renderWith()
+    expect(screen.queryByText(/unpriced/)).toBeNull()
+  })
+
+  it('tags the figure with the sales it left out', () => {
+    renderWith({ unpriced_disposals: 2 })
+    expect(screen.getByText('2 sales unpriced')).toBeTruthy()
+    cleanup()
+    renderWith({ unpriced_disposals: 1 })
+    expect(screen.getByText('1 sale unpriced')).toBeTruthy()
+  })
+})
+
 describe('the period gain', () => {
   it('shows the gain, its percentage and the range', () => {
     renderWith()

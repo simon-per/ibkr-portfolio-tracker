@@ -864,6 +864,11 @@ class PortfolioService:
         (fifoPnlRealized) and proceeds in the trade currency, so both need the
         native->EUR->base two-step that `NativeToBase` owns — this was one of the
         three copies of it that forced the extraction.
+
+        A SELL with no FX rate near its trade date is left out of the sums and
+        counted in `unpriced_disposals` (GitHub issue #26): until then it was only a
+        log line, and the summary's realized headline understated with nothing to
+        say so — the shape `tax_service` already warns about per year.
         """
         trades = (await self.db.execute(select(Trade))).scalars().all()
         # "Some trades exist" is not "realized figures exist": a statement can
@@ -876,6 +881,7 @@ class PortfolioService:
         total_proceeds_eur = Decimal("0")
         total_gain_eur = Decimal("0")
         closed_security_ids: set = set()
+        unconvertible = 0
         to_base = NativeToBase(self.currency_service, base_fx)
 
         for t in trades:
@@ -891,6 +897,7 @@ class PortfolioService:
                 logger.warning(
                     f"Realized: skipping trade {t.ib_key} — no FX for {currency} near {t.trade_date}"
                 )
+                unconvertible += 1
                 continue
 
             total_proceeds_eur += proceeds_base
@@ -903,6 +910,7 @@ class PortfolioService:
             "total_realized_proceeds_eur": float(total_proceeds_eur),
             "total_realized_cost_basis_eur": float(total_proceeds_eur - total_gain_eur),
             "num_closed_positions": len(closed_security_ids),
+            "unpriced_disposals": unconvertible,
         }
 
     async def get_realized_totals(self, base_fx: Optional[BaseFx] = None) -> Dict:
@@ -912,9 +920,11 @@ class PortfolioService:
         Used as the fallback when no SELL trades have been ingested (e.g. lots
         closed before the <Trades> section was enabled): proceeds are approximated
         as quantity × market_price × fx_rate on close_date. Lots that can't
-        be priced within the 14-day fallback window are skipped and not counted.
-        They land in `last_realized_skipped`, but this fallback has no `warnings[]`
-        surface to carry them, so here the skip stays silent (GitHub issue #19).
+        be priced within the 14-day fallback window are left out of the sums and
+        counted: `unpriced_disposals` is read off `last_realized_skipped` (GitHub
+        issue #19) right after the call. The trade path counts its unconvertible
+        SELLs under the same key, so the summary declares a partial realized figure
+        whichever source answered — it has no `warnings[]`, so the count is the surface.
 
         Values are returned in the base currency (proceeds converted at close_date,
         cost basis at open_date). Output keys keep the *_eur suffix.
@@ -931,6 +941,7 @@ class PortfolioService:
             return trade_based
 
         rows = await self.realized_rows_from_closed_lots(base_fx)
+        unpriced_lots = sum(len(d) for d in self.last_realized_skipped.values())
         total_proceeds_eur = sum((row["proceeds"] for row in rows), Decimal("0"))
         total_cost_basis_eur = sum((row["cost_basis"] for row in rows), Decimal("0"))
 
@@ -939,6 +950,7 @@ class PortfolioService:
             "total_realized_proceeds_eur": float(total_proceeds_eur),
             "total_realized_cost_basis_eur": float(total_cost_basis_eur),
             "num_closed_positions": len({row["security_id"] for row in rows}),
+            "unpriced_disposals": unpriced_lots,
         }
 
     async def holdings_snapshot_as_of(

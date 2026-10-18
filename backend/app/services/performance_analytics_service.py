@@ -482,8 +482,9 @@ class PerformanceAnalyticsService:
         held, and what its price did after the last sale.
 
         Realized P&L is IBKR's own FIFO figure summed over the security's SELL trades
-        when any exist (`source: trade`), otherwise the market-price approximation over
-        its closed lots that `realized_rows_from_closed_lots` shares with the tax report
+        when any exist and every one converts to the base currency (`source: trade`),
+        otherwise the market-price approximation over its closed lots that
+        `realized_rows_from_closed_lots` shares with the tax report
         (`source: closed_lots`). Cost is the closed lots' cost basis in both cases, so
         the return percentage is against what was actually paid.
 
@@ -554,16 +555,22 @@ class PerformanceAnalyticsService:
 
         price_repo = MarketPriceRepository(self.db)
         positions: List[Dict] = []
+        fx_fallbacks = 0
         for sid, g in grouped.items():
             sec = securities.get(sid)
             if sec is None:
                 continue
-            if sid in trade_pnl:
+            # Refused whole, per security (GitHub issue #26): IBKR's figure only when
+            # EVERY one of its SELLs converted. The convertible trades alone are a
+            # partial sum that `source: trade` would present as authoritative.
+            if sid in trade_pnl and sid not in trade_fx_missing:
                 realized = trade_pnl[sid]
                 source = "trade"
             else:
                 realized = g["proceeds"] - g["cost"]
                 source = "closed_lots"
+                if sid in trade_fx_missing:
+                    fx_fallbacks += 1
             holding_days = (
                 int(g["weighted_days"] / g["cost"]) if g["cost"] > 0 else None
             )
@@ -620,10 +627,14 @@ class PerformanceAnalyticsService:
         warnings: List[str] = []
         if unpriced_warning:
             warnings.append(unpriced_warning)
-        if trade_fx_missing:
+        # Counted off the positions served, not `trade_fx_missing`: a security whose
+        # closed lots are all unpriced is not on the list to have fallen back.
+        if fx_fallbacks:
             warnings.append(
-                f"{len(trade_fx_missing)} security's SELL trades had no FX rate on the "
-                f"trade date and fell back to the closed-lot approximation."
+                f"{fx_fallbacks} {'securities have' if fx_fallbacks != 1 else 'security has'} "
+                f"a SELL trade with no FX rate on the trade date, so "
+                f"{'their' if fx_fallbacks != 1 else 'its'} realized figure falls back "
+                f"to the closed-lot approximation."
             )
         if positions and not post_judged:
             warnings.append(
