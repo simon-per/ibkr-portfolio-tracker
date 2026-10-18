@@ -24,6 +24,7 @@ from sqlalchemy import select
 
 from app.clock import utcnow
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.services.yahoo_minor_units import minor_unit
 
 MarketCapToBase = Callable[[Optional[int], Optional[str]], Awaitable[Optional[int]]]
 
@@ -37,7 +38,6 @@ async def market_cap_to_base(db) -> MarketCapToBase:
     """A converter from ``(market_cap, quote_currency)`` to the base currency."""
     from app.repositories.app_settings_repository import AppSettingsRepository
     from app.services.currency_service import CurrencyService
-    from app.services.market_data_service import MarketDataService
 
     base = await AppSettingsRepository(db).get_base_currency()
     currency_service = CurrencyService(db)
@@ -59,7 +59,7 @@ async def market_cap_to_base(db) -> MarketCapToBase:
         return memo[key]
 
     async def to_base(market_cap: Optional[int], currency: Optional[str]) -> Optional[int]:
-        if market_cap is None or not currency or MarketDataService._minor_unit(currency):
+        if market_cap is None or not currency or minor_unit(currency):
             return None
         if currency == base:
             return market_cap
@@ -80,13 +80,12 @@ async def quoted_currencies(db) -> Set[str]:
     """
     from app.models.fundamental_metrics import FundamentalMetrics
     from app.models.watchlist_item import WatchlistItem
-    from app.services.market_data_service import MarketDataService
 
     out = set(MARKET_CAP_CURRENCIES)
     for column in (FundamentalMetrics.data_currency, WatchlistItem.data_currency):
         for raw in (await db.execute(select(column).distinct())).scalars().all():
             code = (raw or "").strip()
-            if len(code) == 3 and not MarketDataService._minor_unit(code):
+            if len(code) == 3 and not minor_unit(code):
                 out.add(code.upper())
     out.discard("EUR")
     return out

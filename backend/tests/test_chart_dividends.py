@@ -176,6 +176,55 @@ async def test_one_frame_through_both_paths_stores_the_same_rows(db, yahoo):
     assert result["pre_ownership_skipped"] == 1
 
 
+# ── minor-unit listings (GitHub issue #35) ─────────────────────────────────────
+
+# Pence, as Yahoo quotes a London equity: closes AND dividends.
+PENCE_FRAME = _frame([
+    (_recent(9), 512.4, 0.0, 0.0),
+    (_recent(8), 515.0, 4.5, 0.0),
+    (_recent(1), 516.0, 0.0, 0.0),
+])
+
+
+async def _both_paths(db, yahoo, security):
+    """The rows the price pass's chart capture stores, then the dividend pass's."""
+    await _price_pass(db, security)
+    from_chart = await _rows(db)
+    await db.execute(delete(DividendPayment))
+    await db.commit()
+    await DividendService(db).sync_dividend_data()
+    return from_chart, await _rows(db)
+
+
+@pytest.mark.asyncio
+async def test_a_pence_report_is_scaled_on_both_paths(db, yahoo):
+    security = await _security(db, "LLOY", exchange="LSE", currency="GBP")
+    yahoo.frames["LLOY.L"] = (PENCE_FRAME, "GBp")
+
+    from_chart, from_dividends = await _both_paths(db, yahoo, security)
+
+    assert yahoo.dividend_reads == ["LLOY.L"]
+    expected = [(_recent(8), Decimal("0.045"), "GBP", "yfinance_estimate")]
+    assert from_chart == expected
+    assert from_dividends == expected
+
+
+@pytest.mark.asyncio
+async def test_an_override_ticker_is_never_scaled(db, yahoo):
+    """`SMH.L` is pinned USD by hand; a `GBp` report on it is not evidence."""
+    security = await _security(db, "SMH", exchange="LSEETF", currency="USD")
+    yahoo.frames["SMH.L"] = (_frame([
+        (_recent(9), 250.0, 0.0, 0.0), (_recent(8), 251.0, 0.31, 0.0), (_recent(1), 252.0, 0.0, 0.0),
+    ]), "GBp")
+
+    from_chart, from_dividends = await _both_paths(db, yahoo, security)
+
+    assert yahoo.dividend_reads == ["SMH.L"]
+    expected = [(_recent(8), Decimal("0.31"), "USD", "yfinance_estimate")]
+    assert from_chart == expected
+    assert from_dividends == expected
+
+
 # ── when `.dividends` is read ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio

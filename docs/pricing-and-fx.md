@@ -46,6 +46,21 @@ listing, so the reported code is not evidence.
 Explicit map rather than inferring from letter case: `GBp`/`ZAc` are mixed-case but `ILA` is not, so
 "not all-uppercase means minor unit" would silently miss Tel Aviv. Extend it like `EXCHANGE_SUFFIXES`.
 
+**One helper decides the scale for every Yahoo amount: `app/services/yahoo_minor_units.py`** (GitHub
+issue #35). It owns both maps, `minor_unit_scale(ticker, reported_currency)` (the divisor, or 1 for a
+major code, a missing report or an override) and `reported_currency_of(yf_ticker)` (the code from the
+cached `_history_metadata` — never the public `history_metadata` property, which re-requests). The
+decision used to live in `MarketDataService` and only the price path asked it, so Yahoo's dividends for
+the same listing — also quoted in pence — were stored 100× by both dividend readers
+([dividends.md](dividends.md)). Its readers: the price path (`_try_fetch_yahoo`), the chart-dividend
+capture (the scale rides in `chart_actions`), the dividend pass (`yahoo_dividend_rows(..., scale=)`,
+required) and `market_cap`. `tests/test_yahoo_minor_unit_family.py` walks `app/` for any module that
+imports yfinance and reads a frame's `Close`/`Dividends` or a ticker's `.dividends`, and requires it to
+call `minor_unit_scale`; the benchmark (hand-pinned index currencies; a constant scale cancels in the
+simulation), `manage_mappings` (writes no amount; an unscaled level check refuses) and the watchlist
+(closes feed only RSI) are exempt with their reasons written there. It also fails on a second copy of
+either map or of the metadata read.
+
 Latent today, not live — this account holds no GBP security, and its one London line is `SMH@LSEETF`,
 a USD ETF pinned `manual` to `SMH.L` (which is also why bare-ticker auto-discovery never grabbed the
 NASDAQ SMH). The trap opens the day a UK equity or a GBP-line ETF is bought.

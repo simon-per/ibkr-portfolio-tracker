@@ -45,6 +45,7 @@ from app.services.dividend_forecast import (
     project_dividends,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
+from app.services.yahoo_minor_units import minor_unit_scale, reported_currency_of
 from app.services.yahoo_rate_limit import is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ def pre_ownership_cutoff(first_lot: Optional[date]) -> Optional[date]:
 
 def yahoo_dividend_rows(
     security: Security, dividends: Iterable[Tuple[Any, Any]], keep_from: Optional[date],
+    *, scale: Decimal,
 ) -> Tuple[List[Dict], int]:
     """
     The `dividend_payments` rows a Yahoo dividend series becomes, and how many it skipped.
@@ -119,9 +121,14 @@ def yahoo_dividend_rows(
     `.dividends` and the price pass's chart frame (`store_chart_dividends`, GitHub issue
     #11). Both are the `v8/finance/chart` endpoint's `div` events, so the same builder over
     the same events writes the same rows: the ex-date is the index's exchange-local date,
-    the amount is Yahoo's as reported, the currency is the security's, the source is
+    the amount is Yahoo's divided by `scale`, the currency is the security's, the source is
     `yfinance_estimate`, and anything before `keep_from` (`pre_ownership_cutoff`) is
     skipped. Pure; raises on an amount that is not a number before anything is written.
+
+    `scale` is `yahoo_minor_units.minor_unit_scale` of the response the series came from:
+    Yahoo quotes a `GBp` listing's dividends in pence, as it does its prices, and the row
+    is labelled in pounds (GitHub issue #35). Required, without a default, so no reader
+    can forget to ask.
     """
     rows = []
     skipped = 0
@@ -133,7 +140,7 @@ def yahoo_dividend_rows(
         rows.append({
             'security_id': security.id,
             'ex_date': ex_date,
-            'amount_per_share': Decimal(str(amount)),
+            'amount_per_share': Decimal(str(amount)) / scale,
             'currency': security.currency,
             'source': 'yfinance_estimate',
         })
@@ -382,6 +389,7 @@ class DividendService:
 
     async def store_chart_dividends(
         self, security: Security, dividends: Iterable[Tuple[Any, Any]], split_dates: Iterable[date],
+        *, scale: Decimal,
     ) -> int:
         """
         Store the dividends a price-pass chart response carried, and nothing else.
@@ -399,7 +407,9 @@ class DividendService:
         bootstrap and the slow re-verify off it. A split in the window dated after the
         stamp **clears** it instead — Yahoo restates the history on a split, so the next
         dividend pass re-reads all of it, as a purge does. Once read after the split, the
-        same split no longer re-arms. Returns the rows written; the caller commits.
+        same split no longer re-arms. `scale` is the minor-unit scale the price path applied
+        to the same frame's closes (`chart_actions`). Returns the rows written; the caller
+        commits.
         """
         is_held = (await self.db.execute(
             select(Security.id).where(Security.id == security.id, held())
@@ -409,7 +419,9 @@ class DividendService:
         first_lot = (await self.db.execute(
             select(func.min(TaxLot.open_date)).where(TaxLot.security_id == security.id)
         )).scalar()
-        rows, _skipped = yahoo_dividend_rows(security, dividends, pre_ownership_cutoff(first_lot))
+        rows, _skipped = yahoo_dividend_rows(
+            security, dividends, pre_ownership_cutoff(first_lot), scale=scale,
+        )
 
         checked = security.dividends_checked_at
         if checked is not None and any(
@@ -486,11 +498,16 @@ class DividendService:
                 # Rate limit before API call
                 await asyncio.sleep(random.uniform(1.0, 2.0))
 
-                # Fetch dividends in a thread
+                # Fetch dividends in a thread. `.dividends` is `history(period="max")` on
+                # the same object, so the currency Yahoo reported is in its cached
+                # metadata afterwards — read it there, no extra request, and scale the
+                # amounts exactly as the price path scales that listing's closes.
                 def _fetch(ticker=yahoo_ticker):
-                    return yf.Ticker(ticker).dividends
+                    yf_ticker = yf.Ticker(ticker)
+                    series = yf_ticker.dividends
+                    return series, reported_currency_of(yf_ticker)
 
-                dividends_series = await asyncio.to_thread(_fetch)
+                dividends_series, reported = await asyncio.to_thread(_fetch)
 
                 # An empty series is an answer too. Unstamped, a non-payer — an
                 # accumulating ETF — was asked on every pass forever (issue #6).
@@ -506,6 +523,7 @@ class DividendService:
                 rows, skipped = yahoo_dividend_rows(
                     security, dividends_series.items(),
                     pre_ownership_cutoff(first_lot.get(security.id)),
+                    scale=minor_unit_scale(yahoo_ticker, reported),
                 )
                 pre_ownership_skipped += skipped
                 for row in rows:

@@ -268,14 +268,28 @@ over the price window instead of 99 years — and that window is re-read at each
 new ex-date passes through several responses. `MarketDataService` keeps the frame's dividends for the
 ticker whose prices it stored (`chart_actions`; never a rejected variation, never Alpha Vantage) and
 `DividendService.store_chart_dividends` writes them through **`yahoo_dividend_rows`, the one row
-builder** the pass below uses too: ex-date = the index's exchange-local date, Yahoo's amount as
-reported, the security's currency, `source='yfinance_estimate'`, nothing before
+builder** the pass below uses too: ex-date = the index's exchange-local date, Yahoo's amount divided
+by the response's minor-unit scale, the security's currency, `source='yfinance_estimate'`, nothing before
 `pre_ownership_cutoff(first lot)`, held securities only. Same endpoint, same events, same builder, so
 the rows are the same rows and the era splice treats them alike
 (`test_one_frame_through_both_paths_stores_the_same_rows` feeds one frame through both). It is best
 effort after the prices commit, and it **never stamps `dividends_checked_at`**: a window is not the
 full history. A split in the window dated after the stamp clears the stamp instead (Yahoo restates
 split-adjusted history), like a purge does.
+
+**A minor-unit listing's dividends are scaled like its prices** (GitHub issue #35, 2026-10-18). Yahoo
+quotes a `GBp`/`ZAc`/`ILA` listing's dividend events in the minor unit, as it does its closes. The
+price path divided the closes and labelled the row with the major code, while both dividend readers
+stored the amount as reported under the security's (major) currency: a 4.5p dividend landed as 4.50
+GBP per share, feeding the estimates, the era splice, the forecast, forward yield and growth 100×
+high. `yahoo_dividend_rows` now takes a **required** keyword `scale`, which is
+`yahoo_minor_units.minor_unit_scale(ticker, reported_currency)` — the same call the price path
+makes, so a `TICKER_CURRENCY_OVERRIDES` ticker (`SMH.L`) is never scaled. The chart capture gets the
+scale the price path computed for that frame (`chart_actions` returns it beside the dividends); the
+pass below reads the reported currency from the `yf.Ticker`'s cached `_history_metadata` after
+`.dividends` (`get_dividends` is `history(period="max")` on the same object, verified in yfinance
+1.1.0), so it costs no extra request. Latent when fixed: no minor-unit listing was held. The rule
+lives in [pricing-and-fx.md](pricing-and-fx.md), *minor-unit quotes*.
 
 `sync_dividend_data()` asks Yahoo only about the securities `needs_dividend_check()` selects:
 Yahoo-eligible, **held** (an open lot, `security_repository.held`), and with
@@ -311,7 +325,8 @@ and payers between ex-dates were asked on every pass, and so was every sold posi
 
 Tests: `tests/test_dividend_check_budget.py`, which counts the stubbed requests over a simulated week
 (105 before, 2 after), plus the rate-limit, error, sold, new-purchase, purge and summary cases;
-`tests/test_chart_dividends.py` for the capture, the shared builder and when `.dividends` is read.
+`tests/test_chart_dividends.py` for the capture, the shared builder, when `.dividends` is read and the
+minor-unit scale on both paths; `tests/test_minor_unit_dividends.py` for the scale beside the price.
 
 ### A wrong mapping poisons dividends too, and only prices were ever purged
 

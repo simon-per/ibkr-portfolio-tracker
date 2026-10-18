@@ -22,6 +22,13 @@ from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
+from app.services.yahoo_minor_units import (
+    NO_SCALE,
+    TICKER_CURRENCY_OVERRIDES,
+    minor_unit,
+    minor_unit_scale,
+    reported_currency_of,
+)
 from sqlalchemy import func, select
 from app.models.market_price import MarketPrice, PRICE_ROW_SOURCE_SIBLING_SCALED
 from app.services.finpension_ingest import PRICE_SOURCE_STATEMENT
@@ -71,15 +78,18 @@ PRICE_MISS_BACKOFF_SLACK = timedelta(hours=4)
 ALPHA_VANTAGE_COMPACT_REACH_DAYS = 130
 
 
-def chart_actions(hist) -> Tuple[List[Tuple], List[date]]:
+def chart_actions(hist, scale: Decimal) -> Tuple[List[Tuple], List[date], Decimal]:
     """
-    The dividends and split dates a `history()` frame carried, at no extra request.
+    The dividends and split dates a `history()` frame carried, at no extra request,
+    and the `minor_unit_scale` its amounts are to be divided by.
 
     yfinance asks `v8/finance/chart` for `events=div,splits,capitalGains` on every
     history call and merges them into the frame (`actions=True`, its default). The
     dividends come back as `(index, amount)` pairs — exactly what `Ticker.dividends`
     (the same endpoint over the whole history) iterates as — and the split dates as
-    exchange-local dates. Empty when the frame has neither column.
+    exchange-local dates. Empty when the frame has neither column. The amounts stay as
+    Yahoo reported them; the scale travels with them so no reader can take one without
+    the other, and `yahoo_dividend_rows` divides (GitHub issue #35).
     """
     dividends: List[Tuple] = []
     splits: List[date] = []
@@ -89,7 +99,7 @@ def chart_actions(hist) -> Tuple[List[Tuple], List[date]]:
     if "Stock Splits" in hist.columns:
         column = hist["Stock Splits"]
         splits = [index.date() for index in column[column != 0].index]
-    return dividends, splits
+    return dividends, splits, scale
 
 
 def price_backoff_until(security: Security, is_held: bool) -> Optional[datetime]:
@@ -383,38 +393,6 @@ class MarketDataService:
             self.yahoo_chart_actions = last[1]
         return prices
 
-    # Tickers where the suffix-based currency guess is wrong
-    # e.g. SMH.L trades in USD on London, not GBP
-    TICKER_CURRENCY_OVERRIDES = {
-        'SMH.L': 'USD',
-    }
-
-    # Yahoo quotes some listings in a currency's MINOR unit and says so in the code it
-    # reports: London equities in `GBp` (pence), Johannesburg in `ZAc`, Tel Aviv in
-    # `ILA`. The row's *label* should still be the major code, but the *amount* has to
-    # be divided or a 5-pound price is stored as 500.
-    #
-    # Uppercasing `GBp` to `GBP` without scaling — which is what this did — does not
-    # merely miss the conversion, it **defeats the currency guard**: the normalised code
-    # matches the security's own currency, so the "reject a variation whose currency
-    # disagrees" check passes and nothing downstream can see a position carried 100x
-    # high. That is the SBI failure with its one safeguard removed, which is why this is
-    # a scale and not just a rename.
-    #
-    # Explicit rather than inferred from letter case: `GBp` and `ZAc` are mixed-case but
-    # `ILA` is not, so "not all-uppercase means minor unit" would silently miss Tel Aviv.
-    # Extend the map when a new venue appears, the way EXCHANGE_SUFFIXES is extended.
-    MINOR_UNIT_CURRENCIES = {
-        'GBp': ('GBP', Decimal('100')),
-        'ZAc': ('ZAR', Decimal('100')),
-        'ILA': ('ILS', Decimal('100')),
-    }
-
-    @classmethod
-    def _minor_unit(cls, reported_currency: Optional[str]):
-        """`('GBP', Decimal(100))` when Yahoo reported a minor unit, else None."""
-        return cls.MINOR_UNIT_CURRENCIES.get((reported_currency or '').strip())
-
     def _get_currency_from_ticker(
         self,
         ticker: str,
@@ -434,13 +412,14 @@ class MarketDataService:
         the guess that mislabelled a USD instrument as CAD for SBI@TSE.
         """
         # Check explicit overrides first
-        if ticker in self.TICKER_CURRENCY_OVERRIDES:
-            return self.TICKER_CURRENCY_OVERRIDES[ticker]
+        if ticker in TICKER_CURRENCY_OVERRIDES:
+            return TICKER_CURRENCY_OVERRIDES[ticker]
 
-        # A minor-unit report names its major currency here; `fetch_prices_from_yahoo`
-        # divides the amount to match. The two must move together — labelling pence GBP
-        # without scaling is the 100x error described on MINOR_UNIT_CURRENCIES.
-        minor = self._minor_unit(reported_currency)
+        # A minor-unit report names its major currency here; `_try_fetch_yahoo` divides
+        # the amount by `minor_unit_scale` to match. The two must move together —
+        # labelling pence GBP without scaling is the 100x error `yahoo_minor_units`
+        # describes.
+        minor = minor_unit(reported_currency)
         if minor:
             return minor[0]
 
@@ -504,19 +483,8 @@ class MarketDataService:
                     auto_adjust=False  # Get actual close prices, not adjusted
                 )
                 # Yahoo states the quote currency in the metadata of the response we
-                # just received, so reading it costs no extra request. Deliberately
-                # NOT the public `history_metadata` property: it re-requests at an
-                # intraday interval whenever 'tradingPeriods' is missing, which a daily
-                # history() never populates — that would have quietly doubled our
-                # Yahoo traffic to two requests per security. Read the cached dict
-                # instead, and degrade to suffix inference if yfinance moves it.
-                reported = None
-                try:
-                    meta = getattr(yf_ticker._price_history, '_history_metadata', None)
-                    reported = (meta or {}).get('currency')
-                except Exception:
-                    pass
-                return hist, reported
+                # just received, so reading it costs no extra request.
+                return hist, reported_currency_of(yf_ticker)
 
             hist, reported_currency = await asyncio.to_thread(_fetch_history)
 
@@ -532,20 +500,14 @@ class MarketDataService:
                 ticker, security, reported_currency
             )
 
-            # Divide when Yahoo quoted a minor unit. Read off `reported_currency` rather
-            # than off `price_currency`, which by then has been normalised to the major
-            # code and can no longer tell pence from pounds — and skipped entirely when a
-            # hand-checked override decided the currency, since an override means someone
-            # looked at the listing and the reported code is not to be trusted.
-            minor = (
-                None if ticker in self.TICKER_CURRENCY_OVERRIDES
-                else self._minor_unit(reported_currency)
-            )
-            minor_scale = minor[1] if minor else None
-            if minor_scale:
+            # Divide when Yahoo quoted a minor unit (1 otherwise, and for an override).
+            # The same scale goes with this frame's dividends (`chart_actions`): Yahoo
+            # quotes a pence listing's dividends in pence too (GitHub issue #35).
+            minor_scale = minor_unit_scale(ticker, reported_currency)
+            if minor_scale != NO_SCALE:
                 logger.info(
                     f"{ticker} quoted in {reported_currency} (minor units); dividing "
-                    f"closes by {minor_scale} and storing as {price_currency}"
+                    f"closes and dividends by {minor_scale} and storing as {price_currency}"
                 )
 
             prices = []
@@ -555,7 +517,7 @@ class MarketDataService:
 
                 if close_price and not (close_price != close_price):  # Check for NaN
                     close_decimal = Decimal(str(close_price))
-                    if minor_scale:
+                    if minor_scale != NO_SCALE:
                         close_decimal /= minor_scale
                     prices.append({
                         'date': price_date,
@@ -571,7 +533,7 @@ class MarketDataService:
                 # by `fetch_and_cache_prices` if these prices are the ones kept. Parsing
                 # only — never allowed to cost the prices.
                 try:
-                    self._last_chart_actions = (ticker, chart_actions(hist))
+                    self._last_chart_actions = (ticker, chart_actions(hist, minor_scale))
                 except Exception as e:
                     logger.warning(f"Could not read chart dividends for {ticker}: {e}")
 
@@ -868,7 +830,7 @@ class MarketDataService:
         """
         if not chart:
             return
-        dividends, split_dates = chart
+        dividends, split_dates, scale = chart
         if not dividends and not split_dates:
             return
         from app.services.dividend_service import DividendService
@@ -876,7 +838,7 @@ class MarketDataService:
         symbol = security.symbol
         try:
             stored = await DividendService(self.db).store_chart_dividends(
-                security, dividends, split_dates
+                security, dividends, split_dates, scale=scale
             )
             await self.db.commit()
             if stored:
