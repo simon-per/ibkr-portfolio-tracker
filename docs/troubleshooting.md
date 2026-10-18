@@ -171,7 +171,7 @@ decision; read the entry before "fixing" one.
   sites, and `test_timeline_equivalence.py` is the net.
 - **The realized-P&L headline switches source all-or-nothing, unscoped by account** — found
   2026-09-12, dormant. `_realized_from_trades` uses `trades` for the whole book the moment
-  *any* SELL exists there (the 3a importer writes them too), so closed lots of an account
+  *any* SELL stands there (the 3a importer writes them too), so closed lots of an account
   without `<Trades>` coverage would drop out. Today every IBKR sale is in `trades`, so nothing is
   wrong; `tax_service` already picks per account and per year, and the fix is to do the same here
   — a modelling change, not a one-liner.

@@ -24,8 +24,9 @@ treatment: pillar 3a income is not taxable. Both funds held are accumulating tra
 so the path is dormant on day one — which is when to get it right.
 
 **`realized_pnl` is computed, never left NULL.** `_realized_from_trades` prefers the
-`trades` table wholesale the moment any SELL exists and reads `t.realized_pnl or 0`,
-so a NULL would report a sale's gain as exactly zero in the blended headline. We
+`trades` table wholesale the moment any SELL exists, and `realized_from_sell_trades`
+reads a missing figure as 0, so a NULL would report a sale's gain as exactly zero in
+the blended headline. We
 replay the whole ledger, so the FIFO cost is known exactly; it is our own FIFO rather
 than a broker's, and the row says so via `close_source`.
 """

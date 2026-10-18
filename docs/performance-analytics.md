@@ -148,6 +148,13 @@ exist (`realized_source: trade`), otherwise the market-price approximation over 
 lots that the tax report also uses (`closed_lots`). Cost is the closed lots' cost basis in
 both cases, so `return_pct` is against what was paid. Holding days are cost-weighted.
 
+The sum comes from `realized_trades.realized_from_sell_trades`, the loop the summary and the
+tax report share (GitHub issue #58), and includes each CANCELSELL as stored, so a busted sale
+nets out. `trade` also needs a sale that **stands** (`net_sales > 0`): a security whose every
+sale IBKR cancelled has no IBKR figure, and its closed lots answer. A sale counts as converted
+when its proceeds *and* its realized figure convert — until #58 this reader converted only the
+realized figure, so a zero-P&L sale with no rate read as `trade`.
+
 `trade` needs **every** SELL of the security converted to the base currency. One with no FX
 rate on its trade date sends the whole security to `closed_lots`, and `warnings[]` counts the
 positions that fell back (GitHub issue #26). Until 2026-10-18 the convertible trades stayed

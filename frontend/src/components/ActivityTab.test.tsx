@@ -44,7 +44,7 @@ function estimatedDividend(symbol: string, securityId: number | null = null): Ac
     security_id: securityId,
     description: `${symbol} estimated dividend`, quantity: null, price: null, currency: 'EUR',
     amount_base: 12.5, realized_pnl_base: null, counts_as_money_in: null,
-    source: 'yfinance_estimate', ib_key: null,
+    source: 'yfinance_estimate', ib_key: null, is_sale: null, is_cancellation: null,
   }
 }
 
@@ -89,7 +89,7 @@ function cashRow(amount: number, moneyIn: boolean, key: string): ActivityRow {
     date: '2026-09-01', kind: 'cash_flow', subtype: moneyIn ? 'DEPOSITWITHDRAW' : 'TRANSFER_IN',
     symbol: null, security_id: null, description: 'CASH', quantity: null, price: null,
     currency: 'EUR', amount_base: amount, realized_pnl_base: null, counts_as_money_in: moneyIn,
-    source: null, ib_key: key,
+    source: null, ib_key: key, is_sale: null, is_cancellation: null,
   }
 }
 
@@ -112,6 +112,27 @@ describe('ActivityTab badges', () => {
     expect(deposit.className).toContain('bg-info-soft')
     // The glyph is decoration: the word stays the badge's whole accessible text.
     expect(transfer.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it("badges a sale and its cancellation from the server's flags, not the subtype", async () => {
+    const trade = (key: string, subtype: string, isSale: boolean, cancelled: boolean): ActivityRow => ({
+      date: '2026-09-02', kind: 'trade', subtype, symbol: 'AAA', security_id: null,
+      description: subtype, quantity: 1, price: 10, currency: 'EUR', amount_base: 10,
+      realized_pnl_base: null, counts_as_money_in: null, source: null, ib_key: key,
+      is_sale: isSale, is_cancellation: cancelled,
+    })
+    vi.spyOn(api, 'getContributions').mockResolvedValue(contributions)
+    vi.spyOn(api, 'getLogos').mockResolvedValue({ logos: {}, isins: {} })
+    vi.spyOn(api, 'getActivity').mockResolvedValue(page([
+      trade('s', 'SELL', true, false),
+      trade('sc', 'CANCELSELL', true, true),
+      trade('bc', 'CANCELBUY', false, true),
+    ]))
+    withProviders(<ActivityTab />)
+
+    expect(await screen.findByText('Sell', { selector: 'span' })).toBeTruthy()
+    expect(screen.getByText('Sell · cancelled', { selector: 'span' })).toBeTruthy()
+    expect(screen.getByText('Buy · cancelled', { selector: 'span' })).toBeTruthy()
   })
 })
 

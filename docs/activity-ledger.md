@@ -57,6 +57,15 @@ Five rules, each of which would be a bug the other way:
 - **A field a kind cannot fill is `None`, never 0** — in JSON and in the CSV. A corporate action has no
   price, and a `0.00` would assert one.
 
+**The server says which trades are sales; the client never parses `subtype`** (GitHub issue
+#58). Every trade row carries `is_sale` — the sale side, a SELL *or its cancellation* — and
+`is_cancellation`, both from `app/models/trade.py`; other kinds carry `null`. The client's
+`isSell` used to read `subtype.includes('SELL')` while the server tested `== "SELL"`, so they
+disagreed about a CANCELSELL. A cancellation's realized figure is published (its sale's, negated,
+through the shared `realized_from_sell_trades`), so the figures strip's Sold and Realized net a
+busted sale to zero, and Bought nets a busted buy. Its badge reads *Sell · cancelled* /
+*Buy · cancelled*. A buy still realizes nothing, cancelled or not: `null`, never 0.00.
+
 Zero-value dividend rows are excluded on the same test the two dividend readers use, so yfinance's
 pre-ownership history never surfaces. Tests: `tests/test_activity_service.py`, plus cases in
 `tests/test_api_smoke.py` — including one comparing the ledger's dividend total against

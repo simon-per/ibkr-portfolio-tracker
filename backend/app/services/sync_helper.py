@@ -30,7 +30,7 @@ from sqlalchemy import and_, select
 from app.accounts import IBKR
 from app.models.security import Security
 from app.models.taxlot import TaxLot
-from app.models.trade import Trade
+from app.models.trade import Trade, uncancelled_sales
 from app.services.currency_service import CurrencyService
 from app.services.ibkr_service import IBKRService
 from app.repositories.taxlot_repository import TaxLotRepository
@@ -971,7 +971,9 @@ async def reconcile_taxlots(
         effective_close_date = close_date
         if conid and trade_repo is not None and last_sync_date is not None:
             trades = await trade_repo.get_by_conid_in_range(conid, last_sync_date, report_to_date)
-            sell_dates = [t.trade_date for t in trades if (t.buy_sell or "").upper() == "SELL"]
+            # A sale IBKR cancelled inside the window is no SELL on record (issue #58):
+            # the drop, if there is one, is then explained by inference below.
+            sell_dates = [t.trade_date for t in uncancelled_sales(trades)]
             if sell_dates:
                 close_source = "trade"
                 effective_close_date = max(sell_dates)
@@ -1128,9 +1130,9 @@ async def restamp_unsourced_closed_lots(
             and_(Trade.security_id.isnot(None), Trade.account == IBKR)
         )
     )).scalars().all()
-    for trade in rows:
-        if (trade.buy_sell or "").upper() == "SELL":
-            sells_by_security[trade.security_id].append(trade)
+    # A cancelled sale is no candidate: its date is not when the lot was sold (issue #58).
+    for trade in uncancelled_sales(rows):
+        sells_by_security[trade.security_id].append(trade)
 
     restamped = 0
     for lot in unsourced:

@@ -90,6 +90,16 @@ The skip-and-count rule is unchanged: a sale with no rate is omitted and named i
 `tests/test_eur_conversion_family.py` fails any module outside `native_amounts` that feeds a
 to-EUR result into a second `.convert(...)`.
 
+**The loop is `realized_from_sell_trades`, shared with the summary and the closed positions, and
+a cancelled sale nets out** (GitHub issue #58). The report lists every converted sale-side row of
+the year, so IBKR's `SELL (Ca.)` reversal is a row of its own with **every figure negated**
+(quantity, proceeds, cost, gain) and the year's totals net the busted sale to zero. Until then the
+busted sale's gain stayed in the realized totals. A cancellation dated in a later year than its
+sale nets in that later year — the report sums rows by trade date and does not pair them. The
+fallback to the closed-lot estimate is still "no converted sale-side row in the year"; the
+mechanism and the sign convention it assumes are in
+[data-model-and-valuation.md](data-model-and-valuation.md) (*A cancelled sale is no sale*).
+
 Frontend: `TaxTab.tsx`. It's a filing aid, not tax advice.
 
 **An estimated row's withholding is absent, not 0.00** (2026-10-14; the backend half 2026-10-17).

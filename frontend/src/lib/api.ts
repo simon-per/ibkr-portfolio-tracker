@@ -1276,7 +1276,7 @@ export type ActivityKind = 'trade' | 'dividend' | 'cash_flow' | 'corporate_actio
 export interface ActivityRow {
   date: string;
   kind: ActivityKind;
-  /** BUY/SELL, DEPOSITWITHDRAW/TRANSFER_IN, FORWARDSPLIT, ibkr/yfinance_estimate. */
+  /** BUY/SELL/CANCELBUY/CANCELSELL, DEPOSITWITHDRAW/TRANSFER_IN, FORWARDSPLIT, ibkr/yfinance_estimate. */
   subtype: string;
   symbol: string | null;
   /** The holding, for its logo; null for a cash flow. */
@@ -1293,6 +1293,14 @@ export interface ActivityRow {
   /** Dividends only: 'ibkr' has real withholding, 'yfinance_estimate' is a guess. */
   source: string | null;
   ib_key: string | null;
+  /**
+   * Trades only, decided by the server (`app/models/trade.py`) — never parse `subtype`.
+   * The sale side: a sale or the cancellation of one. A cancellation carries its sale's
+   * amounts negated, so summing the sale side nets a busted sale out.
+   */
+  is_sale: boolean | null;
+  /** Trades only: the row reverses an earlier execution (IBKR's "SELL (Ca.)" / "BUY (Ca.)"). */
+  is_cancellation: boolean | null;
 }
 
 export interface ActivityResponse {

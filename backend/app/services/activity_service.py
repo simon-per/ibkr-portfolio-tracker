@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cash_flow import DEPOSIT_WITHDRAW
+from app.models.trade import is_cancellation, is_sale_side
 from app.models.security import Security
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
@@ -39,6 +40,7 @@ from app.repositories.dividend_repository import DividendRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
+from app.services.realized_trades import realized_from_sell_trades
 from app.services.dividend_service import (
     DividendService,
     EX_TO_PAY_MAX_LAG_DAYS,
@@ -88,6 +90,12 @@ class ActivityRow:
     # Dividends only: 'ibkr' (real withholding) or 'yfinance_estimate' (a guess).
     source: Optional[str]
     ib_key: Optional[str]
+    # Trades only, decided by `app.models.trade` so the client never parses `subtype`
+    # (issue #58). `is_sale` is the sale side: a sale or the cancellation of one, whose
+    # reversed amounts net it out of the sold and realized sums. `is_cancellation`
+    # marks either side's reversal row.
+    is_sale: Optional[bool] = None
+    is_cancellation: Optional[bool] = None
 
 
 def _f(value: Optional[Decimal]) -> Optional[float]:
@@ -197,12 +205,24 @@ class ActivityService:
         Returns None when no rate is available, so the row still appears with the
         figure blank rather than being dropped or silently mis-scaled.
         """
+        return await self._converter(base_fx).convert(amount, currency, on_date)
+
+    def _converter(self, base_fx) -> NativeToBase:
         if self._to_base_converter is None:
             self._to_base_converter = NativeToBase(self.currency_service, base_fx)
-        return await self._to_base_converter.convert(amount, currency, on_date)
+        return self._to_base_converter
 
     async def _trades(self, start: date, end: date, base_fx) -> List[ActivityRow]:
         trades = await TradeRepository(self.db).get_between(start, end)
+        # A BUY realizes nothing. IBKR still sends fifoPnlRealized=0 on every buy,
+        # and rendering that as 0.00 asserts a realized result where there is none —
+        # the same rule that keeps a corporate action's price blank. So only the sale
+        # side carries a figure, converted by the loop every realized reader shares; a
+        # CANCELSELL's is its sale's negated (issue #58).
+        realized = {
+            id(r.trade): r.gain if r.gain_reported else None
+            for r in (await realized_from_sell_trades(trades, self._converter(base_fx))).rows
+        }
         out = []
         for t in trades:
             # `proceeds` already carries IBKR's sign: negative for a buy (cash out),
@@ -210,10 +230,6 @@ class ActivityService:
             # net cash effect is the sum.
             proceeds = t.proceeds or Decimal("0")
             commission = t.commission or Decimal("0")
-            # A BUY realizes nothing. IBKR still sends fifoPnlRealized=0 on every buy,
-            # and rendering that as 0.00 asserts a realized result where there is none —
-            # the same rule that keeps a corporate action's price blank.
-            realized = t.realized_pnl if (t.buy_sell or "").upper() == "SELL" else None
 
             out.append(ActivityRow(
                 date=t.trade_date.isoformat(),
@@ -230,12 +246,12 @@ class ActivityService:
                 amount_base=_f(await self._to_base(
                     proceeds + commission, t.currency, t.trade_date, base_fx
                 )),
-                realized_pnl_base=_f(await self._to_base(
-                    realized, t.currency, t.trade_date, base_fx
-                )),
+                realized_pnl_base=_f(realized.get(id(t))),
                 counts_as_money_in=None,
                 source=None,
                 ib_key=t.ib_key,
+                is_sale=is_sale_side(t),
+                is_cancellation=is_cancellation(t),
             ))
         return out
 

@@ -22,12 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import tax_exempt_accounts
 from app.models.security import Security
-from app.models.trade import Trade
+from app.models.trade import Trade, sale_sign
 from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
+from app.services.realized_trades import realized_from_sell_trades
 from app.services.portfolio_service import PortfolioService
 from app.clock import utc_today
 
@@ -192,32 +193,28 @@ class TaxService:
         realized_gains: List[Dict] = []
         r_proceeds = r_cost = r_gain = Decimal("0")
         warnings: List[str] = []
-        trades_skipped = 0
-        skipped_currencies = set()
         # Trade money is in the trade's own currency, so it takes the native->EUR->base
         # two-step `NativeToBase` owns: one rate lookup per (currency, date), and a
         # sale already in the base currency is its own amount rather than a round trip
-        # through EUR (GitHub issue #46 — this loop was a hand-written copy of it).
-        to_base = NativeToBase(self.currency_service, base_fx)
-        for t, sec in trade_rows:
-            if (t.buy_sell or "").upper() != "SELL":
-                continue
-            # The conversion returned the *unconverted* amount on failure until
-            # 2026-07-30, reporting a foreign figure as base currency — a TWD sale ~35x
-            # high in a filing aid badged realized_source='trades', the badge that
-            # means authoritative. `None` is the only answer to a missing rate now.
-            proceeds = await to_base.convert(
-                t.proceeds or Decimal("0"), t.currency, t.trade_date
-            )
-            gain = await to_base.convert(
-                t.realized_pnl or Decimal("0"), t.currency, t.trade_date
-            )
-            if proceeds is None or gain is None:
-                # Reporting the raw foreign amount would be worse than omitting
-                # it: the figure looks plausible and the badge says authoritative.
-                trades_skipped += 1
-                skipped_currencies.add(t.currency or "?")
-                continue
+        # through EUR (GitHub issue #46 — this loop was a hand-written copy of it). The
+        # loop itself is `realized_from_sell_trades`, shared with the summary and the
+        # closed positions (issue #58). This report's policy: list every converted
+        # sale-side row of the year — a CANCELSELL as a row of negated figures, so the
+        # totals net a busted sale out — and omit and warn per unconvertible one.
+        sec_of = {id(t): sec for t, sec in trade_rows}
+        realized = await realized_from_sell_trades(
+            [t for t, _ in trade_rows], NativeToBase(self.currency_service, base_fx)
+        )
+        # The conversion returned the *unconverted* amount on failure until
+        # 2026-07-30, reporting a foreign figure as base currency — a TWD sale ~35x
+        # high in a filing aid badged realized_source='trades', the badge that
+        # means authoritative. `None` is the only answer to a missing rate now, and
+        # the row is omitted: the raw foreign amount would look plausible.
+        trades_skipped = len(realized.unconvertible)
+        skipped_currencies = {t.currency or "?" for t in realized.unconvertible}
+        for row in realized.rows:
+            t, sec = row.trade, sec_of[id(row.trade)]
+            proceeds, gain = row.proceeds, row.gain
             cost = proceeds - gain
             r_proceeds += proceeds
             r_cost += cost
@@ -225,7 +222,10 @@ class TaxService:
             realized_gains.append({
                 "symbol": t.symbol or (sec.symbol if sec else None),
                 "trade_date": t.trade_date.isoformat(),
-                "quantity": float(abs(t.quantity)) if t.quantity is not None else None,
+                # Negative on a cancellation, like every other figure on its row.
+                "quantity": (
+                    float(abs(t.quantity)) * sale_sign(t) if t.quantity is not None else None
+                ),
                 "proceeds": round(float(proceeds), 2),
                 "cost_basis": round(float(cost), 2),
                 "gain_loss": round(float(gain), 2),

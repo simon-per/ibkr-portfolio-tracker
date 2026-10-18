@@ -865,11 +865,14 @@ re-point onto the general palette would have to redo, and the section above stil
   `SUMMARY_LIMIT` (500, the endpoint's `MAX_LIMIT`, the CSV's ceiling); past it the strip shows
   dashes and asks nothing. A filtered-out kind is a dash, not a zero. Net deposits reads the
   server's `counts_as_money_in` (a transfer is never money in). Dividends carry `est.` when an
-  estimate is in the sum.
+  estimate is in the sum. Sold and Realized sum the rows the server flags `is_sale` (a sale or its
+  cancellation, which nets it out); Bought sums every other trade. `isSell` reads that flag, never
+  `subtype` (issue #58; [activity-ledger.md](activity-ledger.md)).
 - **Activity type badges** are `TONE_CHIP` plus a glyph: Buy positive `Plus`, Sell negative
   `Minus`, Dividend positive `HandCoins` (est. muted), Deposit/Withdrawal neutral
   `ArrowDownToLine`/`ArrowUpFromLine`, Transfer warning `ArrowRightLeft`, corporate action muted
-  `Split`. The word is the badge's name (`e2e/ledger.mjs` reads it); the glyph is `aria-hidden`.
+  `Split`; a cancellation (`is_cancellation`) is muted *Sell · cancelled* / *Buy · cancelled*.
+  The word is the badge's name (`e2e/ledger.mjs` reads it); the glyph is `aria-hidden`.
   Dividends are `HandCoins` everywhere on the tab now, the Dividends tab's glyph.
 - **Fundamentals**: logos by `security_id` in the metrics table, the ETF chips, the earnings
   calendar and the surprise history (20px there: one line, so the measured row height holds). The

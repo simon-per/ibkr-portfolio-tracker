@@ -15,9 +15,10 @@
 - **taxlots** — one row per purchase: `open_date`, `quantity`, `cost_basis`, `cost_basis_eur`
   (pre-converted), `is_open`, `close_date`, **`close_source`** ∈ `trade` | `corporate_action` |
   `heuristic`.
-- **trades** — authoritative executions, idempotent on `ib_key`: `buy_sell`, `quantity`, `price`,
-  `proceeds`, `commission`, **`realized_pnl`** (IBKR's own FIFO). `security_id` is nullable — a fully
-  sold security is no longer in OpenPositions.
+- **trades** — authoritative executions, idempotent on `ib_key`: `buy_sell` ∈ `BUY` | `SELL` |
+  `CANCELBUY` | `CANCELSELL` (ibflex's member names; asked only through `app/models/trade.py`, see
+  *A cancelled sale is no sale*), `quantity`, `price`, `proceeds`, `commission`, **`realized_pnl`**
+  (IBKR's own FIFO). `security_id` is nullable — a fully sold security is no longer in OpenPositions.
 - **corporate_actions** — `action_type` (Reorg name), `quantity`, `value`, `proceeds`, `description`.
 - **cash_flows** — external cash, idempotent on `ib_key`: `flow_date`, **`flow_type`** ∈
   `DEPOSITWITHDRAW` | `TRANSFER_IN` | `TRANSFER_OUT` | `TRANSFER`, `amount` (signed as IBKR reports:
@@ -88,7 +89,8 @@ Migrations: `cd backend && alembic upgrade head` (the container CMD runs this on
 `reconcile_taxlots()` (`sync_helper.py`) first works out **which lots lost shares**, then explains
 the loss for the security as a whole, in priority order:
 1. **SELL trades** → close the shares those lots lost, stamped with the latest SELL date in the
-   window; `close_source='trade'`
+   window; `close_source='trade'`. A SELL that IBKR cancelled inside the window is none
+   (`uncancelled_sales`, issue #58)
 2. **Corporate actions** → deterministic reclassification (split/spinoff/merger), not a sale
 3. **Fallback heuristic** (quantity drop + `COST_CONSERVED_RATIO`) → `close_source='heuristic'`
 
@@ -157,7 +159,8 @@ closed lots. `realized_rows_from_closed_lots()` is **shared** by the portfolio t
 so the two can never disagree — they did once, and that was a bug. The picker keys on **SELL trades
 specifically**, not on the table being non-empty: a BUY-only statement returned hard zeros and
 permanently suppressed the fallback, while the tax report (which decides per year) still showed real
-gains. Pinned by `tests/test_realized_totals.py`.
+gains. Pinned by `tests/test_realized_totals.py`. Since issue #58 it keys on a sale that *stands*:
+a SELL beside its CANCELSELL is no sale on record.
 
 **A sale the realized totals leave out is counted, on either source** (GitHub issue #26). The trade
 path drops a SELL with no FX rate near its trade date — until 2026-10-18 only a log line, so the
@@ -165,6 +168,51 @@ path drops a SELL with no FX rate near its trade date — until 2026-10-18 only 
 `unpriced_disposals`: the trade path its unconvertible SELLs, the closed-lot fallback the lots in
 `last_realized_skipped` (below). `/summary` has no `warnings[]`, so the count is the surface; the
 hero tags *Realized gain* with "N sales unpriced". Test: `tests/test_closed_positions_partial_fx.py`.
+
+**A cancelled sale is no sale, and "is this a sale?" is asked in one place** (GitHub issue #58,
+2026-10-18). When IBKR busts an execution it sends a second row, `buySell="SELL (Ca.)"` (stored as
+`CANCELSELL`) or `"BUY (Ca.)"` (`CANCELBUY`). The question was written inline seven times on the
+server — `(t.buy_sell or "").upper() == "SELL"` in the realized totals (twice), the tax report, the
+closed positions, the activity ledger, reconcile and the restamp — and once more on the client as
+`subtype.includes('SELL')`. No copy knew a cancellation, so a busted sale's P&L stayed in the
+`/summary` headline, the tax report and the closed positions, reconcile closed lots with it, and
+Activity counted the CANCELSELL as a sale while the server did not. Now `app/models/trade.py`
+answers it: `trade_kind`, `sale_sign` (+1 sale, −1 its cancellation, 0 otherwise), `is_sale_side`,
+`is_cancellation`, `uncancelled_sales`.
+
+- **The sign convention is an assumption, stated.** A cancellation row carries its execution's
+  amounts **negated** — a CANCELSELL has positive quantity, negative proceeds and the sale's
+  `fifoPnlRealized` with its sign flipped — so the two rows sum to zero. That is IBKR's statement
+  convention; ibflex parses the attributes and says nothing about their signs, so the code cannot
+  verify it, and it is the assumption the derived cash balance already made (`CashService` sums
+  `proceeds + commission` over every trade as stored). So a reader that **sums money** takes both
+  rows as stored and the pair nets out by itself, in whichever window holds the two; a reader that
+  **counts sales or needs a sale's date** uses `sale_sign` or `uncancelled_sales`, which strikes
+  out the SELL each CANCELSELL reverses (same contract and absolute quantity, preferring the same
+  date, then price, then the nearest date). A cancellation whose sale lies outside the caller's
+  rows strikes out nothing. If IBKR were ever seen sending a cancellation with its original's
+  signs, every sum here and the cash balance would be wrong together; that is the place to look.
+- **The realized-from-SELL loop is `realized_trades.realized_from_sell_trades`, and there is one
+  of it.** It had three copies with three failure policies. It converts every sale-side row
+  (SELL and CANCELSELL) through `NativeToBase` and returns the converted rows, the unconvertible
+  ones, and per-security sums with `net_sales` (sales less cancellations); a row converts when its
+  proceeds *and* its realized figure do. Each reader keeps its own policy: the totals sum every
+  converted row and count the rest in `unpriced_disposals`, falling back to the closed lots when
+  no sale stands; the tax report lists the year's rows ([tax.md](tax.md)); the closed positions
+  refuse a security whole unless every row converted and a sale stands
+  ([performance-analytics.md](performance-analytics.md)). The one behaviour that moved for data
+  without cancellations: the closed positions used to need only the *realized* figure to convert,
+  so a sale with a realized P&L of exactly zero and no rate for its proceeds read as `trade`; it
+  now falls back like any other unconvertible sale.
+- **Reconcile and the restamp read `uncancelled_sales`.** A SELL busted inside the window no
+  longer settles a drop as `close_source='trade'` on the busted date — the drop, if any, goes to
+  inference — and a cancelled SELL is no restamp candidate.
+
+`tests/test_trade_kind_family.py` fails any comparison against `buy_sell` (or a trade-kind literal
+in a module that imports the trade model) outside `app/models/trade.py`, and any `.realized_pnl`
+read outside `realized_trades.py`; it also runs a sale and its cancellation through every reader.
+Reconcile and restamp cases are in `tests/test_sync_helper.py` and
+`tests/test_trade_security_linking.py`.
 
 **A lot sold on D is not held at D's close.** One convention, everywhere: `_calculate_daily_value`,
 `holdings_snapshot_as_of()` and the attribution gates all exclude **on** the close date, matching what

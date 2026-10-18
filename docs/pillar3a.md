@@ -121,8 +121,8 @@ rather than refused** — the export is full history, so refusing would block *e
 upload permanently once such a row existed.
 
 `realized_pnl` on a 3a SELL is **computed, never NULL**: `_realized_from_trades` prefers the
-trades table wholesale once any SELL exists and reads `t.realized_pnl or 0`, so a NULL would
-report the sale's gain as exactly zero in the blended headline.
+trades table wholesale once any SELL exists, and `realized_from_sell_trades` reads a missing
+figure as 0, so a NULL would report the sale's gain as exactly zero in the blended headline.
 
 ### Tax — the one place separation is mandatory
 

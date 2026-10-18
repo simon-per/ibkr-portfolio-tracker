@@ -825,6 +825,10 @@ def test_the_shapes_that_broke_production_serialize(client):
     # has none.
     assert sell["security_id"] == 3
     assert deposit["security_id"] is None
+    # The sale side is decided by the server, never by the client parsing `subtype`
+    # (issue #58); a row of another kind carries no trade flags.
+    assert (sell["is_sale"], sell["is_cancellation"]) == (True, False)
+    assert (deposit["is_sale"], deposit["is_cancellation"]) == (None, None)
     assert all(r["security_id"] is not None for r in act["items"] if r["kind"] == "dividend")
 
     # The ledger is era-spliced like every reader that computes a figure. Without this

@@ -53,6 +53,7 @@ from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.dividend_service import DividendService
 from app.services.lookthrough_service import LookthroughService
 from app.services.native_amounts import NativeToBase
+from app.services.realized_trades import realized_from_sell_trades
 from app.services.portfolio_service import PortfolioService
 from app.services.sector_taxonomy import UNKNOWN as SECTOR_UNKNOWN, normalise as normalise_sector
 
@@ -535,23 +536,14 @@ class PerformanceAnalyticsService:
             )).scalars().all()
         }
 
-        # IBKR's own realized figures per security, where SELL trades exist.
-        to_base = NativeToBase(self.portfolio.currency_service, base_fx)
-        trade_pnl: Dict[int, Decimal] = {}
-        trade_fx_missing: set = set()
-        for t in (await self.db.execute(
-            select(Trade).where(Trade.security_id.isnot(None))
-        )).scalars().all():
-            if (t.buy_sell or "").upper() != "SELL":
-                continue
-            gain = await to_base.convert(
-                t.realized_pnl if t.realized_pnl is not None else ZERO,
-                t.currency, t.trade_date,
-            )
-            if gain is None:
-                trade_fx_missing.add(t.security_id)
-                continue
-            trade_pnl[t.security_id] = trade_pnl.get(t.security_id, ZERO) + gain
+        # IBKR's own realized figures per security, where SELL trades exist — the
+        # conversion shared with the summary and the tax report (issue #58).
+        by_security = (await realized_from_sell_trades(
+            (await self.db.execute(
+                select(Trade).where(Trade.security_id.isnot(None))
+            )).scalars().all(),
+            NativeToBase(self.portfolio.currency_service, base_fx),
+        )).by_security
 
         grouped: Dict[int, Dict] = {}
         for r in rows:
@@ -586,14 +578,17 @@ class PerformanceAnalyticsService:
                 continue
             # Refused whole, per security (GitHub issue #26): IBKR's figure only when
             # EVERY one of its SELLs converted. The convertible trades alone are a
-            # partial sum that `source: trade` would present as authoritative.
-            if sid in trade_pnl and sid not in trade_fx_missing:
-                realized = trade_pnl[sid]
+            # partial sum that `source: trade` would present as authoritative. And
+            # only when a sale stands: a security whose every sale IBKR cancelled has
+            # no IBKR figure to give (issue #58).
+            sold = by_security.get(sid)
+            if sold is not None and sold.net_sales > 0 and sold.converted and not sold.unconvertible:
+                realized = sold.gain
                 source = "trade"
             else:
                 realized = g["proceeds"] - g["cost"]
                 source = "closed_lots"
-                if sid in trade_fx_missing:
+                if sold is not None and sold.net_sales > 0 and sold.unconvertible:
                     fx_fallbacks += 1
             holding_days = (
                 int(g["weighted_days"] / g["cost"]) if g["cost"] > 0 else None
@@ -649,8 +644,8 @@ class PerformanceAnalyticsService:
         warnings: List[str] = []
         if unpriced_warning:
             warnings.append(unpriced_warning)
-        # Counted off the positions served, not `trade_fx_missing`: a security whose
-        # closed lots are all unpriced is not on the list to have fallen back.
+        # Counted off the positions served, not the unconvertible trades: a security
+        # whose closed lots are all unpriced is not on the list to have fallen back.
         if fx_fallbacks:
             warnings.append(
                 f"{fx_fallbacks} {'securities have' if fx_fallbacks != 1 else 'security has'} "

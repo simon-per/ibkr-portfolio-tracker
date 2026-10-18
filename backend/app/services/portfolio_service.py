@@ -21,6 +21,7 @@ from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED, UNKNOWN as CASH_UNKNOWN
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
+from app.services.realized_trades import realized_from_sell_trades
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
@@ -1033,10 +1034,10 @@ class PortfolioService:
         None if no trades have been ingested yet (caller then falls back to the
         market-price approximation over closed lots).
 
-        Each SELL trade already carries IBKR's own FIFO realized P&L
-        (fifoPnlRealized) and proceeds in the trade currency, so both need the
-        native->EUR->base two-step that `NativeToBase` owns — this was one of the
-        three copies of it that forced the extraction.
+        The conversion is `realized_trades.realized_from_sell_trades`, shared with
+        the tax report and the closed positions (GitHub issue #58); this reader's
+        policy is to sum every converted sale-side row, so a cancelled sale nets out
+        against its CANCELSELL.
 
         A SELL with no FX rate near its trade date is left out of the sums and
         counted in `unpriced_disposals` (GitHub issue #26): until then it was only a
@@ -1048,46 +1049,29 @@ class PortfolioService:
         """
         if trades is None:
             trades = await TradeRepository(self.db).get_all()
+        realized = await realized_from_sell_trades(
+            trades, NativeToBase(self.currency_service, base_fx)
+        )
         # "Some trades exist" is not "realized figures exist": a statement can
         # carry BUYs long before any sale. Guarding on any-trade made a BUY-only
         # table return hard zeros and permanently mask the closed-lot fallback,
-        # while the tax report (which picks per-year) showed real gains.
-        if not any((t.buy_sell or "").upper() == "SELL" for t in trades):
+        # while the tax report (which picks per-year) showed real gains. A sale
+        # IBKR cancelled is no sale on record either (issue #58).
+        if realized.net_sales <= 0:
             return None
 
-        total_proceeds_eur = Decimal("0")
-        total_gain_eur = Decimal("0")
-        closed_security_ids: set = set()
-        unconvertible = 0
-        to_base = NativeToBase(self.currency_service, base_fx)
-
-        for t in trades:
-            if (t.buy_sell or "").upper() != "SELL":
-                continue
-            currency = t.currency
-            proceeds = t.proceeds if t.proceeds is not None else Decimal("0")
-            gain = t.realized_pnl if t.realized_pnl is not None else Decimal("0")
-
-            proceeds_base = await to_base.convert(proceeds, currency, t.trade_date)
-            gain_base = await to_base.convert(gain, currency, t.trade_date)
-            if proceeds_base is None or gain_base is None:
-                logger.warning(
-                    f"Realized: skipping trade {t.ib_key} — no FX for {currency} near {t.trade_date}"
-                )
-                unconvertible += 1
-                continue
-
-            total_proceeds_eur += proceeds_base
-            total_gain_eur += gain_base
-            if t.security_id is not None:
-                closed_security_ids.add(t.security_id)
-
+        total_proceeds_eur = realized.proceeds
+        total_gain_eur = realized.gain
         return {
             "total_realized_gain_loss_eur": float(total_gain_eur),
             "total_realized_proceeds_eur": float(total_proceeds_eur),
             "total_realized_cost_basis_eur": float(total_proceeds_eur - total_gain_eur),
-            "num_closed_positions": len(closed_security_ids),
-            "unpriced_disposals": unconvertible,
+            # A security whose every sale was cancelled closed nothing.
+            "num_closed_positions": sum(
+                1 for sid, s in realized.by_security.items()
+                if sid is not None and s.converted and s.net_sales > 0
+            ),
+            "unpriced_disposals": len(realized.unconvertible),
         }
 
     async def get_realized_totals(

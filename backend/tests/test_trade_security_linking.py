@@ -190,6 +190,45 @@ async def test_ambiguous_quantity_match_is_left_alone():
 
 
 @pytest.mark.asyncio
+async def test_a_cancelled_sale_is_no_candidate_for_the_restamp():
+    """
+    Of the two same-size sells above, IBKR busted one (GitHub issue #58): its date is not
+    when anything was sold, so the sale that stands is the unambiguous match.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(TaxLot(
+            id=13, security_id=1, open_date=date(2025, 11, 6),
+            close_date=date(2026, 4, 17), quantity=Decimal("2"),
+            cost_basis=Decimal("400"), price_per_unit=Decimal("200"), currency="USD",
+            cost_basis_eur=Decimal("409.92"), is_open=False, close_source=None,
+        ))
+        for key, side, qty, on in (
+            ("TX1", "SELL", "-2", date(2026, 1, 5)),
+            ("TX2", "SELL", "-2", date(2026, 3, 13)),
+            ("TX2c", "CANCELSELL", "2", date(2026, 3, 13)),
+        ):
+            session.add(Trade(
+                ib_key=key, conid="29624264", security_id=1, symbol="CRM",
+                trade_date=on, buy_sell=side, quantity=Decimal(qty),
+                price=Decimal("250"), proceeds=Decimal("-250") * Decimal(qty),
+                commission=Decimal("0"), currency="USD",
+                realized_pnl=Decimal("37.1") * Decimal(qty), asset_category="STK",
+            ))
+        await session.commit()
+
+        assert await restamp_unsourced_closed_lots(
+            TaxLotRepository(session), TradeRepository(session)
+        ) == 1
+        lot = (await session.execute(select(TaxLot))).scalar_one()
+        assert lot.close_date == date(2026, 1, 5)
+        assert lot.close_source == "trade"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sell_after_the_recorded_close_date_is_not_adopted():
     """
     The heuristic date is when the drop was *detected*, so the true sale is never later.

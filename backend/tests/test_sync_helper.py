@@ -632,7 +632,9 @@ WINDOW_END = date(2026, 6, 12)     # report_to_date
 async def _trade(trade_repo, key, side, trade_date, quantity, price, security_id=1, conid="100"):
     q = Decimal(str(quantity))
     p = Decimal(str(price))
-    signed = -q if side == "SELL" else q
+    # A sale and a cancelled buy take shares out; a buy and a cancelled sale put them
+    # back -- a cancellation row carries its execution's amounts negated (issue #58).
+    signed = -q if side in ("SELL", "CANCELBUY") else q
     await trade_repo.upsert({
         "ib_key": key, "conid": conid, "security_id": security_id, "symbol": "AAA",
         "trade_date": trade_date, "buy_sell": side, "quantity": signed,
@@ -750,6 +752,51 @@ async def test_a_relotted_holding_with_no_sell_on_record_books_no_sale():
 
         assert result["lots_closed_full"] + result["lots_closed_partial"] == 0
         assert await repo.get_by_security_id(1, is_open=False) == []
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_sale_cancelled_in_the_window_is_no_sell_on_record():
+    """
+    The relotted holding above, with a SELL that IBKR busted inside the window (GitHub
+    issue #58). Read as a sale, it closed the old lot on the busted date while IBKR still
+    reports every share held; it is no SELL on record, so the restatement books nothing.
+    """
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 1, 6), 10, 100)
+        await _trade(trade_repo, "S1", "SELL", date(2026, 6, 10), 10, 120)
+        await _trade(trade_repo, "S1c", "CANCELSELL", date(2026, 6, 10), 10, 120)
+        incoming = [_incoming("100", date(2025, 1, 7), 10, 100)]
+
+        result = await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        assert result["lots_closed_full"] + result["lots_closed_partial"] == 0
+        assert await repo.get_by_security_id(1, is_open=False) == []
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_drop_beside_a_cancelled_sale_is_explained_by_inference_not_by_it():
+    """Shares did leave, but the only SELL was busted: the closure is not stamped with it."""
+    engine, session, repo, trade_repo, corp_repo = await _make_repos_with_txns()
+    try:
+        await _seed_open_lot(repo, 1, date(2025, 1, 6), 10, 100)
+        await _trade(trade_repo, "S1", "SELL", date(2026, 6, 10), 4, 120)
+        await _trade(trade_repo, "S1c", "CANCELSELL", date(2026, 6, 10), 4, 120)
+        incoming = [_incoming("100", date(2025, 1, 6), 6, 100)]
+
+        await _reconcile_window(repo, trade_repo, corp_repo, incoming)
+
+        closed = await repo.get_by_security_id(1, is_open=False)
+        assert [(lot.quantity, lot.close_source) for lot in closed] == [
+            (Decimal("4"), "heuristic"),
+        ]
+        assert closed[0].close_date != date(2026, 6, 10)
     finally:
         await session.close()
         await engine.dispose()

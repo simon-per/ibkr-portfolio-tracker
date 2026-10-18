@@ -7,6 +7,7 @@ function row(over: Partial<ActivityRow>): ActivityRow {
     date: '2026-09-10', kind: 'trade', subtype: 'BUY', symbol: 'AAA', security_id: 1,
     description: '', quantity: 1, price: 10, currency: 'USD', amount_base: -10,
     realized_pnl_base: null, counts_as_money_in: null, source: null, ib_key: null,
+    is_sale: false, is_cancellation: false,
     ...over,
   }
 }
@@ -21,7 +22,7 @@ function response(items: ActivityRow[], over: Partial<ActivityResponse> = {}): A
 const LEDGER = [
   row({ subtype: 'BUY', amount_base: -100 }),
   row({ subtype: 'BUY', amount_base: -50 }),
-  row({ subtype: 'SELL', amount_base: 80, realized_pnl_base: 12 }),
+  row({ subtype: 'SELL', is_sale: true, amount_base: 80, realized_pnl_base: 12 }),
   row({ kind: 'dividend', subtype: 'ibkr', source: 'ibkr', amount_base: 3 }),
   row({ kind: 'cash_flow', subtype: 'DEPOSITWITHDRAW', counts_as_money_in: true, amount_base: 1000 }),
   row({ kind: 'cash_flow', subtype: 'DEPOSITWITHDRAW', counts_as_money_in: true, amount_base: -200 }),
@@ -65,7 +66,7 @@ describe('summarizeActivity', () => {
   })
 
   it('is unknown when a sale has no realized figure', () => {
-    const s = summarizeActivity(response([...LEDGER, row({ subtype: 'SELL', amount_base: 5, realized_pnl_base: null })]), [])
+    const s = summarizeActivity(response([...LEDGER, row({ subtype: 'SELL', is_sale: true, amount_base: 5, realized_pnl_base: null })]), [])
     expect(s.realized).toBeNull()
     expect(s.sold).toBe(85)
   })
@@ -77,6 +78,16 @@ describe('summarizeActivity', () => {
     expect(s.dividendsEstimated).toBe(true)
   })
 
+  it('nets a cancelled sale and a cancelled buy out of the sums', () => {
+    const s = summarizeActivity(response([
+      row({ subtype: 'SELL', is_sale: true, amount_base: 100, realized_pnl_base: 40 }),
+      row({ subtype: 'CANCELSELL', is_sale: true, is_cancellation: true, amount_base: -100, realized_pnl_base: -40 }),
+      row({ subtype: 'BUY', amount_base: -60 }),
+      row({ subtype: 'CANCELBUY', is_cancellation: true, amount_base: 60 }),
+    ]), [])
+    expect(s).toMatchObject({ bought: 0, sold: 0, realized: 0 })
+  })
+
   it('sums an empty kind in a complete window to zero', () => {
     const s = summarizeActivity(response([]), [])
     expect(s).toMatchObject({ events: 0, bought: 0, dividends: 0, netDeposits: 0 })
@@ -84,10 +95,11 @@ describe('summarizeActivity', () => {
 })
 
 describe('isSell', () => {
-  it('reads IBKR subtypes, and never calls a non-trade a sale', () => {
-    expect(isSell(row({ subtype: 'SELL' }))).toBe(true)
-    expect(isSell(row({ subtype: 'sell (Ca.)' }))).toBe(true)
+  it("reads the server's flag, never the subtype, and never calls a non-trade a sale", () => {
+    expect(isSell(row({ subtype: 'SELL', is_sale: true }))).toBe(true)
+    expect(isSell(row({ subtype: 'CANCELSELL', is_sale: true, is_cancellation: true }))).toBe(true)
+    expect(isSell(row({ subtype: 'SELL', is_sale: false }))).toBe(false)
     expect(isSell(row({ subtype: 'BUY' }))).toBe(false)
-    expect(isSell(row({ kind: 'cash_flow', subtype: 'SELL' }))).toBe(false)
+    expect(isSell(row({ kind: 'cash_flow', subtype: 'SELL', is_sale: true }))).toBe(false)
   })
 })

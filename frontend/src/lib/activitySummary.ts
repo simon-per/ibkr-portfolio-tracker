@@ -11,9 +11,15 @@ import type { ActivityKind, ActivityResponse, ActivityRow } from './api'
  * rate), and when its kind is filtered out: a filtered-out kind did not sum to zero.
  */
 
-/** A trade is a sale when IBKR's subtype says so (`SELL`, `SELL (Ca.)`); anything else buys. */
+/**
+ * The sale side, as the server decides it (`is_sale`): a sale or the cancellation of one;
+ * every other trade is the buy side. A cancellation carries its execution's amounts
+ * negated, so summing it on the same side as its sale nets a busted sale out of `sold`
+ * and `realized` (and a busted buy out of `bought`). This read the subtype until issue
+ * #58, a second copy of a rule the server applies — and the two disagreed.
+ */
 export function isSell(row: ActivityRow): boolean {
-  return row.kind === 'trade' && row.subtype.toUpperCase().includes('SELL')
+  return row.kind === 'trade' && row.is_sale === true
 }
 
 export interface ActivitySummary {

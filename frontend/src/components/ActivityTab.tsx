@@ -104,6 +104,11 @@ function activityBadge(row: ActivityRow): ActivityBadge {
     return { text: 'Transfer', tone: 'warning', icon: ArrowRightLeft }
   }
   if (row.kind === 'trade') {
+    if (row.is_cancellation) {
+      return isSell(row)
+        ? { text: 'Sell · cancelled', tone: 'muted', icon: Minus }
+        : { text: 'Buy · cancelled', tone: 'muted', icon: Plus }
+    }
     if (isSell(row)) return { text: 'Sell', tone: 'negative', icon: Minus }
     return row.subtype
       ? { text: 'Buy', tone: 'positive', icon: Plus }
