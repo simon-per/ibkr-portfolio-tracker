@@ -9,6 +9,9 @@ filing:
     capital gains, but the figures are provided for completeness / other regimes).
   * A current holdings snapshot as an indicative wealth-tax (Steuerwert) base, with
     the IBKR cash balance at the same date beside it.
+  * For the current year only, the dividends and withholding expected through
+    31 December -- the dividend forecast's own figures, not a second forecast.
+  * Three ESTV Kreisschreiben 36 securities-dealer indicators (`trader_criteria`).
 
 All monetary values are projected into the configured base currency.
 """
@@ -24,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.accounts import IBKR, tax_exempt_accounts
 from app.models.security import Security
-from app.models.trade import Trade, sale_sign
+from app.models.taxlot import TaxLot
+from app.models.trade import Trade, buy_sign, is_sale_side, sale_sign, uncancelled_sales
 from app.models.dividend_payment import DividendPayment
 from app.repositories.dividend_repository import IBKR_SOURCE, YFINANCE_SOURCE
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
@@ -39,6 +43,12 @@ from app.services.swiss_treaty_rates import (
     creditable_split,
     residual_rate_pct,
     withholding_country,
+)
+from app.services.trader_criteria import (
+    lowest_balance,
+    sales_by_day,
+    short_held_counts,
+    turnover_multiple,
 )
 from app.clock import utc_today
 
@@ -253,9 +263,9 @@ class TaxService:
         # sale-side row of the year — a CANCELSELL as a row of negated figures, so the
         # totals net a busted sale out — and omit and warn per unconvertible one.
         sec_of = {id(t): sec for t, sec in trade_rows}
-        realized = await realized_from_sell_trades(
-            [t for t, _ in trade_rows], NativeToBase(self.currency_service, base_fx)
-        )
+        # Shared with the turnover's purchases below, so a (currency, date) is looked up once.
+        to_base = NativeToBase(self.currency_service, base_fx)
+        realized = await realized_from_sell_trades([t for t, _ in trade_rows], to_base)
         # The conversion returned the *unconverted* amount on failure until
         # 2026-07-30, reporting a foreign figure as base currency — a TWD sale ~35x
         # high in a filing aid badged realized_source='trades', the badge that
@@ -411,8 +421,11 @@ class TaxService:
         # exactly as its holdings are. Absent when unknown -- no ledger at all, or a trade
         # with no exchange rate -- never 0.00, which would read as "no cash".
         cash_balance: Optional[Decimal] = None
+        # One instance for this line and the margin indicator below, so the ledgers are
+        # read and converted once.
+        cash_service = CashService(self.db)
         try:
-            cash = await CashService(self.db).uninvested_cash(base_fx, as_of, account=IBKR)
+            cash = await cash_service.uninvested_cash(base_fx, as_of, account=IBKR)
         except Exception as e:
             logger.error(f"Cash balance for {as_of} failed: {e}", exc_info=True)
             warnings.append(
@@ -487,6 +500,42 @@ class TaxService:
             # held on every report with a 3a account, and a warning that is always
             # present teaches the reader to skip the banner (owner, 2026-10-14).
 
+        # Recorded withholding only, absent when every row is an estimate (see the loop).
+        withholding_total: Optional[Decimal] = (
+            None if dividend_income and estimated_rows == len(dividend_income) else div_wht
+        )
+
+        # --- The current year through 31 December (GitHub issue #77) -----------------
+        # Absent for a past year, whose figures are all in. Never a 500: the projection
+        # is a preview beside the filing figures, so its failure is a warning.
+        projected: Optional[Dict] = None
+        if year == today.year:
+            try:
+                projected = await self._projected_to_year_end(
+                    year, today, base_fx, div_gross, withholding_total
+                )
+            except Exception as e:
+                logger.error(f"Dividend projection for {year} failed: {e}", exc_info=True)
+                warnings.append(
+                    f"The dividends expected through {end.isoformat()} could not be "
+                    f"computed, so the year-end projection is absent."
+                )
+
+        # --- Securities-dealer indicators (ESTV KS 36, GitHub issue #78) -------------
+        trader_criteria: Optional[Dict] = None
+        try:
+            trader_criteria = await self._trader_criteria(
+                year, as_of, base_fx, to_base, portfolio, cash_service, exempt_accounts,
+                [t for t, _ in trade_rows], realized_source, bool(realized_gains),
+                r_proceeds, trades_skipped, warnings,
+            )
+        except Exception as e:
+            logger.error(f"Securities-dealer indicators for {year} failed: {e}", exc_info=True)
+            warnings.append(
+                f"The securities-dealer indicators for {year} could not be computed, so "
+                f"they are absent."
+            )
+
         # The label reflects what actually contributed inside the year window:
         # "mixed" is the boundary year, where estimates cover the weeks before the
         # cash-transaction ledger began mid-year.
@@ -512,12 +561,13 @@ class TaxService:
                 # Recorded withholding only; `estimated_rows` is what it leaves out, and
                 # what `gross` and `net` include. Absent when every row is an estimate.
                 "withholding": (
-                    None if dividend_income and estimated_rows == len(dividend_income)
-                    else round(float(div_wht), 2)
+                    None if withholding_total is None else round(float(withholding_total), 2)
                 ),
                 "net": round(float(div_net), 2),
                 "estimated_rows": estimated_rows,
             },
+            # The current year only: received plus expected through 31 December, `est.`.
+            "projected": projected,
             "realized_gains": realized_gains,
             "realized_source": realized_source,
             "realized_totals": {
@@ -559,8 +609,203 @@ class TaxService:
                     "you are affiliated to a pension fund."
                 ),
             } if has_exempt else None,
+            "trader_criteria": trader_criteria,
             "warnings": warnings,
         }
+
+    async def _projected_to_year_end(
+        self,
+        year: int,
+        today: date,
+        base_fx,
+        received_gross: Decimal,
+        received_withholding: Optional[Decimal],
+    ) -> Dict:
+        """
+        The year's dividends received so far plus those expected through 31 December.
+
+        The expected part is the dividend breakdown's own year row (`growth.annual`):
+        `forecast_net_eur` and `forecast_withholding_eur`, which are in whatever base
+        `base_fx` projects -- this report's. Reading it rather than projecting here is
+        the point: a second forecast would be a copy of the cadence, the accruals and the
+        withholding ladder, waiting to disagree with the Dividends tab. The forecast is
+        net of each security's ladder rate and its withholding is net x r / (1 - r), so
+        the expected gross is their sum. Received is this report's own gross and recorded
+        withholding; the withholding through year end is absent when none is recorded.
+        """
+        breakdown = await DividendService(self.db).get_dividend_breakdown(
+            year=year, as_of=today, base_fx=base_fx
+        )
+        row = next((r for r in breakdown["growth"]["annual"] if r["year"] == year), None)
+        expected_net = Decimal(str(row["forecast_net_eur"])) if row else Decimal("0")
+        expected_wht = Decimal(str(row["forecast_withholding_eur"])) if row else Decimal("0")
+        expected_gross = expected_net + expected_wht
+        return {
+            "through": date(year, 12, 31).isoformat(),
+            "expected_gross": round(float(expected_gross), 2),
+            "expected_withholding": round(float(expected_wht), 2),
+            "gross": round(float(received_gross + expected_gross), 2),
+            "withholding": (
+                None if received_withholding is None
+                else round(float(received_withholding + expected_wht), 2)
+            ),
+        }
+
+    async def _trader_criteria(
+        self,
+        year: int,
+        as_of: date,
+        base_fx,
+        to_base: NativeToBase,
+        portfolio: PortfolioService,
+        cash: CashService,
+        exempt_accounts: List[str],
+        trades: List[Trade],
+        realized_source: str,
+        has_realized_rows: bool,
+        sales_proceeds: Decimal,
+        sales_unconvertible: int,
+        warnings: List[str],
+    ) -> Dict:
+        """
+        The three KS 36 indicators for `year` (definitions in `trader_criteria.py` and
+        docs/tax.md). `trades` are the year's trades outside the tax-exempt accounts --
+        the realized section's rows -- and `sales_proceeds` that section's proceeds, of
+        which `sales_unconvertible` sales had to be left out.
+
+        Each figure is absent, never a reassuring default, when the record cannot show
+        it. The first test is coverage: a year the IBKR cash record does not reach (the
+        holdings were at another broker) has no sales or margin on record, so every
+        indicator is absent rather than "no".
+        """
+        start = date(year, 1, 1)
+        opening_on = date(year - 1, 12, 31)
+        criteria: Dict = {
+            "opening_as_of": opening_on.isoformat(),
+            "opening_securities": None,
+            "opening_cash": None,
+            "purchases": None,
+            "sales_proceeds": None,
+            "turnover_multiple": None,
+            "turnover_estimated": False,
+            "sales": None,
+            "short_held_sales": None,
+            "sales_holding_unknown": 0,
+            "margin_used": None,
+            "min_cash_balance": None,
+        }
+
+        events = await cash.balance_events(base_fx, account=IBKR)
+        lowest = lowest_balance(events, start, as_of)
+        if lowest is None:
+            return criteria
+
+        # Margin: did IBKR cash close a day of the year below zero. Unknown while a trade
+        # has no rate -- the balance is short by the whole trade (CashService), and the
+        # year-end cash line's warning already names the count.
+        if not await cash.unconverted_trades(base_fx, account=IBKR):
+            low = round(lowest, 2)
+            criteria["min_cash_balance"] = float(low)
+            criteria["margin_used"] = low < 0
+
+        # Sales, counted on IBKR's own executions; a cancelled sale is no sale.
+        if any(is_sale_side(t) for t in trades):
+            sales = sales_by_day(uncancelled_sales(trades))
+            short, unknown = short_held_counts(
+                sales, await self._lots_closed_by_sales(sales, exempt_accounts)
+            )
+            criteria["sales"] = len(sales)
+            criteria["sales_holding_unknown"] = unknown
+            # Absent when no sale's holding period is on record at all.
+            criteria["short_held_sales"] = None if sales and unknown == len(sales) else short
+        elif not has_realized_rows:
+            criteria["sales"] = 0
+            criteria["short_held_sales"] = 0
+        # Otherwise the closed-lot estimate found disposals the trade ledger does not
+        # hold, so the count is not on record and stays absent.
+
+        # Turnover, the circular's test: purchases plus sales over the securities and
+        # cash at the prior 31 December. Purchases are summed as stored, converted like
+        # the realized section: a BUY's proceeds are negative and its cancellation's the
+        # same amount positive, so a busted purchase nets out.
+        purchases: Optional[Decimal] = Decimal("0")
+        unconverted_buys = 0
+        for t in trades:
+            if not buy_sign(t):
+                continue
+            amount = await to_base.convert(
+                t.proceeds if t.proceeds is not None else Decimal("0"), t.currency, t.trade_date
+            )
+            if amount is None:
+                unconverted_buys += 1
+                continue
+            purchases -= amount
+        if unconverted_buys:
+            purchases = None
+            warnings.append(
+                f"{unconverted_buys} purchase(s) have no exchange rate for their trade "
+                f"date, so the turnover is absent."
+            )
+        # The sales side is the realized section's total. A sale it had to omit leaves it
+        # short (its warning says so); the closed-lot estimate is a whole answer, tagged.
+        sales_side: Optional[Decimal] = (
+            None if realized_source == "trades" and sales_unconvertible else sales_proceeds
+        )
+        criteria["purchases"] = None if purchases is None else round(float(purchases), 2)
+        criteria["sales_proceeds"] = None if sales_side is None else round(float(sales_side), 2)
+        criteria["turnover_estimated"] = (
+            realized_source == "closed_lot_estimate" and has_realized_rows
+        )
+        volume = None if purchases is None or sales_side is None else purchases + sales_side
+
+        # The opening base: its own snapshot call, with its latch read right after it,
+        # and the IBKR cash that day through the one cash read.
+        securities: Optional[Decimal] = None
+        try:
+            rows = await portfolio.holdings_snapshot_as_of(
+                base_fx, opening_on, exclude_accounts=exempt_accounts
+            )
+        except Exception as e:
+            logger.error(f"Holdings snapshot for {opening_on} failed: {e}", exc_info=True)
+            warnings.append(
+                f"The {opening_on.isoformat()} holdings snapshot could not be built, so the "
+                f"turnover is absent."
+            )
+        else:
+            skipped = portfolio.last_snapshot_skipped
+            securities = sum((r["market_value"] for r in rows), Decimal("0"))
+            criteria["opening_securities"] = round(float(securities), 2)
+            if skipped:
+                warnings.append(
+                    f"The {opening_on.isoformat()} holdings behind the turnover omit "
+                    f"{len(skipped)} security(ies) that could not be valued that day "
+                    f"({', '.join(skipped)}), so the turnover overstates."
+                )
+        opening_cash = (await cash.uninvested_cash(base_fx, opening_on, account=IBKR)).balance
+        if opening_cash is not None:
+            criteria["opening_cash"] = round(float(opening_cash), 2)
+        criteria["turnover_multiple"] = turnover_multiple(volume, securities, opening_cash)
+        return criteria
+
+    async def _lots_closed_by_sales(
+        self, sales: Dict, exempt_accounts: List[str]
+    ) -> List[TaxLot]:
+        """The lots a SELL closed on one of `sales`' dates, of one of their securities."""
+        security_ids = {
+            t.security_id for rows in sales.values() for t in rows if t.security_id is not None
+        }
+        if not security_ids:
+            return []
+        return list((await self.db.execute(
+            select(TaxLot)
+            .join(Security, TaxLot.security_id == Security.id)
+            .where(
+                TaxLot.security_id.in_(security_ids),
+                TaxLot.close_date.in_({sale_date for _, sale_date in sales}),
+                TaxLot.close_source == "trade",
+                *([Security.account.notin_(exempt_accounts)] if exempt_accounts else []),
+            )
+        )).scalars().all())
 
     def to_csv(self, report: Dict) -> str:
         cur = report["base_currency"]
@@ -613,6 +858,11 @@ class TaxService:
                     "" if dt["withholding"] is None else dt["withholding"],
                     dt["net"],
                     f"withholding excludes, gross and net include {n_est} est." if n_est else ""])
+        # The current year: received plus expected, in the same columns.
+        proj = report.get("projected")
+        if proj:
+            w.writerow([f"THROUGH {proj['through']}", "", "", "", proj["gross"],
+                        _blank(proj["withholding"]), "", "est."])
         w.writerow([])
 
         # DA-1 is filed per source country, and credits only up to the treaty rate.
@@ -652,5 +902,26 @@ class TaxService:
         # Beside the holdings, not inside their total: a separate line on the return.
         if report.get("cash_balance") is not None:
             w.writerow(["Cash (IBKR)", "", "", report["cash_balance"], ""])
+
+        tc = report.get("trader_criteria")
+        if tc:
+            def _yes_no(flag):
+                return "" if flag is None else ("yes" if flag else "no")
+
+            w.writerow([])
+            w.writerow(["Securities-dealer indicators (ESTV KS 36)"])
+            w.writerow(["Turnover (x)", _blank(tc["turnover_multiple"]),
+                        "est." if tc["turnover_estimated"] else ""])
+            w.writerow([f"Purchases ({cur})", _blank(tc["purchases"])])
+            w.writerow([f"Sales proceeds ({cur})", _blank(tc["sales_proceeds"])])
+            w.writerow([f"Opening securities at {tc['opening_as_of']} ({cur})",
+                        _blank(tc["opening_securities"])])
+            w.writerow([f"Opening cash (IBKR) at {tc['opening_as_of']} ({cur})",
+                        _blank(tc["opening_cash"])])
+            w.writerow(["Sales", _blank(tc["sales"])])
+            w.writerow(["Sales held under 6 months", _blank(tc["short_held_sales"])])
+            w.writerow(["Sales with unknown holding period", tc["sales_holding_unknown"]])
+            w.writerow(["Margin used", _yes_no(tc["margin_used"])])
+            w.writerow([f"Lowest cash balance ({cur})", _blank(tc["min_cash_balance"])])
 
         return buf.getvalue()

@@ -202,4 +202,91 @@ no ledger at all (silently — nothing is wrong), an unconvertible IBKR trade (w
 the count; a 3a trade does not count against it), or the read raising (a warning, never a 500).
 Tests: `tests/test_tax_year_end.py`, `test_one_accounts_cash_carries_no_other_accounts_money`.
 
+**The current year carries its dividends through 31 December** as `projected` (GitHub issue
+#77): `expected_gross` and `expected_withholding` still to come, and `gross` and `withholding`
+= received + expected. **Current year only** (the year of `utc_today()`); a past year's figures
+are all in, so it is `null` there and the forecast is not even asked. The expected part is the
+dividend forecast's own year row, `get_dividend_breakdown(...)["growth"]["annual"]`'s
+`forecast_net_eur` and `forecast_withholding_eur` for the year, asked with this report's
+`base_fx` and `as_of=today` — **never a second projection**, which would copy the cadence, the
+accruals, the overdue fold and the withholding ladder and wait to disagree with the Dividends
+tab. The forecast is net of each security's ladder rate and its withholding is net × r / (1 − r)
+(docs/dividends.md), so expected gross = forecast net + forecast withholding. Received is this
+report's own `dividend_totals`: `gross` includes estimates as that total does, and
+`withholding` is the recorded withholding plus the expected one — **null when no withholding is
+recorded** (an estimate-only year), like the total it extends. No forecast row for the year is
+a real zero expected. A forecast that raises makes `projected` null plus a `warnings[]` line,
+never a 500. The CSV adds a `THROUGH YYYY-12-31` row under the dividend TOTAL, in its Gross and
+Withholding columns, marked `est.`; the tab shows two `est.` tiles. Pure DB, like the breakdown.
+Tests: `tests/test_tax_projected.py`.
+
+## Securities-dealer indicators (ESTV Kreisschreiben 36)
+
+A private investor's capital gains are tax-free, but the ESTV can reclassify a frequent trader
+as a professional securities dealer, whose gains are income. KS 36 lists safe-harbour criteria;
+`trader_criteria` (GitHub issue #78) puts three of them as **figures** per year — never a
+verdict ("safe", "dealer"), and no threshold printed beside them. The arithmetic is
+`app/services/trader_criteria.py` (pure) and `TaxService._trader_criteria`. Every figure is
+**IBKR-side only** (the report's `exempt_accounts` filter on trades, lots and the opening
+snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
+(`test_pillar3a_moves_none_of_them`).
+
+- **Coverage first.** If no IBKR cash event (`CashService.balance_events(account=IBKR)`: trades,
+  flows, IBKR dividends, measured levels) is dated on or before the year's end — the holdings
+  were at another broker — every indicator is **null**, not "no": nothing about that year's
+  sales or margin is on record. A year the record enters part-way is covered from its first
+  event; the months before it are not seen.
+- **`turnover_multiple`** is the circular's own test: *"Das Transaktionsvolumen beträgt pro
+  Kalenderjahr insgesamt nicht mehr als das Fünffache des Wertschriften- und
+  Guthabenbestandes zu Beginn der Steuerperiode"* — the year's transaction volume against the
+  securities and cash balances at the start of the tax period, safe up to five times. So
+  `turnover_multiple` = (`purchases` + `sales_proceeds`) ÷ (`opening_securities` +
+  `opening_cash`), two decimals (`trader_criteria.turnover_multiple`); the tab prints it to one
+  (`1.8×`) and states no threshold.
+  - `purchases`: the year's buy-side rows (`buy_sign`, the mirror of `sale_sign`) summed as
+    stored and negated, through the report's own `NativeToBase` — a BUY's proceeds are
+    negative and its CANCELBUY's the same amount positive, so a busted purchase nets out. Null,
+    with a warning, when any purchase has no rate.
+  - `sales_proceeds`: the realized section's proceeds total (`realized_totals`: every converted
+    sale-side row, a cancellation netting its sale). Null when that section is `trades` and
+    omitted an unconvertible sale (its warning already says the totals understate);
+    `turnover_estimated` when it is the closed-lot estimate. Purchases are always trades.
+  - `opening_securities`: `holdings_snapshot_as_of(prior 31 Dec, exclude_accounts=…)`, the
+    previous year's Steuerwert base; an empty snapshot is 0. Null, with a warning, when it
+    raises; a partial one serves the figure and a warning that the turnover **overstates**.
+  - `opening_cash`: the IBKR balance at the prior 31 December, **signed**, through
+    `CashService.uninvested_cash(…, account=IBKR)` — a margin debit shrinks the base. Null when
+    the balance is unknown (an unconvertible IBKR trade).
+  - The multiple is null when any part is null or the base is ≤ 0: a multiple of nothing, or of
+    a debt, is no figure.
+- **`sales`, `short_held_sales`, `sales_holding_unknown`.** A sale is the standing SELL rows of
+  one contract on one trade date (`uncancelled_sales`, then `sales_by_day`): IBKR sends each
+  fill of an order as its own row, and a busted sale is no sale. Its lots are the closed lots
+  of its security with `close_source='trade'` and `close_date` **equal to the sale date** —
+  reconcile stamps a SELL-explained lot with that SELL's date. It is short-held when any of its
+  lots opened less than **six calendar months** before the sale (`_add_months`, clamped: a lot
+  opened 31 August reaches six months on the last day of February). A sale with no such lot —
+  unlinked to a security, a second sale of the security in one reconcile window (its lots carry
+  the later date), a closure lost before issue #54 — is **unknown**, counted in
+  `sales_holding_unknown`, never guessed short or long; `short_held_sales` is null when every
+  sale is unknown. A year whose only disposals are the closed-lot estimate's has `sales` and
+  `short_held_sales` null: the trade ledger does not hold them. No sale at all is `0` and `0`.
+- **`margin_used`, `min_cash_balance`.** The lowest **end-of-day** IBKR balance over the year
+  (1 January to `holdings_as_of`), the balance carried in included, from the same events the
+  year-end cash line reads; `margin_used` is that minimum, rounded to cents, below zero. Null
+  while an IBKR trade has no exchange rate (`unconverted_trades`: the balance is short by the
+  whole trade). Two limits of the derivation, stated: an intraday dip that closes the day
+  positive is not seen, and the derived balance (before measured `EquitySummaryInBase` rows)
+  is one base-currency figure, so a negative balance in one currency offset by another is not
+  seen either, while a same-currency sell-then-buy weeks apart can read a few units negative
+  from the two days' different base rates. `min_cash_balance` is served so the size is visible.
+- **Derivatives, the circular's fourth trading criterion, are not reported**: `ibkr_service.
+  extract_trades` keeps STK executions only, so the ledger can never hold a derivative and the
+  answer would always be a dash; it becomes answerable once that ingest records non-STK
+  executions (their `assetCategory`, at least that they happened).
+
+A failure anywhere in the block makes `trader_criteria` null plus a warning, never a 500. The
+CSV ends with a *Securities-dealer indicators (ESTV KS 36)* block (blank cells for null, `yes`/
+`no`); the tab shows a three-tile row. Tests: `tests/test_tax_trader_criteria.py`.
+
 ---

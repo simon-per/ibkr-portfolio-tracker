@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import {
-  Building2, Download, Globe, HandCoins, Landmark, Loader2, PiggyBank, ReceiptText, TriangleAlert,
-  Wallet,
+  ArrowLeftRight, Building2, CalendarClock, CreditCard, Download, Globe, HandCoins, Hourglass,
+  Landmark, Loader2, PiggyBank, ReceiptText, Scale, Telescope, TriangleAlert, Wallet,
 } from 'lucide-react'
 import { ABSENT, cn, formatPercent, formatSigned } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -427,6 +427,71 @@ function TaxSummary({ data, money }: { data: TaxReport; money: Money }) {
   )
 }
 
+/**
+ * The current year through 31 December: received plus the dividend forecast's expected, so
+ * every tile is `est.`. Absent for a past year — the server sends no `projected` block.
+ */
+function YearEndProjection({ data, money }: { data: TaxReport; money: Money }) {
+  const p = data.projected
+  if (!p) return null
+  return (
+    <KpiPanel columns={3}>
+      <KpiCard tile icon={Telescope} label="Dividends to 31 Dec" value={money(p.gross)} sub="gross · est." />
+      <KpiCard tile icon={CalendarClock} label="Still expected" value={money(p.expected_gross)} sub="gross · est." />
+      <KpiCard
+        tile
+        icon={Landmark}
+        label="Withheld to 31 Dec"
+        value={p.withholding == null ? null : withheld(money, p.withholding)}
+        sub={`${withheld(money, p.expected_withholding)} expected · est.`}
+      />
+    </KpiPanel>
+  )
+}
+
+/**
+ * The ESTV KS 36 securities-dealer indicators as figures, with no threshold beside them. A
+ * dash is "not on record". Turnover is a multiple, as the circular states its test.
+ */
+function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
+  const tc = data.trader_criteria
+  if (!tc) return null
+  const held = tc.sales != null && tc.short_held_sales != null
+    ? `${tc.short_held_sales} of ${tc.sales}`
+    : null
+  return (
+    <div>
+      <SectionHeader variant="bare" icon={Scale} title="Securities dealer (KS 36)" className="mb-3" />
+      <KpiPanel columns={3}>
+        <KpiCard
+          tile
+          icon={ArrowLeftRight}
+          label="Turnover"
+          value={tc.turnover_multiple == null ? null : `${tc.turnover_multiple.toFixed(1)}×`}
+          sub={tc.turnover_estimated ? 'est.' : undefined}
+        />
+        <KpiCard
+          tile
+          icon={Hourglass}
+          label="Held < 6 months"
+          value={held}
+          sub={tc.sales_holding_unknown > 0 ? `${tc.sales_holding_unknown} unknown` : undefined}
+        />
+        <KpiCard
+          tile
+          icon={CreditCard}
+          label="Margin used"
+          tone={tc.margin_used ? 'warning' : 'neutral'}
+          value={tc.margin_used == null ? null : tc.margin_used ? 'Yes' : 'No'}
+          sub={tc.margin_used && tc.min_cash_balance != null
+            ? `low ${money(tc.min_cash_balance)}`
+            : undefined}
+        />
+      </KpiPanel>
+    </div>
+  )
+}
+
 export function TaxTab() {
   const money: Money = useFormatCurrency()
   const currentYear = new Date().getFullYear()
@@ -517,6 +582,7 @@ export function TaxTab() {
           )}
 
           <TaxSummary data={data} money={money} />
+          <YearEndProjection data={data} money={money} />
 
           {/* --- Pillar 3a --- Leads: it is what is *absent* from every section below. */}
           {data.pillar3a && (
@@ -711,6 +777,8 @@ export function TaxTab() {
               )}
             </CardContent>
           </Card>
+
+          <TraderCriteria data={data} money={money} />
         </>
       ) : null}
     </div>

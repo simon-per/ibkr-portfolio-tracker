@@ -124,6 +124,20 @@ def sale_sign(trade) -> int:
     return 0
 
 
+def buy_sign(trade) -> int:
+    """
+    +1 for a purchase, -1 for the cancellation of one, 0 for anything else -- the mirror
+    of `sale_sign`. Summed with the proceeds as stored (a BUY's are negative, its
+    CANCELBUY's the same amount positive), a busted purchase nets to zero.
+    """
+    kind = trade_kind(trade)
+    if kind == BUY:
+        return 1
+    if kind == CANCEL_BUY:
+        return -1
+    return 0
+
+
 def is_sale_side(trade) -> bool:
     """A sale or the cancellation of one -- the rows the realized sums read."""
     return sale_sign(trade) != 0

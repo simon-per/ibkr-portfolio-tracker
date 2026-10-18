@@ -825,6 +825,17 @@ def test_the_shapes_that_broke_production_serialize(client):
     assert all(row["security_id"] is not None for row in tax["holdings_snapshot"])
     assert "cash_balance" in tax
     assert tax["cash_balance"] is None or isinstance(tax["cash_balance"], float)
+    # The current year's dividends through 31 December (#77) -- the current year only --
+    # and the KS 36 indicators (#78), whose unknowns reach the wire as null.
+    assert set(tax["projected"]) == {
+        "through", "expected_gross", "expected_withholding", "gross", "withholding",
+    }
+    assert client.get(f"/api/tax/report?year={TODAY.year - 1}").json()["projected"] is None
+    assert set(tax["trader_criteria"]) == {
+        "opening_as_of", "opening_securities", "opening_cash", "purchases",
+        "sales_proceeds", "turnover_multiple", "turnover_estimated", "sales",
+        "short_held_sales", "sales_holding_unknown", "margin_used", "min_cash_balance",
+    }
 
     # The activity ledger unions four tables that each had no read surface at all.
     act = client.get(f"/api/portfolio/activity?start_date={START}&end_date={TODAY}").json()

@@ -6,7 +6,7 @@ import { TaxTab } from './TaxTab'
 import { includedEstimatesTag, withholdingTotalLabel } from '@/lib/taxTotals'
 import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
-import type { TaxReport, TaxDividendRow, TaxCountryRow } from '@/lib/api'
+import type { TaxReport, TaxDividendRow, TaxCountryRow, TaxTraderCriteria } from '@/lib/api'
 
 /**
  * An estimated dividend row has a guessed gross and no withholding on record. Its 0 is
@@ -87,9 +87,35 @@ function report(over: Partial<TaxReport> = {}): TaxReport {
     holdings_snapshot_note: '',
     cash_balance: null,
     pillar3a: null,
+    projected: null,
+    trader_criteria: null,
     warnings: [],
     ...over,
   }
+}
+
+function criteria(over: Partial<TaxTraderCriteria> = {}): TaxTraderCriteria {
+  return {
+    opening_as_of: '2025-12-31',
+    opening_securities: 2000,
+    opening_cash: 500,
+    purchases: 3200,
+    sales_proceeds: 1300,
+    turnover_multiple: 1.84,
+    turnover_estimated: false,
+    sales: 3,
+    short_held_sales: 1,
+    sales_holding_unknown: 1,
+    margin_used: true,
+    min_cash_balance: -500,
+    ...over,
+  }
+}
+
+/** The KPI tile whose label is `label`. */
+async function tile(label: string): Promise<HTMLElement> {
+  const el = await screen.findByText(label)
+  return el.closest('[class*="gap-1.5"]') as HTMLElement
 }
 
 function renderTab() {
@@ -377,6 +403,88 @@ describe('logos in the tax tables', () => {
     const realized = await tableWithHeader('Trade date')
     expect(realized.querySelectorAll('img')).toHaveLength(0)
     expect(within(realized).getByText('LO')).toBeTruthy()
+  })
+
+  it('shows the current year through 31 December, every tile est.', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        projected: {
+          through: '2026-12-31', expected_gross: 100, expected_withholding: 15,
+          gross: 250, withholding: 50,
+        },
+      }),
+    )
+    renderTab()
+    const total = await tile('Dividends to 31 Dec')
+    expect(total.textContent).toMatch(/250\.00/)
+    expect(total.textContent).toMatch(/est\./)
+    expect((await tile('Still expected')).textContent).toMatch(/100\.00/)
+    const wht = await tile('Withheld to 31 Dec')
+    expect(wht.textContent).toMatch(/-.*50\.00/)
+    expect(wht.textContent).toMatch(/15\.00 expected · est\./)
+  })
+
+  it('shows no projection for a past year', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    renderTab()
+    await tableWithHeader('Pay date')
+    expect(screen.queryByText('Dividends to 31 Dec')).toBeNull()
+    expect(screen.queryByText('Securities dealer (KS 36)')).toBeNull()
+  })
+
+  it('draws an unknown withholding through year end as a dash', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        projected: {
+          through: '2026-12-31', expected_gross: 100, expected_withholding: 15,
+          gross: 250, withholding: null,
+        },
+      }),
+    )
+    renderTab()
+    expect((await tile('Withheld to 31 Dec')).querySelector('[data-kpi-value]')!.textContent)
+      .toBe('—')
+  })
+
+  it('puts the KS 36 indicators as figures', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria() }))
+    renderTab()
+    const turnover = await tile('Turnover')
+    expect(turnover.querySelector('[data-kpi-value]')!.textContent).toBe('1.8×')
+    // The figure only: no threshold, no estimate tag on a turnover from trades.
+    expect(turnover.textContent).not.toMatch(/5|est\./)
+    const held = await tile('Held < 6 months')
+    expect(held.textContent).toContain('1 of 3')
+    expect(held.textContent).toContain('1 unknown')
+    const margin = await tile('Margin used')
+    expect(margin.querySelector('[data-kpi-value]')!.textContent).toBe('Yes')
+    expect(margin.textContent).toMatch(/low .*500\.00/)
+    // Not answerable from a stock-only ledger, so not shown at all.
+    expect(screen.queryByText('Derivatives')).toBeNull()
+  })
+
+  it('dashes what is not on record and tags an estimated turnover', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        trader_criteria: criteria({
+          sales: null, short_held_sales: null, sales_holding_unknown: 0,
+          margin_used: null, min_cash_balance: null, turnover_estimated: true,
+        }),
+      }),
+    )
+    renderTab()
+    expect((await tile('Turnover')).textContent).toMatch(/est\./)
+    for (const label of ['Held < 6 months', 'Margin used']) {
+      expect((await tile(label)).querySelector('[data-kpi-value]')!.textContent).toBe('—')
+    }
+  })
+
+  it('dashes a turnover with no base', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({ trader_criteria: criteria({ turnover_multiple: null }) }),
+    )
+    renderTab()
+    expect((await tile('Turnover')).querySelector('[data-kpi-value]')!.textContent).toBe('—')
   })
 
   it('draws the realized and holdings rows by their security id', async () => {

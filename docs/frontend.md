@@ -935,7 +935,11 @@ re-point onto the general palette would have to redo, and the section above stil
 - **Tax** has a year summary `KpiPanel` — each tile a totals row from a table below, with that
   row's marks (`incl./excl. N est.`, `est.`, a dash for an unrecorded withholding or an unbuilt
   Steuerwert, never 0.00). Dividend rows show logos by ISIN; realized and holdings rows carry no
-  ISIN or security id in `/api/tax/report`, so they show monograms.
+  ISIN or security id in `/api/tax/report`, so they show monograms. On the current year a
+  three-tile `est.` panel under it shows `projected` (dividends and withholding through 31 Dec),
+  and the KS 36 indicators (`trader_criteria`) close the tab as a three-tile row — turnover as a
+  multiple (`1.8×`, no threshold), held under six months, margin — whose dashes mean "not on
+  record" ([tax.md](tax.md)).
 
 ### Activity, Fundamentals, Watchlist, header, Crypto (2026-10-17)
 

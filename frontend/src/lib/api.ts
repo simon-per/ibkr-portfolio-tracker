@@ -1325,8 +1325,47 @@ export interface TaxReport {
     holdings_value: number | null;
     note: string;
   } | null;
+  /** The current year only (null otherwise): received plus expected through 31 Dec, `est.`. */
+  projected: TaxProjected | null;
+  /** ESTV KS 36 securities-dealer indicators; null when they could not be computed. */
+  trader_criteria: TaxTraderCriteria | null;
   /** Omitted rows, FX failures, a fallback taking over — badged in the UI and CSV. */
   warnings?: string[];
+}
+
+/**
+ * The dividend forecast's own year row (`forecast_net_eur` + `forecast_withholding_eur`),
+ * added to what was received. `withholding` is null when no withholding is recorded.
+ */
+export interface TaxProjected {
+  through: string;
+  expected_gross: number;
+  expected_withholding: number;
+  gross: number;
+  withholding: number | null;
+}
+
+/** Figures, never a verdict; every null is "not on record", never "no" (docs/tax.md). */
+export interface TaxTraderCriteria {
+  /** The prior 31 December the opening base is taken at. */
+  opening_as_of: string;
+  opening_securities: number | null;
+  /** IBKR cash that day, signed. */
+  opening_cash: number | null;
+  purchases: number | null;
+  sales_proceeds: number | null;
+  /** KS 36's test: (purchases + sales) ÷ (opening securities + opening cash). */
+  turnover_multiple: number | null;
+  /** The sales side is the closed-lot estimate's. */
+  turnover_estimated: boolean;
+  /** One per contract and trade date; a cancelled sale is none. */
+  sales: number | null;
+  /** Sales of a lot opened less than six months before; null when no holding period is known. */
+  short_held_sales: number | null;
+  sales_holding_unknown: number;
+  /** IBKR cash closed a day of the year below zero. */
+  margin_used: boolean | null;
+  min_cash_balance: number | null;
 }
 
 /** One event on the ledger. Fields a kind cannot fill are null, never 0. */
