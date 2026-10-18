@@ -82,7 +82,10 @@ def test_wal_and_journal_headers_are_caught():
 
 @pytest.mark.parametrize(
     "content",
-    [b"", b"SQLite format 2", b"SQLite format 3 is a file format\n", gzip.compress(b"text"), b"\x1f\x8bjunk"],
+    # mtime=0: gzip stamps the current time into its header, which made this case's test id
+    # differ between xdist workers ("Different tests were collected").
+    [b"", b"SQLite format 2", b"SQLite format 3 is a file format\n", gzip.compress(b"text", mtime=0),
+     b"\x1f\x8bjunk"],
 )
 def test_lookalikes_are_not_flagged(content):
     assert not check_no_sqlite.is_sqlite(content)
