@@ -15,8 +15,9 @@ docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
-#47, #51 and #38 followed: every audit issue is closed. A second audit round started the same
-afternoon.
+#47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
+and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
+code trace; wave 1 (#53, #54, #56, #57, #59, #67) shipped that evening.
 
 ---
 
@@ -71,8 +72,6 @@ afternoon.
   `error` at 00:00 means both failed. ET Sunday and Monday read `skipped` / `no_new_trading_day`.
   A missed window recovers by a Client Portal download through `app/cli/ingest_flex_xml.py`
   (docs/flex-and-sync.md).
-- **TSMC once, not twice, on `/api/portfolio/lookthrough`** — the ADR override (`ISSUER_OVERRIDES`)
-  has never met real data.
 - **`full_sync` on a day IBKR refuses:** the 2026-10-04 18:00 run (`Code=1001`) should carry a
   real `details.market_result`, not `null`, with top-level `status` `error`.
 - **MCO and MRVL forecast off 2 samples** — check `manage_mappings list` for `DIVIDENDS PREDATE
@@ -113,15 +112,8 @@ Only what is still unverified.
   the Dividend Income card and benchmark lines — aborted in the local check because they can
   reach Yahoo — render in the new styling. Crypto unlocked was not seen (needs the admin key).
 
-- **Look-through identities after the CINS fix (`66cd9cd`):** ASML one row, not three; NXP,
-  Tower, Nebius, Prysmian, Terna folded; `identity.unidentified_groups` well below 78. The capped
-  evening pass drains the backlog over a few evenings — `app.cli.resolve_identities` on the server
-  does it at once. The production half of the diagnosis (only late-sorting CINS unresolved) was
-  read off the API, not the database.
 - **The crypto chart's date axis (`dateAxis`)** — not seen in the browser (needs the admin key).
 - **The audit's Tier 1 (#13–#18) on production:**
-  - Container log lines keep their layout (`INFO:     …` from uvicorn, `asctime level name:` from
-    the app) and no `t=` / `apikey=` value appears in any line or traceback (#14).
   - A scheduled job that met a dashboard-started pass shows a late start, not `skipped /
     pipeline_busy` (#16); `skipped` now means the gate stayed held for 9 minutes.
   - Every `market_data_only` / `full_sync` / `ibkr_sync` row carries `fx_result.frankfurter_failed`
@@ -148,7 +140,6 @@ Only what is still unverified.
     plain grey) — the owner's eye on that paint.
   - Percentages with nothing to divide by show a dash, not 0.0% (#29); the hero's Realized gain
     carries "N sale(s) unpriced" only if a sale could not be priced or converted (#26).
-  - A window over 5 years or before 1900 answers 400 on every window route (#30).
 - **The audit's wave 4 (#32–#37, #52) on production:**
   - The next push after `/root/auto-deploy.sh` is refreshed logs `WAIT: no CI checks yet … deferring`
     for a tick or two instead of "deploying ungated" (#37); `/root/.auto-deploy-ci-wait` exists
@@ -160,9 +151,14 @@ Only what is still unverified.
     by under 0.3%); other currencies unchanged (#46).
   - `fx_result.frankfurter_requests` may read N+1 once on a day Frankfurter rejects a code, then 0–1
     (#40); Easter weekend slots ask nothing.
-- **#48/#49 in a real browser:** dark mode's native scrollbars and selects are dark now
-  (`color-scheme`, not visible to jsdom); money reads "-CHF 1,234" everywhere; the Forecast tab's
-  dividend-trend axis labels — if the monthly forecast passes 1,000, check no tick label repeats.
+- **Audit round 2, wave 1 on production:**
+  - Reconcile (#54): the next sale books its closed lot by open date; a sell-and-rebuy inside one
+    window keeps the old lot's history. Lots already lost to the old FIFO rule do not come back.
+  - Cash (#59): if a trade ever lacks an FX rate, the hero reads "Cash is unknown — N trade(s)
+    …" and cash is absent everywhere, never a partial sum (none lacked one on 2026-10-18).
+  - FX (#56): an accrual in a currency with no rate in 14 days is skipped and counted.
+  - Charts (#67): money axes print exact, distinct labels; bar charts' ticks follow the shared
+    ladder, so their positions moved.
 - **#38's first deploy:** a full uncached build (the dependency layer is new), the log shows
   `docker compose build --pull`, `docker builder prune` and, from the second deploy on,
   "Skipping npm ci"; `docker system df` on the VPS a week later shows build cache bounded to about
@@ -246,8 +242,8 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round (2026-10-18)** — findings are verified by offline repro before they
-   are filed (`gh issue list`).
+1. **The second audit round's open issues, #55, #58, #60–#66, #68–#78** (`gh issue list`), in
+   number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 3. **Tooling.** ESLint and a minimal ruff (`backend/ruff.toml`) run in CI since #39, with an

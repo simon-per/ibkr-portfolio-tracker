@@ -7,6 +7,31 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — audit round 2, wave 1 (#53, #54, #56, #57, #59, #67), and the owner's VPS actions
+
+Five reviewers (valuation, upstreams, frontend, API/ops, duplication) and a product review, each
+finding verified by an offline repro before filing: #53–#78.
+
+- **#53** (`2b66650`, pushed alone): `pending` restamps the CI wait and `failed` pins `<sha> red`,
+  so a red commit never deploys on a later API blip. `/root/auto-deploy.sh` refreshed from it.
+- **#54** (`a28099a`): reconcile diffs lots per open date (`_missing_per_lot`).
+- **#56** (`e9a0747`): `fx_policy.newest_published_rate`, the one bounded cache-only reader.
+- **#57** (`10b2a89`): a 429 holds every Yahoo path 45 min (`app_settings.yahoo_refused_at`);
+  the benchmark fetches only between the first contribution and the last finished session.
+- **#59** (`b98b3a7`): an unconvertible trade makes derived cash unknown, counted.
+- **#67** (`750e2d0`): `formatAxisMoney(value, symbol, step)`; ForecastTab on `niceTicks`.
+- **VPS (owner-approved, run over ssh):** `CORS_ORIGINS=` empty (a localhost preflight now
+  answers 400), Node 22.23.3, HSTS `max-age=300`, the health-watch cron, a one-off build-cache
+  prune (16.24 GB), the 2026-10-04 switchover leftovers removed. The live vhost is now copied in
+  `ops/nginx-portfolio.conf.example`.
+- **Read off production:** the 2026-10-17 outage was a host reboot (`uptime -s` 15:39 UTC);
+  #14's log layout holds with no `t=`/`apikey=` value; #30's window guard answers 400; TSMC is
+  one look-through row and ASML one; `unidentified_groups` 47; `yf-cache/` persists; a light and
+  dark Playwright pass over all nine tabs at 1366 and 390 px found no sideways scroll, broken
+  image, console error or malformed money (phone card views lack logos: #70).
+
+Verified offline: backend 2696 passed / 8 skipped, frontend 1112 passed, build and lint.
+
 ## Shipped 2026-10-18 — #38, dependency lock and cached builds (pushed alone)
 
 - The image and CI install `backend/requirements.lock` (uv-compiled for Python 3.11 manylinux,
