@@ -24,8 +24,6 @@ afternoon.
 
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
-- **Host nginx (#51):** diff `ops/nginx-portfolio.conf.example` against the live vhost and fold the
-  differences back so the repo holds the real file; HSTS is commented out in it, short `max-age`.
 - **Production CORS (#51):** set `CORS_ORIGINS=` empty in the VPS `backend/.env` (the site is
   same-origin), then `GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d` — never `restart`.
 - **Optional (#51):** the health-watch cron in docs/deployment.md.

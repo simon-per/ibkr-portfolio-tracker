@@ -17,8 +17,8 @@ and for wiping / rebuilding it without losing data.
 **In git (restored by `git clone`):** all app code, `frontend/.env.production`
 (empty `VITE_API_URL` → frontend calls `/api/*` same-origin), `backend/frontend-nginx.conf`,
 `backend/docker-compose.yml`, `deploy.sh`, `backend/.env.example`, and
-`ops/nginx-portfolio.conf.example`, a reconstruction of the host vhost (not the live file;
-see the table).
+`ops/nginx-portfolio.conf.example`, a copy of the host vhost (the live file is the one that
+counts; see the table).
 
 **NOT in git — back these up before wiping:**
 
@@ -26,7 +26,7 @@ see the table).
 |---|---|---|
 | `backend/data/portfolio.db` | All portfolio data (securities, tax lots, prices, FX, dividends, fundamentals, etc.) | SQLite, **WAL mode** — never plain-`cp` it while the backend runs; use `/root/backup-db.sh` or stop the backend first. Until 2026-10-04 it was `backend/portfolio.db`, which is now a symlink to it ([docs/deployment.md](docs/deployment.md), *The database directory*) |
 | `backend/.env` | Secrets: `IBKR_TOKEN`, `IBKR_QUERY_ID`, etc. | Can also be rebuilt from `backend/.env.example` |
-| `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; the vhost itself is hand-written and **not** in git. `ops/nginx-portfolio.conf.example` was reconstructed from the docs, so diff it against this file before trusting it ([docs/deployment.md](docs/deployment.md), *The host nginx vhost*) |
+| `/etc/nginx/sites-available/portfolio` | The public vhost: TLS, the `/api/` proxy, `proxy_read_timeout 300` | Certbot re-issues the certificate on a fresh setup; `ops/nginx-portfolio.conf.example` is a copy (2026-10-18); after editing the live file, copy it back ([docs/deployment.md](docs/deployment.md), *The host nginx vhost*) |
 | `/root/auto-deploy.sh`, `/root/backup-db.sh` | The deploy and backup jobs | Both are in git under `ops/` — reinstall from there rather than restoring the copies |
 | root's crontab | `auto-deploy` every 5 min (`*/5`, since 2026-10-04), `backup-db daily` at 03:17 UTC | Two lines; recreate by hand |
 

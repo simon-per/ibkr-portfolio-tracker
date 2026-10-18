@@ -274,18 +274,19 @@ than pushing to `main`.
 
 ## The host nginx vhost
 
-**The public vhost is hand-written on the VPS and not in git**: `/etc/nginx/sites-available/portfolio`,
-linked into `sites-enabled/`, certificate from Certbot. It terminates TLS on 80/443 (both with a
+**The public vhost lives on the VPS**: `/etc/nginx/sites-available/portfolio`, linked into
+`sites-enabled/`, certificate from Certbot; `ops/nginx-portfolio.conf.example` is a copy of it. It terminates TLS on 80/443 (both with a
 `listen [::]` twin, because an AAAA record exists), proxies `/api/` and `/health` to the backend on
-`127.0.0.1:8000` (`proxy_read_timeout 300`, `X-Forwarded-For $proxy_add_x_forwarded_for` — the entry
-`app/rate_limit.py` keys on) and everything else to the frontend container on `127.0.0.1:8080`, whose
+`127.0.0.1:8000` (`proxy_read_timeout 300`; Debian's `proxy_params` sets
+`X-Forwarded-For $proxy_add_x_forwarded_for` — the entry `app/rate_limit.py` keys on) and everything else to the frontend container on `127.0.0.1:8080`, whose
 `frontend-nginx.conf` sets the CSP and cache headers. The same nginx serves an unrelated n8n vhost.
 
-**`ops/nginx-portfolio.conf.example` is a reconstruction, not a copy.** It was written from what this
-repo documents, without access to the server. Diff it against the live file on the VPS before
-relying on it, and fold back whatever the live file has that it lacks. Once the two agree it can
-become the versioned copy. HSTS is in it commented out, with a 5-minute `max-age`: enabling it is
-the owner's call (STATUS.md).
+**`ops/nginx-portfolio.conf.example` is the live file, copied 2026-10-18.** It started as a
+reconstruction from the docs; the diff against the server replaced it with Certbot's real layout
+(the TLS lines and the whole port-80 server are Certbot's, which answers 404 to any other host
+name) plus `client_max_body_size 20m` and `include /etc/nginx/proxy_params`. Nothing installs it:
+after editing the live file, copy it back here. HSTS is in it commented out, with a 5-minute
+`max-age`: enabling it is the owner's call (STATUS.md).
 
 **`backend/setup_ssl.sh` was deleted on 2026-10-18** (GitHub issue #51). Nothing referenced it,
 and running it would have broken the site. It overwrote `$(ls /etc/nginx/sites-enabled/*)`, which is
@@ -296,16 +297,15 @@ host, which bypasses the container's CSP.
 
 ```bash
 apt-get install -y nginx certbot python3-certbot-nginx
+# Start from the example's first server WITHOUT the "managed by Certbot" lines and the
+# `listen 443` pair, listening on 80 instead (`listen 80; listen [::]:80;`): the certificate
+# does not exist yet, so `nginx -t` would reject them. Delete the second server too.
 cp /root/IBKR_investment_tracker/ops/nginx-portfolio.conf.example /etc/nginx/sites-available/portfolio
-# The certificate does not exist yet, so `nginx -t` rejects the 443 server. For the first run,
-# comment out that server and the port-80 `return 301` (Certbot must answer its challenge
-# over plain HTTP).
-# Get the certificate, then restore both.
 ln -s /etc/nginx/sites-available/portfolio /etc/nginx/sites-enabled/portfolio
 nginx -t && systemctl reload nginx
-certbot certonly --nginx -d portfolio.srv1211053.hstgr.cloud
-# Restore both. Certbot's nginx plugin normally creates options-ssl-nginx.conf and
-# ssl-dhparams.pem. If either is missing, drop that line.
+# Certbot moves the server to 443 and writes the port-80 redirect server, as in the example.
+certbot --nginx -d portfolio.srv1211053.hstgr.cloud
+diff /root/IBKR_investment_tracker/ops/nginx-portfolio.conf.example /etc/nginx/sites-available/portfolio
 nginx -t && systemctl reload nginx
 ```
 

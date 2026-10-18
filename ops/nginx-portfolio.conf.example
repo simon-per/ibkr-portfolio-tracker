@@ -1,46 +1,21 @@
-# EXAMPLE of the host nginx vhost. NOT the live file, and NOT installed by anything.
+# The host nginx vhost, as live on the VPS: /etc/nginx/sites-available/portfolio, linked into
+# sites-enabled/. Copied from the server on 2026-10-18 (GitHub issue #51); nothing installs
+# it, so after editing the live file copy it back here, and the reverse on a rebuilt VPS
+# (docs/deployment.md, The host nginx vhost). Lines marked "managed by Certbot" are
+# Certbot's: it wrote the 443 server's TLS block and the whole port-80 server.
 #
-# The live vhost is /etc/nginx/sites-available/portfolio on the VPS, hand-written and not
-# in git (DEPLOY.md, "What is and isn't in git"). This template was reconstructed from
-# what the repo documents about it, without access to the server, so before relying on it
-# DIFF IT AGAINST THE LIVE FILE (`diff ops/nginx-portfolio.conf.example
-# /etc/nginx/sites-available/portfolio`) and fold whatever the live file has and this lacks
-# back into here. Once they agree, this can become the versioned copy (GitHub issue #51).
-#
-# What it is built from:
-# - host nginx terminates TLS (Certbot) and owns 80/443; compose publishes the backend on
-#   127.0.0.1:8000 and the frontend container on 127.0.0.1:8080 (DEPLOY.md, Stack);
-# - /api/ is proxied publicly with proxy_read_timeout 300 (docs/deployment.md);
-# - an AAAA record exists, so every listen needs its [::] twin (the 2026-07-08 incident);
-# - /health answers publicly (ops/finish-deploy.sh reads https://<host>/health);
-# - app/rate_limit.py keys on the RIGHTMOST X-Forwarded-For entry (TRUSTED_PROXY_HOPS=1),
-#   which is the one $proxy_add_x_forwarded_for appends — so whatever a client puts in the
-#   header itself is ignored;
-# - the frontend's CSP and cache headers come from backend/frontend-nginx.conf inside the
-#   container, so this vhost proxies to it rather than serving frontend/dist itself.
-# The same nginx serves an unrelated n8n vhost: edit this server's file only, and reload
-# with `nginx -t && systemctl reload nginx`.
-
+# - TLS terminates here; compose publishes the backend on 127.0.0.1:8000 and the frontend
+#   container on 127.0.0.1:8080, whose frontend-nginx.conf sets the CSP and cache headers.
+# - Every listen has its [::] twin: an AAAA record exists (the 2026-07-08 incident).
+# - /etc/nginx/proxy_params (Debian's) sets Host, X-Real-IP, X-Forwarded-Proto and
+#   X-Forwarded-For $proxy_add_x_forwarded_for — the rightmost entry app/rate_limit.py keys
+#   on (TRUSTED_PROXY_HOPS=1), so whatever a client puts in the header itself is ignored.
+# - proxy_read_timeout 300: a Flex sync or a market-data pass can hold a request for minutes.
+# The same nginx serves an unrelated n8n vhost: edit this server's file only, and reload with
+# `nginx -t && systemctl reload nginx`.
 server {
-    listen 80;
-    listen [::]:80;
     server_name portfolio.srv1211053.hstgr.cloud;
-
-    # Everything to HTTPS. On a fresh VPS comment this out until `certbot certonly --nginx`
-    # has issued the certificate (docs/deployment.md, The host nginx vhost).
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    server_name portfolio.srv1211053.hstgr.cloud;
-
-    # Written by Certbot. Paths only; the key never leaves /etc/letsencrypt.
-    ssl_certificate /etc/letsencrypt/live/portfolio.srv1211053.hstgr.cloud/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/portfolio.srv1211053.hstgr.cloud/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 20m;
 
     # HSTS: the OWNER's call, deliberately commented out (STATUS.md, Needs a human). The
     # header is sticky in every browser that sees it, so start with a short max-age (5
@@ -50,27 +25,39 @@ server {
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        # A Flex sync or a market-data pass can hold a request for minutes.
-        proxy_read_timeout 300s;
+        include /etc/nginx/proxy_params;
+        proxy_read_timeout 300;
     }
 
     location = /health {
         proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        include /etc/nginx/proxy_params;
     }
 
     location / {
         proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        include /etc/nginx/proxy_params;
     }
+
+    listen 443 ssl;
+    listen [::]:443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/portfolio.srv1211053.hstgr.cloud/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/portfolio.srv1211053.hstgr.cloud/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+server {
+    if ($host = portfolio.srv1211053.hstgr.cloud) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    server_name portfolio.srv1211053.hstgr.cloud;
+
+    listen 80;
+    listen [::]:80;
+    return 404; # managed by Certbot
+
+
 }
