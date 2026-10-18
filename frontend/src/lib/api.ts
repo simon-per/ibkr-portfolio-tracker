@@ -1042,11 +1042,33 @@ export interface DividendForecastHistoryPoint {
   reconstructed: boolean;
 }
 
+/**
+ * One company's dividend moving on one day: the breakdown's `raises` part for that
+ * security, served per company instead of summed. Raises and cuts alike, every move;
+ * `feedRaises` (lib/dividendGrowth.ts) keeps those beyond `RAISE_BAND_PCT`.
+ */
+export interface DividendRaise {
+  /** The snapshot day the new level was first recorded. */
+  date: string;
+  security_id: number;
+  symbol: string;
+  /** The levels' currency: the security's own, or EUR when a day lacked its rate. */
+  currency: string | null;
+  /** What one share pays over a year, gross, before and after. */
+  level_from: number;
+  level_to: number;
+  change_pct: number | null;
+  /** The annual income the move added (negative: removed), base currency. */
+  annual_change_eur: number;
+}
+
 export interface DividendForecastHistoryResponse {
   base_currency: string;
   /** The first day growth is measured from, when the owner has set one. */
   growth_from: string | null;
   points: DividendForecastHistoryPoint[];
+  /** Every company's raise or cut on the breakdown's chain, newest first. */
+  raises: DividendRaise[];
 }
 
 /**
@@ -1081,6 +1103,12 @@ export interface DividendUpcomingPayment {
    * payment was invisible on every surface for up to a month.
    */
   pending: boolean;
+  /**
+   * An announced payment's gross per share against the last regular one, in the
+   * payment's own currency, in percent. Signed; null on every other entry and wherever
+   * nothing like-for-like exists. The calendar tags a raise (`payoutVerdict`).
+   */
+  per_share_change_pct?: number | null;
 }
 
 /**

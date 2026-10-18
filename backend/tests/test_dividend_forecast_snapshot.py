@@ -189,6 +189,8 @@ async def test_history_projects_each_day_at_its_own_rate(monkeypatch):
                  # Rows stored without lines have nothing to break down.
                  "breakdown": None, "reconstructed": False},
             ],
+            # ...and no payer to have raised.
+            "raises": [],
         }
     finally:
         await session.close()

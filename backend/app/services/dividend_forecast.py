@@ -243,6 +243,27 @@ def special_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayme
     return out
 
 
+def is_special_near(history: Sequence[HistPayment], on_date: date, tol: int) -> bool:
+    """
+    True when the payment nearest ``on_date`` (within ``tol`` days) is one the forecast
+    never sizes from: IBKR's own label, or `special_payments`' inference over the same
+    history. False when no payment is that near.
+
+    For a record that carries no kind of its own — an open accrual — this is the only
+    way to ask whether it is a one-off, and it asks the forecast's own rule rather than
+    a second one.
+    """
+    nearest = _nearest(history, on_date, tol)
+    if nearest is None:
+        return False
+    if nearest.special:
+        return True
+    gap = infer_gap_days([p.on_date for p in history if p.cadence])
+    if gap is None:
+        return False
+    return any(p is nearest for p in special_payments(history, gap))
+
+
 def is_steady(regular: Sequence[HistPayment]) -> bool:
     """
     True when the recent payments only rise, or drop once and stay down.

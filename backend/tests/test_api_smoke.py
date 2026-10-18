@@ -302,8 +302,9 @@ async def _seed(session: AsyncSession) -> None:
                                     price_usd=60_000.0 - 100 * back, source="daily",
                                     fetched_at=datetime.combine(TODAY, time(6))))
     # Two days of the dividend forecast with their per-security lines: two more ASML
-    # shares bought in between, at an unchanged payout.
-    for back, shares, total in ((1, "8", "32.00"), (0, "10", "40.00")):
+    # shares bought in between, at an unchanged payout, and a raise of its level
+    # (4.00 to 4.40 a share) whose next payment is not yet in the window.
+    for back, shares, total, level in ((1, "8", "32.00", "4.00"), (0, "10", "40.00", "4.40")):
         day = TODAY - timedelta(days=back)
         session.add(DividendForecastSnapshot(
             snapshot_date=day, next_12m_eur=Decimal(total), ttm_net_eur=Decimal("20.00"),
@@ -312,6 +313,7 @@ async def _seed(session: AsyncSession) -> None:
         session.add(DividendForecastSnapshotLine(
             snapshot_date=day, security_id=1, shares=Decimal(shares),
             next_12m_eur=Decimal(total), currency="EUR", fx_to_eur=Decimal("1"),
+            level_eur=Decimal(level),
         ))
     await session.flush()
     await session.commit()
@@ -797,6 +799,10 @@ def test_the_shapes_that_broke_production_serialize(client):
         assert entry["amount_source"] in {
             "announced", "latest_payment", "same_payment_last_year", "estimate",
         }, entry
+        # On the wire for every entry; only an announced amount is ever compared.
+        assert "per_share_change_pct" in entry, entry
+        if entry["amount_source"] != "announced":
+            assert entry["per_share_change_pct"] is None, entry
 
     tax = client.get(f"/api/tax/report?year={TODAY.year}").json()
     assert tax["holdings_snapshot_error"] is False
@@ -890,9 +896,16 @@ def test_the_forecast_history_serves_its_breakdown(client):
     assert last["breakdown"] == {
         "since": first["date"],
         "shares": 7.52,             # 2 shares x 4.00 EUR x 0.94 CHF
-        "raises": 0.0, "timing": 0.0, "newly_forecast": 0.0, "fx": 0.0,
+        "raises": 3.76,             # 10 shares x 4.00 x 10% x 0.94
+        "timing": -3.76,            # the window itself held the same payments
+        "newly_forecast": 0.0, "fx": 0.0,
         "unattributed": 0.0,
     }
+    # The raises feed: that raise, per company, through the response_model.
+    assert history["raises"] == [{
+        "date": last["date"], "security_id": 1, "symbol": "ASML", "currency": "EUR",
+        "level_from": 4.0, "level_to": 4.4, "change_pct": 10.0, "annual_change_eur": 3.76,
+    }]
 
     # And the figures the recorder stores are on the breakdown, one per holding held.
     lines = client.get("/api/dividends/breakdown").json()["forecast_by_security"]

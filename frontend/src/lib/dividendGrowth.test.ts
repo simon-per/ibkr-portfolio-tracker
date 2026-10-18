@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { growthPct, payoutChanges, RAISE_BAND_PCT, realizedOnlyYears } from './dividendGrowth'
-import type { DividendAnnualRow } from './api'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
+import {
+  feedRaises, growthPct, payoutChanges, payoutVerdict, RAISE_BAND_PCT, realizedOnlyYears,
+} from './dividendGrowth'
+import type { DividendAnnualRow, DividendRaise } from './api'
 
 function row(part: Partial<DividendAnnualRow> & { year: number }): DividendAnnualRow {
   return {
@@ -101,6 +105,73 @@ describe('growthPct', () => {
     expect(growthPct(372, 340)).toBe(9.4)
     expect(growthPct(372, 340, 2)).toBe(9.41)
     expect(growthPct(0, 50)).toBe(-100)
+  })
+})
+
+describe('payoutVerdict', () => {
+  it('is a raise or a cut only beyond the band, with the edge inside it', () => {
+    expect(payoutVerdict(RAISE_BAND_PCT + 0.01)).toBe('raised')
+    expect(payoutVerdict(RAISE_BAND_PCT)).toBe('flat')
+    expect(payoutVerdict(-RAISE_BAND_PCT)).toBe('flat')
+    expect(payoutVerdict(-RAISE_BAND_PCT - 0.01)).toBe('cut')
+  })
+
+  it('has no verdict without a figure', () => {
+    expect(payoutVerdict(null)).toBeNull()
+    expect(payoutVerdict(undefined)).toBeNull()
+    expect(payoutVerdict(Number.NaN)).toBeNull()
+  })
+})
+
+describe('feedRaises', () => {
+  const move = (symbol: string, change_pct: number | null): DividendRaise => ({
+    date: '2026-09-16', security_id: 1, symbol, currency: 'USD',
+    level_from: 1, level_to: 1, change_pct, annual_change_eur: 1,
+  })
+
+  it("keeps the server's order and drops a move inside the band", () => {
+    const out = feedRaises([move('AAA', 9.6), move('BBB', 0.4), move('CCC', -12), move('DDD', null)])
+    expect(out.map((r) => r.symbol)).toEqual(['AAA', 'CCC'])
+  })
+
+  it('is empty without a history', () => {
+    expect(feedRaises(undefined)).toEqual([])
+  })
+})
+
+/**
+ * The band is defined once (`RAISE_BAND_PCT`) and decided once (`payoutVerdict`), on this
+ * side of the language boundary; the server's half of the pin is
+ * `tests/test_dividend_raises_feed.py`, which refuses a band constant under `app/`. A copy
+ * here would be a second answer to "is this a raise" beside the count.
+ */
+describe('one definition of a raise', () => {
+  const SRC = join(__dirname, '..')
+  const rel = (p: string) => relative(SRC, p).split(sep).join('/')
+  const sources = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) return sources(path)
+      return /\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name) ? [path] : []
+    })
+  const code = (path: string) =>
+    readFileSync(path, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '')
+
+  it('declares the band in dividendGrowth.ts only', () => {
+    const declaring = sources(SRC)
+      .filter((p) => /\b(?:const|let|var)\s+\w*RAISE\w*BAND\w*\s*=/i.test(code(p)))
+      .map(rel)
+    expect(declaring).toEqual(['lib/dividendGrowth.ts'])
+  })
+
+  it('never compares a per-share change against a number of its own', () => {
+    const comparing = sources(SRC)
+      .filter((p) => rel(p) !== 'lib/dividendGrowth.ts')
+      .filter((p) => /(?:per_share_growth_pct|per_share_change_pct|change_pct)\s*[<>]=?\s*-?(?:[1-9]|0\.\d|\(|[A-Z_])/.test(code(p)))
+      .map(rel)
+    expect(comparing).toEqual([])
   })
 })
 

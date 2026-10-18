@@ -38,6 +38,7 @@ function point(
 const HISTORY: DividendForecastHistoryResponse = {
   base_currency: 'EUR',
   growth_from: '2026-08-28',
+  raises: [],
   points: [
     point('2026-08-01', 40, { reconstructed: true }),
     point('2026-08-28', 300, { reconstructed: true }),

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChartColumnStacked, HandCoins, ListOrdered } from 'lucide-react'
+import { ChartColumnStacked, ChevronRight, HandCoins, ListOrdered } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { contributionsQuery, dividendBreakdownQuery, forecastHistoryQuery } from '@/lib/queryCache'
@@ -13,7 +13,8 @@ import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { forecastTrend, type LiveForecast } from '@/lib/dividendForecastTrend'
 import { incomePerMoneyIn } from '@/lib/incomePerMoneyIn'
 import { deltaColor } from '@/lib/delta'
-import { payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
+import { feedRaises, payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
+import { useRememberedOpen } from '@/lib/storage'
 import {
   DEFAULT_DIVIDEND_SORT, initialDirection, sortDividendRows, type DividendSortKey,
 } from '@/lib/dividendTable'
@@ -23,6 +24,7 @@ import { DividendCalendar } from './DividendCalendar'
 import { DividendForecastTrend } from './DividendForecastTrend'
 import { DividendGrowthPace } from './DividendGrowthPace'
 import { DividendKpiCards, type DividendKpiTrend } from './DividendKpiCards'
+import { DividendRaisesFeed } from './DividendRaisesFeed'
 import { DividendSubheading } from './DividendSubheading'
 import { DividendYearComparison } from './DividendYearComparison'
 import { DIVIDEND_CHART_BOX, DividendStackChart } from './DividendStackChart'
@@ -372,6 +374,12 @@ export function DividendsTab() {
     }
   }, [forecastHistory, live, contributions])
 
+  // Each company's raises and cuts, newest first, beside the count of them: from the
+  // forecast history's chain, so unwindowed like the forecast card. Collapsed by default.
+  const raises = useMemo(() => feedRaises(forecastHistory?.raises), [forecastHistory])
+  const [raisesOpen, setRaisesOpen] = useRememberedOpen('dividend-raises')
+  const raisesId = useId()
+
   // A ticker listed on two venues is two securities and two rows; only the table
   // needs the venue, and only where it actually disambiguates.
   const duplicated = useMemo(() => duplicatedSymbols(securities), [securities])
@@ -668,16 +676,37 @@ export function DividendsTab() {
                   <DividendSubheading
                     title="By position"
                     icon={ListOrdered}
-                    aside={changes ? (
-                      <p aria-label="Payout changes" className="text-xs tabular-nums text-muted-foreground">
-                        <span className="font-medium">Payouts</span>
-                        {' · '}
-                        <span className={cn(changes.raised > 0 && 'font-medium text-gain')}>{changes.raised} raised</span>
-                        {' · '}
-                        <span className={cn(changes.cut > 0 && 'font-medium text-loss')}>{changes.cut} cut</span>
-                      </p>
+                    aside={changes || raises.length > 0 ? (
+                      <>
+                        {changes && (
+                          <p aria-label="Payout changes" className="text-xs tabular-nums text-muted-foreground">
+                            <span className="font-medium">Payouts</span>
+                            {' · '}
+                            <span className={cn(changes.raised > 0 && 'font-medium text-gain')}>{changes.raised} raised</span>
+                            {' · '}
+                            <span className={cn(changes.cut > 0 && 'font-medium text-loss')}>{changes.cut} cut</span>
+                          </p>
+                        )}
+                        {raises.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setRaisesOpen((o) => !o)}
+                            aria-expanded={raisesOpen}
+                            aria-controls={raisesId}
+                            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <ChevronRight
+                              aria-hidden="true"
+                              className={cn('h-3.5 w-3.5 transition-transform duration-200', raisesOpen && 'rotate-90')}
+                            />
+                            Raises &amp; cuts
+                            <span className="tabular-nums">{raises.length}</span>
+                          </button>
+                        )}
+                      </>
                     ) : undefined}
                   />
+                  {raisesOpen && <DividendRaisesFeed raises={raises} id={raisesId} />}
                   <DataTable
                     rows={sortedSecurities}
                     columns={columns}

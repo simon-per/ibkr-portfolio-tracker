@@ -799,6 +799,11 @@ class DividendUpcomingPayment(BaseModel):
     # calendar and deliberately nowhere else — see the service. Before this existed such
     # a payment was invisible on every surface for up to a month.
     pending: bool = False
+    # An announced payment's gross per share against the last regular (not special or
+    # bonus) IBKR payment's stated rate, in the payment's own currency, in percent.
+    # Signed; None for every other entry and wherever nothing like-for-like exists. The
+    # calendar tags a raise beyond `RAISE_BAND_PCT` (frontend `lib/dividendGrowth.ts`).
+    per_share_change_pct: Optional[float] = None
 
 
 class DividendForwardYield(BaseModel):
@@ -895,12 +900,36 @@ class DividendForecastHistoryPoint(BaseModel):
     reconstructed: bool
 
 
+class DividendRaise(BaseModel):
+    """
+    One company's dividend moving on one day — the `raises` part of the forecast's
+    breakdown for that security, emitted instead of summed
+    (`dividend_forecast_attribution.attribute_by_holding`). Raises and cuts alike; the
+    client keeps those beyond `RAISE_BAND_PCT`.
+    """
+    date: str                       # the snapshot day the new level was first recorded
+    security_id: int
+    symbol: str
+    # The level's currency: the security's own, or EUR when a day lacked its rate.
+    currency: Optional[str] = None
+    # What one share pays over a year at the payer's size, gross, before and after
+    # (`dividend_forecast.payout_level`; the old one rescaled across a split).
+    level_from: float
+    level_to: float
+    change_pct: Optional[float]     # level_to over level_from, in percent
+    # The annual income the move added (negative: removed), base currency, on the
+    # shares held — the security's share of `DividendForecastChange.raises`.
+    annual_change_eur: float
+
+
 class DividendForecastHistoryResponse(BaseModel):
     base_currency: str
     # The first day growth is measured from, when the owner has set one; the points
     # before it carry figures and no percentages.
     growth_from: Optional[str]
     points: List[DividendForecastHistoryPoint]
+    # Every company's raise or cut since the breakdown's start, newest first.
+    raises: List[DividendRaise] = []
 
 
 class DividendBreakdownResponse(BaseModel):

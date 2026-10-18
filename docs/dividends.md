@@ -1203,7 +1203,8 @@ that it keeps growing, and have the breakdown available without it being the lou
 - **Lines follow the parent's replay rule on their own** (`fill_lines`): replayed lines
   never replace recorded ones, and they are the only lines a day recorded before the table
   existed will ever get. The backfill writes them without touching that day's total.
-- **The surface is two lines and a sentence** (`lib/dividendForecastTrend.ts`). Nothing
+- **The surface is two lines and a sentence** (`lib/dividendForecastTrend.ts`; the raises
+  feed sits apart, beside the table's "raised · cut" count). Nothing
   before `growth_from` is drawn; a part under half a unit of the base currency is not
   printed, the residual included. The card starts collapsed: its header row (figure,
   growth since the start with "est.", `MTD`/`YTD` chips when the server has them, and
@@ -1229,8 +1230,26 @@ that it keeps growing, and have the breakdown available without it being the lou
   history is ignored. Both surfaces print through `lib/dividendFormat.ts`;
   `DividendsTab.test.tsx` pins them equal on a history that lags the breakdown.
 
+- **The raises feed is the `raises` part per company** (`raises[]` on the response,
+  GitHub issue #75, 2026-10-18). Every day on the chain where a company's level moved:
+  the level per share before and after (gross, a year's worth, in its own currency —
+  EUR when a day lacked its rate), the change, and the annual income it added in the
+  base currency (`q1·n0·(L1/L0 − 1)·g0`, that holding's share of `breakdown.raises`),
+  newest first. It is not a second computation: `attribute_change` is now
+  `sum_parts(attribute_by_holding(...))`, one `attribute_holding` per security, and
+  `get_forecast_history` sums the same per-holding results for the breakdown and emits
+  them for the feed, so the entries add up to `breakdown.raises`. Funds are absent for
+  the reason above (no level reaches the attribution), and so are purchases, splits, a
+  first forecast and a holding without a level on both days. The server serves every
+  move; the client keeps those beyond `RAISE_BAND_PCT` (`feedRaises`). The levels are
+  annual, not per payment: a snapshot line stores no payment count, so "0.83 → 0.91 a
+  quarter" cannot be restated from it. `tests/test_dividend_raises_feed.py` also asks the
+  family question: any module under `app/` other than the attribution that divides a
+  stored `level_eur` is a second raise arithmetic, and fails.
+
 Tests: `tests/test_dividend_forecast_attribution.py`, the lines and breakdown cases in
-`tests/test_dividend_forecast_snapshot.py`, `lib/dividendForecastTrend.test.ts`.
+`tests/test_dividend_forecast_snapshot.py`, `tests/test_dividend_raises_feed.py`,
+`lib/dividendForecastTrend.test.ts`.
 
 ### Per-share growth — the payer's own
 
@@ -1263,7 +1282,28 @@ projection is sized from (`regular_payments`, one preparation for both).
   year to compare, which says nothing about whether the dividend moved — and with no
   measured row the line is absent rather than "0 raised · 0 cut". It counts the rows on
   screen, so it moves with the range exactly as the table does.
+- **The band is defined once, on the client** (2026-10-18). `RAISE_BAND_PCT` and
+  `payoutVerdict` in `lib/dividendGrowth.ts` decide raised / cut / flat for the count, the
+  Growth column's tone (`deltaColor` at the same band, i.e. the same `deltaTone`), the
+  calendar's tag and the raises feed. The server serves signed percentages and
+  classifies nothing; `tests/test_dividend_raises_feed.py` refuses a band constant
+  under `app/`, and `dividendGrowth.test.ts` refuses a second declaration or a
+  per-share change compared against a number of its own anywhere else in `src/`.
+- **An announced raise is tagged on the calendar** (`upcoming[].per_share_change_pct`,
+  GitHub issue #74, 2026-10-18): an open accrual's gross per share (`gross / quantity`
+  through `accrual_gross_per_share_eur`, the reading the forecast sizes it with, turned
+  back into the payment currency at the forecast's sizing rate) against the stated rate
+  (`per_share_native`) of the last regular IBKR payment before its ex-date — a `special`
+  or `bonus` row is never that base. Absent, never 0: no regular payment before it, a
+  last payment whose rate never parsed (not an older rate), another currency, no cached
+  rate, or an accrual the forecast's own rule calls special (`is_special_near` — an
+  accrual carries no kind, so `special_payments` over the same history decides, on the
+  history entry the accrual was matched into). Every other `upcoming` entry is null.
+  Signed; the calendar shows "+x%" only for a raise by `payoutVerdict`. A split between
+  the last payment and the accrual is not guarded: IBKR's stated rate keeps the
+  pre-split unit, so it reads as a cut (never tagged) or, for a reverse split, a raise.
 
-Tests: `tests/test_dividend_per_share_growth.py`, `src/lib/dividendGrowth.test.ts`.
+Tests: `tests/test_dividend_per_share_growth.py`, `tests/test_dividend_announced_raise.py`,
+`src/lib/dividendGrowth.test.ts`, `src/components/DividendCalendar.test.tsx`.
 
 ---

@@ -34,6 +34,28 @@ function payment(over: Partial<DividendUpcomingPayment> = {}): DividendUpcomingP
   }
 }
 
+describe('An announced raise', () => {
+  const announced = (pct: number | null) => payment({
+    pay_date_source: 'accrual', amount_source: 'announced', per_share_change_pct: pct,
+  })
+
+  it('carries its per-share change on the row', () => {
+    render(<DividendCalendar upcoming={[announced(9.6)]} colorOf={colorOf} />)
+    const tag = screen.getByText('+9.6%')
+    expect(tag.closest('li')?.textContent).toContain('ASML')
+  })
+
+  it('is not tagged inside the band, as a cut, or without a comparison', () => {
+    for (const pct of [0.5, 1, -8, null]) {
+      const { container, unmount } = render(
+        <DividendCalendar upcoming={[announced(pct)]} colorOf={colorOf} />,
+      )
+      expect(container.textContent).not.toMatch(/[+−-]\d/)
+      unmount()
+    }
+  })
+})
+
 describe('DividendCalendar', () => {
   it('shows the expected pay date and keeps the ex-date beside it', () => {
     render(<DividendCalendar upcoming={[payment()]} colorOf={colorOf} />)

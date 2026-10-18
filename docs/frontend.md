@@ -918,7 +918,17 @@ re-point onto the general palette would have to redo, and the section above stil
   pushed the page into horizontal scroll at 390. It wraps since #70, but the row stays.
 - **Calendar rows** lead with a date chip and the holding's `TickerAvatar` (by `security_id`),
   the chart-colour swatch as a dot on the avatar. The per-position *Growth* column is toned at
-  `RAISE_BAND_PCT`, the band the "raised · cut" count uses.
+  `RAISE_BAND_PCT`, the band the "raised · cut" count uses. An announced payment that raises
+  the dividend carries a "+x%" pill after the symbol (`per_share_change_pct`, a raise by
+  `payoutVerdict` — the same band; [dividends.md](dividends.md), *Per-share growth*).
+- **The raises feed** (`DividendRaisesFeed`, 2026-10-18): a *Raises & cuts N* toggle beside the
+  "raised · cut" count opens each company's moves from the forecast history's `raises[]`,
+  newest first, filtered by `feedRaises` — date chip, `TickerAvatar`, symbol, the annual level
+  per share old → new in its own currency (`formatPrice`), the change as a `DeltaChip` at
+  `RAISE_BAND_PCT`, and the income added per year in the base currency. Collapsed by default
+  and remembered (`useRememberedOpen('dividend-raises')`); it shares the
+  `['dividends', 'forecast-history']` query, so it costs no request. The row wraps its figures
+  under the symbol on a phone, like the calendar's.
 - **Forecast** has a horizon `KpiPanel` (value with sparkline, money in, gains — the chart's last
   point, so the tiles and the line end on one number); the chart reads `chartColor(0)` /
   `NEUTRAL_COLOR`; the scenarios are `KpiCard` tiles.

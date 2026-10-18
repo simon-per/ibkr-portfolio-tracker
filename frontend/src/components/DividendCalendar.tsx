@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendUpcomingPayment } from '@/lib/api'
+import { formatDelta } from '@/lib/delta'
+import { payoutVerdict } from '@/lib/dividendGrowth'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { DividendSubheading } from './DividendSubheading'
 
@@ -42,6 +44,10 @@ function monthHeading(iso: string): string {
  *
  * Each row leads with the date as a chip and the holding's logo; the small swatch beside
  * the logo is the holding's chart colour, so a row can still be matched to its segment.
+ *
+ * An announced payment that raises the dividend carries "+x%": its per share against the
+ * last regular payment (`per_share_change_pct`), a raise by `payoutVerdict` — the band the
+ * "raised · cut" count uses, so the two cannot disagree about what a raise is.
  */
 export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
   const groups = useMemo(() => {
@@ -105,6 +111,14 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                         badge sits right after it and the notes wrap under. */}
                     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                       <span className="min-w-0 max-w-full truncate font-medium">{p.symbol}</span>
+                      {payoutVerdict(p.per_share_change_pct) === 'raised' && (
+                        <span
+                          className="shrink-0 whitespace-nowrap rounded-full bg-gain-soft px-1.5 py-0.5 text-[0.7rem] font-medium tabular-nums text-gain"
+                          title="Per share vs last payment"
+                        >
+                          {formatDelta(p.per_share_change_pct)}
+                        </span>
+                      )}
                       {p.pending && (
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-warn-soft px-1.5 py-0.5 text-[0.7rem] font-medium text-warn">
                           payment pending

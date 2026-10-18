@@ -30,7 +30,7 @@ function history(
   points: DividendForecastHistoryPoint[],
   growthFrom: string | null = '2026-08-28',
 ): DividendForecastHistoryResponse {
-  return { base_currency: 'CHF', growth_from: growthFrom, points }
+  return { base_currency: 'CHF', growth_from: growthFrom, points, raises: [] }
 }
 
 describe('forecastTrend', () => {

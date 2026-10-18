@@ -471,7 +471,7 @@ describe('One "Next 12 months" figure', () => {
     // two surfaces used to print two values under one label.
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(response(2026))
     vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue({
-      base_currency: 'EUR', growth_from: '2026-08-28',
+      base_currency: 'EUR', growth_from: '2026-08-28', raises: [],
       points: [snapshot('2026-08-28', 120, null), snapshot('2026-10-13', 150, 25)],
     })
     mount()
@@ -491,6 +491,7 @@ describe('One "Next 12 months" figure', () => {
     vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue({
       base_currency: 'EUR', growth_from: '2026-08-28',
       points: [snapshot('2026-08-28', 120, null), snapshot('2026-10-13', 150, 25)],
+      raises: [],
     })
     vi.spyOn(api, 'getContributions').mockResolvedValue({
       windows: [],
@@ -588,6 +589,38 @@ describe('The per-position table', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('lists each company\'s raises and cuts beside the count, newest first', async () => {
+    localStorage.clear()
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
+    const move = (date: string, id: number, symbol: string, from: number, to: number,
+      pct: number, added: number) => ({
+      date, security_id: id, symbol, currency: 'USD', level_from: from, level_to: to,
+      change_pct: pct, annual_change_eur: added,
+    })
+    vi.spyOn(api, 'getDividendForecastHistory').mockResolvedValue({
+      base_currency: 'EUR', growth_from: '2026-08-28', points: [],
+      raises: [
+        move('2026-09-16', 1, 'AAA', 3.32, 3.64, 9.6, 12.4),
+        move('2026-09-10', 2, 'BBB', 2, 2.008, 0.4, 0.1),     // inside the band: not news
+        move('2026-09-02', 3, 'CCC', 1.5, 1.2, -20, -3),
+      ],
+    })
+    const user = userEvent.setup()
+    mount()
+
+    const toggle = await screen.findByRole('button', { name: /Raises & cuts/ })
+    expect(toggle.textContent).toContain('2')
+    expect(screen.queryByRole('list', { name: 'Dividend raises and cuts' })).toBeNull()
+    await user.click(toggle)
+
+    const rows = within(screen.getByRole('list', { name: 'Dividend raises and cuts' }))
+      .getAllByRole('listitem')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringMatching(/Sep 16.*AAA.*\$3\.32 → \$3\.64.*\+9\.6%.*\+€12\.40\/yr/),
+      expect.stringMatching(/Sep 2.*CCC.*\$1\.50 → \$1\.20.*-20%.*−€3\.00\/yr/),
+    ])
   })
 
   it('says nothing about raises when no payer can be measured', async () => {

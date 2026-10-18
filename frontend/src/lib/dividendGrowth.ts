@@ -1,4 +1,5 @@
-import type { DividendAnnualRow } from './api'
+import type { DividendAnnualRow, DividendRaise } from './api'
+import { deltaTone } from './delta'
 
 /**
  * Growth of `current` over `base` in percent, or null when there is nothing to grow from.
@@ -52,8 +53,38 @@ export function realizedOnlyYears(annual: DividendAnnualRow[]): DividendAnnualRo
  * One percent, because the figure is measured in each payer's own currency off the
  * rounded per-share rates IBKR and Yahoo state — a "0.24 → 0.2401" restatement is not a
  * raise — while a real raise is almost never under a few percent.
+ *
+ * **The one definition, app-wide.** The server serves signed percentages and classifies
+ * nothing (`tests/test_dividend_raises_feed.py` refuses a band constant under `app/`), so
+ * the "raised · cut" count, the Growth column's tone, the calendar's "+x%" tag and the
+ * raises feed all decide here, through `payoutVerdict`.
  */
 export const RAISE_BAND_PCT = 1
+
+export type PayoutVerdict = 'raised' | 'cut' | 'flat'
+
+/**
+ * Whether a per-share change is a raise, a cut or neither, at `RAISE_BAND_PCT` — the
+ * band's edge inside it, as `deltaTone` puts it, so the Growth column's colour (which
+ * reads `deltaColor` at the same band) agrees with every count. Null without a figure:
+ * no comparison, which says nothing about whether the dividend moved.
+ */
+export function payoutVerdict(pct: number | null | undefined): PayoutVerdict | null {
+  if (pct == null || !Number.isFinite(pct)) return null
+  const tone = deltaTone(pct, RAISE_BAND_PCT)
+  return tone === 'up' ? 'raised' : tone === 'down' ? 'cut' : 'flat'
+}
+
+/**
+ * The raises feed as shown: the server's moves that are a raise or a cut, in its order
+ * (newest first). A move inside the band is a restated rate, not news.
+ */
+export function feedRaises(raises: readonly DividendRaise[] | null | undefined): DividendRaise[] {
+  return (raises ?? []).filter((r) => {
+    const verdict = payoutVerdict(r.change_pct)
+    return verdict === 'raised' || verdict === 'cut'
+  })
+}
 
 export interface PayoutChanges {
   raised: number
@@ -77,12 +108,10 @@ export function payoutChanges(
 ): PayoutChanges | null {
   const out: PayoutChanges = { raised: 0, cut: 0, flat: 0, measured: 0 }
   for (const row of rows) {
-    const pct = row.per_share_growth_pct
-    if (pct == null || !Number.isFinite(pct)) continue
+    const verdict = payoutVerdict(row.per_share_growth_pct)
+    if (verdict === null) continue
     out.measured += 1
-    if (pct > RAISE_BAND_PCT) out.raised += 1
-    else if (pct < -RAISE_BAND_PCT) out.cut += 1
-    else out.flat += 1
+    out[verdict] += 1
   }
   return out.measured > 0 ? out : null
 }

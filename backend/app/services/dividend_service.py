@@ -41,12 +41,13 @@ from app.services.eur_conversion import to_eur_or_none
 from app.services.fx_policy import FX_MAX_CARRY_DAYS, newest_published_rate
 from app.services.percentages import share_pct
 from app.services.dividend_forecast_attribution import (
-    PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
+    PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_by_holding, sum_parts,
 )
 from app.services.dividend_forecast import (
     ForecastPayment,
     HistPayment,
     infer_gap_days,
+    is_special_near,
     payout_level,
     per_share_growth,
     project_dividends,
@@ -306,6 +307,21 @@ _IBKR_WHT_COUNTRY_RE = re.compile(r"\s-\s*([A-Z]{2})\s+TAX\b", re.IGNORECASE)
 # The kinds a forecast must never repeat. A return of capital is left regular on
 # purpose: funds pay it inside their ordinary schedule.
 SPECIAL_DIVIDEND_KINDS = frozenset({"special", "bonus"})
+
+
+def accrual_gross_per_share_eur(accrual: Dict) -> Optional[Decimal]:
+    """
+    An open accrual's gross per share, in EUR at the rate it was stored at (the newest
+    cached one): ``gross / quantity``, or None when either is missing.
+
+    One reading of an announced amount for the forecast, which sizes the declared
+    dividend with it, and the calendar's raise tag, which compares it with the last
+    regular payment — so the tag and the projection cannot be two different amounts.
+    """
+    qty, gross = accrual.get("quantity"), accrual.get("gross_eur")
+    if not qty or qty <= 0 or not gross or gross <= 0:
+        return None
+    return gross / qty
 
 
 def parse_ibkr_dividend_description(
@@ -1238,8 +1254,8 @@ class DividendService:
 
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
-        ``{security_id: [{ex_date, pay_date, net_eur, quantity, gross_eur, wht_eur}, ...]}``
-        for every open accrual.
+        ``{security_id: [{ex_date, pay_date, currency, net_eur, quantity, gross_eur,
+        wht_eur}, ...]}`` for every open accrual.
 
         Empty whenever the Flex section is not enabled, which is the supported default —
         the caller then dates its projections from a measured lag instead and labels them
@@ -1265,6 +1281,8 @@ class DividendService:
             out[r.security_id].append({
                 "ex_date": r.ex_date,
                 "pay_date": r.pay_date,
+                # The payment's own currency: the raise tag compares per share in it.
+                "currency": r.currency,
                 "net_eur": r.net_amount_eur,
                 # What the forecast sizes from (gross / quantity) and the withholding
                 # ladder's first rung (tax / gross).
@@ -1946,11 +1964,10 @@ class DividendService:
             if sid not in securities:
                 continue
             for a in accruals:
-                qty, gross = a.get("quantity"), a.get("gross_eur")
                 ex = a.get("ex_date")
-                if ex is None or not qty or qty <= 0 or not gross or gross <= 0:
+                ps = accrual_gross_per_share_eur(a)     # EUR at the newest cached rate
+                if ex is None or ps is None:
                     continue
-                ps = gross / qty     # already EUR at the newest cached rate
                 entries = hist_by_sec[sid]
                 # Only an ex-dated series can hold the same dividend under this date;
                 # an IBKR-only security's entries are pay dates, weeks later.
@@ -2196,6 +2213,15 @@ class DividendService:
         days have no lines. What the lines do not account for is `unattributed`,
         reported and never spread over the parts: a recorded day whose lines had to be
         replayed sits a fraction of a percent off its own total.
+
+        `raises` is that same `raises` part per security per day, newest first: every
+        day on the chain where a company's level moved, with the level per share before
+        and after (gross, a year's worth, in its own currency), the change in percent
+        and the annual income it added in the base currency. One computation with the
+        breakdown (`attribute_by_holding`), so the entries add up to its `raises`. Funds
+        carry no level here, so they are never in it. Which moves are raises or cuts and
+        which are flat is the client's call (`RAISE_BAND_PCT` in `lib/dividendGrowth.ts`,
+        the band the "raised · cut" count uses); this serves every move.
         """
         from app.services.portfolio_service import PortfolioService
         base_fx = await PortfolioService(self.db)._load_base_fx()
@@ -2210,12 +2236,12 @@ class DividendService:
         # decided, so a fund's level is not passed on: with no level the attribution
         # measures no raise, and the change stays in `timing`. Its stored level is kept.
         # Fundness is `is_known_etf_isin`, the one predicate (test_fundness_predicate.py).
-        fund_ids = {
-            sid for sid, isin in (await self.db.execute(
-                select(Security.id, Security.isin)
-            )).all()
-            if is_known_etf_isin(isin)
-        }
+        identities = (await self.db.execute(
+            select(Security.id, Security.isin, Security.symbol)
+        )).all()
+        fund_ids = {sid for sid, isin, _ in identities if is_known_etf_isin(isin)}
+        symbols = {sid: symbol for sid, _, symbol in identities}
+        raises: List[Dict] = []
 
         points: List[Dict] = []
         previous = None       # (date, next_12m) of the row before this one
@@ -2279,9 +2305,26 @@ class DividendService:
                 if chain_holdings is None:
                     chain_start = current
                 else:
-                    step = attribute_change(chain_holdings, holdings, chain_rate, rate)
+                    changes = attribute_by_holding(chain_holdings, holdings, chain_rate, rate)
+                    step = sum_parts(changes.values())
                     for part in FORECAST_CHANGE_PARTS:
                         parts[part] += step[part]
+                    currencies = {ln.security_id: ln.currency for ln in day_lines}
+                    for sid, change in changes.items():
+                        if change.level_from is None or not change.parts["raises"]:
+                            continue
+                        raises.append({
+                            "date": day.isoformat(),
+                            "security_id": sid,
+                            "symbol": symbols.get(sid) or f"#{sid}",
+                            "currency": (
+                                currencies.get(sid) if change.levels_native else "EUR"
+                            ),
+                            "level_from": round(float(change.level_from), 4),
+                            "level_to": round(float(change.level_to), 4),
+                            "change_pct": self._pct(change.level_to, change.level_from),
+                            "annual_change_eur": round(float(change.parts["raises"]), 2),
+                        })
                     breakdown = {
                         "since": chain_start[0].isoformat(),
                         **{part: round(float(parts[part]), 2)
@@ -2307,10 +2350,13 @@ class DividendService:
                 "reconstructed": bool(r.reconstructed),
             })
             previous = current
+        # Newest first; on one day the biggest move first.
+        raises.sort(key=lambda r: (r["date"], abs(r["annual_change_eur"])), reverse=True)
         return {
             "base_currency": base_fx.base_currency,
             "growth_from": growth_from.isoformat() if growth_from else None,
             "points": points,
+            "raises": raises,
         }
 
     async def get_dividend_breakdown(
@@ -2697,6 +2743,8 @@ class DividendService:
                             # raise) or `same_payment_last_year` (a varying payer).
                             "amount_source": fp.method,
                             "pending": False,
+                            # Only an announced amount is compared with the last one.
+                            "per_share_change_pct": None,
                         })
 
                 # Windowed figures stay exactly as before: a security only earns a
@@ -2755,6 +2803,44 @@ class DividendService:
             # inference has a sample count to report.
             calendar_folds: List[Tuple[date, str, int, Decimal, Optional[str], bool]] = []
 
+            # The regular IBKR payments per security, for the announced amount's change
+            # against the last of them. A special or a bonus is not the level a raise is
+            # measured from.
+            regular_ibkr: Dict[int, List] = defaultdict(list)
+            for p in raw_payments:
+                if (p.source == IBKR_SOURCE and self._is_income(p)
+                        and p.dividend_kind not in SPECIAL_DIVIDEND_KINDS):
+                    regular_ibkr[p.security_id].append(p)
+
+            def _announced_change_pct(sid: int, a: Dict) -> Optional[float]:
+                """
+                The announced gross per share against the last regular payment's stated
+                rate (`per_share_native`), in the payment's own currency, in percent —
+                or None when there is nothing like-for-like to compare: no regular IBKR
+                payment before it, no stated rate on that one, another currency, no
+                cached rate, or an accrual the forecast's own rule calls special
+                (`is_special_near`; an accrual carries no kind of its own). Signed: a
+                cut is served too, and which side of the flat band a figure falls on is
+                the client's call (`RAISE_BAND_PCT`).
+                """
+                on = a["ex_date"] or a["pay_date"]
+                before = [p for p in regular_ibkr.get(sid, ())
+                          if (p.pay_date or p.ex_date) < on]
+                if not before:
+                    return None
+                last = max(before, key=lambda p: p.pay_date or p.ex_date)
+                per_share_eur = accrual_gross_per_share_eur(a)
+                currency = a.get("currency")
+                rate = sizing_fx.get(currency) if currency else None
+                if (per_share_eur is None or rate is None or currency != last.currency
+                        or not last.per_share_native or last.per_share_native <= 0):
+                    return None
+                # The accrual's own entry in the history `_forecast_inputs` built: the
+                # nearest within the window it was matched into that history with.
+                if is_special_near(hist_by_sec.get(sid, []), on, ACCRUAL_MATCH_DAYS):
+                    return None
+                return self._pct(per_share_eur / rate, last.per_share_native)
+
             for sid, accruals in accruals_by_sec.items():
                 if shares_at(sid, as_of) <= 0:
                     continue
@@ -2774,6 +2860,7 @@ class DividendService:
                         "pay_date_source": "accrual",
                         "amount_source": "announced",
                         "pending": a["pay_date"] <= as_of,
+                        "per_share_change_pct": _announced_change_pct(sid, a),
                     })
                     calendar_folds.append(
                         (a["pay_date"], _symbol(sid), sid, amt, "net", False, "announced")
@@ -2838,6 +2925,7 @@ class DividendService:
                     # projection: Yahoo has recorded this dividend.
                     "amount_source": "estimate",
                     "pending": expected <= as_of,
+                    "per_share_change_pct": None,
                 })
                 calendar_folds.append(
                     (expected, _symbol(p.security_id), p.security_id, amt,
@@ -2889,6 +2977,7 @@ class DividendService:
                     "pay_date_source": source,
                     "amount_source": fp.method,
                     "pending": True,
+                    "per_share_change_pct": None,
                 })
                 calendar_folds.append(
                     (fp.on_date, _symbol(sid), sid, amt, basis, True, fp.method)
