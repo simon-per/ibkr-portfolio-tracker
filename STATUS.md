@@ -17,7 +17,7 @@ verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
 #47, #51 and #38 followed: every audit issue is closed. **A second round (five code reviewers
 and a product review) filed #53–#78** the same afternoon, each verified by an offline repro or a
-code trace; wave 1 (#53, #54, #56, #57, #59, #67) shipped that evening.
+code trace; wave 1 (#53–#57, #59, #67) shipped that evening.
 
 ---
 
@@ -116,8 +116,8 @@ Only what is still unverified.
 - **The audit's Tier 1 (#13–#18) on production:**
   - A scheduled job that met a dashboard-started pass shows a late start, not `skipped /
     pipeline_busy` (#16); `skipped` now means the gate stayed held for 9 minutes.
-  - Every `market_data_only` / `full_sync` / `ibkr_sync` row carries `fx_result.frankfurter_failed`
-    and `fallback_available`; a "no published exchange rate since" warning appears only after three
+  - `fx_result.fallback_available` is on every row (seen 2026-10-18) and `frankfurter_failed` names
+    any currency both providers refused (absent when none did); a "no published exchange rate since" warning appears only after three
     ECB publication days without a rate for a held or base currency (#17).
   - Fundamentals: no "N holdings have no data yet" line for the 3a funds; Update/Refresh never
     leaves the banner up (#18).
@@ -157,6 +157,9 @@ Only what is still unverified.
   - Cash (#59): if a trade ever lacks an FX rate, the hero reads "Cash is unknown — N trade(s)
     …" and cash is absent everywhere, never a partial sum (none lacked one on 2026-10-18).
   - FX (#56): an accrual in a currency with no rate in 14 days is skipped and counted.
+  - Flex (#55): the first served statement (Tue 18:00) leaves an `ibkr_generation` row in
+    `/api/scheduler/history` and a file in `/app/data/flex-statements/` (newest 5 kept); a
+    `1025` holds presses and slots 12 h, a request-step `1001` holds presses until midnight ET.
   - Charts (#67): money axes print exact, distinct labels; bar charts' ticks follow the shared
     ladder, so their positions moved.
 - **#38's first deploy:** a full uncached build (the dependency layer is new), the log shows
@@ -187,13 +190,13 @@ Only what is still unverified.
   `allocations_updated` and ratings `funds_not_asked`; PEG on Fundamentals, the watchlist and
   the buy score now prefers Yahoo's `trailingPegRatio` — a changed figure is expected, a blank
   one is not. The first watchlist run fetches every item in full.
-- **The weekend schedule after #9:** Sunday 2026-10-18 shows no `market_data_only` rows and an
-  18:00 `full_sync` whose `market_result` writes few or no rows; Saturday 2026-10-24 shows only
-  the 08:00 `market_data_only`. Weekday slots unchanged.
-- **Look-through after #8 (migration `a7d4c1e9f3b8`):** the first 18:00 `full_sync` fetches and
-  rewrites every held basket once (no stamps or fingerprints yet) and runs the CINS pass; from
-  the next evening `lookthrough_result.baskets` lists most funds under `unchanged` or
-  `refreshed` daily, and no stale-basket warning appears on an ordinary week.
+- **The weekend schedule after #9:** Sunday 2026-10-18 had no `market_data_only` row and its
+  18:00 `full_sync` skipped IBKR (`no_new_trading_day`) with a `market_result`; Saturday
+  2026-10-24 should show only the 08:00 `market_data_only`. Weekday slots unchanged.
+- **Look-through after #8:** the first 18:00 run (2026-10-18) refreshed all nine baskets, VT on
+  Vanguard's new route (#7); from 2026-10-19 `lookthrough_result.baskets` should list most funds
+  under `unchanged` or `refreshed` daily. The run record still warns about baskets it refreshes
+  (#79).
 - **Price passes after #10 (migration `a2e8c4f6b0d3`):** the short `market_data_only` passes
   report `securities_skipped_sold` > 0 and "N of M" over held and just-sold securities only; the
   18:00 pass still prices sold ones; `securities_backing_off` stays small; no AV `Information`
@@ -205,10 +208,6 @@ Only what is still unverified.
 - **Crypto after #3** (admin key): the first `crypto_sync` of a Berlin day spends value + coins,
   the later ones coins only (`credits_spent` in the run details), and the DeFi figure stays put
   through the day.
-- **VT's basket on Vanguard's new route (#7):** the next 18:00 `full_sync` lists VT under
-  `lookthrough_result.baskets.refreshed` with as-of ≥ 2026-09-30, nothing under `failed`, and
-  `/api/portfolio/lookthrough` shows VT `stale: false`. Verified only from a residential IP; if
-  the VPS gets an HTML body (Akamai), the refusal names it.
 - **The dividend pass after #6 (migration `f6c2e8a4b1d9`):** the first 18:00 pass after the
   deploy asks every held, Yahoo-eligible security once (all stamps start NULL); the next day's
   pass reports `securities_processed: 0`, and dashboard loads stop showing "sync in progress".
@@ -242,7 +241,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The second audit round's open issues, #55, #58, #60–#66, #68–#78** (`gh issue list`), in
+1. **The second audit round's open issues, #58, #60–#66, #68–#79** (`gh issue list`), in
    number order: bugs first, then tooling, then the product enhancements (#74–#78).
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
