@@ -4,7 +4,7 @@ import { formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
 import { compareNullsLast, type SortDirection } from '@/lib/nullsLast'
-import { cashIsTracked } from '@/lib/portfolioCash'
+import { cashIsTracked, inBookCash } from '@/lib/portfolioCash'
 import type { CashSource } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Briefcase, Wallet } from 'lucide-react'
@@ -375,6 +375,8 @@ export function PositionsList({
   // allowed a weight describing the same set.
   const cashTracked = cashIsTracked(cash)
   const cashAmount = cashTracked ? cash!.amount : 0
+  // A debit is still shown as a balance, but it is not in the denominator, so it has no share.
+  const cashInBook = inBookCash(cash)
   // `weightDenominator` is shared with the Performance tab's "Largest holding" tile, so the
   // tile's weight and this row's cannot disagree.
   const totalMarketValue = useMemo(() => weightDenominator(positions ?? [], cash), [positions, cash])
@@ -495,9 +497,11 @@ export function PositionsList({
             </span>
             <span className="tabular-nums">
               {formatCurrency(cashAmount)}
-              <span className="ml-2 text-muted-foreground">
-                {((cashAmount / totalMarketValue) * 100).toFixed(2)}%
-              </span>
+              {cashInBook > 0 && (
+                <span className="ml-2 text-muted-foreground">
+                  {((cashInBook / totalMarketValue) * 100).toFixed(2)}%
+                </span>
+              )}
             </span>
           </div>
         )}

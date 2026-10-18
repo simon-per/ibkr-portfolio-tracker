@@ -30,3 +30,21 @@ export function cashIsTracked(
 ): boolean {
   return !!carrier && carrier.cash_source != null && carrier.cash_source !== 'unknown'
 }
+
+/**
+ * The part of the balance that joins holdings in a "% of portfolio" denominator: a
+ * tracked, **positive** balance, else 0. A margin debit is left out rather than
+ * subtracted (shrinking the denominator around it inflates every holding), and an
+ * untracked one adds nothing.
+ *
+ * The client mirror of the backend's `UninvestedCash.in_book` (`cash_service.py`), which
+ * Allocation and Look-through divide by — so a holding reads the same share on Positions
+ * as on those two tabs in every cash state (GitHub #52). The summary ships only the signed
+ * balance, hence the copy; `portfolioCash.test.ts` and `test_uninvested_cash_family.py`
+ * pin the same four cases, and a change to one side changes both.
+ */
+export function inBookCash(
+  cash: { amount: number; cash_source?: CashSource } | null | undefined
+): number {
+  return cashIsTracked(cash) && cash!.amount > 0 ? cash!.amount : 0
+}

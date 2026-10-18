@@ -101,6 +101,11 @@ class UninvestedCash:
     adding a stand-in would assert a completeness nothing established. Both readers of it
     (`allocation_service`, `lookthrough_service`) then keep their holdings-only base, which
     is what makes their percentages agree in every state, not only the happy one.
+
+    Positions' weights apply the same rule client-side — `inBookCash` in
+    `frontend/src/lib/portfolioCash.ts`, since the summary ships only the signed balance —
+    and its test pins the same cases as `test_uninvested_cash_family.py` (GitHub #52).
+    Change one side, change both.
     """
     source: str
     balance: Optional[Decimal]

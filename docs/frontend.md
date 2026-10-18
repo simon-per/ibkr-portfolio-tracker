@@ -777,8 +777,15 @@ rows, never recomputed), largest holding by account weight, and the next dividen
 passes the attribution, positions, summary cash and `dividendBreakdown.upcoming` it already holds.
 Each pick has two absences — `undefined` (not loaded) renders a dash, `null` (loaded, no such
 row: nothing lost money this range) renders "None" — and an empty book renders no strip.
-**`weightDenominator` is the one definition of "weight"**: valued holdings plus tracked cash.
-`PositionsList` reads it too, so the tile's weight and the table row's cannot drift.
+**`weightDenominator` is the one definition of "weight"**: valued holdings plus in-book cash.
+`PositionsList` reads it too, so the tile's weight and the table row's cannot drift. In-book cash
+is `inBookCash` (`lib/portfolioCash.ts`): a tracked, **positive** balance, else 0 — the client
+mirror of the backend's `UninvestedCash.in_book`, which Allocation and Look-through divide by, so a
+holding reads one share on all three tabs. A margin debit is left out rather than subtracted
+(subtracting inflated every Positions row above the other two tabs, GitHub #52); the Cash line
+still shows the signed balance but carries a share only when the balance is in the book. The
+summary ships only the signed balance, hence a copy rather than a read: `portfolioCash.test.ts`
+and `test_uninvested_cash_family.py` pin the same four cases and name each other.
 The KPI rows carry lucide components (`icon={Waves}`), grouped under bare `SectionHeader`s
 "Returns" and "Risk & income"; Current drawdown's well is red only while in a drawdown, muted
 otherwise (a falling arrow in a green well contradicts itself). Positions: `text-gain`/`text-loss`

@@ -66,6 +66,8 @@ def test_no_other_service_derives_todays_balance_on_its_own():
 
 
 def test_only_a_known_positive_balance_joins_the_book():
+    # The server half of a pair: `inBookCash` in frontend/src/lib/portfolioCash.test.ts pins
+    # the same four cases for Positions' weight denominator (GitHub #52).
     assert UninvestedCash(DERIVED, Decimal("100")).in_book == Decimal("100")
     assert UninvestedCash(DERIVED, Decimal("-250")).in_book == Decimal("0")
     assert UninvestedCash(DERIVED, Decimal("0")).in_book == Decimal("0")

@@ -9,7 +9,7 @@
  * dash there would claim the answer is unknown.
  */
 import type { CashSource, DividendUpcomingPayment, Position, SecurityAttribution } from '@/lib/api'
-import { cashIsTracked } from '@/lib/portfolioCash'
+import { inBookCash } from '@/lib/portfolioCash'
 import { isUnpriced } from '@/lib/positionValuation'
 
 export interface Mover {
@@ -25,7 +25,7 @@ export interface LargestHolding {
   symbol: string
   description: string
   marketValue: number
-  /** Share of the account: holdings the backend could value plus tracked cash. */
+  /** Share of the account: holdings the backend could value plus in-book cash. */
   weightPct: number
 }
 
@@ -38,13 +38,17 @@ export interface NextDividend {
   estimated: boolean
 }
 
-/** What a position weight is a share of, so the table and the tiles cannot disagree. */
+/**
+ * What a position weight is a share of, so the table and the tiles cannot disagree:
+ * valued holdings plus in-book cash (`inBookCash` — positive and tracked, the rule
+ * Allocation and Look-through share server-side).
+ */
 export function weightDenominator(
   positions: readonly Position[],
   cash?: { amount: number; cash_source?: CashSource },
 ): number {
   const holdings = positions.reduce((sum, p) => (isUnpriced(p) ? sum : sum + p.market_value_eur), 0)
-  return holdings + (cashIsTracked(cash) ? cash!.amount : 0)
+  return holdings + inBookCash(cash)
 }
 
 /**

@@ -59,6 +59,17 @@ describe('largestHolding', () => {
     expect(top?.weightPct).toBeCloseTo(50)
   })
 
+  it('adds only a positive balance, as Allocation and Look-through do (GitHub #52)', () => {
+    // Holdings 900: a 90 holding is 10.0% beside a debit (left out, not subtracted) and
+    // 9.0% beside a credit — the same reading `UninvestedCash.in_book` gives server-side.
+    const rows = [pos(1, 'BIG', 810), pos(2, 'SMALL', 90)]
+    expect(weightDenominator(rows, { amount: -100, cash_source: 'derived' })).toBe(900)
+    expect((90 / weightDenominator(rows, { amount: -100, cash_source: 'ibkr' })) * 100).toBeCloseTo(10)
+    expect((90 / weightDenominator(rows, { amount: 100, cash_source: 'derived' })) * 100).toBeCloseTo(9)
+    // The Largest holding tile reads the same denominator.
+    expect(largestHolding(rows, { amount: -100, cash_source: 'derived' })?.weightPct).toBeCloseTo(90)
+  })
+
   it('ignores cash the backend does not track', () => {
     const top = largestHolding([pos(1, 'AAA', 300), pos(2, 'BBB', 100)], { amount: 999, cash_source: 'unknown' })
     expect(top?.weightPct).toBeCloseTo(75)

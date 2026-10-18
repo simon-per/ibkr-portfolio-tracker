@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cashIsTracked } from './portfolioCash'
+import { cashIsTracked, inBookCash } from './portfolioCash'
 
 /**
  * `cashIsTracked` decides whether four surfaces may present a cash balance as one —
@@ -30,5 +30,25 @@ describe('cashIsTracked', () => {
     // must not be shown. No ledger holds a row, so the zero is the absence of a
     // measurement rather than a measurement of absence.
     expect(cashIsTracked({ cash_source: 'unknown' })).toBe(false)
+  })
+})
+
+/**
+ * The client half of a pair: `test_only_a_known_positive_balance_joins_the_book` in
+ * `backend/tests/test_uninvested_cash_family.py` pins `UninvestedCash.in_book` with the
+ * same four cases. Allocation and Look-through divide by that; Positions divides by this.
+ */
+describe('inBookCash', () => {
+  it('adds only a known positive balance, as UninvestedCash.in_book does', () => {
+    expect(inBookCash({ amount: 100, cash_source: 'derived' })).toBe(100)
+    expect(inBookCash({ amount: -250, cash_source: 'derived' })).toBe(0)
+    expect(inBookCash({ amount: 0, cash_source: 'derived' })).toBe(0)
+    expect(inBookCash({ amount: 0, cash_source: 'unknown' })).toBe(0)
+  })
+
+  it('adds nothing for a balance it may not present', () => {
+    expect(inBookCash({ amount: 999, cash_source: 'unknown' })).toBe(0)
+    expect(inBookCash({ amount: 999 })).toBe(0)
+    expect(inBookCash(undefined)).toBe(0)
   })
 })

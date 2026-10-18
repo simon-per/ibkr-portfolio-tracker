@@ -375,6 +375,9 @@ load. The budget and the gate rules are in docs/flex-and-sync.md (*Sync schedule
 - **Positions weights**, whose denominator is now holdings + cash. The column is labelled
   "% of portfolio" and cash is part of one; dividing by holdings alone inflated every row
   by 21% here. Cash is a line above the table rather than a synthetic `Position` row.
+  The cash added is the same positive-only part Allocation and Look-through use (`inBookCash`,
+  mirroring `UninvestedCash.in_book`; GitHub #52): a debit keeps the holdings-only base and its
+  line shows the balance without a share ([frontend.md](frontend.md)).
 - **All three allocation breakdowns**, as a `Cash` bucket. In *all three* on purpose: a
   cash slice in the asset-type chart alone would give the endpoint two denominators and
   leave sector and geography summing to under 100 while every slice still said "% of

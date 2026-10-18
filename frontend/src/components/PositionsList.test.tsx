@@ -306,3 +306,24 @@ describe('the price-source badge', () => {
     expect(screen.queryByText('statement NAV')).toBeNull()
   })
 })
+
+describe('the cash line and the weight denominator (GitHub #52)', () => {
+  // Holdings 900; the 90 holding's share must match Allocation and Look-through, which
+  // add only a positive known balance (`UninvestedCash.in_book`).
+  const BIG = position({ security_id: 1, symbol: 'BIG', market_value_eur: 810 })
+  const SMALL = position({ security_id: 2, symbol: 'SMALL', market_value_eur: 90 })
+  const cashLine = () => screen.getByText('Cash').closest('div')!.textContent ?? ''
+
+  it('keeps a debit out of the denominator, and gives it no share', () => {
+    render(<PositionsList positions={[BIG, SMALL]} cash={{ amount: -100, cash_source: 'derived' }} />)
+    expect(screen.getAllByText('10.00%').length).toBeGreaterThan(0)
+    expect(screen.queryByText('11.25%')).toBeNull() // 90 / (900 - 100)
+    expect(cashLine()).not.toMatch(/%/)
+  })
+
+  it('adds a positive balance, with its share', () => {
+    render(<PositionsList positions={[BIG, SMALL]} cash={{ amount: 100, cash_source: 'derived' }} />)
+    expect(screen.getAllByText('9.00%').length).toBeGreaterThan(0)
+    expect(cashLine()).toMatch(/10\.00%/)
+  })
+})
