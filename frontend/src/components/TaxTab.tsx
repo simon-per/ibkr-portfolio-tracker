@@ -5,7 +5,7 @@ import {
   Building2, Download, Globe, HandCoins, Landmark, Loader2, PiggyBank, ReceiptText, TriangleAlert,
   Wallet,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatPercent } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
@@ -53,15 +53,25 @@ const TOTAL_LABEL = (
 
 /**
  * The symbol cell: logo (or monogram) plus ticker in the table, the ticker alone as the
- * phone card's title. Only the dividend rows carry an ISIN; the realized and holdings rows
- * carry neither it nor a security id, so they keep the monogram.
+ * phone card's title. The realized and holdings rows carry the security id as well as the
+ * ISIN; a sale linked to no security has neither and keeps the monogram.
  */
-function symbolCell(symbol: string | null, isin: string | null, view: 'table' | 'cards') {
+function symbolCell(
+  symbol: string | null,
+  isin: string | null,
+  view: 'table' | 'cards',
+  securityId?: number | null,
+) {
   if (!symbol) return '—'
   if (view === 'cards') return symbol
   return (
     <span className="flex items-center gap-2.5">
-      <TickerAvatar symbol={symbol} isin={isin} className="h-7 w-7 text-[10px]" />
+      <TickerAvatar
+        symbol={symbol}
+        securityId={securityId ?? undefined}
+        isin={isin}
+        className="h-7 w-7 text-[10px]"
+      />
       <span>{symbol}</span>
     </span>
   )
@@ -186,6 +196,36 @@ const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
         withheld(money, c.withholding)
       ),
   },
+  {
+    key: 'rate_pct',
+    header: 'Rate',
+    shortHeader: 'Rate',
+    align: 'right',
+    cellClassName: 'text-muted-foreground',
+    cell: (c) =>
+      c.rate_pct == null ? (
+        '—'
+      ) : (
+        <span title={c.residual_pct == null ? undefined : `Treaty ${c.residual_pct}%`}>
+          {formatPercent(c.rate_pct)}
+        </span>
+      ),
+  },
+  {
+    key: 'creditable',
+    header: 'Creditable',
+    shortHeader: 'Creditable',
+    align: 'right',
+    cell: (c) => (c.creditable == null ? '—' : money(c.creditable)),
+  },
+  {
+    key: 'excess',
+    header: 'Excess',
+    shortHeader: 'Excess',
+    align: 'right',
+    tone: (c) => (c.excess ? 'text-warn' : undefined),
+    cell: (c) => (c.excess == null ? '—' : money(c.excess)),
+  },
 ]
 
 const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
@@ -195,7 +235,7 @@ const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (r, view) => symbolCell(r.symbol, null, view),
+    cell: (r, view) => symbolCell(r.symbol, r.isin, view, r.security_id),
   },
   {
     key: 'trade_date',
@@ -247,7 +287,7 @@ const HOLDINGS_COLUMNS = (money: Money): Column<HoldingRow>[] => [
     shortHeader: 'Symbol',
     mobile: 'title',
     cellClassName: 'font-medium',
-    cell: (h, view) => symbolCell(h.symbol, null, view),
+    cell: (h, view) => symbolCell(h.symbol, h.isin, view, h.security_id),
   },
   {
     key: 'market_value',
@@ -488,7 +528,7 @@ export function TaxTab() {
                   </div>
                   <div className="rounded-xl border border-border/70 bg-raised p-4">
                     <div className="text-2xl font-semibold tracking-tight text-muted-foreground">
-                      {money(data.pillar3a.holdings_value)}
+                      {data.pillar3a.holdings_value == null ? '—' : money(data.pillar3a.holdings_value)}
                     </div>
                     <div className="mt-1 text-sm text-muted-foreground">
                       Assets held
@@ -648,6 +688,20 @@ export function TaxTab() {
                     },
                   ]}
                 />
+              )}
+              {/* Beside the holdings total, not inside it: absent when unknown. */}
+              {data.cash_balance != null && (
+                <div className="mt-3 flex items-center justify-between border-t border-border/70 px-2 pt-3 text-sm">
+                  <span className="font-medium">Cash</span>
+                  <span
+                    className={cn(
+                      'font-medium tabular-nums',
+                      data.cash_balance < 0 && 'text-red-600 dark:text-red-400',
+                    )}
+                  >
+                    {money(data.cash_balance)}
+                  </span>
+                </div>
               )}
             </CardContent>
           </Card>

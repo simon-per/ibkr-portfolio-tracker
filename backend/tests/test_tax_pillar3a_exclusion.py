@@ -190,6 +190,9 @@ async def test_an_excluded_security_is_never_reported_as_an_unvaluable_one():
     warning that the wealth-tax base understates. A deliberate exclusion reported
     through that latch would make the one figure that goes on a tax return look broken
     — and would train the reader to ignore the warning that matters.
+
+    The 3a figure's own snapshot reads the latch too since GitHub #63, and an unpriceable
+    3a fund *does* make that figure short — so it is named there, and only there.
     """
     engine, session = await _make_session()
     try:
@@ -200,8 +203,9 @@ async def test_an_excluded_security_is_never_reported_as_an_unvaluable_one():
         await session.flush()
 
         report = await TaxService(session).get_tax_report(YEAR)
-        assert not any("CH0117044948" in w for w in report["warnings"])
-        assert not any("could not be valued" in w for w in report["warnings"])
+        assert not any("wealth-tax" in w for w in report["warnings"])
+        (named,) = [w for w in report["warnings"] if "CH0117044948" in w]
+        assert "pillar 3a" in named and "wealth-tax" not in named
         assert report["holdings_snapshot_total"] == 10 * 110.0
     finally:
         await session.close()

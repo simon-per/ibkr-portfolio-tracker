@@ -128,4 +128,64 @@ estimates. `dividend_country_note` is still served but no longer rendered. Tests
 `tests/test_tax_service.py` (`test_an_estimate_only_year_states_no_withholding_anywhere`, the
 boundary-year test) and `TaxTab.test.tsx`.
 
+**DA-1 credits only the treaty rate, so each country row splits its withholding** (2026-10-18,
+GitHub issue #62). The table summed the raw withholding per country under a DA-1 heading, but DA-1
+credits foreign withholding only up to the rate the Swiss treaty leaves the source country (the
+*residual* rate); anything above it is reclaimed from that country's own authority and is not
+creditable here. Korea withholds 22% and Taiwan 21% against 15%, so those rows overstated the claim
+by the difference. Each `dividend_by_country` row now also carries:
+
+- `rate_pct` — the recorded withholding as a share of the **recorded** payments' gross
+  (`percentages.share_pct`; an estimate's gross beside no withholding would dilute it);
+- `residual_pct` — the treaty rate from `app/services/swiss_treaty_rates.py`;
+- `creditable` = Σ min(withheld, gross × residual) and `excess` = withheld − creditable, **per
+  payment** and then summed, since min() does not add across payments (30% and 0% on equal
+  grosses is 15 + 0 creditable, not 15% of the sum).
+
+The rules: a **country is in the table only where its rate is known with confidence**, each entry
+citing its treaty article — an unlisted country's row has `residual_pct`, `creditable` and
+`excess` null rather than a guessed split. A payment that withheld **nothing** needs no rate (0 is
+creditable, 0 is excess, whatever the treaty), so an unlisted country still splits exactly when it
+withheld nothing. An estimate is left out of the split exactly as it is left out of the
+withholding, and a country whose payments are all estimates has every one of the four null.
+Switzerland is deliberately absent: Swiss withholding is refunded through the securities statement,
+not DA-1. Taiwan is absent pending verification (believed 15%, art. 10(2) of the 2007 agreement).
+The fields are in the CSV (`Rate (%)`, `Treaty rate (%)`, `Creditable`, `Excess`, blank when null)
+and the tab shows Rate / Creditable / Excess, the treaty rate as the Rate cell's hover.
+
+**The country is the one that withheld, read off IBKR's withholding line** — `… PER SHARE - US
+TAX`. The ISIN prefix is the issuer's domicile, which is wrong for an ADR (a Taiwanese company's
+US-listed ADR has a US ISIN and is withheld by Taiwan) and for some funds. `ibkr_service` already
+carried the line's description; `sync_dividends_from_cash_transactions` now parses the country
+(`parse_ibkr_withholding_country`) into `dividend_payments.withholding_country` (migration
+`c9f6e1a3b5d7`), one per row — two different countries on one payment's lines store NULL rather
+than a pick — and the report keys on it, else on the ISIN prefix
+(`swiss_treaty_rates.withholding_country`). Rows ingested before the column fill in when a
+statement covering them is ingested again: the upsert rewrites every field, so a Client Portal
+download through `app/cli/ingest_flex_xml.py` backfills with no token spend. Until then they fall
+back to the prefix. Tests: `tests/test_tax_da1_split.py`,
+`test_a_reingested_statement_backfills_the_withholding_country`.
+
+**The pillar 3a figure is guarded like the Steuerwert** (GitHub issue #63). Its
+`holdings_snapshot_as_of(only_accounts=…)` call sat outside the `try` the IBKR snapshot has, so a
+failure there answered 500 for the whole report, and its partial case was never read. Now a raise
+makes `pillar3a.holdings_value` **null** plus a warning (the tab dashes it, the CSV says
+`unavailable`), and a non-empty `last_snapshot_skipped` right after that call names the omitted 3a
+securities in a warning about the **3a figure** — never in the Steuerwert's wealth-tax warning,
+which still must not mention an excluded security.
+
+**Every realized and holdings row carries `isin` and `security_id`**, so the tab's avatars are
+logos rather than monograms (`TickerAvatar` prefers the id). `holdings_snapshot_as_of` and
+`realized_rows_from_closed_lots` put both on their rows; a SELL trade linked to no security has
+both null. The CSV gains an ISIN column on both tables.
+
+**The IBKR cash balance at the same date stands beside the holdings total** as `cash_balance`
+(signed: a margin debit is debt and reduces declared wealth), from
+`CashService.uninvested_cash(base_fx, holdings_as_of, account=IBKR)` — the one cash read, scoped by
+account so pillar 3a money, outside the Steuerwert like 3a holdings, cannot leak in. It is not
+added into `holdings_snapshot_total`; it is a separate line on the return. **Absent when unknown**:
+no ledger at all (silently — nothing is wrong), an unconvertible IBKR trade (with a warning naming
+the count; a 3a trade does not count against it), or the read raising (a warning, never a 500).
+Tests: `tests/test_tax_year_end.py`, `test_one_accounts_cash_carries_no_other_accounts_money`.
+
 ---

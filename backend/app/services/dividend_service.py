@@ -280,11 +280,13 @@ def match_estimates_to_ibkr(
 #   "VT(US9220427424) CASH DIVIDEND USD 0.4084 PER SHARE (Ordinary Dividend)"
 #   "000660.KS(KR7000660001) CASH DIVIDEND KRW 375 PER SHARE (Ordinary Dividend)"
 # Read off a real statement on 2026-10-04. The withholding line repeats the rate with
-# "- US TAX" instead of the kind, and is never parsed for either.
+# "- US TAX" instead of the kind, and is never parsed for either -- only for the country
+# it names (`parse_ibkr_withholding_country`).
 _IBKR_PER_SHARE_RE = re.compile(
     r"\b([A-Z]{3})\s+([0-9]+(?:\.[0-9]+)?)\s+PER\s+SHARE\b", re.IGNORECASE
 )
 _IBKR_KIND_RE = re.compile(r"\(([^()]*)\)\s*$")
+_IBKR_WHT_COUNTRY_RE = re.compile(r"\s-\s*([A-Z]{2})\s+TAX\b", re.IGNORECASE)
 
 # The kinds a forecast must never repeat. A return of capital is left regular on
 # purpose: funds pay it inside their ordinary schedule.
@@ -320,6 +322,20 @@ def parse_ibkr_dividend_description(
         else:
             kind = "other"
     return currency, rate, kind
+
+
+def parse_ibkr_withholding_country(description: Optional[str]) -> Optional[str]:
+    """
+    The country a withholding cash line names ("… PER SHARE - US TAX" -> "US"), or None.
+
+    It is the country that withheld, which is what DA-1 is filed by; the ISIN prefix is
+    the issuer's domicile, and the two differ for an ADR. Unparseable costs only the
+    country -- the tax report then falls back to the ISIN prefix.
+    """
+    if not description:
+        return None
+    m = _IBKR_WHT_COUNTRY_RE.search(description)
+    return m.group(1).upper() if m else None
 
 
 def _summary_source(payments, ibkr_from) -> str:
@@ -719,6 +735,8 @@ class DividendService:
             # cancel its rate rather than double it.
             "rates": defaultdict(Decimal),
             "rate_currencies": set(),
+            # The countries the group's withholding lines name -- see below.
+            "wht_countries": set(),
         })
 
         for ct in cash_txns:
@@ -736,6 +754,9 @@ class DividendService:
                     g["rate_currencies"].add(rate_cur)
             elif ct["type"] == "WHTAX":
                 g["wht"] += ct["amount"]  # IBKR reports withholding as a negative amount
+                country = parse_ibkr_withholding_country(ct.get("description"))
+                if country:
+                    g["wht_countries"].add(country)
 
         saved = 0
         skipped_currencies: Dict[str, int] = {}
@@ -771,6 +792,12 @@ class DividendService:
             per_share_native = rates.get(kind)
             if g["rate_currencies"] - {currency}:
                 per_share_native = None
+            # One country per row, or none: two different countries on one payment's
+            # withholding lines is not something to pick between, so the row falls back
+            # to its ISIN's country in the tax report rather than to a guess.
+            wht_country = (
+                next(iter(g["wht_countries"])) if len(g["wht_countries"]) == 1 else None
+            )
 
             await self.repo.upsert_payment({
                 "security_id": security_id,
@@ -785,6 +812,9 @@ class DividendService:
                 "source": "ibkr",
                 "per_share_native": per_share_native,
                 "dividend_kind": kind,
+                # Written on every upsert, NULL included, so re-ingesting a statement
+                # (`app.cli.ingest_flex_xml`) backfills a row stored before the column.
+                "withholding_country": wht_country,
                 "last_computed": now,
             })
             saved += 1

@@ -31,6 +31,8 @@ from app.models.corporate_action import CorporateAction
 from app.models.dividend_payment import DividendPayment
 from app.models.app_settings import AppSetting
 from app.models.market_price import MarketPrice
+from app.models.cash_flow import CashFlow
+from app.models.cash_balance import CashBalance
 from app.repositories.security_repository import SecurityRepository
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
@@ -102,17 +104,18 @@ async def _make_session():
     )
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               CorporateAction.__table__, DividendPayment.__table__,
-              AppSetting.__table__, MarketPrice.__table__]
+              AppSetting.__table__, MarketPrice.__table__,
+              CashFlow.__table__, CashBalance.__table__]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     return engine, AsyncSession(engine, expire_on_commit=False)
 
 
-async def _ingest(session) -> dict:
+async def _ingest(session, xml: bytes = FLEX_XML) -> dict:
     """Mirror the production sync flow for the Flex-derived tables."""
     svc = IBKRService(token="t", query_id="q")
 
-    sanitized, warnings = svc._sanitize_flex_xml(FLEX_XML)
+    sanitized, warnings = svc._sanitize_flex_xml(xml)
     statement = parser.parse(sanitized).FlexStatements[0]
     flex_data = {"statement": statement}
 
@@ -227,6 +230,32 @@ async def test_tax_report_uses_ingested_trades_and_withholding():
         assert "source: ibkr" in csv_text
         assert "source: trades" in csv_text
         assert "CSU" in csv_text
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_reingested_statement_backfills_the_withholding_country():
+    """
+    The withholding line names the country that withheld (GitHub issue #62). A row
+    stored before the column existed fills in when a statement covering it is ingested
+    again -- `app.cli.ingest_flex_xml` from a Client Portal download, no token spend.
+    """
+    engine, session = await _make_session()
+    try:
+        await _ingest(session)          # this fixture's line names no country
+        (dp,) = (await session.execute(select(DividendPayment))).scalars().all()
+        assert dp.withholding_country is None
+
+        await _ingest(session, FLEX_XML.replace(
+            b"GOOGL WITHHOLDING @ 15%",
+            b"GOOGL(US02079K3059) CASH DIVIDEND EUR 0.21 PER SHARE - US TAX",
+        ))
+        (dp,) = (await session.execute(select(DividendPayment))).scalars().all()
+        await session.refresh(dp)
+        assert dp.withholding_country == "US"
+        assert dp.withholding_tax_eur == Decimal("6.38")
     finally:
         await session.close()
         await engine.dispose()

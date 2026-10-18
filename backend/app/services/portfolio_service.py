@@ -1231,6 +1231,9 @@ class PortfolioService:
                     continue
 
             row = by_security.setdefault(security.id, {
+                # The identity rides along for the tax report's logos (GitHub #63).
+                "security_id": security.id,
+                "isin": security.isin,
                 "symbol": security.symbol,
                 "quantity": Decimal("0"),
                 "market_value": Decimal("0"),
@@ -1364,6 +1367,7 @@ class PortfolioService:
             proceeds_eur = proceeds_local * fx_rate
             rows.append({
                 "security_id": security.id,
+                "isin": security.isin,
                 "symbol": security.symbol,
                 "close_date": lot.close_date,
                 "open_date": lot.open_date,

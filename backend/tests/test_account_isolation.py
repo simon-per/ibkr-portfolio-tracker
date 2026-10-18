@@ -31,11 +31,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.accounts import IBKR, PILLAR3A
 from app.database import Base
+from app.models.cash_balance import CashBalance
+from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.trade import Trade
 from app.repositories.taxlot_repository import TaxLotRepository
 from app.repositories.trade_repository import TradeRepository
+from app.services.cash_service import DERIVED, MEASURED, MIXED, CashService
+from app.services.portfolio_service import PortfolioService
 from app.services.sync_helper import (
     EmptyStatementError,
     reconcile_taxlots,
@@ -243,6 +247,38 @@ async def test_restamp_never_touches_a_pillar3a_closed_lot():
 
 
 # ── The family rule ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_one_accounts_cash_carries_no_other_accounts_money(db):
+    """
+    The tax report's 31 December cash line is IBKR's alone (GitHub issue #63): 3a cash
+    is outside the Steuerwert exactly as 3a holdings are. Scoping by account must keep
+    each account's own splice -- an IBKR level, a 3a derivation -- not difference one
+    against the other's money.
+    """
+    on = date(2026, 12, 31)
+    db.add_all([
+        CashFlow(ib_key="i1", flow_date=date(2026, 1, 2), flow_type=DEPOSIT_WITHDRAW,
+                 amount=Decimal("100"), currency="EUR", amount_eur=Decimal("100"),
+                 account=IBKR),
+        CashFlow(ib_key="p1", flow_date=date(2026, 1, 3), flow_type=DEPOSIT_WITHDRAW,
+                 amount=Decimal("7000"), currency="EUR", amount_eur=Decimal("7000"),
+                 account=PILLAR3A),
+        # IBKR's own level: 50 of interest the ledgers cannot see.
+        CashBalance(report_date=date(2026, 6, 30), account=IBKR, currency="EUR",
+                    cash=Decimal("150")),
+    ])
+    await db.commit()
+    base_fx = await PortfolioService(db)._load_base_fx()
+    cash = CashService(db)
+
+    ibkr = await cash.uninvested_cash(base_fx, on, account=IBKR)
+    assert (ibkr.balance, ibkr.source) == (Decimal("150"), MEASURED)
+    p3a = await cash.uninvested_cash(base_fx, on, account=PILLAR3A)
+    assert (p3a.balance, p3a.source) == (Decimal("7000"), DERIVED)
+    book = await cash.uninvested_cash(base_fx, on)
+    assert (book.balance, book.source) == (Decimal("7150"), MIXED)
+
 
 def test_every_destructive_taxlot_read_in_sync_helper_is_account_scoped():
     """

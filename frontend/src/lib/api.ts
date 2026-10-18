@@ -1193,12 +1193,25 @@ export interface TaxDividendRow {
 }
 
 export interface TaxCountryRow {
-  /** ISIN prefix, e.g. "US", "CH", "DE". "??" when the ISIN is unknown. */
+  /**
+   * The country IBKR's withholding line names, else the ISIN prefix, e.g. "US", "CH".
+   * "??" when neither is known.
+   */
   country: string;
   positions: number;
   gross: number;
   /** Recorded withholding only; `null` when every payment from the country is an estimate. */
   withholding: number | null;
+  /** Withheld as a % of the recorded gross; `null` when nothing is recorded. */
+  rate_pct: number | null;
+  /** The Swiss treaty residual rate (%); `null` for a country not in the server's table. */
+  residual_pct: number | null;
+  /**
+   * The part DA-1 credits (up to the treaty rate) and the part to reclaim at source.
+   * `null` when nothing is recorded, or when withholding has no known treaty rate.
+   */
+  creditable: number | null;
+  excess: number | null;
   net: number;
   /** Payments from the country, and how many of them are estimates. */
   payments: number;
@@ -1207,6 +1220,9 @@ export interface TaxCountryRow {
 
 export interface TaxRealizedRow {
   symbol: string | null;
+  /** The holding, for its logo; both null for a trade linked to no security. */
+  security_id: number | null;
+  isin: string | null;
   trade_date: string;
   quantity: number | null;
   proceeds: number;
@@ -1216,6 +1232,8 @@ export interface TaxRealizedRow {
 
 export interface TaxHoldingRow {
   symbol: string | null;
+  security_id: number;
+  isin: string | null;
   quantity: number | null;
   market_value: number;
   cost_basis: number;
@@ -1251,6 +1269,8 @@ export interface TaxReport {
   holdings_snapshot_total: number | null;
   holdings_snapshot_error?: boolean;
   holdings_snapshot_note: string;
+  /** IBKR cash at `holdings_as_of`, signed (negative is a margin debit); null when unknown. */
+  cash_balance: number | null;
   /**
    * Pillar 3a, when any is tracked. `null` on an IBKR-only book rather than a
    * zeroed block, because zeros would assert a 3a account holding nothing — a
@@ -1265,7 +1285,8 @@ export interface TaxReport {
     tracked: boolean;
     accounts: string[];
     contributions: number;
-    holdings_value: number;
+    /** null when the 3a snapshot could not be built — missing, not zero. */
+    holdings_value: number | null;
     note: string;
   } | null;
   /** Omitted rows, FX failures, a fallback taking over — badged in the UI and CSV. */

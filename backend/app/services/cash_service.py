@@ -139,9 +139,9 @@ class CashService:
         self._trades: Optional[List[Trade]] = None
         self._flows: Optional[List[CashFlow]] = None
         self._balances: Optional[List[CashBalance]] = None
-        # Trades `_derived_events` could not convert, per base currency — see
-        # `unconverted_trades`.
-        self._unconverted: Dict[str, int] = {}
+        # Trades `_derived_events` could not convert, per base currency and then per
+        # account — see `unconverted_trades`.
+        self._unconverted: Dict[str, Dict[str, int]] = {}
 
     async def all_trades(self) -> List[Trade]:
         """Every trade, oldest first — read once per instance. Shared with the realized
@@ -164,7 +164,9 @@ class CashService:
             return self._balances
         return [row for row in self._balances if row.account == account]
 
-    async def balance_events(self, base_fx) -> List[Tuple[date, Decimal]]:
+    async def balance_events(
+        self, base_fx, account: Optional[str] = None
+    ) -> List[Tuple[date, Decimal]]:
         """
         Every cash movement as ``(date, signed amount in base currency)``, sorted.
 
@@ -182,6 +184,10 @@ class CashService:
         a correction that silently subtracts the 3a balance on every measured day,
         and puts it back on every day between. The line would sawtooth and each
         individual point would look plausible.
+
+        `account` keeps one account's events alone (the tax report's IBKR cash line);
+        None is the whole book. The per-account splice is what makes that a filter
+        rather than a second derivation.
         """
         by_account, to_base = await self._derived_events(base_fx)
         # The union of accounts with derived events and accounts with measured
@@ -189,10 +195,12 @@ class CashService:
         # section while <Trades> and <CashTransactions> are still off, and an
         # account whose only evidence is IBKR's own figure must still get it.
         accounted = set(by_account) | {row.account for row in await self._measured_rows()}
+        if account is not None:
+            accounted &= {account}
         merged: List[Tuple[date, Decimal]] = []
-        for account in sorted(accounted):
-            events = sorted(by_account.get(account, []), key=lambda e: e[0])
-            merged += await self._apply_measured(events, to_base, account)
+        for one in sorted(accounted):
+            events = sorted(by_account.get(one, []), key=lambda e: e[0])
+            merged += await self._apply_measured(events, to_base, one)
         merged.sort(key=lambda e: e[0])
         return merged
 
@@ -204,7 +212,7 @@ class CashService:
         """
         by_account: Dict[str, List[Tuple[date, Decimal]]] = defaultdict(list)
         to_base = NativeToBase(self.currency_service, base_fx)
-        unconverted = 0
+        unconverted: Dict[str, int] = defaultdict(int)
 
         # 1. Trades. `proceeds` carries IBKR's sign — negative for a buy, positive for a
         #    sell — and `commission` is separately signed (negative), so the sum is the
@@ -220,7 +228,7 @@ class CashService:
                     "Cash: no FX for trade %s (%s near %s); the balance is unknown",
                     t.ib_key, t.currency, t.trade_date,
                 )
-                unconverted += 1
+                unconverted[t.account] += 1
                 continue
             by_account[t.account].append((t.trade_date, amount))
 
@@ -240,10 +248,10 @@ class CashService:
         for when, net_eur in await DividendService(self.db).ibkr_cash_receipts():
             by_account[IBKR].append((when, base_fx.convert(net_eur, when)))
 
-        self._unconverted[base_fx.base_currency] = unconverted
+        self._unconverted[base_fx.base_currency] = dict(unconverted)
         return by_account, to_base
 
-    async def unconverted_trades(self, base_fx) -> int:
+    async def unconverted_trades(self, base_fx, account: Optional[str] = None) -> int:
         """
         Trades the derived events left out because no FX rate converts them.
 
@@ -253,11 +261,15 @@ class CashService:
         state the surfaces already render as absent — and carries this count so the
         absence names its cause. Answered off the last `_derived_events` run of this
         instance when there was one; the count depends on the base only through
-        `NativeToBase`'s same-currency short-circuit, hence the key.
+        `NativeToBase`'s same-currency short-circuit, hence the key. `account` counts
+        one account's trades only, so a pillar 3a trade cannot unknow the IBKR balance.
         """
         if base_fx.base_currency not in self._unconverted:
             await self._derived_events(base_fx)
-        return self._unconverted[base_fx.base_currency]
+        counts = self._unconverted[base_fx.base_currency]
+        if account is None:
+            return sum(counts.values())
+        return counts.get(account, 0)
 
     async def measured_corrections(self, base_fx) -> List[Tuple[date, Decimal, str]]:
         """
@@ -354,7 +366,7 @@ class CashService:
 
         return corrections
 
-    async def cash_source(self) -> str:
+    async def cash_source(self, account: Optional[str] = None) -> str:
         """
         Whether a derived balance means anything yet for this account.
 
@@ -368,7 +380,14 @@ class CashService:
         not a hedge: `MEASURED` means *read from the broker*, and reporting a total
         that half of which the broker has never seen as `ibkr` is precisely the
         provenance overclaim `derived_source` was split out to avoid.
+
+        With `account`, that account's provenance alone: `MEASURED` when IBKR reports its
+        balance, `DERIVED` when it has a trade or a cash flow, else `UNKNOWN`.
         """
+        if account is not None:
+            if await self._measured_rows(account):
+                return MEASURED
+            return DERIVED if account in await self._accounts_with_activity() else UNKNOWN
         measured_accounts = {row.account for row in await self._measured_rows()}
         if not measured_accounts:
             return await self.derived_source()
@@ -406,7 +425,9 @@ class CashService:
             return DERIVED
         return UNKNOWN
 
-    async def uninvested_cash(self, base_fx, on_date: date) -> UninvestedCash:
+    async def uninvested_cash(
+        self, base_fx, on_date: date, account: Optional[str] = None
+    ) -> UninvestedCash:
         """
         The balance at the end of `on_date` and its provenance, for a share-of-the-book
         denominator — the one read the Allocation and Look-through tabs share.
@@ -421,10 +442,15 @@ class CashService:
         An unconvertible trade makes the balance unknown whatever the provenance: even a
         measured level that absorbs it would leave the days before it short, and the
         correction would book the trade as fees and interest.
+
+        `account` answers for one account alone — the tax report's year-end IBKR cash,
+        where pillar 3a money is outside the wealth-tax base (GitHub issue #63). Its
+        events, its unconverted trades and its provenance are all that account's; None,
+        every caller before that, is the whole book.
         """
-        events = await self.balance_events(base_fx)
-        unconverted = await self.unconverted_trades(base_fx)
-        source = await self.cash_source()
+        events = await self.balance_events(base_fx, account=account)
+        unconverted = await self.unconverted_trades(base_fx, account=account)
+        source = await self.cash_source(account=account)
         if source == UNKNOWN or unconverted:
             return UninvestedCash(source=UNKNOWN, balance=None, unconverted=unconverted)
         return UninvestedCash(source=source, balance=self.balance_as_of(events, on_date))

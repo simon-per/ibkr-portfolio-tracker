@@ -3,10 +3,12 @@ Tax Service
 Assembles a per-year tax report from authoritative IBKR data, framed for Swiss
 filing:
   * Dividend income with foreign withholding tax (DA-1 reclaim) — real figures
-    from <CashTransactions> when available, else yfinance-estimated gross.
+    from <CashTransactions> when available, else yfinance-estimated gross — and, per
+    withholding country, the part DA-1 can credit (`swiss_treaty_rates`).
   * Realized capital gains per SELL trade (Switzerland doesn't tax private
     capital gains, but the figures are provided for completeness / other regimes).
-  * A current holdings snapshot as an indicative wealth-tax (Steuerwert) base.
+  * A current holdings snapshot as an indicative wealth-tax (Steuerwert) base, with
+    the IBKR cash balance at the same date beside it.
 
 All monetary values are projected into the configured base currency.
 """
@@ -20,19 +22,31 @@ from typing import Dict, List, Optional
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.accounts import tax_exempt_accounts
+from app.accounts import IBKR, tax_exempt_accounts
 from app.models.security import Security
 from app.models.trade import Trade, sale_sign
 from app.models.dividend_payment import DividendPayment
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
+from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
+from app.services.percentages import share_pct
 from app.services.realized_trades import realized_from_sell_trades
 from app.services.portfolio_service import PortfolioService
+from app.services.swiss_treaty_rates import (
+    creditable_split,
+    residual_rate_pct,
+    withholding_country,
+)
 from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
+
+
+def _blank(value):
+    """A CSV cell for a figure that may be unknown: blank, never 0.00."""
+    return "" if value is None else value
 
 
 class TaxService:
@@ -132,12 +146,17 @@ class TaxService:
                 "source": row_source,
             })
 
-            # First two ISIN characters are the issuer's domicile — a good proxy for the
-            # withholding country, though not exact (ADRs and some funds differ).
-            country = (sec.isin or "")[:2].upper()
-            bucket = by_country.setdefault(country or "??", {
-                "country": country or "??",
+            # The country IBKR's withholding line names, else the ISIN's first two
+            # letters. The prefix is the issuer's domicile, which is not the withholding
+            # country for an ADR or some funds (GitHub issue #62).
+            country = withholding_country(dp.withholding_country, sec.isin) or "??"
+            bucket = by_country.setdefault(country, {
+                "country": country,
                 "gross": Decimal("0"), "withholding": Decimal("0"), "net": Decimal("0"),
+                # The recorded payments' gross alone, for the rate: an estimate's gross
+                # beside no withholding would dilute it.
+                "recorded_gross": Decimal("0"),
+                "creditable": Decimal("0"), "excess": Decimal("0"), "unsplit": 0,
                 "symbols": set(), "payments": 0, "estimated_payments": 0,
             })
             bucket["gross"] += gross
@@ -146,10 +165,33 @@ class TaxService:
             bucket["payments"] += 1
             if estimated:
                 bucket["estimated_payments"] += 1
+            else:
+                # DA-1 credits only the treaty residual rate; withholding above it is
+                # reclaimed from the source country. Split per payment, since
+                # min(withheld, gross x rate) does not add across payments.
+                bucket["recorded_gross"] += gross
+                split = creditable_split(gross, wht, residual_rate_pct(country))
+                if split is None:
+                    bucket["unsplit"] += 1
+                else:
+                    bucket["creditable"] += split[0]
+                    bucket["excess"] += split[1]
             if sec.symbol:
                 bucket["symbols"].add(sec.symbol)
 
         dividend_income.sort(key=lambda d: d["pay_date"])
+
+        def _split_part(b: Dict, key: str) -> Optional[float]:
+            # Absent, not 0.00, when there is nothing recorded to split or a payment
+            # withheld with no treaty rate in the table: a guessed split on a filing aid
+            # is worse than none.
+            if b["estimated_payments"] == b["payments"] or b["unsplit"]:
+                return None
+            return round(float(b[key]), 2)
+
+        def _residual(country: str) -> Optional[float]:
+            rate = residual_rate_pct(country)
+            return None if rate is None else float(rate)
 
         dividend_by_country = [
             {
@@ -162,6 +204,11 @@ class TaxService:
                     else round(float(b["withholding"]), 2)
                 ),
                 "net": round(float(b["net"]), 2),
+                # Withheld as a share of the recorded gross, and what the treaty allows.
+                "rate_pct": share_pct(b["withholding"], b["recorded_gross"]),
+                "residual_pct": _residual(b["country"]),
+                "creditable": _split_part(b, "creditable"),
+                "excess": _split_part(b, "excess"),
                 "positions": len(b["symbols"]),
                 # DA-1 is filed per country, so which countries' withholding is
                 # incomplete is said per country, not once for the year.
@@ -221,6 +268,9 @@ class TaxService:
             r_gain += gain
             realized_gains.append({
                 "symbol": t.symbol or (sec.symbol if sec else None),
+                # The holding's identity, for its logo; None for an unlinked trade.
+                "security_id": t.security_id,
+                "isin": sec.isin if sec else None,
                 "trade_date": t.trade_date.isoformat(),
                 # Negative on a cancellation, like every other figure on its row.
                 "quantity": (
@@ -249,6 +299,8 @@ class TaxService:
                 r_gain += gain
                 realized_gains.append({
                     "symbol": row["symbol"],
+                    "security_id": row["security_id"],
+                    "isin": row["isin"],
                     "trade_date": row["close_date"].isoformat(),
                     "quantity": float(abs(row["quantity"])) if row["quantity"] is not None else None,
                     "proceeds": round(float(proceeds), 2),
@@ -309,6 +361,8 @@ class TaxService:
                 holdings_total += mv
                 holdings.append({
                     "symbol": row["symbol"],
+                    "security_id": row["security_id"],
+                    "isin": row["isin"],
                     "quantity": float(row["quantity"]),
                     "market_value": round(float(mv), 2),
                     "cost_basis": round(float(row["cost_basis"]), 2),
@@ -347,6 +401,28 @@ class TaxService:
                     f"date, then re-run."
                 )
 
+        # --- Cash at the same date (GitHub issue #63) ------------------------------
+        # Declared wealth is securities *and* cash, and a negative balance is a margin
+        # debit, which is debt. Scoped to IBKR: pillar 3a cash is outside the Steuerwert
+        # exactly as its holdings are. Absent when unknown -- no ledger at all, or a trade
+        # with no exchange rate -- never 0.00, which would read as "no cash".
+        cash_balance: Optional[Decimal] = None
+        try:
+            cash = await CashService(self.db).uninvested_cash(base_fx, as_of, account=IBKR)
+        except Exception as e:
+            logger.error(f"Cash balance for {as_of} failed: {e}", exc_info=True)
+            warnings.append(
+                f"The {as_of.isoformat()} cash balance could not be computed, so it is "
+                f"absent — it is not zero."
+            )
+        else:
+            cash_balance = cash.balance
+            if cash.unconverted:
+                warnings.append(
+                    f"{cash.unconverted} trade(s) have no exchange rate for their trade "
+                    f"date, so the {as_of.isoformat()} cash balance is unknown."
+                )
+
         # --- Pillar 3a: excluded above, and reported here instead -----------------
         # Its capital is outside the wealth-tax base and its income is not taxable,
         # so none of the three sections above may contain it. What *is* a real tax
@@ -357,6 +433,7 @@ class TaxService:
         # error direction that costs money at an audit.
         exempt_contributions = Decimal("0")
         exempt_holdings_total = Decimal("0")
+        exempt_holdings_failed = False
         has_exempt = False
         if exempt_accounts:
             rows = (await self.db.execute(
@@ -374,10 +451,34 @@ class TaxService:
                     exempt_contributions += converted
             # Stated so the reader can see the assets exist and are deliberately
             # absent from the Steuerwert, rather than wondering where they went.
-            for row in await portfolio.holdings_snapshot_as_of(
-                base_fx, as_of, only_accounts=exempt_accounts
-            ):
-                exempt_holdings_total += row["market_value"]
+            # Guarded like the Steuerwert's own snapshot (GitHub issue #63): unguarded,
+            # the same failure that makes that figure None here answered 500 for the
+            # whole report, and its partial case was never read.
+            try:
+                for row in await portfolio.holdings_snapshot_as_of(
+                    base_fx, as_of, only_accounts=exempt_accounts
+                ):
+                    exempt_holdings_total += row["market_value"]
+            except Exception as e:
+                logger.error(
+                    f"Pillar 3a holdings snapshot for {as_of} failed: {e}", exc_info=True
+                )
+                exempt_holdings_failed = True
+                warnings.append(
+                    f"The {as_of.isoformat()} pillar 3a holdings could not be valued, so "
+                    f"their value is unavailable — it is not zero."
+                )
+            else:
+                # The latch, read right after its own call -- the Steuerwert's reading
+                # above is for the other snapshot.
+                skipped_3a = portfolio.last_snapshot_skipped
+                if skipped_3a:
+                    warnings.append(
+                        f"The {as_of.isoformat()} pillar 3a holdings omit "
+                        f"{len(skipped_3a)} security(ies) that could not be valued that "
+                        f"day ({', '.join(skipped_3a)}), so the 3a assets figure "
+                        f"understates by their value."
+                    )
             # The why lives in `pillar3a.note` (and the CSV), not in `warnings`: it
             # held on every report with a 3a account, and a warning that is always
             # present teaches the reader to skip the banner (owner, 2026-10-14).
@@ -399,7 +500,9 @@ class TaxService:
             "dividend_ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "dividend_income": dividend_income,
             "dividend_by_country": dividend_by_country,
-            "dividend_country_note": "Country from the ISIN prefix — verify ADRs and funds.",
+            "dividend_country_note": (
+                "Country from IBKR's withholding line, else the ISIN prefix."
+            ),
             "dividend_totals": {
                 "gross": round(float(div_gross), 2),
                 # Recorded withholding only; `estimated_rows` is what it leaves out, and
@@ -424,6 +527,8 @@ class TaxService:
             "holdings_snapshot_total": None if holdings_failed else round(float(holdings_total), 2),
             "holdings_snapshot_error": holdings_failed,
             "holdings_as_of": as_of.isoformat(),
+            # IBKR cash at `holdings_as_of`, signed; None when unknown (see above).
+            "cash_balance": None if cash_balance is None else round(float(cash_balance), 2),
             "holdings_snapshot_note": (
                 f"The {as_of.isoformat()} holdings snapshot could not be built; no "
                 f"wealth-tax base is reported for this year."
@@ -436,7 +541,11 @@ class TaxService:
                 "tracked": has_exempt,
                 "accounts": exempt_accounts if has_exempt else [],
                 "contributions": round(float(exempt_contributions), 2),
-                "holdings_value": round(float(exempt_holdings_total), 2),
+                # None when the snapshot raised: a missing figure, not a zero one.
+                "holdings_value": (
+                    None if exempt_holdings_failed
+                    else round(float(exempt_holdings_total), 2)
+                ),
                 "note": (
                     "Pillar 3a contributions are deductible from taxable income. "
                     "The assets themselves are excluded from every section above: "
@@ -474,7 +583,8 @@ class TaxService:
             w.writerow(["Contributions this year (deductible from taxable income)",
                         p3a["contributions"]])
             w.writerow(["Assets held (NOT part of the Steuerwert)",
-                        p3a["holdings_value"]])
+                        "unavailable" if p3a["holdings_value"] is None
+                        else p3a["holdings_value"]])
             w.writerow([p3a["note"]])
             w.writerow([])
 
@@ -501,34 +611,42 @@ class TaxService:
                     f"withholding excludes, gross and net include {n_est} est." if n_est else ""])
         w.writerow([])
 
-        # DA-1 is filed per source country.
+        # DA-1 is filed per source country, and credits only up to the treaty rate.
         w.writerow(["Withholding by country (DA-1)"])
         w.writerow(["Country", "Positions",
-                    f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})",
+                    f"Gross ({cur})", f"Withholding ({cur})", "Rate (%)", "Treaty rate (%)",
+                    f"Creditable ({cur})", f"Excess ({cur})", f"Net ({cur})",
                     "Estimated payments"])
         for c in report.get("dividend_by_country", []):
             w.writerow([c["country"], c["positions"], c["gross"],
-                        "" if c["withholding"] is None else c["withholding"], c["net"],
+                        _blank(c["withholding"]), _blank(c.get("rate_pct")),
+                        _blank(c.get("residual_pct")), _blank(c.get("creditable")),
+                        _blank(c.get("excess")), c["net"],
                         c.get("estimated_payments") or ""])
         w.writerow([])
 
         w.writerow([f"Realized capital gains (source: {report.get('realized_source', 'trades')})"])
-        w.writerow(["Symbol", "Trade date", "Quantity",
+        w.writerow(["Symbol", "ISIN", "Trade date", "Quantity",
                     f"Proceeds ({cur})", f"Cost basis ({cur})", f"Gain/Loss ({cur})"])
         for r in report["realized_gains"]:
-            w.writerow([r["symbol"], r["trade_date"], r["quantity"],
+            w.writerow([r["symbol"], _blank(r.get("isin")), r["trade_date"], r["quantity"],
                         r["proceeds"], r["cost_basis"], r["gain_loss"]])
         rt = report["realized_totals"]
-        w.writerow(["TOTAL", "", "", rt["proceeds"], rt["cost_basis"], rt["gain_loss"]])
+        w.writerow(["TOTAL", "", "", "", rt["proceeds"], rt["cost_basis"], rt["gain_loss"]])
         w.writerow([])
 
         w.writerow([f"Holdings snapshot (wealth-tax base) as at {report.get('holdings_as_of', '')}"])
         if report.get("holdings_snapshot_error"):
             w.writerow(["Unavailable — the snapshot could not be built. This is not zero."])
         else:
-            w.writerow(["Symbol", "Quantity", f"Market value ({cur})", f"Cost basis ({cur})"])
+            w.writerow(["Symbol", "ISIN", "Quantity",
+                        f"Market value ({cur})", f"Cost basis ({cur})"])
             for h in report["holdings_snapshot"]:
-                w.writerow([h["symbol"], h["quantity"], h["market_value"], h["cost_basis"]])
-            w.writerow(["TOTAL", "", report["holdings_snapshot_total"], ""])
+                w.writerow([h["symbol"], _blank(h.get("isin")), h["quantity"],
+                            h["market_value"], h["cost_basis"]])
+            w.writerow(["TOTAL", "", "", report["holdings_snapshot_total"], ""])
+        # Beside the holdings, not inside their total: a separate line on the return.
+        if report.get("cash_balance") is not None:
+            w.writerow(["Cash (IBKR)", "", "", report["cash_balance"], ""])
 
         return buf.getvalue()

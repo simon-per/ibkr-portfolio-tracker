@@ -129,9 +129,10 @@ figure as 0, so a NULL would report the sale's gain as exactly zero in the blend
 3a capital is **not** part of the Steuerwert and 3a income is **not** taxable; both are taxed
 on withdrawal at a separate reduced rate. Including either produces a wrong tax return.
 
-The DA-1 case is the sharpest: the country bucket is keyed on `isin[:2]` and both Swisscanto
-ISINs begin `CH`, so 3a income would land in the one bucket that is definitionally not a
-foreign-withholding reclaim — a claim against a country that withheld nothing.
+The DA-1 case is the sharpest: the country bucket is keyed on the withholding country IBKR
+names, else `isin[:2]`, and both Swisscanto ISINs begin `CH`, so 3a income would land in the one
+bucket that is definitionally not a foreign-withholding reclaim — a claim against a country that
+withheld nothing.
 
 `tax_exempt_accounts()` is resolved once and applied at four sites: the dividend/DA-1 select,
 the realized-gains select, `holdings_snapshot_as_of` and its closed-lot fallback. Realized
@@ -144,6 +145,12 @@ Two things the exclusion must not do. An excluded security is never recorded in
 `last_snapshot_skipped` — that latch means *could not be valued*, and reporting a deliberate
 omission through it would make the one figure that goes on a tax return look broken. And the
 note states **why**, not merely that, or the next reader repairs it back.
+
+The 3a assets figure has its own snapshot call (`only_accounts=`), guarded like the Steuerwert's
+since GitHub #63: a raise is a null `holdings_value` plus a warning, and that call's own latch
+names an unpriceable 3a fund in a warning about the 3a figure. The year-end cash line beside the
+Steuerwert reads `CashService.uninvested_cash(..., account=IBKR)`, so 3a cash stays out of it
+([tax.md](tax.md)).
 
 What 3a *does* contribute is the year's **deposits**, reported as deductible from taxable
 income, leading the JSON and the CSV because they explain what is absent below. Deposits

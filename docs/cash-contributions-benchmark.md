@@ -425,6 +425,13 @@ load. The budget and the gate rules are in docs/flex-and-sync.md (*Sync schedule
   pinned by `tests/test_uninvested_cash_family.py`. `coverage_pct` and the uncovered-funds
   warning stay shares of the holdings: they measure basket coverage, and cash has no basket
   ([lookthrough.md](lookthrough.md)).
+- **The tax report's year-end cash** (since 2026-10-18, GitHub #63): the IBKR balance at
+  `holdings_as_of`, through `uninvested_cash(base_fx, on_date, account=IBKR)`. `account` keeps
+  that account's events, its own measured splice, its own unconverted-trade count and its own
+  provenance (`MEASURED` with a level, `DERIVED` with a trade or flow, else `UNKNOWN`); None is
+  the whole book, as before. Signed, unlike the share-of-book readers: on a tax return a margin
+  debit is debt ([tax.md](tax.md)). Pinned by
+  `test_one_accounts_cash_carries_no_other_accounts_money` in `tests/test_account_isolation.py`.
 - **Not returns** — XIRR, Modified Dietz, the monthly heatmap, drawdown, Sharpe, beta.
   See the top of this section: they were already right, and changing what counts as a
   flow is a separate decision.

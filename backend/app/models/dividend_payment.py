@@ -44,6 +44,14 @@ class DividendPayment(Base):
     # and an IBKR row is dated on its pay date.
     per_share_native: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     dividend_kind: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # The country IBKR's withholding line names ("… PER SHARE - US TAX"), on an `ibkr`
+    # row with one. It is the country that withheld, which the ISIN prefix (the issuer's
+    # domicile) is not for an ADR or some funds, so the tax report's DA-1 table keys on it
+    # when present (`swiss_treaty_rates.withholding_country`). NULL on yfinance rows, on a
+    # payment with no withholding line, and on IBKR rows ingested before 2026-10-18 that no
+    # statement has re-delivered since -- re-ingesting one through
+    # `app.cli.ingest_flex_xml` fills it, since the upsert rewrites the whole row.
+    withholding_country: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     last_computed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 

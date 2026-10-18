@@ -806,6 +806,15 @@ def test_the_shapes_that_broke_production_serialize(client):
         "the Steuerwert omits an unpriceable holding without saying so"
     )
     assert tax["realized_source"] in {"trades", "closed_lot_estimate"}
+    # DA-1's split per country (GitHub #62), and every row's identity for its logo plus
+    # the IBKR cash beside the holdings (#63). Nullable figures: absent, never coerced.
+    for country in tax["dividend_by_country"]:
+        assert {"rate_pct", "residual_pct", "creditable", "excess"} <= country.keys(), country
+    for row in tax["realized_gains"] + tax["holdings_snapshot"]:
+        assert {"isin", "security_id"} <= row.keys(), row
+    assert all(row["security_id"] is not None for row in tax["holdings_snapshot"])
+    assert "cash_balance" in tax
+    assert tax["cash_balance"] is None or isinstance(tax["cash_balance"], float)
 
     # The activity ledger unions four tables that each had no read surface at all.
     act = client.get(f"/api/portfolio/activity?start_date={START}&end_date={TODAY}").json()

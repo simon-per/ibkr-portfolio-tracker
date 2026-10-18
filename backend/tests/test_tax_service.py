@@ -20,6 +20,8 @@ from app.models.dividend_payment import DividendPayment
 from app.models.app_settings import AppSetting
 from app.models.market_price import MarketPrice
 from app.models.corporate_action import CorporateAction
+from app.models.cash_flow import CashFlow
+from app.models.cash_balance import CashBalance
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.services.tax_service import TaxService
@@ -33,10 +35,11 @@ async def _make_session():
         connect_args={"check_same_thread": False},
     )
     # corporate_actions comes along because the holdings snapshot asks it when a position
-    # actually began (a spun-off line's lots predate its listing).
+    # actually began (a spun-off line's lots predate its listing); the two cash tables
+    # because the IBKR cash line beside the holdings reads every cash ledger.
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               DividendPayment.__table__, AppSetting.__table__, MarketPrice.__table__,
-              CorporateAction.__table__]
+              CorporateAction.__table__, CashFlow.__table__, CashBalance.__table__]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
     session = AsyncSession(engine, expire_on_commit=False)
@@ -312,7 +315,9 @@ async def test_an_estimate_only_year_states_no_withholding_anywhere():
         total = next(l for l in lines if l.startswith("TOTAL,") and "est." in l)
         assert total.startswith("TOTAL,,,,40.0,,40.0,"), total
         us = next(l for l in lines if l.startswith("US,"))
-        assert us == "US,1,40.0,,40.0,1", us
+        # Withholding, rate, creditable and excess all blank -- nothing is recorded --
+        # while the treaty rate is a fact about the country, known either way.
+        assert us == "US,1,40.0,,,15.0,,,40.0,1", us
     finally:
         await session.close()
         await engine.dispose()
