@@ -175,6 +175,12 @@ above), and `fetch_flex_data` fails fast on a `ReadTimeout` the way it does on a
 2026-10-17, on every transport error that may have been sent — above). Pinned by the "SendRequest is one HTTP request" block in
 `tests/test_flex_retry_policy.py`, including a source guard on call sites.
 
+**Who may generate a statement is an allowlist** (2026-10-18, issue #31): `fetch_flex_data` is
+referenced only by `routers/sync.py` (the interactive sync) and `scheduler_service.py` (the
+slots). A dead `IBKRService.get_portfolio_summary` called it with no gate around it until then.
+`tests/test_flex_generation_callers.py` walks `app/` and fails on any other reference — a call,
+a bare attribute, or the name as a string — and on an allowlisted module that stopped using it.
+
 **The poll step left ibflex on 2026-10-17 (issue #5)**, for the per-token rate. It fired its first
 GetStatement straight after SendRequest — against the 1/second limit — then every 5 s, 12–13
 requests in the first minute and ~11/min for up to 900 s; `client.submit_request` re-sent a

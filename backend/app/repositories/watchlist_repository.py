@@ -56,23 +56,6 @@ class WatchlistRepository:
         await self.session.refresh(item)
         return item
 
-    async def update_user_data(
-        self,
-        item_id: int,
-        notes: Optional[str] = None,
-        target_price: Optional[float] = None,
-    ) -> Optional[WatchlistItem]:
-        item = await self.get_by_id(item_id)
-        if not item:
-            return None
-        if notes is not None:
-            item.notes = notes
-        if target_price is not None:
-            item.target_price = target_price
-        await self.session.flush()
-        await self.session.refresh(item)
-        return item
-
     async def remove(self, item_id: int) -> bool:
         item = await self.get_by_id(item_id)
         if not item:

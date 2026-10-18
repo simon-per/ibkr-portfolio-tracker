@@ -2,7 +2,7 @@
 Ticker Mapping Repository
 Manages custom ticker mappings for Yahoo Finance.
 """
-from typing import List, Optional
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,15 +60,6 @@ class TickerMappingRepository:
         await self.session.flush()
         await self.session.refresh(mapping)
         return mapping
-
-    async def get_all_mappings(self) -> List[TickerMapping]:
-        """Get all active ticker mappings"""
-        result = await self.session.execute(
-            select(TickerMapping)
-            .where(TickerMapping.is_active == True)
-            .order_by(TickerMapping.ibkr_symbol)
-        )
-        return list(result.scalars().all())
 
     async def upsert_mapping(
         self,

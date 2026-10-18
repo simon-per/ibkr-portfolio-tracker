@@ -256,20 +256,6 @@ export interface SchedulerStatus {
   message?: string;
 }
 
-export interface SyncRun {
-  type: string;
-  status: string;
-  timestamp: string | null;
-  message?: string | null;
-  warnings?: string[] | null;
-  details?: Record<string, unknown> | null;
-}
-
-export interface SyncHistory {
-  count: number;
-  runs: SyncRun[];
-}
-
 export interface BenchmarkInfo {
   key: string;
   name: string;
@@ -1666,17 +1652,6 @@ class ApiClient {
     });
   }
 
-  // Analyst ratings endpoints
-  async syncAnalystRatings(): Promise<{ status: string; securities_processed: number; ratings_updated: number; errors: number; message: string }> {
-    return this.request('/api/analyst-ratings/sync', {
-      method: 'POST',
-    });
-  }
-
-  async getAnalystRatingsStatus(): Promise<{ total_ratings: number; stale_ratings: number; fresh_ratings: number; oldest_update: string | null; newest_update: string | null }> {
-    return this.request('/api/analyst-ratings/status');
-  }
-
   // Look-through endpoints
   async getLookthrough(limit = 50): Promise<LookthroughResponse> {
     return this.request<LookthroughResponse>(`/api/portfolio/lookthrough?limit=${limit}`);
@@ -1722,10 +1697,6 @@ class ApiClient {
   }
 
   // Scheduler endpoints
-  async getSyncHistory(limit = 20): Promise<SyncHistory> {
-    return this.request<SyncHistory>(`/api/scheduler/history?limit=${limit}`);
-  }
-
   async getSchedulerStatus(): Promise<SchedulerStatus> {
     return this.request<SchedulerStatus>('/api/scheduler/status');
   }
@@ -1790,10 +1761,6 @@ class ApiClient {
   // Dividend endpoints
   async getDividendSummary(): Promise<DividendSummaryResponse> {
     return this.request<DividendSummaryResponse>('/api/dividends/summary');
-  }
-
-  async syncDividends(): Promise<{ status: string; message: string }> {
-    return this.request('/api/dividends/sync', { method: 'POST' });
   }
 
   /** Read-only breakdown — unlike /summary it never enqueues a background sync. */

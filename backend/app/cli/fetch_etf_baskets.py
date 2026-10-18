@@ -37,15 +37,12 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import httpx
-
 from app.etf_sources import FUND_SOURCES, FundSource
 from app.logging_setup import configure_logging
-from app.services.etf_basket_fetch import (  # noqa: F401 — re-exported for callers and tests
+from app.services.etf_basket_fetch import (
     AUTOMATED_ADAPTERS,
     BETWEEN_REQUESTS_S,
     FetchError,
-    fetch_blackrock,
     fetch_bodies,
     new_client,
 )
@@ -108,13 +105,6 @@ def _write_bodies(isin: str, adapter: str, bodies: List[bytes], out_dir: Path) -
         path.write_bytes(body)
         paths.append(path)
     return paths
-
-
-async def _fetch_blackrock(
-    client: httpx.AsyncClient, isin: str, source: FundSource, out_dir: Path
-) -> List[Path]:
-    """File-writing wrapper around the shared fetcher, kept for the registry test's probe."""
-    return _write_bodies(isin, "blackrock", [await fetch_blackrock(client, isin, source)], out_dir)
 
 
 async def fetch_baskets(

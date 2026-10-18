@@ -44,15 +44,6 @@ class AnalystRatingRepository:
         result = await self.session.execute(select(AnalystRating))
         return list(result.scalars().all())
 
-    async def get_all_with_securities(self) -> List[AnalystRating]:
-        """Get all analyst ratings with their security relationships loaded"""
-        result = await self.session.execute(
-            select(AnalystRating).options(
-                # Can add joinedload here if needed for eager loading
-            )
-        )
-        return list(result.scalars().all())
-
     async def create(self, rating_data: dict) -> AnalystRating:
         """Create a new analyst rating record"""
         rating = AnalystRating(**rating_data)
@@ -93,15 +84,6 @@ class AnalystRatingRepository:
             await self.upsert(rating_data)
             count += 1
         return count
-
-    async def delete_by_security_id(self, security_id: int) -> bool:
-        """Delete analyst rating for a security"""
-        rating = await self.get_by_security_id(security_id)
-        if rating:
-            await self.session.delete(rating)
-            await self.session.flush()
-            return True
-        return False
 
     async def get_stale_ratings(
         self, older_than: timedelta = STALE_AFTER

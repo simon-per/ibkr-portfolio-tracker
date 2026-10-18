@@ -427,7 +427,3 @@ class AnalystRatingService:
     async def get_rating_for_security(self, security_id: int) -> Optional[AnalystRating]:
         """Get cached analyst rating for a security"""
         return await self.rating_repo.get_by_security_id(security_id)
-
-    async def get_all_ratings(self) -> List[AnalystRating]:
-        """Get all cached analyst ratings"""
-        return await self.rating_repo.get_all()

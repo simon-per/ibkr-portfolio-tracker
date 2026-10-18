@@ -1411,23 +1411,3 @@ class IBKRService:
 
         logger.info(f"Extracted {len(transfers)} transfer(s) from Flex <Transfers>")
         return transfers
-
-    async def get_portfolio_summary(self) -> Dict:
-        """
-        Get a quick summary of the portfolio from IBKR.
-
-        Returns:
-            Dict with portfolio summary statistics
-        """
-        flex_data = await self.fetch_flex_data()
-        securities = await self.extract_securities(flex_data)
-        taxlots = await self.extract_taxlots(flex_data)
-
-        return {
-            'account_id': flex_data['account_id'],
-            'from_date': flex_data['from_date'],
-            'to_date': flex_data['to_date'],
-            'securities_count': len(securities),
-            'taxlots_count': len(taxlots),
-            'total_positions': sum(lot['quantity'] for lot in taxlots),
-        }

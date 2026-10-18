@@ -111,14 +111,6 @@ class FundamentalsRepository:
 
     # --- EarningsEvent ---
 
-    async def get_earnings_by_security(self, security_id: int) -> List[EarningsEvent]:
-        result = await self.session.execute(
-            select(EarningsEvent)
-            .where(EarningsEvent.security_id == security_id)
-            .order_by(EarningsEvent.earnings_date.desc())
-        )
-        return list(result.scalars().all())
-
     async def upsert_earnings_event(self, data: dict) -> EarningsEvent:
         result = await self.session.execute(
             select(EarningsEvent).where(

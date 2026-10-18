@@ -328,11 +328,10 @@ async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
     """
     The override is a single key on an existing param dict, which is exactly the kind of
     change that silently applies to every fund or to none. Both directions are asserted, and
-    no network is touched — the request is captured, not sent.
+    no network is touched — the request is captured, not sent. Driven through `fetch_bodies`,
+    the dispatcher both the CLI and the evening refresh call, so the probe is the live path.
     """
-    import app.cli.fetch_etf_baskets as fetch
-    from pathlib import Path
-    import tempfile
+    from app.services.etf_basket_fetch import fetch_bodies
 
     captured = []
 
@@ -348,14 +347,8 @@ async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
 
             return _R()
 
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp)
-        await fetch._fetch_blackrock(
-            _Client(), "US46438T3095", FUND_SOURCES["US46438T3095"], out
-        )
-        await fetch._fetch_blackrock(
-            _Client(), "IE00B4L5Y983", FUND_SOURCES["IE00B4L5Y983"], out
-        )
+    await fetch_bodies(_Client(), "US46438T3095", FUND_SOURCES["US46438T3095"])
+    await fetch_bodies(_Client(), "IE00B4L5Y983", FUND_SOURCES["IE00B4L5Y983"])
 
     us_params, uk_params = captured[0][1], captured[1][1]
     assert us_params["locale"] == "en_US", "the declared locale did not reach the request"

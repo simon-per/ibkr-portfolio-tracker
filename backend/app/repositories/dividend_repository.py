@@ -69,13 +69,6 @@ class DividendRepository:
         )
         return list(result.scalars().all())
 
-    async def get_latest_ex_date(self, security_id: int) -> Optional[date]:
-        result = await self.session.execute(
-            select(func.max(DividendPayment.ex_date))
-            .where(DividendPayment.security_id == security_id)
-        )
-        return result.scalar_one_or_none()
-
     async def upsert_payment(self, data: dict) -> DividendPayment:
         # Scoped by source, matching uix_dividend_security_source_exdate. Without
         # it a yfinance ex-date landing on an IBKR pay date resolved to the *other*

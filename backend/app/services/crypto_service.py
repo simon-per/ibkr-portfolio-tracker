@@ -335,28 +335,6 @@ def parse_value(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
     }
 
 
-def _to_utc_date(stamp: Any) -> Optional[date]:
-    """CoinStats dates arrive as epoch seconds, epoch milliseconds or ISO strings. Always
-    read in UTC: `fromtimestamp` without a zone would read them in the server's."""
-    if isinstance(stamp, bool):
-        return None
-    if isinstance(stamp, (int, float)):
-        seconds = stamp / 1000 if stamp > 10_000_000_000 else stamp
-        try:
-            return datetime.fromtimestamp(seconds, tz=timezone.utc).date()
-        except (OverflowError, OSError, ValueError):
-            return None
-    if isinstance(stamp, str):
-        try:
-            parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc)
-        return parsed.date()
-    return None
-
-
 def daily_set(holdings: Iterable[ParsedHolding]) -> Dict[str, Tuple[Optional[str], float]]:
     """The holdings that go into `crypto_daily_holdings`: coins CoinStats values that are
     not exchange cash. Spam, unpriced coins and fiat never enter the book's history."""

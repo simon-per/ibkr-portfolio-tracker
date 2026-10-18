@@ -214,13 +214,3 @@ def daily_closes(points: Iterable[Tuple[int, float]], today: date) -> Dict[date,
         if day not in latest or stamp >= latest[day][0]:
             latest[day] = (stamp, price)
     return {d: p for d, (_, p) in latest.items()}
-
-
-def sum_known(values: Iterable[Optional[float]]) -> Optional[float]:
-    """One unknown makes the sum unknown."""
-    total = 0.0
-    for value in values:
-        if value is None:
-            return None
-        total += value
-    return total

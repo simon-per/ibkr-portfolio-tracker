@@ -281,21 +281,6 @@ class MarketPriceRepository:
         await self.session.flush()
         return int(result.rowcount or 0)
 
-    async def get_date_range_for_security(
-        self, security_id: int
-    ) -> Optional[tuple[date, date]]:
-        """Get the earliest and latest dates we have data for a security"""
-        result = await self.session.execute(
-            select(
-                func.min(MarketPrice.date),
-                func.max(MarketPrice.date)
-            ).where(MarketPrice.security_id == security_id)
-        )
-        row = result.one()
-        if row[0] and row[1]:
-            return (row[0], row[1])
-        return None
-
     async def count_by_security(self, security_id: int) -> int:
         """Count how many price records exist for a security"""
         result = await self.session.execute(
