@@ -329,7 +329,7 @@ comparison *between* rows is the point, and there is no identity column to promo
 *squeezed to min-content* rather than scrolled, and why its edge fades were describing a problem they
 did not cause.
 
-**Six things here were each a bug first:**
+**Eight things here were each a bug first:**
 
 - **`justify-center` on a flex overflow container hides its leading items.** A centred row wider than
   its scroller overflows on *both* sides and `scrollLeft` cannot go negative, so the first tab sat
@@ -352,6 +352,17 @@ did not cause.
   `sr-only` "Actions" header span resolved its containing block to `ScrollableTable`'s outer
   wrapper, sat at the wide table's far edge unclipped, and scrolled the whole Watchlist page 211px
   sideways at 1440. The scroller itself is `relative` now.
+- **`overflow-y-auto` makes `overflow-x` auto too.** The Dividends *Expected next* list's rows
+  bleed `-mx-1.5` for their hover wash; with only `pr-1` on the scroller they overflowed it by
+  2px and bought a sideways scrollbar. The scroller bleeds `-mx-1.5 px-1.5` so the wash fits
+  inside it, and its scrollbar is thin and themed (`scrollbar-color`), since the native one is
+  white in dark mode (no `color-scheme` is set).
+- **A pinned column must be opaque and repaint the row's hover.** `DataTable`'s
+  `pinFirstColumn` (Watchlist) makes the first column `sticky left-0` with `bg-card`, which
+  hides the `<tr>`'s `bg-muted/40` wash — so the cell repaints it as a gradient image over its
+  own colour. `ScrollableTable` drops its left fade when told the start is pinned (the fade lay
+  over the pinned cells) and sets `data-scrolled` instead, which draws the column's edge shadow.
+  A table flag, not a column one: `left-0` is only right for the first column.
 - **A card detail wraps, it never truncates its label.** Label and value share half a card; at 390
   "Withholding" read "Withh…" beside a long figure. The pair is `flex-wrap` with the value
   `ml-auto`, so it drops under its label instead.

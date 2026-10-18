@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-17.** Both of the day's branches are on `main`: the owner's batch
+**Last updated: 2026-10-18.** Both of the day's branches are on `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
@@ -214,6 +214,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-18 (two UI fixes)** — Dividends *Expected next* lost its sideways scrollbar and got a
+  themed thin one; Watchlist pins the Stock column (`DataTable` `pinFirstColumn`). Seen at 1366.
 - **2026-10-17 (fintech UI, agent team)** — design foundation, then four tabs' areas in parallel
   worktrees; logos by ISIN; every `--viz-*` token replaced by one ten-slot palette.
 - **2026-10-17 (merge)** — the fintech pass merged into `main` over the owner's batch; two
@@ -223,5 +225,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-17 (fintech pass, web session)** — surfaces, hero figure, quiet tables, one chart
   look; tax footers, held-only fundamentals, period return, tax estimates, base currency, test
   DB, CLI lookup, the copies of one job and ESLint closed; every e2e script green.
-- **2026-10-16 (product pass)** — getquin-style hero, readable names, donuts, jargon and
-  provenance stripped, chart and phone polish; docs/frontend.md *The product pass*.
