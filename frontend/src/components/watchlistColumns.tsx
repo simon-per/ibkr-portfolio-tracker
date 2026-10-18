@@ -156,7 +156,7 @@ export function watchlistColumns(deps: {
         ) : (
           // No security id or ISIN on a watchlist row, so the avatar is the monogram.
           <div className="flex items-center gap-3">
-            <TickerAvatar symbol={i.symbol || i.yahoo_ticker} securityId={i.security_id ?? undefined} className="h-8 w-8 text-[10px]" />
+            <TickerAvatar symbol={i.symbol || i.yahoo_ticker} securityId={i.security_id ?? undefined} isin={i.isin ?? undefined} className="h-8 w-8 text-[10px]" />
             <div className="min-w-0">
               <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
               <div className="text-xs text-muted-foreground truncate max-w-[140px]">

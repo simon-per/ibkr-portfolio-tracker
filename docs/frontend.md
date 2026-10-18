@@ -498,7 +498,8 @@ text. What that settled, so the next change keeps it:
   hashed from the ticker. Logos since 2026-10-17 at the owner's request, reversing "never a
   fetched logo": logo.dev learns the held ISINs (trade-off accepted), but the server fetches and
   stores them, so the browser loads them from `/api/logos` and the CSP stays `img-src 'self'`.
-  Pass `securityId` to get the logo (Positions, Dividends and Activity do; a cash-flow row has none). No
+  Pass `securityId` or `isin` to get the logo — every table listing securities does
+  ([logos.md](logos.md) lists them); a cash row has none. No
   attribution or source text on screen. Fetching, the manual import and the routes:
   [logos.md](logos.md).
 - **No definitions on screen**, which removed the `DataTable` glossary popover; a column `hint` is
@@ -758,8 +759,8 @@ re-point onto the general palette would have to redo, and the section above stil
   **The history page-size loop is fixed**: the left card is `self-start`, so its height is its
   content's and not the grid row's; stretched, it fed back until the history showed all ~170
   rows. `HISTORY_ROW_H` is 41 (measured), not 37.
-- **Watchlist**: rows carry no security id or ISIN, so the avatar is the monogram — no backend
-  change for it. `% 52w High` and `vs MA200` are pills on the column's existing verdict
+- **Watchlist**: since 2026-10-18 rows carry `security_id` (a ticker that is ours) or `isin`
+  (from the stored baskets, `ticker_isin.py`), so the avatar shows the logo. `% 52w High` and `vs MA200` are pills on the column's existing verdict
   (`signalTone`: ±5 plain, below the high/MA is the good side); no `tabular-nums` on them, which
   under Inter gives the hyphen a figure's width. The header counts the list into the Score
   column's three bands (`scoreTone`).

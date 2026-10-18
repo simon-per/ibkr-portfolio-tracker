@@ -399,6 +399,9 @@ class WatchlistItemResponse(BaseModel):
     yahoo_ticker: str
     # The security this ticker is, when it is one of ours (held or sold) — for its logo.
     security_id: Optional[int] = None
+    # Otherwise the ISIN the stored fund baskets give the ticker (`ticker_isin.py`), which
+    # keys a logo just the same; None when no basket lists it.
+    isin: Optional[str] = None
     symbol: Optional[str] = None
     company_name: Optional[str] = None
     notes: Optional[str] = None

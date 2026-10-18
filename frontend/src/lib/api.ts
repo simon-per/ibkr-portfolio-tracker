@@ -359,6 +359,8 @@ export interface PerformanceAttributionResponse {
 
 export interface AllocationPosition {
   symbol: string;
+  /** The row's security, for its logo; null for cash. */
+  security_id?: number | null;
   description: string;
   weight: number;
   market_value_eur: number;
@@ -704,6 +706,8 @@ export interface WatchlistItem {
   yahoo_ticker: string;
   /** The security this ticker is, when it is one of ours — for its logo. */
   security_id?: number | null;
+  /** Otherwise the ISIN the stored fund baskets give the ticker — for its logo. */
+  isin?: string | null;
   symbol: string | null;
   company_name: string | null;
   notes: string | null;

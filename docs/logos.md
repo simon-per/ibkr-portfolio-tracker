@@ -5,8 +5,20 @@
 
 Each holding's round avatar (`frontend/src/components/ui/TickerAvatar.tsx`) shows the company's
 logo **mark** — Google's "G", not the "Google" wordmark — when one is stored, and the ticker
-monogram otherwise. Positions, Dividends and Activity pass a `securityId` (`/api/portfolio/activity`
-rows carry `security_id`, null for a cash flow).
+monogram otherwise. **Where:** by `securityId` on Positions, the insights strip, Dividends and its
+calendar, Activity (`/api/portfolio/activity` rows carry `security_id`, null for a cash flow),
+Fundamentals, the Allocation drill-down (`/api/allocation/portfolio` positions carry
+`security_id`, the first listing's when two merge), Rebalance and the Watchlist when the ticker is
+one of ours; by `isin` on Tax, Look-through constituents and any other Watchlist name.
+
+**Watchlist names never held** have no ISIN of their own: `app/services/ticker_isin.py` reads one
+from the stored fund baskets — ~10,000 constituents published with ticker and ISIN — normalising
+each issuer's spelling ("BRK.B" / "BRKB" / "BRK B", Tencent's "700" for `0700.HK`) and narrowing
+the ISIN's country by the Yahoo suffix (bare = US, where an ADR's ISIN lives too; `.TW` = TW, so
+"2330" is never the Saudi line an EM basket also calls "2330"); the heaviest match wins and an
+unknown suffix resolves nothing. `/api/watchlist` rows carry `security_id` (ours) or `isin`, and
+the logo pass targets those ISINs too, so a name added to the watchlist gets its logo at the next
+05:00 pass.
 
 ## The privacy decision (owner, 2026-10-17)
 
@@ -124,7 +136,9 @@ ISIN, held or not; `--limit N` raises the 30-lookup cap for one run. Records
 `sync_type='manual_logo_fetch'`.
 
 **Fill ahead from a fund basket:** `--basket FUND` (a fund ISIN or symbol, repeatable) asks about
-the constituents of a stored basket instead, `--top N` the N heaviest of each. Logos are keyed by
+the constituents of a stored basket instead, `--top N` the N heaviest of each. A fund that borrows
+another's basket (`etf_sources.basket_proxy_isin`, e.g. the Swisscanto World ex CH → IWDA) reads
+that basket. Logos are keyed by
 ISIN, so a stock bought later shows its logo at once (`manifest` joins on the ISIN). The
 scheduled pass never re-checks these — only securities — so they cost once. A constituent
 unknown by ISIN falls back to the issuer's published ticker.
@@ -134,6 +148,11 @@ docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --dry-run
 docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos
 docker exec backend-portfolio-backend-1 python -m app.cli.fetch_logos --basket QQQM --basket VT --top 100 --dry-run
 ```
+
+**Filled 2026-10-18:** QQQM's whole basket (the Nasdaq-100), and the top 100 of the MSCI World
+(IWDA, `IE00B4L5Y983`) and of VT — effectively the S&P 500's top 100 plus the largest non-US
+companies: 155 stored of 159 asked, the one miss a money-market fund. With every security ever
+held, about 200 companies carry a logo.
 
 **Import by hand** a logo logo.dev misses or gets wrong (e.g. a PNG from Flaticon, ≤ 100 KB,
 square). The same `validate_logo`; the ISIN must belong to a security; stored as `manual`,

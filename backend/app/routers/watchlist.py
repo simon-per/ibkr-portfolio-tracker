@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
+from app.services.ticker_isin import isins_by_yahoo_ticker
 from app.services.watchlist_service import WatchlistService
 from app.single_flight import SYNC_PIPELINE, SyncBusy, single_flight
 from app.repositories.sync_run_repository import utc_iso
@@ -154,22 +155,28 @@ async def _responses(db: AsyncSession, items) -> list[WatchlistItemResponse]:
     """The items as served, each market cap also in the base currency (`market_cap.py`):
     a KRW or JPY cap printed bare reads like a dollar figure."""
     to_base = await market_cap_to_base(db)
-    # A ticker that is one of our securities carries its id, for the stored logo.
+    # A ticker that is one of our securities carries its id, for the stored logo; any other
+    # carries the ISIN the stored fund baskets give it, which keys a logo just the same.
     security_ids = await WatchlistService(db).security_ids_by_ticker()
+    isins = await isins_by_yahoo_ticker(
+        db, [i.yahoo_ticker for i in items if i.yahoo_ticker.upper() not in security_ids]
+    )
     return [
         _item_to_response(
             item, await to_base(item.market_cap, item.data_currency),
-            security_ids.get(item.yahoo_ticker.upper()),
+            security_ids.get(item.yahoo_ticker.upper()), isins.get(item.yahoo_ticker.upper()),
         )
         for item in items
     ]
 
 
-def _item_to_response(item, market_cap_base=None, security_id=None) -> WatchlistItemResponse:
+def _item_to_response(item, market_cap_base=None, security_id=None,
+                      isin=None) -> WatchlistItemResponse:
     return WatchlistItemResponse(
         id=item.id,
         yahoo_ticker=item.yahoo_ticker,
         security_id=security_id,
+        isin=isin,
         symbol=item.symbol,
         company_name=item.company_name,
         notes=item.notes,

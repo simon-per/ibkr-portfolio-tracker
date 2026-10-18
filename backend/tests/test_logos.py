@@ -620,3 +620,27 @@ async def test_a_stored_constituent_logo_shows_once_the_stock_is_bought(db, keye
                     conid=6060, asset_category="STK", exchange="NASDAQ"))
     await db.commit()
     assert list(await SecurityLogoRepository(db).manifest()) == [60]
+
+
+@pytest.mark.asyncio
+async def test_a_watchlist_name_never_held_is_a_target_by_its_basket_isin(db, keyed):
+    """The Watchlist shows names we never held; the baskets give their ticker an ISIN."""
+    from app.models.watchlist_item import WatchlistItem
+    [isin] = await _basket(db, [4.0])                    # constituent "C1", a US ISIN
+    db.add(WatchlistItem(yahoo_ticker="C1", symbol="C1"))
+    await db.commit()
+    fake = FakeLogoDev({("isin", isin): 200})
+    result = await _service(db, fake).refresh()
+    assert fake.lookups == [("isin", isin)] and result["stored"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_proxied_fund_fills_from_the_basket_it_borrows(db, keyed, monkeypatch):
+    """`--basket` given a fund that borrows another's basket reads that basket."""
+    from app.etf_sources import FundSource
+    isins = await _basket(db, [2.0])
+    monkeypatch.setitem(logo_service.FUND_SOURCES, "CH0000000001", FundSource(
+        symbol="CH0000000001", name="proxied", adapter="manual", basket_proxy_isin=FUND))
+    fake = FakeLogoDev({("isin", isins[0]): 200})
+    result = await _service(db, fake).refresh(baskets=["CH0000000001"], limit=10)
+    assert result["unknown_baskets"] == [] and result["stored"] == 1

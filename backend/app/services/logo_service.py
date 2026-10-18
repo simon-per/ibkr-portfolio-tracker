@@ -10,7 +10,8 @@ owner accepted that on 2026-10-17.
 trade ever made, and a sold holding's row is as much a row as a held one's — held ones
 asked first, so a new purchase never waits behind the back catalogue. `fetch_logos
 --basket` can also fill the constituents of a stored fund basket ahead of any purchase:
-logos are keyed by ISIN, so a stock bought later shows its logo at once.
+logos are keyed by ISIN, so a stock bought later shows its logo at once. Watchlist names we
+have never held are targets too, by the ISIN the baskets give their ticker (`ticker_isin.py`).
 
 **Bounded, because every found logo is billed** (about $0.02; the free plan carries $5 of
 credits a month): an ISIN is asked about only when it has no row or its row is older than
@@ -41,7 +42,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.config import settings
+from app.etf_sources import FUND_SOURCES
 from app.models.etf_basket import EtfHolding
+from app.models.watchlist_item import WatchlistItem
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_LOGO_DEV
 from app.repositories.security_logo_repository import SecurityLogoRepository
@@ -269,6 +272,13 @@ class LogoService:
                 security.isin.strip().upper(), LogoTarget(security.symbol, security)
             )
             target.held = target.held or security.id in held_ids
+        if isin is None:
+            # Watchlist names, by the ISIN the stored baskets give their ticker; a name that
+            # is one of our securities is already above under the same ISIN.
+            from app.services.ticker_isin import isins_by_yahoo_ticker
+            tickers = (await self.db.execute(select(WatchlistItem.yahoo_ticker))).scalars().all()
+            for ticker, watched_isin in (await isins_by_yahoo_ticker(self.db, tickers)).items():
+                out.setdefault(watched_isin, LogoTarget(ticker, ticker=ticker))
         return out
 
     async def _basket_targets(
@@ -286,6 +296,11 @@ class LogoService:
             fund_isins = {ref} | set((await self.db.execute(
                 select(Security.isin).where(Security.symbol == ref, Security.isin.is_not(None))
             )).scalars())
+            # A fund that borrows another's basket (`basket_proxy_isin`) is stored under that.
+            fund_isins |= {
+                FUND_SOURCES[f].basket_proxy_isin for f in list(fund_isins)
+                if f in FUND_SOURCES and FUND_SOURCES[f].basket_proxy_isin
+            }
             query = (
                 select(EtfHolding)
                 .where(EtfHolding.fund_isin.in_(fund_isins),
