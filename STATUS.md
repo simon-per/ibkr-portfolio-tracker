@@ -27,8 +27,8 @@ on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-
   live listings: Look-through top 100 100/100, Watchlist 24/24, Positions 35/35; the S&P 500's
   top 100 100/100 and the Nasdaq-100 94/95 (the miss a cash line). Every table listing securities shows them, the Watchlist included
   (docs/logos.md *Where*). Judge the avatar styling (white circle, hairline ring) with real
-  logos; GOOG/GOOGL/ABEA carry Alphabet's red "A" — the Google "G" is one domain lookup away
-  if wanted.
+  logos. GOOG/GOOGL/ABEA carry the Google "G" (owner's choice, 2026-10-18; logo.dev's
+  `google.com` mark imported as `manual`, so the pass never puts Alphabet's "A" back).
 
 - **Crypto history before 3 Oct 2026: run the rebuild or drop it — decide before ~2026-12-31.**
   After that, CoinGecko's Demo plan (365 days) can no longer price 1 Jan 2026 and the stand-in (the
