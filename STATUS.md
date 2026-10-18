@@ -15,12 +15,19 @@ docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
 the same day, then wave 5 (#40, #42–#46) and #39, #48–#50 (docs/shipped-log.md 2026-10-18).
-#47 followed; #38 and #51 are open.
+#47 and #51 followed; #38 is open.
 
 ---
 
 ## Needs a human
 
+- **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
+  happens if it is missed are in docs/deployment.md *Not done: non-root container*.
+- **Host nginx (#51):** diff `ops/nginx-portfolio.conf.example` against the live vhost and fold the
+  differences back so the repo holds the real file; HSTS is commented out in it, short `max-age`.
+- **Production CORS (#51):** set `CORS_ORIGINS=` empty in the VPS `backend/.env` (the site is
+  same-origin), then `GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d` — never `restart`.
+- **Optional (#51):** the health-watch cron in docs/deployment.md.
 - **Refresh `/root/auto-deploy.sh` from the repo (#37's CI gate)** once `/health` shows the wave-4
   commit — the VPS runs a copy, so until then the old gate (error reply = "no checks", 180 s
   commit-age proxy) is still live. docs/deployment.md has the atomic-rename snippet:
@@ -242,7 +249,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #38 and #51** (`gh issue list`). Each carries its
+1. **The open audit issue #38** (dependency lock, cached builds) (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to

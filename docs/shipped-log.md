@@ -7,6 +7,14 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — #51, deploy hardening (pushed alone)
+
+`481d803`: `backend/setup_ssl.sh` deleted; `ops/nginx-portfolio.conf.example`; `.dockerignore` is a
+whitelist of the Dockerfile's COPY sources (a test ties them); `e2e/package-lock.json` committed
+(Playwright 1.62.1); CORS without credentials, explicit methods/headers. Not applied, by design:
+the non-root container (plan in docs/deployment.md). Pushed alone so CI's image job proves the new
+build context before #38 changes the Dockerfile.
+
 ## Shipped 2026-10-18 — #47, read paths read each table once
 
 `f23a71a`: `/summary` 33 → 9 queries (CashService per-instance memo, one grouped start-date query),
