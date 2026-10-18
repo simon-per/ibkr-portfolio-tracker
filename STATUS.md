@@ -23,9 +23,9 @@ on every tab (docs/frontend.md *Design foundation*; docs/shipped-log.md 2026-10-
   outside the repo (claude.ai routines). Since 2026-10-17 Sunday has no 08:00
   `market_data_only` run and Saturday has only the 08:00 one; it may flag the missing rows.
 
-- **Holding logos: look at them.** About 200 companies carry a logo (2026-10-18): every
-  security ever held (the two Swisscanto funds by hand), the whole Nasdaq-100 and the top 100 of
-  the MSCI World and VT. Every table listing securities shows them, the Watchlist included
+- **Holding logos: look at them.** 225 companies carry a logo (2026-10-18): every security
+  ever held (the two Swisscanto funds by hand), the S&P 500's top 100 (100/100) and the
+  Nasdaq-100 (94/95, the miss a cash line), plus the top 100 of the MSCI World and VT. Every table listing securities shows them, the Watchlist included
   (docs/logos.md *Where*). Judge the avatar styling (white circle, hairline ring) with real
   logos; GOOG/GOOGL/ABEA carry Alphabet's red "A" — the Google "G" is one domain lookup away
   if wanted.
@@ -83,10 +83,8 @@ Only what is still unverified.
   strip's shadow on scroll was measured in both themes. Look-through's constituent logos were
   filled on 2026-10-18 (docs/logos.md *Filled*); companies beyond those baskets' top 100 stay
   monograms.
-- **Watchlist logos for names never held (2026-10-18):** CATL (`300750.SZ`), SOFI, SNDK, the
-  Taiwanese names and `8306.T` resolve through the baskets and are fetched by Tuesday's 05:00
-  logo pass (or `fetch_logos` now); `SBI.TO` and any ticker no basket lists stay monograms.
-  MBGL answered `not indexed yet` and is re-asked by the same pass.
+- **Watchlist logos for names never held:** fetched 2026-10-18 and seen on production (CATL,
+  TSM, SOFI, SNDK); a ticker no basket lists stays a monogram.
 
 - **The fintech pass on real data** (merged 2026-10-17; verified only on a synthetic book): the tax
   report's totals under their own columns in all four tables; the hero's 1Y return close to the
@@ -220,6 +218,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
+  (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
+  KPI figures never wrap; `bluegill` merged.
 - **2026-10-18 (two UI fixes)** — Dividends *Expected next* lost its sideways scrollbar and got a
   themed thin one; Watchlist pins the Stock column (`DataTable` `pinFirstColumn`). Seen at 1366.
 - **2026-10-17 (fintech UI, agent team)** — design foundation, then four tabs' areas in parallel
@@ -228,6 +229,3 @@ One line each, newest first; drop the oldest.
   held helpers made one (`security_repository.held`).
 - **2026-10-17 (owner's batch)** — raises/timing (funds' changes are timing), resizable forecast
   chart, base-currency market caps, daily held-only fundamentals; deployed; logos next.
-- **2026-10-17 (fintech pass, web session)** — surfaces, hero figure, quiet tables, one chart
-  look; tax footers, held-only fundamentals, period return, tax estimates, base currency, test
-  DB, CLI lookup, the copies of one job and ESLint closed; every e2e script green.
