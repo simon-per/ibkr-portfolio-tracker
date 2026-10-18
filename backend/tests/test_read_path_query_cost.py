@@ -11,10 +11,17 @@ counted with a cursor listener):
     decomposition, window + 1 year:    48 queries (tax lots x8: every window reloaded
                                        lots, price and FX caches and base_fx)
 
-The bounds below are what the fix measured; a change that needs more queries has to
+and after that fix, the decomposition still read the cash ledgers per reader (GitHub
+#73): 27 queries, `cash_flows` x11, `trades`, `dividend_payments`, `cash_balances` and
+`app_settings` x3 each — `_contribution_inputs` ran twice (directly and inside the
+timeline) at four `cash_flows` queries each, and a second `CashService` re-read every
+ledger for the corrections. The value chart alone read `cash_flows` five times.
+
+The bounds below are what the fixes measured; a change that needs more queries has to
 raise them on purpose. The equivalence tests compare each new path against the old one
 it replaced — re-implemented here where the old code is gone, or switched back on by
-disabling the preload where it is not.
+disabling the preload where it is not. #73 moved no figure either; its proof is a golden
+recorded before it (`tests/test_decomposition_golden.py`).
 """
 from datetime import date, timedelta
 from decimal import Decimal
@@ -52,7 +59,7 @@ TODAY = utc_today()
 # What the fix measured (see the module docstring for before).
 SUMMARY_MAX_QUERIES = 9
 CLOSED_POSITIONS_MAX_QUERIES = 8
-DECOMPOSITION_MAX_QUERIES = 27
+DECOMPOSITION_MAX_QUERIES = 11
 
 
 async def _engine():
@@ -165,9 +172,35 @@ async def test_a_decomposition_reads_lots_and_prices_once_for_every_window():
             TODAY - timedelta(days=60), TODAY
         ))
         assert len(st) <= DECOMPOSITION_MAX_QUERIES, len(st)
-        # The money-in splice's own lot read, and the one shared load.
+        # The money-in splice's own lot read, and the one shared load. (A non-EUR base
+        # adds a third, `_load_base_fx`'s MIN(open_date) for its rate window.)
         assert _from(st, "taxlots") <= 2
         assert _from(st, "market_prices") == 1
+        # One CashService for the request, the splice's inputs handed to the timeline
+        # (GitHub #73): each cash ledger once, whatever reads it.
+        for table in ("cash_flows", "trades", "dividend_payments", "cash_balances"):
+            assert _from(st, table) == 1, (table, _from(st, table))
+        # Two settings, two keys: the base currency and the deposit-coverage date.
+        assert _from(st, "app_settings") == 2
+    finally:
+        await s.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_value_chart_and_the_contributions_read_each_cash_ledger_once():
+    """The timeline route and the contributions strip without the decomposition: the
+    splice's deposits and its three ledger dates come off the one `cash_flows` read the
+    balance makes (they were four queries of their own, the chart's five in all)."""
+    engine, s = await _cost_session(n_actions=1, n_sold=5)
+    try:
+        chart = await _count(engine, lambda: PortfolioService(s).get_portfolio_value_over_time(
+            TODAY - timedelta(days=60), TODAY
+        ))
+        for table in ("cash_flows", "trades", "dividend_payments", "cash_balances"):
+            assert _from(chart, table) == 1, (table, _from(chart, table))
+        strip = await _count(engine, lambda: PortfolioService(s).get_contributions())
+        assert _from(strip, "cash_flows") == 1
     finally:
         await s.close()
         await engine.dispose()

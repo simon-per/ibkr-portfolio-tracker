@@ -1,4 +1,3 @@
-from datetime import date
 from typing import List, Optional
 
 from sqlalchemy import select, func
@@ -57,17 +56,6 @@ class CashBalanceRepository:
             query.order_by(CashBalance.report_date.asc())
         )
         return list(result.scalars().all())
-
-    async def earliest_date(self) -> Optional[date]:
-        """
-        First measured day, or None when the section has never been ingested.
-
-        This is the splice point for `CashService`: measured balances win from here on,
-        and the derived series covers everything before — the Flex window is bounded, so
-        measured history can never reach back to the account's start.
-        """
-        result = await self.session.execute(select(func.min(CashBalance.report_date)))
-        return result.scalar()
 
     async def count(self) -> int:
         result = await self.session.execute(select(func.count(CashBalance.id)))

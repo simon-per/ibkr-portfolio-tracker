@@ -199,19 +199,28 @@ Those corrections are also **the fees-and-interest leg of the return decompositi
 ([performance-analytics.md](performance-analytics.md)), read through
 `CashService.measured_corrections(base_fx)` — the same `_corrections_for` walk the balance
 splices, so the leg and the step in the cash line are one set of numbers. `balance_events`
-and `measured_corrections` share `_derived_events`; neither caches the other's result,
-because they are called from different requests and a stale cache would let the corrections
-drift from the balance they explain.
+and `measured_corrections` share `_derived_events`, memoized on the instance for the `BaseFx`
+object it was projected with (the same object, not just the same base: two loads can span
+different rate windows) — so a request asking both converts each trade once. Never across
+requests: a stale cache would let the corrections drift from the balance they explain.
 
-What *is* memoized is the rows, **per `CashService` instance** and never per module (GitHub
-#47): `trades`, `cash_flows` and `cash_balances` are each read once, and `_corrections_for`
-filters its account out of the one `cash_balances` read. An instance serves one request, so a
-sync between two requests is seen by the next. The summary builds one instance and hands its
-`all_trades()` to `get_realized_totals(trades=)` as well, so one summary reads `trades` once
-(it was three reads, plus two of `cash_flows` and three of `cash_balances`).
-`_accounts_with_activity` and `derived_source` answer off those rows when the instance has
-them, else with a `UNION` of distinct account names and two counts — never by loading every
-Trade and CashFlow to collect a label. Pinned, with the before/after figures, in
+Everything is memoized **per `CashService` instance** and never per module (GitHub #47, #73):
+`trades`, `cash_flows`, `cash_balances` and the IBKR dividend receipts
+(`ibkr_dividend_receipts()`, the third ledger, which the decomposition's dividend leg reads
+too) are each read once, and `_corrections_for` filters its account out of the one
+`cash_balances` read. `measured_from` is the earliest of those measured rows, not a query of
+its own, and `flow_ledger()` hands the money-in splice the `cash_flows` rows as a
+`CashFlowLedger` — its deposits and its three ledger dates (first deposit, first incoming
+transfer, first IBKR row), which were four queries of their own. An instance serves one
+request, so a sync between two requests is seen by the next. The summary builds one instance
+and hands its `all_trades()` to `get_realized_totals(trades=)` as well, so one summary reads
+`trades` once (it was three reads, plus two of `cash_flows` and three of `cash_balances`); the
+value chart hands its instance to `_contribution_inputs`, so it reads `cash_flows` once (it was
+five); and the decomposition builds one instance and hands it, with its own contribution
+inputs, to the timeline (it read `cash_flows` eleven times and the other ledgers three times
+each). `_accounts_with_activity` and `derived_source` answer off those rows when the instance
+has them, else with a `UNION` of distinct account names and two counts — never by loading
+every Trade and CashFlow to collect a label. Pinned, with the before/after figures, in
 `tests/test_read_path_query_cost.py`.
 
 **`cash_source` is per point, not per response.** The Flex window is bounded, so measured
@@ -495,7 +504,8 @@ still covered, and using the first row would hand that week's purchases to the l
 deposits.
 
 **But the period start is a claim, not evidence, and `get_contributions()` clamps it forward to
-`CashFlowRepository.earliest_flow_date(account=IBKR)`** — the first row the IBKR ledger holds, of
+`CashFlowLedger.earliest_flow_date(account=IBKR)`** (off the request's `CashService` rows; the
+repository's method of the same name answers through it) — the first row the IBKR ledger holds, of
 *any* type (scoped since 2026-09-12: `coverage_from` is an IBKR Flex claim, and an unscoped query
 let one pillar-3a row older than the claim make the `>` test false and silently disable the
 clamp — `tests/test_account_isolation.py` now walks the AST for the keyword). **The account
@@ -581,8 +591,10 @@ future-dated.
 
 An incoming transfer moves capital saved years earlier somewhere else, and the transferred lots already
 carry their own `open_date` — so counting it would both invent savings in a month that had none *and*
-double-count purchases already recorded. `CashFlowRepository.get_deposits()` therefore selects
+double-count purchases already recorded. `CashFlowLedger.deposits()` therefore selects
 `flow_type == DEPOSITWITHDRAW` by **whitelist**, so no new transfer-ish type can leak in.
+`CashFlowRepository.get_deposits()` and the repository's earliest-date methods answer through
+the same ledger, so the rule exists once whether the rows were read for it or already held.
 
 IBKR may book a transfer's cash leg as an ordinary "Deposits & Withdrawals" row. `persist_cash_flows()`
 catches that by matching `(flow_date, amount, currency)` against the `<Transfers>` rows — exactly, never

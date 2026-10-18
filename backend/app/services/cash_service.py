@@ -66,7 +66,7 @@ from app.models.cash_balance import CashBalance
 from app.models.cash_flow import CashFlow
 from app.models.trade import Trade
 from app.repositories.cash_balance_repository import CashBalanceRepository
-from app.repositories.cash_flow_repository import CashFlowRepository
+from app.repositories.cash_flow_repository import CashFlowLedger, CashFlowRepository
 from app.repositories.trade_repository import TradeRepository
 from app.services.currency_service import CurrencyService
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
@@ -128,9 +128,13 @@ class CashService:
     """
     The three ledgers and the measured levels are each read **once per instance**: one
     summary request used to read `trades` three times, `cash_balances` three times and
-    `cash_flows` twice (GitHub #47). The memo lives on the instance, never the module —
-    an instance serves one request, so a sync landing between two requests is seen by
-    the next one.
+    `cash_flows` twice (GitHub #47), and one decomposition `cash_flows` eleven times and
+    the other three ledgers three times each (#73). Every question about them — the
+    money-in splice's flow dates (`flow_ledger`), the first measured day, the dividend
+    receipts, the derived events themselves — is answered off those rows, so a caller
+    that shares one instance across a request reads each table once. The memo lives on
+    the instance, never the module — an instance serves one request, so a sync landing
+    between two requests is seen by the next one.
     """
 
     def __init__(self, db: AsyncSession):
@@ -139,6 +143,9 @@ class CashService:
         self._trades: Optional[List[Trade]] = None
         self._flows: Optional[List[CashFlow]] = None
         self._balances: Optional[List[CashBalance]] = None
+        self._dividend_receipts: Optional[List[Tuple[date, Decimal]]] = None
+        # The last `_derived_events` result and the `BaseFx` it was projected with.
+        self._derived: Optional[Tuple[object, tuple]] = None
         # Trades `_derived_events` could not convert, per base currency and then per
         # account — see `unconverted_trades`.
         self._unconverted: Dict[str, Dict[str, int]] = {}
@@ -154,6 +161,20 @@ class CashService:
         if self._flows is None:
             self._flows = await CashFlowRepository(self.db).get_all()
         return self._flows
+
+    async def flow_ledger(self) -> CashFlowLedger:
+        """The cash-flow ledger's dates and deposits for the money-in splice, off the
+        rows this instance has read (or reads now, once)."""
+        return CashFlowLedger(await self._all_flows())
+
+    async def ibkr_dividend_receipts(self) -> List[Tuple[date, Decimal]]:
+        """`DividendService.ibkr_cash_receipts()`, read once per instance — the third
+        ledger of the balance, and the decomposition's dividend leg."""
+        if self._dividend_receipts is None:
+            # Imported here: dividend_service imports this module.
+            from app.services.dividend_service import DividendService
+            self._dividend_receipts = await DividendService(self.db).ibkr_cash_receipts()
+        return self._dividend_receipts
 
     async def _measured_rows(self, account: Optional[str] = None) -> List[CashBalance]:
         """Every measured balance oldest first, optionally one account's — the same rows
@@ -209,7 +230,14 @@ class CashService:
         The three ledgers as per-account ``(date, amount in base)`` events, unspliced,
         plus the converter that projected them. Shared by `balance_events` and
         `measured_corrections` so both read one set of derived events.
+
+        Built once per instance and `BaseFx` (the same object, not just the same base
+        currency: two loads can span different rate windows), so a request asking both —
+        the decomposition (GitHub #73) — does not convert every trade twice and ask the
+        rate table again for each. Callers only read the lists.
         """
+        if self._derived is not None and self._derived[0] is base_fx:
+            return self._derived[1]
         by_account: Dict[str, List[Tuple[date, Decimal]]] = defaultdict(list)
         to_base = NativeToBase(self.currency_service, base_fx)
         unconverted: Dict[str, int] = defaultdict(int)
@@ -244,11 +272,11 @@ class CashService:
         #    which those are lives in DividendService beside every other rule about
         #    these rows — an estimate is a guess about a payment made at a *previous*
         #    broker, so crediting it here invents cash the account never received.
-        from app.services.dividend_service import DividendService
-        for when, net_eur in await DividendService(self.db).ibkr_cash_receipts():
+        for when, net_eur in await self.ibkr_dividend_receipts():
             by_account[IBKR].append((when, base_fx.convert(net_eur, when)))
 
         self._unconverted[base_fx.base_currency] = dict(unconverted)
+        self._derived = (base_fx, (by_account, to_base))
         return by_account, to_base
 
     async def unconverted_trades(self, base_fx, account: Optional[str] = None) -> int:
@@ -282,10 +310,9 @@ class CashService:
         separate here so that surface reads the same corrections the cash line snaps
         to rather than re-deriving them. Empty when no measured row exists.
         """
-        # Re-gathers the derived events rather than caching them from `balance_events`:
-        # the two are called from different requests, and a stale cache would let the
-        # corrections drift from the balance they explain. Only the ledger *rows* are
-        # memoized, and only per instance (see the class docstring).
+        # The derived events `balance_events` splices, off the same per-instance memo —
+        # never a cache across requests, which would let the corrections drift from the
+        # balance they explain once a sync landed between the two (class docstring).
         by_account, to_base = await self._derived_events(base_fx)
         out: List[Tuple[date, Decimal, str]] = []
         for account in sorted(
@@ -465,8 +492,11 @@ class CashService:
         portal and can never reach back to the account's start — reporting the whole
         series as measured because the tail is would be the same overclaim as a badge
         that cannot clear.
+
+        Off the measured rows this instance already holds (the timeline has read them
+        for `balance_events`), not a query of its own (GitHub #73).
         """
-        return await CashBalanceRepository(self.db).earliest_date()
+        return min((row.report_date for row in await self._measured_rows()), default=None)
 
     @staticmethod
     def balance_as_of(

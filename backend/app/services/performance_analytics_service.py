@@ -50,7 +50,6 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
-from app.services.dividend_service import DividendService
 from app.services.lookthrough_service import LookthroughService
 from app.services.native_amounts import NativeToBase
 from app.services.realized_trades import realized_from_sell_trades
@@ -102,7 +101,12 @@ class PerformanceAnalyticsService:
         would then claim it.
         """
         base_fx = await self.portfolio._load_base_fx()
-        inputs = await self.portfolio._contribution_inputs(base_fx)
+        # One CashService for the request, handed to the timeline too, and the money-in
+        # inputs computed once and handed over with it: the timeline used to derive both
+        # again, and a second instance re-read every ledger for the corrections — eleven
+        # reads of `cash_flows` per request (GitHub #73).
+        cash_service = CashService(self.db)
+        inputs = await self.portfolio._contribution_inputs(base_fx, cash_service=cash_service)
         first_open: Optional[date] = inputs["first_open"]
 
         # One timeline over the widest span any window below needs; every window reads
@@ -118,15 +122,15 @@ class PerformanceAnalyticsService:
             span_start, end_date, base_fx=base_fx
         )
         timeline = await self.portfolio.get_portfolio_value_over_time(
-            span_start, end_date, preloaded=preloaded
+            span_start, end_date, preloaded=preloaded,
+            contributions=inputs, cash_service=cash_service,
         )
         by_date = {date.fromisoformat(p["date"]): p for p in timeline}
-        cash_service = CashService(self.db)
         cash_source = await cash_service.cash_source()
 
         dividends = [
             (when, base_fx.convert(net_eur, when))
-            for when, net_eur in await DividendService(self.db).ibkr_cash_receipts()
+            for when, net_eur in await cash_service.ibkr_dividend_receipts()
         ]
         corrections = await cash_service.measured_corrections(base_fx)
         # An unconvertible trade leaves the cash unknown, and the timeline's total value

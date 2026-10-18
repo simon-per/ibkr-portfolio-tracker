@@ -61,6 +61,26 @@ and a newer row would decide a mixed-currency history's price currency. A window
 not hold queries for itself. `tests/test_read_path_query_cost.py` builds both edges and compares
 every window, the closed-lot rows and the whole decomposition with the preload switched off.
 
+**And it reads each cash ledger once** (GitHub #73). After #47 it still read `cash_flows` eleven
+times and `trades`, `dividend_payments`, `cash_balances` and `app_settings` three times each:
+`_contribution_inputs` ran directly (it fixes `first_open`, hence the span) and again inside the
+timeline, at four `cash_flows` queries each, and a second `CashService` re-read every ledger for
+`cash_source`, `measured_corrections` and the dividend leg. Now the decomposition builds **one**
+`CashService` and hands it, with its own contribution inputs, to `get_portfolio_value_over_time`
+(`contributions=`, `cash_service=`); the splice's deposits and ledger dates, the first measured
+day and the dividend receipts all come off that instance's memoized rows
+([cash-contributions-benchmark.md](cash-contributions-benchmark.md)). Query-only: the timeline
+received the same `money_in_legs` it built for itself, and every figure is unchanged —
+`tests/test_decomposition_golden.py` compares the decomposition, the value timeline and the
+contributions on a fixture carrying every branch those reads feed (CHF and EUR base, the
+cash-unknown book) against a golden recorded before the change.
+
+What still reads a table twice, on purpose: `app_settings` (two keys, the base currency and the
+deposit-coverage date) and `taxlots` (the splice's three-column read, which has to run before the
+span is known, and the shared lot load; a non-EUR base adds `_load_base_fx`'s `MIN(open_date)` for
+its rate window). Folding the lot reads would need the lot load hoisted ahead of the span; it is
+three cheap statements, left alone.
+
 ## The price / FX split — a convention, stated
 
 ```
@@ -106,7 +126,9 @@ The other legs:
   Money In line uses ([cash-contributions-benchmark.md](cash-contributions-benchmark.md)).
   A flow, not a return; the waterfall draws it grey.
 - **`dividends_eur`** — `DividendService.ibkr_cash_receipts()` in the window, converted at
-  the pay date. IBKR rows only: an estimate is a guess about cash another broker received.
+  the pay date, read through the request's `CashService` (`ibkr_dividend_receipts()`) so the
+  leg and the cash balance share one read. IBKR rows only: an estimate is a guess about cash
+  another broker received.
 - **`cash_adjustment_eur`** — `CashService.measured_corrections()` in the window. Each
   correction is `measured − derived-so-far`: whatever IBKR's own balance says that the three
   ledgers do not record — broker interest, account fees, FX on idle cash, **and any gap in the
@@ -215,8 +237,11 @@ sale with IBKR's realized figure, an unpriced holding, a basket with a cash row,
 deposit before the first purchase and a measured cash balance three francs off the derived
 one; the identity on the rounded figures; the CHF-base FX leg; the wire shape in both
 directions), `tests/test_closed_positions_partial_fx.py` (none, one or both of a security's two
-SELLs unconvertible), `tests/test_read_path_query_cost.py` (query bounds, and the preloaded and
-bulk paths against the ones they replaced), the three routes in `tests/test_api_smoke.py`,
+SELLs unconvertible), `tests/test_read_path_query_cost.py` (query bounds — each cash ledger once
+per decomposition and per value chart — and the preloaded and bulk paths against the ones they
+replaced), `tests/test_decomposition_golden.py` (the responses against the golden recorded before
+#73; a change meant to move a figure regenerates it with `UPDATE_DECOMPOSITION_GOLDEN=1` and says
+why), the three routes in `tests/test_api_smoke.py`,
 `frontend/src/lib/rollingRisk.test.ts`,
 and `frontend/src/components/AnalyticsTab.test.tsx` (dashes for absences, caveats on the
 surface, the segment toggle, and that the benchmark is never requested unselected).

@@ -31,7 +31,6 @@ from app.services.fx_preload import (
 )
 from app.services.percentages import share_pct
 from app.repositories.app_settings_repository import AppSettingsRepository
-from app.repositories.cash_flow_repository import CashFlowRepository
 from app.repositories.corporate_action_repository import CorporateActionRepository
 from app.repositories.trade_repository import TradeRepository
 from app.repositories.security_repository import held_at, lot_held_at
@@ -321,6 +320,8 @@ class PortfolioService:
         start_date: date,
         end_date: date,
         preloaded: Optional[AttributionInputs] = None,
+        contributions: Optional[Dict] = None,
+        cash_service: Optional[CashService] = None,
     ) -> List[Dict]:
         """
         Calculate portfolio value (cost basis and market value) for each day in range.
@@ -329,6 +330,9 @@ class PortfolioService:
 
         `preloaded` hands over lots, caches and `base_fx` a caller already read over a
         span holding this range (the decomposition), so they are not read again.
+        `contributions` is that caller's own `_contribution_inputs` under the same
+        `base_fx`, and `cash_service` its instance, so the money-in splice and the cash
+        ledgers are read once for the request rather than once per reader (GitHub #73).
         """
         # Get ALL taxlots (open + closed) for historical accuracy
         if preloaded is not None:
@@ -376,8 +380,9 @@ class PortfolioService:
         # Uninvested cash, and the contributions line that is its honest partner.
         # Both are running balances over the whole history, so they are built once here
         # and swept alongside the lot events rather than recomputed per point. The lot
-        # rows are handed over so the splice does not re-query what is already loaded.
-        cash_service = CashService(self.db)
+        # rows are handed over so the splice does not re-query what is already loaded,
+        # and the splice reads the flow ledger off the same CashService as the balance.
+        cash_service = cash_service or CashService(self.db)
         cash_events = await cash_service.balance_events(base_fx)
         # The fallback for days before measurement starts — see derived_source().
         cash_source = await cash_service.derived_source()
@@ -392,13 +397,15 @@ class PortfolioService:
         if await cash_service.unconverted_trades(base_fx):
             cash_events = []
             cash_source = cash_measured_source = CASH_UNKNOWN
-        contributions = await self._contribution_inputs(
-            base_fx,
-            lot_rows=[
-                (lot.open_date, lot.close_date, lot.cost_basis_eur)
-                for lot, _ in taxlots_with_securities
-            ],
-        )
+        if contributions is None:
+            contributions = await self._contribution_inputs(
+                base_fx,
+                lot_rows=[
+                    (lot.open_date, lot.close_date, lot.cost_basis_eur)
+                    for lot, _ in taxlots_with_securities
+                ],
+                cash_service=cash_service,
+            )
 
         # One sweep over the whole range instead of a per-day × per-lot loop.
         portfolio_timeline = self._calculate_timeline_swept(
@@ -724,7 +731,10 @@ class PortfolioService:
         }
 
     async def _contribution_inputs(
-        self, base_fx: BaseFx, lot_rows: Optional[List] = None
+        self,
+        base_fx: BaseFx,
+        lot_rows: Optional[List] = None,
+        cash_service: Optional[CashService] = None,
     ) -> Dict:
         """
         The raw material behind "money in", shared by the contributions strip and the
@@ -740,7 +750,8 @@ class PortfolioService:
 
         `lot_rows` lets the chart pass the tax lots it has already loaded instead of
         re-querying them; the columns it needs are (open_date, close_date,
-        cost_basis_eur).
+        cost_basis_eur). `cash_service` is the caller's instance when it has one: the
+        deposits and the three ledger dates come off its one read of `cash_flows`.
         """
         if lot_rows is None:
             lot_rows = (await self.db.execute(
@@ -763,14 +774,14 @@ class PortfolioService:
                 legs.append((close_date, -base_fx.convert(cost, close_date)))
 
         # External cash, if the Flex Query has been set to deliver it. Deposits only:
-        # get_deposits() excludes TRANSFER rows, so capital that arrived by broker
+        # the ledger's deposits() excludes TRANSFER rows, so capital that arrived by broker
         # transfer is never read as a contribution.
-        flow_repo = CashFlowRepository(self.db)
-        deposits_from = await flow_repo.earliest_deposit_date()
-        transfer_in_date = await flow_repo.earliest_transfer_in_date()
+        flow_ledger = await (cash_service or CashService(self.db)).flow_ledger()
+        deposits_from = flow_ledger.earliest_deposit_date()
+        transfer_in_date = flow_ledger.earliest_transfer_in_date()
         deposit_legs: List[Tuple[date, Decimal]] = [
             (f.flow_date, cash_flow_in_base(f, base_fx))
-            for f in await flow_repo.get_deposits()
+            for f in flow_ledger.deposits()
         ]
 
         # The splice point: where the deposit ledger becomes complete. Recorded from the
@@ -793,7 +804,7 @@ class PortfolioService:
         # its only writer). Unscoped, one pillar-3a export starting before that date
         # made the `>` test false and the clamp silently disappeared — the 3a blends
         # everywhere *except* where a per-IBKR fact is being computed.
-        ledger_starts_at = await flow_repo.earliest_flow_date(account=IBKR)
+        ledger_starts_at = flow_ledger.earliest_flow_date(account=IBKR)
         if coverage_from and ledger_starts_at and ledger_starts_at > coverage_from:
             coverage_from = ledger_starts_at
 
