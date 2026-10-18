@@ -7,11 +7,11 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
-## Shipped 2026-10-18 — audit round 2, wave 3 (#65, #69, #73, #79)
+## Shipped 2026-10-18 — audit round 2, the product issues (#74–#78) and #70, #71
 
-- **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
-  (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
-  contributions and summary were identical before and after.
+- **#77 + #78** (`5b235de`): `projected` on the current year's tax report from the breakdown's
+  forecast; `trader_criteria` (`trader_criteria.py`): KS 36 turnover multiple, short-held sales,
+  margin; derivatives left out (the ingest keeps STK only).
 - **#74 + #75** (`073ce4e`): `upcoming[].per_share_change_pct` on announced accruals;
   `attribute_holding()` per security, so the forecast history serves `raises[]` from the
   breakdown's own arithmetic; `payoutVerdict` the one client definition of a raise.
@@ -22,6 +22,12 @@
 - **#70** (`bce65f5`): phone-card logos through DataTable's title `avatar`; weights absent until the
   summary loads; one `ABSENT`, one `formatSigned`, shared query options (family tests); the
   ResizeObserver stub in `testSetup.ts`.
+
+## Shipped 2026-10-18 — audit round 2, wave 3 (#65, #69, #73, #79)
+
+- **#73** (`daaf84a`, pushed alone): one CashService and one ledger read per decomposition
+  (cash_flows 11 → 1 statements). Production fingerprints of the decomposition, value chart,
+  contributions and summary were identical before and after.
 - **#69** (`8d9c719`): earnings grouped by the look-through's company identity
   (`identity_service.group_companies`), future events replaced per fetch, `utc_iso` dates.
 - **#65 + #79** (`6de291d`): the manual market and dividend syncs call the scheduler's steps
