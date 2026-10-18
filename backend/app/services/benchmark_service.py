@@ -24,7 +24,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.percentages import share_pct
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import YahooHold, check_yahoo_hold, is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 from app.clock import utc_today
 
@@ -94,6 +94,30 @@ def last_finished_session(today: date) -> date:
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day
+
+
+def benchmark_fetch_window(
+    start_date: date, end_date: date, first_contribution: Optional[date],
+) -> Optional[Tuple[date, date]]:
+    """
+    The part of [start, end] worth asking a provider for, or None when there is none.
+
+    From the first contribution, less PRICE_LOOKBACK_DAYS: the hypothetical holds
+    nothing before its first leg, and the walk prices a leg by carrying a close forward
+    at most that far, so a first contribution on a holiday still finds the session
+    before it. To the last finished session: its close is final, and the bar for a
+    session in progress is missing until the close however often it is asked for.
+
+    Without it a validated but unservable window — 1900 to 1904 — reported every weekday
+    as missing, and the public `GET /api/portfolio/benchmark` asked Yahoo for it once per
+    benchmark every five minutes (GitHub issue #57). No contribution at all means nothing
+    to invest, so nothing to fetch.
+    """
+    if first_contribution is None:
+        return None
+    lower = max(start_date, first_contribution - timedelta(days=PRICE_LOOKBACK_DAYS))
+    upper = min(end_date, last_finished_session(utc_today()))
+    return (lower, upper) if lower <= upper else None
 
 
 def reset_upstream_throttle() -> None:
@@ -206,7 +230,7 @@ class BenchmarkService:
 
     async def _ensure_prices_available(
         self, ticker: str, start_date: date, end_date: date, currency: str = "USD",
-        refresh_provisional: bool = True, gate_held: bool = False,
+        refresh_provisional: bool = False, gate_held: bool = False,
     ) -> Optional[int]:
         """
         Lazy-sync: fetch missing benchmark prices from Yahoo Finance.
@@ -214,32 +238,23 @@ class BenchmarkService:
         Returns the rows written from Yahoo's answer (0 for an empty one, e.g. a
         holiday), or **None when Yahoo did not answer**: nothing was missing, the
         ticker was throttled, the pipeline was busy, the request failed or was rate
-        limited (`self.rate_limited` says which). The warm-up counts a benchmark as
-        fetched only on a number, so a skip can no longer pass for a fetch.
+        limited, or a refusal elsewhere in the process is still being honoured (those
+        last two set `self.rate_limited`). The warm-up counts a benchmark as fetched only
+        on a number, so a skip can no longer pass for a fetch.
 
         ``gate_held`` is for a caller already inside SYNC_PIPELINE, i.e. the scheduled
         warm-up — see `_upstream_request`. Every other caller enters the gate here and
         serves cache on `SyncBusy`.
 
         ``refresh_provisional`` re-fetches the trailing days whose cached row may hold a
-        mid-session value — see MarketPriceRepository.PROVISIONAL_PRICE_DAYS. **On by
-        default for the read path and off for the scheduled warm-up**:
-
-        - A read fetches the *one* benchmark being viewed, behind a 300s per-ticker
-          throttle. That is where the staleness is visible: the chart draws the
-          benchmark against the portfolio, so if the portfolio settles to real closes
-          while the benchmark keeps whatever it was first fetched at today, the *gap*
-          between the two lines drifts over the day — the one number the panel exists
-          to show.
-        - `sync_benchmark_prices` asks only through the last *finished* session, whose
-          close is final by the time any slot runs, so it never writes a provisional
-          row and has none of its own to restate. Refreshing there would spend a
-          request per warm benchmark on every first slot of the day, including the
-          days nothing is missing, to restate rows the warm-up did not write.
-
-        The residual is deliberate and small: a mid-session close a chart load wrote
-        stays once it ages out of the window, if nobody opens that chart again. It never
-        affects a series being looked at.
+        mid-session value — see MarketPriceRepository.PROVISIONAL_PRICE_DAYS. **Off, and
+        no caller turns it on since GitHub issue #57.** Both callers ask only through the
+        last *finished* session — `sync_benchmark_prices` always did, and a chart load
+        has since `benchmark_fetch_window` — whose close is final by the time either
+        runs, so neither writes a provisional row or has one of its own to restate.
+        Refreshing would re-ask Yahoo for final closes on every chart load and every
+        first slot of the day. The residual: a mid-session row a chart load wrote before
+        #57 keeps that value.
         """
         if gate_held and not is_running(SYNC_PIPELINE):
             raise RuntimeError(
@@ -265,6 +280,16 @@ class BenchmarkService:
             refresh_provisional=refresh_provisional,
         )
         if not missing:
+            return None
+
+        # Rule 1, process-wide (issue #57): a refusal any path saw — a scheduled pass,
+        # the chart load for another benchmark — holds this one too, which the per-ticker
+        # memo below cannot. Latched like a 429, so the warm-up abandons and says so.
+        try:
+            await check_yahoo_hold()
+        except YahooHold as e:
+            self.rate_limited = True
+            logger.info(f"Benchmark {ticker}: {e}; serving cache")
             return None
 
         # Cheap refusals before the expensive one: a ticker fetched moments ago
@@ -624,20 +649,23 @@ class BenchmarkService:
         # open date whenever the pre-coverage era contributes anything at all.
         earliest_leg_date = min(d for d, _ in money_in_legs)
         price_start = min(earliest_leg_date, start_date)
+        # ...and no further, nor past the last finished session (issue #57).
+        fetch = benchmark_fetch_window(price_start, end_date, earliest_leg_date)
 
         # ── Step 2: Ensure benchmark prices are cached ───────────────
-        try:
-            await self._ensure_prices_available(ticker, price_start, end_date, currency=currency)
-        except Exception as e:
-            logger.warning(f"Could not fetch new benchmark prices for {ticker}, using cached: {e}")
+        if fetch is not None:
             try:
-                await self.db.rollback()
-            except Exception:
-                pass
+                await self._ensure_prices_available(ticker, *fetch, currency=currency)
+            except Exception as e:
+                logger.warning(f"Could not fetch new benchmark prices for {ticker}, using cached: {e}")
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
 
         # ── Step 3: Ensure FX rates are available ────────────────────
-        if not is_eur_benchmark:
-            await self._ensure_fx_rates_available(currency, price_start, end_date)
+        if not is_eur_benchmark and fetch is not None:
+            await self._ensure_fx_rates_available(currency, *fetch)
 
         # ── Step 4: Pre-load caches ──────────────────────────────────
         bench_prices = await self._preload_benchmark_prices(ticker, price_start, end_date)
@@ -696,16 +724,20 @@ class BenchmarkService:
         contributions = await portfolio._contribution_inputs(BaseFx("EUR", {}))
         money_in_legs = contributions["money_in_legs"]
 
-        try:
-            await self._ensure_prices_available(ticker, start_date, end_date, currency=currency)
-        except Exception as e:
-            logger.warning(f"Could not fetch new benchmark prices for {ticker}, using cached: {e}")
+        fetch = benchmark_fetch_window(
+            start_date, end_date, min((d for d, _ in money_in_legs), default=None)
+        )
+        if fetch is not None:
             try:
-                await self.db.rollback()
-            except Exception:
-                pass
-        if not is_eur_benchmark:
-            await self._ensure_fx_rates_available(currency, start_date, end_date)
+                await self._ensure_prices_available(ticker, *fetch, currency=currency)
+            except Exception as e:
+                logger.warning(f"Could not fetch new benchmark prices for {ticker}, using cached: {e}")
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+        if not is_eur_benchmark and fetch is not None:
+            await self._ensure_fx_rates_available(currency, *fetch)
 
         bench_prices = await self._preload_benchmark_prices(ticker, start_date, end_date)
         fx_rates: Dict[date, Decimal] = {}

@@ -30,6 +30,7 @@ from app.services.benchmark_service import (
 )
 from app.services.currency_service import CurrencyService
 from app.services.scheduler_service import SchedulerService
+from app.services.yahoo_rate_limit import reset_yahoo_hold
 from app.single_flight import SYNC_PIPELINE, is_running, single_flight
 from app.clock import utc_today
 
@@ -216,9 +217,16 @@ async def test_a_rate_limit_stops_the_pass_at_the_first_benchmark(db, yahoo):
     assert "0 of 2" in result["warnings"][0]
     assert "Do not retry manually" in result["warnings"][0]
 
-    # Nothing was answered, so nothing is marked asked: the next slot resumes both.
+    # Inside the hold the 429 started (issue #57) a pass asks nothing and says why.
     yahoo.answer = lambda t: _bar(SESSION)
     reset_upstream_throttle()
+    held = await _run_under_the_job_gate(svc)
+    assert yahoo.tickers == ["^GSPC"]
+    assert held["rate_limited"] is True and "Do not retry manually" in held["warnings"][0]
+
+    # Nothing was answered, so nothing is marked asked: the next slot, hours later and
+    # past the hold, resumes both.
+    reset_yahoo_hold()
     resumed = await _run_under_the_job_gate(svc)
     assert yahoo.tickers == ["^GSPC", "^GSPC", "^IXIC"]
     assert resumed["benchmarks_fetched"] == 2

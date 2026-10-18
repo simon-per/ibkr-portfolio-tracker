@@ -21,7 +21,7 @@ from app.models.security import Security
 from app.services.yahoo_estimates import (
     EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
 )
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,10 @@ class FundamentalsService:
         them propagates to the loop, which abandons the pass — see `yahoo_estimates`.
         The fourth element is the `+1y` EPS growth read off the cached trend.
         """
+        # A refusal anywhere in the process holds this too (issue #57); the loop's
+        # breaker reads `YahooHold` as the rate limit it stands for.
+        await check_yahoo_hold()
+
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info

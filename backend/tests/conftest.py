@@ -58,6 +58,7 @@ from app import rate_limit  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.services.currency_service import reset_frankfurter_rejections  # noqa: E402
+from app.services import yahoo_rate_limit  # noqa: E402
 
 
 def pytest_configure(config):
@@ -79,11 +80,17 @@ def _neutral_process_state(monkeypatch):
     monkeypatch.setattr(settings, "coin_stats_share_passcode", "", raising=False)
     monkeypatch.setattr(settings, "coingecko_api_key", "", raising=False)
     monkeypatch.setattr(settings, "logo_dev_secret_key", "", raising=False)
+    # The Yahoo hold (issue #57) is process-wide by design, so one test's 429 would hold
+    # every later test in the worker. Memory only here: persisting would write the
+    # per-process database; `test_yahoo_hold.py` points it at a database of its own.
+    monkeypatch.setattr(yahoo_rate_limit, "_session_factory", lambda: None)
     rate_limit.reset()
     reset_frankfurter_rejections()
+    yahoo_rate_limit.reset_yahoo_hold()
     yield
     rate_limit.reset()
     reset_frankfurter_rejections()
+    yahoo_rate_limit.reset_yahoo_hold()
 
 
 @pytest_asyncio.fixture

@@ -177,6 +177,11 @@ Only what is still unverified.
   `Code=1004`–`1009`, `1019`, `1021`, an unparseable SendRequest reply (#15) or "failed after it
   may have reached IBKR" at 18:00 is now an `error` after one SendRequest, recovered at 00:00 —
   expected, not a regression. "SendRequest reply not understood" in the log is #15's new line.
+- **The Yahoo hold and the benchmark fetch window (#57):** after any Yahoo 429 the log shows
+  "Yahoo refused a request; no Yahoo request until HH:MM UTC" and, until then, passes report
+  `rate_limited` without asking; `app_settings.yahoo_refused_at` holds the stamp across a
+  deploy. The benchmark chart's last point now carries the last finished session's close (no
+  intraday benchmark value) — the owner's eye on whether that reads right.
 - **The benchmark warm-up reaching Yahoo (#4):** the first weekday `market_data_only` (08:00
   Tue–Sat) shows `benchmark_result.benchmarks_fetched` > 0 in `/api/scheduler/history`, the
   later slots 0, and no "pipeline busy; serving cached prices" from the warm-up in the logs.

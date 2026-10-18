@@ -47,7 +47,7 @@ from app.services.dividend_forecast import (
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_minor_units import minor_unit_scale, reported_currency_of
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -501,6 +501,10 @@ class DividendService:
                 security = await self.db.get(Security, security_id)
                 if security is None:
                     continue
+
+                # A refusal anywhere in the process holds this too (issue #57);
+                # the handler below reads it as the rate limit it stands for.
+                await check_yahoo_hold()
 
                 yahoo_ticker = await self._get_yahoo_ticker(security)
                 processed += 1

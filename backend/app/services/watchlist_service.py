@@ -20,7 +20,7 @@ from app.services.yahoo_estimates import (
     EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, read_optional,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +237,10 @@ class WatchlistService:
         which abandons the pass. These reads used to swallow every exception, a 429
         included — see `yahoo_estimates`.
         """
+        # A refusal anywhere in the process holds this too (issue #57): `sync_item`
+        # hands the hold's text to `sync_all` like a 429's.
+        await check_yahoo_hold()
+
         def _fetch():
             ticker = yf.Ticker(yahoo_ticker)
             info = ticker.info

@@ -384,10 +384,13 @@ Tests: `tests/test_benchmark_window_anchor.py`, the anchor cases in
 Two paths write `benchmark_prices`, and only one of them can start a benchmark:
 
 - **A chart load** (`GET /api/portfolio/benchmark`) fetches whatever the selected benchmark is
-  missing over the requested range, today included, and refreshes its trailing provisional
-  days. It is the only path that bootstraps a benchmark nobody selected before, and the only
-  one that writes an intraday value. It enters `SYNC_PIPELINE` around the request and serves
-  the cache when a sync holds it, behind a 300 s per-ticker attempt memo.
+  missing inside `benchmark_fetch_window`: the requested range cut to start no earlier than the
+  first contribution less `PRICE_LOOKBACK_DAYS` and to end at the **last finished session**
+  (GitHub issue #57). It is the only path that bootstraps a benchmark nobody selected before.
+  Since #57 it writes only final closes and refreshes no provisional day, so today's point
+  carries the last close forward until the next session finishes. It enters `SYNC_PIPELINE`
+  around the request and serves the cache when a sync holds it, behind a 300 s per-ticker
+  attempt memo and the process-wide Yahoo hold (docs/flex-and-sync.md, rule 1).
 - **The scheduled warm-up**, inside the `market_data_only` job, fetches every benchmark that
   already has rows, through the **last finished session** only, once per session. So a
   benchmark someone has selected gains each day's close by the first slot of the next morning
@@ -396,7 +399,8 @@ Two paths write `benchmark_prices`, and only one of them can start a benchmark:
 Until 2026-10-17 the second path never ran: it re-entered the gate its own job held and was
 refused at every ticker (issue #4). Every benchmark price before that date came from a chart
 load. The budget and the gate rules are in docs/flex-and-sync.md (*Sync schedule* and
-`GET /api/portfolio/benchmark` is gated at the fetch); tests: `tests/test_benchmark_warmup.py`.
+`GET /api/portfolio/benchmark` is gated at the fetch); tests: `tests/test_benchmark_warmup.py`,
+`tests/test_benchmark_fetch_window.py`.
 
 ### Where cash reaches, and where it deliberately does not
 

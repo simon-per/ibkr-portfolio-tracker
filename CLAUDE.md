@@ -63,7 +63,9 @@ JSON, timeouts. **Recovery: stop immediately, wait 30–60 min, and do not trigg
   abandon the pass on a 429** through `app/services/yahoo_rate_limit.is_rate_limit`;
   `tests/test_yahoo_rate_limit_family.py` walks the AST for any module importing `yfinance`
   without consulting it. Keep its marker list narrow — the same verdict decides whether to try
-  ticker *variations*. `yfinance` stays `>= 1.1.0`.
+  ticker *variations*. **A 429 seen anywhere holds every path for 45 minutes** (persisted in
+  `app_settings`): every module importing `yfinance` awaits `check_yahoo_hold()` before asking,
+  and the same family test fails one that does not. `yfinance` stays `>= 1.1.0`.
 - What can reach Yahoo: the scheduled jobs, every `POST .../sync`, `POST /api/watchlist`,
   `GET /api/dividends/summary` (can enqueue a sync) and `GET /api/portfolio/benchmark` (lazy
   fetch on a cache miss). Everything else is pure DB. The Flex sync (`POST /api/sync/ibkr`)

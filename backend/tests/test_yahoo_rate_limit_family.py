@@ -27,6 +27,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 import app.models  # noqa: F401  register all mappers
 from app.models.security import Security
@@ -36,7 +37,7 @@ import app.services.analyst_rating_service as ratings_module
 from app.services.analyst_rating_service import AnalystRatingService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.watchlist_service import WatchlistService
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import is_rate_limit, yahoo_hold_until
 
 
 async def _no_sleep(_seconds):
@@ -66,6 +67,8 @@ def _no_delays(monkeypatch):
         "app.services.watchlist_service",
         "app.services.allocation_service",
         "app.services.dividend_service",
+        "app.services.market_data_service",
+        "app.services.benchmark_service",
     ):
         monkeypatch.setattr(f"{module}.random.uniform", lambda *_a, **_kw: 0)
 
@@ -530,3 +533,160 @@ def test_no_yahoo_call_is_wrapped_in_a_handler_that_swallows_a_rate_limit():
         "caller's breaker unreachable — exactly how analyst_rating_service went on "
         "asking after a limit while appearing to be covered."
     )
+
+
+# ── The hold: a refusal is remembered across passes (GitHub issue #57) ──────
+#
+# Abandoning the pass was per pass. Each latch lived on one service instance, so the
+# next public chart load, the next `POST .../sync` and the next benchmark each asked
+# Yahoo again at once — eight requests after the first 429 in the issue's repro. Now
+# `is_rate_limit` stamps a process-wide hold and every module that imports yfinance
+# consults `check_yahoo_hold()` before asking. Two halves, as above: a structural walk
+# that catches the next module, and every existing pass driven under a hold with
+# `yf.Ticker` counting, which catches a consult placed where it never runs.
+
+
+def _awaits_the_hold(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.Await) and isinstance(node.value, ast.Call)
+        and (getattr(node.value.func, "id", None) == "check_yahoo_hold"
+             or getattr(node.value.func, "attr", None) == "check_yahoo_hold")
+        for node in ast.walk(tree)
+    )
+
+
+def test_every_yahoo_module_consults_the_hold_before_asking():
+    """
+    Same scope as the predicate walk, and for the same reason: the rule is about who
+    reaches Yahoo, not where the module lives. An awaited call, not the name — an
+    import nobody calls (which `manage_mappings` had for `is_rate_limit`) satisfies a
+    text search and holds nothing.
+    """
+    offenders = [
+        _label(path) for path in _yahoo_modules()
+        if _label(path) not in NOT_IN_THE_FAMILY
+        and not _awaits_the_hold(ast.parse(path.read_text(encoding="utf-8")))
+    ]
+    assert not offenders, (
+        f"{offenders} import yfinance but never await yahoo_rate_limit.check_yahoo_hold(). "
+        "After a 429 anywhere in the process, they would be the path that asks again."
+    )
+
+
+@pytest.fixture
+def held():
+    """A 429 seen a moment ago, by some other path."""
+    assert is_rate_limit(RateLimited())
+    assert yahoo_hold_until() is not None
+    yield
+
+
+@pytest.fixture
+def yahoo_asked(monkeypatch):
+    """Every Yahoo request, recorded. One patch covers all: they share the module."""
+    import yfinance
+
+    asked = []
+
+    class _Counting:
+        def __init__(self, ticker, *_a, **_kw):
+            asked.append(ticker)
+            raise AssertionError(f"asked Yahoo about {ticker} inside a hold")
+
+    monkeypatch.setattr(yfinance, "Ticker", _Counting)
+    return asked
+
+
+@pytest.mark.asyncio
+async def test_market_data_asks_nothing_inside_a_hold(db, held, yahoo_asked):
+    from app.services.market_data_service import MarketDataService
+
+    await _seed_securities(db, n=3)
+
+    securities = list((await db.execute(select(Security))).scalars().all())
+    result = await MarketDataService(db).sync_securities(securities, days_back=7)
+    assert yahoo_asked == []
+    assert result["rate_limited_after"] == securities[0].symbol
+
+
+@pytest.mark.asyncio
+async def test_fundamentals_ask_nothing_inside_a_hold(db, monkeypatch, held, yahoo_asked):
+    await _seed_securities(db, n=3)
+    service = FundamentalsService(db)
+    monkeypatch.setattr(service, "_get_yahoo_ticker", lambda sec, ms=None: _ticker(sec))
+    result = await service.sync_fundamentals_data(force_refresh=True)
+    assert yahoo_asked == []
+    assert result["rate_limited"] is True and result["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_analyst_ratings_ask_nothing_inside_a_hold(db, monkeypatch, held, yahoo_asked):
+    await _seed_securities(db, n=3)
+    monkeypatch.setattr(ratings_module.asyncio, "sleep", _no_sleep)
+    result = await AnalystRatingService(db).sync_ratings_for_securities()
+    assert yahoo_asked == []
+    assert result["rate_limited"] is True and result["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_the_watchlist_asks_nothing_inside_a_hold(db, held, yahoo_asked):
+    for i in range(3):
+        db.add(WatchlistItem(yahoo_ticker=f"TCK{i}"))
+    await db.commit()
+    result = await WatchlistService(db).sync_all(force=True)
+    assert yahoo_asked == []
+    assert result["rate_limited"] is True and result["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_allocation_asks_nothing_inside_a_hold(db, held, yahoo_asked):
+    """And stamps nothing: a held security is one Yahoo never answered about."""
+    from app.services.allocation_service import AllocationService
+
+    await _seed_securities(db, n=3)
+    result = await AllocationService(db).sync_allocation_data(force_refresh=True)
+    assert yahoo_asked == []
+    assert result["rate_limited"] is True
+    stamps = (await db.execute(select(Security.allocation_last_updated))).scalars().all()
+    assert all(stamp is None for stamp in stamps)
+
+
+@pytest.mark.asyncio
+async def test_dividends_ask_nothing_inside_a_hold(db, held, yahoo_asked):
+    from app.services.dividend_service import DividendService
+
+    await _seed_securities(db, n=3)
+    result = await DividendService(db).sync_dividend_data()
+    assert yahoo_asked == []
+    assert result["rate_limited"] is True and result["warnings"]
+    assert result["securities_processed"] == 0, "a held security was not asked about"
+
+
+@pytest.mark.asyncio
+async def test_a_benchmark_asks_nothing_inside_a_hold(db, held, yahoo_asked):
+    from app.services.benchmark_service import BenchmarkService
+
+    service = BenchmarkService(db)
+    assert await service._ensure_prices_available(
+        "^GSPC", date(2026, 3, 2), date(2026, 3, 13)
+    ) is None
+    assert yahoo_asked == []
+    assert service.rate_limited is True
+
+
+@pytest.mark.asyncio
+async def test_the_mapping_cli_refuses_inside_a_hold(db, held, yahoo_asked):
+    """A human typed it, which rule 1 allows — but not into a refusal still in force."""
+    from app.cli import manage_mappings
+    from app.models.market_price import MarketPrice
+
+    await _seed_securities(db, n=1)
+    security = (await db.execute(select(Security))).scalars().first()
+    db.add(MarketPrice(
+        security_id=security.id, date=date(2026, 3, 13), close_price=Decimal("100"),
+        currency="USD", source=manage_mappings.PRICE_SOURCE_STATEMENT,
+    ))
+    await db.commit()
+    refusal = await manage_mappings._verify_against_published_navs(db, None, security, "SEC0")
+    assert yahoo_asked == []
+    assert "Yahoo rate limit hold" in refusal

@@ -20,7 +20,7 @@ from app.repositories.security_repository import held
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.ticker_mapping import TickerMapping
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.services.yahoo_eligibility import is_sibling_priced, is_yahoo_eligible
 from app.services.yahoo_minor_units import (
     NO_SCALE,
@@ -469,6 +469,10 @@ class MarketDataService:
             - rate_limited: True if we hit a rate limit (stop trying variations)
         """
         try:
+            # Raises while a refusal anywhere in the process is being honoured; the
+            # handler below reads it as the rate limit it stands for (issue #57).
+            await check_yahoo_hold()
+
             # Random delay between 2-5 seconds to look more human
             delay = random.uniform(2.0, 5.0)
             await asyncio.sleep(delay)

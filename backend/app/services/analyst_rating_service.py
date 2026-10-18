@@ -20,7 +20,7 @@ from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.models.analyst_rating import AnalystRating
 from app.services.yahoo_estimates import is_fund_quote_type
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,10 @@ class AnalystRatingService:
         try:
             yahoo_ticker = await self._get_yahoo_ticker(security)
             logger.info(f"Fetching analyst rating for {security.symbol} ({yahoo_ticker})...")
+
+            # A refusal anywhere in the process holds this too (issue #57); re-raised
+            # below as the rate limit it stands for.
+            await check_yahoo_hold()
 
             # Add random delay to avoid rate limiting (1-3 seconds)
             await asyncio.sleep(random.uniform(1.0, 3.0))

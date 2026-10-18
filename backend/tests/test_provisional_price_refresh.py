@@ -197,10 +197,10 @@ async def test_the_settled_close_overwrites_the_provisional_row():
 
 # ── The benchmark side ────────────────────────────────────────────────────────
 #
-# Same freeze, and it matters here because the chart draws the two lines together:
-# if the portfolio settles to real closes while the benchmark keeps whatever it was
-# first fetched at today, the *gap* between them drifts over the day, which is the
-# one thing the panel exists to show.
+# Same freeze, but since GitHub issue #57 no benchmark path asks for a session in
+# progress: a chart load and the warm-up both end at `last_finished_session`, so neither
+# writes a provisional row and `_ensure_prices_available` refreshes none by default. The
+# mechanism stays pinned here — opted into, it must restate the row, not duplicate it.
 
 
 def _latest_trading_day() -> date:
@@ -256,11 +256,11 @@ async def _benchmark_session():
 
 
 @pytest.mark.asyncio
-async def test_reading_a_benchmark_restates_its_provisional_close(monkeypatch):
+async def test_a_provisional_refresh_restates_the_row_rather_than_duplicating_it(monkeypatch):
     """
-    The read path refreshes, and the new value must *replace* the old row rather than
-    collide with the unique (ticker, date). `session.add` would have raised here, which
-    is why the write became an upsert.
+    Opted into, the refresh's new value must *replace* the old row rather than collide
+    with the unique (ticker, date). `session.add` would have raised here, which is why
+    the write became an upsert.
     """
     import app.services.benchmark_service as bs
     import pandas as pd
@@ -286,7 +286,7 @@ async def test_reading_a_benchmark_restates_its_provisional_close(monkeypatch):
         await session.flush()
 
         written = await BenchmarkService(session)._ensure_prices_available(
-            "^GSPC", anchor, anchor, currency="USD"
+            "^GSPC", anchor, anchor, currency="USD", refresh_provisional=True,
         )
         assert written == 1
 

@@ -15,7 +15,7 @@ from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.cash_service import CashService
 from app.services.yahoo_estimates import is_fund_quote_type
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
 
 logger = logging.getLogger(__name__)
@@ -152,6 +152,10 @@ class AllocationService:
         await asyncio.sleep(random.uniform(1.0, 3.0))
 
         try:
+            # A refusal anywhere in the process holds this too (issue #57); its text
+            # reaches the loop's `is_rate_limit` like a 429's.
+            await check_yahoo_hold()
+
             # Fetch data from yfinance (in thread to avoid blocking event loop)
             def _fetch():
                 ticker = yf.Ticker(yahoo_ticker)

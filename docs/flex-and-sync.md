@@ -37,6 +37,29 @@ against securities with no `.info`, which is right for a real "no data" answer a
 wrong for a rate limit, where it would mark every remaining security attempted and
 suppress its sector and country for the whole staleness window.
 
+**A refusal holds the whole process for 45 minutes, and survives a restart** (GitHub issue
+#57, 2026-10-18). Abandoning the pass was per *pass*: each latch lived on one service instance,
+so after a 429 the next public `GET /api/portfolio/benchmark` — a new `BenchmarkService` per
+request — asked at once, the chart for another benchmark did the same, and the same benchmark
+was asked again when its 300 s memo ran out: eight requests after the first 429 in the
+issue's repro, while the scheduled passes had stopped and warned. Now `is_rate_limit` stamps
+"Yahoo refused at T" whenever it says yes (the verdict and the record are one call, so no
+caller can learn of a refusal without the next one learning it too), and every module that
+imports yfinance awaits `check_yahoo_hold()` immediately before asking, inside the `try` whose
+handler already tests `is_rate_limit`. It raises `YahooHold`, whose text satisfies the
+predicate, so each pass's existing breaker stops and reports `rate_limited` with its usual
+"do not retry manually" warning — no second code path for "held" — and the hold's own refusal
+never re-stamps, so it ends on time. `YAHOO_HOLD_SECONDS` is **45 minutes**: well past rule 1's
+30-minute minimum, short of the hour so a limit in the 04:00 watchlist pass's first
+quarter-hour does not cost the 05:00 fundamentals pass its day; every other pair of Yahoo slots
+is two or more hours apart. The stamp is cached in memory and written through to
+`app_settings.yahoo_refused_at` (read once per process, on the first consult; never trusted
+later than now), so a deploy mid-hold keeps it. The write is a task on its own session, never
+the caller's transaction, which may hold SQLite's write lock. The `manage_mappings` CLI consults
+and records too, but the server reads the row only at start. Tests:
+`tests/test_yahoo_hold.py`, and the hold block in `tests/test_yahoo_rate_limit_family.py`,
+which fails a yfinance module that never awaits the consult and drives every pass under a hold.
+
 
 The IBKR Flex sync (`POST /api/sync/ibkr`) is Flex-only and touches **no** Yahoo — it's always safe.
 
@@ -751,7 +774,8 @@ benchmark is asked at most once per session** (`_benchmark_sessions_asked`, in-p
 the range end, or inside the 7-day range and younger than `HOLIDAY_GRACE_DAYS`, stays missing after
 Yahoo answers, and would otherwise be re-asked at every slot for a week. A memo only stamps when Yahoo
 answered, so a throttled, failed or rate-limited ticker is retried at the next slot; a restart forgets
-it and costs at most one more pass. **A 429 abandons the pass**: `_ensure_prices_available` catches
+it and costs at most one more pass. **A 429 abandons the pass**, and so does the process-wide hold
+(rule 1 above), which `_ensure_prices_available` latches the same way: it catches
 every exception, so the loop reads `BenchmarkService.rate_limited` after each ticker — the
 `except` that used to test `is_rate_limit` could never fire. The result reports `benchmarks_fetched`
 (Yahoo asked and answered), `benchmark_prices_written` and `benchmarks_total`; a benchmark with nothing
@@ -1151,6 +1175,16 @@ memo is stamped inside the gate, once the request really goes out** (`_upstream_
 be stamped before, so a fetch the gate refused sent nothing yet throttled the next caller for five
 minutes.
 `reset_upstream_throttle()` exists for tests, since the memo is process-lifetime state.
+
+**The memo bounds re-asking; it cannot bound what is asked** (GitHub issue #57). Every weekday of a
+validated window with no row is "missing", and the route accepts 1900..2199, so 1900–1904 looped
+over the eight keys cost eight Yahoo requests every five minutes for prices nothing can use. A
+chart load now asks only for `benchmark_fetch_window`: from the first contribution less
+`PRICE_LOOKBACK_DAYS` (the hypothetical holds nothing before it; the walk carries a close back at
+most that far) to the **last finished session** — the warm-up's bound, so today's bar is no longer
+asked for at every load until the close. With no provisional row written by either path,
+`_ensure_prices_available` refreshes none by default. FX tiles the same window.
+`tests/test_benchmark_fetch_window.py` drives the route.
 
 `_ensure_fx_rates_available` also asks what is missing before tiling. `_batch_fetch_rates` issues its
 request **unconditionally** (it dedups per row, *after* the response), so a five-year chart load cost

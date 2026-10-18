@@ -55,7 +55,7 @@ from app.services.finpension_ingest import (
     purge_carried_prices,
 )
 from app.services.market_data_service import MarketDataService, clear_price_backoff
-from app.services.yahoo_rate_limit import is_rate_limit
+from app.services.yahoo_rate_limit import check_yahoo_hold, flush_hold_writes, is_rate_limit
 from app.yf_cache import configure_yfinance_cache
 
 logger = logging.getLogger(__name__)
@@ -240,18 +240,22 @@ async def _verify_against_published_navs(
     start = min(r.date for r in rows) - timedelta(days=5)
     end = max(r.date for r in rows) + timedelta(days=5)
     try:
+        # A refusal the server or an earlier run saw holds this too (issue #57).
+        await check_yahoo_hold()
         history = await asyncio.to_thread(
             lambda: yf.Ticker(yahoo_ticker).history(
                 start=start.isoformat(), end=end.isoformat(), auto_adjust=False
             )
         )
     except Exception as e:
+        # `is_rate_limit` also records a 429, so every Yahoo path holds (issue #57).
+        retry = " Yahoo is refusing requests; retry in an hour." if is_rate_limit(e) else ""
         return (
             f"Could not fetch {yahoo_ticker} to verify it against the "
             f"{len(rows)} published NAV(s) on record ({type(e).__name__}: {e}). "
             f"Refusing rather than saving an unverified mapping onto a security whose "
             f"real prices are already known — that is the one case where guessing has "
-            f"no upside."
+            f"no upside.{retry}"
         )
     if history.empty:
         return (
@@ -335,15 +339,17 @@ async def _verify_sibling_returns(
     start = rows[0].date - timedelta(days=5)
     end = rows[-1].date + timedelta(days=5)
     try:
+        await check_yahoo_hold()
         history = await asyncio.to_thread(
             lambda: yf.Ticker(yahoo_ticker).history(
                 start=start.isoformat(), end=end.isoformat(), auto_adjust=False
             )
         )
     except Exception as e:
+        retry = " Yahoo is refusing requests; retry in an hour." if is_rate_limit(e) else ""
         return (
             f"Could not fetch {yahoo_ticker} to check its moves against the "
-            f"{len(rows)} published NAVs ({type(e).__name__}: {e}); refusing."
+            f"{len(rows)} published NAVs ({type(e).__name__}: {e}); refusing.{retry}"
         )
     if history.empty:
         return f"{yahoo_ticker} returned no prices at all; it cannot stand in for anything."
@@ -681,11 +687,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def _run_then_persist(args) -> int:
+    try:
+        return await run(args)
+    finally:
+        # A 429 seen here is written to app_settings by a background task; finish it
+        # before asyncio.run cancels it, so the server honours it after its next start.
+        await flush_hold_writes()
+
+
 def main() -> int:
     configure_logging(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     # `test` and `set` probe Yahoo; share the app's on-disk yfinance cache (app/yf_cache.py).
     configure_yfinance_cache()
-    return asyncio.run(run(build_parser().parse_args()))
+    return asyncio.run(_run_then_persist(build_parser().parse_args()))
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 import app.routers.dividends as div_router
 import app.services.dividend_service as ds
+import app.services.yahoo_rate_limit as yahoo_hold
 import app.single_flight as sf
 from app.clock import utcnow as real_utcnow
 from app.database import Base
@@ -136,6 +137,8 @@ def _install(monkeypatch, session, clock, answers):
     monkeypatch.setattr(ds.asyncio, "sleep", _no_sleep)
     monkeypatch.setattr(ds, "utcnow", clock)
     monkeypatch.setattr(div_router, "utcnow", clock)
+    # The process-wide hold a 429 starts (issue #57) runs on the same simulated clock.
+    monkeypatch.setattr(yahoo_hold, "utcnow", clock)
     monkeypatch.setattr(DividendService, "_get_yahoo_ticker", _ticker)
     monkeypatch.setattr(DividendService, "compute_dividend_income", _no_compute)
     monkeypatch.setattr(div_router, "AsyncSessionLocal", lambda: _SharedSession())
