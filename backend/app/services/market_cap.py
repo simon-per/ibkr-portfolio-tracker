@@ -10,7 +10,8 @@ cannot come to disagree about a rate or a refusal (`tests/test_market_cap_family
 Two steps through EUR like every other read path (`native_amounts`), on the newest
 **cached** rate only — a GET must never reach a provider — and refused past
 `fx_policy.FX_MAX_CARRY_DAYS`, counted from the newest *published* rate (a carried copy
-dated today would make any rate look fresh). `sync_exchange_rates` keeps the rates of
+dated today would make any rate look fresh): `fx_policy.newest_published_rate`, the
+cache-only reader the dividend forecast uses too. `sync_exchange_rates` keeps the rates of
 every quoted currency warm for exactly this (`quoted_currencies`).
 
 None, not a guess, for a minor-unit quote (`GBp`, `ZAc`, `ILA`): whether Yahoo states such
@@ -23,7 +24,7 @@ from typing import Awaitable, Callable, Dict, Optional, Set
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.services.fx_policy import FX_MAX_CARRY_DAYS
+from app.services.fx_policy import newest_published_rate
 from app.services.yahoo_minor_units import minor_unit
 
 MarketCapToBase = Callable[[Optional[int], Optional[str]], Awaitable[Optional[int]]]
@@ -37,10 +38,8 @@ MARKET_CAP_CURRENCIES = frozenset({"JPY", "CNY", "HKD", "KRW", "TWD", "GBP"})
 async def market_cap_to_base(db) -> MarketCapToBase:
     """A converter from ``(market_cap, quote_currency)`` to the base currency."""
     from app.repositories.app_settings_repository import AppSettingsRepository
-    from app.services.currency_service import CurrencyService
 
     base = await AppSettingsRepository(db).get_base_currency()
-    currency_service = CurrencyService(db)
     today = utcnow().date()
     memo: Dict[tuple, Optional[Decimal]] = {}
 
@@ -49,13 +48,7 @@ async def market_cap_to_base(db) -> MarketCapToBase:
             return Decimal(1)
         key = (from_currency, to_currency)
         if key not in memo:
-            recent = await currency_service._get_most_recent_rate(
-                from_currency, today, to_currency
-            )
-            fresh = recent is not None and (
-                (today - recent[2]).days <= FX_MAX_CARRY_DAYS
-            )
-            memo[key] = recent[0] if fresh and recent[0] else None
+            memo[key] = await newest_published_rate(db, from_currency, to_currency, today)
         return memo[key]
 
     async def to_base(market_cap: Optional[int], currency: Optional[str]) -> Optional[int]:

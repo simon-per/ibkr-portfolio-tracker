@@ -119,8 +119,9 @@ weekends/holidays.
 `app/services/fx_policy.py` owns `FX_MAX_CARRY_DAYS` (**14**) and the `+carried` tag. A rate may
 stand in for a date at most 14 days after the date it was *published* for — on
 `CurrencyService.get_exchange_rate` (activity, cash, tax, dividends, the sync), on `fx_preload`
-(timeline, benchmark, crypto history) and in `market_cap`. The verdict for a date is a function of
-the published rows alone, whichever path asks first:
+(timeline, benchmark, crypto history) and on the cache-only reader `fx_policy.newest_published_rate`
+(the dividend forecast and accruals, market caps). The verdict for a date is a function of the
+published rows alone, whichever path asks first:
 
 - *Why one value:* the live path carried 30 days and **persisted** its copy, the preload path
   filled 14 and read those copies, so a date 15–30 days past the newest rate was unpriced on the
@@ -134,7 +135,7 @@ the published rows alone, whichever path asks first:
   `cost_basis_eur` or `amount_eur` is a mis-valuation that never self-corrects, while a refused lot
   is skipped with a warning and heals when the providers return.
 - *Why from the published rate:* a carried copy is a cached verdict, never an anchor
-  (`fx_policy.published_rows()`, used by `_get_most_recent_rate`, `_published_span` and
+  (`fx_policy.published_rows()`, used by `fx_policy._get_most_recent_rate`, `_published_span` and
   `preload_eur_rates`). Measured from the newest row of any source, each day's copy restarted the
   clock, so daily carries chained past any bound; and a reader filling from a copy accepted a rate
   up to twice the bound old. A copy already stored for the requested date is re-derived from its
@@ -142,10 +143,22 @@ the published rows alone, whichever path asks first:
   keeps a stand-in's value after the quote replaced it), or **deleted** once the anchor is past
   the bound — which is how copies stored under the 30-day rule, or chained, age out. That costs
   one indexed query per read of a carried date.
+- *Why one cache-only reader* (issue #56): a GET that must never reach a provider cannot call
+  `get_exchange_rate`, so it read `_get_most_recent_rate` — the newest published rate of **any**
+  age. `DividendService._latest_fx_to_eur` (accrual ingest, forecast) and the forecast's
+  IBKR-per-share back-conversion called it bare, so a currency silent for 90 days was refused by
+  the ledger and still converted accruals and the forecast; `market_cap` restated the bound beside
+  its own call. Now `newest_published_rate(session, from, to, as_of)` applies the one comparison
+  (`within_carry_bound`, which `_carry_forward` uses too), and `_get_most_recent_rate` lives in
+  `fx_policy`, called only there and by `CurrencyService._carry_forward`. A refused currency is
+  absent: its accrual is skipped and counted in the ingest's warning, its forecast amounts are
+  unsized, its market cap is shown in the listing's own currency.
 
 Tests: `tests/test_fx_carry_bound_family.py` (read-order invariance at bound−1 and bound+1, no
-chaining, no preload fill from a copy; and an AST check that no other module defines the bound or
-an FX function restates it as a literal default).
+chaining, no preload fill from a copy, the cache-only readers' verdict equal to the ledger's at
+the bound, past it and at 90 days; and AST checks that no other module defines the bound, an FX
+function restates it as a literal default, or any module but `fx_policy` and `currency_service`
+names `_get_most_recent_rate`).
 
 **Every Frankfurter request is EUR-based, and every pair is derived from it** (2026-10-17, issue
 #2). `_fetch_ecb_range` asks `/{start}..{end}?from=EUR&to=A,B,…` — the ECB's own figures — and
@@ -269,7 +282,8 @@ window once meant the lot was skipped forever. Extending the list is one edit an
 
 **Market caps** (since 2026-10-17). The Fundamentals tab and the Watchlist show a cap in the base
 currency through **one** converter, `app/services/market_cap.market_cap_to_base`. It works through
-EUR on the newest cached rate only and refuses a stale rate or a minor-unit quote, in which case the
+EUR on the newest cached rate only (`fx_policy.newest_published_rate`) and refuses a stale rate or a
+minor-unit quote, in which case the
 page shows the listing's own figure with its code. `tests/test_market_cap_family.py` holds both
 surfaces to it. The rates it needs come from `sync_exchange_rates`, which also warms the **quoted
 currencies** (`quoted_currencies`): every fundamentals row's and watchlist item's `data_currency`,

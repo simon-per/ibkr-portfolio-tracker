@@ -139,7 +139,8 @@ Only what is still unverified.
     `TRUSTED_PROXY_HOPS=0` or check the host nginx (docs/deployment.md *Peer address*).
   - FX carries at most 14 days now, from the newest *published* rate (#20): a currency silent
     for 15–30 days refuses where it used to carry; old carried copies are re-derived or deleted
-    on their next read.
+    on their next read. Since #56 the dividend accruals and forecast apply it too: an accrual in
+    such a currency is skipped with the ingest's warning, never converted at the old rate.
   - `/api/analyst-ratings/status` `stale_ratings` covers held, Yahoo-eligible rows only (#21).
 - **The audit's wave 3 (#26–#31) on production:**
   - Look-through (#28): a Cash row in the table, treemap and composition bar; company shares now

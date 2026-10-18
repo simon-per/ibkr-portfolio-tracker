@@ -754,7 +754,11 @@ until 2026-09-19.
   whole setup — no flag, no redeploy, and an empty table is the supported default.
 - Amounts convert at the **newest cached** rate, not at the pay date: that date is in the future and
   has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
-  with no cached rate is skipped and warned about rather than stored unconverted.
+  with no cached rate is skipped and warned about rather than stored unconverted. "Newest" is
+  bounded like every FX read (`fx_policy.newest_published_rate`, `FX_MAX_CARRY_DAYS`, issue #56): a
+  currency whose newest published rate is older is skipped and counted too, and the forecast leaves
+  its amounts unsized, rather than converting at a rate the ledger would refuse
+  ([pricing-and-fx.md](pricing-and-fx.md)).
 - An accrual supersedes the inference it duplicates, within `ACCRUAL_MATCH_DAYS` (15 — under half a
   monthly cycle, so a monthly payer's genuinely separate next payment is never swallowed).
 - **Matched on the ex-date, never the pay date** (`_accrual_covers`, one helper for the forward and

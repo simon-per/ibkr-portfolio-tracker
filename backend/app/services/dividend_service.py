@@ -33,6 +33,7 @@ from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
 from app.services.currency_service import CurrencyService
 from app.services.eur_conversion import to_eur_or_none
+from app.services.fx_policy import FX_MAX_CARRY_DAYS, newest_published_rate
 from app.services.dividend_forecast_attribution import (
     PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
 )
@@ -818,11 +819,12 @@ class DividendService:
         the Flex Query, and is also what a statement says when everything has been paid.
 
         **Refuses whole rather than half-applying.** A row whose currency has no cached
-        rate is skipped and counted, never stored unconverted into a column named `_eur`
-        — the same rule `sync_dividends_from_cash_transactions` learned. The pay date is
-        in the future and has no rate of its own, so the newest cached one is used: a
-        payment yet to happen is best sized at today's rate, exactly as the forecast
-        sizes a projection.
+        rate within `FX_MAX_CARRY_DAYS` is skipped and counted, never stored unconverted
+        into a column named `_eur` nor at a rate `get_exchange_rate` would refuse — the
+        same rule `sync_dividends_from_cash_transactions` learned. The pay date is in the
+        future and has no rate of its own, so the newest cached one is used: a payment
+        yet to happen is best sized at today's rate, exactly as the forecast sizes a
+        projection.
         """
         from app.repositories.dividend_accrual_repository import (
             DividendAccrualRepository,
@@ -891,7 +893,8 @@ class DividendService:
             detail = ", ".join(f"{n} in {cur}" for cur, n in sorted(skipped_currencies.items()))
             warnings.append(
                 f"Skipped {sum(skipped_currencies.values())} announced dividend(s) with "
-                f"no cached FX rate ({detail}). Their expected payment dates fall back "
+                f"no FX rate from the last {FX_MAX_CARRY_DAYS} days ({detail}). Their "
+                f"expected payment dates fall back "
                 f"to a lag measured from history until a rate exists."
             )
             logger.warning(warnings[-1])
@@ -987,7 +990,9 @@ class DividendService:
 
     async def _latest_fx_to_eur(self, currencies, as_of: date) -> Dict[str, Decimal]:
         """
-        Newest cached <currency>→EUR rate on or before ``as_of``, per currency.
+        Newest cached <currency>→EUR rate on or before ``as_of``, per currency, within
+        `FX_MAX_CARRY_DAYS` (`fx_policy.newest_published_rate`). A currency with none is
+        absent: its accruals are skipped and counted, its forecast amounts unsized.
 
         Cache-only on purpose: this endpoint must never reach a provider. A future
         payment is best sized with the latest known rate rather than the one that
@@ -997,11 +1002,11 @@ class DividendService:
         for cur in currencies:
             if cur in out:
                 continue
-            recent = await self.currency_service._get_most_recent_rate(cur, as_of, "EUR")
-            if recent:
-                out[cur] = recent[0]
+            rate = await newest_published_rate(self.db, cur, "EUR", as_of)
+            if rate is not None:
+                out[cur] = rate
             else:
-                logger.info(f"Dividend forecast: no cached {cur}->EUR rate, skipping its per-share amounts")
+                logger.info(f"Dividend forecast: no current {cur}->EUR rate, skipping its per-share amounts")
         return out
 
     async def ibkr_cash_receipts(self) -> List[tuple]:
@@ -1544,12 +1549,10 @@ class DividendService:
                 return p.gross_amount_eur / shares
             # Cache-only, like everything this endpoint reads: the pay date's own
             # rate turns the stored EUR back into the currency it was paid in.
-            recent = await self.currency_service._get_most_recent_rate(
-                p.currency, pay, "EUR"
-            )
-            if not recent or not recent[0]:
+            rate = await newest_published_rate(self.db, p.currency, "EUR", pay)
+            if rate is None:
                 return None
-            return p.gross_amount_eur / shares / recent[0]
+            return p.gross_amount_eur / shares / rate
 
         def _to_eur_ps(native: Optional[Decimal], currency: Optional[str]) -> Optional[Decimal]:
             if native is None or native <= 0:

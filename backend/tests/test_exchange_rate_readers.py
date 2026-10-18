@@ -5,12 +5,13 @@ Until 2026-09-28 the same preload-and-forward-fill existed twice
 (`PortfolioService._preload_exchange_rates` and `BenchmarkService._preload_fx_rates`),
 and the crypto view's history was about to be the third copy. They now share
 `fx_preload`, and the EUR->base loader moved to `base_fx`. `currency_service` owns the
-cache itself.
+cache itself, and `fx_policy` the newest-published-rate query and its bounded cache-only
+reader `newest_published_rate` (issue #56).
 
-A fourth module selecting rows is either another copy of the preload, or a read path
+A fifth module selecting rows is either another copy of the preload, or a read path
 about to reach for `CurrencyService.get_exchange_rate` — which asks Frankfurter on a miss
 and writes a carried row, so inside a GET it makes network calls and takes SQLite's
-write lock. Either way it should go through one of these three instead.
+write lock. Either way it should go through one of these four instead.
 """
 import re
 from datetime import date, timedelta
@@ -34,6 +35,7 @@ ALLOWED_READERS = {
     "services/currency_service.py",
     "services/base_fx.py",
     "services/fx_preload.py",
+    "services/fx_policy.py",
 }
 
 _ROW_SELECT = re.compile(r"select\(\s*ExchangeRate\s*\)")
@@ -48,7 +50,8 @@ def test_only_the_fx_modules_select_exchange_rate_rows():
     assert readers == ALLOWED_READERS, (
         f"Unexpected ExchangeRate readers: {sorted(readers - ALLOWED_READERS)}; "
         f"missing: {sorted(ALLOWED_READERS - readers)}. Read rates through "
-        f"fx_preload (dated amounts on a read path) or base_fx (EUR->base)."
+        f"fx_preload (dated amounts on a read path), fx_policy.newest_published_rate "
+        f"(one current rate) or base_fx (EUR->base)."
     )
 
 

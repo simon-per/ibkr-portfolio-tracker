@@ -38,9 +38,10 @@ class DividendAccrual(Base):
     Flex portal is the whole setup — no flag, no redeploy. Until then the forecast falls
     back to a pay date measured from history, and says which it used.
 
-    Amounts are EUR, converted at the newest cached rate rather than at the pay date —
-    that date is in the future and has no rate, and `_latest_fx_to_eur` is the same
-    cache-only helper the forecast already sizes projections with.
+    Amounts are EUR, converted at the newest cached rate (within `FX_MAX_CARRY_DAYS`)
+    rather than at the pay date — that date is in the future and has no rate, and
+    `_latest_fx_to_eur` is the same cache-only helper the forecast already sizes
+    projections with.
     """
     __tablename__ = "dividend_accruals"
 

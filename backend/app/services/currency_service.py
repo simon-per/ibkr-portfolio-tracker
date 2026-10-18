@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
 from app.models.exchange_rate import ExchangeRate
-from app.services.fx_policy import CARRIED_SUFFIX, FX_MAX_CARRY_DAYS, published_rows
+from app.services.fx_policy import (
+    CARRIED_SUFFIX, FX_MAX_CARRY_DAYS, _get_most_recent_rate, published_rows,
+    within_carry_bound,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -247,13 +250,15 @@ class CurrencyService:
         be replaced once that day's real quote is published. ``existing`` is a copy
         already stored for the date: refreshed from the anchor, or deleted on a refusal.
         """
-        recent = await self._get_most_recent_rate(from_currency, target_date, to_currency)
-        age = (target_date - recent[2]).days if recent else None
-        if recent is None or age > FX_MAX_CARRY_DAYS:
+        recent = await _get_most_recent_rate(
+            self.session, from_currency, to_currency, target_date
+        )
+        age = (target_date - recent.date).days if recent else None
+        if recent is None or not within_carry_bound(recent.date, target_date):
             if recent is not None:
                 logger.warning(
                     f"Refusing to carry a {age}-day-old {from_currency}/{to_currency} rate "
-                    f"({recent[2]}) onto {target_date} — beyond {FX_MAX_CARRY_DAYS} days"
+                    f"({recent.date}) onto {target_date} — beyond {FX_MAX_CARRY_DAYS} days"
                 )
             if existing is not None:
                 await self.session.delete(existing)
@@ -294,43 +299,6 @@ class CurrencyService:
             )
         )
         return result.scalar_one_or_none()
-
-    async def _get_most_recent_rate(
-        self,
-        from_currency: str,
-        target_date: date,
-        to_currency: str
-    ) -> Optional[Tuple[Decimal, str, date]]:
-        """
-        Get the most recent *published* exchange rate on or before the target date, with
-        the provider that produced it and the date it belongs to. Used for
-        weekends/holidays when the specific date isn't available.
-
-        A carried copy is skipped (`fx_policy.published_rows`): its date is not the
-        rate's, so an age measured from it restarts at every carry and daily copies chain
-        past `FX_MAX_CARRY_DAYS` — and a cache-only reader that sizes staleness from this
-        (`market_cap`) would be fooled the same way.
-
-        The `date <= target_date` bound is what stops a currency we only learned
-        about recently from being projected backwards onto older lots: a rate first
-        cached today is invisible to a request for last year, which still raises and
-        so keeps the caller's skip-with-warning path.
-        """
-        result = await self.session.execute(
-            select(ExchangeRate)
-            .where(
-                ExchangeRate.date <= target_date,
-                ExchangeRate.from_currency == from_currency,
-                ExchangeRate.to_currency == to_currency,
-                published_rows(),
-            )
-            .order_by(ExchangeRate.date.desc())
-            .limit(1)
-        )
-        exchange_rate = result.scalar_one_or_none()
-        if not exchange_rate:
-            return None
-        return exchange_rate.rate, exchange_rate.source, exchange_rate.date
 
     async def _batch_fetch_rates(
         self,
