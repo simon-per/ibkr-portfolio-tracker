@@ -14,8 +14,8 @@ fundamentals; deployed, backfill run) and the web session's fintech pass
 docs/shipped-log.md 2026-10-17. #2–#12 shipped the same night, and the fintech UI pass on every
 tab (docs/frontend.md *Design foundation*). **A five-area audit (2026-10-18) filed #13–#51**, each
 verified first by an offline repro; Tier 1 (#13–#18, #41) and waves 2–4 (#19–#37, #52) shipped
-the same day (docs/shipped-log.md 2026-10-18). #38–#40 and #42–#51 are open, numbered in fix
-order.
+the same day, and wave 5 (#40, #42–#46) after them (docs/shipped-log.md 2026-10-18). #38, #39
+(committed, held for its first CI run) and #47–#51 are open.
 
 ---
 
@@ -158,6 +158,11 @@ Only what is still unverified.
     only while one is pending.
   - `/api/watchlist` answers noticeably faster; rows keep their logos (#32).
   - The 18:00 `market_result` stops re-listing a sold security whose close date has no bar (#33).
+- **The audit's wave 5 (#40, #42–#46) on production:**
+  - The tax report's realized figures for a sale in the base currency itself are now exact (moved
+    by under 0.3%); other currencies unchanged (#46).
+  - `fx_result.frankfurter_requests` may read N+1 once on a day Frankfurter rejects a code, then 0–1
+    (#40); Easter weekend slots ask nothing.
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
@@ -231,7 +236,7 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **The open audit issues, #38–#40 and #42–#51, in number order** (`gh issue list`). Each carries its
+1. **The open audit issues, #38, #39 and #47–#51, in number order** (`gh issue list`). Each carries its
    repro test, fix and acceptance criteria; pinning the floating dependencies is #38, the CI
    tooling below is #39.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to

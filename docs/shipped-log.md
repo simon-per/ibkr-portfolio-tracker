@@ -7,6 +7,25 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-18 — the audit's wave 5 (#40, #42–#46)
+
+Four of the six agents stopped on the org's monthly spend limit mid-task and were resumed from
+their saved state after the 13:00 reset.
+
+- **#40** (`112d792`): a 4xx batch is retried per code, a rejected code is skipped until the
+  UTC day ends, only its pairs reach the fallback; Easter via computus; `_fetch_from_api` gone.
+- **#42 + #43** (`6d7667e`): every open-lot join is `held()`; "lot held at D" is
+  `held_at(d)` / `lot_held_at`; two family tests. Behaviour unchanged.
+- **#44** (`b83af63`): Yahoo families and the contract test cover all of `app/` and pair
+  through live response models; three fundamentals routes gained theirs; one pacing stamp.
+- **#45** (`3d39cc6`): cooldown constants in `single_flight.py`; `utc_today()` replaces
+  `date.today()` (banned by test); prune calls `pre_ownership_cutoff`.
+- **#46** (`da19104`): the tax report's SELL conversion through `NativeToBase`.
+
+Merging #42/#43 after #45 dropped `security_repository`'s `date` import that `held_at` needs —
+restored in a follow-up commit. Verified offline: backend 2616 passed / 8 skipped plus 24
+deploy-script tests, frontend 1088 passed.
+
 ## Shipped 2026-10-18 — the audit's wave 4 (#32–#37, #52)
 
 - **#32** (`8e01543`): `yahoo_ticker_for` / `yahoo_tickers_for` split; the watchlist index is
