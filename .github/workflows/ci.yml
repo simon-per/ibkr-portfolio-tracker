@@ -46,6 +46,13 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      # The repo is public; a SQLite file under a name .gitignore misses is account data
+      # (issue #36). Content check, stdlib only, so it runs first and fails fast. It runs
+      # after the push, so it reports a leak rather than preventing one: the prevention is
+      # the same script as a pre-commit hook (docs/local-development.md).
+      - name: Refuse a tracked SQLite database
+        run: python ../ops/check_no_sqlite.py
+
       - run: pip install -r requirements.txt
 
       # `Settings` declares ibkr_token and ibkr_query_id with no default, on purpose —

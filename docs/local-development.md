@@ -33,7 +33,23 @@ Traps when pointing a browser at a local stack:
 - **A real-data snapshot beats the stale local DB.** `sqlite3 .backup` on the VPS, copied down, and
   `DATABASE_URL` pointed at it (the local `backend/portfolio.db` predates trades, cash flows and
   the IBKR dividend era, so it exercises none of the interesting shapes). Delete the copy afterwards —
-  `*.db` is gitignored, but it is real account data.
+  it is real account data and **this repo is public**. Keep it **outside the checkout**, or under
+  `backend/data/` (ignored whole). `.gitignore` also catches the usual copy names (`*.db.*`,
+  `*.db-*`, `*.sqlite*`, `*.snapshot`, `*.gz`, `.env.*`, e2e screenshots/videos/traces), but a name
+  list is always one name behind (issue #36), so the backstop checks content:
+  `ops/check_no_sqlite.py` refuses any staged file that is a SQLite database, WAL or journal, bare
+  or gzip/bzip2/xz-wrapped, whatever it is called. CI runs it, but only after the push, when the
+  file is already public. **Install the pre-commit hook once per clone** so it runs before a commit
+  exists (all worktrees then use it; Git for Windows runs it through its own `sh`, and it fails
+  closed without a Python 3.8+ on `PATH`):
+
+  ```bash
+  git config core.hooksPath ops/hooks     # relative: each worktree runs its own ops/hooks/pre-commit
+  ```
+
+  That replaces any existing `core.hooksPath`; this clone's was a stale path to the pre-rename
+  folder, so no hook ran at all. Pinned by `tests/test_no_sqlite_in_git.py` (the hook end to end
+  is `deploy_scripts`).
 - **The test suite runs on its own database** (since 2026-10-17), so a snapshot named in
   `backend/.env` is safe while you run it. `tests/conftest.py` sets `DATABASE_URL` to a temporary file
   per process — the xdist controller and each worker — before `settings` is built, and removes it on

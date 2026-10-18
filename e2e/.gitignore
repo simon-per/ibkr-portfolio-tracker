@@ -2,6 +2,16 @@ node_modules/
 package-lock.json
 
 # Screenshots are real account data and this repo is public. The scripts write them
-# next to themselves, so this must stay.
+# next to themselves, so this must stay. Videos, traces and HAR captures record the
+# same UI (and the API responses behind it), so they are covered too.
 *.png
 *.jpg
+*.jpeg
+*.webp
+*.gif
+*.webm
+*.mp4
+*.zip
+*.har
+test-results/
+playwright-report/

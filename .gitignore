@@ -1,8 +1,11 @@
-# Environment variables (contain secrets)
+# Environment variables (contain secrets). `.env.*` rather than a list of suffixes, so a
+# `.env.bak`, `.env.save` or `.env.production` copy of backend/.env is caught too; the two
+# negations are the files tracked on purpose (no secrets: placeholders, and the frontend's
+# public build-time API base).
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+!frontend/.env.production
 
 # Python
 __pycache__/
@@ -24,13 +27,24 @@ htmlcov/
 # NOTE: this repo is public, so these patterns must also catch backup and WAL
 # sidecar files — "*.db" does NOT match portfolio.db.bak-2026-07-23 or
 # portfolio.db-wal, and an accidental `git add -A` would publish the account.
+# `*.db.*` and `*.db-*` are the copies and sidecars (portfolio.db.snapshot,
+# portfolio.db.2026-10-18, portfolio.db.gz, portfolio.db-wal); `*.sqlite*` covers
+# .sqlite3 and its sidecars. Names are always one behind: ops/check_no_sqlite.py checks
+# file *content*, in CI and as the pre-commit hook (docs/local-development.md).
 *.db
-*.sqlite
-*.db.bak*
-*.db-wal
-*.db-shm
-*.sqlite-wal
-*.sqlite-shm
+*.db.*
+*.db-*
+*.db3
+*.sqlite*
+*.snapshot
+# Compressed copies of any of the above, and archives of exports.
+*.gz
+*.bz2
+*.xz
+*.zst
+*.zip
+*.7z
+*.tar
 # The live database's directory on the VPS (docker-compose mounts backend/data/), and
 # the set-aside sidecars ops/db-layout.sh leaves in it — names no pattern above catches.
 backend/data/
@@ -48,6 +62,8 @@ portfolio_data*.json
 # Data exports (contain personal account data)
 *.xml
 *.csv
+*.xlsx
+*.xls
 
 # IDE
 .vscode/

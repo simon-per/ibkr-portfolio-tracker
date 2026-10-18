@@ -1,0 +1,19 @@
+#!/bin/sh
+# Refuse to commit a SQLite database under any name (issue #36). The check itself is
+# ops/check_no_sqlite.py, which CI runs too; this only finds a Python to run it with.
+#
+# Install once per clone (every worktree then uses its own checkout's copy):
+#
+#     git config core.hooksPath ops/hooks
+#
+# Fails closed: with no usable Python the commit is refused rather than left unchecked.
+# A Windows `python3` can be the Microsoft Store stub, hence the probe before `exec`.
+check="$(dirname "$0")/../check_no_sqlite.py"
+for py in python3 python py; do
+    if command -v "$py" >/dev/null 2>&1 \
+        && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+        exec "$py" "$check"
+    fi
+done
+echo "pre-commit: no Python 3.8+ found to run ops/check_no_sqlite.py; refusing the commit." >&2
+exit 1
