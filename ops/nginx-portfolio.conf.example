@@ -17,11 +17,11 @@ server {
     server_name portfolio.srv1211053.hstgr.cloud;
     client_max_body_size 20m;
 
-    # HSTS: the OWNER's call, deliberately commented out (STATUS.md, Needs a human). The
-    # header is sticky in every browser that sees it, so start with a short max-age (5
-    # minutes here), confirm nothing breaks, then raise it. Never add includeSubDomains:
-    # the n8n vhost and the rest of hstgr.cloud are not this site's to commit.
-    # add_header Strict-Transport-Security "max-age=300" always;
+    # HSTS, on since 2026-10-18 at a 5-minute max-age (the owner's call). The header is
+    # sticky in every browser that sees it, so raise it in steps once nothing has broken.
+    # Never add includeSubDomains: the n8n vhost and the rest of hstgr.cloud are not this
+    # site's to commit.
+    add_header Strict-Transport-Security "max-age=300" always;
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;

@@ -285,8 +285,8 @@ than pushing to `main`.
 reconstruction from the docs; the diff against the server replaced it with Certbot's real layout
 (the TLS lines and the whole port-80 server are Certbot's, which answers 404 to any other host
 name) plus `client_max_body_size 20m` and `include /etc/nginx/proxy_params`. Nothing installs it:
-after editing the live file, copy it back here. HSTS is in it commented out, with a 5-minute
-`max-age`: enabling it is the owner's call (STATUS.md).
+after editing the live file, copy it back here. HSTS has been on since 2026-10-18 with a 5-minute
+`max-age`; raising it is the owner's call (STATUS.md).
 
 **`backend/setup_ssl.sh` was deleted on 2026-10-18** (GitHub issue #51). Nothing referenced it,
 and running it would have broken the site. It overwrote `$(ls /etc/nginx/sites-enabled/*)`, which is

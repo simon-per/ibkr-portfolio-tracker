@@ -24,14 +24,8 @@ afternoon.
 
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
-- **Production CORS (#51):** set `CORS_ORIGINS=` empty in the VPS `backend/.env` (the site is
-  same-origin), then `GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d` — never `restart`.
-- **Optional (#51):** the health-watch cron in docs/deployment.md.
-- **Refresh `/root/auto-deploy.sh` from the repo (#37's CI gate)** once `/health` shows the wave-4
-  commit — the VPS runs a copy, so until then the old gate (error reply = "no checks", 180 s
-  commit-age proxy) is still live. docs/deployment.md has the atomic-rename snippet:
-  `cp ops/auto-deploy.sh /root/auto-deploy.sh.new && chmod 755 /root/auto-deploy.sh.new && mv -f /root/auto-deploy.sh.new /root/auto-deploy.sh`
-  (run in `/root/IBKR_investment_tracker`).
+- **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
+  edit the live vhost, then copy it to `ops/nginx-portfolio.conf.example`.
 - **Install the SQLite pre-commit hook in your clone (#36):** `git config core.hooksPath ops/hooks`.
   This clone's `core.hooksPath` still points at the pre-rename folder
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
@@ -65,12 +59,8 @@ afternoon.
   /tmp/p3a.csv --dry-run`, then without `--dry-run`. It replaces the account wholesale and refuses
   a file shorter than what is stored.
 
-- **Add HSTS on the host nginx** (`/etc/nginx/sites-*`, not in the repo): one `add_header`, short
-  `max-age` first — the header is sticky.
-
-- **VPS tidy-ups from the 2026-10-04 database move (optional).** `rm /root/finish-hardening.*` and
-  `backend/data/portfolio.db-{wal,shm}.pre-switchover-20261004T131635Z`; point the VPS
-  `DATABASE_URL` at `/app/data/portfolio.db`. Keep the `backend/portfolio.db` link while a
+- **VPS tidy-up from the 2026-10-04 database move (optional).** Point the VPS `DATABASE_URL` at
+  `/app/data/portfolio.db` (the leftover files went on 2026-10-18). Keep the `backend/portfolio.db` link while a
   rollback past `9e57366` is conceivable. `failed-deploys/` is never pruned; check `df -h` and
   logrotate while there.
 
@@ -176,9 +166,10 @@ Only what is still unverified.
   `docker compose build --pull`, `docker builder prune` and, from the second deploy on,
   "Skipping npm ci"; `docker system df` on the VPS a week later shows build cache bounded to about
   seven days of layers instead of growing.
-- **The VPS still runs Node 20** (deploy.sh installs Node only when none is present): `npm ci` on
-  deploy prints an `EBADENGINE` warning since `engines: >=22` (#39) — harmless; upgrading is an
-  owner action over ssh.
+- **The VPS on Node 22 (2026-10-18):** the next deploy re-runs `npm ci` (the stamp carries the
+  Node version) with no `EBADENGINE` warning. The health-watch cron (every 5 min) and an empty
+  `CORS_ORIGINS` went in the same afternoon; `/root/auto-deploy.sh` is the #53 copy, so the next
+  push logs `WAIT: no CI checks yet …` for a tick or two.
 - **The Flex client after #5:** the next IBKR runs (Sun/Mon are ET skips, so Tue 18:00 Berlin
   is the first real generation) succeed about 7 s slower, with `not ready (Code=…)` lines in the
   container log that used to be silent and no `t=` token in any Flex log line. A
@@ -226,9 +217,6 @@ Only what is still unverified.
 - **The owner's batch in the browser:** "from raises" on the Next 12 months card (after the
   backfill), the forecast chart's drag and keyboard resize and its remembered height, market caps
   in the base currency on Fundamentals and the Watchlist.
-- **The 2026-10-17 outage (~15:28–15:40 UTC):** every port timed out from the owner's network
-  while port 443 refused from outside; it recovered unaided before the deploy. Cause unknown —
-  `uptime` on the VPS would show a reboot.
 - **The ET Sunday/Monday IBKR skip (`b88faa9`):** Berlin Sun 18:00, Mon 00:00 and 18:00, Tue 00:00
   read `skipped` / `no_new_trading_day` with no Flex request; the 18:00 runs still carry
   `market_result`; Tue 18:00 generates. The daily validator will see no IBKR success Sat–Tue ET
