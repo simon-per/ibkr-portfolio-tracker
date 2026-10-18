@@ -15,6 +15,7 @@ import {
   marketCapParts,
   ABSENT,
 } from './utils'
+import { axisFloor, niceTicks, zeroBasedTicks, type Axis } from './niceTicks'
 
 describe('formatMarketCap', () => {
   it('draws the app-wide absent glyph for an unknown, never a hyphen', () => {
@@ -302,5 +303,66 @@ describe('formatAxisMoney', () => {
 
   it('omits the symbol when none is given', () => {
     expect(formatAxisMoney(4_500)).toBe('4.5k')
+  })
+})
+
+describe('formatAxisMoney with the axis step', () => {
+  const labels = (axis: Axis, symbol = '') => axis.ticks.map((t) => formatAxisMoney(t, symbol, axis.step))
+
+  // Issue #67: at one decimal regardless of step these read "1.2k, 1.2k, 1.3k, 1.3k" and
+  // "1.9k, 2k, 2k, 2.1k, 2.1k".
+  it('prints the ranges that repeated as distinct, exact labels', () => {
+    expect([1_150, 1_200, 1_250, 1_300].map((v) => formatAxisMoney(v, 'CHF ', 50)))
+      .toEqual(['CHF 1.15k', 'CHF 1.2k', 'CHF 1.25k', 'CHF 1.3k'])
+    expect([1_900, 1_950, 2_000, 2_050, 2_100].map((v) => formatAxisMoney(v, '€', 50)))
+      .toEqual(['€1.9k', '€1.95k', '€2k', '€2.05k', '€2.1k'])
+    expect(formatAxisMoney(150_250, '$', 250)).toBe('$150.25k')
+    expect(formatAxisMoney(2.5, '$', 2.5)).toBe('$2.5')
+    expect(formatAxisMoney(-1_250, 'CHF ', 250)).toBe('-CHF 1.25k')
+  })
+
+  it('adds no decimals the step does not need', () => {
+    expect(formatAxisMoney(150_000, 'CHF ', 10_000)).toBe('CHF 150k')
+    expect(formatAxisMoney(12_500, '€', 2_500)).toBe('€12.5k')
+    expect(formatAxisMoney(1_000_000, '€', 250_000)).toBe('€1M')
+    expect(formatAxisMoney(0, '€', 50)).toBe('€0')
+    expect(formatAxisMoney(950, '€', 50)).toBe('€950')
+  })
+
+  // Every way a chart builds its ticks: the line charts' padded `niceTicks` with a floor,
+  // a bare `niceTicks`, and the bar charts' `zeroBasedTicks`, at each target count in use.
+  const RANGES: [number, number][] = [
+    [1_200, 1_260], [1_950, 2_050], [1_150, 1_300], [2_400, 2_700], [12_000, 12_600],
+    [150_000, 150_500], [0, 7.5], [3, 9], [120, 180], [0, 950], [990, 1_010],
+    [1_200_000, 1_260_000], [0, 3_500_000], [999_000, 1_001_000], [-4_200, 11_800],
+    [2e9, 2.05e9],
+  ]
+  const axes = RANGES.flatMap(([lo, hi]) => [3, 4, 6, 8].flatMap((target) => {
+    const pad = (hi - lo) * 0.15
+    return [
+      niceTicks(lo, hi, target),
+      niceTicks(lo - pad, hi + pad, target, axisFloor(lo, lo - pad, lo - pad)),
+      zeroBasedTicks([lo, hi], target),
+    ]
+  }))
+  const UNIT: Record<string, number> = { '': 1, k: 1e3, M: 1e6, B: 1e9 }
+
+  it('never prints two ticks of one axis alike', () => {
+    for (const axis of axes) {
+      const printed = labels(axis, 'CHF ')
+      expect(new Set(printed).size, printed.join(', ')).toBe(printed.length)
+    }
+  })
+
+  it('prints every tick exactly', () => {
+    for (const axis of axes) {
+      for (const [i, label] of labels(axis).entries()) {
+        const m = /^(-?)(\d+(?:\.\d+)?)([kMB]?)$/.exec(label)
+        expect(m, label).not.toBeNull()
+        const read = (m![1] ? -1 : 1) * Number(m![2]) * UNIT[m![3]]
+        const tick = axis.ticks[i]
+        expect(Math.abs(read - tick), `${tick} -> ${label}`).toBeLessThan(1e-9 * Math.max(1, Math.abs(tick)))
+      }
+    }
   })
 })

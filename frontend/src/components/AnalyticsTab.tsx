@@ -78,6 +78,7 @@ import {
   CHART_GRID_PROPS,
 } from '@/lib/chartTooltip'
 import { ABSENT, formatDate, formatAxisMoney } from '@/lib/utils'
+import { niceTicks, zeroBasedTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
 
 const GAIN = '#10b981'
@@ -123,10 +124,13 @@ function pct(v: number | null | undefined, digits = 2): string {
   return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`
 }
 
-/** "12.3k" style axis labels with the currency symbol; the axis measures its own width. */
+/**
+ * "12.3k" style labels with the currency symbol; the axis measures its own width. A tick
+ * passes its axis's step (see `formatAxisMoney`); a bar's value label has none.
+ */
 function useCompactMoney() {
   const symbol = useCurrencySymbol()
-  return (v: number) => formatAxisMoney(v, symbol)
+  return (v: number, step?: number) => formatAxisMoney(v, symbol, step)
 }
 
 /**
@@ -429,7 +433,7 @@ function Waterfall({
 }: {
   window: DecompositionWindow | undefined
   formatCurrency: (v: number) => string
-  compactMoney: (v: number) => string
+  compactMoney: (v: number, step?: number) => string
   compact: boolean
 }) {
   const rows = useMemo(() => (w ? waterfallRows(w) : []), [w])
@@ -442,6 +446,7 @@ function Waterfall({
   const floor = Math.min(...rows.map((r) => r.base))
   const ceil = Math.max(...rows.map((r) => r.base + r.size))
   const pad = (ceil - floor) * 0.08
+  const yAxis = niceTicks(Math.max(0, floor - pad), ceil + pad, 4)
   return (
     <div>
       <h3 className="mb-2 text-sm font-medium">Selected range</h3>
@@ -460,12 +465,13 @@ function Waterfall({
               height={compact ? 52 : 28}
             />
             <YAxis
-              domain={[Math.max(0, floor - pad), ceil + pad]}
+              domain={yAxis.domain}
+              ticks={yAxis.ticks}
               tick={{ fontSize: 11, fill: AXIS }}
               tickLine={false}
               axisLine={false}
               width="auto"
-              tickFormatter={compactMoney}
+              tickFormatter={(v: number) => compactMoney(v, yAxis.step)}
             />
             <Tooltip
               {...tooltipProps}
@@ -504,7 +510,7 @@ function YearlyLegs({
 }: {
   years: DecompositionYear[] | undefined
   formatCurrency: (v: number) => string
-  compactMoney: (v: number) => string
+  compactMoney: (v: number, step?: number) => string
   compact: boolean
 }) {
   if (!years) return <div className={`${CHART_CLASS} animate-pulse rounded-md bg-muted`} />
@@ -517,6 +523,7 @@ function YearlyLegs({
   // A leg that is zero or unknown in every year is not drawn: an empty cluster slot for
   // "Unsplit" on an account where every holding split would only add legend noise.
   const legs = LEGS.filter((leg) => rows.some((y) => (y[leg.key] ?? 0) !== 0))
+  const yAxis = zeroBasedTicks(rows.flatMap((y) => legs.map((leg) => y[leg.key] ?? NaN)), 4)
   return (
     <div>
       <h3 className="mb-2 text-sm font-medium">Per calendar year (* partial)</h3>
@@ -525,7 +532,7 @@ function YearlyLegs({
           <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="22%" barGap={2}>
             <CartesianGrid {...CHART_GRID_PROPS} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={compactMoney} />
+            <YAxis domain={yAxis.domain} ticks={yAxis.ticks} tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} width="auto" tickFormatter={(v: number) => compactMoney(v, yAxis.step)} />
             <Tooltip {...tooltipProps} formatter={(v, n) => [v === null ? ABSENT : formatCurrency(Number(v)), String(n)]} />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: compact ? 11 : 12 }} />
             <ReferenceLine y={0} stroke={AXIS} strokeDasharray="2 2" />
@@ -578,7 +585,7 @@ function SegmentsCard({
   isLoading: boolean
   isError: boolean
   formatCurrency: (v: number) => string
-  compactMoney: (v: number) => string
+  compactMoney: (v: number, step?: number) => string
   compact: boolean
 }) {
   const [dimension, setDimension] = useState<Dimension>('sector')
@@ -589,6 +596,7 @@ function SegmentsCard({
   }, [data, dimension])
   const paint = (name: string) => (dimension === 'sector' ? allocationSectorPaint(name) : neutralPaint(name)).fill
   const chartHeight = Math.min(compact ? 480 : 640, Math.max(200, rows.length * (compact ? 26 : 30)))
+  const xAxis = zeroBasedTicks(rows.map((r) => r.pnl_eur ?? NaN), 4)
 
   const money = (v: number | null) => (v === null ? ABSENT : formatCurrency(v))
   const columns: Column<SegmentRow>[] = [
@@ -646,7 +654,7 @@ function SegmentsCard({
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }} barCategoryGap="25%">
                   <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
+                  <XAxis type="number" domain={xAxis.domain} ticks={xAxis.ticks} tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(v: number) => compactMoney(v, xAxis.step)} />
                   <YAxis type="category" dataKey="name" width={compact ? 110 : 170} tick={{ fontSize: compact ? 10 : 11, fill: AXIS }} tickLine={false} axisLine={false} interval={0} />
                   <Tooltip {...tooltipProps} formatter={(v) => [v === null ? ABSENT : formatCurrency(Number(v)), 'Gain']} />
                   <ReferenceLine x={0} stroke={AXIS} />
@@ -706,7 +714,7 @@ function ClosedPositionsCard({
   isLoading: boolean
   isError: boolean
   formatCurrency: (v: number) => string
-  compactMoney: (v: number) => string
+  compactMoney: (v: number, step?: number) => string
   compact: boolean
 }) {
   const money = (v: number | null) => (v === null ? ABSENT : formatCurrency(v))
@@ -724,6 +732,7 @@ function ClosedPositionsCard({
   const s = data?.summary
   const chartRows = (data?.positions ?? []).filter((p) => p.realized_pnl_eur !== null)
   const chartHeight = Math.min(compact ? 420 : 560, Math.max(160, chartRows.length * (compact ? 26 : 30)))
+  const xAxis = zeroBasedTicks(chartRows.map((p) => p.realized_pnl_eur ?? NaN), 4)
 
   return (
     <Card>
@@ -774,7 +783,7 @@ function ClosedPositionsCard({
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartRows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }} barCategoryGap="25%">
                     <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={compactMoney} />
+                    <XAxis type="number" domain={xAxis.domain} ticks={xAxis.ticks} tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} tickFormatter={(v: number) => compactMoney(v, xAxis.step)} />
                     <YAxis type="category" dataKey="symbol" width={compact ? 70 : 90} tick={{ fontSize: 11, fill: AXIS }} tickLine={false} axisLine={false} interval={0} />
                     <Tooltip {...tooltipProps} formatter={(v) => [v === null ? ABSENT : formatCurrency(Number(v)), 'Realized']} />
                     <ReferenceLine x={0} stroke={AXIS} />

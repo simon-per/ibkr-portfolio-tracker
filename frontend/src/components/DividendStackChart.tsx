@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -6,6 +6,7 @@ import { useCurrencySymbol, useFormatCurrency } from '@/lib/CurrencyContext'
 import { dividendMonthLabel, FC } from '@/lib/dividendChart'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { formatAxisMoney } from '@/lib/utils'
+import { zeroBasedTicks } from '@/lib/niceTicks'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
 /**
@@ -53,7 +54,12 @@ export function DividendStackChart({
   const formatCurrency = useFormatCurrency()
   const isCompact = useIsCompact()
 
-  const formatAxisTick = (v: number) => formatAxisMoney(v, curSym)
+  // The tallest column is the stack of every drawn series.
+  const axis = useMemo(() => {
+    const keys = showForecast ? [...stackSymbols, ...stackSymbols.map((s) => FC + s)] : stackSymbols
+    return zeroBasedTicks(data.map((row) => keys.reduce((sum, k) => sum + (Number(row[k]) || 0), 0)), 4)
+  }, [data, stackSymbols, showForecast])
+  const formatAxisTick = (v: number) => formatAxisMoney(v, curSym, axis.step)
 
   // Faded rather than hidden: dropping the other series would restack the bar and move the
   // highlighted segment, which is the one thing the reader is trying to follow.
@@ -133,6 +139,8 @@ export function DividendStackChart({
             minTickGap={isCompact ? 24 : 16}
           />
           <YAxis
+            domain={axis.domain}
+            ticks={axis.ticks}
             tickFormatter={formatAxisTick}
             tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
             tickLine={false}

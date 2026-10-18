@@ -13,6 +13,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { summaryQuery } from '@/lib/queryCache'
 import { formatAxisMoney } from '@/lib/utils'
+import { niceTicks } from '@/lib/niceTicks'
+import { useIsCompact } from '@/lib/useMediaQuery'
 import { forecastBaseline, forecastSeries, monthlyPace, projectForecast } from '@/lib/forecast'
 import { useBaseCurrency, useCurrencySymbol, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import { readStored, writeStored } from '@/lib/storage'
@@ -139,6 +141,7 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
 
 export function ForecastTab() {
   const curSym = useCurrencySymbol()
+  const isCompact = useIsCompact()
   const money = useFormatMoneyWhole()
   const { baseCurrency } = useBaseCurrency()
   const [chosenContribution, setChosenContribution] = useState(readChosenContribution)
@@ -234,36 +237,13 @@ export function ForecastTab() {
   const horizon = monthlyData[monthlyData.length - 1]
   const yearsLabel = `${forecastYears} ${forecastYears === 1 ? 'year' : 'years'}`
 
-  // Calculate dynamic Y-axis configuration — always produces ≤ 10 ticks
+  // Fewer ticks on a phone: eight put nine labels about 29px apart in the 260px chart.
   const yAxisConfig = useMemo(() => {
-    const TARGET_TICKS = 8
-
-    if (monthlyData.length === 0) {
-      return { domain: [0, 100000] as [number, number], ticks: [0, 50000, 100000] }
-    }
-
     const maxValue = Math.max(...monthlyData.map(d => d.value), 0)
-
-    if (!isFinite(maxValue) || isNaN(maxValue) || maxValue <= 0) {
-      return { domain: [0, 100000] as [number, number], ticks: [0, 50000, 100000] }
-    }
-
-    // Pick a "nice" interval so we get roughly TARGET_TICKS ticks
-    const rawInterval = maxValue / TARGET_TICKS
-    const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)))
-    const normalised = rawInterval / magnitude                // 1–10 range
-    const niceStep = normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10
-    const tickInterval = niceStep * magnitude
-
-    const domainMax = Math.ceil(maxValue / tickInterval) * tickInterval
-
-    const ticks: number[] = []
-    for (let i = 0; i <= domainMax; i += tickInterval) {
-      ticks.push(i)
-    }
-
-    return { domain: [0, domainMax] as [number, number], ticks }
-  }, [monthlyData])
+    // Nothing to scale to (no series, or a zero one): an empty 0–100k axis.
+    if (!isFinite(maxValue) || maxValue <= 0) return niceTicks(0, 100000, 2, 0)
+    return niceTicks(0, maxValue, isCompact ? 4 : 8, 0)
+  }, [monthlyData, isCompact])
 
   return (
     <div className="space-y-8">
@@ -444,7 +424,7 @@ export function ForecastTab() {
               <YAxis
                 domain={yAxisConfig.domain}
                 ticks={yAxisConfig.ticks}
-                tickFormatter={(value: number) => formatAxisMoney(value, curSym)}
+                tickFormatter={(value: number) => formatAxisMoney(value, curSym, yAxisConfig.step)}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: 'hsl(var(--muted-foreground))' }}

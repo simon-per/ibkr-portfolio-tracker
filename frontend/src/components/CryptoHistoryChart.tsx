@@ -72,7 +72,7 @@ export function CryptoHistoryChart({ points }: { points: readonly CryptoHistoryP
   }, [data, metric, isCompact])
 
   const xAxis = useMemo(() => dateAxis(data.map((p) => p.date)), [data])
-  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym)
+  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym, axis?.step)
 
   return (
     <div className="space-y-3">

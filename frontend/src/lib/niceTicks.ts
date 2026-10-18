@@ -14,6 +14,12 @@
 export interface Axis {
   domain: [number, number]
   ticks: number[]
+  /**
+   * The distance between neighbouring ticks. A label needs it: `formatAxisMoney` takes
+   * it to print as many decimals as the step has, so 1,200/1,250/1,300 read "1.2k,
+   * 1.25k, 1.3k" rather than "1.2k, 1.3k, 1.3k".
+   */
+  step: number
 }
 
 /**
@@ -57,14 +63,14 @@ export function niceTicks(
   min: number, max: number, targetCount: number, floor?: number
 ): Axis {
   if (!isFinite(min) || !isFinite(max) || targetCount < 1) {
-    return { domain: [0, 1], ticks: [0, 1] }
+    return { domain: [0, 1], ticks: [0, 1], step: 1 }
   }
 
   // A flat series still needs an axis with height, or every tick lands on one line.
   if (max === min) {
     const step = niceStep(Math.abs(max) / targetCount || 1)
     return applyFloor(
-      { domain: [min - step, max + step], ticks: [min - step, min, max + step] }, floor
+      { domain: [min - step, max + step], ticks: [min - step, min, max + step], step }, floor
     )
   }
 
@@ -78,7 +84,20 @@ export function niceTicks(
   const count = Math.round((hi - lo) / step)
   for (let i = 0; i <= count; i++) ticks.push(lo + i * step)
 
-  return applyFloor({ domain: [lo, hi], ticks }, floor)
+  return applyFloor({ domain: [lo, hi], ticks, step }, floor)
+}
+
+/**
+ * A bar chart's value axis: always through zero, which a bar is measured from.
+ *
+ * The bar charts left their ticks to Recharts, whose steps (350, 1,050, …) are not on
+ * the ladder above and are not handed to the tick formatter, so a label could not know
+ * how many decimals it needed: 0/350/700/1,050 printed "1.1k" for 1,050. Choosing the
+ * ticks here is what gives the label its step.
+ */
+export function zeroBasedTicks(values: number[], targetCount: number): Axis {
+  const finite = values.filter(Number.isFinite)
+  return niceTicks(Math.min(0, ...finite), Math.max(0, ...finite), targetCount)
 }
 
 /**
@@ -108,5 +127,5 @@ function applyFloor(axis: Axis, floor?: number): Axis {
   // emit an inverted domain — recharts renders that as a blank chart.
   if (floor >= axis.domain[1]) return axis
   const ticks = axis.ticks.filter(t => t >= floor)
-  return { domain: [floor, axis.domain[1]], ticks: ticks.length ? ticks : [floor, axis.domain[1]] }
+  return { ...axis, domain: [floor, axis.domain[1]], ticks: ticks.length ? ticks : [floor, axis.domain[1]] }
 }

@@ -160,7 +160,7 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   className="text-xs"
                   tick={{ fill: 'hsl(var(--muted-foreground))' }}
                   // The headline carries the currency; on a phone the axis has no room to repeat it.
-                  tickFormatter={(value: number) => formatAxisMoney(value, isCompact ? '' : curSym)}
+                  tickFormatter={(value: number) => formatAxisMoney(value, isCompact ? '' : curSym, axis.step)}
                   domain={axis.domain}
                   ticks={axis.ticks}
                   width="auto"

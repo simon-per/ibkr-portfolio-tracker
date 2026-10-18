@@ -211,30 +211,49 @@ export function formatCount(value: number): string {
  * Every chart wrote its own — seven `(value / 1000).toFixed(…)k` variants, three with the
  * symbol and four without — and each was wrong somewhere: the Forecast axis printed
  * "CHF 1000k" for a million and "CHF 0k" for zero, the value chart rounded a 12,500 tick
- * to "13k", and the dividend chart printed "1.0k". One decimal at most, trailing ".0"
- * dropped, the sign before the symbol as `formatCurrency` puts it. `symbol` is optional
- * for the axes whose card already names the currency.
+ * to "13k", and the dividend chart printed "1.0k". Trailing zeros dropped, the sign
+ * before the symbol as `formatCurrency` puts it. `symbol` is optional for the axes whose
+ * card already names the currency.
+ *
+ * `step` is the distance between the axis's ticks (`niceTicks(...).step`), and every
+ * axis passes it: the label then carries as many decimals in its unit as the step has,
+ * so each tick prints exactly and no two alike — 1,150/1,200/1,250/1,300 read "1.15k,
+ * 1.2k, 1.25k, 1.3k". At one decimal regardless they read "1.2k, 1.2k, 1.3k, 1.3k".
+ * Without a step (a value label on a bar, not a tick) it keeps one decimal at most.
  */
-export function formatAxisMoney(value: number, symbol: string = ""): string {
-  const abs = Math.abs(value)
-  const sign = value < 0 && abs >= 0.5 ? "-" : ""
-  return `${sign}${symbol}${compactBody(abs)}`
+export function formatAxisMoney(value: number, symbol: string = "", step?: number): string {
+  const body = compactBody(Math.abs(value), step)
+  const sign = value < 0 && /[1-9]/.test(body) ? "-" : ""
+  return `${sign}${symbol}${body}`
 }
 
 const AXIS_UNITS: readonly [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "k"], [1, ""]]
 
+/** The fewest decimals that write `x` exactly, up to six. */
+function decimalsOf(x: number): number {
+  for (let d = 0; d < 6; d++) {
+    const scaled = x * 10 ** d
+    if (Math.abs(scaled - Math.round(scaled)) < 1e-9 * Math.max(1, scaled)) return d
+  }
+  return 6
+}
+
 /** `abs` in the largest unit it reaches *after* rounding, so 999,950 is "1M", not "1000k". */
-function compactBody(abs: number): string {
-  // Whole units below a thousand; one decimal from there up.
+function compactBody(abs: number, step?: number): string {
+  const exactStep = step !== undefined && Number.isFinite(step) && step > 0 ? step : undefined
+  // With a step, the decimals it needs in this unit; without, whole units below a
+  // thousand and one decimal from there up.
   const round = (i: number) => {
     const size = AXIS_UNITS[i][0]
-    return size === 1 ? Math.round(abs) : Math.round((abs / size) * 10) / 10
+    const digits = exactStep !== undefined ? decimalsOf(exactStep / size) : size === 1 ? 0 : 1
+    return (Math.round((abs / size) * 10 ** digits) / 10 ** digits).toFixed(digits)
   }
   let i = AXIS_UNITS.findIndex(([size]) => abs >= size)
   if (i === -1) i = AXIS_UNITS.length - 1
   let rounded = round(i)
-  if (rounded >= 1000 && i > 0) rounded = round(--i)
-  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}${AXIS_UNITS[i][1]}`
+  if (Number(rounded) >= 1000 && i > 0) rounded = round(--i)
+  const trimmed = rounded.includes(".") ? rounded.replace(/\.?0+$/, "") : rounded
+  return `${trimmed}${AXIS_UNITS[i][1]}`
 }
 
 /**

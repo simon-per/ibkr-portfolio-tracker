@@ -639,8 +639,12 @@ insight. What that settled, on top of the product pass:
   rather than draw a total under a neighbour's header ([failure-modes.md](failure-modes.md)).
 - **One chart look, enforced.** Every `<CartesianGrid>` spreads `CHART_GRID_PROPS` (solid
   hairlines along the value axis) and every money axis label goes through `formatAxisMoney`
-  ("CHF 150k", "€1.2M", one decimal at most); `components/chartAxisFamily.test.ts` refuses a hand
-  rolled copy of either. Off the axes, money is `formatCurrency` or, in whole units,
+  ("CHF 150k", "€1.2M") **with its axis's step**, so it carries as many decimals as the step has:
+  ticks 1,150/1,200/1,250/1,300 read "1.15k, 1.2k, 1.25k, 1.3k", where one decimal regardless read
+  "1.2k, 1.2k, 1.3k, 1.3k" (issue #67). The step comes from the chart choosing its own ticks —
+  `niceTicks` on the line charts, `zeroBasedTicks` on the bar charts, never Recharts' auto ticks,
+  whose step the formatter is not given. `components/chartAxisFamily.test.ts` refuses a hand
+  rolled copy of either and a `formatAxisMoney` call without a step. Off the axes, money is `formatCurrency` or, in whole units,
   `formatMoneyWhole` (`useFormatMoneyWhole`), never `${curSym}${n}`: that put the sign after the
   symbol ("CHF -1,234") at 23 sites, and `lib/displayFamily.test.ts` refuses a new one. The value series is the one gradient area, and the crypto chart now draws
   its value the same way. Portfolio lines and benchmarks are coloured by identity (*Colour by

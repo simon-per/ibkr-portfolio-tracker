@@ -212,14 +212,13 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
   // One tick per month (or per day on a short span) — see `dateAxis`.
   const xAxis = useMemo(() => dateAxis(chartData.map((p) => String(p.date))), [chartData])
 
-  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym)
-
   // Calculate dynamic Y axis domain and ticks based on data and visible lines
   const yAxisConfig = useMemo(() => {
     if (!chartData || chartData.length === 0) {
       return {
         domain: [0, 50000] as [number, number],
-        ticks: [0, 10000, 20000, 30000, 40000, 50000]
+        ticks: [0, 10000, 20000, 30000, 40000, 50000],
+        step: 10000,
       }
     }
 
@@ -243,7 +242,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     if (allValues.length === 0) {
       return {
         domain: [0, 50000] as [number, number],
-        ticks: [0, 10000, 20000, 30000, 40000, 50000]
+        ticks: [0, 10000, 20000, 30000, 40000, 50000],
+        step: 10000,
       }
     }
 
@@ -270,6 +270,8 @@ export function PortfolioValueChart({ data, benchmarks = [], isLoading, isError 
     // which is how eight labels ended up 35px apart in a 280px-tall phone chart.
     return niceTicks(domainMin, domainMax, isCompact ? 4 : 8, floor)
   }, [chartData, series, visibleBenchmarks, availableBenchmarks, isCompact])
+
+  const formatYAxisTick = (value: number) => formatAxisMoney(value, curSym, yAxisConfig.step)
 
   if (isLoading) {
     return (

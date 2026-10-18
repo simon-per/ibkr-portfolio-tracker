@@ -16,6 +16,7 @@ import { useFormatCurrency, useFormatMoneyWhole } from '@/lib/CurrencyContext'
 import type { ContributionsResponse, ContributionMonthlyItem } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { formatAxisMoney } from '@/lib/utils'
+import { zeroBasedTicks } from '@/lib/niceTicks'
 import { useRememberedOpen } from '@/lib/storage'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
@@ -97,6 +98,7 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
   // failure this feature fears most — a transfer booked as a deposit, which inflates
   // money in with nothing beside it to disagree.
   const showDeployed = !hasMoneyIn
+  const yAxis = zeroBasedTicks(monthly.map(m => (hasMoneyIn ? m.money_in_eur : m.deployed_eur) ?? NaN), 4)
 
   // Collapsed summary: this month so far, the 12M average pace, and year-to-date money in
   // (the legacy deployment fallback keeps last month + the average).
@@ -199,7 +201,9 @@ export function MonthlyDeploymentCard({ data, isLoading, isError }: MonthlyDeplo
                     <YAxis
                       fontSize={12}
                       width="auto"
-                      tickFormatter={(value: number) => formatAxisMoney(value)}
+                      domain={yAxis.domain}
+                      ticks={yAxis.ticks}
+                      tickFormatter={(value: number) => formatAxisMoney(value, '', yAxis.step)}
                     />
                     <Tooltip content={<DeploymentTooltip hasMoneyIn={hasMoneyIn} />} />
                     {/* No legend: exactly one series is ever drawn, and a one-item legend

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { axisFloor, niceTicks } from './niceTicks'
+import { axisFloor, niceTicks, zeroBasedTicks } from './niceTicks'
 
 describe('niceTicks', () => {
   it('produces round steps and brackets the data', () => {
@@ -53,6 +53,13 @@ describe('niceTicks', () => {
     // 2999.9999999999995.
     const { ticks } = niceTicks(0, 3, 10)
     for (const t of ticks) expect(Number(t.toFixed(10))).toBe(t)
+  })
+
+  it('reports the step its ticks are spaced by, which the axis label needs', () => {
+    for (const [min, max, target] of [[0, 47_300, 8], [-4_200, 11_800, 6], [1_150, 1_310, 3], [500, 500, 5]]) {
+      const { ticks, step } = niceTicks(min, max, target)
+      for (let i = 1; i < ticks.length; i++) expect(ticks[i] - ticks[i - 1]).toBeCloseTo(step, 9)
+    }
   })
 
   it('refuses rather than throws on degenerate input', () => {
@@ -122,6 +129,23 @@ describe('niceTicks floor', () => {
     const explicitUndefined = niceTicks(-4_200, 11_800, 6, undefined)
     expect(explicitUndefined).toEqual(without)
     expect(without.ticks[0]).toBe(without.domain[0])
+  })
+})
+
+describe('zeroBasedTicks', () => {
+  it('runs through zero, which every bar is measured from', () => {
+    expect(zeroBasedTicks([1_150, 1_300], 4).domain[0]).toBe(0)
+    expect(zeroBasedTicks([-850, -120], 4).domain[1]).toBe(0)
+    const { domain, ticks } = zeroBasedTicks([-2_400, 9_700], 4)
+    expect(domain[0]).toBeLessThanOrEqual(-2_400)
+    expect(domain[1]).toBeGreaterThanOrEqual(9_700)
+    expect(ticks).toContain(0)
+  })
+
+  it('skips an unknown rather than letting NaN into the domain', () => {
+    const { domain } = zeroBasedTicks([NaN, 400, NaN], 4)
+    expect(domain).toEqual([0, 400])
+    expect(zeroBasedTicks([], 4).ticks.every(Number.isFinite)).toBe(true)
   })
 })
 

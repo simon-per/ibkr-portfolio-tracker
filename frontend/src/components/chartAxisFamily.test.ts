@@ -65,6 +65,35 @@ describe('compact money labels', () => {
     }
     expect(offenders).toEqual([])
   })
+
+  // Without the step the label kept one decimal whatever the ticks, so a 50-step axis
+  // printed "1.2k, 1.2k, 1.3k, 1.3k" (issue #67). The step comes from the axis's own
+  // ticks (`niceTicks`/`zeroBasedTicks`), so a call that passes one has chosen its ticks.
+  it('pass the axis step to formatAxisMoney', () => {
+    const sources = import.meta.glob('./**/*.tsx', { query: '?raw', import: 'default', eager: true })
+    const offenders: string[] = []
+    let calls = 0
+    for (const [path, src] of Object.entries(sources)) {
+      if (path.endsWith('.test.tsx')) continue
+      const text = src as string
+      for (const match of text.matchAll(/formatAxisMoney\(/g)) {
+        // The argument list up to its closing parenthesis, counting top-level commas.
+        let depth = 1
+        let commas = 0
+        let i = match.index! + match[0].length
+        for (; i < text.length && depth > 0; i++) {
+          const ch = text[i]
+          if (ch === '(' || ch === '[' || ch === '{') depth += 1
+          else if (ch === ')' || ch === ']' || ch === '}') depth -= 1
+          else if (ch === ',' && depth === 1) commas += 1
+        }
+        calls += 1
+        if (commas < 2) offenders.push(`${path}: ${text.slice(match.index!, i)}`)
+      }
+    }
+    expect(offenders).toEqual([])
+    expect(calls).toBeGreaterThanOrEqual(8)
+  })
 })
 
 /** Every chart draws one grid — see `CHART_GRID_PROPS`. */

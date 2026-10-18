@@ -18,6 +18,7 @@ import type { PerformanceAttributionResponse } from '@/lib/api'
 import { useIsCompact } from '@/lib/useMediaQuery'
 import { displayName } from '@/lib/securityName'
 import { ABSENT, formatAxisMoney } from '@/lib/utils'
+import { zeroBasedTicks } from '@/lib/niceTicks'
 import { useRememberedOpen } from '@/lib/storage'
 import { CHART_GRID_PROPS } from '@/lib/chartTooltip'
 
@@ -53,6 +54,7 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
     const negative = filtered.filter(a => a.pnl_contribution_eur < 0).sort((a, b) => b.pnl_contribution_eur - a.pnl_contribution_eur)
     return [...positive, ...negative]
   })()
+  const xAxis = zeroBasedTicks(sorted.map(a => a.pnl_contribution_eur), 4)
 
   // Height stays a number here, unlike every other chart: it is *data*-driven — one
   // row per security — so a CSS height would squash thirty bars into 240px. Only the
@@ -117,7 +119,9 @@ export function PerformanceAttribution({ data, isLoading, isError }: Performance
                 <CartesianGrid {...CHART_GRID_PROPS} vertical horizontal={false} />
                 <XAxis
                   type="number"
-                  tickFormatter={(value: number) => formatAxisMoney(value)}
+                  domain={xAxis.domain}
+                  ticks={xAxis.ticks}
+                  tickFormatter={(value: number) => formatAxisMoney(value, '', xAxis.step)}
                   fontSize={12}
                 />
                 <YAxis
