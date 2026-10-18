@@ -85,6 +85,7 @@ from app.services.coinstats_client import (
     CoinStatsQuotaError,
     is_configured,
 )
+from app.services.coinstats_parse import num, usd, usd_period
 from app.services.crypto_book import (
     CRYPTO_HISTORY_START,
     PRICE_PEG,
@@ -151,38 +152,8 @@ COINGECKO_NOT_CONFIGURED = (
 # ─────────────────────────────────────────────────────────────── parsing (pure)
 
 
-def _num(value: Any) -> Optional[float]:
-    """A finite float, or None. Booleans are not numbers; numeric strings are."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        try:
-            value = float(value)
-        except ValueError:
-            return None
-    if not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
-def _usd(block: Any) -> Optional[float]:
-    """The USD figure of a CoinStats money block (`{USD, BTC, ETH}`), or a bare number."""
-    if isinstance(block, dict):
-        return _num(block.get("USD"))
-    return _num(block)
-
-
-def _usd_period(block: Any, period: str) -> Optional[float]:
-    """`profit`, `averageBuy` and `profitPercent` are keyed by period (`allTime`,
-    `hour24`, `unrealized`, …), each holding a money block."""
-    if isinstance(block, dict):
-        return _usd(block.get(period))
-    return None
-
-
 def _int(value: Any) -> Optional[int]:
-    number = _num(value)
+    number = num(value)
     return int(number) if number is not None else None
 
 
@@ -233,7 +204,7 @@ def _skip_reason(item: Any) -> Optional[str]:
     if not isinstance(item, dict):
         return _MALFORMED
     coin = item.get("coin") if isinstance(item.get("coin"), dict) else {}
-    count = _num(item.get("count"))
+    count = num(item.get("count"))
     if not (coin.get("identifier") or coin.get("id")) or count is None or count < 0:
         return _MALFORMED
     if count == 0:
@@ -245,9 +216,9 @@ def _parse_coin(item: Dict[str, Any]) -> ParsedHolding:
     """One held coin; `_skip_reason(item)` is None."""
     coin = item.get("coin") if isinstance(item.get("coin"), dict) else {}
     coin_id = coin.get("identifier") or coin.get("id")
-    count = _num(item.get("count"))
+    count = num(item.get("count"))
 
-    price = _usd(item.get("price"))
+    price = usd(item.get("price"))
     if coin.get("isFake"):
         status = SPAM
     elif price is None or price <= 0:
@@ -266,13 +237,13 @@ def _parse_coin(item: Dict[str, Any]) -> ParsedHolding:
         count=count,
         price_usd=price if status == VALUED else None,
         value_usd=count * price if status == VALUED else None,
-        total_cost_usd=_usd(item.get("totalCost")),
-        avg_buy_usd=_usd_period(item.get("averageBuy"), "allTime"),
-        unrealized_pl_usd=_usd_period(profit, "unrealized"),
-        unrealized_pl_pct=_usd_period(item.get("profitPercent"), "unrealized"),
-        realized_pl_usd=_usd_period(profit, "realized"),
-        pl_24h_usd=_usd_period(profit, "hour24"),
-        change_24h_pct=_num(coin.get("priceChange24h")),
+        total_cost_usd=usd(item.get("totalCost")),
+        avg_buy_usd=usd_period(item.get("averageBuy"), "allTime"),
+        unrealized_pl_usd=usd_period(profit, "unrealized"),
+        unrealized_pl_pct=usd_period(item.get("profitPercent"), "unrealized"),
+        realized_pl_usd=usd_period(profit, "realized"),
+        pl_24h_usd=usd_period(profit, "hour24"),
+        change_24h_pct=num(coin.get("priceChange24h")),
     )
 
 
@@ -323,15 +294,15 @@ def parse_coins(items: Iterable[Any]) -> Tuple[List[ParsedHolding], int, int]:
 def parse_value(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
     """`/portfolio/value` → the snapshot's USD totals, as CoinStats computed them."""
     return {
-        "total_value_usd": _num(body.get("totalValue")),
-        "defi_value_usd": _num(body.get("defiValue")),
-        "total_cost_usd": _num(body.get("totalCost")),
-        "unrealized_pl_usd": _num(body.get("unrealizedProfitLoss")),
-        "unrealized_pl_pct": _num(body.get("unrealizedProfitLossPercent")),
-        "realized_pl_usd": _num(body.get("realizedProfitLoss")),
-        "realized_pl_pct": _num(body.get("realizedProfitLossPercent")),
-        "all_time_pl_usd": _num(body.get("allTimeProfitLoss")),
-        "all_time_pl_pct": _num(body.get("allTimeProfitLossPercent")),
+        "total_value_usd": num(body.get("totalValue")),
+        "defi_value_usd": num(body.get("defiValue")),
+        "total_cost_usd": num(body.get("totalCost")),
+        "unrealized_pl_usd": num(body.get("unrealizedProfitLoss")),
+        "unrealized_pl_pct": num(body.get("unrealizedProfitLossPercent")),
+        "realized_pl_usd": num(body.get("realizedProfitLoss")),
+        "realized_pl_pct": num(body.get("realizedProfitLossPercent")),
+        "all_time_pl_usd": num(body.get("allTimeProfitLoss")),
+        "all_time_pl_pct": num(body.get("allTimeProfitLossPercent")),
     }
 
 

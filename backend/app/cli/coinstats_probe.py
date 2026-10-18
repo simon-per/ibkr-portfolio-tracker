@@ -15,14 +15,17 @@ no symbol, no address** — this repository is public and its docs carry no figu
 nothing here should be pasteable into a file that could be committed. Credit balances are
 printed; they describe the API plan, not the portfolio.
 
+Every figure is read with the sync's own readers (`coinstats_parse`), so what it
+measures is what the sync would see.
+
 Read-only: it writes nothing and records no `sync_runs` row (like `fetch_etf_baskets`,
 the other read-only CLI). Cost: about 53 credits (value 10, coins 8 per page, chart 10,
 P&L history 25).
 """
 import asyncio
 import statistics
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import List
 
 from app.services.coinstats_client import (
     COINS_PAGE_LIMIT,
@@ -30,31 +33,7 @@ from app.services.coinstats_client import (
     CoinStatsError,
     is_configured,
 )
-
-
-def _shape(value: Any, depth: int = 0) -> str:
-    """Keys and types, recursively for dicts; never a value."""
-    if isinstance(value, dict):
-        if depth >= 2:
-            return "{...}"
-        inner = ", ".join(f"{k}: {_shape(v, depth + 1)}" for k, v in sorted(value.items()))
-        return "{" + inner + "}"
-    if isinstance(value, list):
-        return f"list[{len(value)}]"
-    return type(value).__name__
-
-
-def _to_datetime(ts: Any) -> Optional[datetime]:
-    """CoinStats timestamps arrive as seconds or milliseconds since the epoch, or ISO."""
-    if isinstance(ts, (int, float)):
-        seconds = ts / 1000 if ts > 10_000_000_000 else ts
-        return datetime.fromtimestamp(seconds, tz=timezone.utc)
-    if isinstance(ts, str):
-        try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    return None
+from app.services.coinstats_parse import num, shape, to_utc_datetime, usd
 
 
 def _spacing(dates: List[datetime]) -> str:
@@ -62,14 +41,6 @@ def _spacing(dates: List[datetime]) -> str:
         return "n/a"
     gaps = [(b - a).total_seconds() / 3600 for a, b in zip(dates, dates[1:])]
     return f"median {statistics.median(gaps):.1f} h, max {max(gaps):.1f} h"
-
-
-def _usd(block: Any) -> Optional[float]:
-    """The USD figure from a CoinStats `{USD, BTC, ETH}` block."""
-    if isinstance(block, dict):
-        value = block.get("USD")
-        return float(value) if isinstance(value, (int, float)) else None
-    return None
 
 
 async def probe() -> int:
@@ -85,36 +56,37 @@ async def probe() -> int:
                   f"remaining={before.get('remainingCredits')} of {before.get('totalCredits')}")
 
             value = await client.portfolio_value()
-            print(f"\n/portfolio/value shape: {_shape(value)}")
-            total = value.get("totalValue")
-            defi = value.get("defiValue")
-            print(f"  defiValue present: {defi is not None}; nonzero: {bool(defi)}")
+            print(f"\n/portfolio/value shape: {shape(value)}")
+            total = num(value.get("totalValue"))
+            defi = num(value.get("defiValue"))
+            print(f"  defiValue present: {value.get('defiValue') is not None}; "
+                  f"a number: {defi is not None}; nonzero: {bool(defi)}")
 
             coins = await client.portfolio_coins()
             pages = client.coin_pages
             print(f"\n/portfolio/coins: {len(coins)} holdings over {pages} page(s) of "
                   f"{COINS_PAGE_LIMIT}")
             if coins:
-                print(f"  item shape: {_shape(coins[0])}")
+                print(f"  item shape: {shape(coins[0])}")
             fake = sum(1 for c in coins if (c.get("coin") or {}).get("isFake"))
             fiat = sum(1 for c in coins if (c.get("coin") or {}).get("isFiat"))
-            no_price = sum(1 for c in coins if not _usd(c.get("price")))
+            no_price = sum(1 for c in coins if not usd(c.get("price")))
             print(f"  isFake: {fake}  isFiat: {fiat}  without a USD price: {no_price}")
 
             def worth(items):
-                return sum((c.get("count") or 0) * (_usd(c.get("price")) or 0) for c in items)
+                return sum((num(c.get("count")) or 0) * (usd(c.get("price")) or 0) for c in items)
 
             real = [c for c in coins if not (c.get("coin") or {}).get("isFake")]
-            if isinstance(total, (int, float)) and total:
+            if total:
                 print(f"  sum(count*price) / totalValue, all coins:   {worth(coins) / total:.4f}")
                 print(f"  sum(count*price) / totalValue, spam removed: {worth(real) / total:.4f}")
-                if isinstance(defi, (int, float)):
+                if defi is not None:
                     print(f"  (sum spam-free + defiValue) / totalValue:   "
                           f"{(worth(real) + defi) / total:.4f}")
 
             chart = await client.portfolio_chart()
             rows = [r for r in chart if isinstance(r, list) and r]
-            dates = sorted(d for d in (_to_datetime(r[0]) for r in rows) if d)
+            dates = sorted(d for d in (to_utc_datetime(r[0]) for r in rows) if d)
             print(f"\n/portfolio/chart?type=all: {len(chart)} rows; row length "
                   f"{sorted({len(r) for r in rows})}; timestamp type "
                   f"{type(rows[0][0]).__name__ if rows else 'n/a'}")
@@ -126,13 +98,13 @@ async def probe() -> int:
             print(f"\n/portfolio/pl/history: {len(points)} points; "
                   f"meta={ {k: v for k, v in (pl.get('meta') or {}).items()} }")
             if points:
-                print(f"  point shape: {_shape(points[0])}")
-                pl_dates = sorted(d for d in (_to_datetime(p.get('date')) for p in points) if d)
+                print(f"  point shape: {shape(points[0])}")
+                pl_dates = sorted(d for d in (to_utc_datetime(p.get('date')) for p in points) if d)
                 if pl_dates:
                     print(f"  span {pl_dates[0].date()} -> {pl_dates[-1].date()}; "
                           f"spacing {_spacing(pl_dates)}")
-                values = [p.get("profitLoss") for p in points
-                          if isinstance(p.get("profitLoss"), (int, float))]
+                values = [v for v in (num(p.get("profitLoss")) for p in points)
+                          if v is not None]
                 if len(values) > 2:
                     steps = [abs(b - a) for a, b in zip(values, values[1:])]
                     level = statistics.mean(abs(v) for v in values) or 1.0

@@ -29,6 +29,8 @@ CRYPTO_MODULES = {
     "app.cli.crypto_rebuild_holdings",
     "app.services.coingecko_client",
     "app.services.crypto_book",
+    # The CoinStats payload readers the sync, the rebuild and the probe share (#34).
+    "app.services.coinstats_parse",
 }
 
 # Non-crypto modules allowed to import a crypto module, each for a named reason.

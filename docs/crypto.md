@@ -20,6 +20,7 @@ profit and loss and was unreliable before 2026.
 | `app/services/coingecko_client.py` | the only CoinGecko caller: the Demo key header, pacing, typed errors |
 | `app/services/paced_http.py` | the paced GET both clients share (`PacedGet`): one request at a time, spaced from when the last *finished*, transport failures as the provider's transient error; each client keeps its own status mapping (2026-10-17, `tests/test_crypto_http.py`). Neutral, not a crypto module: the logo.dev client uses it too, and crypto imports it as shared infrastructure |
 | `app/services/crypto_book.py` | the formula, pure: holdings timeline, prices, the peg table, closes |
+| `app/services/coinstats_parse.py` | the CoinStats payload readers, pure and the only copy: `num` (finite float or None; a bool is not a number, a numeric string is), `usd`/`usd_period` (money blocks), `to_utc_datetime` (epoch s/ms or ISO → naive UTC, None rather than a raise) and `shape` (keys and types, never a value). The sync, the rebuild CLI and the probe all import it, so the probe reads a payload exactly as the sync does (issue #34, `tests/test_coinstats_parse_family.py` fails on a copy in any crypto module) |
 | `app/services/crypto_service.py` | `CryptoSyncService` (sync, price fill) and `CryptoService` (reads) |
 | `app/models/crypto.py` | `crypto_snapshots`, `crypto_holdings`, `crypto_daily` (migration `w6f3b0c7d1e2`); `crypto_daily_holdings`, `crypto_coin_prices`, `crypto_coin_ids` (migration `x7a3c9e1f5b2d`) |
 | `app/routers/crypto.py`, `app/schemas/crypto.py` | `/api/crypto/{portfolio,history,status,sync}` |
@@ -44,8 +45,8 @@ which non-crypto modules may reference crypto code (the models registry, `main.p
 job, and `routers/scheduler.py`, which names the crypto run types only to *exclude* them), and
 which shared modules crypto may import (settings, database, clock, redaction, gates, FX, app
 settings, sync history — no stock model, service or repository). A new module on either side
-fails until someone decides it belongs; the CoinGecko client, `crypto_book` and the rebuild CLI
-are on the list.
+fails until someone decides it belongs; the CoinGecko client, `crypto_book`, `coinstats_parse` and
+the rebuild CLI are on the list.
 
 ## The data sources
 
@@ -371,7 +372,9 @@ unpriced or fiat, legs marked fiat, and `--exclude COIN_ID` are never written.
 
 `python -m app.cli.coinstats_probe` asks each CoinStats question once (~53 credits) and prints
 structure only — key names, types, counts, date spans, ratios. Read-only, records no `sync_runs`
-row, ASCII-only output. **Never paste its output into a committed file.**
+row, ASCII-only output. **Never paste its output into a committed file.** It reads every figure
+with the sync's own readers (`coinstats_parse`): a probe that parsed differently would measure
+something the sync never sees, which is what its own copies had drifted into (#34).
 
 What it established on the first real run (2026-09-28):
 

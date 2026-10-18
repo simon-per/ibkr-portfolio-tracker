@@ -40,7 +40,7 @@ import math
 import sys
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy import delete, select
@@ -65,6 +65,7 @@ from app.services.coinstats_client import (
     CoinStatsError,
     is_configured,
 )
+from app.services.coinstats_parse import num, shape, to_utc_datetime
 from app.services.crypto_service import (
     REBUILD_SYNC_TYPE,
     CryptoSyncService,
@@ -105,41 +106,6 @@ class Leg:
 
 
 # ───────────────────────────────────────────────────────────── parsing (pure)
-
-
-def _num(value: Any) -> Optional[float]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        try:
-            value = float(value)
-        except ValueError:
-            return None
-    if not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
-def to_utc_datetime(stamp: Any) -> Optional[datetime]:
-    """Epoch seconds, epoch milliseconds or ISO → naive UTC."""
-    if isinstance(stamp, bool):
-        return None
-    if isinstance(stamp, (int, float)):
-        seconds = stamp / 1000 if stamp > 10_000_000_000 else stamp
-        try:
-            return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(tzinfo=None)
-        except (OverflowError, OSError, ValueError):
-            return None
-    if isinstance(stamp, str):
-        try:
-            parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-        return parsed
-    return None
 
 
 def page_items(body: Any) -> List[Any]:
@@ -203,7 +169,7 @@ def legs_of(item: Any, legs_mode: str = "transfers", fees: str = "ignore") -> Li
                 if not isinstance(leg, dict):
                     raise RebuildRefused("a transfer item is not an object")
                 coin_id, symbol, fiat = _coin_of(leg.get("coin") or leg.get("coinData"))
-                count = _num(leg.get("count"))
+                count = num(leg.get("count"))
                 if coin_id is None or count is None:
                     raise RebuildRefused(
                         f"a transfer item without a coin identifier or a count "
@@ -215,7 +181,7 @@ def legs_of(item: Any, legs_mode: str = "transfers", fees: str = "ignore") -> Li
         data = item.get("coinData")
         if data is not None:
             coin_id, symbol, fiat = _coin_of(data)
-            count = _num(data.get("count")) if isinstance(data, dict) else None
+            count = num(data.get("count")) if isinstance(data, dict) else None
             if coin_id is None or count is None:
                 raise RebuildRefused(
                     f"a `coinData` without an identifier or a count "
@@ -226,7 +192,7 @@ def legs_of(item: Any, legs_mode: str = "transfers", fees: str = "ignore") -> Li
     if fees == "subtract" and isinstance(item.get("fee"), dict):
         fee = item["fee"]
         coin_id, symbol, fiat = _coin_of(fee.get("coin"))
-        count = _num(fee.get("count"))
+        count = num(fee.get("count"))
         if coin_id and count:
             legs.append(Leg(at, coin_id, symbol, -abs(count), fiat))
     return legs
@@ -314,25 +280,10 @@ def check_rebuild(
 
 
 def _sign(value: Any) -> str:
-    number = _num(value)
+    number = num(value)
     if number is None:
         return "none"
     return "+" if number > 0 else "-" if number < 0 else "0"
-
-
-def _shape(value: Any, depth: int = 0) -> str:
-    """Keys and types, recursively for dicts; never a value."""
-    if isinstance(value, dict):
-        if depth >= 2:
-            return "{...}"
-        return "{" + ", ".join(
-            f"{k}: {_shape(v, depth + 1)}" for k, v in sorted(value.items())
-        ) + "}"
-    if isinstance(value, list):
-        return f"list[{len(value)}]" + (
-            f" of {_shape(value[0], depth + 1)}" if value and depth < 2 else ""
-        )
-    return type(value).__name__
 
 
 def describe_page(body: Any) -> List[str]:
@@ -340,7 +291,7 @@ def describe_page(body: Any) -> List[str]:
     lines = [f"page: {type(body).__name__}"
              + (f" with keys {sorted(body)}" if isinstance(body, dict) else "")]
     if isinstance(body, dict) and isinstance(body.get("meta"), dict):
-        lines.append(f"meta: {_shape(body['meta'])}")
+        lines.append(f"meta: {shape(body['meta'])}")
         lines.append("meta values (paging only): " + ", ".join(
             f"{k}={v}" for k, v in sorted(body["meta"].items())
             if isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -366,13 +317,13 @@ def describe_page(body: Any) -> List[str]:
         ]
         main = (data.get("identifier") if data else None)
         main_sum = sum(
-            _num(i.get("count")) or 0.0
+            num(i.get("count")) or 0.0
             for t in transfers if isinstance(t, dict)
             for i in (t.get("items") or []) if isinstance(i, dict)
             and _coin_of(i.get("coin"))[0] == main
         )
-        agrees = (main is not None and _num(data.get("count")) is not None
-                  and math.isclose(main_sum, _num(data.get("count")), rel_tol=1e-9,
+        agrees = (main is not None and num(data.get("count")) is not None
+                  and math.isclose(main_sum, num(data.get("count")), rel_tol=1e-9,
                                    abs_tol=1e-12))
         patterns[(
             f"type={item.get('transactionType')!s}",
@@ -385,7 +336,7 @@ def describe_page(body: Any) -> List[str]:
     if items and isinstance(items[0], dict):
         safe = {k: v for k, v in items[0].items()
                 if k not in ("hash", "note", "notes", "address", "from", "to")}
-        lines.append(f"first item shape (hash/note/address keys left out): {_shape(safe)}")
+        lines.append(f"first item shape (hash/note/address keys left out): {shape(safe)}")
     lines.append("patterns (type, sign of coinData.count, transfer types and signs, "
                  "whether the legs add up to coinData.count, fee):")
     lines.extend(f"  {n} x {p}" for p, n in patterns.most_common())
