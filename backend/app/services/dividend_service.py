@@ -27,13 +27,19 @@ from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.dividend_forecast_snapshot_repository import (
     DividendForecastSnapshotRepository,
 )
-from app.repositories.dividend_repository import DividendRepository
+from app.repositories.dividend_repository import (
+    IBKR_SOURCE,
+    YFINANCE_SOURCE,
+    DividendRepository,
+)
 from app.repositories.security_repository import held, lot_held_at
 from app.repositories.sync_run_repository import utc_iso
 from app.services.base_fx import BaseFx
+from app.services.cash_service import is_valuable
 from app.services.currency_service import CurrencyService
 from app.services.eur_conversion import to_eur_or_none
 from app.services.fx_policy import FX_MAX_CARRY_DAYS, newest_published_rate
+from app.services.percentages import share_pct
 from app.services.dividend_forecast_attribution import (
     PARTS as FORECAST_CHANGE_PARTS, Holding, attribute_change,
 )
@@ -153,7 +159,7 @@ def yahoo_dividend_rows(
             'ex_date': ex_date,
             'amount_per_share': Decimal(str(amount)) / scale,
             'currency': security.currency,
-            'source': 'yfinance_estimate',
+            'source': YFINANCE_SOURCE,
         })
     return rows, skipped
 
@@ -358,9 +364,9 @@ def _summary_source(payments, ibkr_from) -> str:
     it. Reporting a flat 'ibkr' claims real withholding for a period with none.
     """
     if not ibkr_from:
-        return "yfinance_estimate"
+        return YFINANCE_SOURCE
     sources = {p.source for p in payments}
-    return "ibkr" if sources <= {"ibkr"} else "mixed"
+    return IBKR_SOURCE if sources <= {IBKR_SOURCE} else "mixed"
 
 
 def _estimated_net_from_gross(
@@ -413,7 +419,7 @@ class IncomeSplit:
         return rate
 
     def split(self, p) -> Tuple[Decimal, Decimal]:
-        if p.source == "ibkr":
+        if p.source == IBKR_SOURCE:
             return DividendService._net_eur(p), abs(p.withholding_tax_eur or Decimal("0"))
         gross = (
             p.gross_amount_eur if p.gross_amount_eur is not None
@@ -695,7 +701,7 @@ class DividendService:
             try:
                 # Authoritative IBKR rows carry gross/withholding/net directly — never
                 # recompute them from per-share estimates.
-                if dp.source == "ibkr":
+                if dp.source == IBKR_SOURCE:
                     continue
 
                 shares = shares_held_at(taxlots_by_security.get(dp.security_id, []), dp.ex_date)
@@ -737,7 +743,7 @@ class DividendService:
                 dp.withholding_tax_eur = Decimal("0")
                 dp.net_amount_eur = gross_eur
                 if dp.source is None:
-                    dp.source = "yfinance_estimate"
+                    dp.source = YFINANCE_SOURCE
                 dp.last_computed = utcnow()
                 computed += 1
 
@@ -932,7 +938,7 @@ class DividendService:
                 "gross_amount_eur": gross_eur,
                 "withholding_tax_eur": wht_eur,
                 "net_amount_eur": net_eur,
-                "source": "ibkr",
+                "source": IBKR_SOURCE,
                 "per_share_native": per_share_native,
                 "dividend_kind": kind,
                 # Written on every upsert, NULL included, so re-ingesting a statement
@@ -1067,7 +1073,7 @@ class DividendService:
             select(DividendPayment)
             .where(and_(
                 DividendPayment.security_id == adj.security_id,
-                DividendPayment.source == "ibkr",
+                DividendPayment.source == IBKR_SOURCE,
                 DividendPayment.gross_amount_eur > 0,
                 on_date >= earliest,
                 on_date <= posted,
@@ -1365,7 +1371,7 @@ class DividendService:
         instead would hand a past day the amount and the withholding of a payment
         that had not been made.
         """
-        if p.source == "ibkr":
+        if p.source == IBKR_SOURCE:
             known = p.pay_date or p.ex_date
         else:
             known = p.ex_date or p.pay_date
@@ -1404,7 +1410,7 @@ class DividendService:
         needs the IBKR row that pairs with a windowed estimate — which can fall outside
         the window even when the estimate does not.
         """
-        ibkr_rows = [p for p in payments if p.source == "ibkr"]
+        ibkr_rows = [p for p in payments if p.source == IBKR_SOURCE]
         if boundary is None:
             # Derived from the rows given, which is right for every reader that splices
             # the FULL history. A caller that windows first must pass the whole-table
@@ -1417,7 +1423,7 @@ class DividendService:
 
         kept = [
             p for p in payments
-            if p.source == "ibkr" or (p.pay_date or p.ex_date) < boundary
+            if p.source == IBKR_SOURCE or (p.pay_date or p.ex_date) < boundary
         ]
 
         # The boundary alone leaks one dividend per security, because the two sources
@@ -1435,7 +1441,7 @@ class DividendService:
         # the reason they are a shared function live on `match_estimates_to_ibkr`.
         consumed = {
             id(est) for est, _ in match_estimates_to_ibkr(
-                [p for p in kept if p.source != "ibkr"], ibkr_rows
+                [p for p in kept if p.source != IBKR_SOURCE], ibkr_rows
             )
         }
 
@@ -1475,8 +1481,8 @@ class DividendService:
         two dates as IBKR booked them, so they need no window at all.
         """
         exact_pairs = exact_pairs or {}
-        estimates = [p for p in raw_payments if p.source != "ibkr"]
-        ibkr_rows = [p for p in raw_payments if p.source == "ibkr"]
+        estimates = [p for p in raw_payments if p.source != IBKR_SOURCE]
+        ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE]
         lags: Dict[int, List[int]] = defaultdict(list)
         if ibkr_rows:
             for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
@@ -1707,7 +1713,7 @@ class DividendService:
             return isin[:2].upper() if isin and len(isin) >= 2 else None
 
         for p in raw_payments:
-            if p.source != "ibkr":
+            if p.source != IBKR_SOURCE:
                 continue
             r = _rate(p.gross_amount_eur, p.withholding_tax_eur)
             if r is None:
@@ -1797,7 +1803,7 @@ class DividendService:
         # payment that has not happened is best sized at today's rate, and one rate
         # across the whole history means exchange-rate moves cannot make a level payer
         # look like a varying one (`dividend_forecast.is_steady`).
-        ibkr_rows = [p for p in raw_payments if p.source == "ibkr" and self._is_income(p)]
+        ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE and self._is_income(p)]
         fx_to_eur = await self._latest_fx_to_eur(
             {s.currency for s in securities.values() if s.currency}
             | {p.currency for p in ibkr_rows if p.currency},
@@ -1870,14 +1876,14 @@ class DividendService:
             scheduled = p.security_id in schedule_source
             if scheduled and p.amount_per_share is None:
                 continue    # IBKR's record of a Yahoo dividend: sized through its pair
-            if p.source == "ibkr" and not self._is_income(p):
+            if p.source == IBKR_SOURCE and not self._is_income(p):
                 continue
             on_date = p.pay_date or p.ex_date
             if on_date is None or on_date > as_of:
                 continue
 
             special = False
-            if p.source == "ibkr":
+            if p.source == IBKR_SOURCE:
                 # An IBKR-only security: its own pay-dated rows are the schedule.
                 gross_ps = _to_eur_ps(await _ibkr_per_share(p, None), p.currency)
                 special = p.dividend_kind in SPECIAL_DIVIDEND_KINDS
@@ -2090,7 +2096,7 @@ class DividendService:
         )
         return {
             "pct": round(float((covered_income / year_ago - 1) * 100), 2),
-            "covered_pct": round(float(covered_income / next_12m * 100), 1),
+            "covered_pct": share_pct(covered_income, next_12m, digits=1),
             "payers": len(covered),
         }
 
@@ -2468,7 +2474,7 @@ class DividendService:
             row["net"] += net
             row["gross"] += base_fx.convert(p.gross_amount_eur or Decimal("0"), on_date)
             row["wht"] += base_fx.convert(p.withholding_tax_eur or Decimal("0"), on_date)
-            row["sources"].add("ibkr" if p.source == "ibkr" else "estimate")
+            row["sources"].add(IBKR_SOURCE if p.source == IBKR_SOURCE else "estimate")
             monthly_actual[mk][symbol] += net
             total_net += net
 
@@ -2776,7 +2782,7 @@ class DividendService:
             ibkr_pays_by_sec: Dict[int, List[Tuple[date, int]]] = defaultdict(list)
             est_ex_by_sec: Dict[int, List[date]] = defaultdict(list)
             for p in raw_payments:
-                if p.source == "ibkr":
+                if p.source == IBKR_SOURCE:
                     ibkr_pays_by_sec[p.security_id].append(
                         (p.pay_date or p.ex_date, max_pay_lag_days(p.currency))
                     )
@@ -2797,7 +2803,7 @@ class DividendService:
                            for pay, window in ibkr_pays_by_sec.get(sid, ()))
 
             for p in raw_payments:
-                if p.source == "ibkr" or not self._is_income(p):
+                if p.source == IBKR_SOURCE or not self._is_income(p):
                     continue
                 ex = p.ex_date or p.pay_date
                 # Only rows the splice has superseded: before the era began an estimate
@@ -3233,7 +3239,7 @@ class DividendService:
         # because the gap between the two figures is only readable as appreciation
         # while both describe the same set of securities.
         forward_yield: Optional[Dict] = None
-        priced = {sid: mv for sid, mv in mv_by_sec.items() if mv > 0}
+        priced = {sid: mv for sid, mv in mv_by_sec.items() if is_valuable(mv)}
         fwd_mv = sum(priced.values(), Decimal("0"))
         fwd_income = sum(
             (next_12m_by_sec.get(sid, Decimal("0")) for sid in priced), Decimal("0")
@@ -3268,10 +3274,8 @@ class DividendService:
             )
             forward_yield = {
                 "annual_eur": round(float(fwd_income), 2),
-                "pct": round(float(fwd_income / fwd_mv * 100), 2),
-                "on_cost_pct": (
-                    round(float(fwd_income / fwd_cost * 100), 2) if fwd_cost > 0 else None
-                ),
+                "pct": share_pct(fwd_income, fwd_mv),
+                "on_cost_pct": share_pct(fwd_income, fwd_cost) if fwd_cost > 0 else None,
                 # An accumulating ETF counts in `priced_holdings` and not in `paying`,
                 # which is the right answer for it — so a low yield reads as "most of
                 # this book does not distribute" rather than as missing data.
@@ -3405,8 +3409,7 @@ class DividendService:
                 "forecast_payouts": row["forecast_payouts"],
                 "forecast_net_eur": round(float(row["forecast_net"]), 2),
                 "trailing_yield_pct": (
-                    round(float(ttm / mv * 100), 2)
-                    if mv and mv > 0 and ttm > 0 else None
+                    share_pct(ttm, mv) if is_valuable(mv) and ttm > 0 else None
                 ),
                 # The forward counterpart, and the audit of the portfolio-level figure:
                 # weight each of these by its share of market value and the result is
@@ -3420,8 +3423,8 @@ class DividendService:
                 # forecast of 0 next to a non-zero yield when its next payment falls
                 # past the window. Don't "fix" them into agreement.
                 "forward_yield_pct": (
-                    round(float(next_12m_by_sec.get(sid, Decimal("0")) / mv * 100), 2)
-                    if mv and mv > 0 and next_12m_by_sec.get(sid, Decimal("0")) > 0
+                    share_pct(next_12m_by_sec.get(sid, Decimal("0")), mv)
+                    if is_valuable(mv) and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
                 # The payer's own growth: its newest regular payment per share against
@@ -3462,12 +3465,12 @@ class DividendService:
                 # two figures with one name and two definitions is the failure this
                 # codebase names first.
                 "yield_on_cost_pct": (
-                    round(float(next_12m_by_sec.get(sid, Decimal("0")) / cost * 100), 2)
+                    share_pct(next_12m_by_sec.get(sid, Decimal("0")), cost)
                     if cost and cost > 0 and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
                 "share_pct": (
-                    round(float((row["net"] + row["forecast_net"]) / window_total * 100), 1)
+                    share_pct(row["net"] + row["forecast_net"], window_total, digits=1)
                     if window_total > 0 else None
                 ),
                 "next_pay_date": (

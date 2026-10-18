@@ -316,7 +316,9 @@ What the figures mean:
 - **P&L since 1 Jan 2026** (`pnl_since_start`) = Σ of `pnl(d)` after 1 January, each converted at
   its own date — exactly where the chart's ALL range ends.
 - **Weights are shares of the total**; the total is the priced coins, so they add to 100 by
-  construction, and unknown when the total is.
+  construction, and unknown when the total is. They and the total's `change_today_pct` round
+  through the stock side's `percentages.share_pct` (arithmetic only, so allowed across the
+  isolation line; GitHub #71).
 - **Beside the total, not in it** (*fiat: owner-accepted deviation*): exchange cash
   (`cash_value`, CoinStats' own figure for fiat balances) and DeFi (`defi_value`, as of the
   Berlin day's first sync — `/value` is asked once a day). Neither has a CoinGecko price or

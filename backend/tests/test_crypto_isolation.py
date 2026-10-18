@@ -59,6 +59,8 @@ ALLOWED_SHARED = {
     "app.services.fx_policy",
     "app.services.fx_preload",
     "app.services.native_amounts",
+    # The one share-of-a-whole rule (#71): arithmetic only, no data.
+    "app.services.percentages",
     # The router asks the scheduler for the crypto group's next run time.
     "app.services.scheduler_service",
 }

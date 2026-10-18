@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,6 +122,23 @@ class UninvestedCash:
         if self.balance is None or self.balance <= 0:
             return Decimal("0")
         return self.balance
+
+
+def is_valuable(market_value_eur: Union[Decimal, float, int, None]) -> bool:
+    """
+    Whether a `get_positions_breakdown()` row joins a "% of portfolio" denominator: the
+    holdings' half of the rule whose cash half is `UninvestedCash.in_book`.
+
+    `market_value_eur > 0` alone. `portfolio_service` zeroes the value for both ways it
+    fails to value a holding — no cached price, and no FX rate for the price's currency —
+    so the two-clause test the client needs (`isUnpriced` in
+    `frontend/src/lib/positionValuation.ts`, which sees the columns separately) does not
+    apply here. A missing value is not valuable either. Every reader that partitions the
+    breakdown — allocation, look-through, the forward yield — asks this, and counts what
+    it refuses as `unpriced_holdings`; `tests/test_valuability_family.py` fails one that
+    tests the value itself (GitHub #71).
+    """
+    return market_value_eur is not None and market_value_eur > 0
 
 
 class CashService:

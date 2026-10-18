@@ -44,7 +44,7 @@ from app.models.dividend_payment import DividendPayment
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.ticker_mapping import TickerMapping
-from app.repositories.dividend_repository import DividendRepository
+from app.repositories.dividend_repository import YFINANCE_SOURCE, DividendRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 from app.repositories.ticker_mapping_repository import TickerMappingRepository
@@ -117,7 +117,7 @@ async def cmd_list(db) -> int:
     # showing the two side by side puts that where the mapping is read.
     newest_estimate = dict((await db.execute(
         select(DividendPayment.security_id, func.max(DividendPayment.last_computed))
-        .where(DividendPayment.source == "yfinance_estimate")
+        .where(DividendPayment.source == YFINANCE_SOURCE)
         .group_by(DividendPayment.security_id)
     )).all())
 

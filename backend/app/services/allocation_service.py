@@ -13,7 +13,7 @@ import yfinance as yf
 
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.services.cash_service import CashService
+from app.services.cash_service import CashService, is_valuable
 from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
@@ -282,9 +282,9 @@ class AllocationService:
         not see it — summing to 100 is what being wrong looks like here.
 
         Same predicate and same exclude-and-count rule as `LookthroughService`'s
-        `_split_by_valuability` and the forward yield: `market_value_eur > 0`, which covers
-        both ways the backend fails to value a holding (no price, and no FX rate for the
-        price's currency) without the client-side two-clause form.
+        `_split_by_valuability` and the forward yield: `cash_service.is_valuable`, which
+        covers both ways the backend fails to value a holding (no price, and no FX rate for
+        the price's currency) without the client-side two-clause form.
 
         **Uninvested cash is a bucket in all three breakdowns**, not just the asset-type
         one. Putting it in one chart and not the others would give this endpoint two
@@ -305,8 +305,8 @@ class AllocationService:
         portfolio_service = PortfolioService(self.db)
         all_positions = await portfolio_service.get_positions_breakdown()
 
-        positions = [p for p in all_positions if p['market_value_eur'] > 0]
-        unvaluable = [p for p in all_positions if p['market_value_eur'] <= 0]
+        positions = [p for p in all_positions if is_valuable(p['market_value_eur'])]
+        unvaluable = [p for p in all_positions if not is_valuable(p['market_value_eur'])]
 
         # The read Look-through shares (`CashService.uninvested_cash`), so the two tabs
         # cannot disagree about what joins the denominator.

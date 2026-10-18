@@ -46,7 +46,7 @@ from app.database import AsyncSessionLocal
 from app.logging_setup import configure_logging
 from app.models.security import Security
 from app.cli.security_lookup import resolve_security
-from app.repositories.dividend_repository import DividendRepository
+from app.repositories.dividend_repository import YFINANCE_SOURCE, DividendRepository
 from app.repositories.sync_run_repository import SyncRunRepository
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ async def purge(
 
             estimates = await repo.get_estimates_for_security(security.id)
             all_rows = await repo.get_by_security(security.id)
-            kept = [p for p in all_rows if p.source != "yfinance_estimate"]
+            kept = [p for p in all_rows if p.source != YFINANCE_SOURCE]
 
             label = f"{security.symbol}@{security.exchange} (id={security.id})"
             if not estimates:

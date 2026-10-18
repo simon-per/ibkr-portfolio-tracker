@@ -26,6 +26,7 @@ from app.accounts import IBKR, tax_exempt_accounts
 from app.models.security import Security
 from app.models.trade import Trade, sale_sign
 from app.models.dividend_payment import DividendPayment
+from app.repositories.dividend_repository import IBKR_SOURCE, YFINANCE_SOURCE
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
@@ -120,7 +121,7 @@ class TaxService:
             gross = base_fx.convert(gross_e, on_date)
             wht = base_fx.convert(wht_e, on_date)
             net = base_fx.convert(net_e, on_date)
-            row_source = "ibkr" if dp.source == "ibkr" else "yfinance_estimate"
+            row_source = IBKR_SOURCE if dp.source == IBKR_SOURCE else YFINANCE_SOURCE
             # An estimate has no withholding on record: `compute_dividend_income` stores
             # 0 because yfinance carries none, so its 0 means "not known", never "nothing
             # withheld". It is absent here, and the withholding total is the RECORDED
@@ -130,7 +131,7 @@ class TaxService:
             # other reader uses (issue #61): its net is gross less an ASSUMED withholding,
             # and on a filing aid gross minus net would publish that assumption as a
             # withholding figure this report refuses to state (docs/tax.md).
-            estimated = row_source == "yfinance_estimate"
+            estimated = row_source == YFINANCE_SOURCE
             if estimated:
                 estimated_rows += 1
                 wht = Decimal("0")
@@ -489,12 +490,12 @@ class TaxService:
         # The label reflects what actually contributed inside the year window:
         # "mixed" is the boundary year, where estimates cover the weeks before the
         # cash-transaction ledger began mid-year.
-        if sources_seen == {"ibkr"}:
-            dividend_source = "ibkr"
-        elif "ibkr" in sources_seen:
+        if sources_seen == {IBKR_SOURCE}:
+            dividend_source = IBKR_SOURCE
+        elif IBKR_SOURCE in sources_seen:
             dividend_source = "mixed"
         else:
-            dividend_source = "yfinance_estimate"
+            dividend_source = YFINANCE_SOURCE
 
         return {
             "year": year,
@@ -602,7 +603,7 @@ class TaxService:
         w.writerow(["Symbol", "Description", "ISIN", "Pay date",
                     f"Gross ({cur})", f"Withholding ({cur})", f"Net ({cur})", "Estimate"])
         for d in report["dividend_income"]:
-            estimated = d["source"] == "yfinance_estimate"
+            estimated = d["source"] == YFINANCE_SOURCE
             w.writerow([d["symbol"], d["description"], d["isin"], d["pay_date"],
                         d["gross"], "" if d["withholding"] is None else d["withholding"],
                         d["net"], "est." if estimated else ""])

@@ -1484,7 +1484,8 @@ distinguishable from a measured one, and three surfaces could not do it.
   that did to the test suite — `test_an_unpriced_holding_does_not_break_the_percentages` pinned
   the sums for months and was structurally blind to it, because here summing to 100 is what
   being wrong looks like. When a completeness bug can satisfy the assertion you already have,
-  the assertion is measuring the wrong thing.
+  the assertion is measuring the wrong thing. The predicate is `cash_service.is_valuable`,
+  shared with look-through and the forward yield (GitHub #71).
 
 - **`PositionsList` shows a dash for value, gain and weight, and names the holdings above the
   table.** The last member found, and the one the family should have started with: this is the

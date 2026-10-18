@@ -51,7 +51,7 @@ from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
 from app.etf_sources import basket_proxy_for, source_for_fund_isin
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.services.percentages import share_pct
-from app.services.cash_service import CashService, UninvestedCash
+from app.services.cash_service import CashService, UninvestedCash, is_valuable
 from app.services.company_identity import IdentityMember
 from app.services.identity_service import group_companies
 from app.services.etf_basket_parsers import counts_as_invested
@@ -528,9 +528,8 @@ class LookthroughService:
         """
         Partition positions into ones that can be valued and ones that cannot.
 
-        The server-side test is `market_value_eur > 0` alone, exactly as
-        `dividend_service`'s forward-yield filter does it — cited rather than reinvented so
-        this does not become another copy of the same predicate. Both ways of failing to
+        The server-side test is `cash_service.is_valuable`, the one the forward yield and
+        allocation ask too, rather than a copy of it here. Both ways of failing to
         value a holding (no cached price, and no FX rate for its price currency) zero the
         value here, which is why the two-clause form `rebalance.ts` needs does not apply:
         the client cannot distinguish them, the server does not have to.
@@ -543,7 +542,7 @@ class LookthroughService:
         for pos in positions:
             mv = Decimal(str(pos.get("market_value_eur") or 0))
             enriched = dict(pos, _mv=mv)
-            (valuable if mv > 0 else unvaluable).append(enriched)
+            (valuable if is_valuable(mv) else unvaluable).append(enriched)
         return valuable, unvaluable
 
     @staticmethod

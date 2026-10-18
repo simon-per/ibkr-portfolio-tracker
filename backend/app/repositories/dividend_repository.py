@@ -6,6 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.dividend_payment import DividendPayment
 from app.models.security import Security
 
+#: The two values of `dividend_payments.source`. Every reader and writer names them
+#: through these: `tests/test_dividend_source_family.py` fails a bare literal elsewhere
+#: under `app/` (GitHub #71). Not `app.accounts.IBKR`, which spells the same word for
+#: another column: the account a lot belongs to, not where a dividend row came from.
+IBKR_SOURCE = "ibkr"
 YFINANCE_SOURCE = "yfinance_estimate"
 
 
@@ -118,7 +123,7 @@ class DividendRepository:
         """
         on_date = func.coalesce(DividendPayment.pay_date, DividendPayment.ex_date)
         result = await self.session.execute(
-            select(func.min(on_date)).where(DividendPayment.source == "ibkr")
+            select(func.min(on_date)).where(DividendPayment.source == IBKR_SOURCE)
         )
         return result.scalar()
 
@@ -135,7 +140,7 @@ class DividendRepository:
         on_date = func.coalesce(DividendPayment.pay_date, DividendPayment.ex_date)
         result = await self.session.execute(
             select(DividendPayment)
-            .where(DividendPayment.source == "ibkr")
+            .where(DividendPayment.source == IBKR_SOURCE)
             .order_by(on_date.asc())
         )
         return list(result.scalars().all())
@@ -193,7 +198,7 @@ class DividendRepository:
         The window uses `pay_date` falling back to `ex_date`, matching how TaxService
         buckets a payment into a year, so the flag can never disagree with the rows shown.
         """
-        stmt = select(func.count(DividendPayment.id)).where(DividendPayment.source == "ibkr")
+        stmt = select(func.count(DividendPayment.id)).where(DividendPayment.source == IBKR_SOURCE)
         on_date = func.coalesce(DividendPayment.pay_date, DividendPayment.ex_date)
         if start is not None:
             stmt = stmt.where(on_date >= start)

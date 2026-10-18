@@ -53,7 +53,7 @@ from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.lookthrough_service import LookthroughService
 from app.services.native_amounts import NativeToBase
 from app.services.realized_trades import realized_from_sell_trades
-from app.services.portfolio_service import PortfolioService
+from app.services.portfolio_service import PRICE_LOOKBACK_DAYS, PortfolioService
 from app.services.sector_taxonomy import UNKNOWN as SECTOR_UNKNOWN, normalise as normalise_sector
 
 logger = logging.getLogger(__name__)
@@ -565,12 +565,13 @@ class PerformanceAnalyticsService:
             g["weighted_days"] += r["cost_basis"] * (r["close_date"] - r["open_date"]).days
 
         # The post-sale prices in two queries for every sold security together, not two
-        # per security (GitHub #47): each one's newest close, then the closes in the 14
-        # days up to its last sale for those that have a later price.
+        # per security (GitHub #47): each one's newest close, then the closes in the
+        # PRICE_LOOKBACK_DAYS up to its last sale for those that have a later price —
+        # the valuation path's own bound on how stale a close may be (GitHub #71).
         price_repo = MarketPriceRepository(self.db)
         latest_by_sid = await price_repo.get_latest_prices(list(grouped))
         around_close_by_sid = await price_repo.get_price_ranges({
-            sid: (g["last_close"] - timedelta(days=14), g["last_close"])
+            sid: (g["last_close"] - timedelta(days=PRICE_LOOKBACK_DAYS), g["last_close"])
             for sid, g in grouped.items()
             if sid in latest_by_sid and latest_by_sid[sid].date > g["last_close"]
         })

@@ -45,6 +45,7 @@ from app.services.benchmark_service import (
 )
 from app.models.benchmark_price import BenchmarkPrice
 from app.models.dividend_payment import DividendPayment
+from app.repositories.dividend_repository import YFINANCE_SOURCE
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.sync_run import SyncRun
@@ -1024,7 +1025,7 @@ class SchedulerService:
             .where(
                 and_(
                     DividendPayment.security_id.in_([row[0] for row in held_rows]),
-                    DividendPayment.source == "yfinance_estimate",
+                    DividendPayment.source == YFINANCE_SOURCE,
                 )
             )
             .group_by(DividendPayment.security_id)

@@ -101,6 +101,7 @@ from app.services.currency_service import CurrencyService
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.fx_preload import PreloadedRates, preload_eur_rates
 from app.services.native_amounts import NativeToBase
+from app.services.percentages import share_pct
 
 logger = logging.getLogger(__name__)
 
@@ -1242,8 +1243,8 @@ class CryptoService:
                 "price": _per_unit(await project(price, day)),
                 "price_source": source,
                 "value": _amount(await project(value_usd, day)),
-                "weight_pct": _pct(
-                    value_usd / total_usd * 100 if value_usd is not None and total_usd else None
+                "weight_pct": (
+                    share_pct(value_usd, total_usd) if value_usd is not None else None
                 ),
                 "change_today_pct": _pct(change),
             })
@@ -1282,9 +1283,8 @@ class CryptoService:
             "defi_value": _amount(await project(snapshot.defi_value_usd, day)),
             "cash_value": _amount(await project(cash_usd, day)),
             "change_today": _amount(await project(change_today, day)),
-            "change_today_pct": _pct(
-                change_today / base_value * 100
-                if change_today is not None and base_value else None
+            "change_today_pct": (
+                share_pct(change_today, base_value) if change_today is not None else None
             ),
             "pnl_since_start": _amount(pnl_total),
             "basket_date": book.timeline.earliest.isoformat() if book.timeline else None,

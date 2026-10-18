@@ -105,7 +105,8 @@ for one: with the flag set and nothing projected, a window reaching forward is e
 empty ones, and the series would decay to 0.00 and draw a collapse that never happened. This service
 served that exact shape once, as `next_12m_vs_ttm_pct: -100.0`.
 
-`source` is the provenance of money **received** (`ibkr` / `mixed` / `yfinance_estimate`), and is
+`source` is the provenance of money **received** (`ibkr` / `mixed` / `yfinance_estimate`; the two
+row values are `dividend_repository.IBKR_SOURCE` / `YFINANCE_SOURCE`, never a literal), and is
 null for a window that is entirely projection — stamping the estimate's provenance there would claim
 income arrived from a guess. `mom_crosses_era` flags a comparison whose two windows jointly contain
 both sources; the UI no longer renders it (see *Data-quality notes are not rendered* below). The
@@ -937,6 +938,10 @@ Note the deliberate asymmetry on a row: `forward_yield_pct` always covers the ne
 `forecast_net_eur` beside it is bounded by the selected window, so a row can show **no forecast and a
 real yield** when its next payment falls past the year being viewed. Don't reconcile them — keying the
 yield to the window would make it read 5/12 of the truth when asked in August.
+Every yield and share on the breakdown — the card's two, each row's three yields and its
+`share_pct`, the book growth's `covered_pct` — rounds through `percentages.share_pct`, and
+the unpriced exclusion is `cash_service.is_valuable`, the predicate allocation and look-through
+ask (GitHub #71).
 Tests: the forward-yield block in `tests/test_dividend_breakdown.py`.
 
 ### Growth — MoM / YoY, and the five ways it lies
