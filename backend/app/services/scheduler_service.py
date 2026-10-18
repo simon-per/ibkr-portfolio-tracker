@@ -35,7 +35,8 @@ from app.services.flex_generation import (
 from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
 from app.services.sync_helper import ingest_flex_statement
-from app.repositories.security_repository import SecurityRepository
+from app.repositories.security_repository import SecurityRepository, held
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.repositories.sync_run_repository import SyncRunRepository, utc_iso
 from app.services.benchmark_service import (
     BENCHMARKS, BenchmarkService, last_finished_session,
@@ -110,6 +111,13 @@ STALE_PRICE_DAYS = 5
 #: total on day 59. A warning after that would be the wrong alarm: `unpriced_holdings`
 #: would fire first and send the reader hunting a broken ticker mapping.
 MANUAL_PRICE_STALE_DAYS = 40
+
+#: How many ECB publication days a held currency's (or the base currency's) rate may
+#: miss before `find_stale_exchange_rates` says so. Not one: the warm-up re-asks at
+#: every slot, so a provider blip the next slot heals is recorded in the run's
+#: `fx_result` (`frankfurter_failed`, `fallback_available`) and never warns. Three is
+#: three working days of every slot failing, well inside CARRY_FORWARD_MAX_AGE_DAYS.
+FX_STALE_PUBLICATION_DAYS = 3
 
 # How long IBKR may go without a *successful* sync before we say so.
 #
@@ -670,6 +678,38 @@ class SchedulerService:
                     "timestamp": utc_iso(utcnow())
                 }
 
+    async def find_stale_exchange_rates(
+        self, db: AsyncSession, as_of: Optional[date] = None
+    ) -> list:
+        """
+        Held currencies, and the selected base currency's `EUR -> base` pair, whose
+        newest published rate is FX_STALE_PUBLICATION_DAYS ECB publication days behind.
+
+        Database only, so it judges the outcome of every slot's warm-up rather than one
+        run's failure. A currency warmed only on spec (`WARM_CURRENCIES`, the market-cap
+        quote currencies) never warns: no position depends on it. Strings for
+        `warnings[]`, like the other `find_*` checks.
+        """
+        held_currencies = (await db.execute(
+            select(distinct(Security.currency)).where(held(), Security.currency.isnot(None))
+        )).scalars().all()
+        pairs = [(c, "EUR") for c in sorted(held_currencies) if c != "EUR"]
+        base = await AppSettingsRepository(db).get_stored_base_currency()
+        if base != "EUR":
+            pairs.append(("EUR", base))
+
+        as_of = as_of or date.today()
+        stale = await CurrencyService(db).stale_pairs(
+            pairs, FX_STALE_PUBLICATION_DAYS, as_of=as_of,
+        )
+        return [
+            f"{f}->{t}: no published exchange rate on record — both FX providers have "
+            f"failed for it" if newest is None else
+            f"{f}->{t}: no published exchange rate since {newest} "
+            f"({(as_of - newest).days} days) — positions run on a carried rate"
+            for (f, t), newest in stale
+        ]
+
     async def find_stale_priced_securities(
         self, db: AsyncSession, as_of: Optional[date] = None
     ) -> list:
@@ -1142,6 +1182,18 @@ class SchedulerService:
                     "quoted_currencies": sorted(quoted),
                     "timestamp": utc_iso(utcnow())
                 }
+                # Recorded, not warned: one run's failure is healed by the next slot's
+                # re-ask. The warning is the staleness those failures add up to.
+                for key in ("frankfurter_failed", "fallback_available"):
+                    if warmed.get(key) is not None:
+                        result[key] = warmed[key]
+                try:
+                    stale = await self.find_stale_exchange_rates(db)
+                except Exception as e:
+                    logger.warning(f"Could not check exchange-rate staleness: {e}")
+                    stale = []
+                if stale:
+                    result["warnings"] = stale
                 logger.info(f"Exchange rate sync completed: {total_rates} currencies updated")
                 return result
 
@@ -1501,7 +1553,7 @@ class SchedulerService:
         if ibkr_result.get("reason"):
             self.last_sync_result["reason"] = ibkr_result["reason"]
         _collect_warnings(
-            self.last_sync_result, ibkr_result, market_result, div_result,
+            self.last_sync_result, ibkr_result, fx_result, market_result, div_result,
             lookthrough_result, forecast_result,
         )
         await self._record_run(self.last_sync_result, started_at)
@@ -1553,7 +1605,8 @@ class SchedulerService:
             "status": market_result.get("status", "error"),
         }
         _collect_warnings(
-            self.last_sync_result, market_result, bench_result, forecast_result
+            self.last_sync_result, fx_result, market_result, bench_result,
+            forecast_result,
         )
         await self._record_run(self.last_sync_result, started_at)
 
@@ -1773,7 +1826,7 @@ class SchedulerService:
         }
         if ibkr_result.get("reason"):
             self.last_sync_result["reason"] = ibkr_result["reason"]
-        _collect_warnings(self.last_sync_result, ibkr_result)
+        _collect_warnings(self.last_sync_result, ibkr_result, fx_result)
         await self._record_run(self.last_sync_result, started_at)
 
         logger.info("=" * 80)

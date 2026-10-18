@@ -118,6 +118,22 @@ names a failed extra pair as `EUR->CHF`); `frankfurter_requests` in the summary 
 Before this, each slot sent one 7- or 30-day request per ECB currency plus two for CHF/USD, nearly
 all re-downloading stored rows. Tests: `tests/test_fx_incremental_warm.py`.
 
+**A failed warm-up is recorded at every run and warned about only once it is stale** (2026-10-18,
+issue #17). `sync_exchange_rates` keeps `frankfurter_failed` and `fallback_available` from
+`warm_rates`, so each job's `details.fx_result` names a currency neither provider served — but one
+run's failure is not a warning, because the next slot re-asks and usually heals it. The warning is
+`find_stale_exchange_rates`, run inside `sync_exchange_rates` and so collected by all three jobs: a
+currency with an **open lot** (`security_repository.held()`), plus the **stored** base currency's
+`EUR -> base` pair, whose newest *published* rate (`_published_span`: a fallback or carried row
+does not reset the age) has missed `FX_STALE_PUBLICATION_DAYS` (3) ECB publication days, counted
+with `_last_ecb_publication_day` so a weekend or TARGET holiday is not an outage
+(`CurrencyService.stale_pairs`). A pair Frankfurter cannot serve (TWD) is judged on its fallback
+rows, its only publication. Currencies warmed on spec — `WARM_CURRENCIES`, the market-cap quote
+currencies — never warn: no position depends on them. Database only, and quiet again by itself
+once rates return. Until then a held currency failing both providers was invisible until
+carry-forward refused and `reconcile_taxlots` started skipping lots. Tests:
+`tests/test_fx_staleness_warning.py`.
+
 **Frankfurter v2 is not used, and is not a drop-in.** Checked 2026-10-17: `/v2/rates` serves daily
 **history** for TWD, CNH, AED and many other non-ECB currencies (`/v2/currencies` lists ~160), so
 it could replace the latest-only fallback for `WARM_CURRENCIES`. But its default answer blends

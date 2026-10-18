@@ -785,7 +785,8 @@ children's warnings, which is also how `compute_dividend_income`'s FX-skipped li
 visible. Rule: a step that can stop early says so on its own result, and a job passes *every* step
 result to `_collect_warnings` — the silent shape is the default one, since a dict without the key
 looks finished. Tests: `tests/test_dividend_sync_rate_limit.py`, the "every Yahoo step reports" block
-in `tests/test_scheduler_jobs.py`.
+in `tests/test_scheduler_jobs.py`. `fx_result` was the step still missing until 2026-10-18 (issue
+#17; docs/pricing-and-fx.md, the warm-up).
 
 Related, same day: the Alpha Vantage fallback in `fetch_and_cache_prices` fired on `not prices_data`,
 and a 429 comes back from the Yahoo fetcher as the same empty list as "Yahoo has never heard of this

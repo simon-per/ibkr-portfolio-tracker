@@ -361,22 +361,52 @@ class CurrencyService:
         return day
 
     async def _published_span(
-        self, from_currency: str, to_currency: str, on_or_before: date
+        self, from_currency: str, to_currency: str, on_or_before: date,
+        fallback_counts: bool = False,
     ) -> Tuple[Optional[date], Optional[date]]:
         """
         The oldest and newest date holding a *published* rate for the pair. A stand-in
         (fallback or carried) does not count: it is what a later fetch must still replace.
+
+        ``fallback_counts`` is for a pair Frankfurter cannot serve, where the fallback's
+        latest-only row is the only publication there will ever be.
         """
+        criteria = [
+            ExchangeRate.from_currency == from_currency,
+            ExchangeRate.to_currency == to_currency,
+            ExchangeRate.date <= on_or_before,
+            ExchangeRate.source.notlike(f"%{self.CARRIED_SUFFIX}"),
+        ]
+        if not fallback_counts:
+            criteria.append(ExchangeRate.source != self.FALLBACK_SOURCE)
         oldest, newest = (await self.session.execute(
-            select(func.min(ExchangeRate.date), func.max(ExchangeRate.date)).where(
-                ExchangeRate.from_currency == from_currency,
-                ExchangeRate.to_currency == to_currency,
-                ExchangeRate.date <= on_or_before,
-                ExchangeRate.source != self.FALLBACK_SOURCE,
-                ExchangeRate.source.notlike(f"%{self.CARRIED_SUFFIX}"),
-            )
+            select(func.min(ExchangeRate.date), func.max(ExchangeRate.date)).where(*criteria)
         )).one()
         return oldest, newest
+
+    async def stale_pairs(
+        self, pairs: Iterable[Tuple[str, str]], publication_days: int,
+        as_of: Optional[date] = None,
+    ) -> List[Tuple[Tuple[str, str], Optional[date]]]:
+        """
+        The pairs whose newest published rate has missed ``publication_days`` ECB
+        publication days or more, with that date (None: no published rate at all).
+
+        Database only. Counted in publication days, so a weekend or a TARGET holiday is
+        not an outage, and a pair the next slot brings current never appears. A pair
+        Frankfurter cannot serve is judged on its fallback rows.
+        """
+        as_of = as_of or date.today()
+        cutoff = self._last_ecb_publication_day(as_of)
+        for _ in range(publication_days - 1):
+            cutoff = self._last_ecb_publication_day(cutoff - timedelta(days=1))
+        stale = []
+        for pair in pairs:
+            ecb = set(pair) <= self.SUPPORTED_CURRENCIES
+            _, newest = await self._published_span(*pair, as_of, fallback_counts=not ecb)
+            if newest is None or newest < cutoff:
+                stale.append((pair, newest))
+        return stale
 
     async def _refresh_ecb_pairs(
         self, pairs: List[Tuple[str, str]], target_date: date, days_back: int
