@@ -10,6 +10,11 @@ the Yahoo suffix narrows the ISIN's country: a bare ticker is a US listing — w
 an ADR's ISIN lives (TSM is US8740391003) — and "2330" is Taiwan's TSMC under `.TW` but also a
 Saudi line in one EM basket. Among what is left the heaviest match wins.
 
+A CN ISIN is the one country two of those markets share: an H-share lists in Hong Kong with a
+`CNE…` ISIN, as every mainland A-share does, and once the zeros are stripped Vanke's A-share
+"000002" is CLP's `0002.HK`. There the code's length as the issuer wrote it decides
+(`CN_CODE_DIGITS`): an A-share code is six digits, a Hong Kong code at most five.
+
 An unknown suffix resolves nothing: a guess here puts the wrong company's logo on a row.
 Pure database; touches no upstream.
 """
@@ -37,44 +42,68 @@ SUFFIX_COUNTRIES: Dict[str, Tuple[str, ...]] = {
     "AX": ("AU",),
 }
 
+#: Suffix -> the digit counts a constituent's code may have, zeros included, for a CN ISIN to be
+#: the listing there: mainland A-share codes are six digits, HKEX codes at most five.
+CN_CODE_DIGITS: Dict[str, range] = {"HK": range(1, 6), "SZ": range(6, 7), "SS": range(6, 7)}
+
+
+def _alnum(ticker: str) -> str:
+    return "".join(ch for ch in ticker.upper() if ch.isalnum())
+
 
 def normalise(ticker: str) -> str:
     """Upper case, separators dropped, a numeric code's leading zeros stripped."""
-    key = "".join(ch for ch in ticker.upper() if ch.isalnum())
+    key = _alnum(ticker)
     return key.lstrip("0") or key if key.isdigit() else key
+
+
+def _base_and_suffix(yahoo_ticker: str) -> Tuple[str, str]:
+    ticker = yahoo_ticker.strip().upper()
+    base, _, suffix = ticker.rpartition(".") if "." in ticker else (ticker, "", "")
+    return base, suffix
 
 
 def split_yahoo_ticker(yahoo_ticker: str) -> Tuple[str, Optional[Tuple[str, ...]]]:
     """`(normalised base, allowed ISIN countries)`; countries None for an unknown suffix."""
-    ticker = yahoo_ticker.strip().upper()
-    base, _, suffix = ticker.rpartition(".") if "." in ticker else (ticker, "", "")
+    base, suffix = _base_and_suffix(yahoo_ticker)
     return normalise(base), SUFFIX_COUNTRIES.get(suffix)
+
+
+def code_fits(suffix: str, isin: str, constituent_ticker: str) -> bool:
+    """False for a CN ISIN whose code, as the issuer wrote it, is not this market's shape."""
+    digits = CN_CODE_DIGITS.get(suffix)
+    if digits is None or not isin.startswith("CN"):
+        return True
+    code = _alnum(constituent_ticker)
+    return code.isdigit() and len(code) in digits
 
 
 async def isins_by_yahoo_ticker(db: AsyncSession, yahoo_tickers: Iterable[str]) -> Dict[str, str]:
     """Upper-cased Yahoo ticker -> the ISIN the stored baskets give it, where one does."""
-    wanted: Dict[str, Tuple[str, Tuple[str, ...]]] = {}
+    wanted: Dict[str, Tuple[str, Tuple[str, ...], str]] = {}
     for yahoo_ticker in yahoo_tickers:
         base, countries = split_yahoo_ticker(yahoo_ticker)
         if base and countries:
-            wanted[yahoo_ticker.strip().upper()] = (base, countries)
+            suffix = _base_and_suffix(yahoo_ticker)[1]
+            wanted[yahoo_ticker.strip().upper()] = (base, countries, suffix)
     if not wanted:
         return {}
-    bases = {base for base, _ in wanted.values()}
+    bases = {base for base, _, _ in wanted.values()}
     rows = (await db.execute(
         select(EtfHolding.constituent_ticker, EtfHolding.constituent_isin, EtfHolding.weight_pct)
         .where(EtfHolding.constituent_isin.is_not(None), EtfHolding.constituent_ticker.is_not(None))
     )).all()
-    # base -> [(weight, isin)], only for the bases asked about: ~10k rows, normalised in Python
-    # because the issuers' separators cannot be matched by one SQL expression.
+    # base -> [(weight, isin, ticker as written)], only for the bases asked about: ~10k rows,
+    # normalised in Python because the issuers' separators cannot be matched by one SQL expression.
     by_base: Dict[str, list] = {}
     for ticker, isin, weight in rows:
         key = normalise(ticker)
         if key in bases:
-            by_base.setdefault(key, []).append((weight or 0, isin.strip().upper()))
+            by_base.setdefault(key, []).append((weight or 0, isin.strip().upper(), ticker))
     out: Dict[str, str] = {}
-    for yahoo_ticker, (base, countries) in wanted.items():
-        matches = [(w, i) for w, i in by_base.get(base, []) if i[:2] in countries]
+    for yahoo_ticker, (base, countries, suffix) in wanted.items():
+        matches = [(w, i) for w, i, t in by_base.get(base, [])
+                   if i[:2] in countries and code_fits(suffix, i, t)]
         if matches:
             out[yahoo_ticker] = max(matches)[1]
     return out

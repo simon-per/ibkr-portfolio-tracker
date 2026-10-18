@@ -47,8 +47,8 @@ ROWS = [
 ]
 
 
-async def _seed(db):
-    for line, (fund, ticker, isin, weight) in enumerate(ROWS, start=1):
+async def _seed(db, rows=ROWS):
+    for line, (fund, ticker, isin, weight) in enumerate(rows, start=1):
         db.add(EtfHolding(fund_isin=fund, line_no=line, constituent_ticker=ticker,
                           constituent_isin=isin, constituent_name=ticker,
                           weight_pct=Decimal(weight)))
@@ -90,3 +90,37 @@ async def test_no_match_and_an_unknown_suffix_give_nothing(db):
     await _seed(db)
     # "2330" bare is a US listing: no US ISIN carries it, so nothing — never the Taiwanese.
     assert await isins_by_yahoo_ticker(db, ["2330", "ZZZZ", "SAP.XX"]) == {}
+
+
+# A CN ISIN lists in Hong Kong (an H-share) and on the mainland (an A-share); stripped of their
+# zeros the two markets' codes collide, so the code's length as written decides (issue #27).
+CLP = "HK0002007356"        # CLP Holdings, 0002.HK
+VANKE_A = "CNE0000000T2"    # China Vanke A, 000002.SZ
+CCB_H = "CNE1000002H1"      # China Construction Bank H, 0939.HK
+
+
+@pytest.mark.parametrize("rows, expected", [
+    # Both lines stored, the A-share heavier: CLP's own line, never Vanke's.
+    ([("IE00B4L5Y983", "2", CLP, "0.03"), ("IE00B4L5Y983", "000002", VANKE_A, "0.05")], CLP),
+    # Only the A-share stored (an EM basket): nothing, not Vanke.
+    ([("IE00B4L5Y983", "000002", VANKE_A, "0.05")], None),
+])
+@pytest.mark.asyncio
+async def test_a_hong_kong_code_never_resolves_to_a_shenzhen_a_share(db, rows, expected):
+    await _seed(db, rows)
+    assert (await isins_by_yahoo_ticker(db, ["0002.HK"])).get("0002.HK") == expected
+
+
+@pytest.mark.asyncio
+async def test_an_a_share_never_resolves_to_a_hong_kong_line(db):
+    await _seed(db, [
+        ("IE00B4L5Y983", "2", CLP, "0.30"),
+        ("IE00B4L5Y983", "000002", VANKE_A, "0.05"),
+        ("IE00B4L5Y983", "939", CCB_H, "0.90"),
+    ])
+    found = await isins_by_yahoo_ticker(db, ["000002.SZ", "000939.SZ", "0939.HK", "939.HK"])
+    assert found == {
+        "000002.SZ": VANKE_A,      # not CLP's heavier "2"
+        "0939.HK": CCB_H,          # an H-share's CN ISIN still resolves in Hong Kong
+        "939.HK": CCB_H,
+    }                              # 000939.SZ: only the H-share's "939" is stored, so nothing

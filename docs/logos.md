@@ -20,6 +20,17 @@ unknown suffix resolves nothing. `/api/watchlist` rows carry `security_id` (ours
 the logo pass targets those ISINs too, so a name added to the watchlist gets its logo at the next
 05:00 pass.
 
+**A CN ISIN is told apart by code length** (`CN_CODE_DIGITS`, issue #27). `.HK` admits CN ISINs
+because H-shares carry `CNE…` ones, but so does every mainland A-share, and with the zeros
+stripped Vanke's A-share "000002" is CLP's `0002.HK`; the heavier line won, and with only the
+A-share stored CLP's row got Vanke's logo. A CN ISIN now counts under `.HK` only when the
+issuer's code had at most five digits, and under `.SZ`/`.SS` only when it had six. That rule
+covers the mirror case too: a stored H-share "939" never resolves `000939.SZ`. It assumes the
+issuers write A-share codes with their six digits. An issuer that strips the zeros defeats it:
+under `.SZ`/`.SS` that line resolves nothing, but under `.HK` it reads as a Hong Kong code again.
+The other suffixes that share a country (`.TW`/`.TWO`,
+`.KS`/`.KQ`) draw on one national code list each, so stripping zeros cannot merge two companies.
+
 ## The privacy decision (owner, 2026-10-17)
 
 Until 2026-10-17 the avatar was a monogram by design: the CSP allows images from our own origin
