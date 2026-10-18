@@ -3,6 +3,7 @@ import {
   allTiles,
   buildExposureGroups,
   buildPartition,
+  cashRow,
   unattributedValue,
 } from './lookthroughChart'
 import { OTHER_SECTORS_LABEL } from './sectorColors'
@@ -39,6 +40,10 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
     as_of: '2026-08-16',
     base_currency: 'EUR',
     total_market_value_eur: 1000,
+    cash_eur: null,
+    cash_source: 'unknown',
+    total_value_eur: 1000,
+    cash_pct_of_portfolio: null,
     direct_equity_eur: 400,
     looked_through_equity_eur: 300,
     fund_residual_eur: 50,
@@ -86,7 +91,7 @@ describe('buildExposureGroups', () => {
     const leaves = allTiles(buildExposureGroups(data))
 
     expect(leaves.reduce((acc, t) => acc + t.value, 0)).toBeCloseTo(
-      data.total_market_value_eur,
+      data.total_value_eur,
       6,
     )
     expect(leaves.reduce((acc, t) => acc + t.pct, 0)).toBeCloseTo(100, 6)
@@ -96,7 +101,7 @@ describe('buildExposureGroups', () => {
     const data = response()
     const groups = buildExposureGroups(data)
     expect(groups.reduce((acc, g) => acc + g.value, 0)).toBeCloseTo(
-      data.total_market_value_eur,
+      data.total_value_eur,
       6,
     )
     for (const group of groups) {
@@ -174,6 +179,7 @@ describe('buildExposureGroups', () => {
     const groups = buildExposureGroups(
       response({
         total_market_value_eur: 650,
+        total_value_eur: 650,
         direct_equity_eur: 400,
         looked_through_equity_eur: 250,
         fund_residual_eur: 0,
@@ -227,7 +233,7 @@ describe('buildExposureGroups', () => {
   it('draws nothing at all when no position could be priced', () => {
     // The `concentrationPct` rule: an unpriced book has an unknown shape, and a chart of
     // confident rectangles is a worse answer than no chart.
-    expect(buildExposureGroups(response({ total_market_value_eur: 0 }))).toEqual([])
+    expect(buildExposureGroups(response({ total_market_value_eur: 0, total_value_eur: 0 }))).toEqual([])
   })
 })
 
@@ -237,7 +243,7 @@ describe('buildPartition', () => {
     const segments = buildPartition(data)
 
     expect(segments.reduce((acc, s) => acc + s.value, 0)).toBeCloseTo(
-      data.total_market_value_eur,
+      data.total_value_eur,
       6,
     )
     expect(segments.reduce((acc, s) => acc + s.pct, 0)).toBeCloseTo(100, 6)
@@ -254,6 +260,7 @@ describe('buildPartition', () => {
     const segments = buildPartition(
       response({
         total_market_value_eur: 700,
+        total_value_eur: 700,
         direct_equity_eur: 400,
         looked_through_equity_eur: 300,
         fund_residual_eur: 0,
@@ -265,6 +272,64 @@ describe('buildPartition', () => {
   })
 
   it('draws nothing when no position could be priced', () => {
-    expect(buildPartition(response({ total_market_value_eur: 0 }))).toEqual([])
+    expect(buildPartition(response({ total_market_value_eur: 0, total_value_eur: 0 }))).toEqual([])
+  })
+})
+
+describe('uninvested cash (GitHub #28)', () => {
+  // Holdings 1000 plus cash 100: the whole book is 1100, and every share is of that.
+  const withCash = () =>
+    response({
+      cash_eur: 100,
+      cash_source: 'derived',
+      total_value_eur: 1100,
+      cash_pct_of_portfolio: 9.09,
+      companies: [
+        company({ company_key: 'K1', value_eur: 400, pct_of_portfolio: 36.36 }),
+        company({
+          company_key: 'K2',
+          name: 'FUND ONLY',
+          sector: 'Financials',
+          value_eur: 250,
+          pct_of_portfolio: 22.73,
+          direct_value_eur: 0,
+          via_funds_value_eur: 250,
+        }),
+      ],
+    })
+
+  it('is a treemap block, so the tiles cover the whole book and not only the holdings', () => {
+    const data = withCash()
+    const groups = buildExposureGroups(data)
+    const cash = groups.find((g) => g.paintKey === 'cash')
+
+    expect(cash?.name).toBe('Cash')
+    expect(cash?.value).toBe(100)
+    // The server's share, so the tile and the table's Cash row are one figure.
+    expect(cash?.pct).toBe(9.09)
+    expect(cash?.children[0].companyKey).toBeNull()
+    expect(allTiles(groups).reduce((acc, t) => acc + t.value, 0)).toBeCloseTo(1100, 6)
+    expect(allTiles(groups).reduce((acc, t) => acc + t.pct, 0)).toBeCloseTo(100, 1)
+  })
+
+  it('is a composition-bar segment, so the bar and the table share one whole', () => {
+    const data = withCash()
+    const segments = buildPartition(data)
+
+    expect(segments.map((s) => s.key)).toEqual(['direct', 'via_funds', 'unattributed', 'cash'])
+    expect(segments.reduce((acc, s) => acc + s.value, 0)).toBeCloseTo(1100, 6)
+    expect(segments.reduce((acc, s) => acc + s.pct, 0)).toBeCloseTo(100, 1)
+    expect(cashRow(data)).toEqual({ value: 100, pct: 9.09 })
+  })
+
+  it.each([
+    ['negative', -50, 'derived' as const],
+    ['unknown', null, 'unknown' as const],
+  ])('draws no Cash anywhere when the balance is %s', (_label, cash_eur, cash_source) => {
+    // The server leaves `cash_pct_of_portfolio` null for both; the client re-decides nothing.
+    const data = response({ cash_eur, cash_source, cash_pct_of_portfolio: null })
+    expect(cashRow(data)).toBeNull()
+    expect(buildExposureGroups(data).some((g) => g.paintKey === 'cash')).toBe(false)
+    expect(buildPartition(data).some((s) => s.key === 'cash')).toBe(false)
   })
 })

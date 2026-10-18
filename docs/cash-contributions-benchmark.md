@@ -382,6 +382,12 @@ load. The budget and the gate rules are in docs/flex-and-sync.md (*Sync schedule
   route. A **negative** balance is excluded from both the slice and the denominator and
   reported as `cash_eur`, because a pie cannot draw a negative slice and renormalising
   around one inflates every other holding.
+- **Look-through's company shares** (since 2026-10-18, GitHub #28), as a `Cash` row closing the
+  company table and a `Cash` block in both charts, over `total_value_eur`. Same read as
+  Allocation — `CashService.uninvested_cash`, positive balance only, unknown adds nothing —
+  pinned by `tests/test_uninvested_cash_family.py`. `coverage_pct` and the uncovered-funds
+  warning stay shares of the holdings: they measure basket coverage, and cash has no basket
+  ([lookthrough.md](lookthrough.md)).
 - **Not returns** — XIRR, Modified Dietz, the monthly heatmap, drawdown, Sharpe, beta.
   See the top of this section: they were already right, and changing what counts as a
   flow is a separate decision.

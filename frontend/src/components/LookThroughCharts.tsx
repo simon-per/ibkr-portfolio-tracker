@@ -5,8 +5,8 @@ import type {
   ExposureTile,
   PartitionSegment,
 } from '@/lib/lookthroughChart'
-import { sectorPaint } from '@/lib/sectorColors'
-import { NEUTRAL_PAINT, chartPaint, type ChartPaint } from '@/lib/chartPaint'
+import { STRUCTURAL_PAINT, sectorPaint } from '@/lib/sectorColors'
+import { HATCH_STRIPE_PX, chartPaint, paintBackground, type ChartPaint } from '@/lib/chartPaint'
 import { ConstituentAvatar } from './ConstituentAvatar'
 
 /**
@@ -28,25 +28,39 @@ import { ConstituentAvatar } from './ConstituentAvatar'
 
 /**
  * The composition bar's paint, by segment identity. Held directly and through funds take the
- * palette's first two slots (an all-pairs-safe pair); the unattributed remainder is the same
- * strong neutral as the treemap's 'Not attributed' block, because it is the same value.
+ * palette's first two slots (an all-pairs-safe pair); the unattributed remainder and cash take
+ * the treemap's own paints for those blocks, because they are the same values.
  */
 const SEGMENT_PAINT: Record<PartitionSegment['key'], ChartPaint> = {
   direct: chartPaint(0),
   via_funds: chartPaint(1),
-  unattributed: NEUTRAL_PAINT.strong,
+  unattributed: STRUCTURAL_PAINT.unattributed,
+  cash: STRUCTURAL_PAINT.cash,
 }
 
 /** Chart height as a module constant so the chart and its empty state cannot drift apart. */
 const TREEMAP_HEIGHT = 'h-[280px] sm:h-[440px]'
 
-function Swatch({ fill }: { fill: string }) {
+function Swatch({ paint }: { paint: ChartPaint }) {
   return (
     <span
       aria-hidden="true"
       className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]"
-      style={{ backgroundColor: fill }}
+      style={paintBackground(paint)}
     />
+  )
+}
+
+/** The SVG pattern a hatched paint fills with; one per tile, so its id is the tile's. */
+function HatchPattern({ id, paint }: { id: string; paint: ChartPaint }) {
+  const w = HATCH_STRIPE_PX
+  return (
+    <defs>
+      <pattern id={id} width={2 * w} height={2 * w} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width={2 * w} height={2 * w} fill={paint.fill} />
+        <rect width={w} height={2 * w} fill={paint.hatch} />
+      </pattern>
+    </defs>
   )
 }
 
@@ -85,7 +99,7 @@ export function CompositionBar({
             className="flex min-w-0 items-center justify-center"
             style={{
               width: `${segment.pct}%`,
-              backgroundColor: SEGMENT_PAINT[segment.key].fill,
+              ...paintBackground(SEGMENT_PAINT[segment.key]),
             }}
             title={`${segment.label}: ${formatCurrency(segment.value)} (${segment.pct.toFixed(1)}%)`}
           >
@@ -103,11 +117,11 @@ export function CompositionBar({
         ))}
       </div>
 
-      <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
+      <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
         {segments.map((segment) => (
           <div key={segment.key} className="min-w-0 text-xs">
             <dt className="flex items-center gap-1.5 font-medium">
-              <Swatch fill={SEGMENT_PAINT[segment.key].fill} />
+              <Swatch paint={SEGMENT_PAINT[segment.key]} />
               <span className="truncate">{segment.label}</span>
               <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
                 {segment.pct.toFixed(1)}%
@@ -168,7 +182,10 @@ function TileContent(props: TileContentProps) {
 
   // Recharts hands a leaf its ancestor as `root`, which is how a company knows which sector
   // painted it — the leaf carries no paint key of its own, because the group owns that decision.
-  const paint = sectorPaint(props.root?.paintKey ?? '')
+  const paintKey = props.root?.paintKey ?? ''
+  const paint = sectorPaint(paintKey)
+  // Only a structural group is hatched, and each has exactly one tile, so its key is unique.
+  const hatchId = paint.hatch ? `lookthrough-hatch-${paintKey}` : null
   // Two thresholds rather than one: a tile can be wide enough for a percentage and still too
   // short for a name above it, and a clipped name is worse than no name.
   const showPct = width > 44 && height > 22
@@ -176,12 +193,13 @@ function TileContent(props: TileContentProps) {
 
   return (
     <g>
+      {hatchId && <HatchPattern id={hatchId} paint={paint} />}
       <rect
         x={x}
         y={y}
         width={width}
         height={height}
-        fill={paint.fill}
+        fill={hatchId ? `url(#${hatchId})` : paint.fill}
         stroke="hsl(var(--card))"
         strokeWidth={2}
         rx={4}
@@ -302,7 +320,7 @@ export function ExposureTreemap({
       <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
         {groups.map((group) => (
           <li key={group.key} className="flex items-center gap-1.5">
-            <Swatch fill={sectorPaint(group.paintKey).fill} />
+            <Swatch paint={sectorPaint(group.paintKey)} />
             <span className="text-foreground/90">{group.name}</span>
             <span className="tabular-nums text-muted-foreground">{group.pct.toFixed(1)}%</span>
           </li>

@@ -26,7 +26,8 @@ renormalisation alike.
 number:**
 
 - *No renormalisation onto covered value.* Every percentage is a share of the whole
-  portfolio. With six funds undecomposed, roughly a fifth of the book has no company
+  portfolio — holdings plus positive uninvested cash, the denominator Allocation and
+  Positions use (`CashService.uninvested_cash`, GitHub #28). With six funds undecomposed, roughly a fifth of the book has no company
   attribution, so every row is *understated* — and rescaling to make the visible rows sum
   to 100 would convert a stated gap into a confident lie. `coverage_pct` is the figure to
   read first, and the frontend renders it above the table rather than in a footnote.
@@ -51,6 +52,7 @@ from app.etf_sources import ISSUER_OVERRIDES, basket_proxy_for, source_for_fund_
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.isin_identity_repository import IsinIdentityRepository
 from app.services.percentages import share_pct
+from app.services.cash_service import CashService, UninvestedCash
 from app.services.company_identity import IdentityMember, company_groups
 from app.services.etf_basket_parsers import counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
@@ -162,6 +164,12 @@ class LookthroughService:
         positions = await portfolio_service.get_positions_breakdown()
         base_currency = await portfolio_service.get_base_currency()
 
+        # The same read Allocation makes, through the same helper, so "% of portfolio" means
+        # one denominator on both tabs (GitHub #28).
+        cash = await CashService(self.db).uninvested_cash(
+            await portfolio_service._load_base_fx(), today
+        )
+
         warnings: List[str] = []
         valuable, unvaluable = self._split_by_valuability(positions)
 
@@ -169,9 +177,14 @@ class LookthroughService:
             # An empty portfolio is not a failure and must not claim to be one — the same
             # distinction PortfolioSummaryCards draws between "no data yet" and "the
             # backend didn't answer".
-            return self._empty(today, base_currency, unvaluable, warnings)
+            return self._empty(today, base_currency, unvaluable, warnings, cash)
 
+        # `total` is the INVESTED book: the partition closes on it and coverage is measured
+        # against it. `book` adds positive uninvested cash and is what every company's
+        # "% of portfolio" is a share of. Unknown or negative cash adds nothing, so `book`
+        # falls back to `total`, exactly as Allocation's denominator does.
         total = sum((p["_mv"] for p in valuable), Decimal("0"))
+        book = total + cash.in_book
 
         direct_positions = [p for p in valuable if not is_known_etf_isin(p["isin"])]
         fund_positions = [p for p in valuable if is_known_etf_isin(p["isin"])]
@@ -377,6 +390,7 @@ class LookthroughService:
             "as_of": today.isoformat(),
             "base_currency": base_currency,
             "total_market_value_eur": self._q(total),
+            **self._cash_fields(cash, total),
             "direct_equity_eur": self._q(direct_equity),
             "looked_through_equity_eur": self._q(looked_through),
             # The residual is published as the ROUNDED remainder, not as its own rounded sum.
@@ -392,8 +406,12 @@ class LookthroughService:
             "uncovered_fund_eur": self._q(uncovered_total),
             # A share of nothing is not 0%: with no valued book there is no coverage to
             # state, and a 0.0 reads as "nothing could be looked through" (`share_pct`).
+            #
+            # Of the INVESTED book, not of `book`: it measures how much of the holdings the
+            # baskets attribute. Cash has no basket to be missing, so counting it in the
+            # denominator would read a sale as falling coverage.
             "coverage_pct": share_pct(covered, total),
-            "companies": [self._present_row(r, total) for r in shown],
+            "companies": [self._present_row(r, book) for r in shown],
             "companies_shown": len(shown),
             "company_count_total": len(rows_out),
             "shown_value_eur": self._q(shown_value),
@@ -779,7 +797,13 @@ class LookthroughService:
         total: Decimal,
         unvaluable: List[Dict],
     ) -> List[str]:
-        """State the gaps in prose, so a partial answer cannot read as a complete one."""
+        """
+        State the gaps in prose, so a partial answer cannot read as a complete one.
+
+        The uncovered share is of the invested value (`total`), the base `coverage_pct`
+        uses, so the two figures describing basket coverage stay on one base: it is a
+        statement about the funds, not a portfolio weight.
+        """
         out: List[str] = []
         if uncovered > 0 and total > 0:
             missing = [
@@ -791,7 +815,7 @@ class LookthroughService:
                 )
             )
             out.append(
-                f"{share_pct(uncovered, total):.1f}% of the portfolio sits in funds whose "
+                f"{share_pct(uncovered, total):.1f}% of the invested value sits in funds whose "
                 f"constituents are not known ({names}), so every company figure below "
                 f"excludes whatever those funds hold."
             )
@@ -837,13 +861,33 @@ class LookthroughService:
         )
 
 
-    def _present_row(self, row: Dict, total: Decimal) -> Dict:
+    @classmethod
+    def _cash_fields(cls, cash: UninvestedCash, total: Decimal) -> Dict:
+        """
+        Uninvested cash, and the denominator it makes with the invested `total`.
+
+        `cash_pct_of_portfolio` is the Cash row's share, and None exactly when there is no
+        Cash row — an unknown balance (no stand-in) or a negative one (no negative slice).
+        The client reads the row's presence off it rather than re-deciding the sign rule.
+        """
+        book = total + cash.in_book
+        return {
+            "cash_eur": cls._q(cash.balance) if cash.balance is not None else None,
+            "cash_source": cash.source,
+            "total_value_eur": cls._q(book),
+            "cash_pct_of_portfolio": (
+                share_pct(cash.in_book, book) if cash.in_book > 0 else None
+            ),
+        }
+
+    def _present_row(self, row: Dict, book: Decimal) -> Dict:
         return {
             **row,
             "value_eur": self._q(row["value_eur"]),
             "direct_value_eur": self._q(row["direct_value_eur"]),
             "via_funds_value_eur": self._q(row["via_funds_value_eur"]),
-            "pct_of_portfolio": share_pct(row["value_eur"], total),
+            # Of holdings plus positive cash — the base Allocation and Positions divide by.
+            "pct_of_portfolio": share_pct(row["value_eur"], book),
             "via_funds": [
                 {
                     "symbol": f["symbol"],
@@ -868,12 +912,19 @@ class LookthroughService:
         }
 
     def _empty(
-        self, today: date, base_currency: str, unvaluable: List[Dict], warnings: List[str]
+        self,
+        today: date,
+        base_currency: str,
+        unvaluable: List[Dict],
+        warnings: List[str],
+        cash: UninvestedCash,
     ) -> Dict:
         return {
             "as_of": today.isoformat(),
             "base_currency": base_currency,
             "total_market_value_eur": 0.0,
+            # A book of cash alone is still a book; its Cash row is all of it.
+            **self._cash_fields(cash, Decimal("0")),
             "direct_equity_eur": 0.0,
             "looked_through_equity_eur": 0.0,
             "fund_residual_eur": 0.0,

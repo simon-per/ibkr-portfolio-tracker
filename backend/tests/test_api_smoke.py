@@ -845,6 +845,19 @@ def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
     assert lt["total_market_value_eur"] == summary["total_market_value_eur"]
     assert lt["base_currency"] == summary["base_currency"] == "CHF"
 
+    # Cash survives the response_model (GitHub #28): the whole-book denominator and the
+    # Cash row's share. A dropped `total_value_eur` would leave the client dividing by
+    # holdings again with nothing saying so.
+    for key in ("cash_eur", "cash_source", "total_value_eur", "cash_pct_of_portfolio"):
+        assert key in lt, f"response_model dropped {key}"
+    assert lt["cash_source"] == summary["cash_source"]
+    # One read with Allocation's, so the two tabs agree about the book they divide.
+    allocation = client.get("/api/allocation/portfolio").json()
+    assert lt["total_value_eur"] == pytest.approx(allocation["total_value_eur"])
+    assert lt["total_value_eur"] == pytest.approx(
+        lt["total_market_value_eur"] + max(lt["cash_eur"] or 0.0, 0.0)
+    )
+
     # Truncation reports the tail as a value rather than only a count.
     small = client.get("/api/portfolio/lookthrough?limit=1").json()
     assert small["companies_shown"] == 1

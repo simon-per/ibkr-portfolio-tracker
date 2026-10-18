@@ -60,10 +60,11 @@ class LookthroughCompanyRow(BaseModel):
     pct_of_portfolio: float = Field(
         ...,
         description=(
-            "Share of the WHOLE portfolio, never of the decomposed subset. Renormalising "
-            "onto covered value would inflate every row by the undecomposed share and is "
-            "the same refusal rebalance.ts makes about targets — read `coverage_pct` "
-            "beside this."
+            "Share of the WHOLE portfolio (`total_value_eur`: holdings plus positive "
+            "uninvested cash, the base Allocation and Positions use), never of the "
+            "decomposed subset. Renormalising onto covered value would inflate every row by "
+            "the undecomposed share and is the same refusal rebalance.ts makes about "
+            "targets — read `coverage_pct` beside this."
         ),
     )
     direct_value_eur: float = Field(
@@ -204,7 +205,8 @@ class LookthroughResponse(BaseModel):
 
     That identity is the one assertion catching a dropped holding, a double-counted
     constituent and an accidental renormalisation at once, and it is pinned over buckets
-    discovered from this response rather than a hardcoded list.
+    discovered from this response rather than a hardcoded list. Uninvested cash sits outside
+    it, beside it: `total_market_value_eur` + positive `cash_eur` == `total_value_eur`.
     """
     as_of: str
     base_currency: str = "EUR"
@@ -212,7 +214,35 @@ class LookthroughResponse(BaseModel):
         ...,
         description=(
             "Σ over valuable positions — the same figure /api/portfolio/summary reports, "
-            "from the same helper, so the two cannot disagree."
+            "from the same helper, so the two cannot disagree. Holdings only: the "
+            "partition below closes on it."
+        ),
+    )
+    cash_eur: Optional[float] = Field(
+        ...,
+        description=(
+            "Uninvested cash, signed, from `CashService.uninvested_cash` — the read the "
+            "Allocation tab shares. `null` when `cash_source` is 'unknown' (no ledger "
+            "row to derive from; never a stand-in 0.00). A negative balance is reported "
+            "here and joins no denominator."
+        ),
+    )
+    cash_source: str = Field(
+        ..., description="derived | ibkr | mixed | unknown, as on /api/portfolio/summary"
+    )
+    total_value_eur: float = Field(
+        ...,
+        description=(
+            "`total_market_value_eur` plus positive cash: the base every "
+            "`pct_of_portfolio` and `cash_pct_of_portfolio` is a share of. Equals "
+            "`total_market_value_eur` when cash is unknown or negative."
+        ),
+    )
+    cash_pct_of_portfolio: Optional[float] = Field(
+        ...,
+        description=(
+            "The Cash row's share of `total_value_eur`. `null` exactly when there is no "
+            "Cash row: cash unknown, zero or negative."
         ),
     )
 
@@ -243,7 +273,8 @@ class LookthroughResponse(BaseModel):
     coverage_pct: Optional[float] = Field(
         ...,
         description=(
-            "Share of the portfolio actually attributed to companies. THE figure to read "
+            "Share of the INVESTED portfolio (`total_market_value_eur`, cash excluded: it "
+            "has no basket to be missing) actually attributed to companies. THE figure to read "
             "before any row: at 79%, 'Nvidia 6.1%' omits the Nvidia inside every "
             "undecomposed fund, and a plausible understatement invites no doubt. `null` "
             "when nothing in the book could be valued — a share of nothing is not 0%."

@@ -91,11 +91,43 @@ Positions come from `PortfolioService.get_positions_breakdown()` and nowhere els
 base-currency projection is inherited and the total **cannot disagree with
 `/api/portfolio/summary`** — pinned in `test_api_smoke.py`.
 
+### Uninvested cash: in the denominator, beside the partition
+
+Since 2026-10-18 (GitHub #28, owner decision) every `pct_of_portfolio` is a share of
+**`total_value_eur` = valued holdings + positive uninvested cash**, the base Allocation and
+Positions already divided by. Before, Look-through divided by holdings alone, so with cash held
+every company read ~cash/holdings higher here than the same money on the other two tabs, under
+the same "% of portfolio" header.
+
+- **One read, shared with Allocation**: `CashService.uninvested_cash(base_fx, today)` returns the
+  signed balance (None when `cash_source` is `unknown`) and `in_book`, the positive part that
+  joins a denominator. `tests/test_uninvested_cash_family.py` fails either service if it calls
+  `cash_source`/`balance_events`/`balance_as_of` itself, and any other service that picks up
+  `balance_as_of` without being named there with its reason.
+- **Unknown or negative cash keeps the holdings-only base**, as on Allocation: no stand-in for
+  an unknown, no negative slice for a margin debit. `cash_eur` still reports the balance
+  (`null` when unknown); `cash_pct_of_portfolio` is `null` exactly when there is no Cash row, and
+  the client reads the row's presence off it rather than re-deciding the sign rule.
+- **Cash sits beside the partition, never inside it.** The five buckets still close on
+  `total_market_value_eur` (holdings); `total_market_value_eur` + `in_book` = `total_value_eur`.
+  `cash_eur` and `total_value_eur` are classified non-bucket in `test_lookthrough_partition.py`.
+- **Which figures kept the invested base, and why.** `coverage_pct` and the uncovered-funds
+  sentence in `warnings[]` ("x% of the invested value sits in funds…") are shares of
+  `total_market_value_eur`: they measure how much of the *holdings* the baskets attribute. Cash
+  has no basket to be missing, so a sale would otherwise read as falling coverage. So does the
+  Unidentified card's tone (`unresolvedTone` against the holdings) — it qualifies identity
+  coverage, not a weight. Everything that is a weight moved: the company rows, the insight strip
+  (which only sums rows), both charts and the Cash row itself.
+- **On screen** the Cash row is the company table's footer row (Allocation's label and swatch),
+  under the Exposure and % of portfolio columns and outside the ranking. Both charts carry a
+  `Cash` block, so their areas are shares of the same whole. A negative balance raises
+  Allocation's alert, same wording; an unknown one shows nothing new.
+
 ### Nine rules, each a wrong number the other way
 
 - **Nothing is renormalised onto covered value.** Every percentage is a share of the *whole*
-  portfolio, so while some funds have no basket every row is an understatement — and rescaling
-  would convert a stated gap into a confident lie. Same refusal `rebalance.ts` makes about
+  portfolio (holdings + positive cash, above), so while some funds have no basket every row is
+  an understatement — and rescaling would convert a stated gap into a confident lie. Same refusal `rebalance.ts` makes about
   targets. `coverage_pct` leads the panel on the KPI row, **outside any collapsible**, the
   `MonthlyReturnsHeatmap` lesson — and since 2026-09-08 the itemised `warnings[]` sit *inside*
   the collapsed *Fund coverage* card at the bottom, at the owner's request: ten near-identical
@@ -153,9 +185,10 @@ roughly-comparable slices, which describes neither.
 
 Four rules, three of which restate rules this feature already has:
 
-- **The treemap's tiles cover the whole portfolio**, so the truncated tail and the unattributed
-  remainder are tiles. Drawing only the companies would fill the card with the ~79% that could
-  be attributed and render it as the whole — the renormalisation refused everywhere else, this
+- **The treemap's tiles cover the whole portfolio**, so the truncated tail, the unattributed
+  remainder and (when there is a Cash row) uninvested cash are tiles; the composition bar gains a
+  `Cash` segment on the same condition. Both divide by `total_value_eur`. Drawing only the
+  companies would fill the card with the ~79% that could be attributed and render it as the whole — the renormalisation refused everywhere else, this
   time in a form where nobody would notice, since a treemap has no axis to disagree with.
 - **The composition bar folds `fund_residual` + `nested_fund` + `uncovered_fund` into one
   segment.** They are one thing to a reader — value no company row accounts for — and three
@@ -237,16 +270,22 @@ inks and the neutrals. It used its own `--viz-sector-*` set before. Four details
   foreground. `chartPaint.test.ts` reads `index.css` and holds every pair at 3:1 in both themes,
   so a palette re-step that makes a tile label unreadable fails there. The percentage line is
   drawn at full ink — an opacity would quietly spend that margin.
-- **Three neutrals, three meanings.** `Not attributed` is the strong one (the caveat, and the
-  same value as the composition bar's `Not attributed` segment, so the same fill), the
-  truncated tail the faint one, the sector fold the palette's Other — mixed from
-  `--chart-other` with `color-mix` toward the ink and the card. `sectorPaint` consults the
-  structural record before the sectors: it once looked only at sectors, so all three fell
-  through to one grey and the legend showed three identical swatches with nothing failing.
+- **Three neutrals, four meanings.** `Cash` is the strong one, because it is the Allocation
+  tab's Cash paint (`bucketPaint(CASH_BUCKET)`) and colour follows the entity across tabs.
+  `Not attributed` (the caveat) is therefore `HATCHED_NEUTRAL` — the strong neutral striped with
+  the faint one, still the heaviest grey, and the same paint on the composition bar's
+  `Not attributed` segment because it is the same value. The truncated tail is the faint one,
+  the sector fold the palette's Other — mixed from `--chart-other` with `color-mix` toward the
+  ink and the card. A fourth *solid* grey was not available: none fits between the three while
+  keeping the ΔE separation and the 1.3:1 card contrast `chartPaint.test.ts` measures. Both
+  stripes carry the same measured ink, so a label clears 3:1 on either. `sectorPaint` consults
+  the structural record before the sectors: it once looked only at sectors, so all three fell
+  through to one grey and the legend showed three identical swatches with nothing failing; the
+  distinct-fill test counts the hatch as part of the fill.
 
 The composition bar takes slots one and two (held directly, through funds — an all-pairs-safe
-pair) and the strong neutral. Its blue is the treemap's Technology blue; harmless, because the bar
-carries no sector and the treemap no holding mode.
+pair), the hatched neutral and, with a Cash row, the strong one. Its blue is the treemap's
+Technology blue; harmless, because the bar carries no sector and the treemap no holding mode.
 
 **Only depth 2 is drawn, and that is a finding rather than a shortcut.** The first version
 painted a frame and a header strip at depth 1 to delimit each sector; neither ever appeared,

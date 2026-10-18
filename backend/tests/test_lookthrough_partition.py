@@ -31,6 +31,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 import app.models  # noqa: F401 - register every mapper
 from app.models.app_settings import AppSetting
+from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
 from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.isin_identity import IsinIdentity
 from app.models.market_price import MarketPrice
@@ -42,6 +43,7 @@ from app.schemas.lookthrough import (
     LookthroughFundCoverage,
     LookthroughResponse,
 )
+from app.services.allocation_service import AllocationService
 from app.services.lookthrough_service import LookthroughService
 
 TODAY = date.today()
@@ -73,6 +75,8 @@ NON_BUCKET_EUR_FIELDS = (
     "total_market_value_eur",   # the sum the buckets must equal
     "shown_value_eur",          # a slice of the company rows, not of the portfolio
     "other_companies_eur",      # the rest of that slice
+    "cash_eur",                 # uninvested; beside the partition, never inside it
+    "total_value_eur",          # the partition's total plus positive cash
 )
 
 
@@ -448,6 +452,146 @@ async def test_percentages_are_of_the_whole_portfolio_not_of_the_covered_subset(
 
     assert _row(report, "Alphabet")["pct_of_portfolio"] == pytest.approx(44.23, abs=0.01)
     assert _row(report, "Alphabet")["pct_of_portfolio"] != pytest.approx(65.71, abs=0.01)
+
+
+# ------------------------------------------------------------------- uninvested cash (#28)
+
+def _cash_flow(amount: str) -> CashFlow:
+    """A deposit (or, negative, a withdrawal): with no trades, the derived balance."""
+    return CashFlow(
+        ib_key=f"flow-{amount}", flow_date=TODAY - timedelta(days=30),
+        flow_type=DEPOSIT_WITHDRAW, amount=Decimal(amount), currency="EUR",
+        amount_eur=Decimal(amount),
+    )
+
+
+async def _nine_hundred_book(session: AsyncSession, cash: Optional[str]) -> None:
+    """Holdings 900 — AAA worth 90, BBB worth 810 — plus `cash` if given."""
+    session.add_all([
+        _security(1, "AAA", "US0000000AA1", "NASDAQ"),
+        _security(2, "BBB", "US0000000BB2", "NASDAQ"),
+        _lot(1, "9", "80"), _lot(2, "81", "700"),
+        _price(1, "10"), _price(2, "10"),
+    ])
+    if cash is not None:
+        session.add(_cash_flow(cash))
+    await session.flush()
+
+
+def _allocation_weight(allocation: dict, symbol: str) -> float:
+    """The holding's weight in Allocation's sector breakdown (one bucket per stock)."""
+    for bucket in allocation["sector_allocation"].values():
+        for pos in bucket["positions"]:
+            if pos["symbol"] == symbol:
+                return pos["weight"]
+    raise AssertionError(f"{symbol} is in no sector bucket")
+
+
+@pytest.mark.asyncio
+async def test_cash_joins_the_denominator_the_way_allocation_reads_it(session):
+    """
+    The issue's acceptance case: holdings 900 and cash 100, so a company worth 90 is 9.0%
+    of the portfolio on Look-through — the share Allocation gives the same money — and the
+    Cash row is 10.0%. Before #28 Look-through divided by holdings alone and said 10.0%.
+    """
+    await _nine_hundred_book(session, cash="100")
+    report = await LookthroughService(session).get_lookthrough()
+    allocation = await AllocationService(session).get_portfolio_allocation()
+
+    assert report["total_market_value_eur"] == 900.0
+    assert report["cash_eur"] == 100.0
+    assert report["cash_source"] == "derived"
+    assert report["total_value_eur"] == 1000.0
+    assert _row(report, "AAA")["pct_of_portfolio"] == pytest.approx(9.0)
+    assert report["cash_pct_of_portfolio"] == pytest.approx(10.0)
+
+    assert _allocation_weight(allocation, "AAA") == pytest.approx(9.0)
+    assert allocation["sector_allocation"]["Cash"]["percentage"] == pytest.approx(10.0)
+    assert report["total_value_eur"] == allocation["total_value_eur"]
+    # The partition still closes on the invested book, and cash sits beside it.
+    assert _bucket_sum(report) == Decimal("900.00")
+
+
+@pytest.mark.asyncio
+async def test_a_negative_cash_balance_keeps_the_holdings_only_base(session):
+    """A margin debit is reported, joins no denominator, and draws no Cash row."""
+    await _nine_hundred_book(session, cash="-100")
+    report = await LookthroughService(session).get_lookthrough()
+    allocation = await AllocationService(session).get_portfolio_allocation()
+
+    assert report["cash_eur"] == -100.0
+    assert report["total_value_eur"] == 900.0
+    assert report["cash_pct_of_portfolio"] is None
+    assert _row(report, "AAA")["pct_of_portfolio"] == pytest.approx(10.0)
+    assert _allocation_weight(allocation, "AAA") == pytest.approx(10.0)
+    assert "Cash" not in allocation["sector_allocation"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_cash_keeps_the_holdings_only_base_and_is_not_a_zero(session):
+    """No ledger row: the balance is absent (never 0.00) and the base is the holdings."""
+    await _nine_hundred_book(session, cash=None)
+    report = await LookthroughService(session).get_lookthrough()
+
+    assert report["cash_source"] == "unknown"
+    assert report["cash_eur"] is None
+    assert report["total_value_eur"] == 900.0
+    assert report["cash_pct_of_portfolio"] is None
+    assert _row(report, "AAA")["pct_of_portfolio"] == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_coverage_stays_a_share_of_the_invested_book_when_cash_is_held(session):
+    """
+    Coverage measures the baskets, and cash has no basket to be missing: a sale must not
+    read as falling coverage. Same for the uncovered-funds warning, which shares its base.
+    """
+    await _standard_book(session)
+    session.add(_cash_flow("800"))
+    await session.flush()
+    report = await LookthroughService(session).get_lookthrough()
+
+    assert report["total_value_eur"] == 6000.0
+    assert report["coverage_pct"] == pytest.approx(67.31, abs=0.01)    # 3500 / 5200
+    # 1500 / 5200, not 1500 / 6000 (25.0%).
+    assert any(w.startswith("28.9% of the invested value") for w in report["warnings"])
+    # The companies, on the other hand, are shares of the whole book: 2300 / 6000.
+    assert _row(report, "Alphabet")["pct_of_portfolio"] == pytest.approx(38.33, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_the_rows_the_tail_and_cash_add_up_to_the_whole_book(session):
+    """
+    Nothing renormalised: companies + the truncated tail + what no company accounts for
+    + cash is `total_value_eur`, which is what lets the treemap draw the whole book.
+    """
+    await _standard_book(session)
+    session.add(_cash_flow("800"))
+    await session.flush()
+    report = await LookthroughService(session).get_lookthrough(limit=1)
+
+    parts = (
+        sum((Decimal(str(r["value_eur"])) for r in report["companies"]), Decimal("0"))
+        + Decimal(str(report["other_companies_eur"]))
+        + Decimal(str(report["fund_residual_eur"]))
+        + Decimal(str(report["nested_fund_eur"]))
+        + Decimal(str(report["uncovered_fund_eur"]))
+        + Decimal(str(report["cash_eur"]))
+    )
+    assert parts == Decimal(str(report["total_value_eur"]))
+
+
+@pytest.mark.asyncio
+async def test_a_book_of_cash_alone_is_all_cash_row(session):
+    session.add(_cash_flow("250"))
+    await session.flush()
+    report = await LookthroughService(session).get_lookthrough()
+
+    assert report["companies"] == []
+    assert report["total_market_value_eur"] == 0.0
+    assert report["total_value_eur"] == 250.0
+    assert report["cash_pct_of_portfolio"] == pytest.approx(100.0)
+    assert report["coverage_pct"] is None
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 import { displayName } from './securityName'
 import type { LookthroughResponse } from './api'
-import { UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
+import { CASH_BUCKET, UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
 
 /**
  * What the two look-through charts draw, as pure data.
@@ -16,6 +16,10 @@ import { UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
  * a tile. It is a large grey block, and that is the honest picture rather than a defect in
  * it: `coverage_pct` says the same thing in a number nobody looks at twice.
  *
+ * **The whole is `total_value_eur`: holdings plus positive uninvested cash**, the base the
+ * table's `pct_of_portfolio`, Allocation and Positions all divide by (GitHub #28). So cash is a
+ * block in both charts too, or the areas would quietly be shares of the holdings again.
+ *
  * The treemap groups companies by **sector**; it used to colour them by whether they were held
  * directly, through funds, or both. That was dropped at the owner's request — the table's
  * Direct / Via funds columns and the drill-down still carry it, and only the treemap's one
@@ -23,7 +27,7 @@ import { UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
  */
 
 /**
- * A leaf: one company, or one of the two structural blocks. The structural ones are not
+ * A leaf: one company, or one of the structural blocks. The structural ones are not
  * companies — they carry value that belongs on the chart so the areas mean what the header
  * says — and they open no drill-down.
  */
@@ -45,7 +49,7 @@ export interface ExposureTile {
   size: number
 }
 
-/** A depth-1 node: a sector, or one of the two structural blocks. */
+/** A depth-1 node: a sector, or one of the structural blocks. */
 export interface ExposureGroup {
   key: string
   name: string
@@ -63,11 +67,22 @@ export function unattributedValue(data: LookthroughResponse): number {
 }
 
 /**
- * The treemap, as sector groups of company tiles plus the two structural blocks.
+ * The Cash row, or null when there is none. Its presence is the server's
+ * `cash_pct_of_portfolio`, never a sign test here: unknown and negative balances are decided
+ * once, in `CashService.uninvested_cash`.
+ */
+export function cashRow(data: LookthroughResponse): { value: number; pct: number } | null {
+  if (data.cash_pct_of_portfolio == null || data.cash_eur == null) return null
+  return { value: data.cash_eur, pct: data.cash_pct_of_portfolio }
+}
+
+/**
+ * The treemap, as sector groups of company tiles plus the structural blocks: the truncated tail,
+ * the unattributed remainder and uninvested cash.
  *
- * **The structural blocks are top-level groups, not tiles inside a sector**, because neither is a
- * sector: the truncated tail spans all of them and the unattributed remainder belongs to no
- * company at all. Keeping them at depth 1 is also what preserves the partition — every leaf still
+ * **The structural blocks are top-level groups, not tiles inside a sector**, because none is a
+ * sector: the truncated tail spans all of them, and the unattributed remainder and cash belong to
+ * no company at all. Keeping them at depth 1 is also what preserves the partition — every leaf still
  * sums to the whole portfolio, which is the one property worth testing.
  *
  * Returns empty when there is no total to take a share of. That is the `concentrationPct` refusal
@@ -75,7 +90,7 @@ export function unattributedValue(data: LookthroughResponse): number {
  * rectangles out of nothing.
  */
 export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] {
-  const total = data.total_market_value_eur
+  const total = data.total_value_eur
   if (!(total > 0)) return []
 
   const pctOf = (value: number) => (value / total) * 100
@@ -118,16 +133,17 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
   }
 
   const structural = (
-    key: 'other_companies' | 'unattributed',
+    key: 'other_companies' | 'unattributed' | 'cash',
     name: string,
     value: number,
+    pct: number = pctOf(value),
   ): void => {
     if (!(value > 0)) return
     const tile: ExposureTile = {
       key: `tile:${key}`,
       name,
       value,
-      pct: pctOf(value),
+      pct,
       sector: '',
       isins: [],
       listings: [],
@@ -138,7 +154,7 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
       key: `group:${key}`,
       name,
       value,
-      pct: pctOf(value),
+      pct,
       paintKey: key,
       size: value,
       // A single child so every leaf in the tree is an `ExposureTile` and the sum test can
@@ -155,6 +171,9 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
     data.other_companies_eur,
   )
   structural('unattributed', 'Not attributed to a company', unattributedValue(data))
+  // The server's share, so the tile and the table's Cash row are one figure.
+  const cash = cashRow(data)
+  if (cash) structural('cash', CASH_BUCKET, cash.value, cash.pct)
 
   // Largest first, ties on name, so the layout cannot shuffle between requests.
   groups.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
@@ -168,7 +187,7 @@ export function allTiles(groups: ExposureGroup[]): ExposureTile[] {
 
 /** One segment of the composition bar. */
 export interface PartitionSegment {
-  key: 'direct' | 'via_funds' | 'unattributed'
+  key: 'direct' | 'via_funds' | 'unattributed' | 'cash'
   label: string
   value: number
   pct: number
@@ -177,15 +196,18 @@ export interface PartitionSegment {
 /**
  * The composition bar: every euro in the portfolio, split by how the look-through reaches it.
  *
- * **Three segments, not the response's five.** `fund_residual`, `nested_fund` and
+ * **Three holdings segments, not the response's five.** `fund_residual`, `nested_fund` and
  * `uncovered_fund` are one thing to a reader — value no company row accounts for — and
  * separating them here would spend three categorical hues on a distinction the fund table
  * below already makes in full, against the skill's own ~7-class ceiling and this file's
  * "a chart is not a table" rule. The partition still closes; it is just summed one level up.
+ * Uninvested cash is a fourth segment when there is a Cash row, so the bar's percentages are
+ * shares of the same whole as the table's.
  */
 export function buildPartition(data: LookthroughResponse): PartitionSegment[] {
-  const total = data.total_market_value_eur
+  const total = data.total_value_eur
   if (!(total > 0)) return []
+  const cash = cashRow(data)
 
   const segments: PartitionSegment[] = [
     {
@@ -205,6 +227,12 @@ export function buildPartition(data: LookthroughResponse): PartitionSegment[] {
       label: 'Not attributed',
       value: unattributedValue(data),
       pct: (unattributedValue(data) / total) * 100,
+    },
+    {
+      key: 'cash',
+      label: CASH_BUCKET,
+      value: cash?.value ?? 0,
+      pct: cash?.pct ?? 0,
     },
   ]
 

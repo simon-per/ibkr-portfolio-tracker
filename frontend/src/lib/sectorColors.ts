@@ -19,7 +19,7 @@
  * once already (docs/lookthrough.md).
  */
 import { CHART_OTHER, chartColor } from './chartPalette'
-import { NEUTRAL_PAINT, chartPaint, type ChartPaint } from './chartPaint'
+import { HATCHED_NEUTRAL, NEUTRAL_PAINT, chartPaint, type ChartPaint } from './chartPaint'
 
 export type SectorPaint = ChartPaint
 
@@ -57,7 +57,8 @@ export const ASSET_TYPE_ORDER = ['Stock', 'ETF'] as const
 /** What the server sends when nothing classified a company or a holding. */
 export const UNKNOWN_SECTOR = 'Unknown'
 
-/** The bucket the allocation service adds to every breakdown for uninvested cash. */
+/** The bucket the allocation service adds to every breakdown for uninvested cash, and the
+ * look-through's Cash row. */
 export const CASH_BUCKET = 'Cash'
 
 /** Labels that mean "not classified" rather than naming a category. */
@@ -114,13 +115,18 @@ export function sectorGroup(sector: string | null | undefined): string {
 }
 
 /**
- * The two structural treemap groups: value on the chart to keep the areas honest, not
- * companies. "Not attributed" is the strong neutral because it is the caveat; the truncated
- * tail the faint one; the sector fold sits between them as the palette's Other.
+ * The structural treemap groups: value on the chart to keep the areas honest, not companies.
+ *
+ * Cash is the Allocation tab's Cash paint (`bucketPaint`), because it is the same money on
+ * both tabs and colour follows the entity. That spends the strong neutral, so "Not attributed"
+ * — the caveat — is the strong neutral striped with the faint one: still the heaviest grey,
+ * and distinct from Cash beside it. The truncated tail is the faint one; the sector fold sits
+ * between them as the palette's Other.
  */
-export const STRUCTURAL_PAINT: Record<'other_companies' | 'unattributed', SectorPaint> = {
+export const STRUCTURAL_PAINT: Record<'other_companies' | 'unattributed' | 'cash', SectorPaint> = {
   other_companies: NEUTRAL_PAINT.faint,
-  unattributed: NEUTRAL_PAINT.strong,
+  unattributed: HATCHED_NEUTRAL,
+  cash: bucketPaint(CASH_BUCKET, []),
 }
 
 /**

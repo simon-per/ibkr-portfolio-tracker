@@ -74,13 +74,27 @@ describe('sectorPaint', () => {
   it('gives every group a distinct fill', () => {
     // Found by sampling a screenshot, not by a test: `sectorPaint` once looked only at the
     // sectors, so `unattributed` and `other_companies` fell through to the fold's grey.
-    const keys = [...HUED, OTHER_SECTORS_LABEL, 'other_companies', 'unattributed']
-    const fills = keys.map((k) => sectorPaint(k).fill)
+    // A hatch counts as part of the fill: it is what keeps Not attributed apart from Cash.
+    const keys = [...HUED, OTHER_SECTORS_LABEL, 'other_companies', 'unattributed', 'cash']
+    const fills = keys.map((k) => `${sectorPaint(k).fill}|${sectorPaint(k).hatch ?? ''}`)
     expect(new Set(fills).size).toBe(keys.length)
   })
 
+  it("paints the treemap's Cash exactly as the Allocation tab paints its Cash bucket", () => {
+    // Colour follows the entity: it is the same money on both tabs.
+    expect(sectorPaint('cash')).toEqual(assetTypePaint(CASH_BUCKET))
+    expect(sectorPaint('cash')).toEqual(allocationSectorPaint(CASH_BUCKET))
+  })
+
+  it('hatches Not attributed with two measured neutrals, so its ink reads on either stripe', () => {
+    const paint = sectorPaint('unattributed')
+    expect([paint.fill, paint.hatch]).toEqual([NEUTRAL_PAINT.strong.fill, NEUTRAL_PAINT.faint.fill])
+    expect(paint.ink).toBe(NEUTRAL_PAINT.strong.ink)
+    expect(paint.ink).toBe(NEUTRAL_PAINT.faint.ink)
+  })
+
   it('pairs every fill with a label ink', () => {
-    for (const key of [...HUED, OTHER_SECTORS_LABEL, 'other_companies', 'unattributed']) {
+    for (const key of [...HUED, OTHER_SECTORS_LABEL, 'other_companies', 'unattributed', 'cash']) {
       const paint = sectorPaint(key)
       expect(paint.ink).toBeTruthy()
       expect(paint.ink).not.toBe(paint.fill)

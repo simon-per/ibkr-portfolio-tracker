@@ -874,7 +874,9 @@ re-point onto the general palette would have to redo, and the section above stil
   with the foreground). `chartPaint.test.ts` re-measures every ink at 3:1 in both themes and the
   neutrals' separation. Use it for any chart that writes on its own marks.
 - **The treemap groups every sector with a hue**, not the first four; the measured trade-off is in
-  [lookthrough.md](lookthrough.md). The composition bar is slots 1–2 plus the strong neutral.
+  [lookthrough.md](lookthrough.md). The composition bar is slots 1–2, `HATCHED_NEUTRAL` for Not
+  attributed and, since GitHub #28, the strong neutral for Cash (the Allocation tab's Cash paint;
+  `paintBackground` renders a hatch on HTML, `LookThroughCharts`' `HatchPattern` in SVG).
 - **Look-through gained an insight strip** (`lib/lookthroughInsights.ts`; largest exposure, top 10,
   largest via funds only, held both ways — shares of the whole book, no sector figure) and
   constituent logos by ISIN (`ConstituentAvatar`), in the company table, the treemap tooltip and

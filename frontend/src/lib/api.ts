@@ -593,14 +593,21 @@ export interface LookthroughIdentityCoverage {
 export interface LookthroughResponse {
   as_of: string;
   base_currency: string;
+  /** Holdings only; the five buckets below partition it exactly. */
   total_market_value_eur: number;
-  /** These five buckets partition total_market_value_eur exactly. */
+  /** Uninvested cash, signed; null when `cash_source` is 'unknown'. */
+  cash_eur: number | null;
+  cash_source: CashSource;
+  /** Holdings plus positive cash: what every `pct_of_portfolio` is a share of. */
+  total_value_eur: number;
+  /** The Cash row's share of `total_value_eur`; null exactly when there is no Cash row. */
+  cash_pct_of_portfolio: number | null;
   direct_equity_eur: number;
   looked_through_equity_eur: number;
   fund_residual_eur: number;
   nested_fund_eur: number;
   uncovered_fund_eur: number;
-  /** Share of the portfolio attributed to companies. Read this before any row. */
+  /** Share of the INVESTED value attributed to companies. Read this before any row. */
   coverage_pct: number | null;
   companies: LookthroughCompanyRow[];
   companies_shown: number;

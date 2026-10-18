@@ -13,7 +13,7 @@ import yfinance as yf
 
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.services.cash_service import CashService, UNKNOWN
+from app.services.cash_service import CashService
 from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
@@ -304,14 +304,16 @@ class AllocationService:
         positions = [p for p in all_positions if p['market_value_eur'] > 0]
         unvaluable = [p for p in all_positions if p['market_value_eur'] <= 0]
 
-        cash_service = CashService(self.db)
-        cash_source = await cash_service.cash_source()
-        base_fx = await portfolio_service._load_base_fx()
-        cash_eur = float(cash_service.balance_as_of(
-            await cash_service.balance_events(base_fx), date.today()
-        )) if cash_source != UNKNOWN else 0.0
+        # The read Look-through shares (`CashService.uninvested_cash`), so the two tabs
+        # cannot disagree about what joins the denominator.
+        cash = await CashService(self.db).uninvested_cash(
+            await portfolio_service._load_base_fx(), date.today()
+        )
+        cash_source = cash.source
+        # 0.0 on the wire when unknown, as before; `cash_source` says which zero it is.
+        cash_eur = float(cash.balance) if cash.balance is not None else 0.0
         # Only a positive balance is a slice — see the docstring.
-        cash_slice = cash_eur if cash_eur > 0 else 0.0
+        cash_slice = float(cash.in_book)
 
         if not positions and not cash_slice:
             return {

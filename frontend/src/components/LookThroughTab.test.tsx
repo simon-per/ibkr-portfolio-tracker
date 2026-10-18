@@ -52,6 +52,10 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
     as_of: '2026-08-14',
     base_currency: 'EUR',
     total_market_value_eur: 5200,
+    cash_eur: null,
+    cash_source: 'unknown',
+    total_value_eur: 5200,
+    cash_pct_of_portfolio: null,
     direct_equity_eur: 1700,
     looked_through_equity_eur: 1800,
     fund_residual_eur: 200,
@@ -129,7 +133,7 @@ function response(over: Partial<LookthroughResponse> = {}): LookthroughResponse 
       unresolved_value_eur: 1200,
     },
     warnings: [
-      '28.8% of the portfolio sits in funds whose constituents are not known (VWCE, DBPG), so every company figure below excludes whatever those funds hold.',
+      '28.9% of the invested value sits in funds whose constituents are not known (VWCE, DBPG), so every company figure below excludes whatever those funds hold.',
     ],
     ...over,
   }
@@ -168,7 +172,7 @@ describe('LookThroughTab insight strip', () => {
   })
 
   it('shows dashes, not zeros, for a book with nothing to rank', async () => {
-    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response({ total_market_value_eur: 0 }))
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response({ total_market_value_eur: 0, total_value_eur: 0 }))
     withProviders(<LookThroughTab />)
 
     const largest = kpiTile(await screen.findByText('Largest exposure'))
@@ -360,7 +364,8 @@ describe('LookThroughTab', () => {
   it('treats an empty portfolio as a state, not as an outage', async () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
       response({
-        total_market_value_eur: 0, direct_equity_eur: 0, looked_through_equity_eur: 0,
+        total_market_value_eur: 0, total_value_eur: 0, direct_equity_eur: 0,
+        looked_through_equity_eur: 0,
         fund_residual_eur: 0, nested_fund_eur: 0, uncovered_fund_eur: 0, coverage_pct: 0,
         companies: [], companies_shown: 0, company_count_total: 0, shown_value_eur: 0,
         other_companies_eur: 0, other_companies_count: 0, funds: [],
@@ -382,7 +387,7 @@ describe('LookThroughTab', () => {
   ])('shows a dash rather than a confident 0.0%% coverage on an empty book, coverage %s', async (_label, coverage) => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
       response({
-        total_market_value_eur: 0, coverage_pct: coverage, companies: [], companies_shown: 0,
+        total_market_value_eur: 0, total_value_eur: 0, coverage_pct: coverage, companies: [], companies_shown: 0,
         company_count_total: 0, funds: [], warnings: [],
       }),
     )
@@ -440,6 +445,67 @@ describe('LookThroughTab unvaluable holdings', () => {
   })
 
   it('renders no alert when every holding could be valued', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
+    withProviders(<LookThroughTab />)
+    await screen.findByText('Coverage')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('LookThroughTab uninvested cash (GitHub #28)', () => {
+  // Holdings 5,200 plus cash 400: every share on the page is of 5,600, as on Allocation.
+  const withCash = (over: Partial<LookthroughResponse> = {}) =>
+    response({
+      cash_eur: 400,
+      cash_source: 'derived',
+      total_value_eur: 5600,
+      cash_pct_of_portfolio: 7.14,
+      ...over,
+    })
+
+  it('closes the company table with a Cash row under the same columns', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(withCash())
+    withProviders(<LookThroughTab />)
+
+    await screen.findAllByText('Alphabet')
+    const footer = document.querySelector('tfoot')
+    expect(footer?.textContent).toContain('Cash')
+    expect(footer?.textContent).toContain('7.14%')
+    // A figure, not an explanation (owner, 2026-10-14).
+    expect(footer?.textContent).not.toMatch(/uninvested|denominator/i)
+  })
+
+  it('draws Cash in both charts, so their shares are of the same whole as the table', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(withCash())
+    withProviders(<LookThroughTab />)
+
+    const bar = await screen.findByRole('img', { name: /Portfolio composition/ })
+    expect(bar.getAttribute('aria-label')).toContain('Cash 7.1%')
+    // 1,700 of 5,600, not of the 5,200 in holdings.
+    expect(bar.getAttribute('aria-label')).toContain('Held directly 30.4%')
+  })
+
+  it.each([
+    ['unknown', { cash_eur: null, cash_source: 'unknown' as const }],
+    ['negative', { cash_eur: -250, cash_source: 'derived' as const }],
+  ])('has no Cash row when the balance is %s', async (_label, over) => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      withCash({ ...over, total_value_eur: 5200, cash_pct_of_portfolio: null }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findAllByText('Alphabet')
+    expect(document.querySelector('tfoot')).toBeNull()
+  })
+
+  it("raises Allocation's alert for a negative balance, and none for an unknown one", async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      withCash({ cash_eur: -250, total_value_eur: 5200, cash_pct_of_portfolio: null }),
+    )
+    withProviders(<LookThroughTab />)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/negative cash balance/)
+    cleanup()
+
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(response())
     withProviders(<LookThroughTab />)
     await screen.findByText('Coverage')
@@ -665,6 +731,7 @@ describe('LookThroughTab coverage tone', () => {
     vi.spyOn(api, 'getLookthrough').mockResolvedValue(
       response({
         total_market_value_eur: 0,
+        total_value_eur: 0,
         direct_equity_eur: 0,
         looked_through_equity_eur: 0,
         fund_residual_eur: 0,

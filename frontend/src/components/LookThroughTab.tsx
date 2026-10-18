@@ -14,10 +14,13 @@ import { displayName } from '@/lib/securityName'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { KpiCard, KpiCardSkeleton, KpiPanel } from '@/components/ui/KpiCard'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
-import { DataTable, type Column } from '@/components/ui/DataTable'
+import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { ConstituentAvatar } from './ConstituentAvatar'
-import { buildExposureGroups, buildPartition } from '@/lib/lookthroughChart'
+import { buildExposureGroups, buildPartition, cashRow } from '@/lib/lookthroughChart'
+import { CASH_BUCKET, STRUCTURAL_PAINT } from '@/lib/sectorColors'
+import { paintBackground } from '@/lib/chartPaint'
+import { cashIsTracked } from '@/lib/portfolioCash'
 import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
 import { listingTickers } from '@/lib/lookthroughIdentity'
 import { formatCount } from '@/lib/utils'
@@ -149,6 +152,37 @@ export function lookthroughColumns(deps: {
       hint: { description: 'Funds holding it' },
       cell: (row) => (row.via_funds.length ? String(row.via_funds.length) : '—'),
     },
+  ]
+}
+
+/**
+ * Uninvested cash as the company table's closing row: under the same columns, so its share
+ * adds up with the companies' against one whole, and outside the ranking, because it is not a
+ * company. Allocation's label and swatch. Empty when there is no Cash row (unknown or negative).
+ */
+function cashFooter(
+  data: LookthroughResponse,
+  formatCurrency: (v: number) => string,
+): FooterCell[] {
+  const cash = cashRow(data)
+  if (!cash) return []
+  return [
+    {
+      key: 'cash-name',
+      spans: ['name'],
+      content: (
+        <span className="flex items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]"
+            style={paintBackground(STRUCTURAL_PAINT.cash)}
+          />
+          {CASH_BUCKET}
+        </span>
+      ),
+    },
+    { key: 'cash-value', spans: ['value'], align: 'right', content: formatCurrency(cash.value) },
+    { key: 'cash-pct', spans: ['pct'], align: 'right', content: `${cash.pct.toFixed(2)}%` },
   ]
 }
 
@@ -477,6 +511,20 @@ export function LookThroughTab() {
             </div>
           )}
 
+          {/* AllocationTab's alert, for the same condition: a negative balance joins no
+              denominator here either. */}
+          {cashIsTracked(data) && (data.cash_eur ?? 0) < 0 && (
+            <div
+              role="alert"
+              className="rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
+            >
+              <span className="font-medium">
+                The account carries a negative cash balance
+              </span>{' '}
+              , so these percentages are shares of the holdings alone.
+            </div>
+          )}
+
           <KpiPanel columns={showUnidentified ? 4 : 3} fillLastRow>
             <KpiCard
               tile
@@ -597,6 +645,7 @@ export function LookThroughTab() {
                     getRowKey={(row) => row.company_key}
                     label="Company exposure"
                     detailLimit={4}
+                    footer={cashFooter(data, formatCurrency)}
                     rowActions={(row) => (
                       <Button
                         variant="ghost"

@@ -52,6 +52,7 @@ whenever the section was enabled and can never reach back to the account's start
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from collections import defaultdict
@@ -82,6 +83,33 @@ UNKNOWN = "unknown"
 #: which is the same overclaim as a badge that cannot clear. Three-way for the same
 #: reason `dividend_source` is.
 MIXED = "mixed"
+
+
+@dataclass(frozen=True)
+class UninvestedCash:
+    """
+    Today's uninvested balance, as every "% of portfolio" denominator needs it.
+
+    `balance` is the signed figure in the base currency, or None when `source` is
+    `UNKNOWN` — no ledger holds a row, so the derivation's 0.00 means "no idea", not
+    "fully deployed" (see `cash_source`).
+
+    `in_book` is the part that joins holdings in a share-of-the-book denominator: a
+    **positive** known balance, else zero. A negative one (a margin debit) is left out
+    rather than subtracted, because a chart cannot draw a negative slice and shrinking the
+    denominator around one would inflate every holding; an unknown one is left out because
+    adding a stand-in would assert a completeness nothing established. Both readers of it
+    (`allocation_service`, `lookthrough_service`) then keep their holdings-only base, which
+    is what makes their percentages agree in every state, not only the happy one.
+    """
+    source: str
+    balance: Optional[Decimal]
+
+    @property
+    def in_book(self) -> Decimal:
+        if self.balance is None or self.balance <= 0:
+            return Decimal("0")
+        return self.balance
 
 
 class CashService:
@@ -306,6 +334,23 @@ class CashService:
         if await CashFlowRepository(self.db).count():
             return DERIVED
         return UNKNOWN
+
+    async def uninvested_cash(self, base_fx, on_date: date) -> UninvestedCash:
+        """
+        The balance at the end of `on_date` and its provenance, for a share-of-the-book
+        denominator — the one read the Allocation and Look-through tabs share.
+
+        It was written inline in `allocation_service` until GitHub #28, and Look-through
+        divided by holdings alone beside it, so the same money read ~cash/holdings higher
+        on one tab than on the other under the same "% of portfolio" header. One helper,
+        so the two cannot again disagree about what counts as cash or when it is unknown;
+        `tests/test_uninvested_cash_family.py` fails a service that reads it another way.
+        """
+        source = await self.cash_source()
+        if source == UNKNOWN:
+            return UninvestedCash(source=source, balance=None)
+        balance = self.balance_as_of(await self.balance_events(base_fx), on_date)
+        return UninvestedCash(source=source, balance=balance)
 
     async def measured_from(self) -> Optional[date]:
         """
