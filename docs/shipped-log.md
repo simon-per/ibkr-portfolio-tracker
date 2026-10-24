@@ -7,6 +7,17 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-24 — Swiss residency date on the tax report
+
+- `app_settings.swiss_tax_residency_from` (`PUT /api/settings/swiss-residency`, a popover on the
+  Tax tab): the report counts dividends, sales, 3a contributions and the dealer indicators from
+  that day only; a year that ended before it is an empty report with one warning; the Steuerwert is
+  untouched. The owner moved from Italy on 2026-07-11 and was Swiss from 2026-07-12. Reasoning in
+  docs/tax.md *Swiss residency*.
+
+Verified offline: backend 2929+ passed, ruff on the touched files, frontend 1184 passed,
+`tsc -b` and build. **Not yet on production** — the date still has to be entered there.
+
 ## Shipped 2026-10-18 — #72, tooling (pushed alone; audit round 2 closed)
 
 - **#72** (`f2c47ab`): models aligned to the migrations (`alembic check` clean, now a test;

@@ -3,6 +3,7 @@ Settings Router
 Read/update application-level settings, notably the portfolio's base (display) currency.
 """
 import logging
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -35,6 +36,8 @@ class SettingsResponse(BaseModel):
     # figures are reported in EUR (`AppSettingsRepository.get_base_currency`). None
     # otherwise; the header warns while it is set.
     base_currency_unavailable: Optional[str] = None
+    # The first day of Swiss tax residence (ISO date), or None when resident throughout.
+    swiss_tax_residency_from: Optional[str] = None
 
 
 class UpdateBaseCurrencyRequest(BaseModel):
@@ -45,6 +48,15 @@ class UpdateDividendWithholdingRequest(BaseModel):
     dividend_forecast_withholding_pct: Decimal = Field(
         ge=0, le=100, decimal_places=3
     )
+
+
+class UpdateSwissResidencyRequest(BaseModel):
+    # None clears it: resident in Switzerland for the whole record.
+    swiss_tax_residency_from: Optional[date] = None
+
+
+# The earliest date accepted; the tax report itself starts at the year 2000.
+_MIN_RESIDENCY_DATE = date(2000, 1, 1)
 
 
 def _withholding_pct(net_factor: Decimal) -> float:
@@ -64,6 +76,10 @@ async def _settings_response(
         supported_currencies=SUPPORTED_BASE_CURRENCIES,
         dividend_forecast_withholding_pct=_withholding_pct(
             await repo.get_dividend_net_factor()
+        ),
+        swiss_tax_residency_from=(
+            None if (moved := await repo.get_swiss_tax_residency_from()) is None
+            else moved.isoformat()
         ),
     )
 
@@ -134,4 +150,24 @@ async def update_dividend_withholding(
         payload.dividend_forecast_withholding_pct / Decimal(100)
     )
     await repo.set_dividend_net_factor(net_factor)
+    return await _settings_response(repo)
+
+
+@router.put("/swiss-residency", response_model=SettingsResponse)
+async def update_swiss_residency(
+    payload: UpdateSwissResidencyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set (or clear) the first day the owner was a Swiss taxpayer; see the tax report."""
+    moved = payload.swiss_tax_residency_from
+    if moved is not None and not _MIN_RESIDENCY_DATE <= moved <= utc_today():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The residency date must be between {_MIN_RESIDENCY_DATE.isoformat()} "
+                f"and today ({utc_today().isoformat()})."
+            ),
+        )
+    repo = AppSettingsRepository(db)
+    await repo.set_swiss_tax_residency_from(moved)
     return await _settings_response(repo)

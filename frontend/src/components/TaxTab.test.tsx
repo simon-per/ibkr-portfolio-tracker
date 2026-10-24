@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { TaxTab } from './TaxTab'
 import { includedEstimatesTag, withholdingTotalLabel } from '@/lib/taxTotals'
@@ -64,6 +64,7 @@ function report(over: Partial<TaxReport> = {}): TaxReport {
   return {
     year: 2026,
     base_currency: 'CHF',
+    residency: { swiss_from: null, covered_from: '2026-01-01' },
     dividend_source: 'mixed',
     dividend_ibkr_from: '2026-02-15',
     dividend_income: [
@@ -509,5 +510,59 @@ describe('logos in the tax tables', () => {
       await waitFor(() => expect(table.querySelectorAll('img').length).toBe(1))
       expect(table.querySelector('img')!.getAttribute('src')).toContain('/api/logos/7?v=v2')
     }
+  })
+
+  it('shows only the warning for a year that ended before the move', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        year: 2025,
+        residency: { swiss_from: '2026-07-12', covered_from: null },
+        dividend_source: null,
+        realized_source: null,
+        dividend_income: [],
+        dividend_by_country: [],
+        realized_gains: [],
+        holdings_snapshot: [],
+        holdings_snapshot_total: null,
+        cash_balance: null,
+        pillar3a: null,
+        trader_criteria: null,
+        warnings: ['Swiss tax residence began 2026-07-12, after 2025 ended, so this year has no Swiss tax report.'],
+      }),
+    )
+    renderTab()
+    expect(await screen.findByText(/Swiss tax residence began 2026-07-12/)).toBeTruthy()
+    expect(screen.queryByRole('columnheader', { name: 'Pay date' })).toBeNull()
+    expect(screen.queryByText(/Holdings snapshot/)).toBeNull()
+  })
+
+  it('saves the residency date and clears it again', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report())
+    const update = vi.spyOn(api, 'updateSwissResidency').mockResolvedValue({
+      base_currency: 'CHF',
+      supported_currencies: ['EUR', 'CHF', 'USD'],
+      dividend_forecast_withholding_pct: 15,
+      swiss_tax_residency_from: '2026-07-12',
+    })
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Swiss residency date' }))
+    const input = await screen.findByLabelText('First day as a Swiss taxpayer')
+    fireEvent.change(input, { target: { value: '2026-07-12' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith('2026-07-12'))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Edit Swiss residency date' }).textContent)
+        .toBe('Swiss since Jul 12, 2026'),
+    )
+
+    update.mockResolvedValue({
+      base_currency: 'CHF',
+      supported_currencies: ['EUR', 'CHF', 'USD'],
+      dividend_forecast_withholding_pct: 15,
+      swiss_tax_residency_from: null,
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Swiss residency date' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear' }))
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith(null))
   })
 })

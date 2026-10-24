@@ -18,7 +18,7 @@ All monetary values are projected into the configured base currency.
 import csv
 import io
 import logging
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional
 
@@ -32,6 +32,7 @@ from app.models.trade import Trade, buy_sign, is_sale_side, sale_sign, uncancell
 from app.models.dividend_payment import DividendPayment
 from app.repositories.dividend_repository import IBKR_SOURCE, YFINANCE_SOURCE
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
+from app.repositories.app_settings_repository import AppSettingsRepository
 from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService
@@ -66,8 +67,15 @@ class TaxService:
         self.currency_service = CurrencyService(db)
 
     async def get_tax_report(self, year: int) -> Dict:
-        start = date(year, 1, 1)
         end = date(year, 12, 31)
+        # The Swiss report covers Swiss residence only (docs/tax.md, *Swiss residency*):
+        # income and trades before the day the owner became a Swiss taxpayer belong to the
+        # previous country's return. `start` is therefore the later of 1 January and that
+        # day, and a year that ended before it has an empty window -- `covered` False --
+        # which is answered whole below rather than reporting the old country's year
+        # under a Swiss heading.
+        swiss_from = await AppSettingsRepository(self.db).get_swiss_tax_residency_from()
+        start = max(date(year, 1, 1), swiss_from) if swiss_from else date(year, 1, 1)
 
         # Resolved once and applied at three call sites -- the dividend/DA-1 select,
         # the realized-gains select and the Steuerwert snapshot. A second copy of
@@ -77,6 +85,9 @@ class TaxService:
 
         portfolio = PortfolioService(self.db)
         base_fx = await portfolio._load_base_fx()
+
+        if start > end:
+            return self._before_residency(year, swiss_from, base_fx.base_currency)
 
         # --- Dividend income (era-spliced, like the dividend card) ---
         # The boundary is the globally first IBKR payment: estimates strictly before
@@ -525,7 +536,7 @@ class TaxService:
         trader_criteria: Optional[Dict] = None
         try:
             trader_criteria = await self._trader_criteria(
-                year, as_of, base_fx, to_base, portfolio, cash_service, exempt_accounts,
+                year, start, as_of, base_fx, to_base, portfolio, cash_service, exempt_accounts,
                 [t for t, _ in trade_rows], realized_source, bool(realized_gains),
                 r_proceeds, trades_skipped, warnings,
             )
@@ -549,6 +560,7 @@ class TaxService:
         return {
             "year": year,
             "base_currency": base_fx.base_currency,
+            "residency": self._residency(year, swiss_from),
             "dividend_source": dividend_source,
             "dividend_ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "dividend_income": dividend_income,
@@ -613,6 +625,64 @@ class TaxService:
             "warnings": warnings,
         }
 
+    @staticmethod
+    def _residency(year: int, swiss_from: Optional[date]) -> Dict:
+        """
+        What the report covers of `year`: `swiss_from` (the setting, null when resident
+        throughout) and `covered_from`, the first day counted -- the later of 1 January and
+        `swiss_from`, null when the year ended before the move and nothing is counted.
+        """
+        january = date(year, 1, 1)
+        first = max(january, swiss_from) if swiss_from else january
+        return {
+            "swiss_from": swiss_from.isoformat() if swiss_from else None,
+            "covered_from": first.isoformat() if first <= date(year, 12, 31) else None,
+        }
+
+    def _before_residency(
+        self, year: int, swiss_from: Optional[date], base_currency: str
+    ) -> Dict:
+        """
+        The report for a year that ended before the owner became a Swiss taxpayer.
+
+        Nothing in it is a Swiss figure: the dividends, sales and holdings of that year
+        belong to the previous country's return, and a Steuerwert of a year with no Swiss
+        wealth tax is no figure at all. Every key of the full report is present with its
+        absent value (`test_tax_residency.py` pins the key set both ways), so a reader
+        never meets a missing field, and the one `warnings[]` line says why the sections
+        are empty -- a year that reads as an empty report of a Swiss resident is exactly
+        what this is not.
+        """
+        return {
+            "year": year,
+            "base_currency": base_currency,
+            "residency": self._residency(year, swiss_from),
+            "dividend_source": None,
+            "dividend_ibkr_from": None,
+            "dividend_income": [],
+            "dividend_by_country": [],
+            "dividend_country_note": "",
+            "dividend_totals": {
+                "gross": 0.0, "withholding": None, "net": 0.0, "estimated_rows": 0,
+            },
+            "projected": None,
+            "realized_gains": [],
+            "realized_source": None,
+            "realized_totals": {"proceeds": 0.0, "cost_basis": 0.0, "gain_loss": 0.0},
+            "holdings_snapshot": [],
+            "holdings_snapshot_total": None,
+            "holdings_snapshot_error": False,
+            "holdings_as_of": date(year, 12, 31).isoformat(),
+            "cash_balance": None,
+            "holdings_snapshot_note": "",
+            "pillar3a": None,
+            "trader_criteria": None,
+            "warnings": [
+                f"Swiss tax residence began {swiss_from.isoformat()}, after {year} ended, "
+                f"so this year has no Swiss tax report."
+            ],
+        }
+
     async def _projected_to_year_end(
         self,
         year: int,
@@ -654,6 +724,7 @@ class TaxService:
     async def _trader_criteria(
         self,
         year: int,
+        window_start: date,
         as_of: date,
         base_fx,
         to_base: NativeToBase,
@@ -678,8 +749,11 @@ class TaxService:
         holdings were at another broker) has no sales or margin on record, so every
         indicator is absent rather than "no".
         """
-        start = date(year, 1, 1)
-        opening_on = date(year - 1, 12, 31)
+        # The start of the covered window, not 1 January: a year the owner moved into
+        # Switzerland part-way is measured from the move, against the holdings the day
+        # before it (docs/tax.md, *Swiss residency*).
+        start = window_start
+        opening_on = start - timedelta(days=1)
         criteria: Dict = {
             "opening_as_of": opening_on.isoformat(),
             "opening_securities": None,
@@ -821,6 +895,15 @@ class TaxService:
             w.writerow(["WARNINGS"])
             for warning in report["warnings"]:
                 w.writerow([warning])
+            w.writerow([])
+
+        residency = report.get("residency") or {}
+        if residency.get("swiss_from"):
+            if residency.get("covered_from") is None:
+                # Nothing below is a Swiss figure; the warning above says why.
+                return buf.getvalue()
+            w.writerow([f"Swiss tax residence from {residency['swiss_from']}",
+                        f"figures count from {residency['covered_from']}"])
             w.writerow([])
 
         # Pillar 3a leads, because it explains what is *absent* from every section

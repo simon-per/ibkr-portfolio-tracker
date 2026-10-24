@@ -4,16 +4,12 @@ import { api } from './api'
 import {
   CurrencyContext, DEFAULT_SUPPORTED, FALLBACK_CURRENCY, type CurrencyContextValue,
 } from './CurrencyContext'
-import { dependsOnBaseCurrency } from './queryCache'
+import { dependsOnBaseCurrency, settingsQuery } from './queryCache'
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
 
-  const { data, isError: settingsFailed } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-    staleTime: Infinity,
-  })
+  const { data, isError: settingsFailed } = useQuery(settingsQuery)
 
   const mutation = useMutation({
     mutationFn: (currency: string) => api.updateBaseCurrency(currency),

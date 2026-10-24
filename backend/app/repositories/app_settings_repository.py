@@ -64,6 +64,12 @@ CASH_FLOWS_COVERED_FROM_KEY = "cash_flows_covered_from"
 # Unset means the whole series is measured.
 DIVIDEND_FORECAST_GROWTH_FROM_KEY = "dividend_forecast_growth_from"
 
+# The first day the owner was a Swiss taxpayer (docs/tax.md, *Swiss residency*). The tax
+# report is the Swiss one, so income, sales and purchases before it belong to the previous
+# country's return and are not counted. Unset means resident throughout, which is how the
+# report behaved before the setting existed.
+SWISS_TAX_RESIDENCY_FROM_KEY = "swiss_tax_residency_from"
+
 
 class AppSettingsRepository:
     """Repository for the app_settings key/value table."""
@@ -184,6 +190,23 @@ class AppSettingsRepository:
         existing = await self.get_last_sync_to_date()
         if existing is None or to_date > existing:
             await self.set(LAST_IBKR_SYNC_TO_DATE_KEY, to_date.isoformat())
+
+    async def get_swiss_tax_residency_from(self) -> Optional[date]:
+        """The first day of Swiss tax residence, or None when unset (or unreadable)."""
+        val = await self.get(SWISS_TAX_RESIDENCY_FROM_KEY)
+        if not val:
+            return None
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            logger.warning("Invalid stored Swiss residency date %r; treating it as unset", val)
+            return None
+
+    async def set_swiss_tax_residency_from(self, from_date: Optional[date]) -> None:
+        """Store the first day of Swiss tax residence; None clears it."""
+        await self.set(
+            SWISS_TAX_RESIDENCY_FROM_KEY, "" if from_date is None else from_date.isoformat()
+        )
 
     async def get_dividend_forecast_growth_from(self) -> Optional[date]:
         val = await self.get(DIVIDEND_FORECAST_GROWTH_FROM_KEY)
