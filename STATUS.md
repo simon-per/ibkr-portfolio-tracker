@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-18.** Both of the day's branches are on `main`: the owner's batch
+**Last updated: 2026-10-24.** Both of the day's branches are on `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
@@ -31,6 +31,10 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   This clone's `core.hooksPath` still points at the pre-rename folder
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
   today. CI refuses a tracked SQLite file either way.
+- **Enter the Swiss residency date after the next deploy** (Tax tab → *Swiss residency*, or
+  `PUT /api/settings/swiss-residency`): until it is set the 2026 report still counts the Italian
+  months, and 2025 still reads as a Swiss year. Then check that 2026 starts on the move day and
+  2025 shows only its one warning (docs/tax.md *Swiss residency*).
 - **Confirm Taiwan's DA-1 treaty rate (#62).** The tax report splits TW withholding at 15%
   (art. 10(2) of the 2007 agreement), added on review with medium confidence; check it against
   the ESTV's DA-1 country list before a filing relies on the split.
@@ -319,6 +323,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-24 (Swiss residency)** — the tax report takes a "Swiss taxpayer from" date
+  (docs/tax.md); the same morning's sync check found the Flex ingest healthy.
 - **2026-10-18 (audit round 2, agent team)** — six reviewers, #53–#79 filed after offline repros,
   all fixed and deployed the same day with the owner's VPS actions; health-watch's cron had
   starved auto-deploy of its lock (moved to `2-59/5`).
@@ -330,5 +336,3 @@ One line each, newest first; drop the oldest.
   KPI figures never wrap; `bluegill` merged.
 - **2026-10-18 (two UI fixes)** — Dividends *Expected next* lost its sideways scrollbar and got a
   themed thin one; Watchlist pins the Stock column (`DataTable` `pinFirstColumn`). Seen at 1366.
-- **2026-10-17 (fintech UI, agent team)** — design foundation, then four tabs' areas in parallel
-  worktrees; logos by ISIN; every `--viz-*` token replaced by one ten-slot palette.

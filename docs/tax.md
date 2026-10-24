@@ -220,6 +220,45 @@ never a 500. The CSV adds a `THROUGH YYYY-12-31` row under the dividend TOTAL, i
 Withholding columns, marked `est.`; the tab shows two `est.` tiles. Pure DB, like the breakdown.
 Tests: `tests/test_tax_projected.py`.
 
+## Swiss residency (the report counts Swiss days only)
+
+The report is the **Swiss** one, but the owner lived in Italy until 2026-07-11 and was a Swiss
+taxpayer from 2026-07-12. Income and sales before the move belong to the Italian return, so the
+first day of Swiss residence is a setting, `app_settings.swiss_tax_residency_from` (ISO date;
+`PUT /api/settings/swiss-residency`, a popover on the Tax tab; **unset means resident throughout**,
+which is how the report behaved before it existed). Never a constant in code or a date in a
+document: read `/api/settings`.
+
+The report's window is `[max(1 Jan, swiss_from), 31 Dec]` (`start` in `get_tax_report`), and it is
+the **one** `start` every windowed section already used, so nothing has a second copy of the cut:
+
+- **Dividends** by pay date (ex-date for an estimate), so a payment on the move day itself counts and
+  the day before does not. DA-1's per-country table is built from the same rows.
+- **Realized gains** by trade date, and the closed-lot fallback with the same window.
+- **Pillar 3a contributions** by flow date.
+- **KS 36 indicators** are measured from the move: purchases, sales and the lowest cash balance are
+  the window's, and the opening base is the day **before** it (`opening_as_of`), not the prior 31
+  December — the circular's turnover is against the holdings at the start of the tax period.
+- **The Steuerwert is not cut.** Wealth is valued at 31 December (or today) whenever the owner
+  arrived; `holdings_as_of`, the holdings and `cash_balance` are what they would be without the
+  setting (`test_the_year_end_base_is_not_cut_by_the_move`).
+- `projected` (the year's remaining dividends) is the forecast's and starts from today, which is
+  never before the move: unaffected.
+
+**A year that ended before the move is not a Swiss report at all** (`_before_residency`): every
+figure absent or empty, `dividend_source`, `realized_source`, the Steuerwert and the cash balance
+`null` (a wealth-tax base for a year with no Swiss wealth tax is no figure), one `warnings[]` line
+saying why, and the tab shows that line alone. That response is built apart from the full one, so
+`test_a_year_before_the_move_answers_the_whole_report_shape` pins its key set against the full
+report's in both directions. `residency` rides on every report: `swiss_from` (the setting) and
+`covered_from` (the first day counted, `null` for that early year). The CSV names the window under
+the warnings.
+
+The setting is refused outside 2000-01-01 .. today: a move that has not happened is not a
+residency, and the report's year is capped at the current one. Not modelled, deliberately: a
+departure date (the owner has not left), Italian tax of any kind, and a mid-year split of the
+Steuerwert.
+
 ## Securities-dealer indicators (ESTV Kreisschreiben 36)
 
 A private investor's capital gains are tax-free, but the ESTV can reclassify a frequent trader

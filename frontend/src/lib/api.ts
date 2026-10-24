@@ -16,6 +16,8 @@ export interface AppSettings {
    * `base_currency` then says EUR and every figure is in EUR. Absent or null otherwise.
    */
   base_currency_unavailable?: string | null;
+  /** First day of Swiss tax residence (ISO date); null/absent when resident throughout. */
+  swiss_tax_residency_from?: string | null;
 }
 
 /**
@@ -1278,7 +1280,14 @@ export interface TaxHoldingRow {
 export interface TaxReport {
   year: number;
   base_currency: string;
-  dividend_source: 'ibkr' | 'yfinance_estimate' | 'mixed';
+  /**
+   * What the report counts of this year. `covered_from` is the first day counted — the later
+   * of 1 January and `swiss_from` — and `null` for a year that ended before the move, whose
+   * figures are all empty or absent.
+   */
+  residency: { swiss_from: string | null; covered_from: string | null };
+  /** null for a year before the move: nothing was counted. */
+  dividend_source: 'ibkr' | 'yfinance_estimate' | 'mixed' | null;
   /** First IBKR payment date — the era-splice boundary; null before the ledger. */
   dividend_ibkr_from: string | null;
   dividend_income: TaxDividendRow[];
@@ -1296,7 +1305,7 @@ export interface TaxReport {
     estimated_rows: number;
   };
   realized_gains: TaxRealizedRow[];
-  realized_source: 'trades' | 'closed_lot_estimate';
+  realized_source: 'trades' | 'closed_lot_estimate' | null;
   /** Date the holdings snapshot is valued at — 31 Dec for past years, today otherwise. */
   holdings_as_of: string;
   realized_totals: { proceeds: number; cost_basis: number; gain_loss: number };
@@ -1717,6 +1726,13 @@ class ApiClient {
     return this.request<AppSettings>('/api/settings/dividend-withholding', {
       method: 'PUT',
       body: JSON.stringify({ dividend_forecast_withholding_pct: withholdingPct }),
+    });
+  }
+
+  async updateSwissResidency(from: string | null): Promise<AppSettings> {
+    return this.request<AppSettings>('/api/settings/swiss-residency', {
+      method: 'PUT',
+      body: JSON.stringify({ swiss_tax_residency_from: from }),
     });
   }
 

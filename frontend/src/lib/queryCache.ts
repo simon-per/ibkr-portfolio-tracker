@@ -62,6 +62,13 @@ export const valueOverTimeQuery = (range: DateRange) =>
     staleTime: VALUATION_STALE_TIME,
   })
 
+/** The app settings (base currency, forecast withholding, Swiss residency): the provider's, read by Tax too. */
+export const settingsQuery = queryOptions({
+  queryKey: ['settings'],
+  queryFn: () => api.getSettings(),
+  staleTime: Infinity,
+})
+
 /** Money in by month and the first contribution date (Performance, Activity, Tax, Forecast, Dividends). */
 export const contributionsQuery = queryOptions({
   queryKey: ['portfolio', 'contributions'],

@@ -7,12 +7,13 @@ import {
 } from 'lucide-react'
 import { ABSENT, cn, formatPercent, formatSigned } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { contributionsQuery } from '@/lib/queryCache'
+import { contributionsQuery, settingsQuery } from '@/lib/queryCache'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
 import { SectionHeader } from '@/components/ui/SectionHeader'
+import { SwissResidencyControl } from '@/components/SwissResidencyControl'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import type { Tone } from '@/lib/tone'
 import { displayName } from '@/lib/securityName'
@@ -500,6 +501,7 @@ export function TaxTab() {
   // Shares Dashboard's query key, so TanStack Query serves it from cache rather than
   // refetching. Failure is non-fatal: the picker falls back to the hardcoded floor.
   const { data: contributions } = useQuery(contributionsQuery)
+  const { data: settings } = useQuery(settingsQuery)
 
   const inceptionYear = contributions?.first_contribution_date
     ? Number(contributions.first_contribution_date.slice(0, 4))
@@ -539,6 +541,7 @@ export function TaxTab() {
                   </option>
                 ))}
               </select>
+              <SwissResidencyControl from={settings?.swiss_tax_residency_from ?? null} />
               <a
                 href={api.getTaxReportCsvUrl(year)}
                 download={`tax_report_${year}.csv`}
@@ -581,6 +584,10 @@ export function TaxTab() {
             </Card>
           )}
 
+          {/* A year that ended before the move has no Swiss figures; the warning above
+              says so and there is nothing to show beneath it. */}
+          {data.residency.covered_from !== null && (
+          <>
           <TaxSummary data={data} money={money} />
           <YearEndProjection data={data} money={money} />
 
@@ -779,6 +786,8 @@ export function TaxTab() {
           </Card>
 
           <TraderCriteria data={data} money={money} />
+          </>
+          )}
         </>
       ) : null}
     </div>

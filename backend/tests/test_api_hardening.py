@@ -175,6 +175,39 @@ def test_dividend_withholding_setting_round_trips_and_validates(client):
         assert response.status_code == 422
 
 
+def test_swiss_residency_setting_round_trips_and_validates(client):
+    assert client.get("/api/settings").json()["swiss_tax_residency_from"] is None
+
+    changed = client.put("/api/settings/swiss-residency",
+                         json={"swiss_tax_residency_from": "2026-07-12"})
+    assert changed.status_code == 200
+    assert changed.json()["swiss_tax_residency_from"] == "2026-07-12"
+    assert client.get("/api/settings").json()["swiss_tax_residency_from"] == "2026-07-12"
+
+    # The report reads it back.
+    assert client.get("/api/tax/report?year=2026").json()["residency"] == {
+        "swiss_from": "2026-07-12", "covered_from": "2026-07-12"}
+
+    for invalid in ("2999-01-01", "1999-12-31"):
+        refused = client.put("/api/settings/swiss-residency",
+                             json={"swiss_tax_residency_from": invalid})
+        assert refused.status_code == 400, invalid
+    assert client.put("/api/settings/swiss-residency",
+                      json={"swiss_tax_residency_from": "soon"}).status_code == 422
+    assert client.get("/api/settings").json()["swiss_tax_residency_from"] == "2026-07-12"
+
+    cleared = client.put("/api/settings/swiss-residency",
+                         json={"swiss_tax_residency_from": None})
+    assert cleared.json()["swiss_tax_residency_from"] is None
+
+
+def test_the_residency_write_needs_the_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
+    r = client.put("/api/settings/swiss-residency",
+                   json={"swiss_tax_residency_from": "2026-07-12"})
+    assert r.status_code == 401
+
+
 def test_health_stays_reachable_for_the_deploy_script(client, monkeypatch):
     """It is polled by deploy.sh and any uptime check, and exposes no data."""
     monkeypatch.setattr(settings, "api_admin_token", TOKEN, raising=False)
