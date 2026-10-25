@@ -1023,20 +1023,25 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 `companyFinancialsCompaniesQuery` / `companyFinancialsQuery(id, period, range)` in
 `lib/queryCache.ts`. The backend's rules live in its own file (CLAUDE.md's index).
 
-- **The browser only draws.** TTM, CAGR, YoY, margins and per-share figures come from
-  `/api/company-financials/{id}`; Quarterly | TTM | Annual and 5Y | 10Y | Max are query parameters,
-  never a transform here. `companyFinancials.ts` merges series by `period_end` for Recharts and
-  picks axis ticks, nothing more.
-- **Layout.** A picker card (a native `<select>` of `symbol · name`, the last pick remembered per
-  browser under `company-financials:security` through `lib/storage.ts`; a pick no longer listed
-  falls back to the first) with the two `SegmentedControl`s in its aside. Under it a grid of cards,
-  4 / 2 / 1 per row at `xl` / `sm` / phone, one per entry of `COMPANY_CHARTS`: revenue, net income,
-  EPS, FCF with FCF after SBC, FCF per share, diluted shares, margins (three lines), dividends per
-  share. Each card is a flex column with the plot pushed to the bottom, so a header that wraps (a
-  legend, three margins) leaves a row's plots level.
-- **Card header**: the server's CAGR and YoY of the first series, a dash for null. Margins carry
-  none (the server sends null), so that card shows each line's latest value with its swatch. The
-  shares card tones growth the other way: fewer shares is green.
+- **The browser only draws.** TTM, CAGR, YoY (each series' and each point's), margins and
+  per-share figures come from `/api/company-financials/{id}`; Quarterly | TTM | Annual and 5Y |
+  10Y | Max are query parameters, never a transform here, and **Total | Per share only picks which
+  served series a card draws** (`chartView`: revenue → revenue per share, net income → diluted
+  EPS, FCF → FCF and FCF after SBC per share; shares, margins and dividends are the same in both),
+  so switching it asks the server nothing. `companyFinancials.ts` merges series by `period_end`
+  for Recharts (each row carries the points' `yoy` too) and picks axis ticks, nothing more.
+- **Layout** (enlarged 2026-10-25, owner: "way too small"). A picker card (a native `<select>` of
+  `symbol · name`, the last pick remembered per browser under `company-financials:security`
+  through `lib/storage.ts`; a pick no longer listed falls back to the first) with three
+  `SegmentedControl`s in its aside. Under it a grid of six cards, 2 per row from `lg`, 1 below,
+  each with a 320px plot (260px on a phone); the expand button (desktop) makes one card span the
+  row with a 460px plot, one card at a time.
+- **Card header**: a large headline — the first drawn series at the hovered period, else the
+  newest — with that period's label and its own YoY, and the range's CAGR on the right, a dash for
+  null. Margins carry no growth (the server sends null). A card of several series has a legend of
+  toggle chips, each showing its value at the same period; clicking hides or shows the series
+  (never the last one) and the y axis refits. Hovering dims the other periods' bars. The shares
+  card tones growth the other way: fewer shares is green.
 - **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends card is
   drawn only when some point has a value. A response with no value anywhere is one warning and no
   charts; `warnings[]` render as warnings above the grid. Toggling keeps the last response dimmed
@@ -1044,9 +1049,13 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 - **Formats**: compact money in the response's `currency` (`formatCompactMoney`, "$130.5B"),
   per-share figures at two decimals (`formatCurrency`), shares as a compact count, fractions through
   `formatFractionPercent` — the API sends 0.25 for 25%, `formatPercent` takes percentage points.
-- **The x axis labels fiscal-year ends only** ("Q4 FY2025" and "FY2025" print "FY25"), at most five
-  (six on a phone), newest kept (`axisTicks`). "Q1 FY2016" under every tenth bar of a 300px card
-  ran into its neighbours.
-- Tests: `CompanyTab.test.tsx` (picker, remembered pick, toggles as parameters, dashes, the hidden
-  dividends card, no-data and `warnings[]`), `companyFinancials.test.ts` (rows, gaps, ticks) over
+- **The x axis labels fiscal-year ends only** ("Q4 FY2025" and "FY2025" print "FY25"), at most
+  seven (ten expanded, six on a phone), newest kept (`axisTicks`). "Q1 FY2016" under every tenth
+  bar of a 300px card ran into its neighbours.
+- **Screenshots: use a tall viewport, not `fullPage`** — a full-page capture resizes the page,
+  `ResponsiveContainer` re-renders and the bars restart their animation from zero, so every plot
+  looks empty.
+- Tests: `CompanyTab.test.tsx` (picker, remembered pick, toggles as parameters, Total | Per share
+  without a request, legend toggles, expand, dashes, the hidden dividends card, no-data and
+  `warnings[]`), `companyFinancials.test.ts` (rows and their YoY, gaps, ticks, `chartView`) over
   the NVDA-like fixture in `companyFinancials.fixture.ts`.

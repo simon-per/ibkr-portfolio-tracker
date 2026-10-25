@@ -19,6 +19,11 @@
   05:00 pass under its own gate, `fetch_company_financials` CLI, `/api/company-financials`.
   Every rule in docs/company-financials.md.
 - Built by two worktree teammates to one contract; the lead reviewed both diffs and merged.
+- Same day, on the owner's word ("way too small, not really interactive, no switch to per
+  share"): six cards 2 per row with 320px plots and a large headline that follows the hovered
+  period (its own YoY, served per point), legend toggle chips, expand-to-full-width, and a
+  Total | Per share switch drawing the served `revenue_per_share`, diluted EPS and
+  `fcf(_after_sbc)_per_share` instead. Backend 3008 passed, frontend 1219 passed.
 
 Verified offline on the merged tree: backend 3004 passed / 8 skipped (baseline 2923), ruff,
 `alembic check`; frontend 1214 passed, `tsc -b`, build; Playwright on fixture data at 1600 / 1100

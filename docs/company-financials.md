@@ -209,7 +209,11 @@ first_period_end, last_period_end, last_fetched_at`.
 
 `GET /api/company-financials/{security_id}?period=quarterly|ttm|annual&range=5y|10y|max`
 (defaults `ttm`, `10y`): `security_id, symbol, name, currency, period, range, as_of, warnings,
-series`, each series `{points: [{period_end, label, value}], cagr, yoy}`. Unknown security: 404.
+series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
+carries its own YoY by the series' rule (it may compare with a point before the range), for the
+tab's hover. The series: revenue, revenue per share, net income, diluted EPS, FCF, FCF after SBC,
+FCF per share, FCF after SBC per share, diluted shares, three margins, dividends per share; every
+per-share figure is the figure over the same period's diluted shares. Unknown security: 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
 **no write route**.

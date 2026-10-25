@@ -1588,6 +1588,8 @@ export interface CompanyFinancialsPoint {
   period_end: string;
   label: string;
   value: number | null;
+  /** This point against the one a year before it, a fraction; null for a margin. */
+  yoy: number | null;
 }
 
 /**
@@ -1603,11 +1605,13 @@ export interface CompanyFinancialsSeries {
 /** The `series` object: one entry per figure. Margins always carry `cagr`/`yoy` null. */
 export interface CompanyFinancialsSeriesSet {
   revenue: CompanyFinancialsSeries;
+  revenue_per_share: CompanyFinancialsSeries;
   net_income: CompanyFinancialsSeries;
   eps_diluted: CompanyFinancialsSeries;
   fcf: CompanyFinancialsSeries;
   fcf_after_sbc: CompanyFinancialsSeries;
   fcf_per_share: CompanyFinancialsSeries;
+  fcf_after_sbc_per_share: CompanyFinancialsSeries;
   diluted_shares: CompanyFinancialsSeries;
   operating_margin: CompanyFinancialsSeries;
   net_margin: CompanyFinancialsSeries;

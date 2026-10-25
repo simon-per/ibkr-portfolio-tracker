@@ -3,6 +3,7 @@ import {
   COMPANY_CHARTS,
   axisTicks,
   chartRows,
+  chartView,
   shortPeriodLabel,
   hasAnyData,
   latestValue,
@@ -15,7 +16,15 @@ describe('chartRows', () => {
   it('keeps a null as null, never a zero', () => {
     const rows = chartRows(fixtureFinancials(), ['fcf', 'fcf_after_sbc'])
     expect(rows.map((r) => r.fcf)).toEqual([8_132e6, 3_808e6, null, 60_853e6])
-    expect(rows[2]).toEqual({ period_end: '2024-01-28', label: 'FY2024', fcf: null, fcf_after_sbc: null })
+    expect(rows[2]).toEqual({
+      period_end: '2024-01-28', label: 'FY2024', fcf: null, fcf_after_sbc: null,
+      yoy: { fcf: null, fcf_after_sbc: null },
+    })
+  })
+
+  it("carries each point's own YoY from the server", () => {
+    const rows = chartRows(fixtureFinancials(), ['revenue'])
+    expect(rows.map((r) => r.yoy.revenue)).toEqual([null, null, null, 1.142])
   })
 
   it('keeps a negative value below zero', () => {
@@ -26,19 +35,19 @@ describe('chartRows', () => {
   it('merges series by period, oldest first, filling a missing period with null', () => {
     const data = fixtureFinancials({
       series: {
-        fcf: { points: [{ period_end: '2025-01-26', label: 'FY2025', value: 2 }], cagr: null, yoy: null },
+        fcf: { points: [{ period_end: '2025-01-26', label: 'FY2025', value: 2, yoy: 0.5 }], cagr: null, yoy: null },
         fcf_after_sbc: {
           points: [
-            { period_end: '2025-01-26', label: 'FY2025', value: 1 },
-            { period_end: '2024-01-28', label: 'FY2024', value: 3 },
+            { period_end: '2025-01-26', label: 'FY2025', value: 1, yoy: null },
+            { period_end: '2024-01-28', label: 'FY2024', value: 3, yoy: null },
           ],
           cagr: null, yoy: null,
         },
       },
     })
     expect(chartRows(data, ['fcf', 'fcf_after_sbc'])).toEqual([
-      { period_end: '2024-01-28', label: 'FY2024', fcf: null, fcf_after_sbc: 3 },
-      { period_end: '2025-01-26', label: 'FY2025', fcf: 2, fcf_after_sbc: 1 },
+      { period_end: '2024-01-28', label: 'FY2024', fcf: null, fcf_after_sbc: 3, yoy: { fcf: null, fcf_after_sbc: null } },
+      { period_end: '2025-01-26', label: 'FY2025', fcf: 2, fcf_after_sbc: 1, yoy: { fcf: 0.5, fcf_after_sbc: null } },
     ])
   })
 })
@@ -80,6 +89,20 @@ describe('visibleCharts', () => {
     const nonPayer = fixtureFinancials({ series: { dividends_per_share: fixtureSeries([null, null, null, null]) } })
     expect(visibleCharts(nonPayer).map((c) => c.id)).not.toContain('dps')
     expect(visibleCharts(nonPayer)).toHaveLength(COMPANY_CHARTS.length - 1)
+    expect(visibleCharts(nonPayer, 'perShare')).toHaveLength(COMPANY_CHARTS.length - 1)
+  })
+})
+
+describe('chartView', () => {
+  const byId = (id: string) => COMPANY_CHARTS.find((c) => c.id === id)!
+  const keys = (id: string, basis: 'total' | 'perShare') => chartView(byId(id), basis).series.map((s) => s.key)
+
+  it('swaps each figure for its per-share series and keeps the rest', () => {
+    expect(keys('revenue', 'perShare')).toEqual(['revenue_per_share'])
+    expect(keys('net-income', 'perShare')).toEqual(['eps_diluted'])
+    expect(keys('fcf', 'perShare')).toEqual(['fcf_per_share', 'fcf_after_sbc_per_share'])
+    expect(keys('fcf', 'total')).toEqual(['fcf', 'fcf_after_sbc'])
+    for (const id of ['shares', 'margins', 'dps']) expect(keys(id, 'perShare')).toEqual(keys(id, 'total'))
   })
 })
 

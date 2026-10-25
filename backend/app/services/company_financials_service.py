@@ -7,15 +7,18 @@ given. TTM, free cash flow, margins, per-share figures and growth:
 - **TTM** of a flow is the sum of four consecutive quarters; a missing quarter (or a gap in
   the quarters) makes it null, never a partial sum. TTM shares are the mean of the four.
 - **FCF** = operating cash flow − capex; **FCF after SBC** = FCF − stock-based
-  compensation; **FCF per share** = FCF / diluted shares of the same period. Any missing
-  input makes the result null: a broker that reports no capex has no FCF, not its OCF.
+  compensation; **per share** (revenue, FCF, FCF after SBC) = the figure / diluted shares
+  of the same period — the Company tab's *Per share* view, whose net income is the reported
+  diluted EPS. Any missing input makes the result null: a broker that reports no capex has
+  no FCF, not its OCF.
 - **Margins** = the figure / revenue of the same period, as fractions; null when revenue
   is missing or not positive.
 - **CAGR** over the range's first and last known values: null when the start is not
   positive, the end is negative, or they are less than a year apart. **YoY** compares the
   latest point with the point a year before it (four quarters back, or the previous fiscal
-  year): null when that point is missing or not positive. Neither is computed for a margin,
-  whose growth rate would read as a figure nobody means.
+  year): null when that point is missing or not positive. Every point carries its own YoY by
+  the same rule, for the tab's hover. Neither is computed for a margin, whose growth rate
+  would read as a figure nobody means.
 - **Annual** is the fiscal years as filed (the FY facts), not a sum of quarters.
 
 Figures stay in the reporting currency. Converting a history into the base currency would
@@ -43,11 +46,13 @@ DEFAULT_RANGE = "10y"
 
 SERIES = (
     "revenue",
+    "revenue_per_share",
     "net_income",
     "eps_diluted",
     "fcf",
     "fcf_after_sbc",
     "fcf_per_share",
+    "fcf_after_sbc_per_share",
     "diluted_shares",
     "operating_margin",
     "net_margin",
@@ -137,14 +142,17 @@ def _derive(point: Point) -> None:
     b = point.base
     ocf, capex, sbc = b.get("operating_cash_flow"), b.get("capex"), b.get("sbc")
     fcf = ocf - capex if ocf is not None and capex is not None else None
+    fcf_after_sbc = fcf - sbc if fcf is not None and sbc is not None else None
     revenue, shares = b.get("revenue"), b.get("diluted_shares")
     point.series = {
         "revenue": revenue,
+        "revenue_per_share": _ratio(revenue, shares),
         "net_income": b.get("net_income"),
         "eps_diluted": b.get("eps_diluted"),
         "fcf": fcf,
-        "fcf_after_sbc": fcf - sbc if fcf is not None and sbc is not None else None,
+        "fcf_after_sbc": fcf_after_sbc,
         "fcf_per_share": _ratio(fcf, shares),
+        "fcf_after_sbc_per_share": _ratio(fcf_after_sbc, shares),
         "diluted_shares": shares,
         "operating_margin": _ratio(b.get("operating_income"), revenue),
         "net_margin": _ratio(b.get("net_income"), revenue),
@@ -174,15 +182,18 @@ def cagr(points: Sequence[tuple]) -> Optional[float]:
 
 def yoy(points: Sequence[tuple]) -> Optional[float]:
     """The last (period_end, value) against the one a year before it, or None."""
-    if not points:
-        return None
-    last_date, last = points[-1]
+    return yoy_at(points, len(points) - 1) if points else None
+
+
+def yoy_at(points: Sequence[tuple], index: int) -> Optional[float]:
+    """Point `index` of (period_end, value) pairs against the one a year before it."""
+    last_date, last = points[index]
     if last is None:
         return None
     target = _years_before(last_date, 1)
     earlier = [
         (abs((d - target).days), v)
-        for d, v in points[:-1]
+        for d, v in points[:index]
         if abs((d - target).days) <= YOY_SLACK_DAYS
     ]
     if not earlier:
@@ -210,6 +221,9 @@ def build_series(
     if years is not None and points:
         cutoff = _years_before(points[-1].period_end, years)
         shown = [p for p in points if p.period_end > cutoff]
+    # `shown` is the newest stretch of `points`, so a shown point's YoY may reach back
+    # before the range: the first year of a 5Y chart still has its growth.
+    offset = len(points) - len(shown)
     out: Dict[str, Any] = {}
     for name in SERIES:
         full = [(p.period_end, p.series.get(name)) for p in points]
@@ -220,8 +234,9 @@ def build_series(
                     "period_end": p.period_end.isoformat(),
                     "label": p.label,
                     "value": p.series.get(name),
+                    "yoy": None if name in MARGINS else yoy_at(full, offset + i),
                 }
-                for p in shown
+                for i, p in enumerate(shown)
             ],
             "cagr": None if name in MARGINS else cagr(visible),
             "yoy": None if name in MARGINS else yoy(full),

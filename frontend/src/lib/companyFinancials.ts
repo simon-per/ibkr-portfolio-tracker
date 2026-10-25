@@ -25,46 +25,68 @@ export interface CompanyChartSeries {
   name: string
 }
 
+/** Total figures, or the same figures per diluted share (the tab's Total | Per share switch). */
+export type CompanyBasis = 'total' | 'perShare'
+
+/** What one card draws in one basis. */
+export interface CompanyChartView {
+  title: string
+  format: CompanyValueFormat
+  /** First series is the one the card's headline, CAGR and YoY describe. */
+  series: CompanyChartSeries[]
+}
+
 export interface CompanyChartDef {
   id: string
-  title: string
   kind: 'bar' | 'line'
-  format: CompanyValueFormat
-  /** First series is the one the card's CAGR and YoY describe. */
-  series: CompanyChartSeries[]
-  /** `growth`: CAGR and YoY of the first series. `latest`: each series' latest value. */
+  /** `growth`: CAGR and YoY of the first series. `latest`: no growth (the margins). */
   header: 'growth' | 'latest'
   /** Drawn only when some point has a value — a company that pays no dividend has no card. */
   optional?: boolean
+  total: CompanyChartView
+  /** The card in the Per share basis; a card without one (shares, margins, DPS) is the same in both. */
+  perShare?: CompanyChartView
 }
 
 export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
-  { id: 'revenue', title: 'Revenue', kind: 'bar', format: 'money', header: 'growth',
-    series: [{ key: 'revenue', name: 'Revenue' }] },
-  { id: 'net-income', title: 'Net income', kind: 'bar', format: 'money', header: 'growth',
-    series: [{ key: 'net_income', name: 'Net income' }] },
-  { id: 'eps', title: 'EPS (diluted)', kind: 'bar', format: 'perShare', header: 'growth',
-    series: [{ key: 'eps_diluted', name: 'EPS' }] },
-  { id: 'fcf', title: 'Free cash flow', kind: 'bar', format: 'money', header: 'growth',
-    series: [{ key: 'fcf', name: 'FCF' }, { key: 'fcf_after_sbc', name: 'FCF after SBC' }] },
-  { id: 'fcf-per-share', title: 'FCF per share', kind: 'bar', format: 'perShare', header: 'growth',
-    series: [{ key: 'fcf_per_share', name: 'FCF per share' }] },
-  { id: 'shares', title: 'Diluted shares', kind: 'bar', format: 'count', header: 'growth',
-    series: [{ key: 'diluted_shares', name: 'Shares' }] },
-  { id: 'margins', title: 'Margins', kind: 'line', format: 'percent', header: 'latest',
-    series: [
+  { id: 'revenue', kind: 'bar', header: 'growth',
+    total: { title: 'Revenue', format: 'money', series: [{ key: 'revenue', name: 'Revenue' }] },
+    perShare: { title: 'Revenue per share', format: 'perShare',
+      series: [{ key: 'revenue_per_share', name: 'Revenue per share' }] } },
+  { id: 'net-income', kind: 'bar', header: 'growth',
+    total: { title: 'Net income', format: 'money', series: [{ key: 'net_income', name: 'Net income' }] },
+    perShare: { title: 'EPS (diluted)', format: 'perShare', series: [{ key: 'eps_diluted', name: 'EPS' }] } },
+  { id: 'fcf', kind: 'bar', header: 'growth',
+    total: { title: 'Free cash flow', format: 'money',
+      series: [{ key: 'fcf', name: 'FCF' }, { key: 'fcf_after_sbc', name: 'FCF after SBC' }] },
+    perShare: { title: 'FCF per share', format: 'perShare',
+      series: [{ key: 'fcf_per_share', name: 'FCF' }, { key: 'fcf_after_sbc_per_share', name: 'FCF after SBC' }] } },
+  { id: 'shares', kind: 'bar', header: 'growth',
+    total: { title: 'Diluted shares', format: 'count', series: [{ key: 'diluted_shares', name: 'Shares' }] } },
+  { id: 'margins', kind: 'line', header: 'latest',
+    total: { title: 'Margins', format: 'percent', series: [
       { key: 'operating_margin', name: 'Operating' },
       { key: 'net_margin', name: 'Net' },
       { key: 'fcf_margin', name: 'FCF' },
-    ] },
-  { id: 'dps', title: 'Dividends per share', kind: 'bar', format: 'perShare', header: 'growth',
-    optional: true, series: [{ key: 'dividends_per_share', name: 'DPS' }] },
+    ] } },
+  { id: 'dps', kind: 'bar', header: 'growth', optional: true,
+    total: { title: 'Dividends per share', format: 'perShare',
+      series: [{ key: 'dividends_per_share', name: 'DPS' }] } },
 ]
 
-/** One x position: the period and each series' value there, `null` where it has none. */
+/** The card as drawn in `basis`. */
+export function chartView(chart: CompanyChartDef, basis: CompanyBasis): CompanyChartView {
+  return basis === 'perShare' && chart.perShare ? chart.perShare : chart.total
+}
+
+/**
+ * One x position: the period, each series' value there (`null` where it has none) and, under
+ * `yoy`, the server's YoY of that point — what the card's header shows while it is hovered.
+ */
 export type CompanyChartRow = {
   period_end: string
   label: string
+  yoy: Partial<Record<CompanyFinancialsSeriesKey, number | null>>
 } & Partial<Record<CompanyFinancialsSeriesKey, number | null>>
 
 /** A series the response lacks reads as empty, never as a crash or a zero. */
@@ -89,11 +111,15 @@ export function chartRows(
     for (const point of seriesOf(response, key)?.points ?? []) {
       let row = byPeriod.get(point.period_end)
       if (!row) {
-        row = { period_end: point.period_end, label: point.label }
-        for (const k of keys) row[k] = null
+        row = { period_end: point.period_end, label: point.label, yoy: {} }
+        for (const k of keys) {
+          row[k] = null
+          row.yoy[k] = null
+        }
         byPeriod.set(point.period_end, row)
       }
       row[key] = point.value
+      row.yoy[key] = point.yoy ?? null
     }
   }
   // ISO dates sort as strings.
@@ -114,7 +140,7 @@ export function shortPeriodLabel(label: string): string {
  * 300px card ran into its neighbours. A window with fewer than two year ends spaces its own
  * periods instead.
  */
-export function axisTicks(rows: readonly CompanyChartRow[], max: number): string[] {
+export function axisTicks(rows: readonly Pick<CompanyChartRow, 'label'>[], max: number): string[] {
   const yearEnds = rows.filter((r) => YEAR_END_LABEL.test(r.label)).map((r) => r.label)
   const pool = yearEnds.length >= 2 ? yearEnds : rows.map((r) => r.label)
   const step = Math.max(1, Math.ceil(pool.length / Math.max(1, max)))
@@ -134,9 +160,13 @@ export function hasAnyData(response: CompanyFinancialsResponse): boolean {
 }
 
 /** The cards to draw: every chart, less an optional one whose series are all empty. */
-export function visibleCharts(response: CompanyFinancialsResponse): CompanyChartDef[] {
+export function visibleCharts(
+  response: CompanyFinancialsResponse,
+  basis: CompanyBasis = 'total',
+): CompanyChartDef[] {
   return COMPANY_CHARTS.filter(
-    (chart) => !chart.optional || chart.series.some((s) => hasAnyValue(seriesOf(response, s.key))),
+    (chart) => !chart.optional
+      || chartView(chart, basis).series.some((s) => hasAnyValue(seriesOf(response, s.key))),
   )
 }
 
@@ -164,6 +194,11 @@ export const PERIOD_OPTIONS: readonly { value: CompanyFinancialsPeriod; label: s
   { value: 'quarterly', label: 'Quarterly' },
   { value: 'ttm', label: 'TTM' },
   { value: 'annual', label: 'Annual' },
+]
+
+export const BASIS_OPTIONS: readonly { value: CompanyBasis; label: string }[] = [
+  { value: 'total', label: 'Total' },
+  { value: 'perShare', label: 'Per share' },
 ]
 
 export const RANGE_OPTIONS: readonly { value: CompanyFinancialsRange; label: string }[] = [

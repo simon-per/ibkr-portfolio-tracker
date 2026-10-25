@@ -39,6 +39,11 @@ class CompanyFinancialsPoint(BaseModel):
         description="`Q3 FY2025` for a quarter or a TTM point, `FY2025` for a year.",
     )
     value: Optional[float] = None
+    yoy: Optional[float] = Field(
+        None,
+        description="This point against the one a year before it, by the series' `yoy` "
+        "rule. Always null for a margin.",
+    )
 
 
 class CompanyFinancialsSeries(BaseModel):
@@ -58,11 +63,13 @@ class CompanyFinancialsSeries(BaseModel):
 
 class CompanyFinancialsSeriesSet(BaseModel):
     revenue: CompanyFinancialsSeries
+    revenue_per_share: CompanyFinancialsSeries
     net_income: CompanyFinancialsSeries
     eps_diluted: CompanyFinancialsSeries
     fcf: CompanyFinancialsSeries
     fcf_after_sbc: CompanyFinancialsSeries
     fcf_per_share: CompanyFinancialsSeries
+    fcf_after_sbc_per_share: CompanyFinancialsSeries
     diluted_shares: CompanyFinancialsSeries
     operating_margin: CompanyFinancialsSeries
     net_margin: CompanyFinancialsSeries

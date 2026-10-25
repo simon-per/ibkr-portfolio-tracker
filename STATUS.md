@@ -97,7 +97,8 @@ Only what is still unverified.
 
 - **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
   `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old);
-  the owner's eye on the charts and whether the default 10Y TTM reads right. NVDA's TTM FCF
+  the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
+  toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
   months and a year; docs/company-financials.md *Known gaps*).
   SPGI and NXPI end at Q1 2026 because EDGAR's companyfacts held no later 10-Q on 2026-10-25;

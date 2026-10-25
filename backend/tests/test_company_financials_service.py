@@ -98,6 +98,11 @@ def test_ttm_sums_four_quarters_and_averages_the_share_count():
     assert _values(series, "fcf_per_share")[0] == pytest.approx(
         fcf / ((100 + 101 + 102 + 103) / 4)
     )
+    shares = (100 + 101 + 102 + 103) / 4
+    assert _values(series, "revenue_per_share")[0] == pytest.approx(460 / shares)
+    assert _values(series, "fcf_after_sbc_per_share")[0] == pytest.approx(
+        (fcf - 8.0) / shares
+    )
     assert _values(series, "fcf_margin")[0] == pytest.approx(fcf / 460)
     assert _values(series, "operating_margin")[0] == pytest.approx(100 / 460)
     assert _values(series, "net_margin")[0] == pytest.approx((20 + 21 + 22 + 23) / 460)
@@ -151,7 +156,7 @@ def test_annual_is_the_fiscal_years_as_filed():
     ]
     series = build_series(rows, "annual", "max")
     assert series["revenue"]["points"] == [
-        {"period_end": "2015-12-31", "label": "FY2015", "value": 999.0}
+        {"period_end": "2015-12-31", "label": "FY2015", "value": 999.0, "yoy": None}
     ]
     assert _values(series, "net_income") == [None]
 
@@ -225,3 +230,16 @@ def test_cagr_edges(points, expected):
 )
 def test_yoy_edges(points, expected):
     assert yoy(points) == expected
+
+
+def test_every_point_carries_its_own_yoy_even_at_the_start_of_the_range():
+    series = build_series(_rows(ENDS, BASE), "quarterly", "5y")
+    points = series["revenue"]["points"]
+    full = build_series(_rows(ENDS, BASE), "quarterly", "max")["revenue"]["points"]
+    # The 5Y chart's first quarter compares with one outside the range.
+    first = next(i for i, p in enumerate(full) if p["period_end"] == points[0]["period_end"])
+    assert points[0]["yoy"] == pytest.approx(points[0]["value"] / full[first - 4]["value"] - 1)
+    assert points[-1]["yoy"] == pytest.approx(series["revenue"]["yoy"])
+    assert full[0]["yoy"] is None  # nothing a year before the first quarter
+    for name in MARGINS:
+        assert all(p["yoy"] is None for p in series[name]["points"])

@@ -23,7 +23,8 @@ export function fixtureSeries(
   yoy: number | null = null,
 ): CompanyFinancialsSeries {
   return {
-    points: values.map((value, i) => ({ ...PERIODS[i], value })),
+    // Each point's YoY: the last one carries the series' own, the earlier ones none.
+    points: values.map((value, i) => ({ ...PERIODS[i], value, yoy: i === values.length - 1 ? yoy : null })),
     cagr,
     yoy,
   }
@@ -57,11 +58,13 @@ export function fixtureFinancials(
     warnings: [],
     series: {
       revenue: fixtureSeries([26_914e6, 26_974e6, 60_922e6, 130_497e6], 0.693, 1.142),
+      revenue_per_share: fixtureSeries([1.06, 1.08, 2.44, 5.26], 0.705, 1.156),
       net_income: fixtureSeries([9_752e6, -4_368e6, 29_760e6, 72_880e6], null, 1.449),
       eps_diluted: fixtureSeries([0.39, 0.17, 1.19, 2.94], 0.961, 1.471),
       fcf: fixtureSeries([8_132e6, 3_808e6, null, 60_853e6], 0.956, null),
       fcf_after_sbc: fixtureSeries([6_128e6, 1_098e6, null, 56_116e6], 1.093, null),
       fcf_per_share: fixtureSeries([0.32, 0.15, null, 2.45], 0.971, null),
+      fcf_after_sbc_per_share: fixtureSeries([0.24, 0.04, null, 2.26], 1.111, null),
       diluted_shares: fixtureSeries([25_350e6, 25_070e6, 24_940e6, 24_804e6], -0.007, -0.005),
       operating_margin: fixtureSeries([0.372, 0.157, 0.541, 0.624]),
       net_margin: fixtureSeries([0.362, 0.162, 0.488, 0.558]),
@@ -77,8 +80,9 @@ export function fixtureFinancials(
 export function emptySeriesSet(): CompanyFinancialsSeriesSet {
   const empty = (): CompanyFinancialsSeries => ({ points: [], cagr: null, yoy: null })
   return {
-    revenue: empty(), net_income: empty(), eps_diluted: empty(), fcf: empty(),
-    fcf_after_sbc: empty(), fcf_per_share: empty(), diluted_shares: empty(),
+    revenue: empty(), revenue_per_share: empty(), net_income: empty(), eps_diluted: empty(),
+    fcf: empty(), fcf_after_sbc: empty(), fcf_per_share: empty(), fcf_after_sbc_per_share: empty(),
+    diluted_shares: empty(),
     operating_margin: empty(), net_margin: empty(), fcf_margin: empty(),
     dividends_per_share: empty(),
   }

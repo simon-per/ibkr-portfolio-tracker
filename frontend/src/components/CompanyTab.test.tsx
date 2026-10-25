@@ -54,7 +54,7 @@ describe('CompanyTab', () => {
     expect(options[1]).toMatch(/^AMZN · Amazon/i)
     expect((select as HTMLSelectElement).value).toBe('11')
     await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'ttm', '10y'))
-    expect(await screen.findAllByTestId('chart')).toHaveLength(8)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(6)
   })
 
   it('remembers the pick on this browser and opens it next time', async () => {
@@ -101,10 +101,10 @@ describe('CompanyTab', () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
     await screen.findAllByTestId('chart')
-    expect(card('revenue').textContent).toContain('CAGR+69.3%')
+    expect(card('revenue').textContent).toContain('CAGR 10Y+69.3%')
     expect(card('revenue').textContent).toContain('YoY+114.2%')
     // Net income's CAGR is null (a loss year in the range): a dash, never 0%.
-    expect(card('net-income').textContent).toContain('CAGR—')
+    expect(card('net-income').textContent).toContain('CAGR 10Y—')
     expect(card('net-income').textContent).toContain('YoY+144.9%')
     expect(card('fcf').textContent).toContain('YoY—')
   })
@@ -135,9 +135,55 @@ describe('CompanyTab', () => {
       series: { dividends_per_share: fixtureSeries([null, null, null, null]) },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(7)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(5)
     expect(document.querySelector('[data-chart="dps"]')).toBeNull()
     expect(screen.queryByText('Dividends per share')).toBeNull()
+  })
+
+  it('switches every figure to per share without asking the server again', async () => {
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await screen.findAllByTestId('chart')
+    expect(within(card('revenue')).getByTestId('headline').textContent).toBe('$130.5B')
+    const calls = get.mock.calls.length
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Basis' })).getByRole('button', { name: 'Per share' }))
+    expect(card('revenue').textContent).toContain('Revenue per share')
+    expect(within(card('revenue')).getByTestId('headline').textContent).toBe('$5.26')
+    expect(card('net-income').textContent).toContain('EPS (diluted)')
+    expect(within(card('net-income')).getByTestId('headline').textContent).toBe('$2.94')
+    expect(card('fcf').textContent).toContain('FCF per share')
+    expect(card('shares').textContent).toContain('Diluted shares')
+    expect(get.mock.calls.length).toBe(calls)
+  })
+
+  it('hides a series from its legend but never the last one', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await screen.findAllByTestId('chart')
+    const legend = within(card('margins')).getByRole('group', { name: 'Margins series' })
+    const [operating, net, fcf] = within(legend).getAllByRole('button')
+    fireEvent.click(operating)
+    fireEvent.click(net)
+    expect(operating.getAttribute('aria-pressed')).toBe('false')
+    expect(net.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(fcf)
+    expect(fcf.getAttribute('aria-pressed')).toBe('true')
+    // The headline follows the first series still drawn.
+    expect(within(card('margins')).getByTestId('headline').textContent).toBe('46.6%')
+  })
+
+  it('expands one card at a time', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await screen.findAllByTestId('chart')
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Revenue' }))
+    expect(card('revenue').className).toMatch(/col-span-2/)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Net income' }))
+    expect(card('revenue').className).not.toMatch(/col-span-2/)
+    expect(card('net-income').className).toMatch(/col-span-2/)
+    fireEvent.click(screen.getByRole('button', { name: 'Shrink Net income' }))
+    expect(card('net-income').className).not.toMatch(/col-span-2/)
   })
 
   it('shows a warning and no charts for a company with no data', async () => {
@@ -153,7 +199,7 @@ describe('CompanyTab', () => {
     }))
     renderTab()
     expect((await screen.findByRole('alert')).textContent).toContain('FY2024 cash flow not filed')
-    expect(await screen.findAllByTestId('chart')).toHaveLength(8)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(6)
   })
 
   it('has no warning when the response carries none', async () => {
