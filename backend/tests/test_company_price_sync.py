@@ -72,9 +72,11 @@ class FakeYahoo:
 
 
 async def _seed(db, *tickers):
+    # One pass's stamp: the tab lists the constituents carrying the newest one.
+    seen = utcnow()
     for i, ticker in enumerate(tickers):
         cik = 1000 + i
-        db.add(SecCompany(cik=cik, ticker=ticker, universe_seen_at=utcnow()))
+        db.add(SecCompany(cik=cik, ticker=ticker, universe_seen_at=seen))
         db.add(
             CompanyFinancial(
                 cik=cik,
