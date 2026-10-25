@@ -280,6 +280,8 @@ SLIPS_IN_ORDER: Tuple[Fraction, ...] = (
 # 2012 stayed in the old basis while Q1 and Q2 were adjusted (CRWD's 4:1 and KLAC's 10:1
 # the same). `_neighbour_split` reads such a filing's basis from the nearest periods.
 NEIGHBOUR_DAYS = 100
+# How far a derived quarter's share count may stand from a reported neighbour's.
+DERIVED_COUNT_MAX_STEP = 1.5
 NEIGHBOUR_TOLERANCE = 0.05
 NEIGHBOUR_MIN_COUNTS = 2
 # The ratios companies split by, and no change. Not every whole number: adjacent periods'
@@ -945,6 +947,26 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
         slip = _snap(shares.value / implied, SHARE_COUNT_SLIPS, SHARES_SLIP_TOLERANCE)
         if slip is not None:
             shares.value = shares.value / float(slip)
+
+    # A derived quarter's share count far from every reported neighbour is a difference of
+    # two bases, not a count: the year's diluted average holds dilution the loss quarters
+    # leave out (DXCM's 2020 Q4 came to 807M between 298M and 418M; REGN's 2013 Q4 to 13M).
+    # It stays absent; the step below may still fill it from net income over EPS.
+    counts = values["diluted_shares"]
+    reported = [(k[1], o.value) for k, o in counts.items() if k[0] == "Q" and not o.derived]
+    for key, obs in list(counts.items()):
+        if key[0] != "Q" or not obs.derived:
+            continue
+        near = [
+            v
+            for end, v in reported
+            if 0 < abs((end - key[1]).days) <= NEIGHBOUR_DAYS and v > 0
+        ]
+        if near and not any(
+            1 / DERIVED_COUNT_MAX_STEP <= obs.value / v <= DERIVED_COUNT_MAX_STEP
+            for v in near
+        ):
+            del counts[key]
 
     # A share count the company did not report, from net income over diluted EPS, when the
     # EPS is precise enough for it (documented: GOOGL tags the count only from 2022).

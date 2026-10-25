@@ -652,3 +652,21 @@ def test_revenue_with_the_taxes_collected_is_revenue():
     )
     revenue = [r["value"] for r in normalise(doc).rows if r["metric"] == "revenue"]
     assert revenue == [5.8e9]
+
+
+
+def test_a_derived_share_count_far_from_every_reported_neighbour_stays_absent():
+    """DXCM's 2020 year carried dilution its quarters did not: Q4 came to 807M between
+    298M and 418M. The year itself stays."""
+    doc = _counts(
+        _f("2020-01-01", "2020-03-31", 100.0, "2020-05-01", accn="q1"),
+        _f("2020-04-01", "2020-06-30", 100.0, "2020-08-01", accn="q2"),
+        _f("2020-07-01", "2020-09-30", 100.0, "2020-11-01", accn="q3"),
+        _f("2020-01-01", "2020-09-30", 100.0, "2020-11-01", accn="q3"),
+        _f("2020-01-01", "2020-12-31", 160.0, "2021-02-11", form="10-K", accn="k"),
+        _f("2021-01-01", "2021-03-31", 104.0, "2021-05-01", accn="q5"),
+    )
+    rows = normalise(doc).rows
+    q4 = [r for r in rows if r["fiscal_period"] == "Q4" and r["metric"] == "diluted_shares"]
+    fy = [r["value"] for r in rows if r["fiscal_period"] == "FY" and r["metric"] == "diluted_shares"]
+    assert q4 == [] and fy == [160.0]
