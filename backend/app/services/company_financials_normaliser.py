@@ -280,8 +280,9 @@ SLIPS_IN_ORDER: Tuple[Fraction, ...] = (
 # 2012 stayed in the old basis while Q1 and Q2 were adjusted (CRWD's 4:1 and KLAC's 10:1
 # the same). `_neighbour_split` reads such a filing's basis from the nearest periods.
 NEIGHBOUR_DAYS = 100
-# How far a derived quarter's share count may stand from a reported neighbour's.
-DERIVED_COUNT_MAX_STEP = 1.5
+# How far a derived quarter's share count may stand from a reported neighbour's: DXCM's 2020
+# Q4 came to 518M between 398M and 418M (a restated year less unrestated nine months).
+DERIVED_COUNT_MAX_STEP = 1.2
 NEIGHBOUR_TOLERANCE = 0.05
 NEIGHBOUR_MIN_COUNTS = 2
 # The basic share count votes on splits and is never stored. A split moves it with the
