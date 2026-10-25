@@ -12,13 +12,21 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   diluted EPS. Any missing input makes the result null: a broker that reports no capex has
   no FCF, not its OCF.
 - **Margins** = the figure / revenue of the same period, as fractions; null when revenue
-  is missing or not positive.
+  is missing or not positive. Gross profit is the tagged one, else revenue less cost of
+  revenue.
+- **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
+  Debt is the tagged total, else its noncurrent and current halves added (`_debt`). **No
+  net cash**: cash is cash and equivalents only, and the short-term investments beside it are
+  tagged too unevenly to add (NVDA's stop in 2025), so cash − debt showed the book's most
+  cash-rich company as a net debtor.
 - **CAGR** over the range's first and last known values: null when the start is not
   positive, the end is negative, or they are less than a year apart. **YoY** compares the
   latest point with the point a year before it (four quarters back, or the previous fiscal
   year): null when that point is missing or not positive. Every point carries its own YoY by
-  the same rule, for the tab's hover. Neither is computed for a margin, whose growth rate
-  would read as a figure nobody means.
+  the same rule, for the tab's hover. **3/5/10-year CAGRs** (`cagrs`) compare the latest
+  point with the one that many years before it, over the whole history. None of these is
+  computed for a margin, whose growth rate would read as a figure nobody means.
+- **Key stats** are the newest TTM point's figures, whatever period the charts show.
 - **Annual** is the fiscal years as filed (the FY facts), not a sum of quarters.
 
 Figures stay in the reporting currency. Converting a history into the base currency would
@@ -47,6 +55,7 @@ DEFAULT_RANGE = "10y"
 SERIES = (
     "revenue",
     "revenue_per_share",
+    "operating_income",
     "net_income",
     "eps_diluted",
     "fcf",
@@ -54,15 +63,22 @@ SERIES = (
     "fcf_per_share",
     "fcf_after_sbc_per_share",
     "diluted_shares",
+    "gross_margin",
     "operating_margin",
     "net_margin",
     "fcf_margin",
     "dividends_per_share",
+    "buybacks",
+    "dividends_paid",
+    "cash",
+    "debt",
 )
-MARGINS = frozenset({"operating_margin", "net_margin", "fcf_margin"})
-# The stored metrics a TTM sums; the share count is averaged instead.
+MARGINS = frozenset({"gross_margin", "operating_margin", "net_margin", "fcf_margin"})
+# The stored metrics a TTM sums; the share count is averaged, a balance is the newest.
 SUMMED = (
     "revenue",
+    "gross_profit",
+    "cost_of_revenue",
     "net_income",
     "eps_diluted",
     "operating_cash_flow",
@@ -70,8 +86,14 @@ SUMMED = (
     "sbc",
     "operating_income",
     "dividends_per_share",
+    "buybacks",
+    "dividends_paid",
 )
 AVERAGED = ("diluted_shares",)
+BALANCES = ("cash", "debt_total", "debt_noncurrent", "debt_current")
+NO_GROWTH = MARGINS
+# The compound growth the cards and the key figures quote, in years back from the latest.
+CAGR_YEARS = (3, 5, 10)
 # Two quarter ends this far apart are consecutive (13 or 14 weeks, a little slack).
 CONSECUTIVE_DAYS = (80, 105)
 # How far from exactly a year back the YoY comparison point may sit (52/53-week years).
@@ -120,6 +142,8 @@ def _ttm(quarters: List[Point]) -> List[Point]:
         window = quarters[i - 3 : i + 1]
         point = Point(quarters[i].period_end, quarters[i].label)
         whole = _consecutive(window)
+        for metric in BALANCES:
+            point.base[metric] = quarters[i].base.get(metric)
         for metric in SUMMED + AVERAGED:
             values = [q.base.get(metric) for q in window]
             if not whole or any(v is None for v in values):
@@ -138,15 +162,35 @@ def _ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional
     return numerator / denominator
 
 
+def _debt(base: Dict[str, Optional[float]]) -> Optional[float]:
+    """
+    The tagged total, else the noncurrent and current halves added when both are tagged.
+    A total of exactly zero is a tagging slip, not a debt-free company (ORCL's FY2022 and
+    AMD's FY2021 10-Ks tag a 0 beside billions of notes); a company without debt tags none.
+    """
+    total = base.get("debt_total")
+    if total:
+        return total
+    noncurrent, current = base.get("debt_noncurrent"), base.get("debt_current")
+    if noncurrent is not None and current is not None:
+        return noncurrent + current
+    return None
+
+
 def _derive(point: Point) -> None:
     b = point.base
     ocf, capex, sbc = b.get("operating_cash_flow"), b.get("capex"), b.get("sbc")
     fcf = ocf - capex if ocf is not None and capex is not None else None
     fcf_after_sbc = fcf - sbc if fcf is not None and sbc is not None else None
     revenue, shares = b.get("revenue"), b.get("diluted_shares")
+    gross, cost = b.get("gross_profit"), b.get("cost_of_revenue")
+    if gross is None and revenue is not None and cost is not None:
+        gross = revenue - cost
+    cash, debt = b.get("cash"), _debt(b)
     point.series = {
         "revenue": revenue,
         "revenue_per_share": _ratio(revenue, shares),
+        "operating_income": b.get("operating_income"),
         "net_income": b.get("net_income"),
         "eps_diluted": b.get("eps_diluted"),
         "fcf": fcf,
@@ -154,10 +198,15 @@ def _derive(point: Point) -> None:
         "fcf_per_share": _ratio(fcf, shares),
         "fcf_after_sbc_per_share": _ratio(fcf_after_sbc, shares),
         "diluted_shares": shares,
+        "gross_margin": _ratio(gross, revenue),
         "operating_margin": _ratio(b.get("operating_income"), revenue),
         "net_margin": _ratio(b.get("net_income"), revenue),
         "fcf_margin": _ratio(fcf, revenue),
         "dividends_per_share": b.get("dividends_per_share"),
+        "buybacks": b.get("buybacks"),
+        "dividends_paid": b.get("dividends_paid"),
+        "cash": cash,
+        "debt": debt,
     }
 
 
@@ -187,10 +236,20 @@ def yoy(points: Sequence[tuple]) -> Optional[float]:
 
 def yoy_at(points: Sequence[tuple], index: int) -> Optional[float]:
     """Point `index` of (period_end, value) pairs against the one a year before it."""
+    return growth_at(points, index, 1)
+
+
+def growth_at(points: Sequence[tuple], index: int, years: int) -> Optional[float]:
+    """
+    The compound annual growth from the point `years` before point `index` (within
+    `YOY_SLACK_DAYS`) to it; one year back is the YoY. None when either value is missing
+    or the earlier is not positive, and over several years when the later is negative
+    (a root of a negative ratio is no growth rate).
+    """
     last_date, last = points[index]
     if last is None:
         return None
-    target = _years_before(last_date, 1)
+    target = _years_before(last_date, years)
     earlier = [
         (abs((d - target).days), v)
         for d, v in points[:index]
@@ -199,15 +258,21 @@ def yoy_at(points: Sequence[tuple], index: int) -> Optional[float]:
     if not earlier:
         return None
     _, previous = min(earlier, key=lambda pair: pair[0])
-    if previous is None or previous <= 0:
+    if previous is None or previous <= 0 or (years > 1 and last < 0):
         return None
-    return last / previous - 1
+    return (last / previous) ** (1 / years) - 1
 
 
-def build_series(
-    rows: Sequence[CompanyFinancial], period: str, range_key: str
-) -> Dict[str, Any]:
-    """The `series` object of the response, from one security's stored rows."""
+def cagrs(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
+    """`CAGR_YEARS` growth to the latest point, keyed `y3`, `y5`, `y10`."""
+    return {
+        f"y{n}": growth_at(points, len(points) - 1, n) if points else None
+        for n in CAGR_YEARS
+    }
+
+
+def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
+    """Every period of `period`, oldest first, with its derived series."""
     if period == "annual":
         points = _points(rows, annual=True)
     else:
@@ -216,6 +281,63 @@ def build_series(
             points = _ttm(points)
     for point in points:
         _derive(point)
+    return points
+
+
+def key_stats(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
+    """
+    The company's key figures at its newest TTM point, whatever period the charts show:
+    the sums of the last four quarters, the balances at the newest quarter end, the YoY
+    and 5-year growth by the series' rules. The payout ratio is TTM dividends per share
+    over TTM diluted EPS, null when the EPS is not positive.
+    """
+    points = _series_points(rows, "ttm")
+    last = points[-1] if points else None
+
+    def value(name: str) -> Optional[float]:
+        return last.series.get(name) if last is not None else None
+
+    def growth(name: str, years: int) -> Optional[float]:
+        if last is None:
+            return None
+        return growth_at(
+            [(p.period_end, p.series.get(name)) for p in points], len(points) - 1, years
+        )
+
+    eps, dps = value("eps_diluted"), value("dividends_per_share")
+    return {
+        "label": last.label if last is not None else None,
+        "period_end": last.period_end.isoformat() if last is not None else None,
+        "revenue": value("revenue"),
+        "revenue_yoy": growth("revenue", 1),
+        "revenue_cagr_5y": growth("revenue", 5),
+        "net_income": value("net_income"),
+        "eps_diluted": eps,
+        "eps_yoy": growth("eps_diluted", 1),
+        "eps_cagr_5y": growth("eps_diluted", 5),
+        "fcf": value("fcf"),
+        "fcf_per_share": value("fcf_per_share"),
+        "fcf_yoy": growth("fcf", 1),
+        "gross_margin": value("gross_margin"),
+        "operating_margin": value("operating_margin"),
+        "net_margin": value("net_margin"),
+        "fcf_margin": value("fcf_margin"),
+        "diluted_shares": value("diluted_shares"),
+        "shares_yoy": growth("diluted_shares", 1),
+        "dividends_per_share": dps,
+        "payout_ratio": dps / eps
+        if dps is not None and eps is not None and eps > 0
+        else None,
+        "buybacks": value("buybacks"),
+        "dividends_paid": value("dividends_paid"),
+    }
+
+
+def build_series(
+    rows: Sequence[CompanyFinancial], period: str, range_key: str
+) -> Dict[str, Any]:
+    """The `series` object of the response, from one security's stored rows."""
+    points = _series_points(rows, period)
     years = RANGES[range_key]
     shown = points
     if years is not None and points:
@@ -234,12 +356,14 @@ def build_series(
                     "period_end": p.period_end.isoformat(),
                     "label": p.label,
                     "value": p.series.get(name),
-                    "yoy": None if name in MARGINS else yoy_at(full, offset + i),
+                    "yoy": None if name in NO_GROWTH else yoy_at(full, offset + i),
                 }
                 for i, p in enumerate(shown)
             ],
-            "cagr": None if name in MARGINS else cagr(visible),
-            "yoy": None if name in MARGINS else yoy(full),
+            "cagr": None if name in NO_GROWTH else cagr(visible),
+            "yoy": None if name in NO_GROWTH else yoy(full),
+            # Measured on the whole history, not the range: the 10Y figure of a 5Y chart.
+            "cagrs": dict.fromkeys(cagrs(full)) if name in NO_GROWTH else cagrs(full),
         }
     return out
 
@@ -309,5 +433,6 @@ class CompanyFinancialsService:
             "range": range_key,
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
+            "key_stats": key_stats(rows),
             "series": build_series(rows, period, range_key),
         }

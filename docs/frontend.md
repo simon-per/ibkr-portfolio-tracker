@@ -1033,19 +1033,26 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 - **Layout** (enlarged 2026-10-25, owner: "way too small"). A picker card (a native `<select>` of
   `symbol · name`, the last pick remembered per browser under `company-financials:security`
   through `lib/storage.ts`; a pick no longer listed falls back to the first) with three
-  `SegmentedControl`s in its aside. Under it a grid of six cards, 2 per row from `lg`, 1 below,
-  each with a 320px plot (260px on a phone); the expand button (desktop) makes one card span the
-  row with a 460px plot, one card at a time.
-- **Card header**: a large headline — the first drawn series at the hovered period, else the
-  newest — with that period's label and its own YoY, and the range's CAGR on the right, a dash for
-  null. Margins carry no growth (the server sends null). A card of several series has a legend of
-  toggle chips, each showing its value at the same period; clicking hides or shows the series
-  (never the last one) and the y axis refits. Hovering dims the other periods' bars. The shares
-  card tones growth the other way: fewer shares is green.
-- **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends card is
-  drawn only when some point has a value. A response with no value anywhere is one warning and no
-  charts; `warnings[]` render as warnings above the grid. Toggling keeps the last response dimmed
-  (`useKeepPreviousData`).
+  `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
+  `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
+  FCF, the four margins, shares, DPS with its payout ratio, buybacks, dividends paid, with YoY
+  and 5-year CAGR notes; a figure the company does not file is left out, never a dash row), then
+  a grid of up to nine cards (revenue, operating income, net income, FCF, margins, shares,
+  buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot
+  (260px on a phone); the expand button (desktop) makes one card span the row with a 460px plot,
+  one card at a time.
+- **Card header**: a large headline — the lead series (the first drawn) at the hovered period,
+  else the newest — with that period's label and its own YoY, and the server's **3Y / 5Y / 10Y
+  CAGRs** (`cagrs`, over the whole history, so a 5Y chart still quotes 10Y) on the right; a span
+  the server has none for is left out. Margins and the cash & debt card carry no growth. A card of
+  several series has a legend of toggle chips, each showing its value at the same period; clicking
+  hides or shows the series (never the last one) and the y axis refits. A series with no value
+  anywhere gets no chip (`seriesWithData`: MA files no gross margin). Hovering dims the other
+  periods' bars. The shares card tones growth the other way (`inverse`): fewer shares is green.
+- **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends, buybacks
+  & dividends and cash & debt cards are drawn only when some point has a value. A response with no
+  value anywhere is one warning and no charts; `warnings[]` render as warnings above the grid.
+  Toggling keeps the last response dimmed (`useKeepPreviousData`).
 - **Formats**: compact money in the response's `currency` (`formatCompactMoney`, "$130.5B"),
   per-share figures at two decimals (`formatCurrency`), shares as a compact count, fractions through
   `formatFractionPercent` — the API sends 0.25 for 25%, `formatPercent` takes percentage points.
@@ -1056,6 +1063,7 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `ResponsiveContainer` re-renders and the bars restart their animation from zero, so every plot
   looks empty.
 - Tests: `CompanyTab.test.tsx` (picker, remembered pick, toggles as parameters, Total | Per share
-  without a request, legend toggles, expand, dashes, the hidden dividends card, no-data and
-  `warnings[]`), `companyFinancials.test.ts` (rows and their YoY, gaps, ticks, `chartView`) over
-  the NVDA-like fixture in `companyFinancials.fixture.ts`.
+  without a request, legend toggles, expand, the CAGR spans, key figures, the hidden dividends
+  card, a margin never filed, no-data and `warnings[]`), `companyFinancials.test.ts` (rows and
+  their YoY, gaps, ticks, `chartView`, `seriesWithData`, `visibleKeyStats`) over the NVDA-like
+  fixture in `companyFinancials.fixture.ts`.

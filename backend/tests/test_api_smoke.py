@@ -550,6 +550,10 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert set(revenue[0]) == {"period_end", "label", "value", "yoy"}
     assert "revenue_per_share" in body["series"]
     assert "fcf_after_sbc_per_share" in body["series"]
+    assert set(body["series"]["revenue"]["cagrs"]) == {"y3", "y5", "y10"}
+    assert body["key_stats"]["label"] == "Q4 FY2024"
+    assert body["key_stats"]["revenue"] == 104.0 + 105.0 + 106.0 + 107.0
+    assert body["key_stats"]["revenue_yoy"] == (104.0 + 105 + 106 + 107) / (100.0 + 101 + 102 + 103) - 1
 
     annual = client.get("/api/company-financials/1?period=annual").json()
     assert [p["value"] for p in annual["series"]["revenue"]["points"]] == [412.0, 428.0]

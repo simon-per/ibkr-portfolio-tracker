@@ -12,9 +12,12 @@ import pytest
 
 from app.services.company_financials_service import (
     MARGINS,
+    NO_GROWTH,
     SERIES,
     build_series,
     cagr,
+    cagrs,
+    key_stats,
     yoy,
 )
 
@@ -76,7 +79,8 @@ def test_every_series_is_served():
     series = build_series(_rows(ENDS, BASE), "ttm", "max")
     assert set(series) == set(SERIES)
     for name in SERIES:
-        assert set(series[name]) == {"points", "cagr", "yoy"}
+        assert set(series[name]) == {"points", "cagr", "yoy", "cagrs"}
+        assert set(series[name]["cagrs"]) == {"y3", "y5", "y10"}
 
 
 def test_ttm_sums_four_quarters_and_averages_the_share_count():
@@ -172,10 +176,12 @@ def test_the_range_counts_back_from_the_latest_point():
 
 
 def test_growth_is_computed_for_every_series_but_the_margins():
-    series = build_series(_rows(ENDS, BASE), "ttm", "10y")
+    series = build_series(_rows(ENDS, BALANCED), "ttm", "10y")
     for name in SERIES:
-        if name in MARGINS:
+        if name in NO_GROWTH:
             assert series[name]["cagr"] is None and series[name]["yoy"] is None
+            assert set(series[name]["cagrs"].values()) == {None}
+    assert NO_GROWTH == MARGINS
     first, last = series["revenue"]["points"][0], series["revenue"]["points"][-1]
     years = (
         date.fromisoformat(last["period_end"]) - date.fromisoformat(first["period_end"])
@@ -243,3 +249,90 @@ def test_every_point_carries_its_own_yoy_even_at_the_start_of_the_range():
     assert full[0]["yoy"] is None  # nothing a year before the first quarter
     for name in MARGINS:
         assert all(p["yoy"] is None for p in series[name]["points"])
+
+
+BALANCED = {
+    **BASE,
+    "gross_profit": lambda i: 60.0,
+    "buybacks": lambda i: 4.0,
+    "dividends_paid": lambda i: 1.0,
+    "cash": lambda i: 50.0 + i,
+    "debt_total": lambda i: 80.0,
+}
+
+
+def test_gross_margin_is_the_tagged_gross_profit_else_revenue_less_its_cost():
+    rows = _rows(ENDS[:4], {**BASE, "gross_profit": lambda i: 60.0})
+    assert _values(build_series(rows, "quarterly", "max"), "gross_margin")[0] == pytest.approx(0.6)
+    rows = _rows(ENDS[:4], {**BASE, "cost_of_revenue": lambda i: 30.0})
+    margins = _values(build_series(rows, "quarterly", "max"), "gross_margin")
+    assert margins[0] == pytest.approx(70 / 100)
+    # Neither tagged (a broker, a card network): no gross margin, never 100%.
+    assert set(_values(build_series(_rows(ENDS[:4], BASE), "quarterly", "max"), "gross_margin")) == {None}
+
+
+def test_a_ttm_point_carries_its_newest_quarters_balances_and_sums_the_flows():
+    series = build_series(_rows(ENDS[:5], BALANCED), "ttm", "max")
+    assert _values(series, "cash") == [53.0, 54.0]
+    assert _values(series, "debt") == [80.0, 80.0]
+    assert "net_cash" not in series  # cash leaves out short-term investments
+    assert _values(series, "buybacks") == [16.0, 16.0]
+    assert _values(series, "dividends_paid") == [4.0, 4.0]
+    assert _values(series, "operating_income") == [100.0, 100.0]
+
+
+def test_no_debt_tagged_is_no_debt_figure_never_zero():
+    rows = _rows(ENDS[:4], {**BASE, "cash": lambda i: 50.0})
+    series = build_series(rows, "quarterly", "max")
+    assert set(_values(series, "debt")) == {None}
+    assert _values(series, "cash") == [50.0] * 4
+
+
+def test_cagrs_compare_the_latest_point_with_n_years_before_over_the_whole_history():
+    points = [(D.replace(year=D.year + y), 100.0 * 1.1**y) for y in range(11)]
+    got = cagrs(points)
+    assert got == {"y3": pytest.approx(0.1), "y5": pytest.approx(0.1), "y10": pytest.approx(0.1)}
+    assert cagrs(points[-4:]) == {"y3": pytest.approx(0.1), "y5": None, "y10": None}
+    # Into a loss over several years: no rate.
+    assert cagrs(points[:-1] + [(points[-1][0], -5.0)])["y5"] is None
+    assert cagrs([]) == {"y3": None, "y5": None, "y10": None}
+    # A 5Y chart still carries the 10-year figure.
+    series = build_series(_rows(ENDS, BASE), "ttm", "5y")
+    assert series["revenue"]["cagrs"]["y10"] is not None
+
+
+def test_key_stats_are_the_newest_ttm_point_whatever_the_charts_show():
+    rows = _rows(ENDS, BALANCED)
+    ttm = build_series(rows, "ttm", "max")
+    stats = key_stats(rows)
+    assert stats["label"] == ttm["revenue"]["points"][-1]["label"]
+    assert stats["revenue"] == ttm["revenue"]["points"][-1]["value"]
+    assert stats["revenue_yoy"] == pytest.approx(ttm["revenue"]["yoy"])
+    assert stats["eps_cagr_5y"] == pytest.approx(ttm["eps_diluted"]["cagrs"]["y5"])
+    assert stats["buybacks"] == ttm["buybacks"]["points"][-1]["value"]
+    assert stats["payout_ratio"] == pytest.approx(
+        stats["dividends_per_share"] / stats["eps_diluted"]
+    )
+    assert stats["gross_margin"] == pytest.approx(240 / stats["revenue"])
+
+
+def test_key_stats_without_quarters_are_all_absent():
+    assert set(key_stats([]).values()) == {None}
+    loss = _rows(ENDS[:4], {**BASE, "eps_diluted": lambda i: -0.1})
+    assert key_stats(loss)["payout_ratio"] is None
+
+
+@pytest.mark.parametrize(
+    "tagged, expected",
+    [
+        ({"debt_total": 80.0, "debt_noncurrent": 70.0, "debt_current": 5.0}, 80.0),
+        ({"debt_noncurrent": 70.0, "debt_current": 5.0}, 75.0),  # MA tags the halves
+        ({"debt_noncurrent": 70.0}, None),  # half of it is no total
+        ({"debt_total": 0.0, "debt_noncurrent": 70.0, "debt_current": 5.0}, 75.0),
+        ({"debt_total": 0.0}, None),  # a tagged zero beside billions of notes (ORCL)
+        ({}, None),
+    ],
+)
+def test_debt_is_the_tagged_total_else_its_two_halves(tagged, expected):
+    rows = _rows(ENDS[:1], {**BASE, **{k: (lambda i, v=v: v) for k, v in tagged.items()}})
+    assert _values(build_series(rows, "quarterly", "max"), "debt") == [expected]

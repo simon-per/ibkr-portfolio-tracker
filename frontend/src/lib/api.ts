@@ -1600,12 +1600,21 @@ export interface CompanyFinancialsSeries {
   points: CompanyFinancialsPoint[];
   cagr: number | null;
   yoy: number | null;
+  /** Growth to the latest point from 3, 5 and 10 years before it, over the whole history. */
+  cagrs: CompanyFinancialsCagrs;
 }
 
-/** The `series` object: one entry per figure. Margins always carry `cagr`/`yoy` null. */
+export interface CompanyFinancialsCagrs {
+  y3: number | null;
+  y5: number | null;
+  y10: number | null;
+}
+
+/** The `series` object: one entry per figure. Margins carry no growth. */
 export interface CompanyFinancialsSeriesSet {
   revenue: CompanyFinancialsSeries;
   revenue_per_share: CompanyFinancialsSeries;
+  operating_income: CompanyFinancialsSeries;
   net_income: CompanyFinancialsSeries;
   eps_diluted: CompanyFinancialsSeries;
   fcf: CompanyFinancialsSeries;
@@ -1613,10 +1622,41 @@ export interface CompanyFinancialsSeriesSet {
   fcf_per_share: CompanyFinancialsSeries;
   fcf_after_sbc_per_share: CompanyFinancialsSeries;
   diluted_shares: CompanyFinancialsSeries;
+  gross_margin: CompanyFinancialsSeries;
   operating_margin: CompanyFinancialsSeries;
   net_margin: CompanyFinancialsSeries;
   fcf_margin: CompanyFinancialsSeries;
   dividends_per_share: CompanyFinancialsSeries;
+  buybacks: CompanyFinancialsSeries;
+  dividends_paid: CompanyFinancialsSeries;
+  cash: CompanyFinancialsSeries;
+  debt: CompanyFinancialsSeries;
+}
+
+/** The newest TTM point's figures, whatever period the charts show. Fractions for rates. */
+export interface CompanyFinancialsKeyStats {
+  label: string | null;
+  period_end: string | null;
+  revenue: number | null;
+  revenue_yoy: number | null;
+  revenue_cagr_5y: number | null;
+  net_income: number | null;
+  eps_diluted: number | null;
+  eps_yoy: number | null;
+  eps_cagr_5y: number | null;
+  fcf: number | null;
+  fcf_per_share: number | null;
+  fcf_yoy: number | null;
+  gross_margin: number | null;
+  operating_margin: number | null;
+  net_margin: number | null;
+  fcf_margin: number | null;
+  diluted_shares: number | null;
+  shares_yoy: number | null;
+  dividends_per_share: number | null;
+  payout_ratio: number | null;
+  buybacks: number | null;
+  dividends_paid: number | null;
 }
 
 export type CompanyFinancialsSeriesKey = keyof CompanyFinancialsSeriesSet;
@@ -1634,6 +1674,7 @@ export interface CompanyFinancialsResponse {
   range: CompanyFinancialsRange;
   as_of: string | null;
   warnings: string[];
+  key_stats: CompanyFinancialsKeyStats;
   series: CompanyFinancialsSeriesSet;
 }
 

@@ -46,6 +46,15 @@ class CompanyFinancialsPoint(BaseModel):
     )
 
 
+class CompanyFinancialsCagrs(BaseModel):
+    """Growth to the latest point from 3, 5 and 10 years before it, over the whole history
+    (not the range). Always null for a margin."""
+
+    y3: Optional[float] = None
+    y5: Optional[float] = None
+    y10: Optional[float] = None
+
+
 class CompanyFinancialsSeries(BaseModel):
     points: List[CompanyFinancialsPoint]
     cagr: Optional[float] = Field(
@@ -59,11 +68,43 @@ class CompanyFinancialsSeries(BaseModel):
         description="The latest point against the one a year before it; null when that is "
         "missing or not positive. Always null for a margin.",
     )
+    cagrs: CompanyFinancialsCagrs
+
+
+class CompanyFinancialsKeyStats(BaseModel):
+    """The newest TTM point's figures, whatever period the charts show."""
+
+    label: Optional[str] = None
+    period_end: Optional[str] = None
+    revenue: Optional[float] = None
+    revenue_yoy: Optional[float] = None
+    revenue_cagr_5y: Optional[float] = None
+    net_income: Optional[float] = None
+    eps_diluted: Optional[float] = None
+    eps_yoy: Optional[float] = None
+    eps_cagr_5y: Optional[float] = None
+    fcf: Optional[float] = None
+    fcf_per_share: Optional[float] = None
+    fcf_yoy: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    net_margin: Optional[float] = None
+    fcf_margin: Optional[float] = None
+    diluted_shares: Optional[float] = None
+    shares_yoy: Optional[float] = None
+    dividends_per_share: Optional[float] = None
+    payout_ratio: Optional[float] = Field(
+        None,
+        description="TTM dividends per share / TTM diluted EPS; null when EPS <= 0.",
+    )
+    buybacks: Optional[float] = None
+    dividends_paid: Optional[float] = None
 
 
 class CompanyFinancialsSeriesSet(BaseModel):
     revenue: CompanyFinancialsSeries
     revenue_per_share: CompanyFinancialsSeries
+    operating_income: CompanyFinancialsSeries
     net_income: CompanyFinancialsSeries
     eps_diluted: CompanyFinancialsSeries
     fcf: CompanyFinancialsSeries
@@ -71,10 +112,15 @@ class CompanyFinancialsSeriesSet(BaseModel):
     fcf_per_share: CompanyFinancialsSeries
     fcf_after_sbc_per_share: CompanyFinancialsSeries
     diluted_shares: CompanyFinancialsSeries
+    gross_margin: CompanyFinancialsSeries
     operating_margin: CompanyFinancialsSeries
     net_margin: CompanyFinancialsSeries
     fcf_margin: CompanyFinancialsSeries
     dividends_per_share: CompanyFinancialsSeries
+    buybacks: CompanyFinancialsSeries
+    dividends_paid: CompanyFinancialsSeries
+    cash: CompanyFinancialsSeries
+    debt: CompanyFinancialsSeries
 
 
 class CompanyFinancialsResponse(BaseModel):
@@ -86,4 +132,5 @@ class CompanyFinancialsResponse(BaseModel):
     range: str = Field(..., description="`5y`, `10y` or `max`.")
     as_of: Optional[str] = Field(None, description="When EDGAR was last read, UTC.")
     warnings: List[str]
+    key_stats: CompanyFinancialsKeyStats
     series: CompanyFinancialsSeriesSet

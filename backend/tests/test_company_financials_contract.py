@@ -18,7 +18,9 @@ from app.models.company_financials import CompanyFinancial, SecurityCik
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.schemas.company_financials import (
+    CompanyFinancialsCagrs,
     CompanyFinancialsCompany,
+    CompanyFinancialsKeyStats,
     CompanyFinancialsPoint,
     CompanyFinancialsResponse,
     CompanyFinancialsSeries,
@@ -115,8 +117,10 @@ async def test_the_response_declares_every_key_the_service_returns(db, period):
 
     assert set(body) == _fields(CompanyFinancialsResponse)
     assert set(body["series"]) == _fields(CompanyFinancialsSeriesSet)
+    assert set(body["key_stats"]) == _fields(CompanyFinancialsKeyStats)
     for series in body["series"].values():
         assert set(series) == _fields(CompanyFinancialsSeries)
+        assert set(series["cagrs"]) == _fields(CompanyFinancialsCagrs)
         for point in series["points"]:
             assert set(point) == _fields(CompanyFinancialsPoint)
     assert body["series"]["revenue"]["points"], "the walk compared no point"
@@ -152,4 +156,6 @@ async def test_a_security_without_figures_answers_the_same_shape(db):
     body = await CompanyFinancialsService(db).get_financials(await db.get(Security, 2))
     assert set(body) == _fields(CompanyFinancialsResponse)
     assert body["warnings"] and body["currency"] is None and body["as_of"] is None
+    assert set(body["key_stats"]) == _fields(CompanyFinancialsKeyStats)
+    assert all(v is None for v in body["key_stats"].values())
     assert all(s["points"] == [] for s in body["series"].values())

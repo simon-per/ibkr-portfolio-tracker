@@ -8,9 +8,13 @@ import {
   hasAnyData,
   latestValue,
   resolveCompany,
+  seriesWithData,
   visibleCharts,
+  visibleKeyStats,
 } from './companyFinancials'
-import { FIXTURE_COMPANIES, emptySeriesSet, fixtureFinancials, fixtureSeries } from './companyFinancials.fixture'
+import {
+  FIXTURE_COMPANIES, FIXTURE_KEY_STATS, emptySeriesSet, fixtureFinancials, fixtureSeries,
+} from './companyFinancials.fixture'
 
 describe('chartRows', () => {
   it('keeps a null as null, never a zero', () => {
@@ -35,13 +39,13 @@ describe('chartRows', () => {
   it('merges series by period, oldest first, filling a missing period with null', () => {
     const data = fixtureFinancials({
       series: {
-        fcf: { points: [{ period_end: '2025-01-26', label: 'FY2025', value: 2, yoy: 0.5 }], cagr: null, yoy: null },
+        fcf: { points: [{ period_end: '2025-01-26', label: 'FY2025', value: 2, yoy: 0.5 }], cagr: null, yoy: null, cagrs: { y3: null, y5: null, y10: null } },
         fcf_after_sbc: {
           points: [
             { period_end: '2025-01-26', label: 'FY2025', value: 1, yoy: null },
             { period_end: '2024-01-28', label: 'FY2024', value: 3, yoy: null },
           ],
-          cagr: null, yoy: null,
+          cagr: null, yoy: null, cagrs: { y3: null, y5: null, y10: null },
         },
       },
     })
@@ -79,7 +83,7 @@ describe('latestValue', () => {
   it("is the newest period's value, null when that period has none", () => {
     expect(latestValue(fixtureSeries([0.1, 0.2, 0.3, null]))).toBeNull()
     expect(latestValue(fixtureSeries([0.1, 0.2, null, 0.4]))).toBe(0.4)
-    expect(latestValue({ points: [], cagr: null, yoy: null })).toBeNull()
+    expect(latestValue({ points: [], cagr: null, yoy: null, cagrs: { y3: null, y5: null, y10: null } })).toBeNull()
   })
 })
 
@@ -90,6 +94,31 @@ describe('visibleCharts', () => {
     expect(visibleCharts(nonPayer).map((c) => c.id)).not.toContain('dps')
     expect(visibleCharts(nonPayer)).toHaveLength(COMPANY_CHARTS.length - 1)
     expect(visibleCharts(nonPayer, 'perShare')).toHaveLength(COMPANY_CHARTS.length - 1)
+  })
+})
+
+describe('seriesWithData', () => {
+  const margins = COMPANY_CHARTS.find((c) => c.id === 'margins')!
+  it('leaves out a series the company never files', () => {
+    const noGross = fixtureFinancials({ series: { gross_margin: fixtureSeries([null, null, null, null]) } })
+    expect(seriesWithData(noGross, margins.total).map((s) => s.key)).toEqual(['operating_margin', 'net_margin', 'fcf_margin'])
+    expect(seriesWithData(fixtureFinancials(), margins.total)).toHaveLength(4)
+  })
+
+  it('keeps the first series when none has a value, so the card still has a lead', () => {
+    const empty = fixtureFinancials({ series: emptySeriesSet() })
+    expect(seriesWithData(empty, margins.total).map((s) => s.key)).toEqual(['gross_margin'])
+  })
+})
+
+describe('visibleKeyStats', () => {
+  it('lists only the figures the company has', () => {
+    const keys = visibleKeyStats(FIXTURE_KEY_STATS).map((d) => d.key)
+    expect(keys).toContain('revenue')
+    expect(keys).toContain('dividends_paid')
+    expect(keys).not.toContain('gross_margin')
+    expect(keys).not.toContain('buybacks')
+    expect(visibleKeyStats(undefined)).toEqual([])
   })
 })
 

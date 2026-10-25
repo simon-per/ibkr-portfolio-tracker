@@ -153,6 +153,56 @@ METRICS: Dict[str, MetricSpec] = {
             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
         ),
     ),
+    # Gross profit as tagged; the service falls back to revenue less cost of revenue, the
+    # only form META, GOOGL and SPGI file. `CostOfServices` alone is a part of the cost
+    # (SPGI, ORCL), so it is not in the chain.
+    "gross_profit": MetricSpec(MONETARY, FLOW, ("GrossProfit",)),
+    "cost_of_revenue": MetricSpec(
+        MONETARY,
+        FLOW,
+        (
+            "CostOfRevenue",
+            "CostOfGoodsAndServicesSold",
+            "CostOfGoodsSold",
+        ),
+        non_negative=True,
+    ),
+    "buybacks": MetricSpec(
+        MONETARY,
+        FLOW,
+        ("PaymentsForRepurchaseOfCommonStock",),
+        non_negative=True,
+    ),
+    "dividends_paid": MetricSpec(
+        MONETARY,
+        FLOW,
+        (
+            "PaymentsOfDividendsCommonStock",
+            "PaymentsOfDividends",
+            "PaymentsOfOrdinaryDividends",
+        ),
+        non_negative=True,
+    ),
+    # Debt, current maturities included: the total as tagged, and its two halves for the
+    # companies that tag only those (MA, GOOGL's quarters); the service adds them. Never
+    # `DebtInstrumentCarryingAmount`, which ORCL's 10-Qs tag per new bond issue, not as a
+    # total. Commercial paper and short-term borrowings are not counted.
+    "debt_total": MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "LongTermDebt",
+            "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+        ),
+    ),
+    "debt_noncurrent": MetricSpec(
+        MONETARY,
+        INSTANT,
+        ("LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"),
+    ),
+    "debt_current": MetricSpec(
+        MONETARY, INSTANT, ("LongTermDebtCurrent", "DebtCurrent")
+    ),
 }
 
 #: The source recorded for a share count derived as net income / diluted EPS — for the

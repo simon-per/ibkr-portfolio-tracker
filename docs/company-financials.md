@@ -3,10 +3,11 @@
 > **This file is authoritative for its subsystem.** Keep it accurate in the same change that
 > moves the code.
 
-The Company tab shows one company at a time: revenue, net income, diluted EPS, free cash flow
-(before and after stock-based compensation, in total and per share), the diluted share count,
-operating, net and FCF margins, and dividends per share, quarterly, TTM or by fiscal year,
-over 5 years, 10 years or everything filed. **Sourced from SEC EDGAR only** — never Yahoo,
+The Company tab shows one company at a time: revenue, operating income, net income, diluted EPS,
+free cash flow (before and after stock-based compensation, in total and per share), the diluted
+share count, gross, operating, net and FCF margins, buybacks and dividends paid, cash and debt, and
+dividends per share, quarterly, TTM or by fiscal year, over 5 years, 10 years or everything filed,
+with a key-figures strip at the newest TTM point. **Sourced from SEC EDGAR only** — never Yahoo,
 never IBKR.
 
 | piece | file |
@@ -95,6 +96,13 @@ and the SEC lists no such ticker" needs a row of its own, with its own stamp (th
 | operating income | `OperatingIncomeLoss` |
 | dividends per share | `CommonStockDividendsPerShareDeclared` → `CommonStockDividendsPerShareCashPaid` |
 | cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` |
+| gross profit | `GrossProfit` |
+| cost of revenue | `CostOfRevenue` → `CostOfGoodsAndServicesSold` → `CostOfGoodsSold` |
+| buybacks | `PaymentsForRepurchaseOfCommonStock` |
+| dividends paid | `PaymentsOfDividendsCommonStock` → `PaymentsOfDividends` → `PaymentsOfOrdinaryDividends` |
+| debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
+| debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` |
+| debt, current | `LongTermDebtCurrent` → `DebtCurrent` |
 
 For **every period** the first concept that reports it wins, so a company that moved from
 `SalesRevenueNet` to `RevenueFromContractWithCustomer…` in 2018 keeps one series. Quarters are
@@ -109,7 +117,21 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   `NetIncomeLoss` after 2014; its `ProfitLoss` includes the non-controlling interests (about five
   times what its EPS is computed on). `NetIncomeLossAvailableToCommonStockholdersBasic` keeps net
   income, net margin and EPS on one base.
-- **Cash** is normalised and stored but not served: the API contract has no cash series yet.
+- **Gross margin** is `GrossProfit`, else revenue less cost of revenue (META, GOOGL and SPGI tag
+  only the cost). `CostOfServices` is not in the chain: alone it is part of the cost (SPGI, ORCL).
+  A company tagging neither (MA, IBKR) has no gross margin, never 100%.
+- **Debt** (an audit of 22 companyfacts documents, 2026-10-25) is the tagged total, else the
+  noncurrent and current halves added when both are tagged (MA, GOOGL's quarters), else absent.
+  **`DebtInstrumentCarryingAmount` is not used**: ORCL's 10-Qs tag it per new bond issue (6.25B,
+  14B, 18B), not as a total. **A tagged total of exactly zero is a slip** and falls through to the
+  halves (ORCL FY2022 and AMD FY2021 tag 0 beside billions of notes). Commercial paper and
+  short-term borrowings are not counted.
+- **No net cash.** Cash is cash and equivalents only; the short-term investments beside it are
+  tagged too unevenly to add (NVDA's `MarketableSecuritiesCurrent` stops in 2025), and cash − debt
+  showed NVDA, the book's most cash-rich company, as a net debtor (seen in the preview,
+  2026-10-25). The tab draws cash beside debt and derives nothing from the pair.
+- **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
+  AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 
 The audit (one throwaway pass over the book's CIKs, nothing stored) flagged every place the
 winning concept changes between adjacent periods with a jump over 30%; each was a real move
@@ -211,9 +233,13 @@ first_period_end, last_period_end, last_fetched_at`.
 (defaults `ttm`, `10y`): `security_id, symbol, name, currency, period, range, as_of, warnings,
 series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the
-tab's hover. The series: revenue, revenue per share, net income, diluted EPS, FCF, FCF after SBC,
-FCF per share, FCF after SBC per share, diluted shares, three margins, dividends per share; every
-per-share figure is the figure over the same period's diluted shares. Unknown security: 404.
+tab's hover — and `cagrs` `{y3, y5, y10}`. The series: revenue, revenue per share, operating
+income, net income, diluted EPS, FCF, FCF after SBC, FCF per share, FCF after SBC per share,
+diluted shares, four margins (gross, operating, net, FCF), dividends per share, buybacks, dividends
+paid, cash, debt; every per-share figure is the figure over the same period's diluted shares.
+`key_stats` is the newest TTM point's figures whatever `period` asked for (`label`, revenue with
+its YoY and 5-year CAGR, net income, EPS with both, FCF and FCF per share, the margins, shares and
+their YoY, DPS and the payout ratio, buybacks, dividends paid). Unknown security: 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
 **no write route**.
@@ -226,11 +252,15 @@ Computed in `company_financials_service` only:
   of the same period. A missing input makes each null: IBKR reports no capex, so it has no FCF.
 - **Margins** = the figure / revenue of the same period, as fractions (0.25 is 25%); null when
   revenue is missing or not positive.
+- **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
+- **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not
-  positive. **Both are null for the three margins** (lead's decision, 2026-10-25): a growth
-  rate of a ratio reads as a figure nobody means.
+  positive. **3/5/10-year CAGRs** (`cagrs`) compare the latest point with the one that many years
+  before it (same slack) over the whole history, not the range; null also when the latest is
+  negative (a root of a negative ratio is no rate). **All are null for the margins** (lead's
+  decision, 2026-10-25): a growth rate of a ratio reads as a figure nobody means.
 - **Annual** = the fiscal years as filed (the FY facts), not a sum of quarters.
 - **Range** counts back from the series' latest period end, not from today, so a TTM at the
   range's start is computed from quarters before it.
@@ -275,5 +305,5 @@ shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh`
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
-- Gross margin, EBITDA, balance-sheet series beyond cash, and valuation history (P/E, P/S, …,
-  which need prices: Yahoo, so rule 1).
+- EBITDA, net cash, equity and returns on capital, and valuation history (P/E, P/S, …, which need
+  prices: Yahoo, so rule 1).

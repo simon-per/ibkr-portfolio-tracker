@@ -32,7 +32,9 @@ import {
   type CompanyChartDef,
   type CompanyChartRow,
   type CompanyValueFormat,
+  type KeyStatDef,
   BASIS_OPTIONS,
+  CAGR_SPANS,
   PERIOD_OPTIONS,
   RANGE_OPTIONS,
   axisTicks,
@@ -42,8 +44,10 @@ import {
   hasAnyData,
   readCompanyPick,
   resolveCompany,
+  seriesWithData,
   shortPeriodLabel,
   visibleCharts,
+  visibleKeyStats,
   writeCompanyPick,
 } from '@/lib/companyFinancials'
 import { chartColor, LOSS_COLOR } from '@/lib/chartPalette'
@@ -98,11 +102,6 @@ function growthTone(printed: string, inverse: boolean): Tone {
   if (printed.startsWith('-')) return inverse ? 'positive' : 'negative'
   return 'neutral'
 }
-
-/** Fewer shares is the shareholder's gain, so the shares card reads growth the other way. */
-const INVERSE_GROWTH = new Set(['shares'])
-
-const RANGE_LABEL: Record<CompanyFinancialsRange, string> = { '5y': '5Y', '10y': '10Y', max: 'Max' }
 
 /** Recharts reports the hovered index as a number or a numeric string, or nothing. */
 function toIndex(value: unknown): number | null {
@@ -167,7 +166,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const [hidden, setHidden] = useState<ReadonlySet<CompanyFinancialsSeriesKey>>(() => new Set())
   const [active, setActive] = useState<number | null>(null)
 
-  const series = view.series.map((s, i) => ({ ...s, color: chartColor(i) }))
+  const series = seriesWithData(data, view).map((s, i) => ({ ...s, color: chartColor(i) }))
   const shown = series.filter((s) => !hidden.has(s.key))
   const maxTicks = isCompact ? 6 : expanded ? 10 : 7
   // The rows keep their identity across hovers: a new `data` array would restart the bars'
@@ -185,9 +184,15 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const lead = shown[0] ?? series[0]
   const leadValue = row?.[lead.key] ?? null
   const growth = chart.header === 'growth'
-  const inverse = INVERSE_GROWTH.has(chart.id)
+  const inverse = chart.inverse ?? false
   const pointYoy = growth ? signedPercent(row?.yoy[lead.key] ?? null) : null
-  const cagr = growth ? signedPercent(growthOf(data, lead.key).cagr) : null
+  const leadCagrs = growthOf(data, lead.key).cagrs
+  const cagrs = growth
+    ? CAGR_SPANS.flatMap((span) => {
+        const value = leadCagrs[span.key]
+        return value == null ? [] : [{ ...span, printed: signedPercent(value) }]
+      })
+    : []
 
   const toggle = (key: CompanyFinancialsSeriesKey) => setHidden((prev) => {
     const next = new Set(prev)
@@ -261,9 +266,12 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
               {pointYoy != null && <Stat label="YoY" value={pointYoy} tone={growthTone(pointYoy, inverse)} />}
             </p>
           </div>
-          {cagr != null && (
-            <span className="text-xs">
-              <Stat label={`CAGR ${RANGE_LABEL[data.range]}`} value={cagr} tone={growthTone(cagr, inverse)} />
+          {cagrs.length > 0 && (
+            <span className="flex flex-wrap items-center gap-x-3 text-xs" data-testid="cagrs">
+              <span className="text-muted-foreground">CAGR</span>
+              {cagrs.map((c) => (
+                <Stat key={c.key} label={c.label} value={c.printed} tone={growthTone(c.printed, inverse)} />
+              ))}
             </span>
           )}
         </div>
@@ -338,6 +346,59 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
             )}
           </ResponsiveContainer>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** A key stat's figure: a growth rate signed and inked, anything else as its cards print it. */
+function keyStatText(def: Pick<KeyStatDef, 'format'>, value: number, currency: string): string {
+  return def.format === 'signed' ? signedPercent(value) : valueFormatter(def.format, currency)(value)
+}
+
+/** The newest TTM point's figures, whatever period the charts below show. */
+function KeyStats({ data }: { data: CompanyFinancialsResponse }) {
+  const stats = data.key_stats
+  const defs = visibleKeyStats(stats)
+  if (defs.length === 0) return null
+  return (
+    <Card data-testid="key-stats">
+      <SectionHeader
+        title="Key figures"
+        className="pb-1 [&_h3]:text-base"
+        aside={<span className="text-xs tabular-nums text-muted-foreground">TTM · {stats.label}</span>}
+      />
+      <CardContent className="pt-0">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+          {defs.map((def) => {
+            const value = stats[def.key] as number
+            const printed = keyStatText(def, value, data.currency)
+            const noteValue = def.note ? stats[def.note.key] : null
+            const notePrinted = def.note && noteValue != null ? keyStatText(def.note, noteValue, data.currency) : null
+            return (
+              <div key={def.key} className="min-w-0">
+                <dt className="truncate text-xs text-muted-foreground">{def.label}</dt>
+                <dd
+                  className={cn(
+                    'text-lg font-semibold tabular-nums leading-tight',
+                    def.format === 'signed' && TONE_TEXT[growthTone(printed, def.inverse ?? false)],
+                  )}
+                >
+                  {printed}
+                </dd>
+                {def.note && notePrinted != null && (
+                  <dd className="text-xs">
+                    <Stat
+                      label={def.note.label}
+                      value={notePrinted}
+                      tone={def.note.format === 'signed' ? growthTone(notePrinted, def.inverse ?? false) : 'neutral'}
+                    />
+                  </dd>
+                )}
+              </div>
+            )
+          })}
+        </dl>
       </CardContent>
     </Card>
   )
@@ -482,6 +543,8 @@ export function CompanyTab() {
           {data && !hasAnyData(data) ? (
             <Notice>No financial data for {data.symbol}.</Notice>
           ) : (
+            <>
+            {data && <KeyStats data={data} />}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {data
                 ? charts.map((chart) => (
@@ -497,6 +560,7 @@ export function CompanyTab() {
                   ))
                 : <ChartSkeletons />}
             </div>
+            </>
           )}
         </div>
       )}
