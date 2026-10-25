@@ -116,7 +116,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 |---|---|
 | revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) |
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
-| diluted EPS | `EarningsPerShareDiluted` |
+| diluted EPS | `EarningsPerShareDiluted` → `EarningsPerShareBasicAndDiluted` (ALNY to 2021) → `IncomeLossFromContinuingOperationsPerDilutedShare` (ABNB; MNST after 2011), then net income / diluted shares (below) |
 | operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
 | capex | `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets` → `PaymentsForCapitalImprovements` |
 | SBC | `ShareBasedCompensation` → `AllocatedShareBasedCompensationExpense` |
@@ -251,6 +251,13 @@ its dividends per share a million times over). A slip in a filing no newer one o
 **reported share count about 1000× off net income / EPS** for the same period is rescaled too
 (ONDS tags some 10-Ks and Q1 10-Qs in thousands).
 
+A filing slipped **in some contexts only** fits no one factor: DXCM's 2014 10-K re-tagged its 2012
+quarters' EPS a million times over (−210000 beside three filings' −0.21) while its years stayed
+right, and walking it voted the older filings a million times up to match. So before the walk
+(`_drop_lone_slips`), a fact a thousand or a million times off the value two other filings agree
+on for that concept and period is dropped, and then so is that filing's same concept the same
+factor off a single other filing. Found when the EPS chain took `EarningsPerShareBasicAndDiluted`.
+
 **Window**: a split after the newest filing is reflected once the next 10-Q is filed (it restates
 the comparatives), so for up to a quarter the per-share history sits in the pre-split basis.
 
@@ -259,7 +266,12 @@ the comparatives), so for up to a quarter the per-share history sits in the pre-
 GOOGL tags `WeightedAverageNumberOfDilutedSharesOutstanding` only from 2022. For a period with no
 count, it is **net income / diluted EPS** (source `NetIncomeLoss/EarningsPerShareDiluted`) when the
 EPS is precise to 2% after its cent rounding — and **never from `ProfitLoss`**, which includes
-non-controlling interests.
+non-controlling interests, nor from continuing operations' EPS, which net income is not over.
+
+The other way round, a period with no EPS takes **net income / diluted shares** (source
+`NetIncomeLoss/WeightedAverageNumberOfDilutedSharesOutstanding`): EXC's 10-Ks tag no year's EPS,
+so it had no fourth quarter and no TTM EPS. Not from `ProfitLoss`, nor over a count that was
+itself net income / EPS. A company paying preferred dividends reads them as common here.
 
 ### Fiscal periods, by period end
 
@@ -304,7 +316,8 @@ A known one without figures: 200, empty points, a warning. Response models are p
 
 Computed in `company_financials_service` only:
 
-- **TTM** of a flow = the sum of four consecutive quarters (ends 80–105 days apart); a missing
+- **TTM** of a flow = the sum of four consecutive quarters (ends 80–120 days apart: COST's
+  fourth quarter is 16 or 17 weeks, and at 105 it had no TTM at any year end); a missing
   quarter or a gap makes it null, never a partial sum. TTM shares = the mean of the four.
 - **FCF** = OCF − capex; **FCF after SBC** = FCF − SBC; **FCF per share** = FCF / diluted shares
   of the same period. A missing input makes each null: IBKR reports no capex, so it has no FCF.
@@ -322,6 +335,9 @@ Computed in `company_financials_service` only:
 - **Split basis** (`eps_basis`): Yahoo split-adjusts closes to the day they were fetched, the
   normaliser restates figures to the newest filing. A split after that filing is in the closes
   and not yet in the EPS, so its ratio scales the closes up until a filing restates the figures.
+  Only a ratio in `SPLIT_RATIOS` counts: Yahoo books a spin-off as a fractional split (SPGI's
+  1.057 on 2026-07-01), which moves no share count. Its pre-spin-off closes stay as Yahoo
+  lowered them, so a P/E before a spin-off reads that fraction low (accepted).
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not
@@ -402,6 +418,9 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
   check has NI / EPS to compare with; revenue has nothing).
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
+- **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from
+  then until its Q1 2027 10-Q restates the quarter. Deriving it as six months less Q2 is not done.
+- **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
+  HONA and SPCX are new filers with too few quarters for a TTM.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
-- EBITDA, net cash, equity and returns on capital, and valuation history (P/E, P/S, …, which need
-  prices: Yahoo, so rule 1).
+- EBITDA, net cash, equity and returns on capital; valuation history beyond the P/E.

@@ -72,6 +72,10 @@ class MetricSpec:
     non_negative: bool = False
 
 
+#: Continuing operations' EPS: net income, which includes the discontinued ones, over it is no
+#: share count either.
+CONTINUING_EPS = "IncomeLossFromContinuingOperationsPerDilutedShare"
+
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
 # Revenue starts with `RevenuesNetOfInterestExpense`, which only a bank or a broker tags and
@@ -105,7 +109,18 @@ METRICS: Dict[str, MetricSpec] = {
             "ProfitLoss",
         ),
     ),
-    "eps_diluted": MetricSpec(PER_SHARE, FLOW, ("EarningsPerShareDiluted",)),
+    # A company without dilutive securities may tag one figure for both (ALNY to 2021); one
+    # without discontinued operations may tag only the continuing figure (ABNB throughout,
+    # MNST after 2011), which is then its EPS.
+    "eps_diluted": MetricSpec(
+        PER_SHARE,
+        FLOW,
+        (
+            "EarningsPerShareDiluted",
+            "EarningsPerShareBasicAndDiluted",
+            CONTINUING_EPS,
+        ),
+    ),
     "operating_cash_flow": MetricSpec(
         MONETARY,
         FLOW,
@@ -215,6 +230,11 @@ METRICS: Dict[str, MetricSpec] = {
 #: count.
 SHARES_FROM_EPS_EXCLUDED_INCOME = "ProfitLoss"
 SHARES_FROM_EPS_SOURCE = "NetIncomeLoss/EarningsPerShareDiluted"
+#: The other way round: a period's EPS the company did not tag, from net income over its
+#: diluted share count. EXC's 10-Ks tag no year's EPS (its combined filing dimensions it), so
+#: it had no fourth quarter and no TTM EPS. Not over `ProfitLoss`, nor over a count that was
+#: itself net income over EPS. Where preferred dividends are paid, this reads them as common.
+EPS_FROM_SHARES_SOURCE = "NetIncomeLoss/WeightedAverageNumberOfDilutedSharesOutstanding"
 #: How imprecise the EPS may be (its rounding to the cent, relative) for that derivation.
 SHARES_FROM_EPS_MAX_ERROR = 0.02
 # The unit-slip check needs only to tell 1 from 1000, so it takes a far coarser EPS, and a
@@ -265,6 +285,16 @@ SCALE_SLIPS: Tuple[Fraction, ...] = (
     Fraction(1000),
     Fraction(1_000_000),
 )
+# A fact one filing tags a thousand or a million times off the value at least this many
+# other filings agree on, for the same concept and period, is that filing's slip in that
+# context: DXCM's 2014 10-K re-tagged its 2012 quarters' EPS a million times over (-210000
+# beside three filings' -0.21) while its years stayed right, so no one factor for the filing
+# held both, and the older filings were voted a million times up to match it. Dropped before
+# the filings are walked (`_drop_lone_slips`). Only these factors: a split's is far smaller.
+LONE_SLIP_MIN_AGREEING = 2
+# Loose on purpose: the factors are a thousand apart, and a small EPS is cent-rounded.
+LONE_SLIP_TOLERANCE = 0.25
+
 # The order a split vote tries them in: no slip first.
 SLIPS_IN_ORDER: Tuple[Fraction, ...] = (
     Fraction(1),
@@ -444,6 +474,47 @@ def _tolerance(f: Fact, g: Fact) -> Optional[float]:
         return VALUE_TOLERANCE
     tol = VALUE_TOLERANCE + CENT_ROUNDING / abs(f.val) + CENT_ROUNDING / abs(g.val)
     return tol if tol <= MAX_VOTE_TOLERANCE else None
+
+
+def _drop_lone_slips(facts: List[Fact]) -> List[Fact]:
+    """
+    The facts less each one a lone filing tagged a `SCALE_SLIPS` factor off the rest. Proven
+    where `LONE_SLIP_MIN_AGREEING` other filings agree; then that filing's same concept off by
+    the same factor from a single other filing is the same slip (DXCM's 2012 Q4, which only
+    the 2013 10-K reported besides).
+    """
+    groups: Dict[Tuple[str, Optional[date], date], List[Fact]] = defaultdict(list)
+    for f in facts:
+        if f.val != 0:
+            groups[(f.concept, f.start, f.end)].append(f)
+    slips = [float(s) for s in SCALE_SLIPS if s != 1]
+
+    def agreeing(f: Fact, group: List[Fact], factor: float) -> int:
+        return sum(
+            abs(f.val / (g.val * factor) - 1) <= LONE_SLIP_TOLERANCE
+            for g in group
+            if g.accn != f.accn
+        )
+
+    proven = set()
+    for group in groups.values():
+        for f in group:
+            if agreeing(f, group, 1.0):
+                continue
+            for factor in slips:
+                if agreeing(f, group, factor) >= LONE_SLIP_MIN_AGREEING:
+                    proven.add((f.accn, f.concept, factor))
+    slipped = set()
+    for group in groups.values():
+        for f in group:
+            if agreeing(f, group, 1.0):
+                continue
+            if any(
+                (f.accn, f.concept, factor) in proven and agreeing(f, group, factor)
+                for factor in slips
+            ):
+                slipped.add(id(f))
+    return [f for f in facts if id(f) not in slipped]
 
 
 def _split_part(kind: str, split: Fraction) -> Fraction:
@@ -823,11 +894,12 @@ def _implied_shares(
     max_error: float,
 ) -> Optional[float]:
     """Net income over diluted EPS for one period, or None when either is missing, the
-    income is the consolidated `ProfitLoss`, or the EPS is too coarse for it."""
+    income is the consolidated `ProfitLoss`, the EPS is continuing operations' only, or the
+    EPS is too coarse for it."""
     income, eps = values["net_income"].get(key), values["eps_diluted"].get(key)
     if income is None or eps is None or eps.value == 0:
         return None
-    if income.concept == SHARES_FROM_EPS_EXCLUDED_INCOME:
+    if income.concept == SHARES_FROM_EPS_EXCLUDED_INCOME or eps.concept == CONTINUING_EPS:
         return None
     if eps.error / abs(eps.value) > max_error:
         return None
@@ -836,6 +908,29 @@ def _implied_shares(
 
 
 # ── The whole thing ──────────────────────────────────────────────────────────
+
+
+def _fill_eps_from_shares(values, keys) -> None:
+    """Each period's missing diluted EPS, from net income over the diluted share count."""
+    for key in keys:
+        if key in values["eps_diluted"]:
+            continue
+        income, shares = values["net_income"].get(key), values["diluted_shares"].get(key)
+        if income is None or shares is None or shares.value <= 0:
+            continue
+        if (
+            income.concept == SHARES_FROM_EPS_EXCLUDED_INCOME
+            or shares.concept == SHARES_FROM_EPS_SOURCE
+        ):
+            continue
+        values["eps_diluted"][key] = Obs(
+            value=income.value / shares.value,
+            filed=max(income.filed, shares.filed),
+            start=income.start,
+            end=income.end,
+            unit=f"{income.unit}/shares",
+            concept=EPS_FROM_SHARES_SOURCE,
+        )
 
 
 def _fill_shares_from_eps(values, keys) -> None:
@@ -865,7 +960,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
     reads (an IFRS 20-F filer, a fund).
     """
     result = Normalised(entity_name=(companyfacts or {}).get("entityName"))
-    facts = _facts(companyfacts)
+    facts = _drop_lone_slips(_facts(companyfacts))
     if not facts:
         return result
     multiplier = adjustments(facts)
@@ -1010,6 +1105,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
             dropped = True
     if dropped:
         _fill_shares_from_eps(values, keys)
+    _fill_eps_from_shares(values, keys)
 
     currencies: Counter = Counter()
     for metric in ("revenue", "net_income"):

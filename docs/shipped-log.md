@@ -12,7 +12,11 @@
 - **P/E** for every listed company, in *Key figures* and a P/E card: weekly Yahoo closes per
   CIK (`company_price_sync`, Sunday 05:00, about a hundred requests a week, approved by the
   owner), each period end's close over TTM diluted EPS, splits after the newest filing scaled
-  in. The first version (`c06f243`) used the held listings' daily closes only.
+  in. The first version (`c06f243`) used the held listings' daily closes only. The fill found
+  the gaps behind 18 companies without a P/E: the EPS chain gains `BasicAndDiluted` and the
+  continuing-operations EPS (ABNB, MNST, ALNY), a missing EPS is net income / shares (EXC), a
+  TTM accepts a 16/17-week fourth quarter (COST), a spin-off Yahoo books as a split no longer
+  scales closes (SPGI), and a slip in some of one filing's contexts is dropped (DXCM 2012).
 - **Figures** (`808c4a3`): a *Key figures* card at the newest TTM point (revenue, net income, EPS,
   FCF, four margins, shares, DPS with payout ratio, buybacks, dividends paid, YoY and 5Y CAGR
   notes); new cards for operating income, buybacks & dividends, and cash & debt; gross margin in

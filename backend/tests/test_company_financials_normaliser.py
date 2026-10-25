@@ -20,7 +20,9 @@ from pathlib import Path
 import pytest
 
 from app.services.company_financials_normaliser import (
+    EPS_FROM_SHARES_SOURCE,
     SHARES_FROM_EPS_SOURCE,
+    _drop_lone_slips,
     _facts,
     adjustments,
     fiscal_year_name,
@@ -327,7 +329,7 @@ def test_q4_comes_from_the_year_less_three_quarters_across_two_concepts():
     assert q4["source_concept"] == "Revenues less Q1-Q3"
 
 
-def _eps_doc(shares_rows, income_concept="NetIncomeLoss"):
+def _eps_doc(shares_rows, income_concept="NetIncomeLoss", eps_concept="EarningsPerShareDiluted"):
     # Two discrete quarters and their six-month rung, which places them in a fiscal year.
     concepts = {
         income_concept: {
@@ -339,7 +341,7 @@ def _eps_doc(shares_rows, income_concept="NetIncomeLoss"):
                 ]
             }
         },
-        "EarningsPerShareDiluted": {
+        eps_concept: {
             "units": {
                 "USD/shares": [
                     _f("2024-01-01", "2024-03-31", 2.00, "2024-05-01"),
@@ -367,6 +369,76 @@ def test_consolidated_profit_never_derives_a_share_count():
     rows = normalise(_eps_doc(None, income_concept="ProfitLoss")).rows
     assert _row(rows, "net_income", date(2024, 3, 31), "Q1") is not None
     assert _row(rows, "diluted_shares", date(2024, 3, 31), "Q1") is None
+
+
+@pytest.mark.parametrize(
+    "concept, derives_shares",
+    [
+        ("EarningsPerShareBasicAndDiluted", True),
+        # Net income includes discontinued operations; over this EPS it is no share count.
+        ("IncomeLossFromContinuingOperationsPerDilutedShare", False),
+    ],
+)
+def test_eps_falls_back_to_the_concepts_a_simpler_filer_tags(concept, derives_shares):
+    rows = normalise(_eps_doc(None, eps_concept=concept)).rows
+    eps = _row(rows, "eps_diluted", date(2024, 6, 30), "Q2")
+    assert (eps["value"], eps["source_concept"]) == (2.40, concept)
+    shares = _row(rows, "diluted_shares", date(2024, 3, 31), "Q1")
+    assert (shares is not None) == derives_shares
+
+
+def test_a_missing_eps_is_net_income_over_the_share_count():
+    shares = [
+        _f("2024-01-01", "2024-03-31", 50e6, "2024-05-01"),
+        _f("2024-04-01", "2024-06-30", 50e6, "2024-08-01"),
+        _f("2024-07-01", "2024-09-30", 40e6, "2024-11-01"),
+    ]
+    doc = _eps_doc(shares)
+    doc["facts"]["us-gaap"]["NetIncomeLoss"]["units"]["USD"].append(
+        _f("2024-07-01", "2024-09-30", 100e6, "2024-11-01")
+    )
+    rows = normalise(doc).rows
+    q3 = _row(rows, "eps_diluted", date(2024, 9, 30), "Q3")
+    assert q3["value"] == pytest.approx(2.5) and q3["unit"] == "USD/shares"
+    assert q3["source_concept"] == EPS_FROM_SHARES_SOURCE
+    # A reported EPS stands.
+    assert _row(rows, "eps_diluted", date(2024, 6, 30), "Q2")["value"] == 2.40
+
+
+def test_no_eps_is_derived_from_consolidated_profit():
+    shares = [_f("2024-01-01", "2024-03-31", 50e6, "2024-05-01")]
+    doc = _eps_doc(shares, income_concept="ProfitLoss")
+    del doc["facts"]["us-gaap"]["EarningsPerShareDiluted"]
+    assert _row(normalise(doc).rows, "eps_diluted", date(2024, 3, 31), "Q1") is None
+
+
+def test_a_lone_filings_slip_in_some_contexts_is_dropped():
+    """DXCM's 2014 10-K: its 2012 quarters' EPS a million times over, its years right."""
+    eps = [
+        _f("2012-01-01", "2012-03-31", -0.21, "2012-05-02"),
+        _f("2012-01-01", "2012-03-31", -0.21, "2013-02-21", form="10-K"),
+        _f("2012-01-01", "2012-03-31", -0.21, "2013-05-01"),
+        _f("2012-01-01", "2012-03-31", -210000, "2014-02-20", form="10-K"),
+        # A quarter only one other filing reported: the same filing's same slip.
+        _f("2012-10-01", "2012-12-31", -0.12, "2013-02-21", form="10-K"),
+        _f("2012-10-01", "2012-12-31", -120000, "2014-02-20", form="10-K"),
+        _f("2012-01-01", "2012-12-31", -0.79, "2013-02-21", form="10-K"),
+        _f("2012-01-01", "2012-12-31", -0.79, "2014-02-20", form="10-K"),
+    ]
+    doc = _doc({
+        "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
+        "NetIncomeLoss": {"units": {"USD": [
+            _f("2012-01-01", "2012-03-31", -14.1e6, "2013-05-01"),
+            _f("2012-01-01", "2012-12-31", -54.5e6, "2014-02-20", form="10-K"),
+        ]}},
+    })
+    rows = normalise(doc).rows
+    assert _row(rows, "eps_diluted", date(2012, 3, 31), "Q1")["value"] == -0.21
+    assert _row(rows, "eps_diluted", date(2012, 12, 31), "FY")["value"] == -0.79
+    assert _row(rows, "eps_diluted", date(2012, 12, 31), "Q4")["value"] == -0.12
+    # Two filings apart, neither alone: no slip is assumed.
+    pair = _doc({"EarningsPerShareDiluted": {"units": {"USD/shares": eps[2:4]}}})
+    assert len(_drop_lone_slips(_facts(pair))) == 2
 
 
 def test_a_share_count_tagged_in_thousands_is_rescaled():
