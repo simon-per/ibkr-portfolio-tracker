@@ -1,5 +1,7 @@
 import { queryOptions, type Query } from '@tanstack/react-query'
-import { api, type ActivityParams } from './api'
+import {
+  api, type ActivityParams, type CompanyFinancialsPeriod, type CompanyFinancialsRange,
+} from './api'
 import type { DateRange } from './dateRanges'
 
 /**
@@ -116,6 +118,25 @@ export const activityQuery = (params: ActivityParams) =>
     queryKey: ['portfolio', 'activity', params],
     queryFn: () => api.getActivity(params),
     staleTime: 5 * 60 * 1000,
+  })
+
+/** The held US SEC filers the Company tab can show. Changes only when the server fetches filings. */
+export const companyFinancialsCompaniesQuery = queryOptions({
+  queryKey: ['company-financials', 'companies'],
+  queryFn: () => api.getCompanyFinancialsCompanies(),
+  staleTime: 30 * 60 * 1000,
+})
+
+/** One company's fundamentals history at one period basis and range (the Company tab). */
+export const companyFinancialsQuery = (
+  securityId: number,
+  period: CompanyFinancialsPeriod,
+  range: CompanyFinancialsRange,
+) =>
+  queryOptions({
+    queryKey: ['company-financials', 'series', securityId, period, range],
+    queryFn: () => api.getCompanyFinancials(securityId, period, range),
+    staleTime: 30 * 60 * 1000,
   })
 
 /**

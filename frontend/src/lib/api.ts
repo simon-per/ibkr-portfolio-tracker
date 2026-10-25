@@ -1564,6 +1564,75 @@ export interface CryptoSyncResponse {
   timestamp: string | null;
 }
 
+/** `/api/company-financials/companies`: one held US SEC filer the Company tab can show. */
+export interface CompanyFinancialsCompany {
+  security_id: number;
+  symbol: string;
+  name: string;
+  cik: string;
+  /** The filings' reporting currency; every money figure for the company is in it. */
+  currency: string;
+  first_period_end: string | null;
+  last_period_end: string | null;
+  last_fetched_at: string | null;
+}
+
+export type CompanyFinancialsPeriod = 'quarterly' | 'ttm' | 'annual';
+export type CompanyFinancialsRange = '5y' | '10y' | 'max';
+
+/**
+ * One period of one series. `label` is "Q3 FY2025" (quarterly, TTM) or "FY2025" (annual), FY
+ * being the calendar year the fiscal year ends in. `value: null` is a gap, never 0.
+ */
+export interface CompanyFinancialsPoint {
+  period_end: string;
+  label: string;
+  value: number | null;
+}
+
+/**
+ * One series over the range. `cagr` and `yoy` are fractions (0.25 = 25%) computed by the
+ * server, null when they cannot be (a negative start, too few points).
+ */
+export interface CompanyFinancialsSeries {
+  points: CompanyFinancialsPoint[];
+  cagr: number | null;
+  yoy: number | null;
+}
+
+/** The `series` object: one entry per figure. Margins always carry `cagr`/`yoy` null. */
+export interface CompanyFinancialsSeriesSet {
+  revenue: CompanyFinancialsSeries;
+  net_income: CompanyFinancialsSeries;
+  eps_diluted: CompanyFinancialsSeries;
+  fcf: CompanyFinancialsSeries;
+  fcf_after_sbc: CompanyFinancialsSeries;
+  fcf_per_share: CompanyFinancialsSeries;
+  diluted_shares: CompanyFinancialsSeries;
+  operating_margin: CompanyFinancialsSeries;
+  net_margin: CompanyFinancialsSeries;
+  fcf_margin: CompanyFinancialsSeries;
+  dividends_per_share: CompanyFinancialsSeries;
+}
+
+export type CompanyFinancialsSeriesKey = keyof CompanyFinancialsSeriesSet;
+
+/**
+ * `/api/company-financials/{security_id}`. Money is in `currency` units (not thousands);
+ * margins are fractions. The browser draws these and computes nothing from them.
+ */
+export interface CompanyFinancialsResponse {
+  security_id: number;
+  symbol: string;
+  name: string;
+  currency: string;
+  period: CompanyFinancialsPeriod;
+  range: CompanyFinancialsRange;
+  as_of: string | null;
+  warnings: string[];
+  series: CompanyFinancialsSeriesSet;
+}
+
 /** `/api/logos`: `security_id` -> logo version, for the securities that have a logo. */
 export interface LogoManifest {
   /** `security_id` -> version. */
@@ -1963,6 +2032,20 @@ class ApiClient {
   /** Reaches CoinStats: a 409 means it is not configured, a 429 that a run is in flight or cooling down. */
   async syncCrypto(): Promise<CryptoSyncResponse> {
     return this.request<CryptoSyncResponse>('/api/crypto/sync', { method: 'POST' });
+  }
+
+  // Company financials from SEC filings (the Company tab).
+  async getCompanyFinancialsCompanies(): Promise<CompanyFinancialsCompany[]> {
+    return this.request<CompanyFinancialsCompany[]>('/api/company-financials/companies');
+  }
+
+  async getCompanyFinancials(
+    securityId: number,
+    period: CompanyFinancialsPeriod,
+    range: CompanyFinancialsRange,
+  ): Promise<CompanyFinancialsResponse> {
+    const params = new URLSearchParams({ period, range });
+    return this.request<CompanyFinancialsResponse>(`/api/company-financials/${securityId}?${params}`);
   }
 
   // Holding logos (docs/logos.md)
