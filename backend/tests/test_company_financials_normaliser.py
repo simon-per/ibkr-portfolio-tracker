@@ -475,6 +475,26 @@ def test_equity_is_the_parents_before_the_consolidated():
     assert _row(rows, "equity", date(2024, 6, 30), "Q2")["value"] == 990e6
 
 
+def test_a_sixteen_week_fourth_quarter_carries_the_years_balances():
+    """COST: 12, 12, 12 and 16 weeks; the 10-K's year-end cash belongs to Q4 too."""
+    income = [
+        _f("2025-09-01", "2025-11-23", 10, "2025-12-15"),
+        _f("2025-09-01", "2026-02-15", 20, "2026-03-15"),
+        _f("2025-09-01", "2026-05-10", 30, "2026-06-15"),
+        _f("2025-09-01", "2026-08-30", 45, "2026-10-01", form="10-K"),
+    ]
+    doc = _doc({
+        "NetIncomeLoss": {"units": {"USD": income}},
+        "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [
+            _f(None, "2026-05-10", 900, "2026-06-15"),
+            _f(None, "2026-08-30", 950, "2026-10-01", form="10-K"),
+        ]}},
+    })
+    rows = normalise(doc).rows
+    assert _row(rows, "net_income", date(2026, 8, 30), "Q4")["value"] == 15
+    assert _row(rows, "cash", date(2026, 8, 30), "Q4")["value"] == 950
+
+
 def test_a_share_count_tagged_in_thousands_is_rescaled():
     """ONDS tags some filings' counts in thousands, in filings no newer one overlaps."""
     rows = normalise(

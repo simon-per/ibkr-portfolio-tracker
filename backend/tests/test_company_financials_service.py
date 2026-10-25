@@ -371,6 +371,16 @@ def test_the_multiples_share_the_close_and_the_ttm_per_share_figures():
     assert stats["dividend_yield"] is None and stats["pfcf_ratio"] is None
 
 
+def test_the_market_cap_needs_a_count_that_agrees_with_the_diluted_one():
+    n = len(ENDS) - 1
+    rows = _rows(ENDS, {**BASE, "shares_outstanding": lambda i: 100.0 + i})
+    assert key_stats(rows, 40.0)["market_cap"] == pytest.approx(40.0 * (100.0 + n))
+    # One class of two, untagged by class: half the company is no market cap.
+    half = _rows(ENDS, {**BASE, "shares_outstanding": lambda i: 50.0})
+    assert key_stats(half, 40.0)["market_cap"] is None
+    assert key_stats(rows)["market_cap"] is None  # no price
+
+
 def test_return_on_equity_is_ttm_income_over_the_years_mean_equity():
     equity = {**BASE, "equity": lambda i: 400.0 + 20 * i}
     rows = _rows(ENDS, equity)

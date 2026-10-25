@@ -124,6 +124,7 @@ describe('CompanyTab', () => {
     expect(stats.textContent).toContain('EPS$2.94')
     expect(stats.textContent).toContain('P/E48.3')
     expect(stats.textContent).toContain('P/S26.9')
+    expect(stats.textContent).toContain('Market cap$3.5T')
     expect(stats.textContent).toContain('P/FCF57.6')
     expect(stats.textContent).toContain('Return on equity119.2%')
     expect(stats.textContent).toContain('Dividend yield0.02%')

@@ -12,7 +12,8 @@
 - **Valuation and returns**: P/S, P/FCF and dividend yield beside the P/E (key figures, and a
   Valuation card of P/E, P/FCF, P/S), from the same closes; return on equity from a new
   `equity` concept (key figure and card), null for negative equity. No new Yahoo request;
-  one EDGAR refetch for the equity rows.
+  one EDGAR refetch for the equity rows. Then market cap: the close x the balance sheet's
+  shares outstanding, null when that count is 10%+ off the diluted one (a class of several).
 - **P/E** for every listed company, in *Key figures* and a P/E card: weekly Yahoo closes per
   CIK (`company_price_sync`, Sunday 05:00, about a hundred requests a week, approved by the
   owner), each period end's close over TTM diluted EPS, splits after the newest filing scaled

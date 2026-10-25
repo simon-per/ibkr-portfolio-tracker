@@ -302,7 +302,10 @@ export function formatAxisMoney(value: number, symbol: string = "", step?: numbe
   return `${sign}${symbol}${body}`
 }
 
-const AXIS_UNITS: readonly [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "k"], [1, ""]]
+// Trillions for a market cap (the Company tab's $3.5T read "$3509B").
+const AXIS_UNITS: readonly [number, string][] = [
+  [1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "k"], [1, ""],
+]
 
 /** The fewest decimals that write `x` exactly, up to six. */
 function decimalsOf(x: number): number {

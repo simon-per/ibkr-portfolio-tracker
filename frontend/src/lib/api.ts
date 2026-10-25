@@ -1669,6 +1669,8 @@ export interface CompanyFinancialsKeyStats {
   payout_ratio: number | null;
   /** The newest close (two weeks old at most) over TTM diluted EPS. */
   pe_ratio: number | null;
+  /** The newest close x shares outstanding; null for a count off the diluted one by 10%+. */
+  market_cap: number | null;
   ps_ratio: number | null;
   pfcf_ratio: number | null;
   /** TTM dividends per share over the same close, a fraction. */

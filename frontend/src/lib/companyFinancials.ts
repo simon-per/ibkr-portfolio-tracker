@@ -257,6 +257,7 @@ export const KEY_STATS: readonly KeyStatDef[] = [
   { key: 'net_income', label: 'Net income', format: 'money' },
   { key: 'eps_diluted', label: 'EPS', format: 'perShare', note: { key: 'eps_yoy', label: 'YoY', format: 'signed' } },
   { key: 'eps_cagr_5y', label: 'EPS CAGR 5Y', format: 'signed' },
+  { key: 'market_cap', label: 'Market cap', format: 'money' },
   { key: 'pe_ratio', label: 'P/E', format: 'multiple' },
   { key: 'ps_ratio', label: 'P/S', format: 'multiple' },
   { key: 'pfcf_ratio', label: 'P/FCF', format: 'multiple' },

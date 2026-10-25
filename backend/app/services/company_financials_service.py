@@ -27,6 +27,9 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   point with the one that many years before it, over the whole history. None of these is
   computed for a margin, whose growth rate would read as a figure nobody means.
 - **Key stats** are the newest TTM point's figures, whatever period the charts show.
+- **Market cap** (key figures only) = the newest close x the shares outstanding at the newest
+  quarter end, when that count is within `MARKET_CAP_SHARE_TOLERANCE` of the diluted average;
+  otherwise null, never the diluted average in its place.
 - **Return on equity** = TTM net income (a year's own on the annual view) / the mean of the
   equity at the period end and a year before it; null when either equity is missing or not
   positive (a buyback-heavy company's negative equity makes no return).
@@ -109,7 +112,14 @@ SUMMED = (
     "dividends_paid",
 )
 AVERAGED = ("diluted_shares",)
-BALANCES = ("cash", "debt_total", "debt_noncurrent", "debt_current", "equity")
+BALANCES = (
+    "cash",
+    "debt_total",
+    "debt_noncurrent",
+    "debt_current",
+    "equity",
+    "shares_outstanding",
+)
 # Ratios: a growth rate of a multiple, a yield or a return reads as a figure nobody means.
 VALUATIONS = ("pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield")
 NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe"}
@@ -118,6 +128,9 @@ PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
 PRICE_MAX_AGE_DAYS = 14
 SPLIT_RATIO_TOLERANCE = 0.005
+# The market cap's share count must sit this near the diluted average: a filer that tags one
+# class of several without its class (half of GOOGL's, 87% of META's) is no company's count.
+MARKET_CAP_SHARE_TOLERANCE = 0.10
 # The compound growth the cards and the key figures quote, in years back from the latest.
 CAGR_YEARS = (3, 5, 10)
 # Two quarter ends this far apart are consecutive: 12 to 14 weeks, or the 16 and 17 of a
@@ -355,6 +368,17 @@ def _with_valuations(
         )
 
 
+def market_cap(
+    price: Optional[float], outstanding: Optional[float], diluted: Optional[float]
+) -> Optional[float]:
+    """`price` x shares outstanding, when the count agrees with the diluted one."""
+    if price is None or not outstanding or not diluted:
+        return None
+    if abs(outstanding / diluted - 1) > MARKET_CAP_SHARE_TOLERANCE:
+        return None
+    return price * outstanding
+
+
 def _value_near(values: Dict[date, float], day: date) -> Optional[float]:
     """The value dated nearest `day`, within `YOY_SLACK_DAYS`, or None."""
     near = [(abs((d - day).days), v) for d, v in values.items()]
@@ -417,6 +441,15 @@ def key_stats(
             [(p.period_end, p.series.get(name)) for p in points], len(points) - 1, years
         )
 
+    def value_base(name: str) -> Optional[float]:
+        return last.base.get(name) if last is not None else None
+
+    # The newest quarter's own diluted count, which a TTM missing a quarter still has.
+    quarter = next(
+        (q for q in _points(rows, annual=False) if last and q.period_end == last.period_end),
+        None,
+    )
+    quarter_diluted = quarter.base.get("diluted_shares") if quarter is not None else None
     eps, dps = value("eps_diluted"), value("dividends_per_share")
     positive_eps = eps is not None and eps > 0
     return {
@@ -441,6 +474,9 @@ def key_stats(
         "dividends_per_share": dps,
         "payout_ratio": dps / eps if dps is not None and positive_eps else None,
         **valuations(price, last.series if last is not None else {}),
+        "market_cap": market_cap(
+            price, value_base("shares_outstanding"), quarter_diluted or value_base("diluted_shares")
+        ),
         "roe": value("roe"),
         "buybacks": value("buybacks"),
         "dividends_paid": value("dividends_paid"),

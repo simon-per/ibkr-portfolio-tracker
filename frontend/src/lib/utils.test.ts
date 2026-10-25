@@ -226,6 +226,9 @@ describe('formatCompactMoney', () => {
     expect(formatCompactMoney(1_200_000, 'USD')).toBe('$1.2M')
     expect(formatCompactMoney(12_000_000_000, 'USD')).toBe('$12B')
     expect(formatCompactMoney(950, 'USD')).toBe('$950')
+    // A market cap: trillions, and 999.96B rounds up into them.
+    expect(formatCompactMoney(3_509_000_000_000, 'USD')).toBe('$3.5T')
+    expect(formatCompactMoney(999_960_000_000, 'USD')).toBe('$1T')
   })
 
   it('puts the sign before the symbol and names other currencies', () => {

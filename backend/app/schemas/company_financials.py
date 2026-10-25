@@ -108,6 +108,11 @@ class CompanyFinancialsKeyStats(BaseModel):
         description="The newest close (two weeks old at most) / TTM diluted EPS; null "
         "without one, or when EPS <= 0.",
     )
+    market_cap: Optional[float] = Field(
+        None,
+        description="The same close x shares outstanding at the newest quarter end; null when "
+        "that count is more than 10% off the diluted average (one class of several).",
+    )
     ps_ratio: Optional[float] = Field(None, description="The same close / TTM revenue per share.")
     pfcf_ratio: Optional[float] = Field(None, description="The same close / TTM FCF per share.")
     dividend_yield: Optional[float] = Field(

@@ -131,6 +131,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
 | debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` |
 | debt, current | `LongTermDebtCurrent` → `DebtCurrent` |
+| shares outstanding | `CommonStockSharesOutstanding` (one class's alone, per class, is left out by companyfacts) |
 | equity | `StockholdersEquity` → `…IncludingPortionAttributableToNoncontrollingInterest` (the parent's first, as net income is) |
 
 For **every period** the first concept that reports it wins, so a company that moved from
@@ -313,7 +314,7 @@ paid, cash, debt; every per-share figure is the figure over the same period's di
 `key_stats` is the newest TTM point's figures whatever `period` asked for (`label`, revenue with
 its YoY and 5-year CAGR, net income, EPS with both, FCF and FCF per share, the margins, shares and
 their YoY, DPS and the payout ratio, P/E, P/S, P/FCF, dividend yield, return on equity, buybacks,
-dividends paid). A CIK the pass never looked at:
+dividends paid, market cap). A CIK the pass never looked at:
 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
@@ -322,7 +323,8 @@ A known one without figures: 200, empty points, a warning. Response models are p
 Computed in `company_financials_service` only:
 
 - **TTM** of a flow = the sum of four consecutive quarters (ends 80–120 days apart: COST's
-  fourth quarter is 16 or 17 weeks, and at 105 it had no TTM at any year end); a missing
+  fourth quarter is 16 or 17 weeks, and at 105 it had no TTM at any year end; the normaliser's
+  `QUARTER_DAYS` takes 75–120 for the same reason, or its year-end balances had no Q4); a missing
   quarter or a gap makes it null, never a partial sum. TTM shares = the mean of the four.
 - **FCF** = OCF − capex; **FCF after SBC** = FCF − SBC; **FCF per share** = FCF / diluted shares
   of the same period. A missing input makes each null: IBKR reports no capex, so it has no FCF.
@@ -434,5 +436,7 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
 - **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
   HONA and SPCX are new filers with too few quarters for a TTM.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
-- EBITDA, net cash, return on invested capital, enterprise-value multiples, market cap (it needs
-  shares outstanding, and the diluted average would be a stand-in).
+- EBITDA, net cash, return on invested capital, enterprise-value multiples: each subtracts debt
+  and cash, tagged too unevenly to subtract (cash leaves out short-term investments).
+- **Market cap of a multi-class company** (GOOGL, META): its count is tagged per class, which
+  companyfacts leaves out, so it has none; the diluted average is never used in its place.

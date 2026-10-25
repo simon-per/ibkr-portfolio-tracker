@@ -222,6 +222,11 @@ METRICS: Dict[str, MetricSpec] = {
     "debt_current": MetricSpec(
         MONETARY, INSTANT, ("LongTermDebtCurrent", "DebtCurrent")
     ),
+    # The balance sheet's count at the period end, for the market cap. A company with several
+    # classes tags it per class, which companyfacts leaves out: none is read for it.
+    "shares_outstanding": MetricSpec(
+        SHARES, INSTANT, ("CommonStockSharesOutstanding",), non_negative=True
+    ),
     # The parent's equity before the consolidated figure, as net income is the parent's.
     "equity": MetricSpec(
         MONETARY,
@@ -266,7 +271,9 @@ FORMS = frozenset(
     {"10-K", "10-K/A", "10-Q", "10-Q/A", "10-KT", "10-KT/A", "10-QT", "10-QT/A"}
 )
 
-QUARTER_DAYS = (75, 105)
+# 12 to 14 weeks, or a retailer's 16- and 17-week fourth quarter: COST's 112 days had no Q4
+# from its ladder, so its year-end balances never reached a quarter (no Q4 cash or equity).
+QUARTER_DAYS = (75, 120)
 YEAR_DAYS = (350, 380)
 # Two figures this close are one figure reported twice.
 SAME_VALUE = 1e-6
