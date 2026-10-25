@@ -7,7 +7,9 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-24.** Both of the day's branches are on `main`: the owner's batch
+**Last updated: 2026-10-25.** PR #80 (Swiss residency) is merged and deployed (`08de1a0`);
+the residency date still has to be entered. On 2026-10-17 both of the day's branches went
+to `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
 (`ccr-7289b752-aev50c`), merged with one held predicate (`security_repository.held`). See
@@ -31,7 +33,7 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   This clone's `core.hooksPath` still points at the pre-rename folder
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
   today. CI refuses a tracked SQLite file either way.
-- **Enter the Swiss residency date after the next deploy** (Tax tab → *Swiss residency*, or
+- **Enter the Swiss residency date** (deployed 2026-10-25; Tax tab → *Swiss residency*, or
   `PUT /api/settings/swiss-residency`): until it is set the 2026 report still counts the months
   before the move, and 2025 still reads as a Swiss year. Then check that 2026 starts on the move day and
   2025 shows only its one warning (docs/tax.md *Swiss residency*).
@@ -323,6 +325,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-25 (PR #80 merged)** — Swiss residency deployed; the move's country and date
+  kept out of the public docs (the setting holds it); Trading212 lots need nothing (in Jan).
 - **2026-10-24 (Swiss residency)** — the tax report takes a "Swiss taxpayer from" date
   (docs/tax.md); the same morning's sync check found the Flex ingest healthy.
 - **2026-10-18 (audit round 2, agent team)** — six reviewers, #53–#79 filed after offline repros,
@@ -334,5 +338,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
   (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
   KPI figures never wrap; `bluegill` merged.
-- **2026-10-18 (two UI fixes)** — Dividends *Expected next* lost its sideways scrollbar and got a
-  themed thin one; Watchlist pins the Stock column (`DataTable` `pinFirstColumn`). Seen at 1366.
