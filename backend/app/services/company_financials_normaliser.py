@@ -285,7 +285,7 @@ SCALE_SLIPS: Tuple[Fraction, ...] = (
     Fraction(1000),
     Fraction(1_000_000),
 )
-# A fact one filing tags a thousand or a million times off the value at least this many
+# A per-share fact one filing tags a thousand or a million times off the value this many
 # other filings agree on, for the same concept and period, is that filing's slip in that
 # context: DXCM's 2014 10-K re-tagged its 2012 quarters' EPS a million times over (-210000
 # beside three filings' -0.21) while its years stayed right, so no one factor for the filing
@@ -481,11 +481,15 @@ def _drop_lone_slips(facts: List[Fact]) -> List[Fact]:
     The facts less each one a lone filing tagged a `SCALE_SLIPS` factor off the rest. Proven
     where `LONE_SLIP_MIN_AGREEING` other filings agree; then that filing's same concept off by
     the same factor from a single other filing is the same slip (DXCM's 2012 Q4, which only
-    the 2013 10-K reported besides).
+    the 2013 10-K reported besides). Only where that filing's concept agrees with another
+    filing somewhere: one off everywhere it overlaps is a filing in other units, which the
+    vote in `adjustments` rescales whole. Per-share figures only: share counts in thousands
+    were a convention several filings shared (MPWR's to 2013), so two of them agreeing is no
+    majority, and dropping their overlap left MPWR's Q4 2012 at 36763 shares.
     """
     groups: Dict[Tuple[str, Optional[date], date], List[Fact]] = defaultdict(list)
     for f in facts:
-        if f.val != 0:
+        if f.val != 0 and f.kind == PER_SHARE:
             groups[(f.concept, f.start, f.end)].append(f)
     slips = [float(s) for s in SCALE_SLIPS if s != 1]
 
@@ -496,10 +500,16 @@ def _drop_lone_slips(facts: List[Fact]) -> List[Fact]:
             if g.accn != f.accn
         )
 
+    consistent = {
+        (f.accn, f.concept)
+        for group in groups.values()
+        for f in group
+        if agreeing(f, group, 1.0)
+    }
     proven = set()
     for group in groups.values():
         for f in group:
-            if agreeing(f, group, 1.0):
+            if (f.accn, f.concept) not in consistent or agreeing(f, group, 1.0):
                 continue
             for factor in slips:
                 if agreeing(f, group, factor) >= LONE_SLIP_MIN_AGREEING:

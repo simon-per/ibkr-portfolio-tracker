@@ -254,9 +254,12 @@ its dividends per share a million times over). A slip in a filing no newer one o
 A filing slipped **in some contexts only** fits no one factor: DXCM's 2014 10-K re-tagged its 2012
 quarters' EPS a million times over (−210000 beside three filings' −0.21) while its years stayed
 right, and walking it voted the older filings a million times up to match. So before the walk
-(`_drop_lone_slips`), a fact a thousand or a million times off the value two other filings agree
-on for that concept and period is dropped, and then so is that filing's same concept the same
-factor off a single other filing. Found when the EPS chain took `EarningsPerShareBasicAndDiluted`.
+(`_drop_lone_slips`), a **per-share** fact a thousand or a million times off the value two other
+filings agree on for that concept and period is dropped, and then so is that filing's same concept
+the same factor off a single other filing, provided the filing's concept agrees with another
+filing somewhere (one off everywhere is in other units, and the vote rescales it whole). Not share
+counts: several filings shared thousands as a convention (MPWR's to 2013), so two agreeing is no
+majority. Found when the EPS chain took `EarningsPerShareBasicAndDiluted`.
 
 **Window**: a split after the newest filing is reflected once the next 10-Q is filed (it restates
 the comparatives), so for up to a quarter the per-share history sits in the pre-split basis.

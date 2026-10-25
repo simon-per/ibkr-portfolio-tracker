@@ -441,6 +441,20 @@ def test_a_lone_filings_slip_in_some_contexts_is_dropped():
     assert len(_drop_lone_slips(_facts(pair))) == 2
 
 
+def test_a_filing_in_thousands_throughout_is_rescaled_not_dropped():
+    """MPWR's 2013 10-K tags every count in thousands, beside two later 10-Ks in units."""
+    counts = [
+        _f("2012-01-01", "2012-12-31", 36247, "2013-03-05", form="10-K"),
+        _f("2012-10-01", "2012-12-31", 36763, "2013-03-05", form="10-K"),
+        _f("2012-01-01", "2012-12-31", 36247000, "2014-03-10", form="10-K"),
+        _f("2012-01-01", "2012-12-31", 36247000, "2015-03-02", form="10-K"),
+    ]
+    facts = _facts(_doc({"WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": counts}}}))
+    assert len(_drop_lone_slips(facts)) == 4
+    multiplier = adjustments(facts)
+    assert multiplier[("WeightedAverageNumberOfDilutedSharesOutstanding", "accn-2013-03-05")] == 1000
+
+
 def test_a_share_count_tagged_in_thousands_is_rescaled():
     """ONDS tags some filings' counts in thousands, in filings no newer one overlaps."""
     rows = normalise(
