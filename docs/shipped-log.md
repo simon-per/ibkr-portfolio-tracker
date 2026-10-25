@@ -30,6 +30,16 @@
   $275.2B, 12.8%, 18.21; NVDA FY2025 gross margin 75.0%; MU FY2023 −9.1%. Live screenshots at
   1600 and 390 px: no horizontal overflow, nine cards for AAPL.
 - Backend 3033 passed / 8 skipped, frontend 1226 passed (before the HON fix).
+- **An audit of every company's served series** (a read-only script over all 102, run in the
+  container; implausible margins, share/EPS/revenue/DPS/balance jumps, missing revenue) found and
+  fixed (`e11cd97`, `2dd6398`, `6585eb9`): splits between a 10-K and the next 10-Q (BKNG 25:1,
+  CRWD 4:1, KLAC 10:1 — Q3, Q4 and years had stayed pre-split), compounded splits (NFLX's 70),
+  revenue concepts (CRWD, ODFL had none), million-fold slips (PCAR's counts, STX's dividends),
+  absurd derived Q4 share counts (DXCM, REGN, TTWO, LITE), a margins headline of a dash (BKNG).
+  Share-count jumps went from 141 to 29, all IPOs, SPACs, a new listing or KDP's merger.
+  Refetched with `--force` after each deploy (102 of 110, 0 failed). Checked against filings:
+  BKNG FY2019 EPS 111.82 / 25, CRWD FY2025 revenue 3.95B, NFLX 2024 EPS 19.83 / 10. Known
+  gap left: restated diluted counts read as splits (REGN before 2014, DXCM 2020).
 
 ## Shipped 2026-10-25 — the Company tab (SEC EDGAR fundamentals history)
 
