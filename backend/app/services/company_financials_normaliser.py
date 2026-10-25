@@ -451,6 +451,18 @@ def _latest(
     return out
 
 
+def _not_a_figure(kind: str, non_negative: bool, value: float) -> bool:
+    """
+    A derived quarter that stays absent: below zero for a figure that cannot be, or a
+    dividend of exactly zero. Two equal dividend rungs are as often one quarterly rate
+    tagged on every year-to-date context (IBKR before 2020: 3, 6, 9 and 12 months all
+    0.10) as a quarter without a dividend, and a 0.00 must not stand in for the unknown.
+    """
+    if not non_negative:
+        return False
+    return value < 0 or (kind == PER_SHARE and abs(value) < 1e-12)
+
+
 def _difference(kind: str, longer: Obs, shorter: Obs) -> Obs:
     """The quarter between two rungs of one year-to-date ladder."""
     if kind == SHARES:
@@ -544,7 +556,7 @@ def _quarters_and_years(
             if not _between((longer.end - shorter.end).days, QUARTER_DAYS):
                 continue
             candidate = _difference(kind, longer, shorter)
-            if non_negative and candidate.value < 0:
+            if _not_a_figure(kind, non_negative, candidate.value):
                 continue
             held = derived.get(longer.end)
             derived[longer.end] = (
@@ -757,7 +769,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
             if not all(q in quarters_of_year for q in QUARTERS[:3]):
                 continue
             q4 = annual.value - sum(quarters_of_year[q].value for q in QUARTERS[:3])
-            if spec.non_negative and q4 < 0:
+            if _not_a_figure(spec.kind, spec.non_negative, q4):
                 continue
             keys.setdefault(("Q", year.end), (year.name, QUARTERS[3]))
             values[metric][("Q", year.end)] = Obs(

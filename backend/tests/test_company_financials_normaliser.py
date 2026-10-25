@@ -504,3 +504,35 @@ def test_a_ytd_rung_below_its_own_quarters_derives_nothing():
         assert _row(rows, "dividends_per_share", end, period)["value"] == 0.10
     assert _row(rows, "dividends_per_share", date(2022, 12, 31), "Q4") is None
     assert _row(rows, "dividends_per_share", date(2022, 12, 31), "FY") is None
+
+
+def test_a_dividend_rate_on_every_ytd_rung_derives_no_zero_quarter():
+    """IBKR before 2020: no discrete quarter, and every rung carries the 0.10 rate."""
+    doc = _doc(
+        {
+            "CommonStockDividendsPerShareDeclared": {
+                "units": {
+                    "USD/shares": [
+                        _f("2018-01-01", "2018-03-31", 0.10, "2018-05-01"),
+                        _f("2018-01-01", "2018-06-30", 0.10, "2018-08-01"),
+                        _f("2018-01-01", "2018-09-30", 0.10, "2018-11-01"),
+                        _f(
+                            "2018-01-01",
+                            "2018-12-31",
+                            0.10,
+                            "2019-02-20",
+                            form="10-K",
+                        ),
+                    ]
+                }
+            }
+        }
+    )
+    rows = normalise(doc).rows
+    assert _row(rows, "dividends_per_share", date(2018, 3, 31), "Q1")["value"] == 0.10
+    for end, period in (
+        (date(2018, 6, 30), "Q2"),
+        (date(2018, 9, 30), "Q3"),
+        (date(2018, 12, 31), "Q4"),
+    ):
+        assert _row(rows, "dividends_per_share", end, period) is None
