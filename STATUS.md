@@ -339,6 +339,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-25 (Company tab: P/E)** — owner-approved weekly Yahoo closes per CIK (about a
+  hundred requests a Sunday, 5.1 MB first fill) for a P/E in the key figures and a P/E card; the
+  fill exposed EPS gaps (COST's 16-week Q4, continuing-ops and BasicAndDiluted EPS, EXC's
+  untagged years, DXCM's lone slip) and a spin-off booked as a split (SPGI). P/E on 88 of 102.
+
 - **2026-10-25 (Company tab: figures and Nasdaq-100)** — key figures, four more series, CAGRs;
   net cash built then dropped (cash excludes investments); figures re-keyed by CIK so 100
   constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated;
