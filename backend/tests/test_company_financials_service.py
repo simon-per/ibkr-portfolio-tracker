@@ -349,6 +349,8 @@ def test_a_split_after_the_newest_filing_scales_the_closes_to_its_basis():
         (date(2024, 5, 31), 1000.0), (date(2024, 6, 14), 120.0)]
     # Once a filing has restated the figures for it, the closes stand as fetched.
     assert eps_basis(prices, splits, date(2024, 8, 28)) == prices
+    # A spin-off Yahoo books as a split (SPGI's 1.057) moves no EPS.
+    assert eps_basis(prices, [(date(2024, 6, 10), 1.057)], date(2024, 5, 29)) == prices
 
 
 def test_the_pe_series_is_each_period_ends_close_over_ttm_eps():
@@ -383,3 +385,17 @@ def test_the_pe_series_is_each_period_ends_close_over_ttm_eps():
 def test_debt_is_the_tagged_total_else_its_two_halves(tagged, expected):
     rows = _rows(ENDS[:1], {**BASE, **{k: (lambda i, v=v: v) for k, v in tagged.items()}})
     assert _values(build_series(rows, "quarterly", "max"), "debt") == [expected]
+
+
+def test_a_retailers_long_fourth_quarter_still_makes_a_ttm():
+    # COST: 12, 12, 12 and 16 weeks (17 in a 53-week year).
+    ends = [date(2025, 8, 31), date(2025, 11, 23), date(2026, 2, 15), date(2026, 5, 10),
+            date(2026, 8, 30), date(2026, 11, 22)]
+    rows = _rows(ends, {"revenue": lambda i: 100.0, "eps_diluted": lambda i: 5.0})
+    ttm = build_series(rows, "ttm", "max")
+    assert [p["period_end"] for p in ttm["revenue"]["points"]] == [
+        "2026-05-10", "2026-08-30", "2026-11-22"]
+    assert key_stats(rows)["eps_diluted"] == 20.0
+    # A missing quarter is still a gap, never a three-quarter sum.
+    gap = _rows(ends[:3] + ends[4:], {"revenue": lambda i: 100.0})
+    assert set(_values(build_series(gap, "ttm", "max"), "revenue")) == {None}

@@ -54,7 +54,7 @@ from app.repositories.company_financials_repository import CompanyFinancialsRepo
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
-from app.services.company_financials_normaliser import ANNUAL
+from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
 RANGES = {"5y": 5, "10y": 10, "max": None}
@@ -106,10 +106,15 @@ NO_GROWTH = MARGINS | {"pe_ratio"}
 PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
 PRICE_MAX_AGE_DAYS = 14
+SPLIT_RATIO_TOLERANCE = 0.005
 # The compound growth the cards and the key figures quote, in years back from the latest.
 CAGR_YEARS = (3, 5, 10)
-# Two quarter ends this far apart are consecutive (13 or 14 weeks, a little slack).
-CONSECUTIVE_DAYS = (80, 105)
+# Two quarter ends this far apart are consecutive: 12 to 14 weeks, or the 16 and 17 of a
+# retailer's long fourth quarter (COST's 12/12/12/16 weeks had no TTM at any year end). A
+# missing quarter puts two ends about 180 days apart, far outside.
+CONSECUTIVE_DAYS = (80, 120)
+# How near a split Yahoo reports must sit to a ratio in SPLIT_RATIOS to be one. Yahoo books a
+# spin-off as a fractional "split" (SPGI's 1.057 in 2026), which moves no EPS.
 # How far from exactly a year back the YoY comparison point may sit (52/53-week years).
 YOY_SLACK_DAYS = 20
 DAYS_PER_YEAR = 365.25
@@ -302,11 +307,14 @@ def eps_basis(
     """
     Closes on the figures' split basis. Yahoo adjusts a history to the day it was fetched;
     the normaliser restates the figures to the newest filing, which has not seen a split
-    after it, so each such split's ratio scales the closes back up.
+    after it, so each such split's ratio scales the closes back up. Only a split ratio
+    counts: a spin-off Yahoo books as a split changes no share count.
     """
     factor = 1.0
     for day, ratio in splits:
-        if newest_filed is None or day > newest_filed:
+        if (newest_filed is None or day > newest_filed) and any(
+            abs(ratio / float(r) - 1) <= SPLIT_RATIO_TOLERANCE for r in SPLIT_RATIOS
+        ):
             factor *= ratio
     return [(day, close * factor) for day, close in prices]
 
