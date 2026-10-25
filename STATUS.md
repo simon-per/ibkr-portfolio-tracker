@@ -7,8 +7,9 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-25.** PR #80 (Swiss residency) is merged and deployed (`08de1a0`);
-the residency date still has to be entered. On 2026-10-17 both of the day's branches went
+**Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+docs/company-financials.md) is merged; first fill and live check below. PR #80 (Swiss residency)
+is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
@@ -92,6 +93,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
+  `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old);
+  the owner's eye on the charts and whether the default 10Y TTM reads right. NVDA's TTM FCF
+  starts at FY2022 by design (its older capex is an extension concept; docs/company-financials.md).
 
 - **The fintech UI pass with the owner's own eyes** (2026-10-17): every tab was screenshotted in
   both themes against production data through a routed preview; the dividend summary, the
@@ -325,6 +331,9 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-25 (Company tab, agent team)** — two worktree teammates (backend, frontend) against
+  one contract; a 22-company EDGAR audit moved the revenue/NI chains (IBKR), fixed ORCL's
+  year-as-quarter and ONDS's thousands; SEC contact only in the VPS `.env`.
 - **2026-10-25 (PR #80 merged)** — Swiss residency deployed; the move's country and date
   kept out of the public docs (the setting holds it); Trading212 lots need nothing (in Jan).
 - **2026-10-24 (Swiss residency)** — the tax report takes a "Swiss taxpayer from" date
@@ -335,6 +344,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
   offline repros, 39 issues filed (#13–#51, plus #52); Tier 1 and waves 2–4 (#13–#37, #41, #52)
   fixed in worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
-- **2026-10-18 (logos everywhere)** — S&P 500 top 100 and Nasdaq-100 filled and measured
-  (100/100, 94/95); logos in Watchlist (basket ISINs, `ticker_isin.py`), Allocation, Rebalance;
-  KPI figures never wrap; `bluegill` merged.

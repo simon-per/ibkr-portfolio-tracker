@@ -7,6 +7,23 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-25 — the Company tab (SEC EDGAR fundamentals history)
+
+- A **Company** tab after Fundamentals: pick one held US SEC filer, see revenue, net income,
+  diluted EPS (split-adjusted), FCF and FCF after SBC, FCF per share, diluted shares, margins and
+  dividends per share — Quarterly / TTM / Annual over 5Y / 10Y / Max, each with CAGR and YoY.
+  Figures in the reporting currency (USD), never projected into the base currency.
+- Backend: `company_financials` + `security_ciks` (migration `d1e3f5a7b9c2`), `edgar_client`
+  (5 req/s, bounded retries, `EDGAR_USER_AGENT`), one normaliser (concept chains, YTD ladders,
+  Q4 = FY − 9M, restatements, split and unit votes from the filings themselves), a weekly Sunday
+  05:00 pass under its own gate, `fetch_company_financials` CLI, `/api/company-financials`.
+  Every rule in docs/company-financials.md.
+- Built by two worktree teammates to one contract; the lead reviewed both diffs and merged.
+
+Verified offline on the merged tree: backend 3004 passed / 8 skipped (baseline 2923), ruff,
+`alembic check`; frontend 1214 passed, `tsc -b`, build; Playwright on fixture data at 1600 / 1100
+/ 390 px.
+
 ## Shipped 2026-10-24 — Swiss residency date on the tax report
 
 - `app_settings.swiss_tax_residency_from` (`PUT /api/settings/swiss-residency`, a popover on the
