@@ -22,7 +22,7 @@ import { MonthlyReturnsHeatmap } from './MonthlyReturnsHeatmap'
 import { MonthlyDeploymentCard } from './MonthlyDeploymentCard'
 import { DividendSummary } from './DividendSummary'
 /**
- * The seven non-default tabs load on demand; the Performance tab does not.
+ * The non-default tabs load on demand; the Performance tab does not.
  *
  * The build was one 891 kB chunk and Vite warned on it every time. Recharts is most of
  * that weight, but splitting *it* out wins little — `PortfolioValueChart`,
@@ -38,6 +38,7 @@ const ActivityTab = lazy(() => import('./ActivityTab').then(m => ({ default: m.A
 const AllocationTab = lazy(() => import('./AllocationTab').then(m => ({ default: m.AllocationTab })))
 const ForecastTab = lazy(() => import('./ForecastTab').then(m => ({ default: m.ForecastTab })))
 const FundamentalsTab = lazy(() => import('./FundamentalsTab').then(m => ({ default: m.FundamentalsTab })))
+const CompanyTab = lazy(() => import('./CompanyTab').then(m => ({ default: m.CompanyTab })))
 const WatchlistTab = lazy(() => import('./WatchlistTab').then(m => ({ default: m.WatchlistTab })))
 const TaxTab = lazy(() => import('./TaxTab').then(m => ({ default: m.TaxTab })))
 const DividendsTab = lazy(() => import('./DividendsTab').then(m => ({ default: m.DividendsTab })))
@@ -69,7 +70,7 @@ import { writeStored } from '@/lib/storage'
 import { BENCHMARKS_KEY, readSelectedBenchmarks } from '@/lib/benchmarkSelection'
 import { formatShortDateTime } from '@/lib/utils'
 import {
-  ArrowLeftRight, ChartPie, Eye, Gauge, HandCoins, Landmark, Layers, RefreshCw, Telescope,
+  ArrowLeftRight, Building2, ChartPie, Eye, Gauge, HandCoins, Landmark, Layers, RefreshCw, Telescope,
   TrendingUp,
 } from 'lucide-react'
 import { useScrolled } from '@/lib/useScrolled'
@@ -109,6 +110,7 @@ function SectionStrip() {
         <TabsTrigger value="allocation" icon={ChartPie}>Allocation</TabsTrigger>
         <TabsTrigger value="activity" icon={ArrowLeftRight}>Activity</TabsTrigger>
         <TabsTrigger value="fundamentals" icon={Gauge}>Fundamentals</TabsTrigger>
+        <TabsTrigger value="company" icon={Building2}>Company</TabsTrigger>
         <TabsTrigger value="watchlist" icon={Eye}>Watchlist</TabsTrigger>
         <TabsTrigger value="tax" icon={Landmark}>Tax</TabsTrigger>
         <TabsTrigger value="forecast" icon={Telescope}>Forecast</TabsTrigger>
@@ -561,6 +563,11 @@ export function Dashboard() {
           {/* Fundamentals Tab */}
           <TabsContent value="fundamentals">
             <LazyTabPanel label="Fundamentals"><FundamentalsTab /></LazyTabPanel>
+          </TabsContent>
+
+          {/* Company Tab — one company's fundamentals history from its SEC filings */}
+          <TabsContent value="company">
+            <LazyTabPanel label="Company"><CompanyTab /></LazyTabPanel>
           </TabsContent>
 
           {/* Watchlist Tab */}
