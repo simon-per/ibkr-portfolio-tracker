@@ -141,7 +141,12 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   ladder's Q4 replaces it. For a figure that cannot be negative (revenue, capex, SBC, shares,
   dividends), a negative derived quarter is dropped, and so is a year smaller than its own nine
   months (NVDA's FY2016 10-K tagged Q4's 0.115 dividend as the year's; the year then comes from
-  the next concept in the chain).
+  the next concept in the chain). A year-to-date rung or year below two-thirds of the reported
+  quarters inside it carries one quarter's figure, not a sum, and is dropped with everything it
+  would derive: IBKR tags its nine-month and 10-K dividend contexts with the quarterly rate,
+  which made every Q4 a 0.00 dividend (seen on the live tab, 2026-10-25). Its Q4s and fiscal
+  years, and so every TTM, stay absent. A restated quarter moves the sum by less and never
+  trips it (NXPI's 2023 10-Q re-tags Q3 2021's dividend at the 2023 rate).
 - **One end date per period.** Ends within a week are one period (NVDA tagged one 2010 rung as
   ending a day before its quarter).
 

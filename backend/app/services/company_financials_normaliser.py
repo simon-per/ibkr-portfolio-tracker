@@ -182,6 +182,10 @@ QUARTER_DAYS = (75, 105)
 YEAR_DAYS = (350, 380)
 # Two figures this close are one figure reported twice.
 SAME_VALUE = 1e-6
+# A year-to-date figure carrying one quarter's figure is at most half the two or more
+# reported quarters inside it; a restated quarter moves that sum by far less (NXPI's 2023
+# 10-Q re-tagged Q3 2021's dividend at the 2023 rate: +17%), and must not unseat the rung.
+NOT_CUMULATIVE_RATIO = 1.5
 
 # Split ratios a filing's factor may snap to, as share-count multipliers (a 4:1 split is 4).
 SPLIT_RATIOS: Tuple[Fraction, ...] = tuple(
@@ -504,6 +508,27 @@ def _quarters_and_years(
         rungs.sort(key=lambda o: o.end)
         if any(_days(start, o.end) > QUARTER_DAYS[1] for o in rungs):
             starts.append(start)
+        # A rung smaller than the reported quarters inside it is not year-to-date: IBKR
+        # tags its nine-month and 10-K contexts with one quarter's dividend rate, and the
+        # difference of two such rungs was a 0.00 Q4 dividend never declared. The rung
+        # goes, and with it the year and every quarter it would have derived.
+        if non_negative and kind != SHARES:
+            kept = []
+            for rung in rungs:
+                inside = sum(
+                    q.value
+                    for q in direct.values()
+                    if q.start is not None and q.start >= start and q.end <= rung.end
+                )
+                if (
+                    _days(start, rung.end) > QUARTER_DAYS[1]
+                    and inside > rung.value * NOT_CUMULATIVE_RATIO
+                ):
+                    if years.get(rung.end) is rung:
+                        del years[rung.end]
+                    continue
+                kept.append(rung)
+            rungs[:] = kept
         # An additive year cannot be smaller than its own nine months. An average (a
         # weighted share count) can, so the check is not asked of one.
         if non_negative and kind != SHARES:

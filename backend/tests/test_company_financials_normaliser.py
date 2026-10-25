@@ -473,3 +473,34 @@ def test_a_new_years_first_quarter_counts_before_its_six_month_rung():
     q1 = _row(rows, "revenue", date(2026, 3, 31), "Q1")
     assert q1["value"] == pytest.approx(4.2e9)
     assert q1["fiscal_year"] == 2026
+
+
+def test_a_ytd_rung_below_its_own_quarters_derives_nothing():
+    """IBKR tags its 9-month and 10-K dividend contexts with one quarter's rate."""
+    doc = _doc(
+        {
+            "CommonStockDividendsPerShareCashPaid": {
+                "units": {
+                    "USD/shares": [
+                        _f("2022-01-01", "2022-03-31", 0.10, "2022-05-01"),
+                        _f("2022-04-01", "2022-06-30", 0.10, "2022-08-01"),
+                        _f("2022-01-01", "2022-06-30", 0.10, "2022-08-01"),
+                        _f("2022-07-01", "2022-09-30", 0.10, "2022-11-01"),
+                        _f("2022-01-01", "2022-09-30", 0.10, "2022-11-01"),
+                        _f(
+                            "2022-01-01",
+                            "2022-12-31",
+                            0.10,
+                            "2023-02-20",
+                            form="10-K",
+                        ),
+                    ]
+                }
+            }
+        }
+    )
+    rows = normalise(doc).rows
+    for end, period in ((date(2022, 3, 31), "Q1"), (date(2022, 9, 30), "Q3")):
+        assert _row(rows, "dividends_per_share", end, period)["value"] == 0.10
+    assert _row(rows, "dividends_per_share", date(2022, 12, 31), "Q4") is None
+    assert _row(rows, "dividends_per_share", date(2022, 12, 31), "FY") is None
