@@ -263,9 +263,10 @@ shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh`
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property
   and equipment and intangible assets") as an `nvda:` extension concept, which companyfacts does
-  not carry. Its Q1–Q3 capex exists from the 10-Q ladders up to mid-2020 and everything exists from
-  Q3 FY2021, but every Q4 and every year in between is null, so NVDA's TTM FCF starts at FY2022 and
-  its annual FCF has FY2010–FY2012 and FY2022 on. Reaching extension concepts would need each
+  not carry. Its Q1–Q3 capex exists from the 10-Q ladders up to mid-2020, but every Q4 and every
+  year in between is null. FY2023's capex survives only as the nine months and the year (later
+  filings' comparatives), so only its Q4 is derived. NVDA's annual FCF has FY2010–FY2012 and
+  FY2022 on, and its TTM FCF starts at Q3 FY2024 (checked on production, 2026-10-25). Reaching extension concepts would need each
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).

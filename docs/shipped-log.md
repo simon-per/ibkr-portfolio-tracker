@@ -35,7 +35,11 @@ first fill and a forced refill — 18 of 20 companies, ASML and NU 20-F (no rows
 `manual_company_financials_fetch` rows in `sync_runs`; `/api/company-financials/companies` lists
 18 (GOOG and GOOGL as one). NVDA against its 10-Ks: FY2025 revenue 130.497B, diluted EPS 2.94,
 FCF 60.853B, FCF/share 2.45; FY2024 revenue 60.922B, EPS 1.19 (11.93 split 10:1), FCF 27.021B; TTM
-equals the year at both year ends. No zero or negative revenue, share count or dividend in any
+equals the year at both year ends. Two quarters against their 10-Q facts: Q2 FY2024 (pre-split)
+revenue 13.507B, EPS 0.25, FCF 6.059B (OCF 9.259B − 2.911B YTD less capex 537M − 248M),
+FCF/share 0.2424, TTM revenue 32.681B (= the four filed quarters); Q3 FY2025 revenue 35.082B, EPS
+0.78, FCF 16.814B, FCF/share 0.6787, TTM revenue 113.269B and TTM FCF/share 2.274 (56.546B over
+the four quarters' mean diluted shares) — all exact. No zero or negative revenue, share count or dividend in any
 company's quarterly, TTM or annual series. Playwright on the live site: NVDA at 1600 dark and 390
 (tall viewport — a full-page capture restarts Recharts' animation and draws empty plots), IBKR
 at 1600 light (FCF absent, not zero; no dividend card in TTM); no horizontal overflow, no page
