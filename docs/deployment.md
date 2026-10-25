@@ -40,7 +40,10 @@ deleting `node_modules` does the same.
   `API_ADMIN_TOKEN`, `OPENFIGI_API_KEY`, and for the crypto book `COIN_STATS_API_KEY`,
   `COIN_STATS_SHARE_TOKEN`, `COIN_STATS_SHARE_PASSCODE`, `COINGECKO_API_KEY` — see
   [crypto.md](crypto.md) — and `LOGO_DEV_SECRET_KEY` for holding logos, see
-  [logos.md](logos.md)); every setting is listed in `backend/.env.example`
+  [logos.md](logos.md)); every setting is listed in `backend/.env.example`. Beside them, not a
+  secret but the operator's address: `EDGAR_USER_AGENT` (`"<client name> <contact email>"`), which
+  SEC EDGAR requires for the Company tab's weekly pass — without it the pass records a warning and
+  makes no request, see [company-financials.md](company-financials.md)
 - nginx proxies all `/api/` publicly with `proxy_read_timeout 300`; needs `listen [::]:443/80` (an AAAA
   record exists)
 - **Peer address.** The host nginx is the only proxy in front of the backend (the frontend container

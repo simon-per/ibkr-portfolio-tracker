@@ -34,6 +34,7 @@ means the `docs/` file the index maps.
 | [docs/activity-ledger.md](docs/activity-ledger.md) | `activity_service` |
 | [docs/lookthrough.md](docs/lookthrough.md) | `lookthrough_service`, `etf_sources`, baskets and adapters, identities, the treemap, the evening basket refresh, researched future sources |
 | [docs/logos.md](docs/logos.md) | holding logos: `logo_service` (logo.dev), `security_logos`, `/api/logos`, `TickerAvatar`'s image, `fetch_logos` and the manual `import_logo` CLI, the cost bounds, the privacy decision |
+| [docs/company-financials.md](docs/company-financials.md) | the Company tab's SEC EDGAR history: `edgar_client`, `company_financials_normaliser` (concept chains, YTD ladders, splits), `company_financials_sync` and its Sunday slot, `company_financials_service` (TTM, FCF, margins, CAGR/YoY), `/api/company-financials`, `fetch_company_financials`, `EDGAR_USER_AGENT` |
 | [docs/pricing-and-fx.md](docs/pricing-and-fx.md) | ticker mapping, `manage_mappings`, minor-unit quotes, `currency_service`, Frankfurter and the fallback |
 | [docs/frontend.md](docs/frontend.md) | `frontend/src/lib/` analytics (risk, rebalance, currency exposure, forecast), `DataTable`, the mobile layout |
 | [docs/performance-analytics.md](docs/performance-analytics.md) | `performance_analytics_service`, `/api/performance/*`, `attribution_rows`, the price/FX split, the Analytics tab (hidden since 2026-10-04), `rollingRisk.ts` |

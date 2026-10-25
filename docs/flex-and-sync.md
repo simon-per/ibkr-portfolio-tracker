@@ -582,6 +582,14 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | every hour above, daily | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
 | 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
+| 05:00, **Sunday** | 23:00 Sat | `company_financials_refresh` — SEC EDGAR companyfacts for held US-listed filers, weekly, own gate (`EDGAR_GATE`) and upkeep group ([company-financials.md](company-financials.md)) | no |
+
+**The company financials take the fundamentals' hour on the one day it is free** (2026-10-25):
+Sunday 05:00, weekly. Nothing else runs at 05:00 on a Sunday, the hour is already in
+`ALL_SYNC_HOURS` (so the deploy guard and its ops copies need no change), and the pass touches
+only SEC EDGAR under its own `EDGAR_GATE` — no Yahoo, no IBKR, never `SYNC_PIPELINE`. It records a
+`company_financials_refresh` row; without `EDGAR_USER_AGENT` that row is `skipped` with a warning.
+Scope, pacing and back-off are in [company-financials.md](company-financials.md).
 
 **The watchlist has a slot of its own, away from the portfolio's** (2026-10-13, at the owner's
 request — nothing scheduled it before, so it aged until someone pressed *Refresh All*). It is the

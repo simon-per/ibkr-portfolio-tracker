@@ -185,7 +185,7 @@ lose time to.
   fixed by comparing payloads built from one snapshot, or ratios inside one payload.
 - **Don't push within ~10 minutes of a Berlin sync slot** — ten of them, on the hour at
   00/04/05/08/11/13/15/18/20/22 (`ALL_SYNC_HOURS`; 04:00 is the watchlist's and 05:00 the
-  fundamentals', Tuesday to Saturday).
+  fundamentals', Tuesday to Saturday, and 05:00 Sunday the weekly SEC EDGAR pass).
   Since 2026-09-08 `deploy.sh` builds before it stops anything, so the outage is the seconds of
   `down`/`up`, it waits out a running sync, and the persistent job store recovers a slot missed by
   under 30 minutes. `ops/finish-deploy.*` checks the window for you.
