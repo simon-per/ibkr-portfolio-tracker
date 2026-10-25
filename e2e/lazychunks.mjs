@@ -41,7 +41,7 @@ const initial = jsRequests.map(r => r.file)
 const TAB_TO_CHUNK = {
   Activity: 'ActivityTab', Allocation: 'AllocationTab', Dividends: 'DividendsTab',
   Fundamentals: 'FundamentalsTab', Watchlist: 'WatchlistTab', Forecast: 'ForecastTab',
-  Tax: 'TaxTab', 'Look-through': 'LookThroughTab',
+  Tax: 'TaxTab', 'Look-through': 'LookThroughTab', Company: 'CompanyTab',
 }
 
 const eager = Object.values(TAB_TO_CHUNK).filter(n => initial.some(f => f.startsWith(n + '-')))

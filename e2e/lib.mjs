@@ -13,7 +13,7 @@ export const CSP =
 /** In strip order — `Dashboard.tsx`'s, the owner's since 2026-09-13; a11y.mjs walks it with the arrow keys. */
 export const TABS = [
   'Performance', 'Dividends', 'Look-through', 'Allocation', 'Activity',
-  'Fundamentals', 'Watchlist', 'Tax', 'Forecast',
+  'Fundamentals', 'Company', 'Watchlist', 'Tax', 'Forecast',
 ]
 
 export function reporter() {
