@@ -7,6 +7,30 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-10-25 — Company tab: more figures, and the Nasdaq-100
+
+- **Figures** (`808c4a3`): a *Key figures* card at the newest TTM point (revenue, net income, EPS,
+  FCF, four margins, shares, DPS with payout ratio, buybacks, dividends paid, YoY and 5Y CAGR
+  notes); new cards for operating income, buybacks & dividends, and cash & debt; gross margin in
+  the margins card; every card header quotes the server's 3Y / 5Y / 10Y CAGRs. The normaliser
+  adds gross profit / cost of revenue, buybacks, dividends paid and debt (total, else its halves;
+  never `DebtInstrumentCarryingAmount`, a tagged zero total is a slip). Net cash was built and
+  dropped the same hour: cash excludes short-term investments, so it showed NVDA as a net debtor.
+- **The Nasdaq-100** (`78a9684`): the EDGAR pass adds the 100 heaviest companies of QQQM's stored
+  basket; figures keyed by CIK (`sec_companies`, `sec_tickers`, migration `e5f7a9b1c3d6`, rows
+  kept one per company), so no constituent gets a `securities` row; API by CIK, picker grouped
+  Held / Nasdaq-100. `bb0098f`: a negative reported figure that cannot be negative is dropped
+  (HON's 2009 dividends paid, found in the fill; HON refetched after the deploy, no negative left).
+- **Ran on production:** `fetch_company_financials --force` after the deploy: 102 of 110
+  companies fetched, 98,754 rows, 8 IFRS 20-F filers without figures (ASML, NU, ARM, PDD, CCEP,
+  TRI, NBIS, FER), 0 failed. `/companies` lists 102 (18 held, 84 constituents not held). The
+  table and its index take 17.6 MB (the estimate given beforehand was 8–12 MB); the database
+  file went from about 17 to 32.8 MB. Spot checks against the 10-Ks: AAPL FY2025 revenue
+  $416.2B, gross margin 46.9%, EPS 7.46; MSFT FY2025 $281.7B, 68.8%, 13.64; COST FY2025
+  $275.2B, 12.8%, 18.21; NVDA FY2025 gross margin 75.0%; MU FY2023 −9.1%. Live screenshots at
+  1600 and 390 px: no horizontal overflow, nine cards for AAPL.
+- Backend 3033 passed / 8 skipped, frontend 1226 passed (before the HON fix).
+
 ## Shipped 2026-10-25 — the Company tab (SEC EDGAR fundamentals history)
 
 - A **Company** tab after Fundamentals: pick one held US SEC filer, see revenue, net income,

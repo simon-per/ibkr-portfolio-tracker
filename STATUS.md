@@ -8,8 +8,9 @@
 > [docs/local-development.md](docs/local-development.md).
 
 **Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
-docs/company-financials.md) is deployed (`3d92062`) and filled: 18 companies, NVDA checked
-against its 10-Ks. PR #80 (Swiss residency)
+docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
+(102 companies with figures, keyed by CIK), with key figures, gross margin, operating income,
+buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
 is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
@@ -96,7 +97,8 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 Only what is still unverified.
 
 - **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
-  `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old);
+  `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old;
+  `universe` 100);
   the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
   toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
@@ -336,6 +338,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-10-25 (Company tab: figures and Nasdaq-100)** — key figures, four more series, CAGRs;
+  net cash built then dropped (cash excludes investments); figures re-keyed by CIK so 100
+  constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated.
+
 - **2026-10-25 (Company tab, agent team)** — two worktree teammates (backend, frontend) against
   one contract; a 22-company EDGAR audit moved the revenue/NI chains (IBKR), fixed ORCL's
   year-as-quarter and ONDS's thousands; SEC contact only in the VPS `.env`.
@@ -346,6 +352,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-18 (audit round 2, agent team)** — six reviewers, #53–#79 filed after offline repros,
   all fixed and deployed the same day with the owner's VPS actions; health-watch's cron had
   starved auto-deploy of its lock (moved to `2-59/5`).
-- **2026-10-18 (audit, agent team)** — five review agents, five verification agents with
-  offline repros, 39 issues filed (#13–#51, plus #52); Tier 1 and waves 2–4 (#13–#37, #41, #52)
-  fixed in worktrees and shipped. Git Bash `TZ=Europe/Berlin date` prints UTC (docs/local-development.md).
