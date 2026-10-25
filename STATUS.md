@@ -8,7 +8,8 @@
 > [docs/local-development.md](docs/local-development.md).
 
 **Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
-docs/company-financials.md) is merged; first fill and live check below. PR #80 (Swiss residency)
+docs/company-financials.md) is deployed (`3d92062`) and filled: 18 companies, NVDA checked
+against its 10-Ks. PR #80 (Swiss residency)
 is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
@@ -98,6 +99,8 @@ Only what is still unverified.
   `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old);
   the owner's eye on the charts and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at FY2022 by design (its older capex is an extension concept; docs/company-financials.md).
+  SPGI and NXPI end at Q1 2026 because EDGAR's companyfacts held no later 10-Q on 2026-10-25;
+  the Sunday pass should bring Q2.
 
 - **The fintech UI pass with the owner's own eyes** (2026-10-17): every tab was screenshotted in
   both themes against production data through a routed preview; the dividend summary, the

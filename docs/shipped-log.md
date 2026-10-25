@@ -24,6 +24,23 @@ Verified offline on the merged tree: backend 3004 passed / 8 skipped (baseline 2
 `alembic check`; frontend 1214 passed, `tsc -b`, build; Playwright on fixture data at 1600 / 1100
 / 390 px.
 
+Three normaliser fixes followed from what the live first fill showed (`2b3431b`, `be86cd7`,
+`3d92062`; backend 3007 passed): a new fiscal year's lone Q1 10-Q was dropped (SPGI, NXPI, CRDO,
+ORCL); IBKR's dividend contexts carry the quarterly rate on every year-to-date rung, which
+derived 0.00 Q4 dividends — such rungs and any derived zero dividend now stay absent. Each
+checked against the old output on 22 companies' documents: only the intended rows moved.
+
+Verified on production (`3d92062`): `EDGAR_USER_AGENT` set in the VPS `.env` only; the CLI's
+first fill and a forced refill — 18 of 20 companies, ASML and NU 20-F (no rows), 0 failed,
+`manual_company_financials_fetch` rows in `sync_runs`; `/api/company-financials/companies` lists
+18 (GOOG and GOOGL as one). NVDA against its 10-Ks: FY2025 revenue 130.497B, diluted EPS 2.94,
+FCF 60.853B, FCF/share 2.45; FY2024 revenue 60.922B, EPS 1.19 (11.93 split 10:1), FCF 27.021B; TTM
+equals the year at both year ends. No zero or negative revenue, share count or dividend in any
+company's quarterly, TTM or annual series. Playwright on the live site: NVDA at 1600 dark and 390
+(tall viewport — a full-page capture restarts Recharts' animation and draws empty plots), IBKR
+at 1600 light (FCF absent, not zero; no dividend card in TTM); no horizontal overflow, no page
+errors.
+
 ## Shipped 2026-10-24 — Swiss residency date on the tax report
 
 - `app_settings.swiss_tax_residency_from` (`PUT /api/settings/swiss-residency`, a popover on the
