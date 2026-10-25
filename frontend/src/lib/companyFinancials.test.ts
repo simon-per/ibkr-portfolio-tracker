@@ -119,6 +119,7 @@ describe('visibleKeyStats', () => {
     expect(keys).toContain('revenue')
     expect(keys).toContain('dividends_paid')
     expect(keys).toContain('pe_ratio')
+    expect(keys).toEqual(expect.arrayContaining(['ps_ratio', 'pfcf_ratio', 'dividend_yield', 'roe']))
     expect(visibleKeyStats({ ...FIXTURE_KEY_STATS, pe_ratio: null }).map((d) => d.key)).not.toContain('pe_ratio')
     expect(keys).not.toContain('gross_margin')
     expect(keys).not.toContain('buybacks')

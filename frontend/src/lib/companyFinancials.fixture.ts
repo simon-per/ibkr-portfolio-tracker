@@ -41,7 +41,8 @@ export const FIXTURE_KEY_STATS: CompanyFinancialsKeyStats = {
   fcf: 60_853e6, fcf_per_share: 2.45, fcf_yoy: null,
   gross_margin: null, operating_margin: 0.624, net_margin: 0.558, fcf_margin: 0.466,
   diluted_shares: 24_804e6, shares_yoy: -0.005,
-  dividends_per_share: 0.034, payout_ratio: 0.0116, pe_ratio: 48.27,
+  dividends_per_share: 0.034, payout_ratio: 0.0116, pe_ratio: 48.27, ps_ratio: 26.9,
+  pfcf_ratio: 57.6, dividend_yield: 0.00024, roe: 1.192,
   buybacks: null, dividends_paid: 834e6,
 }
 
@@ -104,6 +105,10 @@ export function fixtureFinancials(
       cash: fixtureSeries([1_990e6, 3_389e6, 7_280e6, 8_589e6], 0.628, 0.180),
       debt: fixtureSeries([10_946e6, 10_954e6, 9_709e6, 8_463e6], -0.082, -0.128),
       pe_ratio: fixtureSeries([62.8, null, 51.4, 48.27]),
+      ps_ratio: fixtureSeries([22.8, 13.9, 25.1, 26.9]),
+      pfcf_ratio: fixtureSeries([75.3, 98.6, null, 57.6]),
+      dividend_yield: fixtureSeries([0.0007, 0.0012, 0.0005, 0.00024]),
+      roe: fixtureSeries([0.448, -0.165, 0.919, 1.192]),
       ...series,
     },
     ...rest,
@@ -122,6 +127,7 @@ export function emptySeriesSet(): CompanyFinancialsSeriesSet {
     diluted_shares: empty(),
     gross_margin: empty(), operating_margin: empty(), net_margin: empty(), fcf_margin: empty(),
     dividends_per_share: empty(), buybacks: empty(), dividends_paid: empty(),
-    cash: empty(), debt: empty(), pe_ratio: empty(),
+    cash: empty(), debt: empty(), pe_ratio: empty(), ps_ratio: empty(), pfcf_ratio: empty(),
+    dividend_yield: empty(), roe: empty(),
   }
 }

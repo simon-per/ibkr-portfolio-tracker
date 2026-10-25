@@ -1638,6 +1638,11 @@ export interface CompanyFinancialsSeriesSet {
   debt: CompanyFinancialsSeries;
   /** Each period end's close over the TTM diluted EPS there; no growth. */
   pe_ratio: CompanyFinancialsSeries;
+  ps_ratio: CompanyFinancialsSeries;
+  pfcf_ratio: CompanyFinancialsSeries;
+  dividend_yield: CompanyFinancialsSeries;
+  /** TTM net income over the year's mean equity, a fraction. */
+  roe: CompanyFinancialsSeries;
 }
 
 /** The newest TTM point's figures, whatever period the charts show. Fractions for rates. */
@@ -1664,6 +1669,12 @@ export interface CompanyFinancialsKeyStats {
   payout_ratio: number | null;
   /** The newest close (two weeks old at most) over TTM diluted EPS. */
   pe_ratio: number | null;
+  ps_ratio: number | null;
+  pfcf_ratio: number | null;
+  /** TTM dividends per share over the same close, a fraction. */
+  dividend_yield: number | null;
+  /** TTM net income over the year's mean equity, a fraction; null when equity <= 0. */
+  roe: number | null;
   buybacks: number | null;
   dividends_paid: number | null;
 }

@@ -455,6 +455,26 @@ def test_a_filing_in_thousands_throughout_is_rescaled_not_dropped():
     assert multiplier[("WeightedAverageNumberOfDilutedSharesOutstanding", "accn-2013-03-05")] == 1000
 
 
+def test_equity_is_the_parents_before_the_consolidated():
+    doc = _doc({
+        "StockholdersEquity": {"units": {"USD": [
+            _f(None, "2024-03-31", 900e6, "2024-05-01"),
+        ]}},
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": {"units": {"USD": [
+            _f(None, "2024-03-31", 950e6, "2024-05-01"),
+            _f(None, "2024-06-30", 990e6, "2024-08-01"),
+        ]}},
+        "NetIncomeLoss": {"units": {"USD": [
+            _f("2024-01-01", "2024-03-31", 1e6, "2024-05-01"),
+            _f("2024-04-01", "2024-06-30", 1e6, "2024-08-01"),
+            _f("2024-01-01", "2024-06-30", 2e6, "2024-08-01"),
+        ]}},
+    })
+    rows = normalise(doc).rows
+    assert _row(rows, "equity", date(2024, 3, 31), "Q1")["value"] == 900e6
+    assert _row(rows, "equity", date(2024, 6, 30), "Q2")["value"] == 990e6
+
+
 def test_a_share_count_tagged_in_thousands_is_rescaled():
     """ONDS tags some filings' counts in thousands, in filings no newer one overlaps."""
     rows = normalise(

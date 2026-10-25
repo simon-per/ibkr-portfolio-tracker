@@ -222,6 +222,15 @@ METRICS: Dict[str, MetricSpec] = {
     "debt_current": MetricSpec(
         MONETARY, INSTANT, ("LongTermDebtCurrent", "DebtCurrent")
     ),
+    # The parent's equity before the consolidated figure, as net income is the parent's.
+    "equity": MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "StockholdersEquity",
+            "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+        ),
+    ),
 }
 
 #: The source recorded for a share count derived as net income / diluted EPS — for the

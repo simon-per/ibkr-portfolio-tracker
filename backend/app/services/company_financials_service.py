@@ -27,8 +27,13 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   point with the one that many years before it, over the whole history. None of these is
   computed for a margin, whose growth rate would read as a figure nobody means.
 - **Key stats** are the newest TTM point's figures, whatever period the charts show.
+- **Return on equity** = TTM net income (a year's own on the annual view) / the mean of the
+  equity at the period end and a year before it; null when either equity is missing or not
+  positive (a buyback-heavy company's negative equity makes no return).
 - **P/E** = a close over TTM diluted EPS (a year's own EPS on the annual view), null when
-  the EPS is not positive. A period's close is the newest stored within `PRICE_MATCH_DAYS`
+  the EPS is not positive; **P/S** and **P/FCF** the same close over revenue and FCF per
+  share, **dividend yield** TTM dividends per share over it. Every per-share figure is over
+  the diluted shares, so all four share the EPS's split basis. A period's close is the newest stored within `PRICE_MATCH_DAYS`
   before its end (`company_prices`, weekly); the key figures' is the newest of those and the
   held listing's daily close, null when older than `PRICE_MAX_AGE_DAYS`. Closes in another
   currency than the filings are not used. Yahoo adjusts closes for splits to today, the
@@ -82,6 +87,10 @@ SERIES = (
     "cash",
     "debt",
     "pe_ratio",
+    "ps_ratio",
+    "pfcf_ratio",
+    "dividend_yield",
+    "roe",
 )
 MARGINS = frozenset({"gross_margin", "operating_margin", "net_margin", "fcf_margin"})
 # The stored metrics a TTM sums; the share count is averaged, a balance is the newest.
@@ -100,8 +109,10 @@ SUMMED = (
     "dividends_paid",
 )
 AVERAGED = ("diluted_shares",)
-BALANCES = ("cash", "debt_total", "debt_noncurrent", "debt_current")
-NO_GROWTH = MARGINS | {"pe_ratio"}
+BALANCES = ("cash", "debt_total", "debt_noncurrent", "debt_current", "equity")
+# Ratios: a growth rate of a multiple, a yield or a return reads as a figure nobody means.
+VALUATIONS = ("pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield")
+NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe"}
 # A period end's P/E takes the newest close up to this many days before it (weekly closes).
 PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
@@ -319,16 +330,54 @@ def eps_basis(
     return [(day, close * factor) for day, close in prices]
 
 
-def _with_pe(
+def valuations(close: Optional[float], figures: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
+    """P/E, P/S, P/FCF and dividend yield at `close`, from one TTM (or year's) figures."""
+    dps = figures.get("dividends_per_share")
+    return {
+        "pe_ratio": _ratio(close, figures.get("eps_diluted")),
+        "ps_ratio": _ratio(close, figures.get("revenue_per_share")),
+        "pfcf_ratio": _ratio(close, figures.get("fcf_per_share")),
+        "dividend_yield": _ratio(dps, close) if dps is not None else None,
+    }
+
+
+def _with_valuations(
     points: List[Point], rows: Sequence[CompanyFinancial], period: str, prices: Prices
 ) -> None:
-    """Each point's P/E: its period end's close over the TTM diluted EPS there."""
+    """Each point's multiples: its period end's close over the TTM figures there."""
     if not prices:
         return
     ttm = _series_points(rows, "ttm") if period == "quarterly" else points
-    eps = {p.period_end: p.series.get("eps_diluted") for p in ttm}
+    figures = {p.period_end: p.series for p in ttm}
     for p in points:
-        p.series["pe_ratio"] = _ratio(close_at(prices, p.period_end), eps.get(p.period_end))
+        p.series.update(
+            valuations(close_at(prices, p.period_end), figures.get(p.period_end, {}))
+        )
+
+
+def _value_near(values: Dict[date, float], day: date) -> Optional[float]:
+    """The value dated nearest `day`, within `YOY_SLACK_DAYS`, or None."""
+    near = [(abs((d - day).days), v) for d, v in values.items()]
+    near = [pair for pair in near if pair[0] <= YOY_SLACK_DAYS]
+    return min(near, key=lambda pair: pair[0])[1] if near else None
+
+
+def _with_roe(points: List[Point], rows: Sequence[CompanyFinancial], period: str) -> None:
+    """Each point's return on equity: its net income over the year's mean equity."""
+    equity = {
+        p.period_end: p.base["equity"]
+        for p in _points(rows, annual=False) + _points(rows, annual=True)
+        if p.base.get("equity") is not None
+    }
+    if not equity:
+        return
+    income_points = _series_points(rows, "ttm") if period == "quarterly" else points
+    income = {p.period_end: p.series.get("net_income") for p in income_points}
+    for p in points:
+        now = equity.get(p.period_end)
+        before = _value_near(equity, _years_before(p.period_end, 1))
+        mean = (now + before) / 2 if now and before and now > 0 and before > 0 else None
+        p.series["roe"] = _ratio(income.get(p.period_end), mean)
 
 
 def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
@@ -341,6 +390,7 @@ def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]
             points = _ttm(points)
     for point in points:
         _derive(point)
+    _with_roe(points, rows, period)
     return points
 
 
@@ -390,7 +440,8 @@ def key_stats(
         "shares_yoy": growth("diluted_shares", 1),
         "dividends_per_share": dps,
         "payout_ratio": dps / eps if dps is not None and positive_eps else None,
-        "pe_ratio": price / eps if price is not None and positive_eps else None,
+        **valuations(price, last.series if last is not None else {}),
+        "roe": value("roe"),
         "buybacks": value("buybacks"),
         "dividends_paid": value("dividends_paid"),
     }
@@ -401,7 +452,7 @@ def build_series(
 ) -> Dict[str, Any]:
     """The `series` object of the response, from one company's rows and closes."""
     points = _series_points(rows, period)
-    _with_pe(points, rows, period, prices)
+    _with_valuations(points, rows, period, prices)
     years = RANGES[range_key]
     shown = points
     if years is not None and points:

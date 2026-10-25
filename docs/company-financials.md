@@ -131,6 +131,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
 | debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` |
 | debt, current | `LongTermDebtCurrent` → `DebtCurrent` |
+| equity | `StockholdersEquity` → `…IncludingPortionAttributableToNoncontrollingInterest` (the parent's first, as net income is) |
 
 For **every period** the first concept that reports it wins, so a company that moved from
 `SalesRevenueNet` to `RevenueFromContractWithCustomer…` in 2018 keeps one series. Quarters are
@@ -311,7 +312,8 @@ diluted shares, four margins (gross, operating, net, FCF), dividends per share, 
 paid, cash, debt; every per-share figure is the figure over the same period's diluted shares.
 `key_stats` is the newest TTM point's figures whatever `period` asked for (`label`, revenue with
 its YoY and 5-year CAGR, net income, EPS with both, FCF and FCF per share, the margins, shares and
-their YoY, DPS and the payout ratio, the P/E, buybacks, dividends paid). A CIK the pass never looked at:
+their YoY, DPS and the payout ratio, P/E, P/S, P/FCF, dividend yield, return on equity, buybacks,
+dividends paid). A CIK the pass never looked at:
 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
@@ -329,7 +331,13 @@ Computed in `company_financials_service` only:
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
 - **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
 - **P/E** = a close / TTM diluted EPS (a year's own EPS on the annual view); null when the EPS
-  is not positive. The `pe_ratio` series takes each period end's newest weekly close within
+  is not positive. **P/S** and **P/FCF** are the same close over revenue and FCF per share,
+  **dividend yield** TTM dividends per share over it (`valuations`); every per-share figure is
+  over the diluted shares, so all four share the EPS's split basis. No dividend is no yield,
+  never 0%; a negative FCF is no P/FCF.
+- **Return on equity** = TTM net income (a year's own on the annual view) / the mean of the
+  equity at the period end and a year before it (within `YOY_SLACK_DAYS`); null when either is
+  missing or not positive — a buyback-heavy company's negative equity makes no return. The `pe_ratio` series takes each period end's newest weekly close within
   `PRICE_MATCH_DAYS` before it; the key figures take the newest of the weekly closes and a held
   listing's daily close (`market_prices`), null when older than `PRICE_MAX_AGE_DAYS`. A close in
   another currency than the filings is not used. No growth is computed for it (`NO_GROWTH`). It
@@ -426,4 +434,5 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
 - **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
   HONA and SPCX are new filers with too few quarters for a TTM.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
-- EBITDA, net cash, equity and returns on capital; valuation history beyond the P/E.
+- EBITDA, net cash, return on invested capital, enterprise-value multiples, market cap (it needs
+  shares outstanding, and the diluted average would be a stand-in).

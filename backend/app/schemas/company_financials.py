@@ -108,6 +108,16 @@ class CompanyFinancialsKeyStats(BaseModel):
         description="The newest close (two weeks old at most) / TTM diluted EPS; null "
         "without one, or when EPS <= 0.",
     )
+    ps_ratio: Optional[float] = Field(None, description="The same close / TTM revenue per share.")
+    pfcf_ratio: Optional[float] = Field(None, description="The same close / TTM FCF per share.")
+    dividend_yield: Optional[float] = Field(
+        None, description="TTM dividends per share / the same close, a fraction."
+    )
+    roe: Optional[float] = Field(
+        None,
+        description="TTM net income / mean equity over the year; null when either equity "
+        "is not positive.",
+    )
     buybacks: Optional[float] = None
     dividends_paid: Optional[float] = None
 
@@ -133,6 +143,10 @@ class CompanyFinancialsSeriesSet(BaseModel):
     cash: CompanyFinancialsSeries
     debt: CompanyFinancialsSeries
     pe_ratio: CompanyFinancialsSeries
+    ps_ratio: CompanyFinancialsSeries
+    pfcf_ratio: CompanyFinancialsSeries
+    dividend_yield: CompanyFinancialsSeries
+    roe: CompanyFinancialsSeries
 
 
 class CompanyFinancialsResponse(BaseModel):

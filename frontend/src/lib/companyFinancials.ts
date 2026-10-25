@@ -19,7 +19,8 @@ import { readStored, writeStored } from './storage'
  */
 
 /** How a card's values print: compact money, per-share money (2 decimals), a count, or a fraction. */
-export type CompanyValueFormat = 'money' | 'perShare' | 'count' | 'percent' | 'multiple'
+/** `yield`: a percent with two decimals, so NVDA's 0.02% does not print as 0.0%. */
+export type CompanyValueFormat = 'money' | 'perShare' | 'count' | 'percent' | 'yield' | 'multiple'
 
 export interface CompanyChartSeries {
   key: CompanyFinancialsSeriesKey
@@ -75,8 +76,14 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'net_margin', name: 'Net' },
       { key: 'fcf_margin', name: 'FCF' },
     ] } },
-  { id: 'pe', kind: 'line', header: 'latest', optional: true,
-    total: { title: 'P/E', format: 'multiple', series: [{ key: 'pe_ratio', name: 'P/E' }] } },
+  { id: 'valuation', kind: 'line', header: 'latest', optional: true,
+    total: { title: 'Valuation', format: 'multiple', series: [
+      { key: 'pe_ratio', name: 'P/E' },
+      { key: 'pfcf_ratio', name: 'P/FCF' },
+      { key: 'ps_ratio', name: 'P/S' },
+    ] } },
+  { id: 'roe', kind: 'line', header: 'latest', optional: true,
+    total: { title: 'Return on equity', format: 'percent', series: [{ key: 'roe', name: 'ROE' }] } },
   { id: 'shares', kind: 'bar', header: 'growth', inverse: true,
     total: { title: 'Diluted shares', format: 'count', series: [{ key: 'diluted_shares', name: 'Shares' }] } },
   { id: 'capital-returns', kind: 'bar', header: 'growth', optional: true,
@@ -251,16 +258,20 @@ export const KEY_STATS: readonly KeyStatDef[] = [
   { key: 'eps_diluted', label: 'EPS', format: 'perShare', note: { key: 'eps_yoy', label: 'YoY', format: 'signed' } },
   { key: 'eps_cagr_5y', label: 'EPS CAGR 5Y', format: 'signed' },
   { key: 'pe_ratio', label: 'P/E', format: 'multiple' },
+  { key: 'ps_ratio', label: 'P/S', format: 'multiple' },
+  { key: 'pfcf_ratio', label: 'P/FCF', format: 'multiple' },
   { key: 'fcf', label: 'Free cash flow', format: 'money', note: { key: 'fcf_yoy', label: 'YoY', format: 'signed' } },
   { key: 'fcf_per_share', label: 'FCF per share', format: 'perShare' },
   { key: 'gross_margin', label: 'Gross margin', format: 'percent' },
   { key: 'operating_margin', label: 'Operating margin', format: 'percent' },
   { key: 'net_margin', label: 'Net margin', format: 'percent' },
   { key: 'fcf_margin', label: 'FCF margin', format: 'percent' },
+  { key: 'roe', label: 'Return on equity', format: 'percent' },
   { key: 'diluted_shares', label: 'Diluted shares', format: 'count', inverse: true,
     note: { key: 'shares_yoy', label: 'YoY', format: 'signed' } },
   { key: 'dividends_per_share', label: 'Dividends per share', format: 'perShare',
     note: { key: 'payout_ratio', label: 'Payout', format: 'percent' } },
+  { key: 'dividend_yield', label: 'Dividend yield', format: 'yield' },
   { key: 'buybacks', label: 'Buybacks', format: 'money' },
   { key: 'dividends_paid', label: 'Dividends paid', format: 'money' },
 ]

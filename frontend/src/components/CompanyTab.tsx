@@ -78,6 +78,7 @@ function valueFormatter(format: CompanyValueFormat, currency: string): (v: numbe
     case 'perShare': return (v) => formatCurrency(v, currency)
     case 'count': return formatCompactCount
     case 'percent': return (v) => formatFractionPercent(v)
+    case 'yield': return (v) => formatFractionPercent(v, 2)
     case 'multiple': return formatMultiple
   }
 }
@@ -91,7 +92,8 @@ function tickFormatter(format: CompanyValueFormat, currency: string, axis: Axis)
     case 'count':
     case 'multiple':
       return (v) => formatAxisMoney(v, '', axis.step)
-    case 'percent': {
+    case 'percent':
+    case 'yield': {
       const digits = Number.isInteger(Math.round(axis.step * 1e6) / 1e4) ? 0 : 1
       return (v) => formatFractionPercent(v, digits)
     }

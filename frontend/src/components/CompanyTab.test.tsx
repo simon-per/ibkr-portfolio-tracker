@@ -57,7 +57,7 @@ describe('CompanyTab', () => {
     expect(options[2]).toMatch(/^AAPL · Apple/i)
     expect((select as HTMLSelectElement).value).toBe(String(NVDA_CIK))
     await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
-    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
   })
 
   it('remembers the pick on this browser and opens it next time', async () => {
@@ -123,6 +123,10 @@ describe('CompanyTab', () => {
     expect(stats.textContent).toContain('YoY+114.2%')
     expect(stats.textContent).toContain('EPS$2.94')
     expect(stats.textContent).toContain('P/E48.3')
+    expect(stats.textContent).toContain('P/S26.9')
+    expect(stats.textContent).toContain('P/FCF57.6')
+    expect(stats.textContent).toContain('Return on equity119.2%')
+    expect(stats.textContent).toContain('Dividend yield0.02%')
     expect(stats.textContent).toContain('Payout1.2%')
     expect(stats.textContent).toContain('Dividends paid$834M')
     expect(stats.textContent).not.toContain('Gross margin')
@@ -145,21 +149,25 @@ describe('CompanyTab', () => {
     expect(margins.textContent).not.toContain('CAGR')
   })
 
-  it('draws the P/E as the latest multiple, without a CAGR', async () => {
+  it('draws the multiples as the latest values, without a CAGR', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
     await screen.findAllByTestId('chart')
-    expect(within(card('pe')).getByTestId('headline').textContent).toBe('48.3')
-    expect(card('pe').textContent).not.toContain('CAGR')
+    expect(within(card('valuation')).getByTestId('headline').textContent).toBe('48.3')
+    expect(card('valuation').textContent).toContain('P/FCF57.6')
+    expect(card('valuation').textContent).toContain('P/S26.9')
+    expect(card('valuation').textContent).not.toContain('CAGR')
+    expect(within(card('roe')).getByTestId('headline').textContent).toBe('119.2%')
   })
 
-  it('hides the P/E card for a company without stored prices', async () => {
+  it('hides the valuation card for a company without stored prices', async () => {
+    const none = fixtureSeries([null, null, null, null])
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
-      series: { pe_ratio: fixtureSeries([null, null, null, null]) },
+      series: { pe_ratio: none, ps_ratio: none, pfcf_ratio: none },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
-    expect(document.querySelector('[data-chart="pe"]')).toBeNull()
+    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
+    expect(document.querySelector('[data-chart="valuation"]')).toBeNull()
   })
 
   it('tones a falling share count as the gain it is', async () => {
@@ -208,7 +216,7 @@ describe('CompanyTab', () => {
       series: { dividends_per_share: fixtureSeries([null, null, null, null]) },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
     expect(document.querySelector('[data-chart="dps"]')).toBeNull()
     expect(screen.queryByText('Dividends per share')).toBeNull()
   })
@@ -274,7 +282,7 @@ describe('CompanyTab', () => {
     }))
     renderTab()
     expect((await screen.findByRole('alert')).textContent).toContain('FY2024 cash flow not filed')
-    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
   })
 
   it('has no warning when the response carries none', async () => {

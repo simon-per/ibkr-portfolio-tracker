@@ -183,7 +183,7 @@ def test_growth_is_computed_for_every_series_but_the_margins_and_the_pe():
         if name in NO_GROWTH:
             assert series[name]["cagr"] is None and series[name]["yoy"] is None
             assert set(series[name]["cagrs"].values()) == {None}
-    assert NO_GROWTH == MARGINS | {"pe_ratio"}
+    assert NO_GROWTH == MARGINS | {"pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield", "roe"}
     first, last = series["revenue"]["points"][0], series["revenue"]["points"][-1]
     years = (
         date.fromisoformat(last["period_end"]) - date.fromisoformat(first["period_end"])
@@ -351,6 +351,42 @@ def test_a_split_after_the_newest_filing_scales_the_closes_to_its_basis():
     assert eps_basis(prices, splits, date(2024, 8, 28)) == prices
     # A spin-off Yahoo books as a split (SPGI's 1.057) moves no EPS.
     assert eps_basis(prices, [(date(2024, 6, 10), 1.057)], date(2024, 5, 29)) == prices
+
+
+def test_the_multiples_share_the_close_and_the_ttm_per_share_figures():
+    rows = _rows(ENDS, BASE)
+    prices = [(end, 40.0) for end in ENDS]
+    ttm = build_series(rows, "ttm", "max", prices)
+    last = {name: ttm[name]["points"][-1]["value"] for name in SERIES}
+    assert last["ps_ratio"] == pytest.approx(40.0 / last["revenue_per_share"])
+    assert last["pfcf_ratio"] == pytest.approx(40.0 / last["fcf_per_share"])
+    assert last["dividend_yield"] == pytest.approx(last["dividends_per_share"] / 40.0)
+    stats = key_stats(rows, 40.0)
+    assert stats["ps_ratio"] == pytest.approx(last["ps_ratio"])
+    assert stats["dividend_yield"] == pytest.approx(last["dividend_yield"])
+    # A company paying no dividend has no yield, not a 0%; one burning cash no P/FCF.
+    no_dps = {k: v for k, v in BASE.items() if k != "dividends_per_share"}
+    burning = {**no_dps, "capex": lambda i: 50.0}
+    stats = key_stats(_rows(ENDS, burning), 40.0)
+    assert stats["dividend_yield"] is None and stats["pfcf_ratio"] is None
+
+
+def test_return_on_equity_is_ttm_income_over_the_years_mean_equity():
+    equity = {**BASE, "equity": lambda i: 400.0 + 20 * i}
+    rows = _rows(ENDS, equity)
+    ttm = build_series(rows, "ttm", "max")
+    n = len(ENDS) - 1
+    income = sum(20.0 + i for i in range(n - 3, n + 1))
+    mean = ((400.0 + 20 * n) + (400.0 + 20 * (n - 4))) / 2
+    assert _values(ttm, "roe")[-1] == pytest.approx(income / mean)
+    assert key_stats(rows)["roe"] == pytest.approx(income / mean)
+    # The first year has no equity a year before it.
+    assert _values(ttm, "roe")[0] is None
+    # A quarter's return is over the TTM income too.
+    assert _values(build_series(rows, "quarterly", "max"), "roe")[-1] == pytest.approx(income / mean)
+    # Negative equity (buybacks past the book) makes no return.
+    negative = _rows(ENDS, {**BASE, "equity": lambda i: -100.0})
+    assert key_stats(negative)["roe"] is None
 
 
 def test_the_pe_series_is_each_period_ends_close_over_ttm_eps():
