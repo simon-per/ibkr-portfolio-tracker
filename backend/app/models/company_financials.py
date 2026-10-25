@@ -1,13 +1,15 @@
 """
 Fundamentals history from SEC EDGAR, one company at a time (docs/company-financials.md).
 
-Four tables. `sec_companies` is one SEC filer the pass fetches — a held company, or a
+Four tables, and two for its share price. `sec_companies` is one SEC filer the pass fetches — a held company, or a
 Nasdaq-100 constituent the account does not hold — keyed by its Central Index Key, with
 the pass's stamps. `company_financials` holds its normalised figures, one row per (company,
 period, metric), in the reporting currency as filed. `security_ciks` maps a held security
 to its CIK: a mapping table rather than a column on `securities` because the answer "asked,
 and the SEC lists no such ticker" needs a row of its own (the `IsinIdentity` /
 `SecurityLogo` pattern); `sec_tickers` does the same for a constituent's ticker.
+`company_prices` and `company_splits` are Yahoo's weekly closes and split events for each
+company, for its P/E (`company_price_sync`).
 
 **Keyed by company, not by security** (2026-10-25): a constituent nobody holds has no
 `securities` row, and must not get one — every Yahoo loop reads that table. Two listings
@@ -61,6 +63,15 @@ class SecCompany(Base):
     facts_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # When this company's rows were last written from a companyfacts answer.
     fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # The price pass's stamps (`company_price_sync`), the same three as the facts': when
+    # Yahoo last answered with closes, and when and how often it answered with none.
+    prices_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    prices_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    prices_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return f"<SecCompany cik={self.cik} {self.ticker}>"
@@ -146,3 +157,37 @@ class CompanyFinancial(Base):
             f"<CompanyFinancial {self.cik} {self.fiscal_period} "
             f"{self.period_end} {self.metric}={self.value}>"
         )
+
+
+class CompanyPrice(Base):
+    """
+    One week's last close of one company, as Yahoo split-adjusted it on the day it was
+    fetched (`company_price_sync` keeps the whole history on one basis), in `currency`.
+    """
+
+    __tablename__ = "company_prices"
+
+    cik: Mapped[int] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), primary_key=True
+    )
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<CompanyPrice {self.cik} {self.date} {self.close} {self.currency}>"
+
+
+class CompanySplit(Base):
+    """One split Yahoo reports for a company: `ratio` new shares per old (10.0 for 10:1)."""
+
+    __tablename__ = "company_splits"
+
+    cik: Mapped[int] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), primary_key=True
+    )
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    ratio: Mapped[float] = mapped_column(Float, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<CompanySplit {self.cik} {self.date} {self.ratio}>"

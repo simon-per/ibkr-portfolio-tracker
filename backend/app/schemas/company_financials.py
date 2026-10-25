@@ -105,8 +105,8 @@ class CompanyFinancialsKeyStats(BaseModel):
     )
     pe_ratio: Optional[float] = Field(
         None,
-        description="The held listing's newest close / TTM diluted EPS; null when not "
-        "held, the close is in another currency, or EPS <= 0.",
+        description="The newest close (two weeks old at most) / TTM diluted EPS; null "
+        "without one, or when EPS <= 0.",
     )
     buybacks: Optional[float] = None
     dividends_paid: Optional[float] = None
@@ -132,6 +132,7 @@ class CompanyFinancialsSeriesSet(BaseModel):
     dividends_paid: CompanyFinancialsSeries
     cash: CompanyFinancialsSeries
     debt: CompanyFinancialsSeries
+    pe_ratio: CompanyFinancialsSeries
 
 
 class CompanyFinancialsResponse(BaseModel):

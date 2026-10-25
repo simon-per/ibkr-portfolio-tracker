@@ -26,23 +26,28 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   the same rule, for the tab's hover. **3/5/10-year CAGRs** (`cagrs`) compare the latest
   point with the one that many years before it, over the whole history. None of these is
   computed for a margin, whose growth rate would read as a figure nobody means.
-- **Key stats** are the newest TTM point's figures, whatever period the charts show. The
-  **P/E** is the held listing's newest stored close over TTM diluted EPS: null for a company
-  not held (no price is stored for it), a close in another currency than the filings, or EPS
-  that is not positive.
+- **Key stats** are the newest TTM point's figures, whatever period the charts show.
+- **P/E** = a close over TTM diluted EPS (a year's own EPS on the annual view), null when
+  the EPS is not positive. A period's close is the newest stored within `PRICE_MATCH_DAYS`
+  before its end (`company_prices`, weekly); the key figures' is the newest of those and the
+  held listing's daily close, null when older than `PRICE_MAX_AGE_DAYS`. Closes in another
+  currency than the filings are not used. Yahoo adjusts closes for splits to today, the
+  figures to the newest filing, so a split after that filing scales the closes (`eps_basis`).
 - **Annual** is the fiscal years as filed (the FY facts), not a sum of quarters.
 
 Figures stay in the reporting currency. Converting a history into the base currency would
 fold a decade of exchange-rate moves into every growth rate.
 """
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utc_today
 from app.models.company_financials import CompanyFinancial, SecCompany
 from app.models.security import Security
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
@@ -76,6 +81,7 @@ SERIES = (
     "dividends_paid",
     "cash",
     "debt",
+    "pe_ratio",
 )
 MARGINS = frozenset({"gross_margin", "operating_margin", "net_margin", "fcf_margin"})
 # The stored metrics a TTM sums; the share count is averaged, a balance is the newest.
@@ -95,7 +101,11 @@ SUMMED = (
 )
 AVERAGED = ("diluted_shares",)
 BALANCES = ("cash", "debt_total", "debt_noncurrent", "debt_current")
-NO_GROWTH = MARGINS
+NO_GROWTH = MARGINS | {"pe_ratio"}
+# A period end's P/E takes the newest close up to this many days before it (weekly closes).
+PRICE_MATCH_DAYS = 7
+# A newest close older than this gives no current P/E: two missed weekly price passes.
+PRICE_MAX_AGE_DAYS = 14
 # The compound growth the cards and the key figures quote, in years back from the latest.
 CAGR_YEARS = (3, 5, 10)
 # Two quarter ends this far apart are consecutive (13 or 14 weeks, a little slack).
@@ -275,6 +285,44 @@ def cagrs(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
     }
 
 
+Prices = Sequence[Tuple[date, float]]
+
+
+def close_at(prices: Prices, day: date) -> Optional[float]:
+    """The newest close on or before `day` within `PRICE_MATCH_DAYS`; `prices` by date."""
+    i = bisect_right(prices, (day, float("inf"))) - 1
+    if i < 0 or (day - prices[i][0]).days > PRICE_MATCH_DAYS:
+        return None
+    return prices[i][1]
+
+
+def eps_basis(
+    prices: Prices, splits: Prices, newest_filed: Optional[date]
+) -> List[Tuple[date, float]]:
+    """
+    Closes on the figures' split basis. Yahoo adjusts a history to the day it was fetched;
+    the normaliser restates the figures to the newest filing, which has not seen a split
+    after it, so each such split's ratio scales the closes back up.
+    """
+    factor = 1.0
+    for day, ratio in splits:
+        if newest_filed is None or day > newest_filed:
+            factor *= ratio
+    return [(day, close * factor) for day, close in prices]
+
+
+def _with_pe(
+    points: List[Point], rows: Sequence[CompanyFinancial], period: str, prices: Prices
+) -> None:
+    """Each point's P/E: its period end's close over the TTM diluted EPS there."""
+    if not prices:
+        return
+    ttm = _series_points(rows, "ttm") if period == "quarterly" else points
+    eps = {p.period_end: p.series.get("eps_diluted") for p in ttm}
+    for p in points:
+        p.series["pe_ratio"] = _ratio(close_at(prices, p.period_end), eps.get(p.period_end))
+
+
 def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
     """Every period of `period`, oldest first, with its derived series."""
     if period == "annual":
@@ -341,10 +389,11 @@ def key_stats(
 
 
 def build_series(
-    rows: Sequence[CompanyFinancial], period: str, range_key: str
+    rows: Sequence[CompanyFinancial], period: str, range_key: str, prices: Prices = ()
 ) -> Dict[str, Any]:
-    """The `series` object of the response, from one security's stored rows."""
+    """The `series` object of the response, from one company's rows and closes."""
     points = _series_points(rows, period)
+    _with_pe(points, rows, period, prices)
     years = RANGES[range_key]
     shown = points
     if years is not None and points:
@@ -453,6 +502,35 @@ class CompanyFinancialsService:
         out.sort(key=lambda c: (c["symbol"], c["cik"]))
         return out
 
+    async def _prices(
+        self,
+        cik: int,
+        rows: Sequence[CompanyFinancial],
+        currency: Optional[str],
+        listing: Optional[Security],
+    ) -> List[Tuple[date, float]]:
+        """
+        The company's weekly closes in its reporting currency, and the held listing's
+        newest daily close after them, on the figures' split basis (`eps_basis`).
+        """
+        if not rows or currency is None:
+            return []
+        closes = [
+            (p.date, p.close)
+            for p in await self.repo.prices_for(cik)
+            if p.currency == currency
+        ]
+        if listing is not None:
+            daily = await MarketPriceRepository(self.db).get_latest_price(listing.id)
+            if (
+                daily is not None
+                and daily.currency == currency
+                and (not closes or daily.date > closes[-1][0])
+            ):
+                closes.append((daily.date, float(daily.close_price)))
+        splits = [(s.date, s.ratio) for s in await self.repo.splits_for(cik)]
+        return eps_basis(closes, splits, max(r.filed for r in rows))
+
     async def get_financials(
         self,
         company: SecCompany,
@@ -463,11 +541,12 @@ class CompanyFinancialsService:
         coverage = (await self.repo.coverage([company.cik])).get(company.cik)
         listing = (await self._held_listings([company.cik])).get(company.cik)
         identity = self._identity(company, listing)
-        price = None
-        if listing is not None and coverage is not None:
-            close = await MarketPriceRepository(self.db).get_latest_price(listing.id)
-            if close is not None and close.currency == coverage["currency"]:
-                price = float(close.close_price)
+        prices = await self._prices(
+            company.cik, rows, coverage["currency"] if coverage else None, listing
+        )
+        current = None
+        if prices and (utc_today() - prices[-1][0]).days <= PRICE_MAX_AGE_DAYS:
+            current = prices[-1][1]
         warnings: List[str] = []
         if not rows:
             warnings.append(
@@ -480,6 +559,6 @@ class CompanyFinancialsService:
             "range": range_key,
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
-            "key_stats": key_stats(rows, price),
-            "series": build_series(rows, period, range_key),
+            "key_stats": key_stats(rows, current),
+            "series": build_series(rows, period, range_key, prices),
         }

@@ -1,20 +1,23 @@
 """
-Reads and writes of `company_financials`, `sec_companies` and `security_ciks`
-(docs/company-financials.md).
+Reads and writes of `company_financials`, `sec_companies`, `security_ciks` and the
+company prices (docs/company-financials.md).
 
 `replace_rows` is the only write of a company's figures and it **refuses whole**: the
 company's rows are deleted and the new set inserted in one transaction, so a reader never
-sees half of one fetch beside half of the previous one.
+sees half of one fetch beside half of the previous one. `write_prices` does the same for
+the stretch of closes one fetch covers.
 """
 
-from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence
+from datetime import date, datetime
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.company_financials import (
     CompanyFinancial,
+    CompanyPrice,
+    CompanySplit,
     SecCompany,
     SecTicker,
     SecurityCik,
@@ -27,6 +30,13 @@ def facts_backoff_until(row: Optional[SecCompany]) -> Optional[datetime]:
     if row is None:
         return None
     return miss_backoff_until(row.facts_checked_at, row.facts_miss_count)
+
+
+def prices_backoff_until(row: Optional[SecCompany]) -> Optional[datetime]:
+    """When Yahoo may next be asked for this company's prices, or None if it may now."""
+    if row is None:
+        return None
+    return miss_backoff_until(row.prices_checked_at, row.prices_miss_count)
 
 
 class CompanyFinancialsRepository:
@@ -199,3 +209,50 @@ class CompanyFinancialsRepository:
         for cik, entry in out.items():
             entry["currency"] = best.get(cik, (None,))[0]
         return out
+
+    # ── company_prices, company_splits ───────────────────────────────────────
+
+    async def prices_for(self, cik: int) -> List[CompanyPrice]:
+        result = await self.session.execute(
+            select(CompanyPrice).where(CompanyPrice.cik == cik).order_by(CompanyPrice.date)
+        )
+        return list(result.scalars())
+
+    async def splits_for(self, cik: int) -> List[CompanySplit]:
+        result = await self.session.execute(
+            select(CompanySplit).where(CompanySplit.cik == cik).order_by(CompanySplit.date)
+        )
+        return list(result.scalars())
+
+    async def write_prices(
+        self,
+        cik: int,
+        closes: Sequence[Tuple[date, float]],
+        splits: Sequence[Tuple[date, float]],
+        currency: str,
+        fetched_at: datetime,
+        since: Optional[date] = None,
+    ) -> None:
+        """
+        One fetch's closes and splits as one set: everything from `since` on is replaced
+        (the whole history when `since` is None), and the miss stamps are cleared.
+        """
+        company = await self.ensure_company(cik)
+        for model in (CompanyPrice, CompanySplit):
+            stale = delete(model).where(model.cik == cik)
+            if since is not None:
+                stale = stale.where(model.date >= since)
+            await self.session.execute(stale)
+        self.session.add_all(
+            CompanyPrice(cik=cik, date=d, close=c, currency=currency) for d, c in closes
+        )
+        self.session.add_all(CompanySplit(cik=cik, date=d, ratio=r) for d, r in splits)
+        company.prices_fetched_at = fetched_at
+        company.prices_checked_at = None
+        company.prices_miss_count = None
+
+    async def record_price_miss(self, cik: int, checked_at: datetime) -> None:
+        """Yahoo had no closes for the company; `prices_backoff_until` spaces the next ask."""
+        row = await self.ensure_company(cik)
+        row.prices_checked_at = checked_at
+        row.prices_miss_count = (row.prices_miss_count or 0) + 1

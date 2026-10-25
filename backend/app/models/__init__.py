@@ -34,6 +34,8 @@ from app.models.isin_identity import IsinIdentity
 from app.models.security_logo import SecurityLogo
 from app.models.company_financials import (
     CompanyFinancial,
+    CompanyPrice,
+    CompanySplit,
     SecCompany,
     SecTicker,
     SecurityCik,
@@ -73,6 +75,8 @@ __all__ = [
     "IsinIdentity",
     "SecurityLogo",
     "CompanyFinancial",
+    "CompanyPrice",
+    "CompanySplit",
     "SecCompany",
     "SecTicker",
     "SecurityCik",

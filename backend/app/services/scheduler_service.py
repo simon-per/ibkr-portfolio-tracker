@@ -317,11 +317,17 @@ FUNDAMENTALS_REFRESH_DAYS = 'tue-sat'
 COMPANY_FINANCIALS_REFRESH_HOUR = FUNDAMENTALS_REFRESH_HOUR
 COMPANY_FINANCIALS_REFRESH_DAYS = 'sun'
 
+# The Company tab's weekly closes from Yahoo (`company_price_sync`, for the P/E): the same
+# Sunday hour, after the week's last close. Yahoo, so under SYNC_PIPELINE like every Yahoo
+# job; nothing else Yahoo runs on a Sunday, and the hour is already guarded.
+COMPANY_PRICES_REFRESH_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
+COMPANY_PRICES_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
+
 # Every hour at which anything is registered, and so what the deploy guard is checked
 # against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
 ALL_SYNC_HOURS = tuple(sorted({
     *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
-    COMPANY_FINANCIALS_REFRESH_HOUR,
+    COMPANY_FINANCIALS_REFRESH_HOUR, COMPANY_PRICES_REFRESH_HOUR,
 }))
 
 # The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
@@ -1904,6 +1910,45 @@ class SchedulerService:
         logger.info(f"Company financials refresh: {result.get('status')} — {result.get('message')}")
         return result
 
+    async def company_prices_refresh_job(self, scheduled: bool = False) -> Optional[dict]:
+        """
+        The weekly Yahoo closes of the Company tab's companies (docs/company-financials.md,
+        *Prices*), at COMPANY_PRICES_REFRESH_HOUR on COMPANY_PRICES_REFRESH_DAYS.
+
+        Under `SYNC_PIPELINE` like every Yahoo job. The pass is `CompanyPriceSync.refresh`
+        — its scope, pacing, back-off and abandon-on-429 — and nothing here re-implements
+        any of it.
+        """
+        return await self._gated_job(
+            "company_prices_refresh", self._company_prices_refresh_locked, scheduled=scheduled
+        )
+
+    async def _company_prices_refresh_locked(self) -> dict:
+        from app.services.company_price_sync import SCHEDULED_SYNC_TYPE, CompanyPriceSync
+
+        started_at = utcnow()
+        result = {"type": SCHEDULED_SYNC_TYPE, "timestamp": utc_iso(started_at)}
+        try:
+            async with AsyncSessionLocal() as db:
+                summary = await CompanyPriceSync(db).refresh()
+        except Exception as e:
+            logger.error(f"Company prices refresh failed: {e}", exc_info=True)
+            result.update(
+                status="error",
+                message=f"Company prices refresh failed: {type(e).__name__}: {e}",
+            )
+        else:
+            result.update(
+                status="success",
+                message=summary["message"],
+                company_prices_result={k: v for k, v in summary.items() if k != "warnings"},
+            )
+            if summary.get("warnings"):
+                result["warnings"] = list(summary["warnings"])
+        await self._record_run(result, started_at)
+        logger.info(f"Company prices refresh: {result.get('status')} — {result.get('message')}")
+        return result
+
     async def _record_run(self, result: dict, started_at: datetime) -> None:
         """
         Persist a job's outcome to sync_runs.
@@ -2277,6 +2322,17 @@ class SchedulerService:
             f'Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
+        # Their weekly closes from Yahoo — see COMPANY_PRICES_REFRESH_HOUR.
+        self._add_or_keep(
+            'company_prices_refresh', company_prices_refresh_job_entry,
+            CronTrigger(
+                day_of_week=COMPANY_PRICES_REFRESH_DAYS,
+                hour=COMPANY_PRICES_REFRESH_HOUR, minute=0, timezone='Europe/Berlin',
+            ),
+            f'Company Prices Refresh (Sun {COMPANY_PRICES_REFRESH_HOUR:02d}:00 '
+            f'Europe/Berlin)',
+            group=UPKEEP_JOB_GROUP,
+        )
 
         self._prune_unknown_jobs()
         self.scheduler.resume()
@@ -2409,3 +2465,7 @@ async def fundamentals_refresh_job_entry() -> Optional[dict]:
 
 async def company_financials_refresh_job_entry() -> dict:
     return await get_scheduler().company_financials_refresh_job()
+
+
+async def company_prices_refresh_job_entry() -> Optional[dict]:
+    return await get_scheduler().company_prices_refresh_job(scheduled=True)

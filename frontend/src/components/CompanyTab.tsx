@@ -78,6 +78,7 @@ function valueFormatter(format: CompanyValueFormat, currency: string): (v: numbe
     case 'perShare': return (v) => formatCurrency(v, currency)
     case 'count': return formatCompactCount
     case 'percent': return (v) => formatFractionPercent(v)
+    case 'multiple': return formatMultiple
   }
 }
 
@@ -88,6 +89,7 @@ function tickFormatter(format: CompanyValueFormat, currency: string, axis: Axis)
     case 'perShare':
       return (v) => formatAxisMoney(v, currencySymbol(currency), axis.step)
     case 'count':
+    case 'multiple':
       return (v) => formatAxisMoney(v, '', axis.step)
     case 'percent': {
       const digits = Number.isInteger(Math.round(axis.step * 1e6) / 1e4) ? 0 : 1
@@ -357,9 +359,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
 
 /** A key stat's figure: a growth rate signed and inked, anything else as its cards print it. */
 function keyStatText(def: Pick<KeyStatDef, 'format'>, value: number, currency: string): string {
-  if (def.format === 'signed') return signedPercent(value)
-  if (def.format === 'multiple') return formatMultiple(value)
-  return valueFormatter(def.format, currency)(value)
+  return def.format === 'signed' ? signedPercent(value) : valueFormatter(def.format, currency)(value)
 }
 
 /** The newest TTM point's figures, whatever period the charts below show. */

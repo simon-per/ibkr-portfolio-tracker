@@ -1636,6 +1636,8 @@ export interface CompanyFinancialsSeriesSet {
   dividends_paid: CompanyFinancialsSeries;
   cash: CompanyFinancialsSeries;
   debt: CompanyFinancialsSeries;
+  /** Each period end's close over the TTM diluted EPS there; no growth. */
+  pe_ratio: CompanyFinancialsSeries;
 }
 
 /** The newest TTM point's figures, whatever period the charts show. Fractions for rates. */
@@ -1660,7 +1662,7 @@ export interface CompanyFinancialsKeyStats {
   shares_yoy: number | null;
   dividends_per_share: number | null;
   payout_ratio: number | null;
-  /** The held listing's newest close over TTM diluted EPS; null for a company not held. */
+  /** The newest close (two weeks old at most) over TTM diluted EPS. */
   pe_ratio: number | null;
   buybacks: number | null;
   dividends_paid: number | null;

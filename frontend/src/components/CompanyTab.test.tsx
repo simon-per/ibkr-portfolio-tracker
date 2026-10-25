@@ -57,7 +57,7 @@ describe('CompanyTab', () => {
     expect(options[2]).toMatch(/^AAPL · Apple/i)
     expect((select as HTMLSelectElement).value).toBe(String(NVDA_CIK))
     await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
-    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
   })
 
   it('remembers the pick on this browser and opens it next time', async () => {
@@ -145,6 +145,23 @@ describe('CompanyTab', () => {
     expect(margins.textContent).not.toContain('CAGR')
   })
 
+  it('draws the P/E as the latest multiple, without a CAGR', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await screen.findAllByTestId('chart')
+    expect(within(card('pe')).getByTestId('headline').textContent).toBe('48.3')
+    expect(card('pe').textContent).not.toContain('CAGR')
+  })
+
+  it('hides the P/E card for a company without stored prices', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      series: { pe_ratio: fixtureSeries([null, null, null, null]) },
+    }))
+    renderTab()
+    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
+    expect(document.querySelector('[data-chart="pe"]')).toBeNull()
+  })
+
   it('tones a falling share count as the gain it is', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
@@ -191,7 +208,7 @@ describe('CompanyTab', () => {
       series: { dividends_per_share: fixtureSeries([null, null, null, null]) },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(8)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
     expect(document.querySelector('[data-chart="dps"]')).toBeNull()
     expect(screen.queryByText('Dividends per share')).toBeNull()
   })
@@ -257,7 +274,7 @@ describe('CompanyTab', () => {
     }))
     renderTab()
     expect((await screen.findByRole('alert')).textContent).toContain('FY2024 cash flow not filed')
-    expect(await screen.findAllByTestId('chart')).toHaveLength(9)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
   })
 
   it('has no warning when the response carries none', async () => {

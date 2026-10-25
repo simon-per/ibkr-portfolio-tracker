@@ -312,11 +312,16 @@ Computed in `company_financials_service` only:
   revenue is missing or not positive.
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
 - **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
-- **P/E** = the held listing's newest stored close (`market_prices`) / TTM diluted EPS; null when
-  the EPS is not positive, the close is in another currency than the filings, or the company is
-  not held: no price is stored for a Nasdaq-100 constituent, and fetching one would be new Yahoo
-  traffic (CLAUDE.md rule 1). It is not the Fundamentals tab's `trailing_pe`, which is Yahoo's
-  own figure over Yahoo's EPS; this one is over the EPS the tab shows beside it.
+- **P/E** = a close / TTM diluted EPS (a year's own EPS on the annual view); null when the EPS
+  is not positive. The `pe_ratio` series takes each period end's newest weekly close within
+  `PRICE_MATCH_DAYS` before it; the key figures take the newest of the weekly closes and a held
+  listing's daily close (`market_prices`), null when older than `PRICE_MAX_AGE_DAYS`. A close in
+  another currency than the filings is not used. No growth is computed for it (`NO_GROWTH`). It
+  is not the Fundamentals tab's `trailing_pe`, which is Yahoo's own figure over Yahoo's EPS; this
+  one is over the EPS the tab shows beside it.
+- **Split basis** (`eps_basis`): Yahoo split-adjusts closes to the day they were fetched, the
+  normaliser restates figures to the newest filing. A split after that filing is in the closes
+  and not yet in the EPS, so its ratio scales the closes up until a filing restates the figures.
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not
@@ -355,6 +360,34 @@ shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh`
 
 `--symbol NVDA` (repeatable; a held symbol or a constituent's ticker) narrows it, `--force`
 ignores staleness and back-off. It records a `manual_company_financials_fetch` row.
+
+## Prices
+
+The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enabled by the owner
+2026-10-25): **one history request per company a week**, about a hundred, after the EDGAR pass.
+
+- **Scope**: the companies the tab lists (`list_companies`), by CIK, asked by the SEC's ticker
+  (Yahoo spells US listings the same, BRK-B). No `securities` row is read or written, so
+  `yahoo_eligible` has nothing to filter and a constituent never joins the price loops.
+- **Kept** (`company_prices`, `company_splits`, migration `f6a8b0c2d4e7`): the last trading day's
+  close of each week, from `HISTORY_LEAD_DAYS` before the company's first stored period, in the
+  quote's currency after `minor_unit_scale`; and every split Yahoo reports. Weekly rather than
+  daily: a period end needs a close within a week, and daily would be five times the rows.
+- **One basis.** A fetch reaches `OVERLAP_DAYS` behind the newest stored close. A split in that
+  window not stored yet, an overlapping close more than `BASIS_TOLERANCE` off, or another
+  currency means the stored history is on an older basis: the whole history is fetched again
+  (a second request) and replaced as one set (`write_prices`).
+- **Bounded**: a company at most once in `STALE_AFTER`; an empty answer backs off on the shared
+  doubling schedule (`prices_checked_at`, `prices_miss_count`); a 429 or the process-wide hold
+  abandons the pass with a warning (`yahoo_rate_limit`), and nothing is stamped.
+- **Schedule**: Sunday 05:00 Berlin (`COMPANY_PRICES_REFRESH_HOUR`/`_DAYS`, job
+  `company_prices_refresh`, upkeep group), under `SYNC_PIPELINE` like every Yahoo job; nothing
+  else asks Yahoo on a Sunday. It records a `company_prices_refresh` row. By hand:
+
+      docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_prices --dry-run
+      docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_prices
+
+  `--symbol`, `--force` as above; it records a `manual_company_prices_fetch` row.
 
 ## Known gaps and out of scope
 

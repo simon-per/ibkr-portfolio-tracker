@@ -17,6 +17,8 @@ from app.services.company_financials_service import (
     build_series,
     cagr,
     cagrs,
+    close_at,
+    eps_basis,
     key_stats,
     yoy,
 )
@@ -175,13 +177,13 @@ def test_the_range_counts_back_from_the_latest_point():
     assert len(ttm) == 20 and ttm[0]["value"] is not None
 
 
-def test_growth_is_computed_for_every_series_but_the_margins():
+def test_growth_is_computed_for_every_series_but_the_margins_and_the_pe():
     series = build_series(_rows(ENDS, BALANCED), "ttm", "10y")
     for name in SERIES:
         if name in NO_GROWTH:
             assert series[name]["cagr"] is None and series[name]["yoy"] is None
             assert set(series[name]["cagrs"].values()) == {None}
-    assert NO_GROWTH == MARGINS
+    assert NO_GROWTH == MARGINS | {"pe_ratio"}
     first, last = series["revenue"]["points"][0], series["revenue"]["points"][-1]
     years = (
         date.fromisoformat(last["period_end"]) - date.fromisoformat(first["period_end"])
@@ -328,6 +330,43 @@ def test_pe_ratio_is_the_price_over_ttm_eps():
     stats = key_stats(rows, 30.0)
     assert stats["pe_ratio"] == pytest.approx(30.0 / stats["eps_diluted"])
     assert key_stats(rows)["pe_ratio"] is None
+
+
+def test_a_period_ends_close_is_the_newest_within_a_week_before_it():
+    prices = [(date(2024, 3, 22), 10.0), (date(2024, 3, 29), 11.0), (date(2024, 4, 12), 12.0)]
+    assert close_at(prices, date(2024, 3, 31)) == 11.0
+    assert close_at(prices, date(2024, 3, 29)) == 11.0
+    assert close_at(prices, date(2024, 4, 10)) is None  # 12 days after the last close
+    assert close_at(prices, date(2024, 3, 1)) is None  # before the history
+    assert close_at([], date(2024, 3, 31)) is None
+
+
+def test_a_split_after_the_newest_filing_scales_the_closes_to_its_basis():
+    prices = [(date(2024, 5, 31), 100.0), (date(2024, 6, 14), 12.0)]
+    splits = [(date(2021, 7, 20), 4.0), (date(2024, 6, 10), 10.0)]
+    # The 2024 10:1 came after the newest filing: Yahoo's closes are a tenth of its basis.
+    assert eps_basis(prices, splits, date(2024, 5, 29)) == [
+        (date(2024, 5, 31), 1000.0), (date(2024, 6, 14), 120.0)]
+    # Once a filing has restated the figures for it, the closes stand as fetched.
+    assert eps_basis(prices, splits, date(2024, 8, 28)) == prices
+
+
+def test_the_pe_series_is_each_period_ends_close_over_ttm_eps():
+    rows = _rows(ENDS, BASE)
+    prices = [(end - timedelta(days=2), 10.0 + i) for i, end in enumerate(ENDS)]
+    ttm = build_series(rows, "ttm", "max", prices)
+    eps = _values(ttm, "eps_diluted")
+    pe = _values(ttm, "pe_ratio")
+    assert pe[-1] == pytest.approx((10.0 + len(ENDS) - 1) / eps[-1])
+    assert pe[0] == pytest.approx(13.0 / eps[0])  # the first TTM ends at the 4th quarter
+    # A quarter's P/E is over the TTM EPS too, never the quarter's own.
+    quarterly = build_series(rows, "quarterly", "max", prices)
+    assert _values(quarterly, "pe_ratio")[-1] == pytest.approx(pe[-1])
+    assert _values(quarterly, "pe_ratio")[0] is None  # no TTM at the first quarter
+    annual = _values(build_series(rows, "annual", "max", prices), "pe_ratio")
+    assert all(v is None for v in annual)  # these rows carry no FY rows
+    assert set(_values(build_series(rows, "ttm", "max"), "pe_ratio")) == {None}
+    assert build_series(rows, "ttm", "max", prices)["pe_ratio"]["cagr"] is None
 
 
 @pytest.mark.parametrize(

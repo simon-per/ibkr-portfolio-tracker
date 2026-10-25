@@ -583,6 +583,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
 | 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
 | 05:00, **Sunday** | 23:00 Sat | `company_financials_refresh` — SEC EDGAR companyfacts for held US-listed filers, weekly, own gate (`EDGAR_GATE`) and upkeep group ([company-financials.md](company-financials.md)) | no |
+| 05:00, **Sunday** | 23:00 Sat | `company_prices_refresh` — the Company tab's weekly closes, one history request per listed company, `SYNC_PIPELINE`, upkeep group ([company-financials.md](company-financials.md) *Prices*) | **yes** |
 
 **The company financials take the fundamentals' hour on the one day it is free** (2026-10-25):
 Sunday 05:00, weekly. Nothing else runs at 05:00 on a Sunday, the hour is already in

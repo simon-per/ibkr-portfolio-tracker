@@ -19,7 +19,7 @@ import { readStored, writeStored } from './storage'
  */
 
 /** How a card's values print: compact money, per-share money (2 decimals), a count, or a fraction. */
-export type CompanyValueFormat = 'money' | 'perShare' | 'count' | 'percent'
+export type CompanyValueFormat = 'money' | 'perShare' | 'count' | 'percent' | 'multiple'
 
 export interface CompanyChartSeries {
   key: CompanyFinancialsSeriesKey
@@ -75,6 +75,8 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'net_margin', name: 'Net' },
       { key: 'fcf_margin', name: 'FCF' },
     ] } },
+  { id: 'pe', kind: 'line', header: 'latest', optional: true,
+    total: { title: 'P/E', format: 'multiple', series: [{ key: 'pe_ratio', name: 'P/E' }] } },
   { id: 'shares', kind: 'bar', header: 'growth', inverse: true,
     total: { title: 'Diluted shares', format: 'count', series: [{ key: 'diluted_shares', name: 'Shares' }] } },
   { id: 'capital-returns', kind: 'bar', header: 'growth', optional: true,
@@ -234,8 +236,8 @@ export interface KeyStatNote {
 export interface KeyStatDef {
   key: KeyStatKey
   label: string
-  /** `signed`: a growth rate, printed with its sign and inked by it. `multiple`: the P/E. */
-  format: CompanyValueFormat | 'signed' | 'multiple'
+  /** `signed`: a growth rate, printed with its sign and inked by it. */
+  format: CompanyValueFormat | 'signed'
   note?: KeyStatNote
   /** Fewer is the shareholder's gain (the share count): growth reads the other way. */
   inverse?: boolean

@@ -9,7 +9,7 @@
 
 **Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
-(102 companies with figures, keyed by CIK), with key figures (P/E for held companies), gross margin, operating income,
+(102 companies with figures, keyed by CIK), with key figures and P/E (weekly Yahoo closes), gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
 is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
@@ -98,7 +98,8 @@ Only what is still unverified.
 
 - **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
   `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old;
-  `universe` 100);
+  `universe` 100); beside it the first `company_prices_refresh` row (a success, no
+  `rate_limited`, `fetched` 0 after a fill under six days old);
   the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
   toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
