@@ -357,6 +357,3 @@ One line each, newest first; drop the oldest.
   kept out of the public docs (the setting holds it); Trading212 lots need nothing (in Jan).
 - **2026-10-24 (Swiss residency)** — the tax report takes a "Swiss taxpayer from" date
   (docs/tax.md); the same morning's sync check found the Flex ingest healthy.
-- **2026-10-18 (audit round 2, agent team)** — six reviewers, #53–#79 filed after offline repros,
-  all fixed and deployed the same day with the owner's VPS actions; health-watch's cron had
-  starved auto-deploy of its lock (moved to `2-59/5`).
