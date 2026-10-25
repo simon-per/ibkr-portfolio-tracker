@@ -306,10 +306,22 @@ WATCHLIST_REFRESH_DAYS = 'tue-sat'
 FUNDAMENTALS_REFRESH_HOUR = 5
 FUNDAMENTALS_REFRESH_DAYS = 'tue-sat'
 
+# ── The company financials' slot (SEC EDGAR) ──────────────────────────────────
+#
+# Weekly, Sunday 05:00 Berlin (docs/company-financials.md): the fundamentals' hour on the
+# one day nothing else runs at it — the fundamentals and the watchlist are Tuesday to
+# Saturday, and no portfolio or crypto slot is at 05:00 — so the deploy guard already
+# covers the hour and no ops script learns a new one. Filings land on weekdays, so a
+# Sunday pass picks up the week's 10-Qs and 10-Ks. EDGAR only: no Yahoo, no IBKR, and its
+# own gate (`company_financials_sync.EDGAR_GATE`), never SYNC_PIPELINE.
+COMPANY_FINANCIALS_REFRESH_HOUR = FUNDAMENTALS_REFRESH_HOUR
+COMPANY_FINANCIALS_REFRESH_DAYS = 'sun'
+
 # Every hour at which anything is registered, and so what the deploy guard is checked
 # against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
 ALL_SYNC_HOURS = tuple(sorted({
     *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
+    COMPANY_FINANCIALS_REFRESH_HOUR,
 }))
 
 # The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
@@ -1849,6 +1861,49 @@ class SchedulerService:
         logger.info(f"Fundamentals refresh: {result.get('status')} — {result.get('message')}")
         return result
 
+    async def company_financials_refresh_job(self) -> dict:
+        """
+        The weekly EDGAR pass (docs/company-financials.md), at
+        COMPANY_FINANCIALS_REFRESH_HOUR on COMPANY_FINANCIALS_REFRESH_DAYS.
+
+        Under its own gate, `EDGAR_GATE`: it shares no upstream with the stock pipeline,
+        and SYNC_PIPELINE would put the stock Sync buttons on cooldown. The pass is
+        `CompanyFinancialsSync.refresh` — its scope, pacing, bounded retries and back-off —
+        and nothing here re-implements any of it. Records a `sync_runs` row either way;
+        never `last_sync_result`, which is the portfolio's "last sync".
+        """
+        from app.services.company_financials_sync import (
+            EDGAR_GATE, SCHEDULED_SYNC_TYPE, CompanyFinancialsSync,
+        )
+
+        started_at = utcnow()
+        result = {"type": SCHEDULED_SYNC_TYPE, "timestamp": utc_iso(started_at)}
+        try:
+            with single_flight(EDGAR_GATE):
+                async with AsyncSessionLocal() as db:
+                    summary = await CompanyFinancialsSync(db).refresh()
+        except SyncBusy as e:
+            result.update(status="skipped", reason="busy", message=str(e))
+        except Exception as e:
+            logger.error(f"Company financials refresh failed: {e}", exc_info=True)
+            result.update(
+                status="error",
+                message=f"Company financials refresh failed: {type(e).__name__}: {e}",
+            )
+        else:
+            result.update(
+                status=summary["status"],
+                message=summary["message"],
+                company_financials_result={
+                    k: v for k, v in summary.items() if k != "warnings"
+                },
+            )
+            if summary.get("warnings"):
+                result["warnings"] = list(summary["warnings"])
+        await self._record_run(result, started_at)
+        logger.info(f"Company financials refresh: {result.get('status')} — {result.get('message')}")
+        return result
+
     async def _record_run(self, result: dict, started_at: datetime) -> None:
         """
         Persist a job's outcome to sync_runs.
@@ -2211,6 +2266,17 @@ class SchedulerService:
             f'Fundamentals Refresh ({FUNDAMENTALS_REFRESH_HOUR:02d}:00 Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
+        # Company financials from SEC EDGAR, weekly — see COMPANY_FINANCIALS_REFRESH_HOUR.
+        self._add_or_keep(
+            'company_financials_refresh', company_financials_refresh_job_entry,
+            CronTrigger(
+                day_of_week=COMPANY_FINANCIALS_REFRESH_DAYS,
+                hour=COMPANY_FINANCIALS_REFRESH_HOUR, minute=0, timezone='Europe/Berlin',
+            ),
+            f'Company Financials Refresh (Sun {COMPANY_FINANCIALS_REFRESH_HOUR:02d}:00 '
+            f'Europe/Berlin)',
+            group=UPKEEP_JOB_GROUP,
+        )
 
         self._prune_unknown_jobs()
         self.scheduler.resume()
@@ -2339,3 +2405,7 @@ async def watchlist_refresh_job_entry() -> Optional[dict]:
 
 async def fundamentals_refresh_job_entry() -> Optional[dict]:
     return await get_scheduler().fundamentals_refresh_job(scheduled=True)
+
+
+async def company_financials_refresh_job_entry() -> dict:
+    return await get_scheduler().company_financials_refresh_job()

@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # Optional: without it the logo pass is skipped and every avatar stays a monogram.
     logo_dev_secret_key: str = ""
 
+    # The User-Agent SEC EDGAR requires of every request (docs/company-financials.md): a
+    # name and a contact address, e.g. "ibkr-portfolio-tracker you@example.com". The SEC
+    # answers 403 without one, so without it the EDGAR pass records a warning and makes no
+    # request. A setting rather than a literal because this repository is public and an
+    # operator's email does not belong in it. Never logged; app/redact.py masks it.
+    edgar_user_agent: str = ""
+
     # Database Configuration. The default is local development's backend/portfolio.db.
     # The container never uses it: docker-compose.yml sets DATABASE_URL to
     # /app/data/portfolio.db (the directory mount) in `environment:`, which overrides

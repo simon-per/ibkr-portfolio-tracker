@@ -57,6 +57,8 @@ _LITERAL_SECRET_SETTINGS = (
     "alpha_vantage_api_key",
     "openfigi_api_key",
     "api_admin_token",
+    # Not a secret, but it carries the operator's email address (docs/company-financials.md).
+    "edgar_user_agent",
 )
 
 

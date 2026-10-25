@@ -55,6 +55,7 @@ from app.services.scheduler_service import (
     is_berlin_trading_day,
     full_sync_job_entry,
     fundamentals_refresh_job_entry,
+    company_financials_refresh_job_entry,
     ibkr_only_sync_job_entry,
     market_data_only_sync_job_entry,
     watchlist_refresh_job_entry,
@@ -528,6 +529,7 @@ def _declared_job_ids() -> set:
         *(f'crypto_sync_{i}' for i in range(1, len(CRYPTO_SYNC_HOURS) + 1)),
         'watchlist_refresh',
         'fundamentals_refresh',
+        'company_financials_refresh',
     }
 
 
@@ -1005,6 +1007,7 @@ async def test_jobs_are_serializable_into_the_persistent_store(jobstore_url):
         assert funcs['crypto_sync_1'] is crypto_sync_job_entry
         assert funcs['watchlist_refresh'] is watchlist_refresh_job_entry
         assert funcs['fundamentals_refresh'] is fundamentals_refresh_job_entry
+        assert funcs['company_financials_refresh'] is company_financials_refresh_job_entry
     finally:
         second.shutdown()
 
@@ -1492,7 +1495,9 @@ async def test_the_watchlist_refresh_has_a_slot_of_its_own(jobstore_url):
     try:
         svc.start()
         upkeep = {j.id: j for j in svc.jobs_in_group(UPKEEP_JOB_GROUP)}
-        assert set(upkeep) == {'watchlist_refresh', 'fundamentals_refresh'}
+        assert set(upkeep) == {
+            'watchlist_refresh', 'fundamentals_refresh', 'company_financials_refresh',
+        }
         assert _trigger_hour(upkeep['watchlist_refresh']) == WATCHLIST_REFRESH_HOUR
         assert f"day_of_week='{WATCHLIST_REFRESH_DAYS}'" in str(upkeep['watchlist_refresh'].trigger)
         assert 'watchlist_refresh' not in {j.id for j in svc.jobs_in_group(STOCK_JOB_GROUP)}
