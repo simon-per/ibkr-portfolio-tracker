@@ -670,3 +670,32 @@ def test_a_derived_share_count_far_from_every_reported_neighbour_stays_absent():
     q4 = [r for r in rows if r["fiscal_period"] == "Q4" and r["metric"] == "diluted_shares"]
     fy = [r["value"] for r in rows if r["fiscal_period"] == "FY" and r["metric"] == "diluted_shares"]
     assert q4 == [] and fy == [160.0]
+
+
+
+def test_a_restated_dilution_is_no_split_when_the_basic_count_holds_still():
+    """REGN: a later 10-Q restates Q3 2013's diluted count 25% higher (and its EPS lower);
+    the basic count is unchanged, so the older filing keeps factor 1, not a "5:4"."""
+    basic, diluted = "WeightedAverageNumberOfSharesOutstandingBasic", SHARES_CONCEPT
+    q3 = ("2013-07-01", "2013-09-30")
+    doc = _doc(
+        {
+            diluted: {"units": {"shares": [
+                _f(*q3, 145.9, "2014-11-04", accn="new"),
+                _f(*q3, 116.7, "2013-11-05", accn="old"),
+            ]}},
+            basic: {"units": {"shares": [
+                _f(*q3, 98.2, "2014-11-04", accn="new"),
+                _f(*q3, 98.2, "2013-11-05", accn="old"),
+            ]}},
+            "EarningsPerShareDiluted": {"units": {"USD/shares": [
+                _f(*q3, 1.00, "2014-11-04", accn="new"),
+                _f(*q3, 1.25, "2013-11-05", accn="old"),
+            ]}},
+        }
+    )
+    multiplier = adjustments(_facts(doc))
+    assert multiplier[(diluted, "old")] == pytest.approx(1)
+    assert multiplier[("EarningsPerShareDiluted", "old")] == pytest.approx(1)
+    # The basic count is a witness only: never a stored row.
+    assert all(r["source_concept"] != basic for r in normalise(doc).rows)

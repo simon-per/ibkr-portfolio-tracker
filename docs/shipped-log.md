@@ -38,8 +38,9 @@
   absurd derived Q4 share counts (DXCM, REGN, TTWO, LITE), a margins headline of a dash (BKNG).
   Share-count jumps went from 141 to 29, all IPOs, SPACs, a new listing or KDP's merger.
   Refetched with `--force` after each deploy (102 of 110, 0 failed). Checked against filings:
-  BKNG FY2019 EPS 111.82 / 25, CRWD FY2025 revenue 3.95B, NFLX 2024 EPS 19.83 / 10. Known
-  gap left: restated diluted counts read as splits (REGN before 2014, DXCM 2020).
+  BKNG FY2019 EPS 111.82 / 25, CRWD FY2025 revenue 3.95B, NFLX 2024 EPS 19.83 / 10. Then the
+  basic share count as the split's witness, so a restated dilution is no split: REGN Q3 2013
+  117M (its 10-Q: 116.7M), DXCM Q3 2020 398M (99.5M × 4).
 
 ## Shipped 2026-10-25 — the Company tab (SEC EDGAR fundamentals history)
 

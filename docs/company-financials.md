@@ -223,6 +223,12 @@ vote for that filing's split factor, snapped to a plausible split ratio (`SPLIT_
 50:1 and the usual 3:2-style fractions; a per-share pair votes only when cent rounding cannot blur
 it). The newest filing is the basis. Money is never split-adjusted.
 
+- **The basic share count is the split's witness** (`SPLIT_WITNESS`, read for voting, never
+  stored). A later filing that restates earlier periods' *diluted* counts (ASU 2020-06's
+  if-converted method for convertibles) moves shares and EPS by reciprocal factors exactly as a
+  split does; the basic count moves only in a split. When a filing's basic counts vote, they
+  decide its factor. Before (found by the 102-company audit, 2026-10-25), REGN's counts before
+  2014 read 25% high as a "5:4" and DXCM's 2020 quarters carried 3 for its 4:1.
 - **A vote snaps the step from the newer filing, not the whole factor.** Two splits compound past
   the largest single ratio: NFLX's 7:1 (2015) and 10:1 (2025) make 70 for its older filings, which
   the whole-factor snap read as 1/14 with a thousands slip (71.4; found auditing all 102
@@ -354,12 +360,6 @@ ignores staleness and back-off. It records a `manual_company_financials_fetch` r
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).
-- **A restated diluted share count reads as a split.** When a later filing restates the diluted
-  counts of earlier periods (ASU 2020-06's if-converted method for convertibles), shares and
-  EPS move by reciprocal factors exactly as in a split, and the vote snaps the step: REGN's counts
-  before 2014 read about 25% high (a 5:4), DXCM's 2020 quarters carry 3 where its 4:1 split
-  should give 4. Telling the two apart would take the basic share count as a second witness (a
-  split moves it, a dilution restatement does not). Found by the 102-company audit, 2026-10-25.
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.

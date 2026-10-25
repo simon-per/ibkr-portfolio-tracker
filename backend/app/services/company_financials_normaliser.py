@@ -284,6 +284,13 @@ NEIGHBOUR_DAYS = 100
 DERIVED_COUNT_MAX_STEP = 1.5
 NEIGHBOUR_TOLERANCE = 0.05
 NEIGHBOUR_MIN_COUNTS = 2
+# The basic share count votes on splits and is never stored. A split moves it with the
+# diluted count; a restatement of dilution moves only the diluted one (ASU 2020-06's
+# if-converted method for convertibles), and shares and EPS then move by reciprocal factors
+# exactly as in a split: REGN's counts before 2014 read 25% high (a "5:4"), DXCM's 2020
+# quarters carried 3 for its 4:1. When a filing's basic counts vote, they decide.
+SPLIT_WITNESS = "WeightedAverageNumberOfSharesOutstandingBasic"
+
 # The ratios companies split by, and no change. Not every whole number: adjacent periods'
 # weighted counts differ by a few percent, and BKNG's 24.3 snapped to 24, not 25. No 3:2,
 # too close to an acquisition's issuance.
@@ -372,6 +379,7 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     """Every usable fact of every concept a chain names, in the concept's main unit."""
     gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
+    wanted[SPLIT_WITNESS] = SHARES
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
@@ -483,6 +491,7 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
     for accn in sorted(by_accn, key=lambda a: (filed_of[a], a), reverse=True):
         pairs = []
         split_votes: Counter = Counter()
+        witness_votes: Counter = Counter()
         for f in by_accn[accn]:
             if f.val == 0:
                 continue
@@ -502,8 +511,12 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
                     snapped = _snap(step / float(slip), SPLIT_RATIOS, tol)
                     if snapped is not None:
                         split_votes[snapped * split_of[g.accn]] += 1
+                        if f.concept == SPLIT_WITNESS:
+                            witness_votes[snapped * split_of[g.accn]] += 1
                         break
-        if split_votes:
+        if witness_votes:
+            split = _vote(witness_votes, previous_split)
+        elif split_votes:
             split = _vote(split_votes, previous_split)
         else:
             split = (
@@ -836,7 +849,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
     if not facts:
         return result
     multiplier = adjustments(facts)
-    latest = _latest(facts, multiplier)
+    latest = _latest([f for f in facts if f.concept != SPLIT_WITNESS], multiplier)
 
     quarters: Dict[str, Dict[date, Obs]] = {}
     years: Dict[str, Dict[date, Obs]] = {}
