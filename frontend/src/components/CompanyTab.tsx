@@ -182,7 +182,9 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const tick = tickFormatter(view.format, data.currency, axis)
 
   const row: CompanyChartRow | undefined = rows[active ?? rows.length - 1]
-  const lead = shown[0] ?? series[0]
+  // The first drawn series with a value at this period: BKNG tagged gross profit only in its
+  // early years, and a dash would head its margins card.
+  const lead = shown.find((s) => row?.[s.key] != null) ?? shown[0] ?? series[0]
   const leadValue = row?.[lead.key] ?? null
   const growth = chart.header === 'growth'
   const inverse = chart.inverse ?? false

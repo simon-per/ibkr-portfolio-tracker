@@ -163,6 +163,15 @@ describe('CompanyTab', () => {
     expect(within(card('margins')).getByTestId('headline').textContent).toBe('62.4%')
   })
 
+  it('heads a card with the first series that has a value at that period', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      series: { gross_margin: fixtureSeries([0.99, 0.98, null, null]) },
+    }))
+    renderTab()
+    await screen.findAllByTestId('chart')
+    expect(within(card('margins')).getByTestId('headline').textContent).toBe('62.4%')
+  })
+
   it('draws cash beside debt, and buybacks beside dividends paid', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()

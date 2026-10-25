@@ -360,6 +360,8 @@ ignores staleness and back-off. It records a `manual_company_financials_fetch` r
   before 2014 read about 25% high (a 5:4), DXCM's 2020 quarters carry 3 where its 4:1 split
   should give 4. Telling the two apart would take the basic share count as a second witness (a
   split moves it, a dilution restatement does not). Found by the 102-company audit, 2026-10-25.
+- **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
+  the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
 - EBITDA, net cash, equity and returns on capital, and valuation history (P/E, P/S, …, which need
   prices: Yahoo, so rule 1).

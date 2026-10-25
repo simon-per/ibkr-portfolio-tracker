@@ -1042,7 +1042,7 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot
   (260px on a phone); the expand button (desktop) makes one card span the row with a 460px plot,
   one card at a time.
-- **Card header**: a large headline — the lead series (the first drawn) at the hovered period,
+- **Card header**: a large headline — the lead series (the first drawn with a value there) at the hovered period,
   else the newest — with that period's label and its own YoY, and the server's **3Y / 5Y / 10Y
   CAGRs** (`cagrs`, over the whole history, so a 5Y chart still quotes 10Y) on the right; a span
   the server has none for is left out. Margins and the cash & debt card carry no growth. A card of
