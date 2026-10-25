@@ -536,3 +536,26 @@ def test_a_dividend_rate_on_every_ytd_rung_derives_no_zero_quarter():
         (date(2018, 12, 31), "Q4"),
     ):
         assert _row(rows, "dividends_per_share", end, period) is None
+
+
+def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
+    """HON's Q1 2009 10-Q tags dividends paid as -224M: a sign slip, not a refund."""
+    q1, q2 = ("2009-01-01", "2009-03-31"), ("2009-04-01", "2009-06-30")
+    doc = _doc(
+        {
+            "Revenues": {"units": {"USD": [
+                _f(*q1, 8e9, "2009-04-23"),
+                _f(*q2, 8e9, "2009-07-23"),
+                _f("2009-01-01", "2009-12-31", 32e9, "2010-02-12", form="10-K"),
+            ]}},
+            "PaymentsOfDividendsCommonStock": {
+                "units": {"USD": [_f(*q1, -224e6, "2009-04-23"), _f(*q2, 224e6, "2009-07-23")]}
+            },
+        }
+    )
+    paid = {
+        str(r["period_end"]): r["value"]
+        for r in normalise(doc).rows
+        if r["metric"] == "dividends_paid"
+    }
+    assert paid == {"2009-06-30": 224e6}

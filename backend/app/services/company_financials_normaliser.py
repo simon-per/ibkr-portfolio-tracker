@@ -35,8 +35,8 @@ exercises:
   shares no period with a newer one inherits the next newer filing's factor, and a reported
   share count about 1000x off net income / EPS is rescaled (ONDS).
 - **Tagging slips stay absent.** A quarter context carrying the year's figure is dropped;
-  for a figure that cannot be negative, so is a negative derived quarter and a year smaller
-  than its own nine months.
+  for a figure that cannot be negative, so is a negative reported fact, a negative derived
+  quarter and a year smaller than its own nine months.
 - **Fiscal periods are labelled from the period end.** A quarter belongs to the fiscal year
   whose span contains it, Q1-Q4 by its distance from that year's start, and the fiscal year
   is named after the calendar year it ends in (a year ending in the first week of January is
@@ -327,6 +327,9 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     """Every usable fact of every concept a chain names, in the concept's main unit."""
     gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
+    never_negative = {
+        c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
+    }
     out: List[Fact] = []
     for concept, kind in wanted.items():
         units = (gaap.get(concept) or {}).get("units") or {}
@@ -343,6 +346,11 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
             if end is None or filed is None or not accn or isinstance(val, bool):
                 continue
             if not isinstance(val, (int, float)):
+                continue
+            # A sign slip in a reported figure that cannot be negative (HON's Q1 2009 10-Q
+            # tags dividends paid as -224M): dropped before any ladder differences it, so
+            # the period falls back to another filing's value or stays absent.
+            if concept in never_negative and val < 0:
                 continue
             start = _date(row.get("start"))
             out.append(
