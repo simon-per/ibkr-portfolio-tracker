@@ -447,3 +447,29 @@ def test_a_split_is_voted_from_the_overlap_and_inherited_without_one():
     assert multiplier[("EarningsPerShareDiluted", "a2021")] == pytest.approx(0.25)
     assert multiplier[("EarningsPerShareDiluted", "a2020")] == pytest.approx(0.25)
     assert multiplier[("EarningsPerShareDiluted", "a2019")] == pytest.approx(0.25)
+
+
+def test_a_new_years_first_quarter_counts_before_its_six_month_rung():
+    """SPGI and NXPI on 2026-10-25: the Q1 10-Q is the new year's only fact."""
+    doc = _doc(
+        {
+            "Revenues": {
+                "units": {
+                    "USD": [
+                        _f(
+                            "2025-01-01",
+                            "2025-12-31",
+                            15.0e9,
+                            "2026-02-10",
+                            form="10-K",
+                        ),
+                        _f("2026-01-01", "2026-03-31", 4.2e9, "2026-04-28"),
+                    ]
+                }
+            }
+        }
+    )
+    rows = normalise(doc).rows
+    q1 = _row(rows, "revenue", date(2026, 3, 31), "Q1")
+    assert q1["value"] == pytest.approx(4.2e9)
+    assert q1["fiscal_year"] == 2026

@@ -585,11 +585,20 @@ class FiscalYear:
 
 
 def _calendar(
-    year_spans: Iterable[Tuple[date, date]], ladder_starts: Iterable[date]
+    year_spans: Iterable[Tuple[date, date]],
+    ladder_starts: Iterable[date],
+    quarter_starts: Iterable[date] = (),
 ) -> List[FiscalYear]:
-    """Fiscal years from the reported years, plus the open year a ladder has begun."""
+    """
+    Fiscal years from the reported years, plus the open year a ladder has begun — or that
+    a first quarter opens within a week of a reported year's end. Until the six-month rung
+    is filed, the new year's Q1 10-Q is its only fact (SPGI and NXPI on 2026-10-25), and
+    without the second rule that quarter had no year to be named in and was dropped.
+    """
     years = {start: FiscalYear(start, end) for start, end in year_spans}
-    for start in ladder_starts:
+    ends = [y.end for y in years.values()]
+    opening = [s for s in quarter_starts if any(0 < (s - e).days <= 7 for e in ends)]
+    for start in [*ladder_starts, *opening]:
         if start in years or any(y.start <= start <= y.end for y in years.values()):
             continue
         years[start] = FiscalYear(start, start + timedelta(days=363))
@@ -642,7 +651,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
     quarters: Dict[str, Dict[date, Obs]] = {}
     years: Dict[str, Dict[date, Obs]] = {}
     instants: Dict[str, Dict[date, Obs]] = {}
-    year_spans, ladder_starts = set(), set()
+    year_spans, ladder_starts, quarter_starts = set(), set(), set()
     spec_of = {c: s for s in METRICS.values() for c in s.concepts}
     for concept, periods in latest.items():
         spec = spec_of[concept]
@@ -654,6 +663,11 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
         q, y, starts = _quarters_and_years(spec.kind, periods, spec.non_negative)
         quarters[concept], years[concept] = q, y
         ladder_starts |= set(starts)
+        quarter_starts |= {
+            start
+            for start, end in periods
+            if start is not None and _between(_days(start, end), QUARTER_DAYS)
+        }
     mapping = _canonical_ends(*quarters.values(), *years.values())
     for concept in quarters:
         quarters[concept] = _rekey(quarters[concept], mapping)
@@ -663,7 +677,7 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
         instants[concept] = {
             mapping[end]: o for end, o in instants[concept].items() if end in mapping
         }
-    calendar = _calendar(year_spans, ladder_starts)
+    calendar = _calendar(year_spans, ladder_starts, quarter_starts)
 
     # (fiscal_year, fiscal_period, period_end) for every quarter and year any flow reports.
     keys: Dict[Tuple[str, date], Tuple[int, str]] = {}

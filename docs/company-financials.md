@@ -179,7 +179,9 @@ non-controlling interests.
 
 A quarter belongs to the fiscal year whose span contains it (from the year facts, or, for the
 year in progress, from its year-to-date ladder's start), Q1–Q4 by its distance from that year's
-start. **The fiscal year is named after the calendar year it ends in** — NVDA's year ending
+start. A quarter starting within a week after a reported year's end opens the next year too:
+until the six-month rung is filed, the new year's Q1 10-Q has no ladder, and the first fill
+(2026-10-25) dropped SPGI's and NXPI's Q1 2026 for that reason. **The fiscal year is named after the calendar year it ends in** — NVDA's year ending
 26 January 2025 is FY2025 — except a 52/53-week year ending in the first week of January, which
 is named after the year before.
 
