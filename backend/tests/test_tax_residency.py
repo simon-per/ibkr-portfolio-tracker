@@ -2,9 +2,9 @@
 Swiss residency (docs/tax.md, *Swiss residency*): the report counts only the days the owner
 was a Swiss taxpayer.
 
-The owner moved from Italy on 2026-07-11 and was a Swiss taxpayer from 2026-07-12. The Swiss
-report used to treat the whole calendar year as Swiss, so 2026 carried six months of
-dividends and sales that belong to the Italian return, and 2025 -- a year with no Swiss tax
+The fixture owner becomes a Swiss taxpayer mid-year (MOVED). The Swiss report used to treat
+the whole calendar year as Swiss, so the move year carried months of dividends and sales
+that belong to the previous country's return, and the year before -- no Swiss tax
 at all -- read as a Swiss report. `app_settings.swiss_tax_residency_from` moves the start of
 the window; unset keeps the old behaviour.
 
@@ -49,7 +49,7 @@ async def _book(db) -> None:
                     currency="EUR", conid=1, exchange="NASDAQ", account=IBKR))
     await db.flush()
     db.add_all([
-        # Italian period.
+        # Before the move.
         _pay(date(YEAR, 3, 10)),
         _pay(MOVED.replace(day=11)),
         _trade("buy-it", date(YEAR, 7, 5), "BUY", "10", "100", "0"),
@@ -90,7 +90,7 @@ async def test_the_arrival_year_counts_from_the_first_swiss_day(db):
     assert report["dividend_totals"]["withholding"] == 12.0
     (country,) = report["dividend_by_country"]
     assert (country["country"], country["gross"], country["withholding"]) == ("US", 80.0, 12.0)
-    # Sales: the Italian-period SELL is out, the Swiss one is in.
+    # Sales: the pre-move SELL is out, the Swiss one is in.
     assert [r["trade_date"] for r in report["realized_gains"]] == ["2026-07-20"]
     assert report["realized_totals"]["gain_loss"] == 25.0
 

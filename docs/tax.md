@@ -222,8 +222,8 @@ Tests: `tests/test_tax_projected.py`.
 
 ## Swiss residency (the report counts Swiss days only)
 
-The report is the **Swiss** one, but the owner lived in Italy until 2026-07-11 and was a Swiss
-taxpayer from 2026-07-12. Income and sales before the move belong to the Italian return, so the
+The report is the **Swiss** one, but the owner became a Swiss taxpayer part-way through a year.
+Income and sales before the move belong to the previous country's return, so the
 first day of Swiss residence is a setting, `app_settings.swiss_tax_residency_from` (ISO date;
 `PUT /api/settings/swiss-residency`, a popover on the Tax tab; **unset means resident throughout**,
 which is how the report behaved before it existed). Never a constant in code or a date in a
@@ -256,7 +256,7 @@ the warnings.
 
 The setting is refused outside 2000-01-01 .. today: a move that has not happened is not a
 residency, and the report's year is capped at the current one. Not modelled, deliberately: a
-departure date (the owner has not left), Italian tax of any kind, and a mid-year split of the
+departure date (the owner has not left), the previous country's tax of any kind, and a mid-year split of the
 Steuerwert.
 
 ## Securities-dealer indicators (ESTV Kreisschreiben 36)

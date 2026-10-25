@@ -12,8 +12,7 @@
 - `app_settings.swiss_tax_residency_from` (`PUT /api/settings/swiss-residency`, a popover on the
   Tax tab): the report counts dividends, sales, 3a contributions and the dealer indicators from
   that day only; a year that ended before it is an empty report with one warning; the Steuerwert is
-  untouched. The owner moved from Italy on 2026-07-11 and was Swiss from 2026-07-12. Reasoning in
-  docs/tax.md *Swiss residency*.
+  untouched. Reasoning in docs/tax.md *Swiss residency*.
 
 Verified offline: backend 2929+ passed, ruff on the touched files, frontend 1184 passed,
 `tsc -b` and build. **Not yet on production** — the date still has to be entered there.

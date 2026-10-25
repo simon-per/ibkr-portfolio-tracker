@@ -32,8 +32,8 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
   today. CI refuses a tracked SQLite file either way.
 - **Enter the Swiss residency date after the next deploy** (Tax tab → *Swiss residency*, or
-  `PUT /api/settings/swiss-residency`): until it is set the 2026 report still counts the Italian
-  months, and 2025 still reads as a Swiss year. Then check that 2026 starts on the move day and
+  `PUT /api/settings/swiss-residency`): until it is set the 2026 report still counts the months
+  before the move, and 2025 still reads as a Swiss year. Then check that 2026 starts on the move day and
   2025 shows only its one warning (docs/tax.md *Swiss residency*).
 - **Confirm Taiwan's DA-1 treaty rate (#62).** The tax report splits TW withholding at 15%
   (art. 10(2) of the 2007 agreement), added on review with medium confidence; check it against
