@@ -43,11 +43,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.config import settings
-from app.etf_sources import FUND_SOURCES
 from app.models.etf_basket import EtfHolding
 from app.models.watchlist_item import WatchlistItem
 from app.models.security import Security
 from app.models.security_logo import LOGO_SOURCE_LOGO_DEV
+from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.security_logo_repository import SecurityLogoRepository
 from app.repositories.security_repository import held
 from app.services.paced_http import PacedGet
@@ -325,14 +325,7 @@ class LogoService:
         unknown: List[str] = []
         for ref in funds:
             ref = ref.strip().upper()
-            fund_isins = {ref} | set((await self.db.execute(
-                select(Security.isin).where(Security.symbol == ref, Security.isin.is_not(None))
-            )).scalars())
-            # A fund that borrows another's basket (`basket_proxy_isin`) is stored under that.
-            fund_isins |= {
-                FUND_SOURCES[f].basket_proxy_isin for f in list(fund_isins)
-                if f in FUND_SOURCES and FUND_SOURCES[f].basket_proxy_isin
-            }
+            fund_isins = await EtfBasketRepository(self.db).fund_isins(ref)
             query = (
                 select(EtfHolding)
                 .where(EtfHolding.fund_isin.in_(fund_isins),

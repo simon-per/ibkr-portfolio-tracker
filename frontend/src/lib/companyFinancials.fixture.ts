@@ -45,14 +45,22 @@ export const FIXTURE_KEY_STATS: CompanyFinancialsKeyStats = {
   buybacks: null, dividends_paid: 834e6,
 }
 
+export const NVDA_CIK = 1045810
+export const AMZN_CIK = 1018724
+export const AAPL_CIK = 320193
+
 export const FIXTURE_COMPANIES: CompanyFinancialsCompany[] = [
   {
-    security_id: 11, symbol: 'NVDA', name: 'NVIDIA CORP', cik: '0001045810', currency: 'USD',
-    first_period_end: '2009-01-25', last_period_end: '2025-01-26', last_fetched_at: '2026-10-24T06:00:00',
+    cik: AAPL_CIK, security_id: null, symbol: 'AAPL', name: 'Apple Inc', isin: 'US0378331005', held: false,
+    currency: 'USD', first_period_end: '2009-06-27', last_period_end: '2025-06-28', last_fetched_at: '2026-10-24T06:00:00',
   },
   {
-    security_id: 22, symbol: 'AMZN', name: 'AMAZON COM INC', cik: '0001018724', currency: 'USD',
-    first_period_end: '2009-12-31', last_period_end: '2025-06-30', last_fetched_at: '2026-10-24T06:00:00',
+    cik: NVDA_CIK, security_id: 11, symbol: 'NVDA', name: 'NVIDIA CORP', isin: 'US67066G1040', held: true,
+    currency: 'USD', first_period_end: '2009-01-25', last_period_end: '2025-01-26', last_fetched_at: '2026-10-24T06:00:00',
+  },
+  {
+    cik: AMZN_CIK, security_id: 22, symbol: 'AMZN', name: 'AMAZON COM INC', isin: 'US0231351067', held: true,
+    currency: 'USD', first_period_end: '2009-12-31', last_period_end: '2025-06-30', last_fetched_at: '2026-10-24T06:00:00',
   },
 ]
 
@@ -63,9 +71,12 @@ export function fixtureFinancials(
 ): CompanyFinancialsResponse {
   const { series, ...rest } = over
   return {
+    cik: NVDA_CIK,
     security_id: 11,
     symbol: 'NVDA',
     name: 'NVIDIA CORP',
+    isin: 'US67066G1040',
+    held: true,
     currency: 'USD',
     period: 'annual',
     range: '10y',

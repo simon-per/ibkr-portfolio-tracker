@@ -3,10 +3,10 @@ Fetch company financials from SEC EDGAR now, instead of waiting for Sunday's pas
 (docs/company-financials.md). The first fill, and a re-fetch after a normaliser change.
 
 The same `CompanyFinancialsSync.refresh` the weekly job runs, with the same scope (held,
-US-listed, not a known fund), pacing (5 requests a second), bounded retries and back-off.
-`--force` fetches every company in scope regardless of staleness and back-off;
-`--symbol NVDA` (repeatable) narrows the scope. `--dry-run` lists what is due and makes no
-request and no write.
+US-listed, not a known fund; and the Nasdaq-100 through QQQM's stored basket), pacing (5
+requests a second), bounded retries and back-off. `--force` fetches every company in scope
+regardless of staleness and back-off; `--symbol NVDA` (repeatable) narrows the scope, held
+or constituent. `--dry-run` lists what is due and makes no request and no write.
 
 Touches no Yahoo and no IBKR. Needs `EDGAR_USER_AGENT` for anything but `--dry-run`.
 
@@ -71,9 +71,14 @@ async def fetch_company_financials(
             print(f"FAILED: {e}", file=sys.stderr)
             return 1
 
-        if symbols and not summary.get("in_scope"):
+        # Nothing held and no constituent matched (a constituent with no CIK yet is a lookup).
+        matched = (
+            summary.get("in_scope") or summary.get("universe") or summary.get("cik_lookups")
+        )
+        if symbols and not matched:
             print(
-                f"None of {', '.join(symbols)} is a held, US-listed security.",
+                f"None of {', '.join(symbols)} is a held, US-listed security or a "
+                f"Nasdaq-100 constituent.",
                 file=sys.stderr,
             )
             return 1
@@ -122,7 +127,7 @@ def main() -> int:
         "--symbol",
         action="append",
         default=None,
-        help="Only this held symbol; repeatable",
+        help="Only this held symbol or Nasdaq-100 ticker; repeatable",
     )
     args = parser.parse_args()
     return asyncio.run(

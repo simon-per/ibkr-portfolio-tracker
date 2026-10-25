@@ -120,7 +120,7 @@ export const activityQuery = (params: ActivityParams) =>
     staleTime: 5 * 60 * 1000,
   })
 
-/** The held US SEC filers the Company tab can show. Changes only when the server fetches filings. */
+/** The SEC filers the Company tab can show, held and Nasdaq-100. Changes only when the server fetches filings. */
 export const companyFinancialsCompaniesQuery = queryOptions({
   queryKey: ['company-financials', 'companies'],
   queryFn: () => api.getCompanyFinancialsCompanies(),
@@ -129,13 +129,13 @@ export const companyFinancialsCompaniesQuery = queryOptions({
 
 /** One company's fundamentals history at one period basis and range (the Company tab). */
 export const companyFinancialsQuery = (
-  securityId: number,
+  cik: number,
   period: CompanyFinancialsPeriod,
   range: CompanyFinancialsRange,
 ) =>
   queryOptions({
-    queryKey: ['company-financials', 'series', securityId, period, range],
-    queryFn: () => api.getCompanyFinancials(securityId, period, range),
+    queryKey: ['company-financials', 'series', cik, period, range],
+    queryFn: () => api.getCompanyFinancials(cik, period, range),
     staleTime: 30 * 60 * 1000,
   })
 

@@ -7,7 +7,7 @@ import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import { COMPANY_PICK_KEY } from '@/lib/companyFinancials'
 import {
-  FIXTURE_COMPANIES, FIXTURE_KEY_STATS, emptySeriesSet, fixtureFinancials, fixtureSeries,
+  AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, NVDA_CIK, emptySeriesSet, fixtureFinancials, fixtureSeries,
 } from '@/lib/companyFinancials.fixture'
 
 // Recharts draws nothing in jsdom; these tests cover the wiring around the charts.
@@ -45,15 +45,18 @@ function card(id: string): HTMLElement {
 }
 
 describe('CompanyTab', () => {
-  it('lists the companies by symbol and name and opens the first at TTM over 10Y', async () => {
+  it('lists held companies before the Nasdaq-100 and opens the first held at TTM over 10Y', async () => {
     const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
     const select = await screen.findByRole('combobox', { name: 'Company' })
+    const groups = within(select).getAllByRole('group').map((g) => g.getAttribute('label'))
+    expect(groups).toEqual(['Held', 'Nasdaq-100'])
     const options = within(select).getAllByRole('option').map((o) => o.textContent)
     expect(options[0]).toMatch(/^NVDA · Nvidia/i)
     expect(options[1]).toMatch(/^AMZN · Amazon/i)
-    expect((select as HTMLSelectElement).value).toBe('11')
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'ttm', '10y'))
+    expect(options[2]).toMatch(/^AAPL · Apple/i)
+    expect((select as HTMLSelectElement).value).toBe(String(NVDA_CIK))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
     expect(await screen.findAllByTestId('chart')).toHaveLength(9)
   })
 
@@ -61,38 +64,38 @@ describe('CompanyTab', () => {
     const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
     const select = await screen.findByRole('combobox', { name: 'Company' })
-    fireEvent.change(select, { target: { value: '22' } })
-    await waitFor(() => expect(get).toHaveBeenCalledWith(22, 'ttm', '10y'))
-    expect(localStorage.getItem(COMPANY_PICK_KEY)).toBe('22')
+    fireEvent.change(select, { target: { value: String(AMZN_CIK) } })
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_CIK, 'ttm', '10y'))
+    expect(localStorage.getItem(COMPANY_PICK_KEY)).toBe(String(AMZN_CIK))
 
     cleanup()
     get.mockClear()
     renderTab()
-    await waitFor(() => expect(get).toHaveBeenCalledWith(22, 'ttm', '10y'))
-    expect(get).not.toHaveBeenCalledWith(11, expect.anything(), expect.anything())
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_CIK, 'ttm', '10y'))
+    expect(get).not.toHaveBeenCalledWith(NVDA_CIK, expect.anything(), expect.anything())
   })
 
   it('ignores a remembered company that is no longer listed', async () => {
     localStorage.setItem(COMPANY_PICK_KEY, '999')
     const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'ttm', '10y'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
     expect(get).not.toHaveBeenCalledWith(999, expect.anything(), expect.anything())
   })
 
   it('sends the period and range toggles to the server as query parameters', async () => {
     const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'ttm', '10y'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
 
     fireEvent.click(within(screen.getByRole('group', { name: 'Period' })).getByRole('button', { name: 'Quarterly' }))
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'quarterly', '10y'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'quarterly', '10y'))
 
     fireEvent.click(within(screen.getByRole('group', { name: 'Range' })).getByRole('button', { name: 'Max' }))
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'quarterly', 'max'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'quarterly', 'max'))
 
     fireEvent.click(within(screen.getByRole('group', { name: 'Period' })).getByRole('button', { name: 'Annual' }))
-    await waitFor(() => expect(get).toHaveBeenCalledWith(11, 'annual', 'max'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'annual', 'max'))
     const annual = within(screen.getByRole('group', { name: 'Period' })).getByRole('button', { name: 'Annual' })
     expect(annual.getAttribute('aria-pressed')).toBe('true')
   })

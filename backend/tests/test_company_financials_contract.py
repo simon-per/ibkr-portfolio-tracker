@@ -10,11 +10,12 @@ at every level of the nested response.
 
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import product
 
 import pytest
 
 from app.clock import utc_today, utcnow
-from app.models.company_financials import CompanyFinancial, SecurityCik
+from app.models.company_financials import CompanyFinancial, SecCompany, SecurityCik
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.schemas.company_financials import (
@@ -64,7 +65,13 @@ async def _seed(db):
             cik=1045810,
             sec_ticker="NVDA",
             cik_checked_at=utcnow(),
-            fetched_at=utcnow(),
+        )
+    )
+    db.add(SecCompany(cik=1045810, ticker="NVDA", fetched_at=utcnow()))
+    # A constituent nobody holds, listed by the newest pass.
+    db.add(
+        SecCompany(
+            cik=320193, ticker="AAPL", name="Apple Inc", universe_seen_at=utcnow()
         )
     )
     for i, end in enumerate(
@@ -76,10 +83,12 @@ async def _seed(db):
             date(2025, 4, 27),
         )
     ):
-        for metric in ("revenue", "net_income", "operating_cash_flow", "capex"):
+        for cik, metric in product(
+            (1045810, 320193), ("revenue", "net_income", "operating_cash_flow", "capex")
+        ):
             db.add(
                 CompanyFinancial(
-                    security_id=1,
+                    cik=cik,
                     period_end=end,
                     fiscal_year=2025 + (i == 4),
                     fiscal_period=f"Q{i % 4 + 1}",
@@ -91,29 +100,31 @@ async def _seed(db):
                     fetched_at=utcnow(),
                 )
             )
-    db.add(
-        CompanyFinancial(
-            security_id=1,
-            period_end=date(2025, 1, 26),
-            fiscal_year=2025,
-            fiscal_period="FY",
-            metric="revenue",
-            value=406.0,
-            unit="USD",
-            source_concept="X",
-            filed=date(2025, 2, 26),
-            fetched_at=utcnow(),
+    for cik in (1045810, 320193):
+        db.add(
+            CompanyFinancial(
+                cik=cik,
+                period_end=date(2025, 1, 26),
+                fiscal_year=2025,
+                fiscal_period="FY",
+                metric="revenue",
+                value=406.0,
+                unit="USD",
+                source_concept="X",
+                filed=date(2025, 2, 26),
+                fetched_at=utcnow(),
+            )
         )
-    )
     await db.commit()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("period", PERIODS)
-async def test_the_response_declares_every_key_the_service_returns(db, period):
+@pytest.mark.parametrize("cik", [1045810, 320193])  # held, and a constituent not held
+async def test_the_response_declares_every_key_the_service_returns(db, period, cik):
     await _seed(db)
-    security = await db.get(Security, 1)
-    body = await CompanyFinancialsService(db).get_financials(security, period, "max")
+    company = await db.get(SecCompany, cik)
+    body = await CompanyFinancialsService(db).get_financials(company, period, "max")
 
     assert set(body) == _fields(CompanyFinancialsResponse)
     assert set(body["series"]) == _fields(CompanyFinancialsSeriesSet)
@@ -131,29 +142,20 @@ async def test_the_response_declares_every_key_the_service_returns(db, period):
 async def test_the_company_list_declares_every_key_the_service_returns(db):
     await _seed(db)
     companies = await CompanyFinancialsService(db).list_companies()
-    assert companies, "the walk compared no company"
+    assert len(companies) == 2, "the walk compared fewer than both kinds"
     for company in companies:
         assert set(company) == _fields(CompanyFinancialsCompany)
         CompanyFinancialsCompany.model_validate(company)
 
 
 @pytest.mark.asyncio
-async def test_a_security_without_figures_answers_the_same_shape(db):
+async def test_a_company_without_figures_answers_the_same_shape(db):
     await _seed(db)
-    db.add(
-        Security(
-            id=2,
-            isin="US0000000002",
-            symbol="NONE",
-            description="No filings",
-            currency="USD",
-            conid=2,
-            asset_category="STK",
-            exchange="NYSE",
-        )
-    )
+    db.add(SecCompany(cik=2, ticker="NONE"))
     await db.commit()
-    body = await CompanyFinancialsService(db).get_financials(await db.get(Security, 2))
+    body = await CompanyFinancialsService(db).get_financials(
+        await db.get(SecCompany, 2)
+    )
     assert set(body) == _fields(CompanyFinancialsResponse)
     assert body["warnings"] and body["currency"] is None and body["as_of"] is None
     assert set(body["key_stats"]) == _fields(CompanyFinancialsKeyStats)

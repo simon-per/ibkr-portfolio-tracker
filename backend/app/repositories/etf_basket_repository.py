@@ -88,6 +88,25 @@ class EtfBasketRepository:
                 out[row.fund_isin] = row
         return out
 
+    async def fund_isins(self, ref: str) -> Set[str]:
+        """
+        Where a fund's basket is stored, for a reference to the fund — its ISIN, or the
+        symbol of a security that is one: those ISINs, and the basket each borrows
+        (`FundSource.basket_proxy_isin`). The logo pass's `--basket` and the EDGAR pass's
+        Nasdaq-100 read a fund through this one answer.
+        """
+        from app.etf_sources import FUND_SOURCES
+        from app.models.security import Security
+
+        ref = ref.strip().upper()
+        isins = {ref} | set((await self.session.execute(
+            select(Security.isin).where(Security.symbol == ref, Security.isin.is_not(None))
+        )).scalars())
+        return isins | {
+            FUND_SOURCES[f].basket_proxy_isin for f in list(isins)
+            if f in FUND_SOURCES and FUND_SOURCES[f].basket_proxy_isin
+        }
+
     async def get_holdings(
         self, fund_isins: Iterable[str]
     ) -> Dict[str, List[EtfHolding]]:

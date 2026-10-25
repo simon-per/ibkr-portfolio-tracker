@@ -712,9 +712,10 @@ async def test_a_watchlist_name_never_held_is_a_target_by_its_basket_isin(db, ke
 @pytest.mark.asyncio
 async def test_a_proxied_fund_fills_from_the_basket_it_borrows(db, keyed, monkeypatch):
     """`--basket` given a fund that borrows another's basket reads that basket."""
+    from app import etf_sources
     from app.etf_sources import FundSource
     isins = await _basket(db, [2.0])
-    monkeypatch.setitem(logo_service.FUND_SOURCES, "CH0000000001", FundSource(
+    monkeypatch.setitem(etf_sources.FUND_SOURCES, "CH0000000001", FundSource(
         symbol="CH0000000001", name="proxied", adapter="manual", basket_proxy_isin=FUND))
     fake = FakeLogoDev({("isin", isins[0]): 200})
     result = await _service(db, fake).refresh(baskets=["CH0000000001"], limit=10)

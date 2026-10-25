@@ -1031,8 +1031,9 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   so switching it asks the server nothing. `companyFinancials.ts` merges series by `period_end`
   for Recharts (each row carries the points' `yoy` too) and picks axis ticks, nothing more.
 - **Layout** (enlarged 2026-10-25, owner: "way too small"). A picker card (a native `<select>` of
-  `symbol · name`, the last pick remembered per browser under `company-financials:security`
-  through `lib/storage.ts`; a pick no longer listed falls back to the first) with three
+  `symbol · name` in two groups, *Held* then *Nasdaq-100* (`companyGroups`), by CIK; the last pick
+  remembered per browser under `company-financials:cik` through `lib/storage.ts`; a pick no longer
+  listed falls back to the first held company; a company not held shows its logo by ISIN) with three
   `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
   `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
   FCF, the four margins, shares, DPS with its payout ratio, buybacks, dividends paid, with YoY

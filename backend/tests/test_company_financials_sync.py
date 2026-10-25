@@ -1,6 +1,7 @@
 """
-The EDGAR pass (docs/company-financials.md): scope, one request per company, the User-Agent,
-bounded retries, back-off, refuse-whole writes, and the missing-key path.
+The EDGAR pass (docs/company-financials.md): scope (held, and the Nasdaq-100 through a stored
+basket), one request per company, the User-Agent, bounded retries, back-off, refuse-whole
+writes, and the missing-key path.
 
 Offline: EDGAR is an `httpx.MockTransport` serving the trimmed NVDA fixture, the database
 is in memory, and the client's sleeps are recorded rather than slept.
@@ -18,12 +19,19 @@ from sqlalchemy import func, select
 
 from app.clock import utc_today, utcnow
 from app.config import settings
-from app.models.company_financials import CompanyFinancial, SecurityCik
+from app.models.company_financials import (
+    CompanyFinancial,
+    SecCompany,
+    SecTicker,
+    SecurityCik,
+)
+from app.models.etf_basket import EtfHolding
 from app.models.security import Security
 from app.models.sync_run import SyncRun
 from app.models.taxlot import TaxLot
-from app.services import scheduler_service
+from app.services import company_financials_sync, scheduler_service
 from app.services.company_financials_sync import (
+    CIK_RECHECK_AFTER,
     NOT_CONFIGURED_WARNING,
     SCHEDULED_SYNC_TYPE,
     STALE_AFTER,
@@ -43,13 +51,15 @@ FIXTURE = json.loads(
         "utf-8"
     )
 )
-NVDA_CIK, ALPHABET_CIK, ASML_CIK = 1045810, 1652044, 937966
+NVDA_CIK, ALPHABET_CIK, ASML_CIK, APPLE_CIK = 1045810, 1652044, 937966, 320193
 TICKERS = {
     "0": {"cik_str": NVDA_CIK, "ticker": "NVDA", "title": "NVIDIA CORP"},
     "1": {"cik_str": ALPHABET_CIK, "ticker": "GOOGL", "title": "Alphabet Inc."},
     "2": {"cik_str": ALPHABET_CIK, "ticker": "GOOG", "title": "Alphabet Inc."},
     "3": {"cik_str": ASML_CIK, "ticker": "ASML", "title": "ASML HOLDING NV"},
+    "4": {"cik_str": APPLE_CIK, "ticker": "AAPL", "title": "Apple Inc."},
 }
+FUND = "US46138G6492"  # QQQM
 IFRS_ONLY = {"cik": ASML_CIK, "entityName": "ASML", "facts": {"ifrs-full": {}}}
 
 
@@ -65,6 +75,7 @@ class Edgar:
                 NVDA_CIK: FIXTURE,
                 ALPHABET_CIK: FIXTURE,
                 ASML_CIK: IFRS_ONLY,
+                APPLE_CIK: FIXTURE,
             }
         )
         self.status = status or {}
@@ -189,11 +200,11 @@ async def test_one_request_per_company_and_rows_under_every_listing(db, configur
     assert len(urls) == 4
     assert all(r.headers["user-agent"] == UA for r in edgar.requests)
 
-    nvda = await _count(db, CompanyFinancial, CompanyFinancial.security_id == 1)
+    nvda = await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK)
     assert nvda > 400
-    assert await _count(db, CompanyFinancial, CompanyFinancial.security_id == 2) == nvda
-    assert await _count(db, CompanyFinancial, CompanyFinancial.security_id == 3) == nvda
-    assert await _count(db, CompanyFinancial, CompanyFinancial.security_id == 4) == 0
+    # GOOG and GOOGL: one set of rows, under the company.
+    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == ALPHABET_CIK) == nvda
+    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == ASML_CIK) == 0
     assert summary["fetched"] == 2 and summary["no_data"] == 1
 
     ciks = {r.security_id: r for r in (await db.execute(select(SecurityCik))).scalars()}
@@ -204,8 +215,11 @@ async def test_one_request_per_company_and_rows_under_every_listing(db, configur
         4: ASML_CIK,
     }
     # The 20-F filer is a miss, backed off; the filers carry their fetch stamp.
-    assert ciks[4].facts_miss_count == 1 and ciks[4].facts_checked_at is not None
-    assert ciks[1].fetched_at is not None and ciks[1].facts_miss_count is None
+    companies = {c.cik: c for c in (await db.execute(select(SecCompany))).scalars()}
+    asml, nvidia = companies[ASML_CIK], companies[NVDA_CIK]
+    assert asml.facts_miss_count == 1 and asml.facts_checked_at is not None
+    assert nvidia.fetched_at is not None and nvidia.facts_miss_count is None
+    assert nvidia.name == FIXTURE["entityName"]
 
 
 @pytest.mark.asyncio
@@ -224,7 +238,7 @@ async def test_a_stale_company_is_fetched_again_and_a_miss_waits_out_its_back_of
 ):
     await _book(db)
     await _sync(db, Edgar()).refresh()
-    for row in (await db.execute(select(SecurityCik))).scalars():
+    for row in (await db.execute(select(SecCompany))).scalars():
         if row.fetched_at is not None:
             row.fetched_at = utcnow() - STALE_AFTER - timedelta(hours=1)
     await db.commit()
@@ -248,7 +262,7 @@ async def test_a_refetch_replaces_the_rows_whole(db, configured):
     await _sync(db, Edgar()).refresh(symbols=["NVDA"])
     db.add(
         CompanyFinancial(
-            security_id=1,
+            cik=NVDA_CIK,
             period_end=utc_today(),
             fiscal_year=2099,
             fiscal_period="Q1",
@@ -274,7 +288,7 @@ async def test_a_failing_company_keeps_its_rows_stamps_nothing_and_is_warned(
 ):
     await _book(db)
     await _sync(db, Edgar()).refresh(symbols=["NVDA"])
-    before = await _count(db, CompanyFinancial, CompanyFinancial.security_id == 1)
+    before = await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK)
     url = FACTS_URL.format(cik=NVDA_CIK)
     edgar = Edgar(status={url: [503, 503, 503]})
     sleeps = []
@@ -285,10 +299,8 @@ async def test_a_failing_company_keeps_its_rows_stamps_nothing_and_is_warned(
     assert all(s <= MIN_INTERVAL_S for s in sleeps if s < 1)
     assert summary["errors"] == 1
     assert any("could not be fetched" in w for w in summary["warnings"])
-    assert (
-        await _count(db, CompanyFinancial, CompanyFinancial.security_id == 1) == before
-    )
-    stamps = await db.get(SecurityCik, 1)
+    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK) == before
+    stamps = await db.get(SecCompany, NVDA_CIK)
     assert stamps.facts_miss_count is None
 
 
@@ -335,6 +347,139 @@ async def test_a_dry_run_asks_and_writes_nothing(db, configured):
     assert edgar.requests == []
     assert summary["cik_lookups"] == 4
     assert await _count(db, SecurityCik) == 0
+
+
+async def _qqqm(db, lines):
+    """A stored QQQM basket: (ticker, isin, weight, asset_class) per line, in file order."""
+    for i, (ticker, isin, weight, asset_class) in enumerate(lines):
+        db.add(
+            EtfHolding(
+                fund_isin=FUND,
+                line_no=i,
+                constituent_isin=isin,
+                constituent_ticker=ticker,
+                constituent_name=f"{ticker} Inc",
+                weight_pct=Decimal(str(weight)),
+                asset_class=asset_class,
+            )
+        )
+    await db.commit()
+
+
+NASDAQ_100 = [
+    ("NVDA", "US67066G1040", 8.1, "Equity"),
+    ("AAPL", "US0378331005", 8.0, "Equity"),
+    ("GOOGL", "US02079K3059", 3.0, "Equity"),
+    ("GOOG", "US02079K1079", 2.8, "Equity"),
+    ("AGPXX", "US8252528851", 0.12, "Money Market Fund, Taxable"),  # no company
+    ("USD", None, 0.01, "Cash"),
+]
+
+
+@pytest.fixture
+def qqqm(monkeypatch):
+    monkeypatch.setattr(company_financials_sync, "UNIVERSE_FUNDS", (FUND,))
+
+
+@pytest.mark.asyncio
+async def test_the_nasdaq_100_is_fetched_from_the_stored_basket_without_a_security(
+    db, configured, qqqm
+):
+    await _hold(db, 1, "NVDA")
+    await db.commit()
+    await _qqqm(db, NASDAQ_100)
+    edgar = Edgar()
+    summary = await _sync(db, edgar).refresh()
+
+    assert summary["status"] == "success", summary
+    urls = edgar.urls()
+    # One ticker list, then one request per company: NVDA held and listed, Alphabet twice
+    # listed, the money-market fund and the cash line no company at all.
+    assert sorted(urls) == sorted(
+        [TICKERS_URL]
+        + [FACTS_URL.format(cik=c) for c in (NVDA_CIK, APPLE_CIK, ALPHABET_CIK)]
+    )
+    assert summary["universe"] == 3
+    assert await _count(db, CompanyFinancial, CompanyFinancial.cik == APPLE_CIK) > 400
+    # Nothing nobody holds enters `securities`: every Yahoo loop reads that table.
+    assert await _count(db, Security) == 1
+    apple = await db.get(SecCompany, APPLE_CIK)
+    assert (apple.ticker, apple.isin, apple.name) == ("AAPL", "US0378331005", "AAPL Inc")
+    assert apple.universe_seen_at is not None
+    assert (await db.get(SecCompany, NVDA_CIK)).universe_seen_at == apple.universe_seen_at
+
+
+@pytest.mark.asyncio
+async def test_the_universe_is_the_heaviest_companies_not_lines(
+    db, configured, qqqm, monkeypatch
+):
+    monkeypatch.setattr(company_financials_sync, "UNIVERSE_SIZE", 2)
+    await _qqqm(db, NASDAQ_100)
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    asked = {u for u in edgar.urls() if u != TICKERS_URL}
+    assert asked == {FACTS_URL.format(cik=c) for c in (NVDA_CIK, APPLE_CIK)}
+
+
+@pytest.mark.asyncio
+async def test_a_known_constituent_needs_no_ticker_list(db, configured, qqqm):
+    await _qqqm(db, NASDAQ_100)
+    await _sync(db, Edgar()).refresh()
+    for row in (await db.execute(select(SecCompany))).scalars():
+        row.fetched_at = utcnow() - STALE_AFTER - timedelta(hours=1)
+    await db.commit()
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    assert TICKERS_URL not in edgar.urls()
+    assert len(edgar.urls()) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_narrowed_pass_leaves_the_universe_stamps_alone(db, configured, qqqm):
+    await _qqqm(db, NASDAQ_100)
+    await _sync(db, Edgar()).refresh()
+    stamp = (await db.get(SecCompany, NVDA_CIK)).universe_seen_at
+    edgar = Edgar()
+    summary = await _sync(db, edgar).refresh(symbols=["AAPL"], force=True)
+    assert [u for u in edgar.urls()] == [FACTS_URL.format(cik=APPLE_CIK)]
+    assert summary["fetched"] == 1
+    for company in (await db.execute(select(SecCompany))).scalars():
+        await db.refresh(company)
+        assert company.universe_seen_at == stamp
+
+
+@pytest.mark.asyncio
+async def test_without_a_stored_basket_the_held_companies_are_still_fetched(
+    db, configured, qqqm
+):
+    await _book(db)
+    edgar = Edgar()
+    summary = await _sync(db, edgar).refresh()
+    assert summary["fetched"] == 2 and summary["universe"] == 0
+    assert any(FUND in w and "Nasdaq-100" in w for w in summary["warnings"])
+    assert await _count(db, SecCompany, SecCompany.universe_seen_at.is_not(None)) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_ticker_the_sec_does_not_list_is_asked_again_only_after_the_recheck(
+    db, configured, qqqm
+):
+    await _qqqm(db, NASDAQ_100 + [("ZZZZ", "US0000000099", 0.5, "Equity")])
+    await _sync(db, Edgar()).refresh()
+    for row in (await db.execute(select(SecCompany))).scalars():
+        row.fetched_at = utcnow() - STALE_AFTER - timedelta(hours=1)
+    await db.commit()
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    assert TICKERS_URL not in edgar.urls()  # GOOG and ZZZZ both answered last pass
+
+    miss = await db.get(SecTicker, "ZZZZ")
+    assert miss.cik is None
+    miss.checked_at = utcnow() - CIK_RECHECK_AFTER - timedelta(hours=1)
+    await db.commit()
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    assert edgar.urls().count(TICKERS_URL) == 1
 
 
 def test_tickers_are_spelled_the_secs_way():

@@ -289,8 +289,8 @@ export const RANGE_OPTIONS: readonly { value: CompanyFinancialsRange; label: str
   { value: 'max', label: 'Max' },
 ]
 
-/** Where this browser remembers the last company picked. */
-export const COMPANY_PICK_KEY = 'company-financials:security'
+/** Where this browser remembers the last company picked, by CIK (security ids until 2026-10-25). */
+export const COMPANY_PICK_KEY = 'company-financials:cik'
 
 export function readCompanyPick(): number | null {
   const raw = readStored(COMPANY_PICK_KEY)
@@ -298,14 +298,14 @@ export function readCompanyPick(): number | null {
   return Number(raw)
 }
 
-export function writeCompanyPick(securityId: number): void {
-  writeStored(COMPANY_PICK_KEY, String(securityId))
+export function writeCompanyPick(cik: number): void {
+  writeStored(COMPANY_PICK_KEY, String(cik))
 }
 
 /**
  * The company to show: the one picked, else the one this browser picked last, else the
- * first. A pick no longer in the list (sold, or no longer filed) falls through rather
- * than asking the server for a company it will 404.
+ * first held, else the first. A pick no longer in the list (sold, or out of the index)
+ * falls through rather than asking the server for a company it no longer lists.
  */
 export function resolveCompany(
   companies: readonly CompanyFinancialsCompany[],
@@ -313,9 +313,20 @@ export function resolveCompany(
   stored: number | null,
 ): CompanyFinancialsCompany | null {
   return (
-    companies.find((c) => c.security_id === picked)
-    ?? companies.find((c) => c.security_id === stored)
+    companies.find((c) => c.cik === picked)
+    ?? companies.find((c) => c.cik === stored)
+    ?? companies.find((c) => c.held)
     ?? companies[0]
     ?? null
   )
+}
+
+/** The picker's groups, in the server's order within each: held first, then the Nasdaq-100. */
+export function companyGroups(
+  companies: readonly CompanyFinancialsCompany[],
+): { label: string; companies: CompanyFinancialsCompany[] }[] {
+  return [
+    { label: 'Held', companies: companies.filter((c) => c.held) },
+    { label: 'Nasdaq-100', companies: companies.filter((c) => !c.held) },
+  ].filter((g) => g.companies.length > 0)
 }

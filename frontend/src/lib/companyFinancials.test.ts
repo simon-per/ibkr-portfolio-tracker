@@ -4,6 +4,7 @@ import {
   axisTicks,
   chartRows,
   chartView,
+  companyGroups,
   shortPeriodLabel,
   hasAnyData,
   latestValue,
@@ -13,7 +14,8 @@ import {
   visibleKeyStats,
 } from './companyFinancials'
 import {
-  FIXTURE_COMPANIES, FIXTURE_KEY_STATS, emptySeriesSet, fixtureFinancials, fixtureSeries,
+  AAPL_CIK, AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, NVDA_CIK, emptySeriesSet, fixtureFinancials,
+  fixtureSeries,
 } from './companyFinancials.fixture'
 
 describe('chartRows', () => {
@@ -143,14 +145,25 @@ describe('hasAnyData', () => {
 })
 
 describe('resolveCompany', () => {
-  it('prefers the pick, then the remembered pick, then the first company', () => {
-    expect(resolveCompany(FIXTURE_COMPANIES, 22, 11)?.symbol).toBe('AMZN')
-    expect(resolveCompany(FIXTURE_COMPANIES, null, 22)?.symbol).toBe('AMZN')
+  it('prefers the pick, then the remembered pick, then the first held company', () => {
+    expect(resolveCompany(FIXTURE_COMPANIES, AMZN_CIK, NVDA_CIK)?.symbol).toBe('AMZN')
+    expect(resolveCompany(FIXTURE_COMPANIES, null, AAPL_CIK)?.symbol).toBe('AAPL')
     expect(resolveCompany(FIXTURE_COMPANIES, null, null)?.symbol).toBe('NVDA')
+    expect(resolveCompany(FIXTURE_COMPANIES.filter((c) => !c.held), null, null)?.symbol).toBe('AAPL')
   })
 
   it('drops a remembered company no longer in the list', () => {
     expect(resolveCompany(FIXTURE_COMPANIES, null, 999)?.symbol).toBe('NVDA')
-    expect(resolveCompany([], null, 11)).toBeNull()
+    expect(resolveCompany([], null, NVDA_CIK)).toBeNull()
+  })
+})
+
+describe('companyGroups', () => {
+  it('puts the held companies first and the Nasdaq-100 after, leaving out an empty group', () => {
+    expect(companyGroups(FIXTURE_COMPANIES).map((g) => [g.label, g.companies.map((c) => c.symbol)])).toEqual([
+      ['Held', ['NVDA', 'AMZN']],
+      ['Nasdaq-100', ['AAPL']],
+    ])
+    expect(companyGroups(FIXTURE_COMPANIES.filter((c) => c.held)).map((g) => g.label)).toEqual(['Held'])
   })
 })

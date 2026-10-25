@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.company_financials import CompanyFinancial, SecurityCik
+from app.models.company_financials import CompanyFinancial, SecCompany
 from app.models.security import Security
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.security_repository import held
@@ -373,33 +373,68 @@ class CompanyFinancialsService:
         self.db = db
         self.repo = CompanyFinancialsRepository(db)
 
-    async def list_companies(self) -> List[Dict[str, Any]]:
-        """Held securities with stored figures, one per company (CIK)."""
-        result = await self.db.execute(select(Security).where(held()))
+    async def _held_listings(self, ciks) -> Dict[int, Security]:
+        """CIK -> its held listing with the lowest symbol (GOOG before GOOGL)."""
+        listings = await self.repo.listings(ciks)
+        ids = [sid for sids in listings.values() for sid in sids]
+        if not ids:
+            return {}
+        result = await self.db.execute(
+            select(Security).where(held(), Security.id.in_(ids))
+        )
         securities = {s.id: s for s in result.scalars()}
-        coverage = await self.repo.coverage(securities)
-        ciks = await self.repo.cik_rows(coverage)
-        # One listing per company: the one with the most rows, then the lowest symbol.
-        by_company: Dict[Any, List[int]] = {}
-        for sid in coverage:
-            cik = ciks[sid].cik if sid in ciks else None
-            by_company.setdefault(cik if cik is not None else ("id", sid), []).append(
-                sid
-            )
-        chosen = [
-            min(ids, key=lambda i: (-coverage[i]["rows"], securities[i].symbol, i))
-            for ids in by_company.values()
+        out: Dict[int, Security] = {}
+        for cik, sids in listings.items():
+            members = [securities[i] for i in sids if i in securities]
+            if members:
+                out[cik] = min(members, key=lambda s: (s.symbol, s.id))
+        return out
+
+    @staticmethod
+    def _identity(company: SecCompany, listing: Optional[Security]) -> Dict[str, Any]:
+        """Who the company is on the tab: its held listing when there is one."""
+        if listing is not None:
+            return {
+                "cik": company.cik,
+                "security_id": listing.id,
+                "symbol": listing.symbol,
+                "name": listing.description,
+                "isin": listing.isin,
+                "held": True,
+            }
+        symbol = company.ticker or str(company.cik)
+        return {
+            "cik": company.cik,
+            "security_id": None,
+            "symbol": symbol,
+            "name": company.name or symbol,
+            "isin": company.isin,
+            "held": False,
+        }
+
+    async def list_companies(self) -> List[Dict[str, Any]]:
+        """
+        Companies with stored figures: those held, and the Nasdaq-100 constituents of the
+        newest full pass (`universe_seen_at`), one entry per company (CIK).
+        """
+        companies = await self.repo.companies()
+        listings = await self._held_listings(companies)
+        latest = await self.repo.latest_universe_stamp()
+        listed = [
+            c
+            for c in companies.values()
+            if c.cik in listings
+            or (latest is not None and c.universe_seen_at == latest)
         ]
+        coverage = await self.repo.coverage(c.cik for c in listed)
         out = []
-        for sid in chosen:
-            security, cov = securities[sid], coverage[sid]
-            cik_row: Optional[SecurityCik] = ciks.get(sid)
+        for company in listed:
+            cov = coverage.get(company.cik)
+            if cov is None:
+                continue
             out.append(
                 {
-                    "security_id": sid,
-                    "symbol": security.symbol,
-                    "name": security.description,
-                    "cik": cik_row.cik if cik_row is not None else None,
+                    **self._identity(company, listings.get(company.cik)),
                     "currency": cov["currency"],
                     "first_period_end": cov["first"].isoformat()
                     if cov["first"]
@@ -408,26 +443,27 @@ class CompanyFinancialsService:
                     "last_fetched_at": utc_iso(cov["fetched_at"]),
                 }
             )
-        out.sort(key=lambda c: (c["symbol"], c["security_id"]))
+        out.sort(key=lambda c: (c["symbol"], c["cik"]))
         return out
 
     async def get_financials(
         self,
-        security: Security,
+        company: SecCompany,
         period: str = DEFAULT_PERIOD,
         range_key: str = DEFAULT_RANGE,
     ) -> Dict[str, Any]:
-        rows = await self.repo.rows_for(security.id)
-        coverage = (await self.repo.coverage([security.id])).get(security.id)
+        rows = await self.repo.rows_for(company.cik)
+        coverage = (await self.repo.coverage([company.cik])).get(company.cik)
+        identity = self._identity(
+            company, (await self._held_listings([company.cik])).get(company.cik)
+        )
         warnings: List[str] = []
         if not rows:
             warnings.append(
-                f"No SEC financial statements are stored for {security.symbol}."
+                f"No SEC financial statements are stored for {identity['symbol']}."
             )
         return {
-            "security_id": security.id,
-            "symbol": security.symbol,
-            "name": security.description,
+            **identity,
             "currency": coverage["currency"] if coverage else None,
             "period": period,
             "range": range_key,

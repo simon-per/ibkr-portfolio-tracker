@@ -40,6 +40,7 @@ import {
   axisTicks,
   chartRows,
   chartView,
+  companyGroups,
   growthOf,
   hasAnyData,
   readCompanyPick,
@@ -452,7 +453,7 @@ export function CompanyTab() {
   const company = companies.data ? resolveCompany(companies.data, picked, stored) : null
 
   const financials = useQuery({
-    ...companyFinancialsQuery(company?.security_id ?? -1, period, range),
+    ...companyFinancialsQuery(company?.cik ?? -1, period, range),
     enabled: company != null,
     // The last company's charts stay, dimmed, while the next loads: a skeleton would unmount
     // the toggle just pressed (#68).
@@ -460,9 +461,9 @@ export function CompanyTab() {
   })
   const data = financials.data
 
-  const pick = (securityId: number) => {
-    setPicked(securityId)
-    writeCompanyPick(securityId)
+  const pick = (cik: number) => {
+    setPicked(cik)
+    writeCompanyPick(cik)
   }
 
   if (companies.isError) {
@@ -483,7 +484,7 @@ export function CompanyTab() {
       <Card>
         <SectionHeader title="Company" icon={Building2} iconTone="muted" />
         <CardContent>
-          <p className="py-8 text-center text-sm text-muted-foreground">No companies with SEC filings held.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">No companies with SEC filings stored.</p>
         </CardContent>
       </Card>
     )
@@ -497,18 +498,24 @@ export function CompanyTab() {
         <SectionHeader
           title={
             <span className="flex min-w-0 items-center gap-2">
-              {company && <TickerAvatar symbol={company.symbol} securityId={company.security_id} />}
+              {company && (
+                <TickerAvatar symbol={company.symbol} securityId={company.security_id ?? undefined} isin={company.isin} />
+              )}
               {companies.data ? (
                 <select
                   aria-label="Company"
-                  value={company?.security_id ?? ''}
+                  value={company?.cik ?? ''}
                   onChange={(e) => pick(Number(e.target.value))}
                   className="h-9 min-w-0 max-w-full rounded-lg border border-border bg-card px-2.5 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  {companies.data.map((c) => (
-                    <option key={c.security_id} value={c.security_id}>
-                      {c.symbol} · {displayName(c.name)}
-                    </option>
+                  {companyGroups(companies.data).map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.companies.map((c) => (
+                        <option key={c.cik} value={c.cik}>
+                          {c.symbol} · {displayName(c.name)}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               ) : (

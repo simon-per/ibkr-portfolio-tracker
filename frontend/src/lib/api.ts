@@ -1564,12 +1564,17 @@ export interface CryptoSyncResponse {
   timestamp: string | null;
 }
 
-/** `/api/company-financials/companies`: one held US SEC filer the Company tab can show. */
+/** `/api/company-financials/companies`: one SEC filer the Company tab can show, held or in the Nasdaq-100. */
 export interface CompanyFinancialsCompany {
-  security_id: number;
+  /** The SEC Central Index Key: the company's id on this API. */
+  cik: number;
+  /** The held listing (lowest symbol); null for a Nasdaq-100 constituent not held. */
+  security_id: number | null;
   symbol: string;
   name: string;
-  cik: string;
+  /** For the logo of a company not held. */
+  isin: string | null;
+  held: boolean;
   /** The filings' reporting currency; every money figure for the company is in it. */
   currency: string;
   first_period_end: string | null;
@@ -1662,13 +1667,19 @@ export interface CompanyFinancialsKeyStats {
 export type CompanyFinancialsSeriesKey = keyof CompanyFinancialsSeriesSet;
 
 /**
- * `/api/company-financials/{security_id}`. Money is in `currency` units (not thousands);
+ * `/api/company-financials/{cik}`. Money is in `currency` units (not thousands);
  * margins are fractions. The browser draws these and computes nothing from them.
  */
 export interface CompanyFinancialsResponse {
-  security_id: number;
+  /** The SEC Central Index Key: the company's id on this API. */
+  cik: number;
+  /** The held listing (lowest symbol); null for a Nasdaq-100 constituent not held. */
+  security_id: number | null;
   symbol: string;
   name: string;
+  /** For the logo of a company not held. */
+  isin: string | null;
+  held: boolean;
   currency: string;
   period: CompanyFinancialsPeriod;
   range: CompanyFinancialsRange;
@@ -2085,12 +2096,12 @@ class ApiClient {
   }
 
   async getCompanyFinancials(
-    securityId: number,
+    cik: number,
     period: CompanyFinancialsPeriod,
     range: CompanyFinancialsRange,
   ): Promise<CompanyFinancialsResponse> {
     const params = new URLSearchParams({ period, range });
-    return this.request<CompanyFinancialsResponse>(`/api/company-financials/${securityId}?${params}`);
+    return this.request<CompanyFinancialsResponse>(`/api/company-financials/${cik}?${params}`);
   }
 
   // Holding logos (docs/logos.md)

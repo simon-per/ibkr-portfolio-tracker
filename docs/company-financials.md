@@ -7,7 +7,8 @@ The Company tab shows one company at a time: revenue, operating income, net inco
 free cash flow (before and after stock-based compensation, in total and per share), the diluted
 share count, gross, operating, net and FCF margins, buybacks and dividends paid, cash and debt, and
 dividends per share, quarterly, TTM or by fiscal year, over 5 years, 10 years or everything filed,
-with a key-figures strip at the newest TTM point. **Sourced from SEC EDGAR only** — never Yahoo,
+with a key-figures strip at the newest TTM point. **For every held US filer and the Nasdaq-100**
+(owner's request, 2026-10-25), held or not. **Sourced from SEC EDGAR only** — never Yahoo,
 never IBKR.
 
 | piece | file |
@@ -22,9 +23,10 @@ never IBKR.
 
 ## Sources
 
-- `https://www.sec.gov/files/company_tickers.json` — ticker → CIK. Asked once a pass, and only
-  when a security in scope has no CIK on record (or had none and `CIK_RECHECK_AFTER`, 30 days,
-  has passed).
+- `https://www.sec.gov/files/company_tickers.json` — ticker → CIK. Asked at most once a pass,
+  and only when a held security or a constituent ticker has no answer on record (or the SEC
+  listed none and `CIK_RECHECK_AFTER`, 30 days, has passed): `security_ciks` keeps a held
+  security's answer, `sec_tickers` a constituent ticker's (GOOG's CIK is stored nowhere else).
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` — every XBRL fact a company
   has filed, every period, every filing. One request per company per week.
 
@@ -53,15 +55,17 @@ below).
 - **Staleness** (`STALE_AFTER`, 6 days): a company fetched within it is not asked again, so the
   weekly pass refetches everything once and a CLI run the same week spends nothing.
 - **Misses back off** through `miss_backoff.miss_backoff_until` on
-  `security_ciks.facts_checked_at` / `facts_miss_count`: a 404, or a document with no us-gaap
+  `sec_companies.facts_checked_at` / `facts_miss_count`: a 404, or a document with no us-gaap
   10-Q/10-K figure this reads (an IFRS 20-F filer such as ASML or NU, a fund), is asked again on
   days 1, 2, 4, … up to every 30. A data answer clears both. `--force` asks anyway.
-- **Refuse whole**: a security's rows are deleted and the new set inserted in one transaction
+- **Refuse whole**: a company's rows are deleted and the new set inserted in one transaction
   (`CompanyFinancialsRepository.replace_rows`), committed per company.
 
 ## Scope
 
-`CompanyFinancialsSync.in_scope`: securities with an open lot (`security_repository.held`),
+Two parts, one request per company (CIK) whichever brought it in.
+
+**Held** — `CompanyFinancialsSync.in_scope`: securities with an open lot (`security_repository.held`),
 listed on an exchange the price path quotes under the bare ticker (`MarketDataService.
 EXCHANGE_SUFFIXES` entries with an empty suffix — NASDAQ, NYSE, ARCA, AMEX, BATS), and not a known
 fund (`etf_mappings.is_known_etf_isin`). The symbol is spelled the SEC's way (`sec_ticker`: "BRK B"
@@ -70,13 +74,37 @@ reaches EDGAR, a UCITS fund whose ticker collides with a US one (SMH) is exclude
 foreign private issuer listed in New York (ASML, NU) gets its CIK and then a miss: its document
 holds IFRS 20-F figures only.
 
-**One company, one request.** Listings sharing a CIK (GOOG and GOOGL) are fetched once and the
-same rows are written under each security. `/companies` folds them back to one entry.
+**The Nasdaq-100** — `CompanyFinancialsSync.universe`: the `UNIVERSE_SIZE` (100) heaviest
+distinct companies in the stored basket of each fund in `UNIVERSE_FUNDS` (`QQQM`, resolved through
+`EtfBasketRepository.fund_isins`, the same answer the logo pass's `--basket` reads). The evening
+basket refresh keeps it current, so a reconstitution reaches the tab without a code change; the
+weights are the index's modified market caps, so "top 100 by market cap" and "the Nasdaq-100" are
+the same list (101 lines, GOOG and GOOGL one company; all 101 resolve to SEC tickers, checked
+2026-10-25). Equity rows only, **whitelisted** (`INVESTED_ASSET_CLASSES`): QQQM's money-market
+fund, futures and cash lines are no companies — and not `counts_as_invested`, whose fund marker
+would admit the money-market fund. Foreign private issuers in the index (ASML, AZN, PDD, ARM, …)
+get their CIK and then a miss, like a held one.
 
-**Why a mapping table (`security_ciks`) and not a column on `securities`**: the answer "asked,
-and the SEC lists no such ticker" needs a row of its own, with its own stamp (the `IsinIdentity` /
-`SecurityLogo` pattern), and the pass's bookkeeping (`facts_checked_at`, `facts_miss_count`,
-`fetched_at`) is read by nothing else that reads `securities`.
+- **A constituent nobody holds gets a `sec_companies` row and never a `securities` row**: every
+  Yahoo loop reads `securities`, and a hundred new rows there would be a hundred new price
+  requests.
+- **Each full pass stamps the companies it found** (`sec_companies.universe_seen_at`, one value
+  per pass); `/companies` lists a company not held only while it carries the newest stamp, so one
+  that left the index drops out of the picker, and a pass that found no basket stamps nothing (the
+  last list stands, with a warning). A `--symbol` pass stamps nothing either. Stored rows of a
+  former member stay; they are a few hundred kilobytes.
+- **Size** (measured on the book's 18 companies, 2026-10-25): about 660 rows a company, so the
+  Nasdaq-100 adds about 66,000 rows, 8–12 MB of SQLite with its index, and about 100 requests a
+  week (under a minute at 5 a second). Each companyfacts document (1–5 MB) is read and dropped.
+
+**One company, one set of rows** (keyed by CIK since 2026-10-25, migration `e5f7a9b1c3d6`).
+Listings sharing a CIK (GOOG and GOOGL) are fetched once and stored once; `/companies` shows the
+company under its held listing with the lowest symbol.
+
+**Why mapping tables (`security_ciks`, `sec_tickers`) and not a column**: the answer "asked, and
+the SEC lists no such ticker" needs a row of its own, with its own stamp (the `IsinIdentity` /
+`SecurityLogo` pattern). The pass's bookkeeping (`fetched_at`, `facts_checked_at`,
+`facts_miss_count`) is per company, on `sec_companies`.
 
 ## The normaliser
 
@@ -218,20 +246,22 @@ is named after the year before.
 
 ## Storage
 
-`company_financials`: one row per (security, period end, fiscal period, metric) — Q4 and FY
+`company_financials`: one row per (CIK, period end, fiscal period, metric) — Q4 and FY
 share a period end, hence the fiscal period in the key — with `fiscal_year`, `value` (float),
 `unit` (`USD`, `USD/shares` or `shares`), `source_concept`, `filed` (the newest filing behind the
 value) and `fetched_at`. **A period never reported has no row; nothing is stored as 0.**
 
 ## Service and API
 
-`GET /api/company-financials/companies` — held securities with stored figures, one per CIK (the
-listing with the most rows, then the lowest symbol): `security_id, symbol, name, cik, currency,
-first_period_end, last_period_end, last_fetched_at`.
+`GET /api/company-financials/companies` — companies with stored figures, one per CIK: the held
+ones and the newest pass's Nasdaq-100 (above): `cik, security_id, symbol, name, isin, held,
+currency, first_period_end, last_period_end, last_fetched_at`. A held company is named by its
+listing with the lowest symbol (`security_id` set); one not held by its basket ticker, name and
+ISIN (`security_id` null; the ISIN finds its logo).
 
-`GET /api/company-financials/{security_id}?period=quarterly|ttm|annual&range=5y|10y|max`
-(defaults `ttm`, `10y`): `security_id, symbol, name, currency, period, range, as_of, warnings,
-series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
+`GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=5y|10y|max`
+(defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,
+warnings, key_stats, series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the
 tab's hover — and `cagrs` `{y3, y5, y10}`. The series: revenue, revenue per share, operating
 income, net income, diluted EPS, FCF, FCF after SBC, FCF per share, FCF after SBC per share,
@@ -239,7 +269,8 @@ diluted shares, four margins (gross, operating, net, FCF), dividends per share, 
 paid, cash, debt; every per-share figure is the figure over the same period's diluted shares.
 `key_stats` is the newest TTM point's figures whatever `period` asked for (`label`, revenue with
 its YoY and 5-year CAGR, net income, EPS with both, FCF and FCF per share, the margins, shares and
-their YoY, DPS and the payout ratio, buybacks, dividends paid). Unknown security: 404.
+their YoY, DPS and the payout ratio, buybacks, dividends paid). A CIK the pass never looked at:
+404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
 **no write route**.
@@ -290,8 +321,8 @@ shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh`
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_financials --dry-run
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_financials
 
-`--symbol NVDA` (repeatable) narrows it, `--force` ignores staleness and back-off. It records a
-`manual_company_financials_fetch` row.
+`--symbol NVDA` (repeatable; a held symbol or a constituent's ticker) narrows it, `--force`
+ignores staleness and back-off. It records a `manual_company_financials_fetch` row.
 
 ## Known gaps and out of scope
 

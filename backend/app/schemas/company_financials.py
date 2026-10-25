@@ -18,10 +18,16 @@ from pydantic import BaseModel, Field
 
 
 class CompanyFinancialsCompany(BaseModel):
-    security_id: int
+    cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
+    security_id: Optional[int] = Field(
+        None, description="The held listing (lowest symbol); null for a company not held."
+    )
     symbol: str
     name: str
-    cik: Optional[int] = None
+    isin: Optional[str] = Field(None, description="For the logo.")
+    held: bool = Field(
+        ..., description="False for a Nasdaq-100 constituent the account does not hold."
+    )
     currency: Optional[str] = Field(
         None, description="The reporting currency of the stored figures."
     )
@@ -124,9 +130,16 @@ class CompanyFinancialsSeriesSet(BaseModel):
 
 
 class CompanyFinancialsResponse(BaseModel):
-    security_id: int
+    cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
+    security_id: Optional[int] = Field(
+        None, description="The held listing (lowest symbol); null for a company not held."
+    )
     symbol: str
     name: str
+    isin: Optional[str] = Field(None, description="For the logo.")
+    held: bool = Field(
+        ..., description="False for a Nasdaq-100 constituent the account does not hold."
+    )
     currency: Optional[str] = None
     period: str = Field(..., description="`quarterly`, `ttm` or `annual`.")
     range: str = Field(..., description="`5y`, `10y` or `max`.")

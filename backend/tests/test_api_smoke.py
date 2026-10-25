@@ -46,7 +46,7 @@ from app.models.crypto import (
     CryptoSnapshot,
 )
 from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
-from app.models.company_financials import CompanyFinancial, SecurityCik
+from app.models.company_financials import CompanyFinancial, SecCompany, SecurityCik
 from app.models.dividend_forecast_snapshot import (
     DividendForecastSnapshot,
     DividendForecastSnapshotLine,
@@ -115,10 +115,11 @@ READ_ENDPOINTS = [
     "/api/logos/2",
     "/api/logos/isin/NL0010273215",
     "/api/company-financials/companies",
-    "/api/company-financials/1",
-    "/api/company-financials/1?period=quarterly&range=5y",
-    "/api/company-financials/1?period=annual&range=max",
-    "/api/company-financials/4",      # a known security without figures
+    "/api/company-financials/937966",
+    "/api/company-financials/937966?period=quarterly&range=5y",
+    "/api/company-financials/937966?period=annual&range=max",
+    "/api/company-financials/320193",   # a Nasdaq-100 constituent not held
+    "/api/company-financials/1234567",  # a known company without figures
 ]
 
 # The crypto book's reads need the admin key (docs/crypto.md), so they run through
@@ -165,9 +166,22 @@ async def _seed(session: AsyncSession) -> None:
                              checked_at=datetime.combine(TODAY, time(5))))
     # Two fiscal years of SEC figures for the held NASDAQ listing (docs/company-financials.md):
     # eight calendar quarters and the two years, no capex in the first quarter.
-    session.add(SecurityCik(security_id=1, cik=937966, sec_ticker="ASML",
-                            cik_checked_at=datetime.combine(TODAY, time(5)),
-                            fetched_at=datetime.combine(TODAY, time(5))))
+    pass_at = datetime.combine(TODAY, time(5))
+    session.add(SecurityCik(security_id=1, cik=937966, sec_ticker="ASML", cik_checked_at=pass_at))
+    session.add(SecCompany(cik=937966, ticker="ASML", fetched_at=pass_at))
+    # A Nasdaq-100 constituent nobody holds, found by the newest pass; one that left the index
+    # (an older stamp) and one the pass never got figures for.
+    session.add(SecCompany(cik=320193, ticker="AAPL", name="Apple Inc", isin="US0378331005",
+                           universe_seen_at=pass_at, fetched_at=pass_at))
+    session.add(SecCompany(cik=7654321, ticker="GONE", name="Former member",
+                           universe_seen_at=pass_at - timedelta(days=7), fetched_at=pass_at))
+    session.add(SecCompany(cik=1234567, ticker="EMPTY"))
+    for cik in (320193, 7654321):
+        session.add(CompanyFinancial(
+            cik=cik, period_end=date(2024, 12, 31), fiscal_year=2024, fiscal_period="FY",
+            metric="revenue", value=391.0, unit="USD", source_concept="Revenues",
+            filed=date(2025, 1, 31), fetched_at=pass_at,
+        ))
     quarter_ends = [date(2023, 3, 31), date(2023, 6, 30), date(2023, 9, 30), date(2023, 12, 31),
                     date(2024, 3, 31), date(2024, 6, 30), date(2024, 9, 30), date(2024, 12, 31)]
     for i, end in enumerate(quarter_ends):
@@ -178,7 +192,7 @@ async def _seed(session: AsyncSession) -> None:
                 continue
             for period in ((f"Q{i % 4 + 1}",) + (("FY",) if i % 4 == 3 else ())):
                 session.add(CompanyFinancial(
-                    security_id=1, period_end=end, fiscal_year=end.year, fiscal_period=period,
+                    cik=937966, period_end=end, fiscal_year=end.year, fiscal_period=period,
                     metric=metric, value=value * (4 if period == "FY" else 1),
                     unit="shares" if metric == "diluted_shares" else "USD",
                     source_concept="Revenues", filed=end + timedelta(days=30),
@@ -533,11 +547,15 @@ def test_logos_serve_both_listings_of_an_isin_through_the_real_stack(client):
 
 def test_company_financials_serve_their_contract_through_the_real_stack(client):
     companies = client.get("/api/company-financials/companies").json()
-    assert [c["security_id"] for c in companies] == [1]
-    assert companies[0]["cik"] == 937966 and companies[0]["currency"] == "USD"
-    assert companies[0]["last_fetched_at"].endswith("+00:00")
+    # The held company and the current constituent; never the former member.
+    assert [(c["symbol"], c["cik"], c["security_id"], c["held"]) for c in companies] == [
+        ("AAPL", 320193, None, False), ("ASML", 937966, 1, True)]
+    assert companies[0]["name"] == "Apple Inc" and companies[0]["isin"] == "US0378331005"
+    assert companies[1]["currency"] == "USD"
+    assert companies[1]["last_fetched_at"].endswith("+00:00")
 
-    body = client.get("/api/company-financials/1").json()
+    body = client.get("/api/company-financials/937966").json()
+    assert (body["cik"], body["security_id"], body["held"]) == (937966, 1, True)
     assert (body["period"], body["range"], body["warnings"]) == ("ttm", "10y", [])
     revenue = body["series"]["revenue"]["points"]
     assert [p["label"] for p in revenue] == [f"Q{q} FY{y}" for y, q in (
@@ -555,16 +573,20 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert body["key_stats"]["revenue"] == 104.0 + 105.0 + 106.0 + 107.0
     assert body["key_stats"]["revenue_yoy"] == (104.0 + 105 + 106 + 107) / (100.0 + 101 + 102 + 103) - 1
 
-    annual = client.get("/api/company-financials/1?period=annual").json()
+    annual = client.get("/api/company-financials/937966?period=annual").json()
     assert [p["value"] for p in annual["series"]["revenue"]["points"]] == [412.0, 428.0]
 
-    empty = client.get("/api/company-financials/4").json()
+    apple = client.get("/api/company-financials/320193?period=annual").json()
+    assert (apple["symbol"], apple["security_id"], apple["held"]) == ("AAPL", None, False)
+    assert apple["series"]["revenue"]["points"][0]["value"] == 391.0
+
+    empty = client.get("/api/company-financials/1234567").json()
     assert empty["warnings"] and empty["series"]["revenue"]["points"] == []
     assert client.get("/api/company-financials/999").status_code == 404
-    assert client.get("/api/company-financials/1?period=weekly").status_code == 422
-    assert client.get("/api/company-financials/1?range=3y").status_code == 422
+    assert client.get("/api/company-financials/937966?period=weekly").status_code == 422
+    assert client.get("/api/company-financials/937966?range=3y").status_code == 422
     # No write route: a POST is not a route at all.
-    assert client.post("/api/company-financials/1").status_code in (401, 405)
+    assert client.post("/api/company-financials/937966").status_code in (401, 405)
 
 
 @pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)
