@@ -30,7 +30,7 @@ annotations there, `Mapped["Security"]`, through its registry) and `F811` in the
 that imports pytest fixtures from another and names them as parameters.
 Workflow actions are pinned to commit shas with the tag as a comment.
 
-**The bundle is code-split, and two of the boundaries are deliberate.** The eight non-default tabs
+**The bundle is code-split, and two of the boundaries are deliberate.** The nine non-default tabs
 are `React.lazy` in `Dashboard.tsx` (safe because `TabsContent` returns `null` while inactive, so a
 panel is not mounted until selected). **Recharts stays eager** — `PortfolioValueChart`,
 `PerformanceAttribution` and `MonthlyDeploymentCard` are all on the default Performance tab, so

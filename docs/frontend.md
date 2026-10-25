@@ -849,7 +849,7 @@ metrics may well go without.
   measures and the 36px pill is a span inside it; the focus ring draws on the pill. Arrow keys,
   roving tabindex and the one-`tablist` rule are unchanged. Icons: Performance `TrendingUp`,
   Dividends `HandCoins`, Look-through `Layers`, Allocation `ChartPie`, Activity `ArrowLeftRight`,
-  Fundamentals `Gauge`, Watchlist `Eye`, Tax `Landmark`, Forecast `Telescope`.
+  Fundamentals `Gauge`, Company `Building2`, Watchlist `Eye`, Tax `Landmark`, Forecast `Telescope`.
 - **The strip is sticky with a blur**, and lifts (a soft shadow) only once the page has scrolled
   (`lib/useScrolled.ts`, read only inside `SectionStrip` so a crossing re-renders the strip
   alone). Padding sits on the tablist, not its sticky wrapper, so the tablist's own
@@ -1015,3 +1015,38 @@ re-point onto the general palette would have to redo, and the section above stil
   its colour; status cards on the `*-soft` state tokens.
 - **Tests that climb a KPI tile** use `kpiTile(label)` in `LookThroughTab.test.tsx` (up to the
   panel grid's child) — a fixed number of `parentElement` hops broke when the label gained a well.
+
+## The Company tab (2026-10-25)
+
+One company's fundamentals history from its SEC filings, Qualtrim-style: `CompanyTab.tsx` (lazy,
+after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the queries
+`companyFinancialsCompaniesQuery` / `companyFinancialsQuery(id, period, range)` in
+`lib/queryCache.ts`. The backend's rules live in its own file (CLAUDE.md's index).
+
+- **The browser only draws.** TTM, CAGR, YoY, margins and per-share figures come from
+  `/api/company-financials/{id}`; Quarterly | TTM | Annual and 5Y | 10Y | Max are query parameters,
+  never a transform here. `companyFinancials.ts` merges series by `period_end` for Recharts and
+  picks axis ticks, nothing more.
+- **Layout.** A picker card (a native `<select>` of `symbol · name`, the last pick remembered per
+  browser under `company-financials:security` through `lib/storage.ts`; a pick no longer listed
+  falls back to the first) with the two `SegmentedControl`s in its aside. Under it a grid of cards,
+  4 / 2 / 1 per row at `xl` / `sm` / phone, one per entry of `COMPANY_CHARTS`: revenue, net income,
+  EPS, FCF with FCF after SBC, FCF per share, diluted shares, margins (three lines), dividends per
+  share. Each card is a flex column with the plot pushed to the bottom, so a header that wraps (a
+  legend, three margins) leaves a row's plots level.
+- **Card header**: the server's CAGR and YoY of the first series, a dash for null. Margins carry
+  none (the server sends null), so that card shows each line's latest value with its swatch. The
+  shares card tones growth the other way: fewer shares is green.
+- **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends card is
+  drawn only when some point has a value. A response with no value anywhere is one warning and no
+  charts; `warnings[]` render as warnings above the grid. Toggling keeps the last response dimmed
+  (`useKeepPreviousData`).
+- **Formats**: compact money in the response's `currency` (`formatCompactMoney`, "$130.5B"),
+  per-share figures at two decimals (`formatCurrency`), shares as a compact count, fractions through
+  `formatFractionPercent` — the API sends 0.25 for 25%, `formatPercent` takes percentage points.
+- **The x axis labels fiscal-year ends only** ("Q4 FY2025" and "FY2025" print "FY25"), at most five
+  (six on a phone), newest kept (`axisTicks`). "Q1 FY2016" under every tenth bar of a 300px card
+  ran into its neighbours.
+- Tests: `CompanyTab.test.tsx` (picker, remembered pick, toggles as parameters, dashes, the hidden
+  dividends card, no-data and `warnings[]`), `companyFinancials.test.ts` (rows, gaps, ticks) over
+  the NVDA-like fixture in `companyFinancials.fixture.ts`.
