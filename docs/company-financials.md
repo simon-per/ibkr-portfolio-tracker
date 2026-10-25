@@ -131,7 +131,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
 | debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` |
 | debt, current | `LongTermDebtCurrent` → `DebtCurrent` |
-| shares outstanding | `CommonStockSharesOutstanding` (one class's alone, per class, is left out by companyfacts) |
+| shares outstanding | `CommonStockSharesOutstanding` → `dei:EntityCommonStockSharesOutstanding` (the cover's, dated weeks after the period: keyed to the newest period end its own filing reports). A count tagged per class is left out by companyfacts |
 | equity | `StockholdersEquity` → `…IncludingPortionAttributableToNoncontrollingInterest` (the parent's first, as net income is) |
 
 For **every period** the first concept that reports it wins, so a company that moved from

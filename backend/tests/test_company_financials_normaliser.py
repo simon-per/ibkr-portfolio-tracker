@@ -495,6 +495,20 @@ def test_a_sixteen_week_fourth_quarter_carries_the_years_balances():
     assert _row(rows, "cash", date(2026, 8, 30), "Q4")["value"] == 950
 
 
+def test_the_cover_count_sits_at_its_filings_period_end():
+    """NVDA tags its outstanding count only on the cover, dated weeks after the quarter."""
+    doc = _eps_doc(None)
+    doc["facts"]["dei"] = {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
+        {**_f(None, "2024-08-20", 49e6, "2024-08-01"), "form": "10-Q"},
+        # A filing that reports no period of its own here is not placed.
+        {**_f(None, "2024-11-20", 48e6, "2024-11-25"), "form": "10-Q"},
+    ]}}}
+    rows = normalise(doc).rows
+    count = _row(rows, "shares_outstanding", date(2024, 6, 30), "Q2")
+    assert (count["value"], count["source_concept"]) == (49e6, "EntityCommonStockSharesOutstanding")
+    assert [r for r in rows if r["metric"] == "shares_outstanding"] == [count]
+
+
 def test_a_share_count_tagged_in_thousands_is_rescaled():
     """ONDS tags some filings' counts in thousands, in filings no newer one overlaps."""
     rows = normalise(

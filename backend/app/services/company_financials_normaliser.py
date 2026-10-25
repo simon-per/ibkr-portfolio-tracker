@@ -75,6 +75,10 @@ class MetricSpec:
 #: Continuing operations' EPS: net income, which includes the discontinued ones, over it is no
 #: share count either.
 CONTINUING_EPS = "IncomeLossFromContinuingOperationsPerDilutedShare"
+#: The cover page's count (`dei`), for a company whose balance sheet tags none (NVDA, TSLA,
+#: PEP). It is dated the cover date, weeks after the period; `_facts` keys it to the newest
+#: period end its own filing reports, so it sits beside that filing's figures.
+COVER_SHARES = "EntityCommonStockSharesOutstanding"
 
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
@@ -225,7 +229,10 @@ METRICS: Dict[str, MetricSpec] = {
     # The balance sheet's count at the period end, for the market cap. A company with several
     # classes tags it per class, which companyfacts leaves out: none is read for it.
     "shares_outstanding": MetricSpec(
-        SHARES, INSTANT, ("CommonStockSharesOutstanding",), non_negative=True
+        SHARES,
+        INSTANT,
+        ("CommonStockSharesOutstanding", COVER_SHARES),
+        non_negative=True,
     ),
     # The parent's equity before the consolidated figure, as net income is the parent's.
     "equity": MetricSpec(
@@ -466,6 +473,24 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
                     row["form"],
                 )
             )
+    # The cover count, keyed to its filing's newest period end (COVER_SHARES).
+    period_end: Dict[str, date] = {}
+    for f in out:
+        if f.start is not None and f.end <= f.filed:
+            period_end[f.accn] = max(period_end.get(f.accn, f.end), f.end)
+    dei = ((companyfacts or {}).get("facts") or {}).get("dei") or {}
+    for row in ((dei.get(COVER_SHARES) or {}).get("units") or {}).get("shares") or []:
+        accn, val, filed = row.get("accn"), row.get("val"), _date(row.get("filed"))
+        if row.get("form") not in FORMS or accn not in period_end or filed is None:
+            continue
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0:
+            continue
+        out.append(
+            Fact(
+                COVER_SHARES, SHARES, "shares", None, period_end[accn], float(val),
+                accn, filed, row["form"],
+            )
+        )
     return out
 
 
