@@ -3,8 +3,11 @@ import {
   formatAxisMoney,
   cn,
   currencySymbol,
+  formatCompactCount,
+  formatCompactMoney,
   formatCurrency,
   formatDate,
+  formatFractionPercent,
   formatPercent,
   formatPrice,
   formatQuantity,
@@ -195,6 +198,46 @@ describe('formatPercent', () => {
 
   it('shows a small non-zero value rather than rounding it away entirely', () => {
     expect(formatPercent(0.01)).toBe('0.01%')
+  })
+})
+
+describe('formatFractionPercent', () => {
+  it('takes a fraction, not percentage points', () => {
+    // The company financials send 0.253 to mean 25.3%.
+    expect(formatFractionPercent(0.253)).toBe('25.3%')
+    expect(formatFractionPercent(1.5)).toBe('150.0%')
+  })
+
+  it('keeps the sign and honours the digits', () => {
+    expect(formatFractionPercent(-0.05)).toBe('-5.0%')
+    expect(formatFractionPercent(0.12345, 2)).toBe('12.35%')
+    expect(formatFractionPercent(0.25, 0)).toBe('25%')
+  })
+
+  it('composes with formatSigned', () => {
+    expect(formatSigned(0.243, (v) => formatFractionPercent(v))).toBe('+24.3%')
+    expect(formatSigned(-0.0001, (v) => formatFractionPercent(v))).toBe('0.0%')
+  })
+})
+
+describe('formatCompactMoney', () => {
+  it('prints the currency in compact units, one decimal at most', () => {
+    expect(formatCompactMoney(130_497_000_000, 'USD')).toBe('$130.5B')
+    expect(formatCompactMoney(1_200_000, 'USD')).toBe('$1.2M')
+    expect(formatCompactMoney(12_000_000_000, 'USD')).toBe('$12B')
+    expect(formatCompactMoney(950, 'USD')).toBe('$950')
+  })
+
+  it('puts the sign before the symbol and names other currencies', () => {
+    expect(formatCompactMoney(-2_500_000_000, 'USD')).toBe('-$2.5B')
+    expect(formatCompactMoney(4_100_000, 'CHF')).toBe('CHF 4.1M')
+  })
+})
+
+describe('formatCompactCount', () => {
+  it('prints a count with no symbol', () => {
+    expect(formatCompactCount(24_400_000_000)).toBe('24.4B')
+    expect(formatCompactCount(999_950)).toBe('1M')
   })
 })
 

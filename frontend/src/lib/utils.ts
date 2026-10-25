@@ -148,6 +148,35 @@ export function formatPercent(value: number): string {
   }).format(value / 100)
 }
 
+/**
+ * A share sent as a **fraction**, as a percentage: 0.253 → "25.3%", -0.05 → "-5.0%".
+ *
+ * `formatPercent` takes percentage points (it divides by 100). The company financials send
+ * margins, CAGRs and growth as fractions, and multiplying by 100 at each call site is how a
+ * figure ends up a hundred times off on one card and not the next.
+ */
+export function formatFractionPercent(fraction: number, digits: number = 1): string {
+  return numberFormat({
+    style: "percent",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(fraction)
+}
+
+/**
+ * A money amount in compact units with one decimal at most: "$130.5B", "-$1.2M", "CHF 950".
+ * For a figure beside a chart or in its tooltip; an axis tick passes its step to
+ * `formatAxisMoney` instead, so neighbouring ticks never print alike.
+ */
+export function formatCompactMoney(value: number, currency: string): string {
+  return formatAxisMoney(value, currencySymbol(currency))
+}
+
+/** A plain count in compact units: "24.4B", "1.2M", "950". */
+export function formatCompactCount(value: number): string {
+  return formatAxisMoney(value)
+}
+
 const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /**
