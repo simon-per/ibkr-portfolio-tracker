@@ -41,6 +41,9 @@
   BKNG FY2019 EPS 111.82 / 25, CRWD FY2025 revenue 3.95B, NFLX 2024 EPS 19.83 / 10. Then the
   basic share count as the split's witness, so a restated dilution is no split: REGN Q3 2013
   117M (its 10-Q: 116.7M), DXCM Q3 2020 398M (99.5M × 4).
+  The 29 share-count jumps left were each checked against the company's first SEC filing: IPOs
+  (ABNB, ALAB, ANET, CRDO, CRWV, DASH, DDOG), a direct listing (PLTR), a SPAC (RKLB), a new
+  listing (SPCX), share issuance (ONDS: 128M to 381M outstanding in 2025) and KDP's merger.
 
 ## Shipped 2026-10-25 — the Company tab (SEC EDGAR fundamentals history)
 

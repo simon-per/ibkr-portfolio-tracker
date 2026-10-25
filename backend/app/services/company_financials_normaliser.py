@@ -838,6 +838,25 @@ def _implied_shares(
 # ── The whole thing ──────────────────────────────────────────────────────────
 
 
+def _fill_shares_from_eps(values, keys) -> None:
+    """Each period's missing share count, from net income over diluted EPS when precise."""
+    for key in keys:
+        if key in values["diluted_shares"]:
+            continue
+        shares = _implied_shares(values, key, SHARES_FROM_EPS_MAX_ERROR)
+        if shares is None:
+            continue
+        income, eps = values["net_income"][key], values["eps_diluted"][key]
+        values["diluted_shares"][key] = Obs(
+            value=shares,
+            filed=max(income.filed, eps.filed),
+            start=income.start,
+            end=income.end,
+            unit="shares",
+            concept=SHARES_FROM_EPS_SOURCE,
+        )
+
+
 def normalise(companyfacts: Dict[str, Any]) -> Normalised:
     """
     Rows for `company_financials`: dicts with `period_end`, `fiscal_year`,
@@ -962,18 +981,25 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
         if slip is not None:
             shares.value = shares.value / float(slip)
 
-    # A derived quarter's share count far from every reported neighbour is a difference of
-    # two bases, not a count: the year's diluted average holds dilution the loss quarters
-    # leave out (DXCM's 2020 Q4 came to 807M between 298M and 418M; REGN's 2013 Q4 to 13M).
-    # It stays absent; the step below may still fill it from net income over EPS.
+    # A share count the company did not report, from net income over diluted EPS, when the
+    # EPS is precise enough for it (documented: GOOGL tags the count only from 2022).
+    _fill_shares_from_eps(values, keys)
+
+    # A derived quarter's share count far from every neighbour that is not derived is a
+    # difference of two bases, not a count: the year's diluted average holds dilution the
+    # loss quarters leave out (DXCM's 2020 Q4 came to 807M between 298M and 418M; REGN's
+    # 2013 Q4 to 13M). It stays absent, unless net income over EPS gives it after all.
+    # The neighbours include counts filled from EPS above: TTWO's 2013 Q4 (86.2M) is real
+    # beside its next quarter's 87.2M, its only reported neighbour a convertible-diluted Q3.
     counts = values["diluted_shares"]
-    reported = [(k[1], o.value) for k, o in counts.items() if k[0] == "Q" and not o.derived]
+    anchors = [(k[1], o.value) for k, o in counts.items() if k[0] == "Q" and not o.derived]
+    dropped = False
     for key, obs in list(counts.items()):
         if key[0] != "Q" or not obs.derived:
             continue
         near = [
             v
-            for end, v in reported
+            for end, v in anchors
             if 0 < abs((end - key[1]).days) <= NEIGHBOUR_DAYS and v > 0
         ]
         if near and not any(
@@ -981,24 +1007,9 @@ def normalise(companyfacts: Dict[str, Any]) -> Normalised:
             for v in near
         ):
             del counts[key]
-
-    # A share count the company did not report, from net income over diluted EPS, when the
-    # EPS is precise enough for it (documented: GOOGL tags the count only from 2022).
-    for key in keys:
-        if key in values["diluted_shares"]:
-            continue
-        shares = _implied_shares(values, key, SHARES_FROM_EPS_MAX_ERROR)
-        if shares is None:
-            continue
-        income, eps = values["net_income"][key], values["eps_diluted"][key]
-        values["diluted_shares"][key] = Obs(
-            value=shares,
-            filed=max(income.filed, eps.filed),
-            start=income.start,
-            end=income.end,
-            unit="shares",
-            concept=SHARES_FROM_EPS_SOURCE,
-        )
+            dropped = True
+    if dropped:
+        _fill_shares_from_eps(values, keys)
 
     currencies: Counter = Counter()
     for metric in ("revenue", "net_income"):

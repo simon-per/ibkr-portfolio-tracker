@@ -181,11 +181,12 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   (`(Y·d_Y − N·d_N) / (d_Y − d_N)`, what a weighted average is). **A derived Q4 EPS is the year's
   EPS less the nine months'**, the usual approximation, exact only while the share count holds
   still; a derived Q4 share count is approximate too (each quarter's dilution is computed on its
-  own). **A derived quarter's count more than 1.2× from every reported neighbouring quarter's
+  own). **A derived quarter's count more than 1.2× from every neighbouring quarter's that is not derived
   stays absent** (and may be refilled from net income / EPS): the year's diluted average can
   hold dilution its loss quarters leave out, and DXCM's 2020 Q4 came to 807M between 298M and
-  418M (518M after the basic-count witness), REGN's 2013 Q4 to 13M. Some real derived quarters go
-  blank with them (TTWO's 2013 and 2015 Q4s, whose only reported neighbour was a high Q3).
+  418M (518M after the basic-count witness), REGN's 2013 Q4 to 13M. The neighbours include
+  counts filled from net income / EPS, which run first: TTWO's 2013 Q4 (86.2M) is real beside
+  its next quarter's 87.2M, its only reported neighbour a convertible-diluted holiday Q3.
 - **Q4 across the chain, last resort.** When no single concept has both the year and the three
   quarters, Q4 = FY − (Q1 + Q2 + Q3) of the merged series, recorded with source
   `<concept> less Q1-Q3`. ORCL tags its years as `Revenues` and its quarters as
