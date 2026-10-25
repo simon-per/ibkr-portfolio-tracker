@@ -41,7 +41,7 @@ export const FIXTURE_KEY_STATS: CompanyFinancialsKeyStats = {
   fcf: 60_853e6, fcf_per_share: 2.45, fcf_yoy: null,
   gross_margin: null, operating_margin: 0.624, net_margin: 0.558, fcf_margin: 0.466,
   diluted_shares: 24_804e6, shares_yoy: -0.005,
-  dividends_per_share: 0.034, payout_ratio: 0.0116,
+  dividends_per_share: 0.034, payout_ratio: 0.0116, pe_ratio: 48.27,
   buybacks: null, dividends_paid: 834e6,
 }
 

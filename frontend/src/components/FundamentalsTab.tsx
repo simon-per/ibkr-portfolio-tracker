@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
-import { ABSENT, cn, formatDate, formatShortDateTime, marketCapParts, parseLocalDate } from '@/lib/utils'
+import { ABSENT, cn, formatDate, formatMultiple, formatShortDateTime, marketCapParts, parseLocalDate } from '@/lib/utils'
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
@@ -51,7 +51,7 @@ function formatPct(value: number | null): string {
 
 function formatRatio(value: number | null): string {
   if (value === null) return ABSENT
-  return value.toFixed(1)
+  return formatMultiple(value)
 }
 
 // Color coding helpers. Only the two ends are coloured: the middle band is plain ink,

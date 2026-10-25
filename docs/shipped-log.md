@@ -9,6 +9,8 @@
 
 ## Shipped 2026-10-25 — Company tab: more figures, and the Nasdaq-100
 
+- **P/E** in *Key figures*: the held listing's newest stored close over TTM diluted EPS, so
+  held companies only; constituents have no stored price (no new Yahoo traffic).
 - **Figures** (`808c4a3`): a *Key figures* card at the newest TTM point (revenue, net income, EPS,
   FCF, four margins, shares, DPS with payout ratio, buybacks, dividends paid, YoY and 5Y CAGR
   notes); new cards for operating income, buybacks & dividends, and cash & debt; gross margin in

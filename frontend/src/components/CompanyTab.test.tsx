@@ -122,6 +122,7 @@ describe('CompanyTab', () => {
     expect(stats.textContent).toContain('Revenue$130.5B')
     expect(stats.textContent).toContain('YoY+114.2%')
     expect(stats.textContent).toContain('EPS$2.94')
+    expect(stats.textContent).toContain('P/E48.3')
     expect(stats.textContent).toContain('Payout1.2%')
     expect(stats.textContent).toContain('Dividends paid$834M')
     expect(stats.textContent).not.toContain('Gross margin')

@@ -320,6 +320,14 @@ def test_key_stats_without_quarters_are_all_absent():
     assert set(key_stats([]).values()) == {None}
     loss = _rows(ENDS[:4], {**BASE, "eps_diluted": lambda i: -0.1})
     assert key_stats(loss)["payout_ratio"] is None
+    assert key_stats(loss, 30.0)["pe_ratio"] is None
+
+
+def test_pe_ratio_is_the_price_over_ttm_eps():
+    rows = _rows(ENDS, BASE)
+    stats = key_stats(rows, 30.0)
+    assert stats["pe_ratio"] == pytest.approx(30.0 / stats["eps_diluted"])
+    assert key_stats(rows)["pe_ratio"] is None
 
 
 @pytest.mark.parametrize(

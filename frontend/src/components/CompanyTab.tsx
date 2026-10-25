@@ -66,6 +66,7 @@ import {
   formatCompactMoney,
   formatCurrency,
   formatFractionPercent,
+  formatMultiple,
   formatSigned,
   placeholderDim,
 } from '@/lib/utils'
@@ -356,7 +357,9 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
 
 /** A key stat's figure: a growth rate signed and inked, anything else as its cards print it. */
 function keyStatText(def: Pick<KeyStatDef, 'format'>, value: number, currency: string): string {
-  return def.format === 'signed' ? signedPercent(value) : valueFormatter(def.format, currency)(value)
+  if (def.format === 'signed') return signedPercent(value)
+  if (def.format === 'multiple') return formatMultiple(value)
+  return valueFormatter(def.format, currency)(value)
 }
 
 /** The newest TTM point's figures, whatever period the charts below show. */

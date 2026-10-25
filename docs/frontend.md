@@ -1036,7 +1036,8 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   listed falls back to the first held company; a company not held shows its logo by ISIN) with three
   `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
   `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
-  FCF, the four margins, shares, DPS with its payout ratio, buybacks, dividends paid, with YoY
+  FCF, the four margins, shares, DPS with its payout ratio, the P/E (held companies only),
+  buybacks, dividends paid, with YoY
   and 5-year CAGR notes; a figure the company does not file is left out, never a dash row), then
   a grid of up to nine cards (revenue, operating income, net income, FCF, margins, shares,
   buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot

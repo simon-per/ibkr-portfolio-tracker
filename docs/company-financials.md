@@ -296,7 +296,7 @@ diluted shares, four margins (gross, operating, net, FCF), dividends per share, 
 paid, cash, debt; every per-share figure is the figure over the same period's diluted shares.
 `key_stats` is the newest TTM point's figures whatever `period` asked for (`label`, revenue with
 its YoY and 5-year CAGR, net income, EPS with both, FCF and FCF per share, the margins, shares and
-their YoY, DPS and the payout ratio, buybacks, dividends paid). A CIK the pass never looked at:
+their YoY, DPS and the payout ratio, the P/E, buybacks, dividends paid). A CIK the pass never looked at:
 404.
 A known one without figures: 200, empty points, a warning. Response models are pinned both ways by
 `tests/test_company_financials_contract.py`. Public reads, rate-limited like every `/api/` read;
@@ -312,6 +312,11 @@ Computed in `company_financials_service` only:
   revenue is missing or not positive.
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
 - **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
+- **P/E** = the held listing's newest stored close (`market_prices`) / TTM diluted EPS; null when
+  the EPS is not positive, the close is in another currency than the filings, or the company is
+  not held: no price is stored for a Nasdaq-100 constituent, and fetching one would be new Yahoo
+  traffic (CLAUDE.md rule 1). It is not the Fundamentals tab's `trailing_pe`, which is Yahoo's
+  own figure over Yahoo's EPS; this one is over the EPS the tab shows beside it.
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not

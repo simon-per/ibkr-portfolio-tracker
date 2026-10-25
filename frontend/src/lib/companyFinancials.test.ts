@@ -118,6 +118,8 @@ describe('visibleKeyStats', () => {
     const keys = visibleKeyStats(FIXTURE_KEY_STATS).map((d) => d.key)
     expect(keys).toContain('revenue')
     expect(keys).toContain('dividends_paid')
+    expect(keys).toContain('pe_ratio')
+    expect(visibleKeyStats({ ...FIXTURE_KEY_STATS, pe_ratio: null }).map((d) => d.key)).not.toContain('pe_ratio')
     expect(keys).not.toContain('gross_margin')
     expect(keys).not.toContain('buybacks')
     expect(visibleKeyStats(undefined)).toEqual([])

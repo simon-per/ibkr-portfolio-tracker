@@ -103,6 +103,11 @@ class CompanyFinancialsKeyStats(BaseModel):
         None,
         description="TTM dividends per share / TTM diluted EPS; null when EPS <= 0.",
     )
+    pe_ratio: Optional[float] = Field(
+        None,
+        description="The held listing's newest close / TTM diluted EPS; null when not "
+        "held, the close is in another currency, or EPS <= 0.",
+    )
     buybacks: Optional[float] = None
     dividends_paid: Optional[float] = None
 

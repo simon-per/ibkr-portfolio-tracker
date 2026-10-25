@@ -16,6 +16,7 @@ import pytest
 
 from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany, SecurityCik
+from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.schemas.company_financials import (
@@ -161,3 +162,46 @@ async def test_a_company_without_figures_answers_the_same_shape(db):
     assert set(body["key_stats"]) == _fields(CompanyFinancialsKeyStats)
     assert all(v is None for v in body["key_stats"].values())
     assert all(s["points"] == [] for s in body["series"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency, expected", [("USD", 100.0 / 4.0), ("EUR", None)])
+async def test_the_pe_reads_the_held_listings_newest_close(db, currency, expected):
+    await _seed(db)
+    for i, end in enumerate(
+        (date(2024, 7, 28), date(2024, 10, 27), date(2025, 1, 26), date(2025, 4, 27))
+    ):
+        db.add(
+            CompanyFinancial(
+                cik=1045810,
+                period_end=end,
+                fiscal_year=2025 + (i == 3),
+                fiscal_period=f"Q{(i + 1) % 4 + 1}",
+                metric="eps_diluted",
+                value=1.0,
+                unit="USD/shares",
+                source_concept="X",
+                filed=end,
+                fetched_at=utcnow(),
+            )
+        )
+    for days, close in ((3, "90"), (1, "100")):
+        db.add(
+            MarketPrice(
+                security_id=1,
+                date=utc_today() - timedelta(days=days),
+                close_price=Decimal(close),
+                currency=currency,
+                source="test",
+            )
+        )
+    await db.commit()
+    service = CompanyFinancialsService(db)
+
+    held = await service.get_financials(await db.get(SecCompany, 1045810))
+    assert held["key_stats"]["pe_ratio"] == (
+        pytest.approx(expected) if expected else None
+    )
+    # No price is stored for a company not held.
+    apple = await service.get_financials(await db.get(SecCompany, 320193))
+    assert apple["key_stats"]["pe_ratio"] is None

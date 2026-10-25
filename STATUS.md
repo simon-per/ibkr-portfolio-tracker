@@ -9,7 +9,7 @@
 
 **Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
-(102 companies with figures, keyed by CIK), with key figures, gross margin, operating income,
+(102 companies with figures, keyed by CIK), with key figures (P/E for held companies), gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
 is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch

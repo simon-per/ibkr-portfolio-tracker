@@ -1660,6 +1660,8 @@ export interface CompanyFinancialsKeyStats {
   shares_yoy: number | null;
   dividends_per_share: number | null;
   payout_ratio: number | null;
+  /** The held listing's newest close over TTM diluted EPS; null for a company not held. */
+  pe_ratio: number | null;
   buybacks: number | null;
   dividends_paid: number | null;
 }

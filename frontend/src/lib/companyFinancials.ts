@@ -234,8 +234,8 @@ export interface KeyStatNote {
 export interface KeyStatDef {
   key: KeyStatKey
   label: string
-  /** `signed`: a growth rate, printed with its sign and inked by it. */
-  format: CompanyValueFormat | 'signed'
+  /** `signed`: a growth rate, printed with its sign and inked by it. `multiple`: the P/E. */
+  format: CompanyValueFormat | 'signed' | 'multiple'
   note?: KeyStatNote
   /** Fewer is the shareholder's gain (the share count): growth reads the other way. */
   inverse?: boolean
@@ -248,6 +248,7 @@ export const KEY_STATS: readonly KeyStatDef[] = [
   { key: 'net_income', label: 'Net income', format: 'money' },
   { key: 'eps_diluted', label: 'EPS', format: 'perShare', note: { key: 'eps_yoy', label: 'YoY', format: 'signed' } },
   { key: 'eps_cagr_5y', label: 'EPS CAGR 5Y', format: 'signed' },
+  { key: 'pe_ratio', label: 'P/E', format: 'multiple' },
   { key: 'fcf', label: 'Free cash flow', format: 'money', note: { key: 'fcf_yoy', label: 'YoY', format: 'signed' } },
   { key: 'fcf_per_share', label: 'FCF per share', format: 'perShare' },
   { key: 'gross_margin', label: 'Gross margin', format: 'percent' },

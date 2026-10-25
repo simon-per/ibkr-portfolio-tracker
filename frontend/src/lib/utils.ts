@@ -163,6 +163,11 @@ export function formatFractionPercent(fraction: number, digits: number = 1): str
   }).format(fraction)
 }
 
+/** A valuation multiple with one decimal: "33.4", "1,204.0". */
+export function formatMultiple(value: number): string {
+  return numberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)
+}
+
 /**
  * A money amount in compact units with one decimal at most: "$130.5B", "-$1.2M", "CHF 950".
  * For a figure beside a chart or in its tooltip; an axis tick passes its step to

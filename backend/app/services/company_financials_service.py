@@ -26,7 +26,10 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   the same rule, for the tab's hover. **3/5/10-year CAGRs** (`cagrs`) compare the latest
   point with the one that many years before it, over the whole history. None of these is
   computed for a margin, whose growth rate would read as a figure nobody means.
-- **Key stats** are the newest TTM point's figures, whatever period the charts show.
+- **Key stats** are the newest TTM point's figures, whatever period the charts show. The
+  **P/E** is the held listing's newest stored close over TTM diluted EPS: null for a company
+  not held (no price is stored for it), a close in another currency than the filings, or EPS
+  that is not positive.
 - **Annual** is the fiscal years as filed (the FY facts), not a sum of quarters.
 
 Figures stay in the reporting currency. Converting a history into the base currency would
@@ -43,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.company_financials import CompanyFinancial, SecCompany
 from app.models.security import Security
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
+from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
 from app.services.company_financials_normaliser import ANNUAL
@@ -284,12 +288,15 @@ def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]
     return points
 
 
-def key_stats(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
+def key_stats(
+    rows: Sequence[CompanyFinancial], price: Optional[float] = None
+) -> Dict[str, Any]:
     """
     The company's key figures at its newest TTM point, whatever period the charts show:
     the sums of the last four quarters, the balances at the newest quarter end, the YoY
     and 5-year growth by the series' rules. The payout ratio is TTM dividends per share
-    over TTM diluted EPS, null when the EPS is not positive.
+    over TTM diluted EPS, and the P/E `price` over it; both null when the EPS is not
+    positive.
     """
     points = _series_points(rows, "ttm")
     last = points[-1] if points else None
@@ -305,6 +312,7 @@ def key_stats(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
         )
 
     eps, dps = value("eps_diluted"), value("dividends_per_share")
+    positive_eps = eps is not None and eps > 0
     return {
         "label": last.label if last is not None else None,
         "period_end": last.period_end.isoformat() if last is not None else None,
@@ -325,9 +333,8 @@ def key_stats(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
         "diluted_shares": value("diluted_shares"),
         "shares_yoy": growth("diluted_shares", 1),
         "dividends_per_share": dps,
-        "payout_ratio": dps / eps
-        if dps is not None and eps is not None and eps > 0
-        else None,
+        "payout_ratio": dps / eps if dps is not None and positive_eps else None,
+        "pe_ratio": price / eps if price is not None and positive_eps else None,
         "buybacks": value("buybacks"),
         "dividends_paid": value("dividends_paid"),
     }
@@ -454,9 +461,13 @@ class CompanyFinancialsService:
     ) -> Dict[str, Any]:
         rows = await self.repo.rows_for(company.cik)
         coverage = (await self.repo.coverage([company.cik])).get(company.cik)
-        identity = self._identity(
-            company, (await self._held_listings([company.cik])).get(company.cik)
-        )
+        listing = (await self._held_listings([company.cik])).get(company.cik)
+        identity = self._identity(company, listing)
+        price = None
+        if listing is not None and coverage is not None:
+            close = await MarketPriceRepository(self.db).get_latest_price(listing.id)
+            if close is not None and close.currency == coverage["currency"]:
+                price = float(close.close_price)
         warnings: List[str] = []
         if not rows:
             warnings.append(
@@ -469,6 +480,6 @@ class CompanyFinancialsService:
             "range": range_key,
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
-            "key_stats": key_stats(rows),
+            "key_stats": key_stats(rows, price),
             "series": build_series(rows, period, range_key),
         }
