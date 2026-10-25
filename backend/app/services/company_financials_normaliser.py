@@ -85,7 +85,11 @@ METRICS: Dict[str, MetricSpec] = {
             "RevenuesNetOfInterestExpense",
             "Revenues",
             "RevenueFromContractWithCustomerExcludingAssessedTax",
+            # CRWD and ODFL report revenue with the taxes they collect included.
+            "RevenueFromContractWithCustomerIncludingAssessedTax",
             "SalesRevenueNet",
+            # ODFL's revenue before 2018: freight services.
+            "SalesRevenueServicesNet",
         ),
         non_negative=True,
     ),
@@ -217,7 +221,12 @@ SHARES_FROM_EPS_MAX_ERROR = 0.02
 # diluted count may sit well off NI/EPS (anti-dilution in a loss year) without being one.
 SHARES_SLIP_EPS_MAX_ERROR = 0.25
 SHARES_SLIP_TOLERANCE = 0.5
-SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (Fraction(1, 1000), Fraction(1000))
+SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (
+    Fraction(1, 1000),
+    Fraction(1000),
+    Fraction(1, 1_000_000),
+    Fraction(1_000_000),
+)
 
 ANNUAL = "FY"
 QUARTERS = ("Q1", "Q2", "Q3", "Q4")
@@ -246,10 +255,44 @@ SPLIT_RATIOS: Tuple[Fraction, ...] = tuple(
         | {Fraction(b, a) for a, b in ((3, 2), (4, 3), (5, 4), (5, 2), (5, 3))}
     )
 )
-# A concept's own unit slip: tagged in thousands (or a thousand times too large).
-SCALE_SLIPS: Tuple[Fraction, ...] = (Fraction(1, 1000), Fraction(1), Fraction(1000))
+# A concept's own unit slip: tagged in thousands or millions, or that many times too large
+# (PCAR's 2019 10-K tags its share counts in millions; STX's 2024 10-K its dividends per
+# share a million times over).
+SCALE_SLIPS: Tuple[Fraction, ...] = (
+    Fraction(1, 1_000_000),
+    Fraction(1, 1000),
+    Fraction(1),
+    Fraction(1000),
+    Fraction(1_000_000),
+)
 # The order a split vote tries them in: no slip first.
-SLIPS_IN_ORDER: Tuple[Fraction, ...] = (Fraction(1), Fraction(1, 1000), Fraction(1000))
+SLIPS_IN_ORDER: Tuple[Fraction, ...] = (
+    Fraction(1),
+    Fraction(1, 1000),
+    Fraction(1000),
+    Fraction(1, 1_000_000),
+    Fraction(1_000_000),
+)
+
+# A filing that shares no period with a newer one (a 10-K, until the next 10-K) inherits
+# the newer filing's split factor — wrong when a split fell between the two: BKNG's 25:1
+# (2026) came after its last pre-split 10-K and Q3 10-Q, and every Q3, Q4 and year since
+# 2012 stayed in the old basis while Q1 and Q2 were adjusted (CRWD's 4:1 and KLAC's 10:1
+# the same). `_neighbour_split` reads such a filing's basis from the nearest periods.
+NEIGHBOUR_DAYS = 100
+NEIGHBOUR_TOLERANCE = 0.05
+NEIGHBOUR_MIN_COUNTS = 2
+# The ratios companies split by, and no change. Not every whole number: adjacent periods'
+# weighted counts differ by a few percent, and BKNG's 24.3 snapped to 24, not 25. No 3:2,
+# too close to an acquisition's issuance.
+_COMMON_SPLITS = (2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30, 40, 50)
+NEIGHBOUR_RATIOS: Tuple[Fraction, ...] = tuple(
+    sorted(
+        {Fraction(1)}
+        | {Fraction(n) for n in _COMMON_SPLITS}
+        | {Fraction(1, n) for n in _COMMON_SPLITS}
+    )
+)
 
 # Relative agreement two filings' values of one period need to vote. Per-share figures are
 # rounded to the cent, so their tolerance grows as the figure shrinks, and a pair whose
@@ -427,7 +470,13 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
         filed_of[f.accn] = max(filed_of.get(f.accn, f.filed), f.filed)
 
     multiplier: Dict[Tuple[str, str], float] = {}
-    done: set = set()
+    # Each walked filing's split factor. A vote snaps the step from the newer filing it is
+    # compared with, never the whole factor: two splits compound past `SPLIT_RATIOS`
+    # (NFLX's 7:1 in 2015 and 10:1 in 2025 make 70, which snapped to 1/14 with a
+    # thousands slip).
+    split_of: Dict[str, Fraction] = {}
+    # Share-count facts of the filings already walked, for `_neighbour_split`.
+    walked_counts: Dict[str, List[Fact]] = defaultdict(list)
     previous_split = Fraction(1)
     for accn in sorted(by_accn, key=lambda a: (filed_of[a], a), reverse=True):
         pairs = []
@@ -436,7 +485,7 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
             if f.val == 0:
                 continue
             for g in by_period[(f.concept, f.start, f.end)]:
-                if g.accn not in done or g.val == 0 or (g.val > 0) != (f.val > 0):
+                if g.accn not in split_of or g.val == 0 or (g.val > 0) != (f.val > 0):
                     continue
                 tol = _tolerance(f, g)
                 if tol is None:
@@ -446,12 +495,19 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
                 if f.kind == MONETARY:
                     continue
                 as_shares = ratio if f.kind == SHARES else 1.0 / ratio
+                step = as_shares / float(split_of[g.accn])
                 for slip in SLIPS_IN_ORDER:
-                    snapped = _snap(as_shares / float(slip), SPLIT_RATIOS, tol)
+                    snapped = _snap(step / float(slip), SPLIT_RATIOS, tol)
                     if snapped is not None:
-                        split_votes[snapped] += 1
+                        split_votes[snapped * split_of[g.accn]] += 1
                         break
-        split = _vote(split_votes, previous_split)
+        if split_votes:
+            split = _vote(split_votes, previous_split)
+        else:
+            split = (
+                _neighbour_split(by_accn[accn], walked_counts, multiplier, split_of)
+                or previous_split
+            )
 
         scale_votes: Dict[str, Counter] = defaultdict(Counter)
         for f, ratio, tol in pairs:
@@ -463,9 +519,46 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
             kind = next(f.kind for f in by_accn[accn] if f.concept == concept)
             slip = _vote(scale_votes[concept], Fraction(1))
             multiplier[(concept, accn)] = float(slip * _split_part(kind, split))
-        done.add(accn)
+        split_of[accn] = split
+        for f in by_accn[accn]:
+            if f.kind == SHARES and f.val > 0:
+                walked_counts[f.concept].append(f)
         previous_split = split
     return multiplier
+
+
+def _neighbour_split(
+    own: Sequence[Fact],
+    walked_counts: Dict[str, List[Fact]],
+    multiplier: Dict[Tuple[str, str], float],
+    split_of: Dict[str, Fraction],
+) -> Optional[Fraction]:
+    """
+    The split factor of a filing that shares no period with a newer one, from its share
+    counts against the adjusted counts of the nearest newer periods (within
+    `NEIGHBOUR_DAYS`), or None to inherit the newer filing's. Only when every compared
+    count — at least `NEIGHBOUR_MIN_COUNTS` — steps by the same whole ratio
+    (`NEIGHBOUR_RATIOS`, within `NEIGHBOUR_TOLERANCE`): BKNG's last pre-split 10-K steps
+    24.3 and 24.3 to the next 10-Q, while ONDS's share issuance steps 1.50 and 2.08.
+    """
+    steps: List[Optional[Fraction]] = []
+    for f in own:
+        if f.kind != SHARES or f.val <= 0:
+            continue
+        near = [
+            g
+            for g in walked_counts.get(f.concept, ())
+            if 0 < abs((g.end - f.end).days) <= NEIGHBOUR_DAYS
+        ]
+        if not near:
+            continue
+        g = min(near, key=lambda g: (abs((g.end - f.end).days), g.end))
+        step = g.val * multiplier[(g.concept, g.accn)] / f.val / float(split_of[g.accn])
+        snapped = _snap(step, NEIGHBOUR_RATIOS, NEIGHBOUR_TOLERANCE)
+        steps.append(None if snapped is None else snapped * split_of[g.accn])
+    if len(steps) < NEIGHBOUR_MIN_COUNTS or None in steps or len(set(steps)) != 1:
+        return None
+    return steps[0]
 
 
 # ── Periods ──────────────────────────────────────────────────────────────────

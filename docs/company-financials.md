@@ -114,7 +114,7 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 
 | metric | chain, in order |
 |---|---|
-| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `SalesRevenueNet` |
+| revenue | `RevenuesNetOfInterestExpense` → `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` → `…IncludingAssessedTax` (CRWD, ODFL) → `SalesRevenueNet` → `SalesRevenueServicesNet` (ODFL before 2018) |
 | net income | `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss` |
 | diluted EPS | `EarningsPerShareDiluted` |
 | operating cash flow | `NetCashProvidedByUsedInOperatingActivities` → `…ContinuingOperations` |
@@ -218,11 +218,25 @@ filings made before and after a split.
 compared with the already-adjusted values of newer filings for the same periods, and the ratios
 vote for that filing's split factor, snapped to a plausible split ratio (`SPLIT_RATIOS`: 1:50 to
 50:1 and the usual 3:2-style fractions; a per-share pair votes only when cent rounding cannot blur
-it). The newest filing is the basis. A filing sharing no period with a newer one inherits the next
-newer filing's factor. Money is never split-adjusted.
+it). The newest filing is the basis. Money is never split-adjusted.
 
-The same vote, per concept, undoes a **factor-of-1000 unit slip** (early XBRL filings tagged
-some counts in thousands). A slip in a filing no newer one overlaps cannot be voted on, so a
+- **A vote snaps the step from the newer filing, not the whole factor.** Two splits compound past
+  the largest single ratio: NFLX's 7:1 (2015) and 10:1 (2025) make 70 for its older filings, which
+  the whole-factor snap read as 1/14 with a thousands slip (71.4; found auditing all 102
+  companies, 2026-10-25).
+- **A filing sharing no period with a newer one** — every 10-K until the next 10-K — inherits the
+  next newer filing's factor, **unless its share counts say a split fell between them**
+  (`_neighbour_split`): each count is compared with the adjusted count of the nearest newer period
+  ending within 100 days, and when at least two counts all step by the same common split ratio
+  (2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30, 40, 50 or the inverse, within 5%), that is the
+  filing's factor. BKNG's 25:1, CRWD's 4:1 and KLAC's 10:1 (2026) fell between a 10-K and the next
+  10-Q: inheriting left every Q3, Q4 and fiscal year in the old basis while Q1 and Q2 were
+  adjusted. ONDS's share issuance steps 1.50 and 2.08 — not unanimous, so inherited. Not every
+  whole number: adjacent weighted counts differ by a few percent, and BKNG's 24.3 snapped to 24.
+
+The same vote, per concept, undoes a **unit slip of a thousand or a million** (early XBRL filings
+tagged some counts in thousands; PCAR's 2019 10-K its share counts in millions, STX's 2024 10-K
+its dividends per share a million times over). A slip in a filing no newer one overlaps cannot be voted on, so a
 **reported share count about 1000× off net income / EPS** for the same period is rescaled too
 (ONDS tags some 10-Ks and Q1 10-Qs in thousands).
 

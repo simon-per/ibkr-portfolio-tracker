@@ -559,3 +559,96 @@ def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
         if r["metric"] == "dividends_paid"
     }
     assert paid == {"2009-06-30": 224e6}
+
+
+SHARES_CONCEPT = "WeightedAverageNumberOfDilutedSharesOutstanding"
+
+
+def _counts(*facts):
+    return _doc({SHARES_CONCEPT: {"units": {"shares": list(facts)}}})
+
+
+def test_two_splits_compound_past_the_largest_single_ratio():
+    """NFLX: 7:1 in 2015, 10:1 in 2025. The oldest filing's factor is 70, not 1000/14."""
+    doc = _counts(
+        _f("2021-01-01", "2021-03-31", 700.0, "2022-05-01", accn="c"),
+        _f("2022-01-01", "2022-03-31", 700.0, "2022-05-01", accn="c"),
+        _f("2020-01-01", "2020-03-31", 70.0, "2021-05-01", accn="b"),
+        _f("2021-01-01", "2021-03-31", 70.0, "2021-05-01", accn="b"),
+        _f("2019-01-01", "2019-03-31", 10.0, "2020-05-01", accn="a"),
+        _f("2020-01-01", "2020-03-31", 10.0, "2020-05-01", accn="a"),
+    )
+    multiplier = adjustments(_facts(doc))
+    assert multiplier[(SHARES_CONCEPT, "b")] == pytest.approx(10)
+    assert multiplier[(SHARES_CONCEPT, "a")] == pytest.approx(70)
+
+
+def _split_between(year_counts, quarter_counts):
+    """A 10-K (years) and the next 10-Q (quarters) sharing no period, as BKNG's around
+    its 25:1 split."""
+    (fy2024, fy2025), (q1_2025, q1_2026) = year_counts, quarter_counts
+    return _counts(
+        _f("2026-01-01", "2026-03-31", q1_2026, "2026-04-28", accn="q"),
+        _f("2025-01-01", "2025-03-31", q1_2025, "2026-04-28", accn="q"),
+        _f("2025-01-01", "2025-12-31", fy2025, "2026-02-18", form="10-K", accn="k"),
+        _f("2024-01-01", "2024-12-31", fy2024, "2026-02-18", form="10-K", accn="k"),
+    )
+
+
+def test_a_split_between_filings_that_share_no_period_is_read_from_the_neighbours():
+    doc = _split_between((33.0, 32.5), (812.0, 794.0))  # every count steps by about 25
+    assert adjustments(_facts(doc))[(SHARES_CONCEPT, "k")] == pytest.approx(25)
+
+
+def test_share_issuance_between_such_filings_is_no_split():
+    """ONDS: counts that grew by different factors are issuance; the factor is inherited."""
+    doc = _split_between((140.0, 100.0), (200.0, 208.0))  # steps 1.43 and 2.08
+    assert adjustments(_facts(doc))[(SHARES_CONCEPT, "k")] == pytest.approx(1)
+
+
+def test_a_share_count_tagged_in_millions_is_rescaled():
+    """PCAR's 2019 10-K tags its counts in millions (351.8 for 351.8M)."""
+    doc = _counts(
+        _f("2019-01-01", "2019-12-31", 349e6, "2020-02-20", form="10-K", accn="n"),
+        _f("2018-01-01", "2018-12-31", 350e6, "2020-02-20", form="10-K", accn="n"),
+        _f("2018-01-01", "2018-12-31", 350.0, "2019-02-21", form="10-K", accn="s"),
+        _f("2017-01-01", "2017-12-31", 352.0, "2019-02-21", form="10-K", accn="s"),
+    )
+    assert adjustments(_facts(doc))[(SHARES_CONCEPT, "s")] == pytest.approx(1e6)
+
+
+def test_a_dividend_tagged_a_million_times_over_is_rescaled():
+    """STX's 2024 10-K tags 2,770,000 for a 2.77 dividend per share."""
+    concept = "CommonStockDividendsPerShareDeclared"
+    doc = _doc(
+        {
+            concept: {
+                "units": {
+                    "USD/shares": [
+                        _f("2024-07-01", "2025-06-30", 2.86, "2025-08-01", form="10-K", accn="n"),
+                        _f("2023-07-01", "2024-06-30", 2.80, "2025-08-01", form="10-K", accn="n"),
+                        _f("2023-07-01", "2024-06-30", 2.8e6, "2024-08-02", form="10-K", accn="s"),
+                        _f("2022-07-01", "2023-06-30", 2.77e6, "2024-08-02", form="10-K", accn="s"),
+                    ]
+                }
+            }
+        }
+    )
+    assert adjustments(_facts(doc))[(concept, "s")] == pytest.approx(1e-6)
+
+
+def test_revenue_with_the_taxes_collected_is_revenue():
+    """CRWD and ODFL tag only `RevenueFromContractWithCustomerIncludingAssessedTax`."""
+    doc = _doc(
+        {
+            "RevenueFromContractWithCustomerIncludingAssessedTax": {
+                "units": {
+                    "USD": [
+                        _f("2024-01-01", "2024-12-31", 5.8e9, "2025-02-20", form="10-K"),
+                    ]
+                }
+            }
+        }
+    )
+    revenue = [r["value"] for r in normalise(doc).rows if r["metric"] == "revenue"]
+    assert revenue == [5.8e9]

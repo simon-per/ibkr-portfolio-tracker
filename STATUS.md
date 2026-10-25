@@ -340,7 +340,9 @@ One line each, newest first; drop the oldest.
 
 - **2026-10-25 (Company tab: figures and Nasdaq-100)** — key figures, four more series, CAGRs;
   net cash built then dropped (cash excludes investments); figures re-keyed by CIK so 100
-  constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated.
+  constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated;
+  an audit of every company's series fixed splits between filings (BKNG, CRWD, KLAC, NFLX), two
+  revenue concepts (CRWD, ODFL) and million-fold unit slips (PCAR, STX).
 
 - **2026-10-25 (Company tab, agent team)** — two worktree teammates (backend, frontend) against
   one contract; a 22-company EDGAR audit moved the revenue/NI chains (IBKR), fixed ORCL's
