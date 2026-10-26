@@ -445,11 +445,15 @@ def key_stats(
         return last.base.get(name) if last is not None else None
 
     # The newest quarter's own diluted count, which a TTM missing a quarter still has, or the
-    # one a quarter before it (TTWO's loss quarter has none): only the cross-check reads it.
+    # newest quarter's or year's up to a quarter before it (TTWO's two loss quarters have none,
+    # its fiscal year does): only the market cap's cross-check reads it.
+    dated = sorted(
+        _points(rows, annual=False) + _points(rows, annual=True), key=lambda p: p.period_end
+    )
     quarter_diluted = next(
         (
             q.base["diluted_shares"]
-            for q in reversed(_points(rows, annual=False))
+            for q in reversed(dated)
             if last is not None
             and q.base.get("diluted_shares")
             and 0 <= (last.period_end - q.period_end).days <= CONSECUTIVE_DAYS[1]
