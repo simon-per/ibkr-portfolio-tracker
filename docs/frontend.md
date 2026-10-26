@@ -1037,7 +1037,8 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
   `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
   FCF, the four margins, return on equity, shares, DPS with its payout ratio and the dividend
-  yield, P/E, P/S, P/FCF, buybacks, dividends paid, with YoY
+  yield, market cap, enterprise value, net cash, P/E, P/S, P/FCF, EV/EBIT, buybacks, dividends
+  paid, with YoY
   and 5-year CAGR notes; a figure the company does not file is left out, never a dash row), then
   a grid of up to eleven cards (revenue, operating income, net income, FCF, margins, valuation
   — P/E, P/FCF, P/S —, return on equity, shares, buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot

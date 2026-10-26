@@ -15,10 +15,14 @@ given. TTM, free cash flow, margins, per-share figures and growth:
   is missing or not positive. Gross profit is the tagged one, else revenue less cost of
   revenue.
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
-  Debt is the tagged total, else its noncurrent and current halves added (`_debt`). **No
-  net cash**: cash is cash and equivalents only, and the short-term investments beside it are
-  tagged too unevenly to add (NVDA's stop in 2025), so cash − debt showed the book's most
-  cash-rich company as a net debtor.
+  Debt is the tagged total, else its noncurrent and current halves added (`_debt`).
+- **Net cash** = cash and short-term investments less debt (`_with_net_cash`): the combined
+  line when tagged, else cash plus the investments. A period without the investments, of a
+  company that tagged them within `INVESTMENTS_LOOKBACK_DAYS`, has none: NVDA stopped tagging
+  its $49B of securities in 2025, and cash alone showed it as a net debtor. A company that
+  never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0.
+- **Enterprise value** = market cap less net cash; **EV/EBIT** over TTM operating income, null
+  when either is not positive (key figures only).
 - **CAGR** over the range's first and last known values: null when the start is not
   positive, the end is negative, or they are less than a year apart. **YoY** compares the
   latest point with the point a year before it (four quarters back, or the previous fiscal
@@ -89,6 +93,7 @@ SERIES = (
     "dividends_paid",
     "cash",
     "debt",
+    "net_cash",
     "pe_ratio",
     "ps_ratio",
     "pfcf_ratio",
@@ -119,10 +124,15 @@ BALANCES = (
     "debt_current",
     "equity",
     "shares_outstanding",
+    "cash_and_short_term",
+    "short_term_investments",
 )
 # Ratios: a growth rate of a multiple, a yield or a return reads as a figure nobody means.
 VALUATIONS = ("pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield")
-NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe"}
+NO_GROWTH = MARGINS | set(VALUATIONS) | {"roe", "net_cash"}
+# A company that tagged short-term investments this recently and not at a period end has an
+# unknown net cash there, not its cash alone.
+INVESTMENTS_LOOKBACK_DAYS = 730
 # A period end's P/E takes the newest close up to this many days before it (weekly closes).
 PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
@@ -379,6 +389,31 @@ def market_cap(
     return price * outstanding
 
 
+def _with_net_cash(points: List[Point], rows: Sequence[CompanyFinancial]) -> None:
+    """Each point's cash and short-term investments less its debt (see the module docstring)."""
+    tagged = sorted(
+        p.period_end
+        for p in _points(rows, annual=False) + _points(rows, annual=True)
+        if p.base.get("short_term_investments") is not None
+        or p.base.get("cash_and_short_term") is not None
+    )
+    for p in points:
+        b = p.base
+        cash, investments = b.get("cash"), b.get("short_term_investments")
+        if b.get("cash_and_short_term") is not None:
+            liquid = b["cash_and_short_term"]
+        elif cash is not None and investments is not None:
+            liquid = cash + investments
+        elif cash is not None and not any(
+            0 <= (p.period_end - d).days <= INVESTMENTS_LOOKBACK_DAYS for d in tagged
+        ):
+            liquid = cash
+        else:
+            liquid = None
+        debt = p.series.get("debt")
+        p.series["net_cash"] = liquid - debt if liquid is not None and debt is not None else None
+
+
 def _value_near(values: Dict[date, float], day: date) -> Optional[float]:
     """The value dated nearest `day`, within `YOY_SLACK_DAYS`, or None."""
     near = [(abs((d - day).days), v) for d, v in values.items()]
@@ -415,6 +450,7 @@ def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]
     for point in points:
         _derive(point)
     _with_roe(points, rows, period)
+    _with_net_cash(points, rows)
     return points
 
 
@@ -460,6 +496,11 @@ def key_stats(
         ),
         None,
     )
+    cap = market_cap(
+        price, value_base("shares_outstanding"), quarter_diluted or value_base("diluted_shares")
+    )
+    net_cash = value("net_cash")
+    ev = cap - net_cash if cap is not None and net_cash is not None else None
     eps, dps = value("eps_diluted"), value("dividends_per_share")
     positive_eps = eps is not None and eps > 0
     return {
@@ -484,9 +525,10 @@ def key_stats(
         "dividends_per_share": dps,
         "payout_ratio": dps / eps if dps is not None and positive_eps else None,
         **valuations(price, last.series if last is not None else {}),
-        "market_cap": market_cap(
-            price, value_base("shares_outstanding"), quarter_diluted or value_base("diluted_shares")
-        ),
+        "market_cap": cap,
+        "net_cash": value("net_cash"),
+        "enterprise_value": ev,
+        "ev_ebit": _ratio(ev, value("operating_income")) if ev and ev > 0 else None,
         "roe": value("roe"),
         "buybacks": value("buybacks"),
         "dividends_paid": value("dividends_paid"),

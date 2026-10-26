@@ -17,7 +17,8 @@
   the cover page's count where the balance sheet tags none (NVDA, PEP, TXN). On 84 of 102 after
   the refetch; the rest tag per class (META, MA, ABNB) or their counts disagree (TSLA, LITE). A
   16-week fourth quarter is a quarter in the normaliser too: COST's year ends regained cash,
-  debt and equity.
+  debt and equity. Then net cash (cash and short-term investments less debt, unknown where a
+  company's investments stop being tagged, as NVDA's in 2025), enterprise value and EV/EBIT.
 - **P/E** for every listed company, in *Key figures* and a P/E card: weekly Yahoo closes per
   CIK (`company_price_sync`, Sunday 05:00, about a hundred requests a week, approved by the
   owner), each period end's close over TTM diluted EPS, splits after the newest filing scaled

@@ -1636,6 +1636,8 @@ export interface CompanyFinancialsSeriesSet {
   dividends_paid: CompanyFinancialsSeries;
   cash: CompanyFinancialsSeries;
   debt: CompanyFinancialsSeries;
+  /** Cash and short-term investments less debt; null where either side is unknown. */
+  net_cash: CompanyFinancialsSeries;
   /** Each period end's close over the TTM diluted EPS there; no growth. */
   pe_ratio: CompanyFinancialsSeries;
   ps_ratio: CompanyFinancialsSeries;
@@ -1671,6 +1673,10 @@ export interface CompanyFinancialsKeyStats {
   pe_ratio: number | null;
   /** The newest close x shares outstanding; null for a count off the diluted one by 10%+. */
   market_cap: number | null;
+  net_cash: number | null;
+  /** Market cap less net cash. */
+  enterprise_value: number | null;
+  ev_ebit: number | null;
   ps_ratio: number | null;
   pfcf_ratio: number | null;
   /** TTM dividends per share over the same close, a fraction. */

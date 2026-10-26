@@ -124,6 +124,8 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | operating income | `OperatingIncomeLoss` |
 | dividends per share | `CommonStockDividendsPerShareDeclared` → `CommonStockDividendsPerShareCashPaid` |
 | cash | `CashAndCashEquivalentsAtCarryingValue` → `CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents` |
+| cash and short-term investments | `CashCashEquivalentsAndShortTermInvestments` (MSFT, GOOGL, ADBE) |
+| short-term investments | `ShortTermInvestments` → `MarketableSecuritiesCurrent` → `AvailableForSaleSecuritiesDebtSecuritiesCurrent` → `AvailableForSaleSecuritiesCurrent` |
 | gross profit | `GrossProfit` |
 | cost of revenue | `CostOfRevenue` → `CostOfGoodsAndServicesSold` → `CostOfGoodsSold` |
 | buybacks | `PaymentsForRepurchaseOfCommonStock` |
@@ -156,10 +158,15 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   14B, 18B), not as a total. **A tagged total of exactly zero is a slip** and falls through to the
   halves (ORCL FY2022 and AMD FY2021 tag 0 beside billions of notes). Commercial paper and
   short-term borrowings are not counted.
-- **No net cash.** Cash is cash and equivalents only; the short-term investments beside it are
-  tagged too unevenly to add (NVDA's `MarketableSecuritiesCurrent` stops in 2025), and cash − debt
-  showed NVDA, the book's most cash-rich company, as a net debtor (seen in the preview,
-  2026-10-25). The tab draws cash beside debt and derives nothing from the pair.
+- **Net cash counts the short-term investments, or is unknown** (`_with_net_cash`). Cash alone
+  showed NVDA, the book's most cash-rich company, as a net debtor (2026-10-25), so net cash was
+  dropped, then rebuilt on the investments (2026-10-26): the combined line when tagged, else cash
+  plus the investments chain. A period without them, of a company that tagged them within
+  `INVESTMENTS_LOOKBACK_DAYS` (two years), has no net cash: NVDA's `MarketableSecuritiesCurrent`
+  stops in late 2025, so its net cash ends there rather than turning into cash alone. A company
+  that never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0
+  (a debt-free MNST has none). Enterprise value = market cap less net cash; EV/EBIT over TTM
+  operating income, both in the key figures only.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 
@@ -442,7 +449,7 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
 - **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
   HONA and SPCX are new filers with too few quarters for a TTM.
 - Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
-- EBITDA, net cash, return on invested capital, enterprise-value multiples: each subtracts debt
-  and cash, tagged too unevenly to subtract (cash leaves out short-term investments).
+- EBITDA (D&A tagged unevenly, above), so no EV/EBITDA; return on invested capital (it needs a
+  tax rate and invested capital, neither tagged consistently).
 - **Market cap of a multi-class company** (GOOGL, META): its count is tagged per class, which
   companyfacts leaves out, so it has none; the diluted average is never used in its place.

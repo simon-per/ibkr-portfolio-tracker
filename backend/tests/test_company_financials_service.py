@@ -183,7 +183,8 @@ def test_growth_is_computed_for_every_series_but_the_margins_and_the_pe():
         if name in NO_GROWTH:
             assert series[name]["cagr"] is None and series[name]["yoy"] is None
             assert set(series[name]["cagrs"].values()) == {None}
-    assert NO_GROWTH == MARGINS | {"pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield", "roe"}
+    assert NO_GROWTH == MARGINS | {
+        "pe_ratio", "ps_ratio", "pfcf_ratio", "dividend_yield", "roe", "net_cash"}
     first, last = series["revenue"]["points"][0], series["revenue"]["points"][-1]
     years = (
         date.fromisoformat(last["period_end"]) - date.fromisoformat(first["period_end"])
@@ -277,10 +278,34 @@ def test_a_ttm_point_carries_its_newest_quarters_balances_and_sums_the_flows():
     series = build_series(_rows(ENDS[:5], BALANCED), "ttm", "max")
     assert _values(series, "cash") == [53.0, 54.0]
     assert _values(series, "debt") == [80.0, 80.0]
-    assert "net_cash" not in series  # cash leaves out short-term investments
+    # Never tagged any short-term investments: its cash is all it holds.
+    assert _values(series, "net_cash") == [53.0 - 80.0, 54.0 - 80.0]
     assert _values(series, "buybacks") == [16.0, 16.0]
     assert _values(series, "dividends_paid") == [4.0, 4.0]
     assert _values(series, "operating_income") == [100.0, 100.0]
+
+
+def test_net_cash_counts_the_short_term_investments_or_admits_it_does_not_know():
+    # NVDA: securities tagged beside cash, then no longer tagged at all.
+    nvda = {**BALANCED, "short_term_investments": lambda i: 40.0}
+    rows = _rows(ENDS[:8], nvda, skip={("short_term_investments", 6), ("short_term_investments", 7)})
+    quarterly = _values(build_series(rows, "quarterly", "max"), "net_cash")
+    assert quarterly[5] == pytest.approx(55.0 + 40.0 - 80.0)
+    assert quarterly[6:] == [None, None]  # never its cash alone
+    # MSFT: one line for both.
+    msft = {**BALANCED, "cash_and_short_term": lambda i: 300.0}
+    assert _values(build_series(_rows(ENDS[:4], msft), "quarterly", "max"), "net_cash")[0] == 220.0
+    # No debt tagged is no net cash, never debt of 0.
+    nodebt = {k: v for k, v in BALANCED.items() if k != "debt_total"}
+    assert set(_values(build_series(_rows(ENDS[:4], nodebt), "quarterly", "max"), "net_cash")) == {None}
+
+
+def test_enterprise_value_is_the_market_cap_less_net_cash():
+    rows = _rows(ENDS, {**BALANCED, "shares_outstanding": lambda i: 100.0 + i})
+    stats = key_stats(rows, 40.0)
+    assert stats["enterprise_value"] == pytest.approx(stats["market_cap"] - stats["net_cash"])
+    assert stats["ev_ebit"] == pytest.approx(stats["enterprise_value"] / (4 * 25.0))
+    assert key_stats(rows)["enterprise_value"] is None  # no price, no cap
 
 
 def test_no_debt_tagged_is_no_debt_figure_never_zero():

@@ -113,6 +113,15 @@ class CompanyFinancialsKeyStats(BaseModel):
         description="The same close x shares outstanding at the newest quarter end; null when "
         "that count is more than 10% off the diluted average (one class of several).",
     )
+    net_cash: Optional[float] = Field(
+        None,
+        description="Cash and short-term investments less debt at the newest quarter end; "
+        "null when either side is not known.",
+    )
+    enterprise_value: Optional[float] = Field(None, description="Market cap less net cash.")
+    ev_ebit: Optional[float] = Field(
+        None, description="Enterprise value / TTM operating income; null when either <= 0."
+    )
     ps_ratio: Optional[float] = Field(None, description="The same close / TTM revenue per share.")
     pfcf_ratio: Optional[float] = Field(None, description="The same close / TTM FCF per share.")
     dividend_yield: Optional[float] = Field(
@@ -147,6 +156,7 @@ class CompanyFinancialsSeriesSet(BaseModel):
     dividends_paid: CompanyFinancialsSeries
     cash: CompanyFinancialsSeries
     debt: CompanyFinancialsSeries
+    net_cash: CompanyFinancialsSeries
     pe_ratio: CompanyFinancialsSeries
     ps_ratio: CompanyFinancialsSeries
     pfcf_ratio: CompanyFinancialsSeries

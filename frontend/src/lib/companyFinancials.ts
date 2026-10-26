@@ -95,6 +95,7 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
     total: { title: 'Cash & debt', format: 'money', series: [
       { key: 'cash', name: 'Cash & equivalents' },
       { key: 'debt', name: 'Debt' },
+      { key: 'net_cash', name: 'Net cash' },
     ] } },
   { id: 'dps', kind: 'bar', header: 'growth', optional: true,
     total: { title: 'Dividends per share', format: 'perShare',
@@ -258,6 +259,9 @@ export const KEY_STATS: readonly KeyStatDef[] = [
   { key: 'eps_diluted', label: 'EPS', format: 'perShare', note: { key: 'eps_yoy', label: 'YoY', format: 'signed' } },
   { key: 'eps_cagr_5y', label: 'EPS CAGR 5Y', format: 'signed' },
   { key: 'market_cap', label: 'Market cap', format: 'money' },
+  { key: 'enterprise_value', label: 'Enterprise value', format: 'money' },
+  { key: 'net_cash', label: 'Net cash', format: 'money' },
+  { key: 'ev_ebit', label: 'EV/EBIT', format: 'multiple' },
   { key: 'pe_ratio', label: 'P/E', format: 'multiple' },
   { key: 'ps_ratio', label: 'P/S', format: 'multiple' },
   { key: 'pfcf_ratio', label: 'P/FCF', format: 'multiple' },

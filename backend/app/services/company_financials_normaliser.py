@@ -176,6 +176,22 @@ METRICS: Dict[str, MetricSpec] = {
             "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
         ),
     ),
+    # Cash and short-term investments as one line (MSFT, GOOGL, ADBE), and the investments
+    # alone for those that tag them apart: the line item first, then its older spellings.
+    # Net cash needs them: cash alone showed NVDA, with $49B of securities, as a net debtor.
+    "cash_and_short_term": MetricSpec(
+        MONETARY, INSTANT, ("CashCashEquivalentsAndShortTermInvestments",)
+    ),
+    "short_term_investments": MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "ShortTermInvestments",
+            "MarketableSecuritiesCurrent",
+            "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+            "AvailableForSaleSecuritiesCurrent",
+        ),
+    ),
     # Gross profit as tagged; the service falls back to revenue less cost of revenue, the
     # only form META, GOOGL and SPGI file. `CostOfServices` alone is a part of the cost
     # (SPGI, ORCL), so it is not in the chain.
