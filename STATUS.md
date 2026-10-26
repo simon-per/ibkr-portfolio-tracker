@@ -9,7 +9,7 @@
 
 **Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
-(102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes) and ROE, gross margin, operating income,
+(102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
 is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
@@ -344,7 +344,8 @@ One line each, newest first; drop the oldest.
   fill exposed EPS gaps (COST's 16-week Q4, continuing-ops and BasicAndDiluted EPS, EXC's
   untagged years, DXCM's lone slip) and a spin-off booked as a split (SPGI). P/E on 88 of 102;
   then P/S, P/FCF, dividend yield and return on equity (new `equity` concept), a Valuation card,
-  market cap (balance-sheet or cover count, cross-checked against the diluted count).
+  market cap (balance-sheet or cover count, cross-checked against the diluted count); net cash
+  with short-term investments (unknown where they stop being tagged, as NVDA's), EV, EV/EBIT.
 
 - **2026-10-25 (Company tab: figures and Nasdaq-100)** — key figures, four more series, CAGRs;
   net cash built then dropped (cash excludes investments); figures re-keyed by CIK so 100
