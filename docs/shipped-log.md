@@ -13,7 +13,11 @@
   Valuation card of P/E, P/FCF, P/S), from the same closes; return on equity from a new
   `equity` concept (key figure and card), null for negative equity. No new Yahoo request;
   one EDGAR refetch for the equity rows. Then market cap: the close x the balance sheet's
-  shares outstanding, null when that count is 10%+ off the diluted one (a class of several).
+  shares outstanding, null when that count is 10%+ off the diluted one (a class of several);
+  the cover page's count where the balance sheet tags none (NVDA, PEP, TXN). On 84 of 102 after
+  the refetch; the rest tag per class (META, MA, ABNB) or their counts disagree (TSLA, LITE). A
+  16-week fourth quarter is a quarter in the normaliser too: COST's year ends regained cash,
+  debt and equity.
 - **P/E** for every listed company, in *Key figures* and a P/E card: weekly Yahoo closes per
   CIK (`company_price_sync`, Sunday 05:00, about a hundred requests a week, approved by the
   owner), each period end's close over TTM diluted EPS, splits after the newest filing scaled

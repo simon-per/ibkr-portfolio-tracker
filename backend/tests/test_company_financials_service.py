@@ -379,6 +379,10 @@ def test_the_market_cap_needs_a_count_that_agrees_with_the_diluted_one():
     half = _rows(ENDS, {**BASE, "shares_outstanding": lambda i: 50.0})
     assert key_stats(half, 40.0)["market_cap"] is None
     assert key_stats(rows)["market_cap"] is None  # no price
+    # The newest quarter without a diluted count (a loss quarter's derived count dropped):
+    # the quarter before it checks the outstanding one.
+    gap = _rows(ENDS, {**BASE, "shares_outstanding": lambda i: 100.0 + i}, skip={("diluted_shares", n)})
+    assert key_stats(gap, 40.0)["market_cap"] == pytest.approx(40.0 * (100.0 + n))
 
 
 def test_return_on_equity_is_ttm_income_over_the_years_mean_equity():

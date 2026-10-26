@@ -444,12 +444,18 @@ def key_stats(
     def value_base(name: str) -> Optional[float]:
         return last.base.get(name) if last is not None else None
 
-    # The newest quarter's own diluted count, which a TTM missing a quarter still has.
-    quarter = next(
-        (q for q in _points(rows, annual=False) if last and q.period_end == last.period_end),
+    # The newest quarter's own diluted count, which a TTM missing a quarter still has, or the
+    # one a quarter before it (TTWO's loss quarter has none): only the cross-check reads it.
+    quarter_diluted = next(
+        (
+            q.base["diluted_shares"]
+            for q in reversed(_points(rows, annual=False))
+            if last is not None
+            and q.base.get("diluted_shares")
+            and 0 <= (last.period_end - q.period_end).days <= CONSECUTIVE_DAYS[1]
+        ),
         None,
     )
-    quarter_diluted = quarter.base.get("diluted_shares") if quarter is not None else None
     eps, dps = value("eps_diluted"), value("dividends_per_share")
     positive_eps = eps is not None and eps > 0
     return {

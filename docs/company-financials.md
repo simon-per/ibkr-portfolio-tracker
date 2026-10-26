@@ -339,7 +339,12 @@ Computed in `company_financials_service` only:
   never 0%; a negative FCF is no P/FCF.
 - **Return on equity** = TTM net income (a year's own on the annual view) / the mean of the
   equity at the period end and a year before it (within `YOY_SLACK_DAYS`); null when either is
-  missing or not positive — a buyback-heavy company's negative equity makes no return. The `pe_ratio` series takes each period end's newest weekly close within
+  missing or not positive — a buyback-heavy company's negative equity makes no return.
+- **Market cap** (key figures only) = the newest close x shares outstanding at the newest quarter
+  end, when that count is within `MARKET_CAP_SHARE_TOLERANCE` (10%) of the newest diluted count
+  (the quarter's own, else one up to a quarter before: TTWO's loss quarter has none); otherwise
+  null, never the diluted count in its place. It declines TSLA (3.95B outstanding against 3.54B
+  diluted) and LITE, whose two counts genuinely differ, rather than guess which is the cap. The `pe_ratio` series takes each period end's newest weekly close within
   `PRICE_MATCH_DAYS` before it; the key figures take the newest of the weekly closes and a held
   listing's daily close (`market_prices`), null when older than `PRICE_MAX_AGE_DAYS`. A close in
   another currency than the filings is not used. No growth is computed for it (`NO_GROWTH`). It
