@@ -225,7 +225,11 @@ METRICS: Dict[str, MetricSpec] = {
     # Debt, current maturities included: the total as tagged, and its two halves for the
     # companies that tag only those (MA, GOOGL's quarters); the service adds them. Never
     # `DebtInstrumentCarryingAmount`, which ORCL's 10-Qs tag per new bond issue, not as a
-    # total. Commercial paper and short-term borrowings are not counted.
+    # total. Commercial paper and short-term borrowings are not counted beside a current
+    # maturity; they are the current half of a company that tags nothing else current (NFLX).
+    # ORCL moved to notes-and-loans concepts in 2026, which left it with no debt at all. Not
+    # `DebtLongtermAndShorttermCombinedAmount`: it is principal, ~1% off the carrying amounts
+    # the halves add (STX).
     "debt_total": MetricSpec(
         MONETARY,
         INSTANT,
@@ -237,10 +241,16 @@ METRICS: Dict[str, MetricSpec] = {
     "debt_noncurrent": MetricSpec(
         MONETARY,
         INSTANT,
-        ("LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"),
+        (
+            "LongTermDebtNoncurrent",
+            "LongTermDebtAndCapitalLeaseObligations",
+            "LongTermNotesAndLoans",
+        ),
     ),
     "debt_current": MetricSpec(
-        MONETARY, INSTANT, ("LongTermDebtCurrent", "DebtCurrent")
+        MONETARY,
+        INSTANT,
+        ("LongTermDebtCurrent", "DebtCurrent", "NotesPayableCurrent", "ShortTermBorrowings"),
     ),
     # The balance sheet's count at the period end, for the market cap. A company with several
     # classes tags it per class, which companyfacts leaves out: none is read for it.

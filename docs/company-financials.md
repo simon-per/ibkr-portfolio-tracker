@@ -131,8 +131,8 @@ the SEC lists no such ticker" needs a row of its own, with its own stamp (the `I
 | buybacks | `PaymentsForRepurchaseOfCommonStock` |
 | dividends paid | `PaymentsOfDividendsCommonStock` → `PaymentsOfDividends` → `PaymentsOfOrdinaryDividends` |
 | debt, total | `LongTermDebt` → `LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities` |
-| debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` |
-| debt, current | `LongTermDebtCurrent` → `DebtCurrent` |
+| debt, noncurrent | `LongTermDebtNoncurrent` → `LongTermDebtAndCapitalLeaseObligations` → `LongTermNotesAndLoans` (ORCL from 2026) |
+| debt, current | `LongTermDebtCurrent` → `DebtCurrent` → `NotesPayableCurrent` (ORCL) → `ShortTermBorrowings` (NFLX) |
 | shares outstanding | `CommonStockSharesOutstanding` → `dei:EntityCommonStockSharesOutstanding` (the cover's, dated weeks after the period: keyed to the newest period end its own filing reports). A count tagged per class is left out by companyfacts |
 | equity | `StockholdersEquity` → `…IncludingPortionAttributableToNoncontrollingInterest` (the parent's first, as net income is) |
 
