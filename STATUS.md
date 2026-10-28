@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-25.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-10-28.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -95,6 +95,11 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **Short-range returns and risk (2026-10-28):** on a range under a year the return card reads
+  *Period return* (`/api/portfolio/annualized-return` `method` `period`), not an annualised rate;
+  on 1W and early MTD, Sharpe, Sortino and Volatility show a dash (20-return floor). Checked only
+  on a demo database; the session could not reach production.
 
 - **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
   `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old;
