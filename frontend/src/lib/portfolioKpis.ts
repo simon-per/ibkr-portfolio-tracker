@@ -5,12 +5,16 @@ import { isValuable, type ValuablePosition } from './positionValuation'
 export const TRADING_DAYS = 252
 /** EUR risk-free assumption for the Sharpe numerator. Shared with `rollingRisk.ts`. */
 export const RISK_FREE_RATE = 0.03
-/** Below this many daily returns the statistics are noise, not signal. */
-const MIN_RETURNS = 5
 /**
- * Below this many *paired* returns a beta is an anecdote. Higher than
- * `MIN_RETURNS` because a regression slope needs far more evidence than a mean
- * does, and because the pairing rule below throws days away.
+ * Below this many daily returns the statistics are noise, not signal — about a
+ * trading month. It was 5 until 2026-10-28, which a 1W range just met, so a Sharpe,
+ * Sortino and volatility annualised from five days rendered as measurements (KPI
+ * audit 2026-10-02).
+ */
+export const MIN_RETURNS = 20
+/**
+ * Below this many *paired* returns a beta is an anecdote. The same floor as
+ * `MIN_RETURNS`, counted after the pairing rule below throws days away.
  */
 export const MIN_PAIRED_RETURNS = 20
 /**

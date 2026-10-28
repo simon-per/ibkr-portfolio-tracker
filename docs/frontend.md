@@ -52,8 +52,8 @@ from one dominant one.
   on every sale date in `externalFlow`'s fallback. That would bias beta on exactly the days the
   portfolio traded. Dropping the pair costs a few days a month and biases nothing. `sampleDays` rides
   along so a thin window declares itself instead of showing a confident slope.
-- **Volatility, Sortino *and Sharpe* are `null`, not `0`**, below the minimum sample or with nothing to
-  divide by. A `0` meaning "unknown" being read later as a fact is the most repeated bug in this
+- **Volatility, Sortino *and Sharpe* are `null`, not `0`**, below the minimum sample (`MIN_RETURNS`, 20
+  daily returns — 5 until 2026-10-28 let a 1W range annualise one week) or with nothing to divide by. A `0` meaning "unknown" being read later as a fact is the most repeated bug in this
   codebase.
 
   **Sharpe was the exception until 2026-08-05**, because it predates the risk row and was missed when

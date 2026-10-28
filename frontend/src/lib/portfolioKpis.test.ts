@@ -12,6 +12,7 @@ import {
   herfindahlConcentration,
   isMeasurable,
   maxDrawdownPct,
+  MIN_RETURNS,
   periodChange,
   sharpeRatio,
   sortinoDetail,
@@ -129,18 +130,26 @@ describe('sharpeRatio', () => {
   it('is null when there is no volatility to divide by', () => {
     // A perfectly flat series is what a stale price feed looks like, and return per unit
     // of risk is undefined when there is no risk.
-    const flat = Array.from({ length: 10 }, (_, i) =>
-      point(`2026-01-${String(i + 1).padStart(2, '0')}`, 100, 100, 0))
+    const flat = Array.from({ length: MIN_RETURNS + 4 }, (_, i) => point(day(i), 100, 100, 0))
     expect(sharpeRatio(flat)).toBeNull()
   })
 
   it('is positive for steady gains and negative for steady losses', () => {
-    const rising = [100, 101, 102, 103, 104, 105, 106].map((v, i) =>
-      point(`2026-01-0${i + 1}`, v, 100, 0))
-    const falling = [100, 99, 98, 97, 96, 95, 94].map((v, i) =>
-      point(`2026-01-0${i + 1}`, v, 100, 0))
+    const rising = Array.from({ length: MIN_RETURNS + 1 }, (_, i) => point(day(i), 100 + i, 100, 0))
+    const falling = Array.from({ length: MIN_RETURNS + 1 }, (_, i) => point(day(i), 100 - i, 100, 0))
     expect(sharpeRatio(rising)!).toBeGreaterThan(0)
     expect(sharpeRatio(falling)!).toBeLessThan(0)
+  })
+
+  it('is null on a week, which is five returns annualised as if they were a year', () => {
+    // The KPI audit's 1W case: five daily returns used to clear the floor, so the card
+    // showed a Sharpe, a Sortino and a volatility scaled by 252 from one week.
+    const week = compounded([0.01, -0.004, 0.006, 0.002, -0.003])
+    expect(sharpeRatio(week)).toBeNull()
+    expect(sortinoDetail(week).absence).toBe('insufficient_history')
+    expect(annualizedVolatilityPct(week)).toBeNull()
+    const month = compounded(Array.from({ length: MIN_RETURNS }, (_, i) => [0.01, -0.004, 0.006, 0.002, -0.003][i % 5]))
+    expect(sharpeRatio(month)).not.toBeNull()
   })
 
   it('is clamped rather than exploding on a high return with small volatility', () => {
@@ -151,7 +160,7 @@ describe('sharpeRatio', () => {
     //
     // ~2% a day with a σ of 0.0005 gives a raw ratio in the hundreds, so the clamp is
     // what the assertion actually measures.
-    const returns = Array.from({ length: 12 }, (_, i) => (i % 2 === 0 ? 0.02 : 0.021))
+    const returns = Array.from({ length: MIN_RETURNS + 2 }, (_, i) => (i % 2 === 0 ? 0.02 : 0.021))
     const ratio = sharpeRatio(compounded(returns))
     expect(ratio).not.toBeNull()
     expect(ratio).toBe(10)
@@ -175,6 +184,12 @@ function compounded(returns: number[], start = 1000): PortfolioValuePoint[] {
     out.push(point(day(i + 1), v, start, 0))
   })
   return out
+}
+
+/** A pattern repeated until it clears `MIN_RETURNS`, so its shape is the one measured. */
+function repeat(pattern: number[]): number[] {
+  return Array.from({ length: Math.ceil(MIN_RETURNS / pattern.length) * pattern.length },
+    (_, i) => pattern[i % pattern.length])
 }
 
 /** ±1% on alternate days: a mean of zero and a daily σ of exactly 0.01. */
@@ -227,19 +242,19 @@ describe('annualizedVolatilityPct', () => {
 describe('sortinoRatio', () => {
   it('is null when nothing fell below the threshold', () => {
     // No downside deviation means an undefined ratio, not a large one.
-    expect(sortinoRatio(compounded(Array(10).fill(0.01)))).toBeNull()
+    expect(sortinoRatio(compounded(Array(MIN_RETURNS).fill(0.01)))).toBeNull()
   })
 
   it('is negative for a series that mostly falls', () => {
-    const ratio = sortinoRatio(compounded(Array(10).fill(-0.01)))
+    const ratio = sortinoRatio(compounded(Array(MIN_RETURNS).fill(-0.01)))
     expect(ratio).not.toBeNull()
     expect(ratio!).toBeLessThan(0)
   })
 
   it('rewards the same return achieved with less downside', () => {
     // Both end up ahead; the first gets there without a single down day.
-    const smooth = sortinoRatio(compounded([0.01, 0.01, 0.01, 0.01, 0.01, 0.0]))
-    const choppy = sortinoRatio(compounded([0.06, -0.04, 0.05, -0.03, 0.04, -0.02]))
+    const smooth = sortinoRatio(compounded(repeat([0.01, 0.01, 0.01, 0.01, 0.01, 0.0])))
+    const choppy = sortinoRatio(compounded(repeat([0.06, -0.04, 0.05, -0.03, 0.04, -0.02])))
     expect(choppy).not.toBeNull()
     // `smooth` has no downside at all, so it is refused rather than ranked —
     // which is the point of returning null.
@@ -254,8 +269,8 @@ describe('sortinoRatio', () => {
   it('tells too little history apart from no downside', () => {
     // Both are null, but only the second is a measured fact about the range.
     expect(sortinoDetail(compounded([0.01, 0.01])).absence).toBe('insufficient_history')
-    expect(sortinoDetail(compounded(Array(10).fill(0.01))).absence).toBe('no_downside')
-    const measured = sortinoDetail(compounded([0.06, -0.04, 0.05, -0.03, 0.04, -0.02]))
+    expect(sortinoDetail(compounded(Array(MIN_RETURNS).fill(0.01))).absence).toBe('no_downside')
+    const measured = sortinoDetail(compounded(repeat([0.06, -0.04, 0.05, -0.03, 0.04, -0.02])))
     expect(measured.absence).toBeNull()
     expect(measured.ratio).not.toBeNull()
   })
@@ -531,11 +546,17 @@ describe('incomplete valuations are not measured', () => {
   })
 
   it('keeps a stalled feed out of volatility and Sharpe', () => {
-    // Without the guard the −100% day dominates both.
-    const vol = annualizedVolatilityPct(stalled)
+    // Without the guard the −100% day dominates both. The same stall after enough real
+    // days to clear `MIN_RETURNS`, so the guard rather than the floor is what is measured.
+    const long: PortfolioValuePoint[] = [
+      ...Array.from({ length: MIN_RETURNS + 1 }, (_, i) => point(day(i), 1000 + 10 * i, 1000, 0)),
+      { ...point(day(MIN_RETURNS + 1), 600, 1000, 0), unpriced_holdings: 2 },
+      { ...point(day(MIN_RETURNS + 2), 0, 1000, 0), unpriced_holdings: 5 },
+    ]
+    const vol = annualizedVolatilityPct(long)
     expect(vol).not.toBeNull()
     expect(vol!).toBeLessThan(5)
-    expect(sharpeRatio(stalled)).not.toBeNull()
+    expect(sharpeRatio(long)).not.toBeNull()
   })
 
   it('excludes an unpriced day from beta as well', () => {
