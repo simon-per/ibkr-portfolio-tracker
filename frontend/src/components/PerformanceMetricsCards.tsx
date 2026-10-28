@@ -88,6 +88,8 @@ export function PerformanceMetricsCards({
   const xirrUnpriced = metrics.xirrUnpriced ?? 0
   const unvalued = metrics.unvaluedPositions ?? 0
 
+  const returnLabel = (metrics.xirrMethod ?? 'xirr') === 'xirr' ? 'Annual return' : 'Period return'
+
   return (
     <section>
       {heading}
@@ -103,18 +105,19 @@ export function PerformanceMetricsCards({
             className="col-span-2 md:col-span-3 lg:col-span-6 rounded-md border border-yellow-600/40 bg-yellow-600/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-500"
           >
             <span className="font-medium">
-              Annual return is understated — {xirrUnpriced}{' '}
+              {returnLabel} is understated — {xirrUnpriced}{' '}
               {xirrUnpriced === 1 ? 'holding had' : 'holdings had'} no usable price at one end
               of this period
             </span>
           </div>
         )}
 
-        {/* Annual Return (XIRR). A window under 30 days reports simple_period instead, and
-            the label follows it rather than annualising a few days of noise. */}
+        {/* XIRR. Only money at work for about a year is annualised ("xirr"); anything
+            shorter is what it earned ("period", "simple_period" — the GIPS rule), and the
+            label follows the method rather than calling a projection a return. */}
         <KpiCard
           tile
-          label={metrics.xirrMethod === 'simple_period' ? 'Period return' : 'Annual return'}
+          label={returnLabel}
           // Three states, not two. `isPositiveXIRR` is false for a *negative* return and
           // for an *unknown* one alike, so a refused XIRR — too few cash flows in the
           // window, which 1W on a week with no trades produces — drew a red downward

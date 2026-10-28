@@ -58,11 +58,14 @@ describe('PerformanceMetricsCards', () => {
     expect(screen.queryByText(/effective/)).toBeNull()
   })
 
-  it('labels a short window a period return instead of annualizing it', () => {
-    renderWith({ xirrMethod: 'simple_period' })
-    expect(screen.getByText('Period return')).toBeTruthy()
-    expect(screen.queryByText('Annual return')).toBeNull()
-  })
+  it.each(['simple_period', 'period'])(
+    'labels a window under a year (%s) a period return instead of annualizing it',
+    (method) => {
+      renderWith({ xirrMethod: method })
+      expect(screen.getByText('Period return')).toBeTruthy()
+      expect(screen.queryByText('Annual return')).toBeNull()
+    },
+  )
 
   it('shows a dash, never a zero, for an unresolved return', () => {
     renderWith({ xirr: null, calmarRatio: null })

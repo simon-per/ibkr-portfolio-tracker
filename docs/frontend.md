@@ -52,8 +52,8 @@ from one dominant one.
   on every sale date in `externalFlow`'s fallback. That would bias beta on exactly the days the
   portfolio traded. Dropping the pair costs a few days a month and biases nothing. `sampleDays` rides
   along so a thin window declares itself instead of showing a confident slope.
-- **Volatility, Sortino *and Sharpe* are `null`, not `0`**, below the minimum sample or with nothing to
-  divide by. A `0` meaning "unknown" being read later as a fact is the most repeated bug in this
+- **Volatility, Sortino *and Sharpe* are `null`, not `0`**, below the minimum sample (`MIN_RETURNS`, 20
+  daily returns — 5 until 2026-10-28 let a 1W range annualise one week) or with nothing to divide by. A `0` meaning "unknown" being read later as a fact is the most repeated bug in this
   codebase.
 
   **Sharpe was the exception until 2026-08-05**, because it predates the risk row and was missed when
@@ -125,6 +125,13 @@ from one dominant one.
   and only what was held at the start was in the denominator — and mis-sized a book carrying old
   gains, which earn on their value, not their cost. Same sign as the gain by construction; on 1Y
   it sits near the XIRR card. `null` when that capital is not positive, never a stand-in.
+- **The XIRR card annualises only a year of money at work** (2026-10-17, the GIPS rule). Under a
+  year `/api/portfolio/annualized-return` answers `method: "period"`: XIRR's rate compounded over
+  the span from the first flow to the last (`calculate_xirr`, `ANNUALIZE_FROM_DAYS` = 360), which
+  is what the money earned — +5% over three months, not a +21% "annual return", and +10% for a
+  position sold mid-range rather than that rate stretched over the idle weeks after the sale.
+  Under 30 days it stays `simple_period`. Anything but `xirr` is labelled *Period return*, and
+  Calmar, which needs an annual rate, stays absent.
 - **Sortino's two nulls are told apart** (`sortinoDetail`, 2026-10-14). Too few returns and no
   downside deviation both returned `null`, and the card captioned every null *"No down days"* — a
   claim about the range, made over a window too short to have measured it. Only `no_downside` may
