@@ -107,12 +107,6 @@ Only what is still unverified.
   SPGI and NXPI end at Q1 2026 because EDGAR's companyfacts held no later 10-Q on 2026-10-25;
   the Sunday pass should bring Q2.
 
-- **The fintech UI pass with the owner's own eyes** (2026-10-17): every tab was screenshotted in
-  both themes against production data through a routed preview; the dividend summary, the
-  benchmarks and the crypto reads were seen only with made-up fixtures (Yahoo / the key). The sticky
-  strip's shadow on scroll was measured in both themes. Look-through's constituent logos were
-  filled on 2026-10-18 (docs/logos.md *Filled*); companies beyond those baskets' top 100 stay
-  monograms.
 - **The two UI fixes (`bluegill`, 2026-10-18), in a real browser:** verified on production at
   1366 dark — the Watchlist's Stock column stays pinned while the table scrolls sideways, and
   Dividends *Expected next* no longer overflows sideways. Unseen: the calendar's thin themed
