@@ -136,7 +136,14 @@ class PortfolioValuePoint(BaseModel):
 
 class AnnualizedReturnResponse(BaseModel):
     """Response for XIRR annualized return calculation"""
-    method: str = Field(..., description="Calculation method used (xirr)")
+    method: str = Field(
+        ...,
+        description=(
+            'Calculation method: "xirr" (annualized, a window of about a year or more), '
+            '"period" (30 days to under a year, the money-weighted return the window '
+            'earned) or "simple_period" (under 30 days). Only "xirr" is an annual rate.'
+        ),
+    )
     annualized_return_pct: Optional[float] = Field(None, description="Annualized return percentage")
     start_date: str = Field(..., description="Start date of the calculation period")
     end_date: str = Field(..., description="End date of the calculation period")

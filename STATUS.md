@@ -309,8 +309,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
    `alembic check`.
 4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
-    chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; XIRR annualised
-    over short ranges; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
+    chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; 1W risk from 5 returns and a 3% EUR risk-free rate; PEG mixes three methods;
     "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
 5. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost

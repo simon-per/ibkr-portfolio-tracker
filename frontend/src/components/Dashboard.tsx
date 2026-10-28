@@ -265,7 +265,8 @@ export function Dashboard() {
 
     // 1. Annual Return (XIRR) - from backend, fallback to null
     const xirr = annualizedReturn?.annualized_return_pct ?? null
-    // "simple_period" for <30-day windows: a raw period return, not annualized.
+    // Only "xirr" is annualized; "period" and "simple_period" are what the window
+    // earned (money at work under a year, or a window under 30 days).
     const xirrMethod = annualizedReturn?.method ?? 'xirr'
 
     // 2/3. Drawdown and Sharpe, from flow-adjusted daily returns. Extracted and

@@ -39,6 +39,11 @@ from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
 
+#: From this many days a window's XIRR is reported annualized; below it, as the return the
+#: window earned (`calculate_xirr`). A year less a few days, so a 1Y range whose first
+#: valued day is a Monday after a weekend still counts as a year.
+ANNUALIZE_FROM_DAYS = 360
+
 # Average calendar month, used only to express an elapsed span in months so a
 # part-month of history isn't rounded away.
 _DAYS_PER_MONTH = 365.25 / 12
@@ -1548,8 +1553,11 @@ class PortfolioService:
         - Positive: portfolio market value on end_date (terminal value)
 
         Returns: (return_pct or None, num_cash_flows, eff_start, eff_end, method)
-        where method is "xirr" (annualized) or "simple_period" (<30 days — a raw
-        period return, which the UI must not label as annual).
+        where method is "xirr" (annualized: money at work for about a year or more),
+        "period" (a window of 30+ days whose money was at work under
+        `ANNUALIZE_FROM_DAYS`: XIRR's rate compounded over that span, the money-weighted
+        return it earned) or "simple_period" (a window under 30 days — a raw period
+        return). Only "xirr" may be labelled annual.
 
         **Completeness rides on `self.last_xirr_unpriced`, not on the tuple.** Both
         endpoint valuations can be partial, and this is the last member of the
@@ -1711,6 +1719,19 @@ class PortfolioService:
             if xirr_result is None:
                 logger.warning("XIRR calculation did not converge")
                 return None, num_cash_flows, effective_start_date, effective_end_date, "xirr"
+            # A return for less than a year is not annualized (the GIPS rule): three
+            # months at +5% read as an "annual return" of +21%, a rate the window never
+            # earned and may never repeat. Measured on the span money was at work — first
+            # flow to last — not on the window: a book bought three months into a 1Y range
+            # has a three-month record, and one sold mid-window earned nothing after the
+            # sale, so compounding the rate over the idle rest would overstate it. XIRR's
+            # money-weighted rate compounded over that span (day count /365, as pyxirr's)
+            # is what the money earned. Labelled "period" so the UI says "Period return",
+            # and Calmar, which needs an annual rate, stays absent.
+            span_days = (max(dates) - min(dates)).days
+            if span_days < ANNUALIZE_FROM_DAYS:
+                period_return = ((1 + xirr_result) ** (span_days / 365) - 1) * 100
+                return period_return, num_cash_flows, effective_start_date, effective_end_date, "period"
             return xirr_result * 100, num_cash_flows, effective_start_date, effective_end_date, "xirr"
         except Exception as e:
             logger.warning(f"XIRR calculation failed: {e}")

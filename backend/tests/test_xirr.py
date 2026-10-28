@@ -82,9 +82,11 @@ async def test_full_liquidation_still_returns_a_figure():
         await session.flush()
         pct, n, _, _, method = await PortfolioService(session).calculate_xirr(Y_START, end)
         # End value is zero — the +110 proceeds carry the whole return. The old
-        # end_mv <= 0 guard returned None here.
-        assert method == "xirr"
-        assert pct is not None and 10 < pct < 35
+        # end_mv <= 0 guard returned None here. Money was at work under a year, so the
+        # figure is what it earned (+10%), not that rate annualized — and not compounded
+        # over the idle weeks after the sale either, which would overstate it.
+        assert method == "period"
+        assert pct == pytest.approx(10.0, abs=0.01)
     finally:
         await session.close()
         await engine.dispose()
@@ -166,6 +168,30 @@ async def test_short_windows_are_labelled_simple_period():
         pct, n, _, _, method = await PortfolioService(session).calculate_xirr(Y_END, d2)
         assert method == "simple_period"
         assert pct == pytest.approx(5.0, abs=0.01)  # NOT annualized
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_window_under_a_year_reports_what_it_earned_not_an_annual_rate():
+    """
+    Three months at +5% is +5%, not an "annual return" of +21% (the GIPS rule: a return
+    for less than a year is not annualized). XIRR's rate compounded over the window's own
+    length gives the money-weighted return the window earned — for one flow in and one
+    out, exactly the price move.
+    """
+    engine, session = await _make_session()
+    try:
+        start, end = date(2025, 10, 1), date(2025, 12, 31)
+        session.add_all([
+            _lot(1, date(2025, 6, 2), "10", "100"),
+            _price(1, start, "10"), _price(1, end, "10.5"),
+        ])
+        await session.flush()
+        pct, _n, _s, _e, method = await PortfolioService(session).calculate_xirr(start, end)
+        assert method == "period"
+        assert pct == pytest.approx(5.0, abs=0.01)
     finally:
         await session.close()
         await engine.dispose()

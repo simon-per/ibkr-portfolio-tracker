@@ -121,8 +121,8 @@ async def get_annualized_return(
     xirr_pct, num_cash_flows, eff_start, eff_end, method = await portfolio_service.calculate_xirr(start_date, end_date)
 
     return AnnualizedReturnResponse(
-        # "simple_period" for <30-day windows — a raw period return the UI must
-        # not present as annualized.
+        # "xirr" is annualized; "period" (30 days to under a year) and "simple_period"
+        # (under 30 days) are what the window earned, which the UI must not label annual.
         method=method,
         annualized_return_pct=round(xirr_pct, 2) if xirr_pct is not None else None,
         start_date=eff_start.isoformat(),
