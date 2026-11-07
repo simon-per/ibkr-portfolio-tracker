@@ -335,3 +335,25 @@ async def test_every_position_row_carries_its_security_for_the_logo(db):
         rows = [p for cat in allocation[key].values() for p in cat["positions"]]
         assert {p["security_id"] for p in rows if p["symbol"] == "KNOWN"} == {known.id}
         assert all(p["security_id"] is None for p in rows if p["symbol"] == "CASH")
+
+
+@pytest.mark.asyncio
+async def test_a_tie_publishes_what_share_pct_publishes(db):
+    """
+    10.25 of 1,000 is exactly 1.025%. `round(weight * 100, 2)` on the float published 1.03
+    (1.0250000000000001); `share_pct` rounds the Decimal half to even, 1.02 — what every
+    other share in the app publishes for the same tie.
+    """
+    await _hold(db, symbol="TIE", isin="US0000000011", conid=11, sector="Technology",
+                country="United States", quantity="1", price="10.25")
+    await _hold(db, symbol="REST", isin="US0000000012", conid=12, sector="Technology",
+                country="United States", quantity="1", price="989.75")
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    assert allocation["total_value_eur"] == 1000.0
+    for key in BREAKDOWNS:
+        (category,) = allocation[key].values()  # Stock / Technology / United States
+        weights = {p["symbol"]: p["weight"] for p in category["positions"]}
+        assert weights == {"TIE": 1.02, "REST": 98.98}, key
+        assert category["percentage"] == 100.0, key

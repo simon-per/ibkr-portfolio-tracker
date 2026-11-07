@@ -22,6 +22,10 @@ rounded a float after the division, so a tie such as 1.015 published 1.01 there 
 here (GitHub issue #71). Two of them publish one decimal, hence `digits`; the crypto
 figures are floats, hence the float entry. The family test now fails any
 `<a> / <b> * 100` outside this module that its allow-list does not name with a reason.
+
+Then the allocation breakdowns' slice and position shares, which divided first into a
+weight and published `round(weight * 100, 2)` later — out of that scan's sight; the
+fourth scan fails a rounded `<x> * 100` whose `<x>` is not a division.
 """
 import math
 from decimal import Decimal

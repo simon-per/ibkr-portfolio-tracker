@@ -14,6 +14,7 @@ import yfinance as yf
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.cash_service import CashService, is_valuable
+from app.services.percentages import share_pct
 from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
@@ -456,14 +457,21 @@ class AllocationService:
                     store, 'Cash', cash_weight, cash_slice, 'CASH', 'Uninvested cash')
 
         def _finalize(store: Dict[str, Dict]) -> Dict:
-            """Convert weights to percentages, sort, and round."""
+            """
+            Sort by weight, publish each share through `share_pct`, round the money.
+
+            Every weight is `market_value / total_value` (a fund's slice and the cash slice
+            included), so the published share is that money over that whole — rounded in
+            Decimal by the one rule, not as `round(weight * 100, 2)` on a float, which
+            rounded a tie such as 1.015 the other way (issue #71's family).
+            """
             out = {}
             for name, data in sorted(store.items(), key=lambda x: x[1]["weight"], reverse=True):
-                pct = round(data["weight"] * 100, 2)
+                pct = share_pct(data["market_value_eur"], total_value)
                 # Sort positions within category by weight descending
                 pos_list = sorted(data["positions"], key=lambda p: p["weight"], reverse=True)
                 for p in pos_list:
-                    p["weight"] = round(p["weight"] * 100, 2)
+                    p["weight"] = share_pct(p["market_value_eur"], total_value)
                     p["market_value_eur"] = round(p["market_value_eur"], 2)
                 out[name] = {
                     "percentage": pct,

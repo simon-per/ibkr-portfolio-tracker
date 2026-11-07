@@ -16,6 +16,12 @@ such as 1.015 published 1.01 there and 1.02 through `share_pct` (GitHub issue #7
 third scan fails every `<a> / <b> * 100` (and `100 * <a> / <b>`) under `app/` outside
 `percentages.py` that `NOT_A_SHARE` does not name with its reason — all of `app/`, not
 `app/services` alone, since a family test must not choose its scope by directory.
+
+That scan saw only the division. `allocation_service._finalize` divided first, into a
+weight, and published `round(weight * 100, 2)` later — the same float rounding with the
+division out of sight. The fourth scan fails every `round(<x> * 100, n)` (either operand
+order) under `app/` outside `percentages.py`; one whose `<x>` is itself a division is the
+third scan's, and its exemptions live in `NOT_A_SHARE`.
 """
 import ast
 from decimal import Decimal
@@ -127,6 +133,34 @@ def _inline_shares(source: str) -> list[tuple[int, str]]:
     return [(node.lineno, ast.unparse(node)) for node in _percentage_nodes(ast.parse(source))]
 
 
+def _rounded_fractions(source: str) -> list[tuple[int, str]]:
+    """
+    `(line, expression)` of every `round(<x> * 100, ...)` / `round(100 * <x>, ...)` whose `<x>`
+    is not a division — a fraction computed elsewhere and scaled here.
+    """
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "round"
+            and node.args
+        ):
+            continue
+        scaled = node.args[0]
+        if not (isinstance(scaled, ast.BinOp) and isinstance(scaled.op, ast.Mult)):
+            continue
+        if _is_hundred(scaled.right):
+            fraction = scaled.left
+        elif _is_hundred(scaled.left):
+            fraction = scaled.right
+        else:
+            continue
+        if not _is_div(fraction):
+            found.append((node.lineno, ast.unparse(node)))
+    return found
+
+
 def _app_modules():
     for path in sorted(APP_DIR.rglob("*.py")):
         if path.name != "percentages.py":
@@ -155,6 +189,35 @@ def test_the_share_scan_recognises_every_spelling():
         assert len(_inline_shares(spelling)) == 1, spelling
     for not_one in ("p = share_pct(a, b)", "p = (a / b - 1) * 100", "p = a * 100", "p = a / 100"):
         assert _inline_shares(not_one) == [], not_one
+
+
+def test_the_fraction_scan_recognises_the_form():
+    for spelling in (
+        "p = round(weight * 100, 2)",
+        "p = round(100 * w, 1)",
+        "p = round(data['weight'] * 100, 2)",
+        "p = round(w * Decimal('100'), 2)",
+    ):
+        assert len(_rounded_fractions(spelling)) == 1, spelling
+    for not_one in (
+        "p = round(a / b * 100, 2)",  # the third scan's
+        "p = share_pct(a, b)",
+        "p = round(w * 10, 2)",
+        "p = round(w, 2) * 100",
+    ):
+        assert _rounded_fractions(not_one) == [], not_one
+
+
+def test_no_module_rounds_a_scaled_fraction():
+    offenders = [
+        f"{name}:{line} {expression}"
+        for name, source in _app_modules()
+        for line, expression in _rounded_fractions(source)
+    ]
+    assert offenders == [], (
+        "publish the share through percentages.share_pct over the money and the whole the "
+        f"fraction came from: {offenders}"
+    )
 
 
 def test_no_module_computes_an_inline_share_with_a_numeric_fallback():
