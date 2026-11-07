@@ -57,6 +57,7 @@ from app.services.finpension_ingest import (
 from app.repositories.analyst_rating_repository import clear_ratings_backoff
 from app.repositories.fundamentals_repository import clear_fundamentals_backoff
 from app.services.market_data_service import MarketDataService, clear_price_backoff
+from app.services.yahoo_errors import history_or_empty
 from app.services.yahoo_rate_limit import check_yahoo_hold, flush_hold_writes, is_rate_limit
 from app.yf_cache import configure_yfinance_cache
 
@@ -245,9 +246,9 @@ async def _verify_against_published_navs(
         # A refusal the server or an earlier run saw holds this too (issue #57).
         await check_yahoo_hold()
         history = await asyncio.to_thread(
-            lambda: yf.Ticker(yahoo_ticker).history(
+            lambda: history_or_empty(lambda: yf.Ticker(yahoo_ticker).history(
                 start=start.isoformat(), end=end.isoformat(), auto_adjust=False
-            )
+            ))
         )
     except Exception as e:
         # `is_rate_limit` also records a 429, so every Yahoo path holds (issue #57).
@@ -343,9 +344,9 @@ async def _verify_sibling_returns(
     try:
         await check_yahoo_hold()
         history = await asyncio.to_thread(
-            lambda: yf.Ticker(yahoo_ticker).history(
+            lambda: history_or_empty(lambda: yf.Ticker(yahoo_ticker).history(
                 start=start.isoformat(), end=end.isoformat(), auto_adjust=False
-            )
+            ))
         )
     except Exception as e:
         retry = " Yahoo is refusing requests; retry in an hour." if is_rate_limit(e) else ""

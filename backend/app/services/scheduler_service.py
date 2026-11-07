@@ -432,7 +432,7 @@ class SchedulerService:
         # see `sync_benchmark_prices`.
         self._benchmark_sessions_asked: dict = {}
 
-    async def sync_ibkr_data(self, force: bool = False) -> dict:
+    async def sync_ibkr_data(self, force: bool = False, manual: bool = False) -> dict:
         """
         Sync securities and tax lots from IBKR Flex Query.
 
@@ -450,8 +450,10 @@ class SchedulerService:
         Also `status="skipped"`, `reason="flex_refusal_hold"`, while the newest Flex
         outcome on record is a `Code=1025` younger than `FLEX_LOCKOUT_HOLD_HOURS` — the
         lockout half of the rule `POST /api/sync/ibkr` answers 429 on (GitHub issue #55).
-        Not the request-step `1001` half: after an 18:00 refusal the 00:00 slot keeps its
-        one fresh SendRequest, the recovery this slot exists for.
+        Not the request-step half for a slot: after an 18:00 refusal the 00:00 slot keeps
+        its one fresh SendRequest, the recovery this slot exists for. `manual=True` (the
+        public `POST /api/scheduler/trigger`) is a press, not a slot, and is held by both
+        halves like `POST /api/sync/ibkr` (review item I2).
 
         `force` exists for the one case the history shows really does allow a second
         generation in a day: editing the query definition in the IBKR portal (07-31).
@@ -481,7 +483,7 @@ class SchedulerService:
                         "timestamp": utc_iso(utcnow()),
                     }
 
-                hold = await flex_refusal_in_force(db, request_refusals=False)
+                hold = await flex_refusal_in_force(db, request_refusals=manual)
                 if hold is not None:
                     message = describe_refusal_hold(hold)
                     logger.info(f"IBKR sync skipped: {message}")
@@ -1564,7 +1566,7 @@ class SchedulerService:
             await self._record_run(skipped, utcnow())
             return skipped
 
-    async def full_sync_job(self, scheduled: bool = False) -> Optional[dict]:
+    async def full_sync_job(self, scheduled: bool = False, manual: bool = False) -> Optional[dict]:
         """
         Full sync job that runs once daily at 18:00 Europe/Berlin.
 
@@ -1583,10 +1585,15 @@ class SchedulerService:
         3. Dividend sync (Yahoo Finance ex-dates + EUR income)
         4. Look-through upkeep (issuer baskets, identities), then the stale-basket
            check — after the refresh, not among step 2's diagnostics (issue #79)
-        """
-        return await self._gated_job("full_sync", self._full_sync_job_locked, scheduled=scheduled)
 
-    async def _full_sync_job_locked(self) -> dict:
+        `manual` is a press (`trigger_sync_now`): its IBKR step honours a request-step
+        refusal hold, which a slot does not (`sync_ibkr_data`).
+        """
+        return await self._gated_job(
+            "full_sync", lambda: self._full_sync_job_locked(manual=manual), scheduled=scheduled
+        )
+
+    async def _full_sync_job_locked(self, manual: bool = False) -> dict:
         logger.info("=" * 80)
         logger.info("STARTING FULL SYNC JOB (IBKR + MARKET DATA)")
         logger.info("=" * 80)
@@ -1594,7 +1601,7 @@ class SchedulerService:
         started_at = utcnow()
 
         # Step 1: Sync IBKR data
-        ibkr_result = await self.sync_ibkr_data()
+        ibkr_result = await self.sync_ibkr_data(manual=manual)
         logger.info(f"IBKR Sync Result: {ibkr_result}")
 
         # Step 2: Sync exchange rates (always, even if IBKR sync fails)
@@ -2470,7 +2477,7 @@ class SchedulerService:
         back for something that cannot arrive before midnight ET.
         """
         logger.info("Manually triggering full sync job...")
-        result = await self.full_sync_job()
+        result = await self.full_sync_job(manual=True)
         if result and result.get("reason") == "pipeline_busy":
             raise SyncBusy(result.get("message") or "sync pipeline is busy")
         # last_sync_result is already set by full_sync_job

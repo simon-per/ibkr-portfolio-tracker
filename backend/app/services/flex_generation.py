@@ -317,19 +317,28 @@ async def record_generation_served(xml: bytes) -> None:
 # 120 s start cooldown, so a press two minutes later sent SendRequest into the locked
 # token — "retrying can extend it". Now the newest Flex outcome on record is read first.
 # A `1025` holds the manual endpoint and every scheduled IBKR path alike. A request-step
-# `1001` holds manual presses only: the 00:00 recovery slot keeps its one fresh SendRequest
-# after an 18:00 refusal ("fail fast and let the next slot ask fresh"), which is how the
-# same-ET-day recoveries of 08-02 and 08-03 succeeded.
+# refusal holds manual presses only: the 00:00 recovery slot keeps its one fresh
+# SendRequest after an 18:00 refusal ("fail fast and let the next slot ask fresh"), which
+# is how the same-ET-day recoveries of 08-02 and 08-03 succeeded.
 #
-# The phrases IBKRService builds its two refusal messages from. Defined here and imported
+# "A request-step refusal" is the whole family `IBKRService` fails fast on, decided by the
+# phrase, never by a code (review item I2, 2026-11-07): every code it refuses without a
+# reference (1001, 1004–1009, 1019, 1021) is a failed generation, and so is a SendRequest
+# that may have reached IBKR before it failed — each raised with one of the two phrases
+# below. Until then only a literal `1001` held, so each press after a `1009` was another
+# failed generation toward `1025`.
+#
+# The phrases IBKRService builds its refusal messages from. Defined here and imported
 # there, so the classifier and the messages cannot drift apart; matching the phrase and
 # not a bare `Code=1025` matters, because the other refusal messages *mention* `1025`.
 FLEX_LOCKOUT_PHRASE = 'has temporarily locked this Flex token'
 FLEX_REQUEST_REFUSED_PHRASE = 'did not hand back a Flex statement reference'
+FLEX_POSSIBLY_DELIVERED_PHRASE = 'SendRequest failed after it may have reached IBKR'
 _REFUSAL_MESSAGE = re.compile(
     rf"(?:{re.escape(FLEX_LOCKOUT_PHRASE)}|{re.escape(FLEX_REQUEST_REFUSED_PHRASE)})"
     r" \(Code=(\d+)"
 )
+_LOCKOUT_MESSAGE = re.compile(rf"{re.escape(FLEX_LOCKOUT_PHRASE)} \(Code=(\d+)")
 
 # How long a recorded `Code=1025` holds every non-force attempt. Long enough to cover the
 # 00:00 recovery slot six hours after an 18:00 lockout and the hours of button presses a
@@ -340,7 +349,9 @@ FLEX_LOCKOUT_HOLD_HOURS = 12
 
 
 class FlexRefusalHold(NamedTuple):
-    code: str              # '1025', or '1001' refused at the request step
+    # '1025' for a lockout; the request-step code IBKR refused with; None for a
+    # SendRequest that failed after it may have reached IBKR.
+    code: Optional[str]
     refused_at: datetime   # naive UTC, the refusal's `finished_at`
     until: datetime        # naive UTC, when asking is allowed again
 
@@ -349,6 +360,21 @@ def flex_refusal_code(message: Optional[str]) -> Optional[str]:
     """The code of a lockout or request-step refusal recorded in `message`, else None."""
     match = _REFUSAL_MESSAGE.search(message or '')
     return match.group(1) if match else None
+
+
+def is_lockout(message: Optional[str]) -> bool:
+    """`message` records IBKR locking the token (`Code=1025`)."""
+    return _LOCKOUT_MESSAGE.search(message or '') is not None
+
+
+def is_request_step_refusal(message: Optional[str]) -> bool:
+    """`message` records a failed generation at SendRequest: a refusal of any code that
+    handed back no reference, or a request that may have reached IBKR before it failed."""
+    text = message or ''
+    return (
+        (FLEX_REQUEST_REFUSED_PHRASE in text and flex_refusal_code(text) is not None)
+        or FLEX_POSSIBLY_DELIVERED_PHRASE in text
+    )
 
 
 async def flex_refusal_hold(
@@ -360,11 +386,12 @@ async def flex_refusal_hold(
     Reads the newest success or error among `FLEX_WEB_SERVICE_SYNC_TYPES` — a skip asked
     nothing, so it neither holds nor lifts. It holds when that row is a `Code=1025` younger
     than `FLEX_LOCKOUT_HOLD_HOURS`, or — only with `request_refusals`, i.e. for a manual
-    press — a `1001` at the SendRequest step in the same ET day (IBKR refused that day's
-    generation; pressing again is another counted failure, and the next ET day is a new
-    generation). The scheduled slots pass `request_refusals=False`: the recovery slot's
-    one fresh request after a refusal is the schedule's design. Any later success, or any
-    other error, lifts it.
+    press — a request-step refusal (`is_request_step_refusal`: any code, or a request that
+    may have reached IBKR) in the same ET day (IBKR refused that day's generation; pressing
+    again is another counted failure, and the next ET day is a new generation). The
+    scheduled slots pass `request_refusals=False`: the recovery slot's one fresh request
+    after a refusal is the schedule's design. Any later success, or any other error, lifts
+    it.
     """
     as_of = as_of or utcnow()
     row = (await db.execute(
@@ -382,9 +409,9 @@ async def flex_refusal_hold(
     if row is None or row.status != 'error':
         return None
     code = flex_refusal_code(row.message)
-    if code == '1025':
+    if is_lockout(row.message):
         until = row.finished_at + timedelta(hours=FLEX_LOCKOUT_HOLD_HOURS)
-    elif code == '1001' and request_refusals:
+    elif request_refusals and is_request_step_refusal(row.message):
         until = next_generation_opens_at(row.finished_at)
     else:
         return None
@@ -411,6 +438,12 @@ def describe_refusal_hold(hold: FlexRefusalHold) -> str:
         what = (
             f"IBKR locked the Flex token (Code=1025) at {utc_iso(hold.refused_at)}, and "
             "asking during a lockout can extend it."
+        )
+    elif hold.code is None:
+        what = (
+            f"Today's statement request at {utc_iso(hold.refused_at)} failed after it may "
+            "have started a generation, and another request counts toward the Code=1025 "
+            "lockout."
         )
     else:
         what = (

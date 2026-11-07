@@ -59,6 +59,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Set
 
 from app.clock import utcnow
+from app.services.yahoo_errors import raise_yahoo_errors
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,13 @@ async def check_yahoo_hold() -> None:
     Call it immediately before a Yahoo request, inside the `try` whose handler already
     asks `is_rate_limit`: that handler then abandons the pass and reports it as rate
     limited, with no second code path for "held".
+
+    It also makes yfinance raise what it meets (`yahoo_errors.raise_yahoo_errors`):
+    every path awaits this before asking, so the setting is in force everywhere without
+    an entry point to remember — the library otherwise swallows a 429 on
+    `quarterly_financials` (review item Y2).
     """
+    raise_yahoo_errors()
     await _load()
     if _dirty:
         _schedule_write()

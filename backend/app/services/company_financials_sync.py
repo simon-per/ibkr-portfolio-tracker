@@ -33,7 +33,11 @@ is read once ever and what it held is stored (`sec_filing_reads`); at most
 payer whose newest four quarters miss a dividend per share (its TTM is absent now), and a
 company whose newest figures are older than `FIGURES_STALE_AFTER` (a filing EDGAR has not
 served). A warning names only the companies the previous scheduled run did not list, so a
-known gap is a line of the record, not a banner every week.
+known gap is a line of the record, not a banner every week. Both lists are read from the
+stored rows of **every** company in scope after the pass, fetched or not: a company the
+weekday check fetched is not due on Sunday, and building them from the fetched alone left
+it out of that Sunday's record — so the Sunday after warned about it again as new (review
+items CO2/DR3).
 
 **Bounded** (`STALE_AFTER`, `CIK_RECHECK_AFTER`, `miss_backoff`): a company is fetched at
 most once in `STALE_AFTER`; a held ticker the SEC does not list is looked up again after
@@ -331,6 +335,9 @@ class CompanyFinancialsSync:
             transport=self._transport,
             sleep=self._sleep,
         ) as client:
+            # The lists below read every target's stored rows; none when the ticker list
+            # was refused before the targets were known.
+            targets: List[Target] = []
             try:
                 if need_cik or unknown:
                     try:
@@ -386,6 +393,7 @@ class CompanyFinancialsSync:
                     f"The SEC answered HTTP {refused.status}; the company financials "
                     f"pass stopped and the rest waits for the next one.{hint}"
                 )
+            await self._findings(targets, summary)
 
         failed = summary["errors"]
         n = sum(1 for o in summary["outcomes"] if o["outcome"].startswith("error"))
@@ -463,6 +471,7 @@ class CompanyFinancialsSync:
             "stale_figures": [],
         }
         warnings: List[str] = []
+        fetched: List[Target] = []
         async with EdgarClient(
             settings.edgar_user_agent.strip(),
             transport=self._transport,
@@ -486,6 +495,7 @@ class CompanyFinancialsSync:
                     summary["outcomes"].append(
                         {"cik": target.cik, "symbols": target.symbols, "outcome": outcome}
                     )
+                    fetched.append(target)
             except EdgarRefused as refused:
                 summary["stopped"] = refused.status
                 hint = "" if refused.status == 429 else " Check EDGAR_USER_AGENT."
@@ -493,6 +503,8 @@ class CompanyFinancialsSync:
                     f"The SEC answered HTTP {refused.status}; the filings check stopped "
                     f"and the rest waits for the next one.{hint}"
                 )
+        # The check's own lists cover what it fetched; the Sunday pass's cover everyone.
+        await self._findings(fetched, summary)
         failed = sum(1 for o in summary["outcomes"] if o["outcome"].startswith("error"))
         if failed:
             warnings.append(
@@ -668,6 +680,20 @@ class CompanyFinancialsSync:
         await self.db.commit()
         summary["profiles_fetched"] += 1
 
+    async def _findings(self, targets: Sequence[Target], summary: Dict[str, Any]) -> None:
+        """`ttm_dividend_gaps` and `stale_figures` over `targets`' stored rows, whether
+        this pass fetched them or not (see the module docstring)."""
+        today = utc_today()
+        for target in targets:
+            rows = await self.repo.finding_rows(target.cik)
+            if not rows:
+                continue
+            label = target.symbols[0]
+            if ttm_dividend_gap(rows):
+                summary["ttm_dividend_gaps"].append(label)
+            if today - max(r["period_end"] for r in rows) > FIGURES_STALE_AFTER:
+                summary["stale_figures"].append(label)
+
     async def _new_findings(self, summary: Dict[str, Any]) -> List[str]:
         """Warnings for the companies this pass found with a broken TTM dividend per share
         or stale figures that the previous scheduled run did not list."""
@@ -722,11 +748,6 @@ class CompanyFinancialsSync:
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)
-        if ttm_dividend_gap(result.rows):
-            summary["ttm_dividend_gaps"].append(label)
-        newest = max(r["period_end"] for r in result.rows)
-        if utc_today() - newest > FIGURES_STALE_AFTER:
-            summary["stale_figures"].append(label)
         if refused is not None:
             # The figures are written; the refusal still stops the pass.
             raise refused

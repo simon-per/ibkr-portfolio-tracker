@@ -222,8 +222,11 @@ serve, so a long build used to restart the app on top of the sync. A sync killed
 from scratch, and at the 18:00/00:00 IBKR slots that is a second Flex generation (rule 2). Since
 2026-10-04 `deploy.sh` runs `wait_for_sync_slot_clear` after the build and before the WAL checkpoint
 and `down`. It waits while within the margin of a slot, then while the running backend reports
-`"sync_in_progress": true` on `/api/scheduler/status`. That field is the in-process
-`SYNC_PIPELINE` gate, held by scheduled jobs and manual POSTs alike. The crypto gate is not in it.
+`"sync_in_progress": true` or `"edgar_in_progress": true` on `/api/scheduler/status`. The first
+is the in-process `SYNC_PIPELINE` gate, held by scheduled jobs and manual POSTs alike; the second
+the SEC EDGAR jobs' own `EDGAR_GATE` (the Sunday companyfacts pass, the weekday filings check, the
+CLI), which until 2026-11-07 (review item I4) nothing reported, so a push could restart mid
+Sunday pass and lose it for a week. The crypto gate is in neither.
 The rules:
 
 - **No copy of the hours.** `SYNC_HOURS`, `SLOT_MARGIN_MIN` and `in_sync_window()` are read out of

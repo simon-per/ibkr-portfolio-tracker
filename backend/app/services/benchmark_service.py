@@ -24,6 +24,7 @@ from app.models.exchange_rate import ExchangeRate
 from app.services.fx_policy import FX_MAX_CARRY_DAYS
 from app.services.percentages import share_pct
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS
+from app.services.yahoo_errors import history_or_empty
 from app.services.yahoo_rate_limit import YahooHold, check_yahoo_hold, is_rate_limit
 from app.single_flight import SYNC_PIPELINE, SyncBusy, is_running, single_flight
 from app.clock import utc_today
@@ -317,7 +318,9 @@ class BenchmarkService:
                 # In a thread like every other yfinance call site — this is reachable
                 # from a public GET on any cache miss and would block the event loop.
                 def _fetch(t=ticker, s=fetch_start.isoformat(), e=fetch_end.isoformat()):
-                    return yf.Ticker(t).history(start=s, end=e, auto_adjust=True)
+                    return history_or_empty(
+                        lambda: yf.Ticker(t).history(start=s, end=e, auto_adjust=True)
+                    )
 
                 hist = await asyncio.to_thread(_fetch)
         except SyncBusy as e:

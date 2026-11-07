@@ -166,8 +166,8 @@ wait_for_sync_slot_clear() {
         if slot=$(in_sync_window); then
             reason="within ${SLOT_MARGIN_MIN} min of the ${slot}:00 Europe/Berlin sync slot"
         elif curl -s --max-time 5 "http://127.0.0.1:8000/api/scheduler/status" 2>/dev/null \
-                | grep -Eq '"sync_in_progress"[[:space:]]*:[[:space:]]*true'; then
-            reason="the running backend reports a sync in progress"
+                | grep -Eq '"(sync|edgar)_in_progress"[[:space:]]*:[[:space:]]*true'; then
+            reason="the running backend reports a sync in progress (stock pipeline or SEC EDGAR)"
         fi
         if [ -z "$reason" ]; then
             break

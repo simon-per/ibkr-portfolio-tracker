@@ -225,13 +225,20 @@ class EdgarClient(PacedGet):
 
 _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
 
-#: The filings whose figures companyfacts carries into the Company tab's rows.
-PERIODIC_FORMS = frozenset({"10-Q", "10-K"})
+#: The filings whose facts count — the one set (review item DR6): the normaliser keeps a
+#: companyfacts row by it, the filing reads find their filings by it, and the weekday check
+#: reads a submissions document's newest report by it. 10-K/10-Q and their amendments and
+#: transition reports; an 8-K's or a proxy's stray fact does not count, and a 20-F's are
+#: IFRS and out of scope. Until 2026-11-07 the check had its own `{10-Q, 10-K}`, so a
+#: transition report (10-KT/10-QT) moved the figures and never the check.
+PERIODIC_FORMS = frozenset(
+    {"10-K", "10-K/A", "10-Q", "10-Q/A", "10-KT", "10-KT/A", "10-QT", "10-QT/A"}
+)
 
 
 def latest_periodic_report(body: Dict[str, Any]) -> Optional[date]:
     """
-    The newest `reportDate` (the period end) of a 10-Q or 10-K among a submissions
+    The newest `reportDate` (the period end) of a periodic report (`PERIODIC_FORMS`) among a submissions
     document's recent filings (`filings.recent`, parallel arrays); None when there is none
     or the document is not that shape. Never a guess: an unparseable date is skipped.
     """

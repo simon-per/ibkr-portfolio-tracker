@@ -393,6 +393,30 @@ describe('CompanyTab', () => {
     expect(within(card('margins')).getByTestId('headline').textContent).toBe('46.6%')
   })
 
+  it("starts the next company's cards with every line drawn (review item U4)", async () => {
+    // NVDA hides three margins; AMZN has no gross margin, so carried over, the toggles
+    // would leave nothing drawn on its card.
+    const nvda = fixtureFinancials({ series: { gross_margin: fixtureSeries([0.6, 0.62, 0.7, 0.75]) } })
+    const amzn = fixtureFinancials({
+      cik: AMZN_CIK, symbol: 'AMZN', series: { gross_margin: fixtureSeries([null, null, null, null]) },
+    })
+    vi.spyOn(api, 'getCompanyFinancials').mockImplementation(async (cik: number) => (cik === NVDA_CIK ? nvda : amzn))
+    renderTab()
+    await screen.findAllByTestId('chart')
+    const legend = () => within(card('margins')).getByRole('group', { name: 'Margins series' })
+    const [, operating, net, fcf] = within(legend()).getAllByRole('button')
+    fireEvent.click(operating)
+    fireEvent.click(net)
+    fireEvent.click(fcf)
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Company' }), { target: { value: String(AMZN_CIK) } })
+    await waitFor(() => expect(card('margins').textContent).not.toContain('Gross'))
+    const pressed = within(legend()).getAllByRole('button').map((b) => b.getAttribute('aria-pressed'))
+    expect(pressed.length).toBeGreaterThan(0)
+    expect(pressed.every((p) => p === 'true')).toBe(true)
+    expect(within(card('margins')).getByTestId('headline').textContent).not.toBe('—')
+  })
+
   it('expands one card at a time', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()

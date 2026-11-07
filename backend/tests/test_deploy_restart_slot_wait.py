@@ -83,8 +83,14 @@ done
 # What the running backend serves, rendered the way FastAPI renders it (compact JSON).
 _STATUS_BUSY = json.dumps({"status": "running", "jobs": [], "sync_in_progress": True},
                           separators=(",", ":"))
-_STATUS_IDLE = json.dumps({"status": "running", "jobs": [], "sync_in_progress": False},
+_STATUS_IDLE = json.dumps({"status": "running", "jobs": [], "sync_in_progress": False,
+                           "edgar_in_progress": False},
                           separators=(",", ":"))
+# The Sunday SEC EDGAR pass under its own gate (review item I4): not a stock sync, but a
+# restart mid-pass loses it for a week, so the restart waits for it too.
+_STATUS_EDGAR = json.dumps({"status": "running", "jobs": [], "sync_in_progress": False,
+                            "edgar_in_progress": True},
+                           separators=(",", ":"))
 
 
 def _at(hh: int, mm: int) -> int:
@@ -243,8 +249,8 @@ def test_the_wait_runs_after_the_build_and_before_the_checkpoint_and_down():
 def _sync_in_progress_pattern() -> str:
     """The regex deploy.sh greps the status body with, in Python syntax."""
     code = _code_only(DEPLOY.read_text(encoding="utf-8"))
-    match = re.search(r"grep -Eq '([^']*sync_in_progress[^']*)'", code)
-    assert match, "deploy.sh no longer greps /api/scheduler/status for sync_in_progress"
+    match = re.search(r"grep -Eq '([^']*_in_progress[^']*)'", code)
+    assert match, "deploy.sh no longer greps /api/scheduler/status for *_in_progress"
     return match.group(1).replace("[[:space:]]", r"\s")
 
 
@@ -259,6 +265,7 @@ def test_the_status_endpoint_publishes_what_deploy_sh_reads(monkeypatch, armed):
     from fastapi.responses import JSONResponse
 
     from app.routers import scheduler as scheduler_router
+    from app.services.company_financials_sync import EDGAR_GATE
     from app.single_flight import SYNC_PIPELINE, single_flight
 
     fake = SimpleNamespace(
@@ -277,3 +284,17 @@ def test_the_status_endpoint_publishes_what_deploy_sh_reads(monkeypatch, armed):
     with single_flight(SYNC_PIPELINE):
         assert pattern.search(body()), "a held pipeline gate must read as a running sync"
     assert not pattern.search(body())
+    with single_flight(EDGAR_GATE):
+        assert pattern.search(body()), "a held EDGAR gate must hold the restart too"
+        assert json.loads(body())["sync_in_progress"] is False
+    assert not pattern.search(body())
+
+
+@pytest.mark.deploy_scripts
+def test_a_running_edgar_pass_holds_the_restart():
+    """The bash half of I4: an EDGAR pass answers busy and the restart waits it out."""
+    slept, now, out = _run(
+        _at(14, 0), running_until_s=_at(14, 10), STATUS_BUSY=_STATUS_EDGAR
+    )
+    assert slept >= 600, out
+    assert "SEC EDGAR" in out

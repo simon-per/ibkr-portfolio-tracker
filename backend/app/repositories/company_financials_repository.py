@@ -229,6 +229,22 @@ class CompanyFinancialsRepository:
             )
         )
 
+    async def finding_rows(self, cik: int) -> List[Dict]:
+        """The columns the pass's checks read (`ttm_dividend_gap`, the newest period), as
+        the normaliser's row dicts carry them — no unit, concept or filing date."""
+        result = await self.session.execute(
+            select(
+                CompanyFinancial.period_end,
+                CompanyFinancial.fiscal_period,
+                CompanyFinancial.metric,
+                CompanyFinancial.value,
+            ).where(CompanyFinancial.cik == cik)
+        )
+        return [
+            {"period_end": p, "fiscal_period": fp, "metric": m, "value": v}
+            for p, fp, m, v in result.all()
+        ]
+
     async def rows_for(self, cik: int) -> List[CompanyFinancial]:
         result = await self.session.execute(
             select(CompanyFinancial)
