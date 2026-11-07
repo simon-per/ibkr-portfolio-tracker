@@ -1109,7 +1109,13 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `formatFractionPercent` — the API sends 0.25 for 25%, `formatPercent` takes percentage points.
 - **The x axis labels fiscal-year ends only** ("Q4 FY2025" and "FY2025" print "FY25"), at most
   seven (ten expanded, six on a phone), newest kept (`axisTicks`). "Q1 FY2016" under every tenth
-  bar of a 300px card ran into its neighbours.
+  bar of a 300px card ran into its neighbours. The price card's points are dates: the axis prints
+  "Nov '26", the header and tooltip "Nov 6, 2026" (`shortPeriodLabel`, `periodText`).
+- **The price card comes first** (2026-11-07): `series.price`, the market closes, as one more
+  `COMPANY_CHARTS` line card with the growth header (its 3Y/5Y/10Y CAGRs are annualised returns,
+  each point's YoY the year's change). The range applies; the Period toggle does not (the server
+  ignores it for closes) and the basis does not (a close is per share already). Optional: a company
+  without closes has no card.
 - **Screenshots: use a tall viewport, not `fullPage`** — a full-page capture resizes the page,
   `ResponsiveContainer` re-renders and the bars restart their animation from zero, so every plot
   looks empty.

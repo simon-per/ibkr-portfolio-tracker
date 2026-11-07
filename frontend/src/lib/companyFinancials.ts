@@ -55,6 +55,10 @@ export interface CompanyChartDef {
 }
 
 export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
+  // The market closes (`series.price`): the range applies, the period and basis do not — a
+  // close has no fiscal period and is per share already. Optional: no closes, no card.
+  { id: 'price', kind: 'line', header: 'growth', optional: true,
+    total: { title: 'Price', format: 'perShare', series: [{ key: 'price', name: 'Price' }] } },
   { id: 'revenue', kind: 'bar', header: 'growth',
     total: { title: 'Revenue', format: 'money', series: [{ key: 'revenue', name: 'Revenue' }] },
     perShare: { title: 'Revenue per share', format: 'perShare',
@@ -168,10 +172,15 @@ const YEAR_END_LABEL = /^(?:Q4\s+)?FY(\d{4})$/
 const DATE_LABEL = /^(\d{4})-(\d{2})-(\d{2})$/
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** A fiscal-year end as an axis prints it: "Q4 FY2025" and "FY2025" → "FY25"; others unchanged. */
+/**
+ * A period as an axis prints it: "Q4 FY2025" and "FY2025" → "FY25"; a close's date
+ * ("2026-11-06", the price series) → "Nov '26"; anything else unchanged.
+ */
 export function shortPeriodLabel(label: string): string {
   const m = YEAR_END_LABEL.exec(label)
-  return m ? `FY${m[1].slice(2)}` : label
+  if (m) return `FY${m[1].slice(2)}`
+  const d = DATE_LABEL.exec(label)
+  return d ? `${MONTHS[Number(d[2]) - 1]} '${d[1].slice(2)}` : label
 }
 
 /** A period as a header or tooltip names it: a close's date in full ("Nov 6, 2026"), else as served. */

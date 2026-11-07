@@ -149,7 +149,7 @@ function ChartTooltip({ active, payload, series, format }: {
   const named = series.length > 1
   return (
     <div style={CHART_TOOLTIP_STYLE} className="space-y-0.5 px-2.5 py-2 shadow-md">
-      <p style={CHART_TOOLTIP_LABEL_STYLE}>{row.label}</p>
+      <p style={CHART_TOOLTIP_LABEL_STYLE}>{periodText(row.label)}</p>
       {rows.map((s) => (
         <p key={s.key} className="flex items-center gap-1.5">
           {named && (
@@ -277,7 +277,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
               {leadValue == null ? ABSENT : format(leadValue)}
             </p>
             <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-              <span className="tabular-nums">{row?.label ?? ABSENT}</span>
+              <span className="tabular-nums">{row ? periodText(row.label) : ABSENT}</span>
               {pointYoy != null && <Stat label="YoY" value={pointYoy} tone={growthTone(pointYoy, inverse)} />}
             </p>
           </div>

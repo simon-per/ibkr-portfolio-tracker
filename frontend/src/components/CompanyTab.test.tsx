@@ -57,7 +57,7 @@ describe('CompanyTab', () => {
     expect(options[2]).toMatch(/^AAPL · Apple/i)
     expect((select as HTMLSelectElement).value).toBe(String(NVDA_CIK))
     await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'ttm', '10y'))
-    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(12)
   })
 
   it('remembers the pick on this browser and opens it next time', async () => {
@@ -223,7 +223,18 @@ describe('CompanyTab', () => {
     expect(within(overview).getByTestId('price-line')).toBeTruthy()
   })
 
-
+  it('draws the price first, by date, the same in either basis', async () => {
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await screen.findAllByTestId('chart')
+    expect(document.querySelector('[data-chart]')?.getAttribute('data-chart')).toBe('price')
+    expect(within(card('price')).getByTestId('headline').textContent).toBe('$186.60')
+    expect(card('price').textContent).toContain('Nov 6, 2026')
+    expect(card('price').textContent).toContain('5Y+62.0%')
+    fireEvent.click(within(screen.getByRole('group', { name: 'Basis' })).getByRole('button', { name: 'Per share' }))
+    expect(within(card('price')).getByTestId('headline').textContent).toBe('$186.60')
+    expect(get).toHaveBeenCalledTimes(1)
+  })
 
   it('shows the latest margins instead of a CAGR, a dash for a missing one', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
@@ -256,7 +267,7 @@ describe('CompanyTab', () => {
       series: { pe_ratio: none, ps_ratio: none, pfcf_ratio: none },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
     expect(document.querySelector('[data-chart="valuation"]')).toBeNull()
   })
 
@@ -307,7 +318,7 @@ describe('CompanyTab', () => {
       series: { dividends_per_share: fixtureSeries([null, null, null, null]) },
     }))
     renderTab()
-    expect(await screen.findAllByTestId('chart')).toHaveLength(10)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
     expect(document.querySelector('[data-chart="dps"]')).toBeNull()
     expect(screen.queryByText('Dividends per share')).toBeNull()
   })
@@ -373,7 +384,7 @@ describe('CompanyTab', () => {
     }))
     renderTab()
     expect((await screen.findByRole('alert')).textContent).toContain('FY2024 cash flow not filed')
-    expect(await screen.findAllByTestId('chart')).toHaveLength(11)
+    expect(await screen.findAllByTestId('chart')).toHaveLength(12)
   })
 
   it('has no warning when the response carries none', async () => {

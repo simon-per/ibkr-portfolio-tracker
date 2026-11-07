@@ -143,7 +143,9 @@ describe('the overview groups', () => {
 })
 
 describe('dates and fiscal years', () => {
-  it("print a date in full", () => {
+  it("print a close's date short on an axis and in full in a header", () => {
+    expect(shortPeriodLabel('2026-11-06')).toBe("Nov '26")
+    expect(shortPeriodLabel('Q4 FY2025')).toBe('FY25')
     expect(periodText('2026-11-06')).toBe('Nov 6, 2026')
     expect(periodText('Q3 FY2025')).toBe('Q3 FY2025')
   })
