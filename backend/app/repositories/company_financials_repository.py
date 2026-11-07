@@ -18,6 +18,7 @@ from app.models.company_financials import (
     CompanyFinancial,
     CompanyPrice,
     CompanySplit,
+    CompanyYahooProfile,
     SecCompany,
     SecTicker,
     SecurityCik,
@@ -30,6 +31,23 @@ def facts_backoff_until(row: Optional[SecCompany]) -> Optional[datetime]:
     if row is None:
         return None
     return miss_backoff_until(row.facts_checked_at, row.facts_miss_count)
+
+
+def yahoo_profile_backoff_until(
+    row: Optional[CompanyYahooProfile],
+) -> Optional[datetime]:
+    """When the Company tab's Yahoo chunk may next ask about a company, or None."""
+    if row is None:
+        return None
+    return miss_backoff_until(row.checked_at, row.miss_count)
+
+
+#: Every figure column of `company_yahoo_profiles`, replaced as one set on each answer.
+YAHOO_PROFILE_COLUMNS = tuple(
+    c.name
+    for c in CompanyYahooProfile.__table__.columns
+    if c.name not in ("cik", "fetched_at", "checked_at", "miss_count")
+)
 
 
 def prices_backoff_until(row: Optional[SecCompany]) -> Optional[datetime]:
@@ -264,6 +282,42 @@ class CompanyFinancialsRepository:
         company.prices_fetched_at = fetched_at
         company.prices_checked_at = None
         company.prices_miss_count = None
+
+    # ── company_yahoo_profiles ────────────────────────────────────────────────
+
+    async def yahoo_profiles(
+        self, ciks: Iterable[int]
+    ) -> Dict[int, CompanyYahooProfile]:
+        wanted = list(ciks)
+        if not wanted:
+            return {}
+        result = await self.session.execute(
+            select(CompanyYahooProfile).where(CompanyYahooProfile.cik.in_(wanted))
+        )
+        return {row.cik: row for row in result.scalars()}
+
+    async def write_yahoo_profile(
+        self, cik: int, values: dict, fetched_at: datetime
+    ) -> None:
+        """One company's Yahoo figures, replaced as one set (a key absent is NULL)."""
+        row = await self.session.get(CompanyYahooProfile, cik)
+        if row is None:
+            row = CompanyYahooProfile(cik=cik)
+            self.session.add(row)
+        for column in YAHOO_PROFILE_COLUMNS:
+            setattr(row, column, values.get(column))
+        row.fetched_at = fetched_at
+        row.checked_at = None
+        row.miss_count = None
+
+    async def record_yahoo_miss(self, cik: int, checked_at: datetime) -> None:
+        """Yahoo had nothing, or failed; the stored figures stay, the next ask waits."""
+        row = await self.session.get(CompanyYahooProfile, cik)
+        if row is None:
+            row = CompanyYahooProfile(cik=cik)
+            self.session.add(row)
+        row.checked_at = checked_at
+        row.miss_count = (row.miss_count or 0) + 1
 
     async def record_price_miss(self, cik: int, checked_at: datetime) -> None:
         """Yahoo had no closes for the company; `prices_backoff_until` spaces the next ask."""

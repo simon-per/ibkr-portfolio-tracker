@@ -1819,6 +1819,9 @@ class SchedulerService:
             else:
                 async with AsyncSessionLocal() as db:
                     ratings_result = await AnalystRatingService(db).sync_stale_ratings()
+            profiles_result = await self._company_profiles_after(
+                fundamentals_result, ratings_result
+            )
         except Exception as e:
             logger.error(f"Fundamentals refresh failed: {e}", exc_info=True)
             result.update(
@@ -1838,11 +1841,15 @@ class SchedulerService:
                     )
             result.update(
                 status="success",
-                message=f"{fundamentals_result.get('message')}; {ratings_result.get('message')}",
+                message=(
+                    f"{fundamentals_result.get('message')}; {ratings_result.get('message')}; "
+                    f"{profiles_result.get('message')}"
+                ),
                 fundamentals_result=fundamentals_result,
                 ratings_result=ratings_result,
+                profiles_result=profiles_result,
             )
-            _collect_warnings(result, fundamentals_result, ratings_result)
+            _collect_warnings(result, fundamentals_result, ratings_result, profiles_result)
 
         # Holding logos (docs/logos.md): logo.dev, not Yahoo, so it runs after a Yahoo rate
         # limit or a crashed fundamentals pass too, and its own failure is a warning, never
@@ -1866,6 +1873,28 @@ class SchedulerService:
         await self._record_run(result, started_at)
         logger.info(f"Fundamentals refresh: {result.get('status')} — {result.get('message')}")
         return result
+
+    async def _company_profiles_after(self, fundamentals_result: dict, ratings_result: dict) -> dict:
+        """
+        The Company tab's Yahoo chunk for the companies nobody holds (`company_profile_sync`,
+        owner-approved 2026-11-07), third in the 05:00 job and under its gate. Not after a
+        rate limit in either pass before it — same IP. Its own failure is its warning,
+        never the job's status: the held passes before it stand.
+        """
+        from app.services.company_profile_sync import CompanyProfileSync
+
+        if fundamentals_result.get("rate_limited") or ratings_result.get("rate_limited"):
+            return {
+                "status": "skipped",
+                "message": "Company figures not attempted after a Yahoo rate limit",
+            }
+        try:
+            async with AsyncSessionLocal() as db:
+                return await CompanyProfileSync(db).refresh()
+        except Exception as e:
+            logger.error(f"Company figures chunk failed: {e}", exc_info=True)
+            message = f"Company figures chunk failed: {type(e).__name__}: {e}"
+            return {"status": "error", "message": message, "warnings": [message]}
 
     async def company_financials_refresh_job(self) -> dict:
         """

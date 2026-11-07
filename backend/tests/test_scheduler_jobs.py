@@ -1669,9 +1669,28 @@ async def test_the_fundamentals_refresh_runs_daily_an_hour_after_the_watchlist(j
         svc.shutdown()
 
 
-def _fake_fundamentals(monkeypatch, fundamentals, ratings):
-    """Stand outcomes in for the two services' stale passes; returns the calls made."""
+def _fake_fundamentals(monkeypatch, fundamentals, ratings, profiles=None):
+    """
+    Stand outcomes in for the two services' stale passes and the Company tab's chunk
+    (`company_profile_sync`); returns the calls made.
+    """
     calls = []
+    profiles = profiles if profiles is not None else {
+        "status": "success", "rate_limited": False, "message": "Company figures: 9 of 9 refreshed",
+    }
+
+    class FakeProfiles:
+        def __init__(self, db):
+            pass
+
+        async def refresh(self):
+            calls.append("profiles")
+            if isinstance(profiles, Exception):
+                raise profiles
+            return dict(profiles)
+
+    import app.services.company_profile_sync as profiles_module
+    monkeypatch.setattr(profiles_module, "CompanyProfileSync", FakeProfiles)
 
     class FakeFundamentals:
         def __init__(self, db):
@@ -1714,10 +1733,11 @@ async def test_the_fundamentals_job_runs_both_stale_passes_as_its_own_run(monkey
 
     result = await svc.fundamentals_refresh_job()
 
-    assert calls == ["fundamentals", "ratings"]
+    assert calls == ["fundamentals", "ratings", "profiles"]
     assert result["type"] == "fundamentals_refresh"
     assert result["status"] == "success"
     assert "warnings" not in result
+    assert result["profiles_result"]["message"] == "Company figures: 9 of 9 refreshed"
     assert recorded == [result]
     assert svc.last_sync_result == {"type": "market_data_only", "status": "success"}
 
@@ -1738,6 +1758,38 @@ async def test_a_rate_limit_in_the_fundamentals_pass_skips_the_ratings_pass(monk
     assert result["status"] == "success"
     assert result["warnings"][0].startswith("Yahoo Finance rate limit reached")
     assert any("Analyst ratings were not refreshed" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_in_the_ratings_pass_skips_the_company_chunk(monkeypatch):
+    """Rule 1 again: the chunk asks the same IP the ratings pass was just refused by."""
+    svc = SchedulerService()
+    calls = _fake_fundamentals(monkeypatch, _OK_FUNDAMENTALS, {
+        **_OK_RATINGS, "rate_limited": True,
+        "warnings": ["Yahoo Finance rate limit reached; the rest of this pass was abandoned."],
+    })
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals", "ratings"]
+    assert result["profiles_result"]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_a_crashed_company_chunk_is_a_warning_never_the_fundamentals_status(monkeypatch):
+    svc = SchedulerService()
+    calls = _fake_fundamentals(
+        monkeypatch, _OK_FUNDAMENTALS, _OK_RATINGS, RuntimeError("database is locked")
+    )
+    _record_into(svc, monkeypatch)
+
+    result = await svc.fundamentals_refresh_job()
+
+    assert calls == ["fundamentals", "ratings", "profiles"]
+    assert result["status"] == "success"
+    assert result["profiles_result"]["status"] == "error"
+    assert any("Company figures chunk failed: RuntimeError" in w for w in result["warnings"])
 
 
 @pytest.mark.asyncio

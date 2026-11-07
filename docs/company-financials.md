@@ -442,6 +442,24 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
 
   `--symbol`, `--force` as above; it records a `manual_company_prices_fetch` row.
 
+## The overview
+
+The Company tab opens on an overview of **the company itself** — never a portfolio figure
+(owner, 2026-11-07; docs/frontend.md *The Company tab*). Beyond the figures above it reads:
+
+- **Industry and fiscal year end** from the SEC's submissions document (*Sources*).
+- **Yahoo's company-level figures** — analyst rating counts, price targets, forward P/E, PEG,
+  forward revenue and EPS growth, the next earnings date and its EPS estimate, the business
+  summary. **A held company reads its listing's own rows**, kept by the daily held pass:
+  `fundamental_metrics` (which keeps `business_summary` from the `.info` it already reads, at no
+  extra request), `analyst_ratings`, `earnings_events`. **A company nobody holds** reads
+  `company_yahoo_profiles` (migration `f1a3c5e7b9d2`), filled a chunk a run by
+  `company_profile_sync` inside the 05:00 `fundamentals_refresh` (CLAUDE.md rule 1, approved by
+  the owner 2026-11-07 for that budget; docs/flex-and-sync.md has it). Both through the same
+  readers — `fundamentals_service.extract_metrics` and `extract_earnings`,
+  `AnalystRatingService.fetch_counts` — so one company's figures never have two parsers. Until the
+  rotation reaches a company (two weeks for the first fill), its Yahoo figures are absent.
+
 ## Known gaps and out of scope
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property

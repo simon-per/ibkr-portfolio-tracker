@@ -83,10 +83,13 @@ def test_both_services_resolve_peg_through_the_one_tier_order():
     could drift between `/api/watchlist` and `/api/fundamentals/portfolio`. Now both call
     `resolve_peg`, which is the only place that knows it (GitHub issue #11, item b).
     """
-    from app.services.fundamentals_service import FundamentalsService
+    from app.services.fundamentals_service import FundamentalsService, extract_metrics
     from app.services.watchlist_service import WatchlistService
 
-    for func in (FundamentalsService._extract_metrics, WatchlistService.sync_item):
+    # The held pass reads `.info` through `extract_metrics`, the one reader it shares with
+    # the Company tab's chunk (2026-11-07).
+    assert "extract_metrics(" in inspect.getsource(FundamentalsService._extract_metrics)
+    for func in (extract_metrics, WatchlistService.sync_item):
         src = inspect.getsource(func)
         assert "resolve_peg(" in src, f"{func.__qualname__} does not use the shared order"
         assert "peg_from_growth" not in src and "longTermGrowth" not in src, (

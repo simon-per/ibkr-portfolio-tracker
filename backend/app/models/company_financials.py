@@ -20,6 +20,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
+    BigInteger,
     Date,
     DateTime,
     Float,
@@ -27,6 +28,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -202,3 +204,60 @@ class CompanySplit(Base):
 
     def __repr__(self) -> str:
         return f"<CompanySplit {self.cik} {self.date} {self.ratio}>"
+
+
+class CompanyYahooProfile(Base):
+    """
+    Yahoo's company-level figures for a company the Company tab lists and nobody holds,
+    refreshed a chunk a day (`company_profile_sync`). A held company never gets a row: its
+    listing's own rows (`fundamental_metrics`, `analyst_ratings`, `earnings_events`) are
+    read instead, so one company's figures have one source.
+
+    The metric columns are `fundamentals_service.extract_metrics`' keys — the one `.info`
+    reader — and the rating counts are `AnalystRatingService.fetch_counts`'; a refresh
+    replaces them all at once. `checked_at` / `miss_count` are the shared miss back-off's
+    pair (`miss_backoff`): Yahoo had nothing, or failed with something not a rate limit.
+    """
+
+    __tablename__ = "company_yahoo_profiles"
+
+    cik: Mapped[int] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), primary_key=True
+    )
+    trailing_pe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    forward_pe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    peg_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_to_sales: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_to_book: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    revenue_growth: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    earnings_growth: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fwd_revenue_growth: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fwd_eps_growth: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profit_margins: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gross_margins: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    operating_margins: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    market_cap: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    number_of_analysts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    target_mean_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    target_high_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    target_low_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quote_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    data_currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    business_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    strong_buy: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    buy: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hold: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sell: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    strong_sell: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The nearest upcoming earnings date (naive UTC) and its EPS estimate.
+    next_earnings_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    next_eps_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # When the figures above were last written from an answer.
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CompanyYahooProfile cik={self.cik} fetched_at={self.fetched_at}>"
