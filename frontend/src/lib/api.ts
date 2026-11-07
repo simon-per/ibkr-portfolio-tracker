@@ -1570,6 +1570,8 @@ export interface CompanyFinancialsCompany {
   cik: number;
   /** The held listing (lowest symbol); null for a Nasdaq-100 constituent not held. */
   security_id: number | null;
+  /** Every held listing (GOOG and GOOGL are both Alphabet); empty when not held. */
+  security_ids: number[];
   symbol: string;
   name: string;
   /** For the logo of a company not held. */

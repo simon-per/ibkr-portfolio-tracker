@@ -53,15 +53,15 @@ export const AAPL_CIK = 320193
 
 export const FIXTURE_COMPANIES: CompanyFinancialsCompany[] = [
   {
-    cik: AAPL_CIK, security_id: null, symbol: 'AAPL', name: 'Apple Inc', isin: 'US0378331005', held: false,
+    cik: AAPL_CIK, security_id: null, security_ids: [], symbol: 'AAPL', name: 'Apple Inc', isin: 'US0378331005', held: false,
     currency: 'USD', first_period_end: '2009-06-27', last_period_end: '2025-06-28', last_fetched_at: '2026-10-24T06:00:00',
   },
   {
-    cik: NVDA_CIK, security_id: 11, symbol: 'NVDA', name: 'NVIDIA CORP', isin: 'US67066G1040', held: true,
+    cik: NVDA_CIK, security_id: 11, security_ids: [11], symbol: 'NVDA', name: 'NVIDIA CORP', isin: 'US67066G1040', held: true,
     currency: 'USD', first_period_end: '2009-01-25', last_period_end: '2025-01-26', last_fetched_at: '2026-10-24T06:00:00',
   },
   {
-    cik: AMZN_CIK, security_id: 22, symbol: 'AMZN', name: 'AMAZON COM INC', isin: 'US0231351067', held: true,
+    cik: AMZN_CIK, security_id: 22, security_ids: [22], symbol: 'AMZN', name: 'AMAZON COM INC', isin: 'US0231351067', held: true,
     currency: 'USD', first_period_end: '2009-12-31', last_period_end: '2025-06-30', last_fetched_at: '2026-10-24T06:00:00',
   },
 ]

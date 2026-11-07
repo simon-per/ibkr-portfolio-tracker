@@ -551,6 +551,7 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert [(c["symbol"], c["cik"], c["security_id"], c["held"]) for c in companies] == [
         ("AAPL", 320193, None, False), ("ASML", 937966, 1, True)]
     assert companies[0]["name"] == "Apple Inc" and companies[0]["isin"] == "US0378331005"
+    assert [c["security_ids"] for c in companies] == [[], [1]]
     assert companies[1]["currency"] == "USD"
     assert companies[1]["last_fetched_at"].endswith("+00:00")
 

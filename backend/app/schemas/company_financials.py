@@ -22,6 +22,10 @@ class CompanyFinancialsCompany(BaseModel):
     security_id: Optional[int] = Field(
         None, description="The held listing (lowest symbol); null for a company not held."
     )
+    security_ids: List[int] = Field(
+        default_factory=list,
+        description="Every held listing of the company (GOOG and GOOGL); empty when not held.",
+    )
     symbol: str
     name: str
     isin: Optional[str] = Field(None, description="For the logo.")
