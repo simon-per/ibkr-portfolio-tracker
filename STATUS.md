@@ -355,7 +355,7 @@ One line each, newest first; drop the oldest.
   shared rules; every holding's row links to its Company page through the URL hash; the Company
   tab opens on an overview of the company (SEC industry, price line, grouped figures, Street row,
   a price card) with Yahoo figures for index-only companies a chunk a day (owner-approved).
-  Branches `harmonize-company-links` and `company-overview` (stacked), unmerged.
+  Merged to `main` and pushed the same day (`harmonize-company-links`, `company-overview`).
 
 - **2026-10-25 (Company tab: P/E)** — owner-approved weekly Yahoo closes per CIK (about a
   hundred requests a Sunday, 5.1 MB first fill) for a P/E in the key figures and a P/E card; the
