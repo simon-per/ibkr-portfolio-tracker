@@ -382,7 +382,7 @@ class IBKRService:
         message names the type only: a transport error's text carries the URL, token
         included."""
         return RuntimeError(
-            f"IBKR Flex SendRequest failed after it may have reached IBKR "
+            f"IBKR Flex {flex_generation.FLEX_POSSIBLY_DELIVERED_PHRASE} "
             f"({type(e).__name__}). Not re-requesting: the request may already "
             "have started a generation, and repeating SendRequest is what trips "
             "the Code=1025 token lockout. The next scheduled sync will try again."

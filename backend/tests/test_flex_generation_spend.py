@@ -450,15 +450,88 @@ async def test_a_newer_outcome_lifts_the_hold_and_a_skip_does_not(maker, monkeyp
         assert await fg.flex_refusal_hold(db, as_of=NOW) is None
 
 
+# Every code `fetch_flex_data` fails fast on at SendRequest — derived from the service's
+# own sets, so a code added there joins the family here (review item I2).
+REQUEST_STEP_CODES = sorted(
+    ibkr_module._RETRIEVE_PENDING_CODES - ibkr_module._REQUEST_RETRYABLE_CODES
+)
+
+
+async def _request_step_message(monkeypatch, refusal):
+    if refusal == "possibly_delivered":
+        return str(IBKRService._possibly_delivered_error(TimeoutError()))
+    return await _refusal_message(monkeypatch, refusal)
+
+
 @pytest.mark.asyncio
-async def test_only_a_lockout_or_a_request_step_1001_holds(maker, monkeypatch):
-    """Every other refusal message merely *mentions* Code=1025; none of them may hold."""
+@pytest.mark.parametrize("refusal", [*REQUEST_STEP_CODES, "possibly_delivered"])
+async def test_every_request_step_refusal_holds_a_press_until_the_next_generation(
+    maker, monkeypatch, refusal
+):
+    """
+    The whole family, not `1001` alone: each is a failed (or possibly started) generation,
+    so a press after it is another one toward `1025`. A slot is not held by it.
+    """
+    assert "1001" in REQUEST_STEP_CODES and "1009" in REQUEST_STEP_CODES
+    message = await _request_step_message(monkeypatch, refusal)
+    await _add(maker, "full_sync", "error", NOW, message=f"Failed to sync IBKR data: {message}")
+
+    async with maker() as db:
+        hold = await fg.flex_refusal_hold(db, as_of=NOW + timedelta(minutes=10))
+        assert hold is not None, message
+        assert hold.until == fg.next_generation_opens_at(NOW)
+        assert hold.code == (None if refusal == "possibly_delivered" else refusal)
+        assert await fg.flex_refusal_hold(db, as_of=hold.until) is None
+        slot = await fg.flex_refusal_hold(
+            db, as_of=NOW + timedelta(minutes=10), request_refusals=False
+        )
+        assert slot is None, "a request-step refusal must not hold the recovery slot"
+        assert fg.flex_refusal_code(fg.describe_refusal_hold(hold)) is None
+        assert not fg.is_request_step_refusal(fg.describe_refusal_hold(hold))
+
+
+@pytest.mark.asyncio
+async def test_the_trigger_route_is_a_press_and_is_held(maker, monkeypatch):
+    """
+    `POST /api/scheduler/trigger` runs the full job on a human's click, so it honours the
+    request-step hold `POST /api/sync/ibkr` does; it passed `request_refusals=False` until
+    review item I2, so each click after a refusal was another failed generation.
+    """
+    message = await _refusal_message(monkeypatch, "1009")
+    await _add(
+        maker, "full_sync", "error", utcnow() - timedelta(minutes=1),
+        message=f"Failed to sync IBKR data: {message}",
+    )
+
+    class _ExplodingFlex:
+        def __init__(self, *a, **k):
+            raise AssertionError("a held press constructed the Flex client")
+
+    monkeypatch.setattr(ss, "IBKRService", _ExplodingFlex)
+    svc = _scheduler(monkeypatch)
+    result = await svc.sync_ibkr_data(manual=True)
+    assert result["status"] == "skipped"
+    assert result["reason"] == "flex_refusal_hold"
+
+    seen = {}
+
+    async def _job(scheduled=False, manual=False):
+        seen["manual"] = manual
+        return {"status": "success"}
+
+    monkeypatch.setattr(svc, "full_sync_job", _job)
+    await svc.trigger_sync_now()
+    assert seen["manual"] is True
+
+
+@pytest.mark.asyncio
+async def test_only_a_lockout_or_a_request_step_refusal_holds(maker, monkeypatch):
+    """Every other message merely *mentions* Code=1025 or a code; none of them may hold."""
     not_holding = [
-        await _refusal_message(monkeypatch, "1009"),  # request-step refusal, not a 1001
-        str(IBKRService._possibly_delivered_error(TimeoutError())),
         "IBKR Flex statement 123 was still not ready after 900s of polling "
         "(last: Code=1001: Statement could not be generated at this time.)",
         "ingest refused",
+        "Network error reaching IBKR Flex (ConnectTimeout); no request reached IBKR",
     ]
     async with maker() as db:
         for i, message in enumerate(not_holding):

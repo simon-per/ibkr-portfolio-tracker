@@ -116,7 +116,7 @@ async def test_a_dashboard_triggered_dividend_pass_delays_the_scheduled_full_syn
 
     ran = []
 
-    async def _full_sync_body():
+    async def _full_sync_body(manual=False):
         ran.append("full_sync")
         return {"type": "full_sync", "status": "success"}
 
@@ -184,7 +184,7 @@ async def test_the_dividend_cooldown_does_not_block_the_job_after_the_pass(monke
 
     ran = []
 
-    async def _body():
+    async def _body(manual=False):
         ran.append(1)
         return {"type": "full_sync", "status": "success"}
 

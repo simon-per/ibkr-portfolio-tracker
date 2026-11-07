@@ -203,21 +203,27 @@ its 120 s start cooldown, so a press two minutes later sent SendRequest into the
   18 h from the 00:00 slot to the next 18:00 one, so a lockout met at 00:00 never costs the next
   day's primary slot. A skip writes no outcome, so only the bound lifts the hold. Pinned by
   `test_a_lockout_met_at_the_recovery_slot_never_costs_the_next_primary_slot`.
-- a **`1001` at the SendRequest step** in the same ET day, for **manual presses only**. IBKR refused
-  that day's generation, and pressing again is another counted failure; the hold lifts at the next
-  midnight ET. The scheduled slots ignore this half (`request_refusals=False`): after an 18:00
-  request-step `1001`, the 00:00 slot of the same ET day keeps its **one** fresh SendRequest — "fail
-  fast and let the next slot ask fresh" (rule 2), and the same-ET-day recoveries of 08-02 and 08-03
-  were exactly this. One automatic retry a day is the schedule's budget; a press is not in it.
+- a **request-step refusal** in the same ET day, for **manual presses only**: any code
+  `fetch_flex_data` fails fast on without a reference (`1001`, `1004`–`1009`, `1019`, `1021`), or a
+  SendRequest that failed after it may have reached IBKR. Each is a failed (or possibly started)
+  generation, and pressing again is another counted failure; the hold lifts at the next midnight
+  ET. Decided by the phrase, never the code — until 2026-11-07 (review item I2) only a literal
+  `1001` held, so every press after a `1009` was another failed generation. The scheduled slots
+  ignore this half (`request_refusals=False`): after an 18:00 request-step refusal, the 00:00 slot
+  of the same ET day keeps its **one** fresh SendRequest — "fail fast and let the next slot ask
+  fresh" (rule 2), and the same-ET-day recoveries of 08-02 and 08-03 were exactly this. One
+  automatic retry a day is the schedule's budget; a press is not in it.
 
 Any later success, including an `ibkr_generation` row, or any other error lifts it.
 `POST /api/sync/ibkr` answers **429** with the reason and a `Retry-After` on either half. Every
 scheduled IBKR path returns `skipped`, `reason="flex_refusal_hold"`, from
-`SchedulerService.sync_ibkr_data` on the `1025` half only; `POST /api/scheduler/trigger` goes
-through it too, so it follows the scheduled rule. `force=true` overrides it, as it does the
-already-generated skip. The two refusal messages are classified by the phrases they are built from
-(`FLEX_LOCKOUT_PHRASE`, `FLEX_REQUEST_REFUSED_PHRASE`, defined in `flex_generation` and imported by
-`ibkr_service`), never by a bare `Code=1025`, because the other refusal messages *mention* `1025`.
+`SchedulerService.sync_ibkr_data` on the `1025` half only. `POST /api/scheduler/trigger` goes
+through it too but is a press, not a slot: `trigger_sync_now` passes `manual=True` and is held by
+both halves (it followed the scheduled rule until I2). `force=true` overrides it, as it does the
+already-generated skip. The refusal messages are classified by the phrases they are built from
+(`FLEX_LOCKOUT_PHRASE`, `FLEX_REQUEST_REFUSED_PHRASE`, `FLEX_POSSIBLY_DELIVERED_PHRASE`, defined in
+`flex_generation` and imported by `ibkr_service`), never by a bare `Code=1025`, because the other
+refusal messages *mention* `1025`.
 The classifier therefore also reads the rows recorded before the change. Tests:
 `tests/test_flex_generation_spend.py`.
 
