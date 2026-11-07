@@ -10,7 +10,7 @@ Offline: the two fetchers are replaced on their classes; no request leaves the m
 """
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
