@@ -558,6 +558,9 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     body = client.get("/api/company-financials/937966").json()
     assert (body["cik"], body["security_id"], body["held"]) == (937966, 1, True)
     assert (body["period"], body["range"], body["warnings"]) == ("ttm", "10y", [])
+    # The overview's profile and the price series ride on the same response.
+    assert "industry" in body["profile"] and "target_upside" in body["profile"]
+    assert isinstance(body["series"]["price"]["points"], list)
     revenue = body["series"]["revenue"]["points"]
     assert [p["label"] for p in revenue] == [f"Q{q} FY{y}" for y, q in (
         (2023, 4), (2024, 1), (2024, 2), (2024, 3), (2024, 4))]

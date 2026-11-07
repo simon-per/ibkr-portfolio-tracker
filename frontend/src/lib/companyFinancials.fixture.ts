@@ -1,6 +1,7 @@
 import type {
   CompanyFinancialsCompany,
   CompanyFinancialsKeyStats,
+  CompanyFinancialsProfile,
   CompanyFinancialsResponse,
   CompanyFinancialsSeries,
   CompanyFinancialsSeriesSet,
@@ -47,6 +48,38 @@ export const FIXTURE_KEY_STATS: CompanyFinancialsKeyStats = {
   buybacks: null, dividends_paid: 834e6,
 }
 
+/** Weekly closes, a quarter apart, each labelled by its date (`series.price`). */
+export function fixturePriceSeries(): CompanyFinancialsSeries {
+  const closes: [string, number][] = [
+    ['2025-11-07', 120.5], ['2026-02-06', 135.2], ['2026-05-08', 150.1], ['2026-08-07', 172.4],
+    ['2026-11-06', 186.6],
+  ]
+  return {
+    points: closes.map(([period_end, value]) => ({ period_end, label: period_end, value, yoy: null })),
+    cagr: null,
+    yoy: 0.549,
+    cagrs: { y3: null, y5: 0.62, y10: null },
+  }
+}
+
+/** An NVDA-like overview profile: every field known. */
+export const FIXTURE_PROFILE: CompanyFinancialsProfile = {
+  industry: 'Semiconductors & Related Devices',
+  fiscal_year_end: '0126',
+  description:
+    'NVIDIA designs graphics processors and accelerated computing platforms for data centres, '
+    + 'gaming and automotive markets. It sells to cloud providers and PC makers worldwide.',
+  price: 186.6, price_date: '2026-11-06',
+  return_1m: 0.041, return_1y: 0.549, return_5y: 0.62, return_10y: null,
+  week52_low: 94.3, week52_high: 212.2,
+  forward_pe: 31.2, peg_ratio: 0.9, fwd_revenue_growth: 0.52, fwd_eps_growth: 0.48,
+  rating: { strong_buy: 20, buy: 35, hold: 6, sell: 1, strong_sell: 0 },
+  analysts: 62,
+  target_low: 140, target_mean: 230, target_high: 300, target_upside: 0.2326,
+  next_earnings_date: '2026-11-19T21:20:00+00:00', next_eps_estimate: 1.02,
+  yahoo_as_of: '2026-11-07T04:03:00+00:00',
+}
+
 export const NVDA_CIK = 1045810
 export const AMZN_CIK = 1018724
 export const AAPL_CIK = 320193
@@ -85,6 +118,7 @@ export function fixtureFinancials(
     as_of: '2026-10-24',
     warnings: [],
     key_stats: FIXTURE_KEY_STATS,
+    profile: FIXTURE_PROFILE,
     series: {
       revenue: fixtureSeries([26_914e6, 26_974e6, 60_922e6, 130_497e6], 0.693, 1.142),
       revenue_per_share: fixtureSeries([1.06, 1.08, 2.44, 5.26], 0.705, 1.156),
@@ -111,6 +145,7 @@ export function fixtureFinancials(
       pfcf_ratio: fixtureSeries([75.3, 98.6, null, 57.6]),
       dividend_yield: fixtureSeries([0.0007, 0.0012, 0.0005, 0.00024]),
       roe: fixtureSeries([0.448, -0.165, 0.919, 1.192]),
+      price: fixturePriceSeries(),
       ...series,
     },
     ...rest,
@@ -130,6 +165,6 @@ export function emptySeriesSet(): CompanyFinancialsSeriesSet {
     gross_margin: empty(), operating_margin: empty(), net_margin: empty(), fcf_margin: empty(),
     dividends_per_share: empty(), buybacks: empty(), dividends_paid: empty(),
     cash: empty(), debt: empty(), net_cash: empty(), pe_ratio: empty(), ps_ratio: empty(), pfcf_ratio: empty(),
-    dividend_yield: empty(), roe: empty(),
+    dividend_yield: empty(), roe: empty(), price: empty(),
   }
 }

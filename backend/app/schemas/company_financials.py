@@ -166,6 +166,59 @@ class CompanyFinancialsSeriesSet(BaseModel):
     pfcf_ratio: CompanyFinancialsSeries
     dividend_yield: CompanyFinancialsSeries
     roe: CompanyFinancialsSeries
+    price: CompanyFinancialsSeries = Field(
+        ...,
+        description="The market closes (weekly, and a held listing's newest daily one); each "
+        "point's `label` is its date. The range applies, the period does not.",
+    )
+
+
+class CompanyFinancialsRating(BaseModel):
+    """The current period's analyst recommendation counts; all zero is "no coverage"."""
+
+    strong_buy: int
+    buy: int
+    hold: int
+    sell: int
+    strong_sell: int
+
+
+class CompanyFinancialsProfile(BaseModel):
+    """
+    The overview's company-level figures (docs/company-financials.md, *The overview*): the
+    SEC's industry and fiscal year end, the price line from the market closes, and Yahoo's
+    figures — a held company's from its listing's rows, any other's from the 05:00 chunk.
+    Growth and returns are fractions (0.25 is 25%); anything unknown is null.
+    """
+
+    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    fiscal_year_end: Optional[str] = Field(None, description="`MMDD`, as the SEC states it.")
+    description: Optional[str] = Field(None, description="Yahoo's business summary.")
+    price: Optional[float] = Field(None, description="The newest market close, `currency`.")
+    price_date: Optional[str] = None
+    return_1m: Optional[float] = None
+    return_1y: Optional[float] = None
+    return_5y: Optional[float] = Field(None, description="Annualised.")
+    return_10y: Optional[float] = Field(None, description="Annualised.")
+    week52_low: Optional[float] = Field(None, description="Of the closes, not intraday.")
+    week52_high: Optional[float] = Field(None, description="Of the closes, not intraday.")
+    forward_pe: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    fwd_revenue_growth: Optional[float] = None
+    fwd_eps_growth: Optional[float] = None
+    rating: Optional[CompanyFinancialsRating] = None
+    analysts: Optional[int] = None
+    target_low: Optional[float] = None
+    target_mean: Optional[float] = None
+    target_high: Optional[float] = None
+    target_upside: Optional[float] = Field(
+        None,
+        description="The mean target over the newest close; null unless both are in one "
+        "currency and the close is current.",
+    )
+    next_earnings_date: Optional[str] = Field(None, description="UTC.")
+    next_eps_estimate: Optional[float] = None
+    yahoo_as_of: Optional[str] = Field(None, description="When Yahoo's figures were read, UTC.")
 
 
 class CompanyFinancialsResponse(BaseModel):
@@ -185,4 +238,5 @@ class CompanyFinancialsResponse(BaseModel):
     as_of: Optional[str] = Field(None, description="When EDGAR was last read, UTC.")
     warnings: List[str]
     key_stats: CompanyFinancialsKeyStats
+    profile: CompanyFinancialsProfile
     series: CompanyFinancialsSeriesSet

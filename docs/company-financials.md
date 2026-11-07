@@ -323,7 +323,7 @@ Alphabet, and only GOOG was named before; empty for a company not held.
 
 `GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=5y|10y|max`
 (defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,
-warnings, key_stats, series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
+warnings, key_stats, profile, series` (`profile` and `series.price`: *The overview* below), each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the
 tab's hover — and `cagrs` `{y3, y5, y10}`. The series: revenue, revenue per share, operating
 income, net income, diluted EPS, FCF, FCF after SBC, FCF per share, FCF after SBC per share,
@@ -459,6 +459,28 @@ The Company tab opens on an overview of **the company itself** — never a portf
   readers — `fundamentals_service.extract_metrics` and `extract_earnings`,
   `AnalystRatingService.fetch_counts` — so one company's figures never have two parsers. Until the
   rotation reaches a company (two weeks for the first fill), its Yahoo figures are absent.
+
+**`profile`** on `/api/company-financials/{cik}` (`CompanyFinancialsService._profile`; pinned both
+ways by the contract test): `industry, fiscal_year_end, description`; the price line `price,
+price_date, return_1m, return_1y, return_5y, return_10y, week52_low, week52_high`; `forward_pe,
+peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell}, analysts,
+target_low, target_mean, target_high, target_upside, next_earnings_date, next_eps_estimate,
+yahoo_as_of`. Rates are fractions; the unknown is null.
+
+- **One resolver** (`_yahoo_figures`): a held company's listing rows or the chunk's row, never a
+  mix; `tests/test_company_overview_profile.py` pins which wins.
+- **The price line is the market's, the multiples' basis is the figures'.** `_closes` reads the
+  weekly closes and the held listing's newest daily close once; the P/E and its kin take them
+  through `_on_eps_basis` (a split after the newest filing scales them), the price line and
+  `series.price` take them as quoted — a 10:1 split would otherwise show ten times the price.
+  `price_line`: the newest close and its date; the 1M change against the newest close on or before
+  a month back (within `PRICE_MATCH_DAYS`), 1Y by `yoy`, 5Y and 10Y by `cagrs` (annualised); the
+  52-week low and high of the closes — weekly closes, not intraday prices.
+- **The upside** is the mean target over the newest close, only when the target's
+  `data_currency` is the closes' currency and the close is within `PRICE_MAX_AGE_DAYS`.
+- **`series.price`** (`price_series`): the market closes shaped like any series, the range counted
+  back from the newest close, each point's YoY and the CAGRs by the same rules, `label` = the date.
+  The Period toggle does not apply.
 
 ## Known gaps and out of scope
 
