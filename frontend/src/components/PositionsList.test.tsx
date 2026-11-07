@@ -224,9 +224,12 @@ describe('a holding with a zero cost basis', () => {
     expect(cellFor('gain_loss_percent', GIFT, 'cards')).toBe('—')
   })
 
-  it('keeps the gain itself and dashes only the percentage under it', () => {
+  it('keeps the gain itself, signed, and dashes only the percentage under it', () => {
+    // Signed like every other gain on the page (review item VI7): "+CHF 200.00", not a
+    // bare positive beside the red losses.
     const { container } = render(<>{cellFor('gain_loss', GIFT)}</>)
-    expect(container.textContent).toBe(`${money(200)}—`)
+    expect(container.textContent).toBe(`+${money(200)}—`)
+    expect(cellFor('gain_loss', GIFT, 'cards')).toBe(`+${money(200)}`)
   })
 
   it('renders the table without throwing', () => {

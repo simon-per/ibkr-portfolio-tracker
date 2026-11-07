@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
-import { ABSENT, formatPercent, formatQuantity } from '@/lib/utils'
+import { ABSENT, formatPercent, formatQuantity, formatSigned } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
 import { getRatingScore } from '@/lib/analystRating'
 import { AnalystRatingBadge } from './AnalystRatingBadge'
@@ -293,10 +293,10 @@ export function positionColumns(deps: {
         cannotValue(p) ? NO_VALUE
         : view === 'table' ? (
           <>
-            <div>{formatCurrency(p.gain_loss_eur)}</div>
+            <div>{formatSigned(p.gain_loss_eur, formatCurrency)}</div>
             <div className="text-xs">{returnOf(p)}</div>
           </>
-        ) : formatCurrency(p.gain_loss_eur),
+        ) : formatSigned(p.gain_loss_eur, formatCurrency),
     },
     {
       key: 'weight',
