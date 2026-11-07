@@ -93,6 +93,17 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **The harmonization wave and the Company links (2026-11-07, `harmonize-company-links`):**
+  migration `d3b7f9a1c5e2` adds `securities.ratings_checked_at` / `ratings_miss_count`; after the
+  next Tue–Sat 05:00 `fundamentals_refresh` a rating fetch that failed is stamped and the ratings
+  result carries `backing_off`. A GLEIF 429 reads `gleif_rate_limited` (and a warning on the 18:00
+  record), not a run of `gleif_errors`. The container log carries one `Rate limited … further
+  refusals this window are not logged` line per client per minute. Allocation's percentages move
+  only on exact ties. In the browser: a holding's logo or name on Positions, Fundamentals,
+  Dividends and the Watchlist opens its company (GOOGL too, which needs the deployed
+  `security_ids`), Back returns, a reload keeps the tab — seen only on a local build against the
+  live API with `security_ids` stood in for.
+
 - **Short-range returns and risk (2026-10-28):** the API half is verified on production
   (2026-11-07: `/api/portfolio/annualized-return` answers `method` `period` for a month, `xirr`
   for over a year). Unseen in the browser: the card reading *Period return*, and Sharpe, Sortino
@@ -298,15 +309,10 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **Low leftovers from audit round 2** (not filed): analyst ratings re-ask a security on every
-   non-429 error and the GLEIF loop continues past a 429 (#66's siblings); the rate limiter logs
-   every rejection (two lines per refused request); `allocation_service` builds percentages from
-   float fractions outside `share_pct`; `currencyExposure.ts` publishes 0 for "nothing priced";
-   the Starlette TestClient warns to move to `httpx2` (the last 16 test warnings); KS 36's
-   derivatives indicator needs the Flex ingest to keep non-STK trades. (Accumulating funds'
-   Kursliste income is out of scope: the owner's tax software computes it from the trades,
-   2026-11-07.) (`gh issue list`), in
-   number order: bugs first, then tooling, then the product enhancements (#74–#78).
+1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
+   Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
+   `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
+   tax software computes it from the trades.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
