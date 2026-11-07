@@ -114,13 +114,14 @@ def is_exempt(method: str, path: str) -> bool:
     return path in EXEMPT_PATHS or (method == "GET" and path.startswith(EXEMPT_GET_PREFIXES))
 
 
-def check(key: str, limit: int, now: Optional[float] = None) -> int:
+def check(key: str, limit: int, now: Optional[float] = None, what: str = "") -> int:
     """
     Count one request against ``key``.
 
     Returns 0 when it is allowed, or the seconds remaining in the window when the limit
     is already spent. Counting happens even on rejection so a client that keeps hammering
-    does not reset itself.
+    does not reset itself. ``what`` names the request in the one log line a window's
+    refusals get (`_log_first_refusal`).
     """
     global _overflow
     if limit <= 0:
@@ -135,10 +136,28 @@ def check(key: str, limit: int, now: Optional[float] = None) -> int:
             # Full table and a new client: count it in the shared overflow bucket, so
             # an internal bound can tighten the limit but never lift it.
             _overflow, retry_after = _count(_overflow, window, limit, now)
+            _log_first_refusal(_overflow, limit, retry_after, what)
             return retry_after
 
     _counters[key], retry_after = _count(_counters.get(key), window, limit, now)
+    _log_first_refusal(_counters[key], limit, retry_after, what)
     return retry_after
+
+
+def _log_first_refusal(
+    state: Tuple[int, int], limit: int, retry_after: int, what: str
+) -> None:
+    """
+    One warning per client per window: the refusal that found the limit spent, not each
+    one after it. A client hammering a closed window wrote a line per request on top of
+    the access log's own — two lines per refusal, the log flooding at exactly the moment
+    someone reads it. Every refusal is still counted (`check`); only the first is logged.
+    """
+    if retry_after and state[1] == limit + 1:
+        logger.warning(
+            "Rate limited %s (>%d req/min); further refusals this window are not logged",
+            what or "a request", limit,
+        )
 
 
 def _count(
@@ -169,11 +188,10 @@ async def rate_limit_middleware(request: Request, call_next):
     if limit <= 0 or is_exempt(request.method, request.url.path):
         return await call_next(request)
 
-    retry_after = check(client_key(request), limit)
+    retry_after = check(
+        client_key(request), limit, what=f"{request.method} {request.url.path}"
+    )
     if retry_after:
-        logger.warning(
-            "Rate limited %s %s (>%d req/min)", request.method, request.url.path, limit
-        )
         return JSONResponse(
             status_code=429,
             content={"detail": f"Too many requests. Retry in {retry_after}s."},

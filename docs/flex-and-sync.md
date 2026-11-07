@@ -1636,8 +1636,12 @@ last, so a rejection from any of them still carries a correlation id:
   made it a hazard was an id past int64 answering 500 with a traceback (below); with that a 422 from
   validation, an image request costs one primary-key or ISIN lookup and writes one uvicorn access
   line, whatever it answers. A 404-only counter would not shrink the log: every request writes that
-  line, exempt or counted, and a rejected one adds the limiter's own `Rate limited` WARNING — a 429
-  costs the log two lines where a 404 costs one.
+  line, exempt or counted, and a rejected one used to add the limiter's own `Rate limited` WARNING —
+  a 429 cost the log two lines where a 404 cost one. **Since 2026-11-07 the WARNING is once per
+  client per window**: `check` logs the refusal that found the limit spent (its count lands on
+  `limit + 1`, so no state beyond the counter) and counts the rest silently, so a client hammering
+  a closed window costs one access line per request and one WARNING per minute
+  (`test_a_window_of_refusals_logs_once`).
 - **`app/observability.py`** stamps `X-Request-ID` (reusing a plausible inbound one so it correlates
   across a proxy) and installs the handler for unhandled exceptions — the one path where `str(e)`
   still reached the client unredacted. The body is a fixed string plus the id; the log line,

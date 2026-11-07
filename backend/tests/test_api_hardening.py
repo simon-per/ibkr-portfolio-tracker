@@ -325,6 +325,25 @@ def test_a_rejected_request_still_counts_against_the_window():
     assert rate_limit.check("k", limit=3, now=61.0) == 0
 
 
+def test_a_window_of_refusals_logs_once(caplog):
+    """Every refusal counts; only the first in a window is logged (one line, not one each)."""
+    rate_limit.reset()
+    caplog.set_level("WARNING", logger="app.rate_limit")
+    for _ in range(2):
+        assert rate_limit.check("k", limit=2, now=0.0, what="GET /api/x") == 0
+    for _ in range(5):
+        assert rate_limit.check("k", limit=2, now=1.0, what="GET /api/x") > 0
+    assert [r.getMessage() for r in caplog.records] == [
+        "Rate limited GET /api/x (>2 req/min); further refusals this window are not logged"
+    ]
+    # Another client's first refusal is its own line; the next window starts over.
+    for _ in range(3):
+        rate_limit.check("other", limit=2, now=2.0, what="GET /api/x")
+    for _ in range(4):
+        rate_limit.check("k", limit=2, now=61.0, what="GET /api/x")
+    assert len(caplog.records) == 3
+
+
 def test_the_forwarded_header_is_bounded(client, monkeypatch):
     """A long forged value must not become a long dictionary key."""
     monkeypatch.setattr(settings, "rate_limit_per_minute", 5, raising=False)
