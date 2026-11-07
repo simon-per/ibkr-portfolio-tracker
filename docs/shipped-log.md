@@ -25,7 +25,15 @@
 - **Verified on production** (deployed `3be8444` the same evening, on the owner's word): `fetch_company_financials
   --symbol MA --force` read 11 filings; `/api/company-financials/1141391?period=ttm` has 40
   consecutive TTM quarters Q4 FY2016–Q3 FY2026, each year end equal to the filed year (1.39,
-  1.64, 1.81, 2.04, 2.37). The other companies fill in the Sunday 05:00 pass.
+  1.64, 1.81, 2.04, 2.37).
+- **The other 25 backfilled the same evening** (owner's request), every SEC request 3 s apart
+  (a one-off driver around `fetch_company_financials`, no code change): 168 filings read, no
+  error or 429. It left 3 gaps each at BKR, INTC and PCAR that the survey had filled: the
+  filings repeating BKR's two-member 2018 quarters had been skipped as covered. `d9808be` asks a
+  gap's repeating filings too (docs/company-financials.md *Filing instances*); a second run over
+  the 22 companies with gaps read 71 more. Production: 260 gaps (MA's already filled) → 133 across 22 companies,
+  COST, MDLZ, XEL and GEHC none, BKR 4, INTC 2, PCAR 1; four `manual_company_financials_fetch`
+  rows, all success.
 
 ## Shipped 2026-10-25 — Company tab: more figures, and the Nasdaq-100
 
