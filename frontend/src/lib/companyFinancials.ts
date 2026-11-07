@@ -49,6 +49,12 @@ export interface CompanyChartDef {
   optional?: boolean
   /** Fewer is the shareholder's gain (the share count): growth reads the other way. */
   inverse?: boolean
+  /**
+   * Until a period is hovered, the headline and legend read today's figures from `key_stats`
+   * (the newest close over the newest TTM), dated by that close — the figures the overview
+   * shows above, not the last quarter end's. A series key must name a key figure too.
+   */
+  current?: boolean
   total: CompanyChartView
   /** The card in the Per share basis; a card without one (shares, margins, DPS) is the same in both. */
   perShare?: CompanyChartView
@@ -81,7 +87,7 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
       { key: 'net_margin', name: 'Net' },
       { key: 'fcf_margin', name: 'FCF' },
     ] } },
-  { id: 'valuation', kind: 'line', header: 'latest', optional: true,
+  { id: 'valuation', kind: 'line', header: 'latest', optional: true, current: true,
     total: { title: 'Valuation', format: 'multiple', series: [
       { key: 'pe_ratio', name: 'P/E' },
       { key: 'pfcf_ratio', name: 'P/FCF' },

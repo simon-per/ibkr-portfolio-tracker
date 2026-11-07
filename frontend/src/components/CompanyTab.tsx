@@ -118,6 +118,12 @@ function growthTone(printed: string, inverse: boolean): Tone {
 }
 
 /** Recharts reports the hovered index as a number or a numeric string, or nothing. */
+/** Today's key figure of the same name as a series (`CompanyChartDef.current`), or null. */
+function keyFigure(data: CompanyFinancialsResponse, key: CompanyFinancialsSeriesKey): number | null {
+  const stats: Partial<Record<CompanyFinancialsSeriesKey, number | null>> = data.key_stats
+  return stats[key] ?? null
+}
+
 function toIndex(value: unknown): number | null {
   if (value == null || value === '') return null
   const n = Number(value)
@@ -195,10 +201,17 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const tick = tickFormatter(view.format, data.currency, axis)
 
   const row: CompanyChartRow | undefined = rows[active ?? rows.length - 1]
+  // A `current` card reads today's figures until a period is hovered — the key figures' own
+  // P/E, not the last quarter end's — when the close they come from is known and any is.
+  const priceDate = data.profile.price_date
+  const today =
+    chart.current === true && active == null && priceDate != null
+    && shown.some((s) => keyFigure(data, s.key) != null)
+  const valueOf = (key: CompanyFinancialsSeriesKey) => (today ? keyFigure(data, key) : row?.[key] ?? null)
   // The first drawn series with a value at this period: BKNG tagged gross profit only in its
   // early years, and a dash would head its margins card.
-  const lead = shown.find((s) => row?.[s.key] != null) ?? shown[0] ?? series[0]
-  const leadValue = row?.[lead.key] ?? null
+  const lead = shown.find((s) => valueOf(s.key) != null) ?? shown[0] ?? series[0]
+  const leadValue = valueOf(lead.key)
   const growth = chart.header === 'growth'
   const inverse = chart.inverse ?? false
   const pointYoy = growth ? signedPercent(row?.yoy[lead.key] ?? null) : null
@@ -282,7 +295,9 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
               {leadValue == null ? ABSENT : format(leadValue)}
             </p>
             <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-              <span className="tabular-nums">{row ? periodText(row.label) : ABSENT}</span>
+              <span className="tabular-nums">
+                {today && priceDate ? periodText(priceDate) : row ? periodText(row.label) : ABSENT}
+              </span>
               {pointYoy != null && <Stat label="YoY" value={pointYoy} tone={growthTone(pointYoy, inverse)} />}
             </p>
           </div>
@@ -305,7 +320,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
             onToggle={toggle}
             options={series.map((s) => {
               const off = hidden.has(s.key)
-              const v = row?.[s.key] ?? null
+              const v = valueOf(s.key)
               return {
                 value: s.key,
                 label: (

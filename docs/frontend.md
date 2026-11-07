@@ -1130,6 +1130,11 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   hides or shows the series (never the last one) and the y axis refits. A series with no value
   anywhere gets no chip (`seriesWithData`: MA files no gross margin). Hovering dims the other
   periods' bars. The shares card tones growth the other way (`inverse`): fewer shares is green.
+  **The valuation card heads with today's multiples** (`current`, 2026-11-07): until a period
+  is hovered its headline and chips read `key_stats` (the newest close over the newest TTM),
+  dated by `profile.price_date`, so it agrees with the overview's P/E; it fell back to the last
+  quarter end's (AMD read P/E 115.4 above and 134.1 in the card). With no current multiple known
+  it heads with the last period as before.
 - **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends, buybacks
   & dividends and cash & debt cards are drawn only when some point has a value. A response with no
   value anywhere is one warning and no charts; `warnings[]` render as warnings above the grid.
