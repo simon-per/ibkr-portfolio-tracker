@@ -117,13 +117,13 @@ function growthTone(printed: string, inverse: boolean): Tone {
   return 'neutral'
 }
 
-/** Recharts reports the hovered index as a number or a numeric string, or nothing. */
 /** Today's key figure of the same name as a series (`CompanyChartDef.current`), or null. */
 function keyFigure(data: CompanyFinancialsResponse, key: CompanyFinancialsSeriesKey): number | null {
   const stats: Partial<Record<CompanyFinancialsSeriesKey, number | null>> = data.key_stats
   return stats[key] ?? null
 }
 
+/** Recharts reports the hovered index as a number or a numeric string, or nothing. */
 function toIndex(value: unknown): number | null {
   if (value == null || value === '') return null
   const n = Number(value)
@@ -187,7 +187,9 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const [active, setActive] = useState<number | null>(null)
 
   const series = seriesWithData(data, view).map((s, i) => ({ ...s, color: chartColor(i) }))
-  const shown = series.filter((s) => !hidden.has(s.key))
+  const kept = series.filter((s) => !hidden.has(s.key))
+  // An empty plot answers nothing: if the lines left drawn have no data here, draw them all.
+  const shown = kept.length > 0 ? kept : series
   const maxTicks = isCompact ? 6 : expanded ? 10 : 7
   // The rows keep their identity across hovers: a new `data` array would restart the bars'
   // animation under the pointer. Keyed on the props the series come from.
@@ -764,8 +766,9 @@ export function CompanyTab() {
               {data
                 ? charts.map((chart) => (
                     <CompanyChartCard
-                      // A new basis is a new set of series: the legend's hidden lines reset.
-                      key={`${chart.id}:${basis}`}
+                      // A new company or basis is a new set of series: the legend's hidden
+                      // lines and the hovered period reset (review item U4).
+                      key={`${data.cik}:${chart.id}:${basis}`}
                       chart={chart}
                       basis={basis}
                       data={data}
