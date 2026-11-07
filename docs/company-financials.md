@@ -321,7 +321,7 @@ and ISIN (`security_id` null; the ISIN finds its logo). `security_ids` names **e
 (2026-11-07), so a table row of any of them can link to the company — GOOG and GOOGL are both
 Alphabet, and only GOOG was named before; empty for a company not held.
 
-`GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=5y|10y|max`
+`GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=3y|5y|10y|max`
 (defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,
 warnings, key_stats, profile, series` (`profile` and `series.price`: *The overview* below), each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the

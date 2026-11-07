@@ -588,7 +588,8 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert empty["warnings"] and empty["series"]["revenue"]["points"] == []
     assert client.get("/api/company-financials/999").status_code == 404
     assert client.get("/api/company-financials/937966?period=weekly").status_code == 422
-    assert client.get("/api/company-financials/937966?range=3y").status_code == 422
+    assert client.get("/api/company-financials/937966?range=2y").status_code == 422
+    assert client.get("/api/company-financials/937966?range=3y").json()["range"] == "3y"
     # No write route: a POST is not a route at all.
     assert client.post("/api/company-financials/937966").status_code in (401, 405)
 

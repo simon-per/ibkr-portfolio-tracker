@@ -74,7 +74,8 @@ from app.services.analyst_rating_service import RATING_COUNT_FIELDS
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
-RANGES = {"5y": 5, "10y": 10, "max": None}
+# 3Y (owner, 2026-11-07): twelve quarters, the shortest span a fundamentals trend reads in.
+RANGES = {"3y": 3, "5y": 5, "10y": 10, "max": None}
 DEFAULT_PERIOD = "ttm"
 DEFAULT_RANGE = "10y"
 

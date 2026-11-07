@@ -240,7 +240,7 @@ class CompanyFinancialsResponse(BaseModel):
     )
     currency: Optional[str] = None
     period: str = Field(..., description="`quarterly`, `ttm` or `annual`.")
-    range: str = Field(..., description="`5y`, `10y` or `max`.")
+    range: str = Field(..., description="`3y`, `5y`, `10y` or `max`.")
     as_of: Optional[str] = Field(None, description="When EDGAR was last read, UTC.")
     warnings: List[str]
     key_stats: CompanyFinancialsKeyStats

@@ -1082,7 +1082,7 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 `lib/queryCache.ts`. The backend's rules live in its own file (CLAUDE.md's index).
 
 - **The browser only draws.** TTM, CAGR, YoY (each series' and each point's), margins and
-  per-share figures come from `/api/company-financials/{id}`; Quarterly | TTM | Annual and 5Y |
+  per-share figures come from `/api/company-financials/{id}`; Quarterly | TTM | Annual and 3Y | 5Y |
   10Y | Max are query parameters, never a transform here, and **Total | Per share only picks which
   served series a card draws** (`chartView`: revenue → revenue per share, net income → diluted
   EPS, FCF → FCF and FCF after SBC per share; shares, margins and dividends are the same in both),

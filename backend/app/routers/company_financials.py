@@ -38,7 +38,7 @@ async def list_companies(db: AsyncSession = Depends(get_db)):
 async def get_company_financials(
     cik: DbId,
     period: Literal["quarterly", "ttm", "annual"] = Query(DEFAULT_PERIOD),
-    range_key: Literal["5y", "10y", "max"] = Query(DEFAULT_RANGE, alias="range"),
+    range_key: Literal["3y", "5y", "10y", "max"] = Query(DEFAULT_RANGE, alias="range"),
     db: AsyncSession = Depends(get_db),
 ):
     """One company's series, by CIK. 404 for a company the pass never looked at; 200

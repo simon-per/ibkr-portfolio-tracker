@@ -389,6 +389,7 @@ export const BASIS_OPTIONS: readonly { value: CompanyBasis; label: string }[] = 
 ]
 
 export const RANGE_OPTIONS: readonly { value: CompanyFinancialsRange; label: string }[] = [
+  { value: '3y', label: '3Y' },
   { value: '5y', label: '5Y' },
   { value: '10y', label: '10Y' },
   { value: 'max', label: 'Max' },

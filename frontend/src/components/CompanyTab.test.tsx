@@ -132,6 +132,10 @@ describe('CompanyTab', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'annual', 'max'))
     const annual = within(screen.getByRole('group', { name: 'Period' })).getByRole('button', { name: 'Annual' })
     expect(annual.getAttribute('aria-pressed')).toBe('true')
+
+    // 3Y, the shortest range (owner, 2026-11-07).
+    fireEvent.click(within(screen.getByRole('group', { name: 'Range' })).getByRole('button', { name: '3Y' }))
+    await waitFor(() => expect(get).toHaveBeenCalledWith(NVDA_CIK, 'annual', '3y'))
   })
 
   it("prints the server's CAGRs and YoY, and leaves out a CAGR it has none for", async () => {

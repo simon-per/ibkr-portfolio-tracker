@@ -169,6 +169,7 @@ def test_annual_is_the_fiscal_years_as_filed():
 
 def test_the_range_counts_back_from_the_latest_point():
     rows = _rows(ENDS, BASE)
+    assert len(build_series(rows, "quarterly", "3y")["revenue"]["points"]) == 12
     assert len(build_series(rows, "quarterly", "5y")["revenue"]["points"]) == 20
     assert len(build_series(rows, "quarterly", "10y")["revenue"]["points"]) == 40
     assert len(build_series(rows, "quarterly", "max")["revenue"]["points"]) == 44

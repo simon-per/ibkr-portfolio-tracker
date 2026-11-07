@@ -1585,7 +1585,7 @@ export interface CompanyFinancialsCompany {
 }
 
 export type CompanyFinancialsPeriod = 'quarterly' | 'ttm' | 'annual';
-export type CompanyFinancialsRange = '5y' | '10y' | 'max';
+export type CompanyFinancialsRange = '3y' | '5y' | '10y' | 'max';
 
 /**
  * One period of one series. `label` is "Q3 FY2025" (quarterly, TTM) or "FY2025" (annual), FY
