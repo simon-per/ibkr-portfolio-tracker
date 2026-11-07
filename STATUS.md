@@ -100,8 +100,9 @@ Only what is still unverified.
   then their Street row is absent, by design. The first Sunday `company_financials_refresh` after
   the deploy reports `profiles_fetched` ≈ the company count (industry and fiscal year end), the
   next Sundays about none until 30 days pass. Held companies' business summaries appear after the
-  first 05:00 run (`fundamental_metrics.business_summary`). The owner's eye on the overview with
-  real data — checked only against mocked profiles on a local build (1366/390 px, both themes).
+  first 05:00 run (`fundamental_metrics.business_summary`). On production since 2026-11-07 the
+  overview draws from real data (price line, groups, a held company's Street row, the price card
+  first); the owner's eye on it.
 
 - **The harmonization wave and the Company links (2026-11-07, `harmonize-company-links`):**
   migration `d3b7f9a1c5e2` adds `securities.ratings_checked_at` / `ratings_miss_count`; after the
@@ -109,10 +110,8 @@ Only what is still unverified.
   result carries `backing_off`. A GLEIF 429 reads `gleif_rate_limited` (and a warning on the 18:00
   record), not a run of `gleif_errors`. The container log carries one `Rate limited … further
   refusals this window are not logged` line per client per minute. Allocation's percentages move
-  only on exact ties. In the browser: a holding's logo or name on Positions, Fundamentals,
-  Dividends and the Watchlist opens its company (GOOGL too, which needs the deployed
-  `security_ids`), Back returns, a reload keeps the tab — seen only on a local build against the
-  live API with `security_ids` stood in for.
+  only on exact ties. The links and the hash are verified on production (2026-11-07, 1366 and
+  390 px: 19 holdings link, GOOGL to Alphabet, Back returns).
 
 - **Short-range returns and risk (2026-10-28):** the API half is verified on production
   (2026-11-07: `/api/portfolio/annualized-return` answers `method` `period` for a month, `xirr`
@@ -323,27 +322,31 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
    tax software computes it from the trades.
-2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
+2. **One rating label.** The Watchlist prints Yahoo's own `recommendationKey`
+   (`watchlist_service.py:393`) while Positions and the Company overview label the counts
+   (`analyst_rating.consensus_of`): NVDA read "Strong Buy" on one and "Buy" on the others
+   (2026-11-07). Pick one rule.
+3. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
+4. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
    `alembic check`.
-4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
+5. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; a 3% EUR risk-free rate (1W risk from 5 returns fixed on the fintech branch); PEG mixes three methods;
     "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
-5. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
+6. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost
     events at read time; **do not** make the portfolio convert per date (breaks the contributions
     identity).
-6. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
+7. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-7. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
+8. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
     estimates (needs a country→region map); exact World ex CH; nested funds; an identity detector.
     Researched future sources (N-PORT, commercial APIs — do not re-shop) are in docs/lookthrough.md.
-8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+9. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+10. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
