@@ -1110,7 +1110,9 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
 - **The x axis labels fiscal-year ends only** ("Q4 FY2025" and "FY2025" print "FY25"), at most
   seven (ten expanded, six on a phone), newest kept (`axisTicks`). "Q1 FY2016" under every tenth
   bar of a 300px card ran into its neighbours. The price card's points are dates: the axis prints
-  "Nov '26", the header and tooltip "Nov 6, 2026" (`shortPeriodLabel`, `periodText`).
+  "Nov '26", the header and tooltip "Nov 6, 2026" (`shortPeriodLabel`, `periodText`). The plot's
+  right margin is about half the last tick's width (16 px at least): a line's last point sits on
+  the edge, and a fixed 16 px cut "Nov '26" in half (seen at 1366 px, 2026-11-07).
 - **The price card comes first** (2026-11-07): `series.price`, the market closes, as one more
   `COMPANY_CHARTS` line card with the growth header (its 3Y/5Y/10Y CAGRs are annualised returns,
   each point's YoY the year's change). The range applies; the Period toggle does not (the server

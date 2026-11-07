@@ -248,8 +248,12 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
       cursor={chart.kind === 'bar' ? { fill: 'hsl(var(--muted))', opacity: 0.5 } : { stroke: 'hsl(var(--muted-foreground))' }}
     />
   )
-  // The right margin leaves room for the newest period's label, centred on the last bar.
-  const margin = { top: 8, right: 16, left: 0, bottom: 0 }
+  // The right margin leaves room for the newest period's label, centred on the last bar or
+  // on a line's last point at the very edge: about half its width, so the price card's
+  // "Nov '26" is not cut where "FY25" fitted in 16px.
+  const lastTick = periodTicks.at(-1)
+  const right = Math.max(16, Math.ceil((lastTick ? shortPeriodLabel(lastTick).length : 0) * 3.6))
+  const margin = { top: 8, right, left: 0, bottom: 0 }
   const plotHeight = isCompact ? 'h-[260px]' : expanded ? 'h-[460px]' : 'h-[320px]'
 
   return (
