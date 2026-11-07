@@ -115,8 +115,9 @@ Only what is still unverified.
   2026-11-07, `4cb7bd1`):** every gap company is backfilled on production (docs/shipped-log.md;
   90 gaps left, each a documented cause). Unverified: the Sunday 2026-11-08 05:00
   `company_financials_refresh` reads few or no filings, has no `filing_errors`, and — its first
-  run with the check — lists `ttm_dividend_gaps` (expect BKR, whose Q2 2026 10-Q companyfacts
-  lacks) and `stale_figures` once as warnings; the Sunday after, the same names in the record
+  run with the check — lists `ttm_dividend_gaps` and `stale_figures` once as warnings; BKR will
+  not be among them on 11-08 (fetched by hand on 11-07, so that pass skips it — review item CO2
+  makes the lists cover every company, fetched or not); the Sunday after, the same names in the record
   and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
@@ -148,8 +149,8 @@ Only what is still unverified.
   `company_prices_refresh` fetched all 102 with no `rate_limited`; `company_financials_refresh`
   had `universe` 100 but **0 due**, because every company was re-fetched after 2026-10-26 during
   the fixes (`STALE_AFTER` is six days). So **Sunday 2026-11-08 is the first real refresh**: it
-  should fetch about 100 companies and bring Q3 2026 for most (every company still ended at Q2 or
-  earlier on 2026-11-07); the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
+  should fetch about 76 companies (the 26 fetched by hand on 2026-11-07 are skipped) and bring Q3
+  2026 for most (every company still ended at Q2 or earlier on 2026-11-07); the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
   toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
   months and a year; docs/company-financials.md *Known gaps*).
@@ -344,14 +345,18 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
+0. **The 2026-11-07 review (14 reviewers): ~90 verified findings in eight waves**, planned for one
+   goal run. The plan, the per-item evidence and the repro scripts are kept outside the repo
+   (they quote account figures): `C:\Users\simon\Desktop\ibkr-review-2026-11-07\` (PLAN.md,
+   findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
+   Company pages approved). Items 2 below and several *Watching* entries are inside it.
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
    tax software computes it from the trades.
-2. **Performance Attribution on 1Y warns of 1 unpriced holding** (found 2026-11-07) while the
-   timeline prices both endpoints: the set comes from `attribution_rows`
-   (`portfolio_service.py:1846-1952`, a lot at an endpoint or `last_realized_skipped`); needs a
-   production snapshot (or the container log's unpriced line) to name it — the owner's OK first.
+2. **Performance Attribution warns of 1 unpriced holding on 6M, YTD and 1Y:** it is MBGL, the
+   spin-off from SPGI — `attribution_rows` (`portfolio_service.py` ~1890/1904) skips the
+   position-start floor the timeline, the daily value and XIRR apply (review item V1).
 3. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 4. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
