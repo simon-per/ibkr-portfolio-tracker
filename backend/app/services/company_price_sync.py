@@ -45,6 +45,7 @@ from app.services.yahoo_minor_units import (
     minor_unit_scale,
     reported_currency_of,
 )
+from app.services.yahoo_errors import history_or_empty
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -136,10 +137,12 @@ class CompanyPriceSync:
 
         def _fetch():
             t = yf.Ticker(ticker)
+            # No data for the ticker is an empty frame, as it was before yfinance was
+            # made to raise (`yahoo_errors`): `_one` reads it as a halt or a miss.
             if start is None:
-                hist = t.history(period="max", auto_adjust=False)
+                hist = history_or_empty(lambda: t.history(period="max", auto_adjust=False))
             else:
-                hist = t.history(start=start, auto_adjust=False)
+                hist = history_or_empty(lambda: t.history(start=start, auto_adjust=False))
             return hist, reported_currency_of(t)
 
         return await asyncio.to_thread(_fetch)

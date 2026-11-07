@@ -60,6 +60,22 @@ and records too, but the server reads the row only at start. Tests:
 `tests/test_yahoo_hold.py`, and the hold block in `tests/test_yahoo_rate_limit_family.py`,
 which fails a yfinance module that never awaits the consult and drives every pass under a hold.
 
+**yfinance itself swallowed a 429 until 2026-11-07** (review item Y2). The library ships with
+`config.debug.hide_exceptions = True`, and under it `quarterly_financials` catches *everything*
+and answers an empty frame: a 429 there never reached `read_optional`, the hold was not
+stamped, the fundamentals and watchlist passes asked the next company, and `.info`'s growth was
+stored as if measured. Every stub in the suite raised, so none could see it.
+`yahoo_errors.raise_yahoo_errors()` turns the flag off, called from `check_yahoo_hold()` — the
+one call every Yahoo path awaits before asking — so it holds on every path, the CLIs included.
+With it off yfinance also *raises* `YFTzMissingError`/`YFPricesMissingError` for a ticker with
+no data, where it used to answer an empty frame; the callers that read "empty" as an answer
+(company prices, dividends, the benchmark, `manage_mappings`) go through
+`yahoo_errors.history_or_empty`, so a delisted ticker or a halt stays "no data", not an error
+count. Anything else — a 404 on `.info` or `recommendations` — now reaches the caller's handler
+as the error it is. `tests/test_yahoo_raises_family.py` runs **real** yfinance with only
+`YfData._make_request` replaced and refuses each endpoint the fundamentals and watchlist passes
+reach in turn.
+
 
 The IBKR Flex sync (`POST /api/sync/ibkr`) is Flex-only and touches **no** Yahoo — it's always safe.
 

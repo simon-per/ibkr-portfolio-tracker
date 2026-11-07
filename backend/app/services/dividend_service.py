@@ -54,6 +54,7 @@ from app.services.dividend_forecast import (
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_minor_units import minor_unit_scale, reported_currency_of
+from app.services.yahoo_errors import history_or_empty
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -609,7 +610,8 @@ class DividendService:
                 # amounts exactly as the price path scales that listing's closes.
                 def _fetch(ticker=yahoo_ticker):
                     yf_ticker = yf.Ticker(ticker)
-                    series = yf_ticker.dividends
+                    # A ticker Yahoo has no history for is "no dividends", not an error.
+                    series = history_or_empty(lambda: yf_ticker.dividends)
                     return series, reported_currency_of(yf_ticker)
 
                 dividends_series, reported = await asyncio.to_thread(_fetch)

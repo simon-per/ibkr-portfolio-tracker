@@ -283,6 +283,11 @@ NOT_IN_THE_FAMILY = {
         "library's on-disk caches at a directory: a local setting, not a request, made "
         "once at startup. There is no 429 for it to swallow and no loop to abandon."
     ),
+    "services/yahoo_errors.py": (
+        "Imports yfinance to set `config.debug.hide_exceptions` and to name "
+        "`YFTickerMissingError`: a library setting and an exception class, never a "
+        "request. It is what makes a 429 reach every other module's breaker (Y2)."
+    ),
 }
 
 
