@@ -766,16 +766,62 @@ def _latest(
     return out
 
 
-def _not_a_figure(kind: str, non_negative: bool, value: float) -> bool:
+def _not_a_figure(
+    kind: str, non_negative: bool, value: float, zero_shown: bool = False
+) -> bool:
     """
     A derived quarter that stays absent: below zero for a figure that cannot be, or a
-    dividend of exactly zero. Two equal dividend rungs are as often one quarterly rate
-    tagged on every year-to-date context (IBKR before 2020: 3, 6, 9 and 12 months all
-    0.10) as a quarter without a dividend, and a 0.00 must not stand in for the unknown.
+    dividend of exactly zero unless its ladder shows it is one (`zero_shown`,
+    `_shows_zero`). Two equal dividend rungs are as often one quarterly rate tagged on
+    every year-to-date context (IBKR before 2020: 3, 6, 9 and 12 months all 0.10; BKNG's
+    2024) as a quarter without a dividend, and a 0.00 must not stand in for the unknown.
     """
     if not non_negative:
         return False
-    return value < 0 or (kind == PER_SHARE and abs(value) < 1e-12)
+    return value < 0 or (kind == PER_SHARE and abs(value) < 1e-12 and not zero_shown)
+
+
+def _shows_zero(rungs: Sequence[Obs], direct: Dict[date, Obs], start: date) -> bool:
+    """
+    Whether a dividend ladder's equal rungs can be a quarter without a dividend rather than
+    one rate tagged on every rung: the ladder is cumulative — its largest rung at least
+    `NOT_CUMULATIVE_RATIO` times its smallest, as INTC's semi-annual declarations double
+    from six to nine months — or the company reported a quarter of it as zero (WMT
+    declares the year's dividend in its first quarter and tags the second as 0). A flat
+    ladder with no reported zero (IBKR before 2020, BKNG) shows neither.
+    """
+    positive = [r.value for r in rungs if r.value > 0]
+    if positive and max(positive) >= min(positive) * NOT_CUMULATIVE_RATIO:
+        return True
+    last = max((r.end for r in rungs), default=start)
+    return any(
+        q.value == 0
+        and not q.derived
+        and q.start is not None
+        and start <= q.start
+        and q.end <= last
+        for q in direct.values()
+    )
+
+
+def _accounted(rungs: Sequence[Obs], upto: int, direct: Dict[date, Obs]) -> bool:
+    """
+    Whether rung `upto` equals the sum of the quarters inside it, each as reported where it
+    was and else the ladder's own step: no reported quarter contradicts the ladder below a
+    zero. ADP's FY2016 10-K tagged FY2015's 1.95 on the nine-month context, against the
+    reported 0.48 + 0.49 + 0.49; the zero fourth quarter it made was never declared.
+    """
+    total, error, previous = 0.0, rungs[upto].error, None
+    for rung in rungs[: upto + 1]:
+        reported = direct.get(rung.end)
+        if reported is not None and not reported.derived:
+            total += reported.value
+            error += reported.error
+        else:
+            total += rung.value - (previous.value if previous is not None else 0.0)
+            error += rung.error + (previous.error if previous is not None else 0.0)
+        previous = rung
+    return abs(total - rungs[upto].value) <= max(error, 1e-9)
 
 
 def _difference(kind: str, longer: Obs, shorter: Obs) -> Obs:
@@ -867,11 +913,13 @@ def _quarters_and_years(
                     and any(r.end < rung.end and r.value > year.value for r in rungs)
                 ):
                     del years[rung.end]
-        for shorter, longer in zip(rungs, rungs[1:]):
+        cumulative = kind == PER_SHARE and _shows_zero(rungs, direct, start)
+        for i, (shorter, longer) in enumerate(zip(rungs, rungs[1:])):
             if not _between((longer.end - shorter.end).days, QUARTER_DAYS):
                 continue
             candidate = _difference(kind, longer, shorter)
-            if _not_a_figure(kind, non_negative, candidate.value):
+            zero_shown = cumulative and _accounted(rungs, i, direct)
+            if _not_a_figure(kind, non_negative, candidate.value, zero_shown):
                 continue
             held = derived.get(longer.end)
             derived[longer.end] = (

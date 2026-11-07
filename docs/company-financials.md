@@ -222,10 +222,21 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   which made every Q4 a 0.00 dividend (seen on the live tab, 2026-10-25). Its Q4s and fiscal
   years, and so every TTM, stay absent. A restated quarter moves the sum by less and never
   trips it (NXPI's 2023 10-Q re-tags Q3 2021's dividend at the 2023 rate). **A derived dividend
-  of exactly zero stays absent too**: before 2020 IBKR filed no discrete quarter and tagged
-  0.10 on every rung, which cannot be told from a quarter without a dividend, and a 0.00 must
-  not stand in for the unknown. Its pre-2020 fiscal years still read one quarter's rate — the
-  facts carry nothing that tells them from an annual payer's (accepted, documented here).
+  of exactly zero stays absent unless its ladder shows it** (`_shows_zero`, `_accounted`):
+  before 2020 IBKR filed no discrete quarter and tagged 0.10 on every rung (BKNG its 2024 rate
+  the same way), which cannot be told from a quarter without a dividend, and a 0.00 must not
+  stand in for the unknown. A zero is kept when the ladder is cumulative — its largest rung at
+  least `NOT_CUMULATIVE_RATIO` times its smallest (INTC declares twice a year: 0.63 at three
+  and six months, 1.26 at nine and twelve) — or the company reported a quarter of that year as
+  0 (WMT declares the year in its first quarter and tags the second 0), **and** the rung below
+  the zero equals its quarters, each as reported where it was: ADP's FY2016 10-K tagged
+  FY2015's 1.95 on the nine-month context against the reported 0.48 + 0.49 + 0.49, and the
+  zero fourth quarter that made was never declared (the year less the three quarters gives the
+  0.49). Without the rule INTC and WMT had no TTM at all. IBKR's pre-2020 fiscal years still read
+  one quarter's rate — the facts carry nothing that tells them from an annual payer's
+  (accepted, documented here). The quarters are the declared basis, so a company declaring two
+  dividends in one quarter (GEHC's Q3 2025, HPE's Q1 FY2016) shows that quarter double and
+  another at 0; the TTM sums them right.
 - **One end date per period.** Ends within a week are one period (NVDA tagged one 2010 rung as
   ending a day before its quarter).
 

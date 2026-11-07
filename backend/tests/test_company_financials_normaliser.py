@@ -678,6 +678,77 @@ def test_a_dividend_rate_on_every_ytd_rung_derives_no_zero_quarter():
         assert _row(rows, "dividends_per_share", end, period) is None
 
 
+def _dps(*facts):
+    return _doc({"CommonStockDividendsPerShareDeclared": {"units": {"USD/shares": list(facts)}}})
+
+
+def test_a_semi_annual_declarers_zero_quarters_are_kept():
+    """INTC declares two quarters' dividends in its first and third quarters: the ladder
+    doubles from six to nine months, so its equal rungs are quarters without a declaration,
+    and without them Q2 and Q4 were absent and no TTM existed (2026-11-07)."""
+    rows = normalise(
+        _dps(
+            _f("2019-01-01", "2019-03-31", 0.63, "2019-04-25"),
+            _f("2019-01-01", "2019-06-30", 0.63, "2019-07-25"),
+            _f("2019-01-01", "2019-09-30", 1.26, "2019-10-25"),
+            _f("2019-01-01", "2019-12-31", 1.26, "2020-01-24", form="10-K"),
+        )
+    ).rows
+    quarters = [
+        _row(rows, "dividends_per_share", end, q)["value"]
+        for end, q in (
+            (date(2019, 3, 31), "Q1"),
+            (date(2019, 6, 30), "Q2"),
+            (date(2019, 9, 30), "Q3"),
+            (date(2019, 12, 31), "Q4"),
+        )
+    ]
+    assert quarters == [0.63, 0.0, pytest.approx(0.63), 0.0]
+
+
+def test_an_annual_declarers_reported_zero_quarter_shows_the_others():
+    """WMT declares the year's dividend in its first quarter and tags the second as 0:
+    the third and fourth are zero too, not unknown."""
+    rows = normalise(
+        _dps(
+            _f("2025-02-01", "2025-04-30", 0.94, "2025-06-06"),
+            _f("2025-05-01", "2025-07-31", 0.0, "2025-08-29"),
+            _f("2025-02-01", "2025-07-31", 0.94, "2025-08-29"),
+            _f("2025-02-01", "2025-10-31", 0.94, "2025-12-03"),
+            _f("2025-02-01", "2026-01-31", 0.94, "2026-03-13", form="10-K"),
+        )
+    ).rows
+    assert _row(rows, "dividends_per_share", date(2025, 10, 31), "Q3")["value"] == 0.0
+    assert _row(rows, "dividends_per_share", date(2026, 1, 31), "Q4")["value"] == 0.0
+
+
+def test_a_zero_quarter_a_reported_quarter_contradicts_stays_absent():
+    """ADP's FY2016 10-K tagged FY2015's 1.95 on the nine-month context, against the
+    reported 0.48 + 0.49 + 0.49: no zero fourth quarter, and the year less the three
+    reported quarters gives the 0.49 declared. (The basic count, as in ADP's filings, says
+    1.95 against 1.46 is no 4:3 split.)"""
+    doc = _dps(
+        _f("2014-07-01", "2014-09-30", 0.48, "2014-10-30"),
+        _f("2014-10-01", "2014-12-31", 0.49, "2015-02-05"),
+        _f("2014-07-01", "2014-12-31", 0.97, "2015-02-05"),
+        _f("2015-01-01", "2015-03-31", 0.49, "2015-05-06"),
+        _f("2014-07-01", "2015-03-31", 1.46, "2015-05-06"),
+        _f("2014-07-01", "2015-06-30", 1.95, "2015-08-07", form="10-K"),
+        _f("2014-07-01", "2015-03-31", 1.95, "2016-08-05", form="10-K"),
+    )
+    doc["facts"]["us-gaap"]["WeightedAverageNumberOfSharesOutstandingBasic"] = {
+        "units": {
+            "shares": [
+                _f("2014-07-01", "2015-03-31", 470e6, "2015-05-06"),
+                _f("2014-07-01", "2015-03-31", 470e6, "2016-08-05", form="10-K"),
+            ]
+        }
+    }
+    rows = normalise(doc).rows
+    q4 = _row(rows, "dividends_per_share", date(2015, 6, 30), "Q4")
+    assert q4["value"] == pytest.approx(0.49)
+
+
 def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
     """HON's Q1 2009 10-Q tags dividends paid as -224M: a sign slip, not a refund."""
     q1, q2 = ("2009-01-01", "2009-03-31"), ("2009-04-01", "2009-06-30")
