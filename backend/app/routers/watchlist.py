@@ -5,7 +5,7 @@ from app.database import get_db
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
 from app.services.ticker_isin import isins_by_yahoo_ticker
-from app.services.watchlist_service import WatchlistService
+from app.services.watchlist_service import WatchlistService, own_counts, watchlist_rating
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
     SYNC_PIPELINE,
@@ -172,17 +172,21 @@ async def _responses(db: AsyncSession, items,
     isins = await isins_by_yahoo_ticker(
         db, [i.yahoo_ticker for i in items if i.yahoo_ticker.upper() not in security_ids]
     )
+    # Read now, not copied at sync time: a held name's counts are the positions table's
+    # at this moment, whichever pass wrote them last.
+    stored = await service.stored_ratings(i.yahoo_ticker for i in items)
     return [
         _item_to_response(
             item, await to_base(item.market_cap, item.data_currency),
             security_ids.get(item.yahoo_ticker.upper()), isins.get(item.yahoo_ticker.upper()),
+            watchlist_rating(item.yahoo_ticker, own_counts(item), stored),
         )
         for item in items
     ]
 
 
 def _item_to_response(item, market_cap_base=None, security_id=None,
-                      isin=None) -> WatchlistItemResponse:
+                      isin=None, rating=None) -> WatchlistItemResponse:
     return WatchlistItemResponse(
         id=item.id,
         yahoo_ticker=item.yahoo_ticker,
@@ -214,7 +218,7 @@ def _item_to_response(item, market_cap_base=None, security_id=None,
         peg_ratio=_compute_peg(item),
         ev_to_ebitda=item.ev_to_ebitda,
         analyst_target=item.analyst_target,
-        analyst_rating=item.analyst_rating,
+        analyst_rating=rating,
         analyst_count=item.analyst_count,
         buy_score=item.buy_score,
         # Through `utc_iso`, not a bare `isoformat()`: the tab prints this as the data's

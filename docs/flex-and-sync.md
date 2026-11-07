@@ -729,6 +729,18 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
+**Analyst counts** (owner-approved 2026-11-07, CLAUDE.md rule 1: about one request a week for
+each ticker below, ~13 then). A row's rating is five counts labelled by `consensus_of`, never
+Yahoo's `recommendationKey`. A held listing's counts are `analyst_ratings`' and a Company-tab
+company's (by SEC ticker) `company_yahoo_profiles`', both read at response time
+(`WatchlistService.stored_ratings`, `watchlist_rating`) so the row shows what the positions
+table or the overview shows. Only a ticker in neither costs a `recommendations` request
+(`AnalystRatingService.fetch_counts`, the held pass's reader, so its 429 stops the pass) — on
+the slow run, or the first run when `ratings_synced_at` is NULL; a fund is answered with zeros
+and never asked. A failed ask keeps the old counts until the next slow run. The buy score's
+analyst points key off the same label (`RATING_POINTS`), so a ticker whose Yahoo key differed
+from its counts' label scores differently than before. `tests/test_watchlist_ratings.py`.
+
 **The crypto sync rides every one of the portfolio's slots, and adds none.** `CRYPTO_SYNC_HOURS`
 is *derived* from `PORTFOLIO_SYNC_HOURS` — not from `ALL_SYNC_HOURS`, which since the watchlist
 slot is a superset, and a slot added for other upkeep must not become one more CoinStats run a

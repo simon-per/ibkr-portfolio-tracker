@@ -61,7 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
-from app.models.analyst_rating import consensus_of
+from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
@@ -70,7 +70,6 @@ from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
-from app.services.analyst_rating_service import RATING_COUNT_FIELDS
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
@@ -872,9 +871,8 @@ class CompanyFinancialsService:
             "peg_ratio": figure("peg_ratio"),
             "fwd_revenue_growth": figure("fwd_revenue_growth"),
             "fwd_eps_growth": figure("fwd_eps_growth"),
-            "rating": None
-            if counts is None
-            else {**counts, "consensus": consensus_of(**counts)},
+            # All zero ("no analysts cover this") is absent, as on the positions table.
+            "rating": rating_of(counts),
             "analysts": figure("number_of_analysts"),
             "target_low": figure("target_low_price"),
             "target_mean": target,

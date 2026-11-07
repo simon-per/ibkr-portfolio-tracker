@@ -16,15 +16,23 @@ class TaxLotInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AnalystRatingInfo(BaseModel):
-    """Analyst rating information for a security"""
+class AnalystRatingCounts(BaseModel):
+    """
+    A company's analyst recommendation counts and their consensus label
+    (`analyst_rating.rating_of`, one shape on every table). Never all zero: Yahoo's "no
+    analysts cover this" is served as no rating at all.
+    """
     strong_buy: int
     buy: int
     hold: int
     sell: int
     strong_sell: int
-    total_ratings: int
     consensus: str
+
+
+class AnalystRatingInfo(AnalystRatingCounts):
+    """Analyst rating information for a security"""
+    total_ratings: int
     last_updated: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -447,7 +455,9 @@ class WatchlistItemResponse(BaseModel):
     market_cap: Optional[int] = None            # the listing's own currency
     market_cap_base: Optional[int] = None       # the same in the base currency, or None
     analyst_target: Optional[float] = None
-    analyst_rating: Optional[str] = None
+    # The counts a held listing or a Company-tab company already keeps, else the
+    # watchlist's own (`watchlist_service.watchlist_rating`); None when none are known.
+    analyst_rating: Optional[AnalystRatingCounts] = None
     analyst_count: Optional[int] = None
     week52_high: Optional[float] = None
     week52_low: Optional[float] = None

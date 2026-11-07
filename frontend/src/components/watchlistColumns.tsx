@@ -4,6 +4,7 @@ import { ABSENT, cn, formatMarketCap, formatSignedPercent, marketCapParts } from
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
+import { AnalystRatingBadge } from './AnalystRatingBadge'
 import { CompanyLink } from './CompanyLink'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 
@@ -43,14 +44,6 @@ export type WatchlistSortColumn =
   | 'fwd_eps_growth'
   | 'profit_margins'
   | 'market_cap_base'
-
-export const RATING_LABELS: Record<string, string> = {
-  strong_buy: 'Strong Buy',
-  buy: 'Buy',
-  hold: 'Hold',
-  sell: 'Sell',
-  strong_sell: 'Strong Sell',
-}
 
 export function formatPercent(value: number | null): string {
   if (value === null) return ABSENT
@@ -107,13 +100,6 @@ export function scoreTone(score: number | null): Tone {
   if (score >= 70) return 'positive'
   if (score >= 40) return 'warning'
   return 'negative'
-}
-
-export function ratingColorClass(rating: string | null): string {
-  if (!rating) return 'text-muted-foreground'
-  if (rating === 'strong_buy' || rating === 'buy') return 'text-green-600 dark:text-green-400'
-  if (rating === 'hold') return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-red-600 dark:text-red-400'
 }
 
 /** Upside to the analyst mean target, or null when either side is missing. */
@@ -276,10 +262,12 @@ export function watchlistColumns(deps: {
         return (
           // `whitespace-nowrap`: "Strong Buy" over "+35% upside" broke into three and four
           // lines in a column that only needs the width of its longest phrase.
-          <div className="whitespace-nowrap">
-            <div className={`text-xs font-medium ${ratingColorClass(i.analyst_rating)}`}>
-              {i.analyst_rating ? RATING_LABELS[i.analyst_rating] || i.analyst_rating : ABSENT}
-            </div>
+          <div className="flex flex-col items-start gap-1 whitespace-nowrap">
+            {i.analyst_rating ? (
+              <AnalystRatingBadge rating={i.analyst_rating} />
+            ) : (
+              <span className="text-xs text-muted-foreground">{ABSENT}</span>
+            )}
             {upside !== null && (
               <div
                 className={`text-[11px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}

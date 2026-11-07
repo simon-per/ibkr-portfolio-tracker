@@ -189,14 +189,22 @@ export interface ContributionsResponse {
   base_currency: string;
 }
 
-export interface AnalystRating {
+/**
+ * A company's analyst recommendation counts and their consensus label — the one shape the
+ * positions table, the watchlist and the Company overview carry (`analyst_rating.rating_of`).
+ * Never all zero: "no analysts cover this" arrives as no rating at all.
+ */
+export interface AnalystRatingCounts {
   strong_buy: number;
   buy: number;
   hold: number;
   sell: number;
   strong_sell: number;
-  total_ratings: number;
   consensus: string;
+}
+
+export interface AnalystRating extends AnalystRatingCounts {
+  total_ratings: number;
   last_updated: string;
 }
 
@@ -755,7 +763,8 @@ export interface WatchlistItem {
   /** `market_cap` in the base currency; null when it cannot be converted. */
   market_cap_base: number | null;
   analyst_target: number | null;
-  analyst_rating: string | null;
+  /** A held name's counts are the positions table's, a Company-tab name's its overview's. */
+  analyst_rating: AnalystRatingCounts | null;
   analyst_count: number | null;
   week52_high: number | null;
   week52_low: number | null;

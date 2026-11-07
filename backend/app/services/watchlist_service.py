@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List
+from typing import Any, Dict, Iterable, Mapping, Optional, List
 from datetime import timedelta
 from app.clock import utc_today, utcnow
 import logging
@@ -6,18 +6,22 @@ import yfinance as yf
 import random
 import asyncio
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.analyst_rating import AnalystRating, RATING_COUNT_FIELDS, rating_of
+from app.models.company_financials import SecCompany
 from app.models.market_price import MarketPrice
 from app.models.security import Security
+from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.security_repository import held
 from app.repositories.watchlist_repository import WatchlistRepository
+from app.services.analyst_rating_service import AnalystRatingService
 from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
@@ -26,6 +30,30 @@ logger = logging.getLogger(__name__)
 
 # RSI-14 needs 15 closes.
 RSI_MIN_CLOSES = 15
+
+# The buy score's analyst points by consensus label (`consensus_of`); no rating is the
+# neutral 6, as every other unknown input is neutral.
+RATING_POINTS = {"Strong Buy": 13, "Buy": 10, "Hold": 5, "Sell": 2, "Strong Sell": 0}
+
+
+def own_counts(item) -> Dict[str, Optional[int]]:
+    """The counts the watchlist asked Yahoo for itself (all None until it asked)."""
+    return {f: getattr(item, f) for f in RATING_COUNT_FIELDS}
+
+
+def watchlist_rating(
+    yahoo_ticker: str,
+    own: Mapping[str, Optional[int]],
+    stored: Dict[str, Dict[str, int]],
+) -> Optional[Dict[str, Any]]:
+    """
+    The rating a watchlist row shows and its score is built from: the counts another pass
+    keeps for the ticker (`WatchlistService.stored_ratings`), else the row's own, through
+    `rating_of` — so a held name reads exactly what the positions table shows, and a
+    Company-tab name what its overview shows. The sync and the read both go through here.
+    """
+    counts = stored.get(yahoo_ticker.upper())
+    return rating_of(counts if counts is not None else own)
 
 
 class WatchlistService:
@@ -207,8 +235,7 @@ class WatchlistService:
 
         # --- Analyst consensus (0-25) ---
         rating = data.get("analyst_rating")
-        rating_map = {"strong_buy": 13, "buy": 10, "hold": 5, "sell": 2, "strong_sell": 0}
-        rating_sub = rating_map.get(rating, 6) if rating else 6
+        rating_sub = RATING_POINTS.get(rating, 6) if rating else 6
 
         target = data.get("analyst_target")
         price = data.get("current_price")
@@ -313,6 +340,41 @@ class WatchlistService:
             self._ticker_index = {True: held_index, False: every_index}
         return self._ticker_index[held_only]
 
+    async def stored_ratings(self, tickers: Iterable[str]) -> Dict[str, Dict[str, int]]:
+        """
+        Upper-cased ticker -> the recommendation counts another pass already keeps for it:
+        a held listing's (`analyst_ratings`, the 05:00 held pass, which the positions table
+        shows), else a Company-tab company's by its SEC ticker (`company_yahoo_profiles`,
+        the 05:00 chunk, which its overview shows). A ticker in neither is absent. Read at
+        sync time for the score and at read time for the row, so a company's counts are
+        the same wherever they appear. Pure database.
+        """
+        wanted = {t.upper() for t in tickers}
+        held_ids = await self.security_ids_by_ticker(held_only=True)
+        ticker_of = {held_ids[t]: t for t in wanted if t in held_ids}
+        out: Dict[str, Dict[str, int]] = {}
+        if ticker_of:
+            rows = (await self.db.execute(
+                select(AnalystRating).where(AnalystRating.security_id.in_(ticker_of))
+            )).scalars()
+            for row in rows:
+                out[ticker_of[row.security_id]] = {
+                    f: getattr(row, f) for f in RATING_COUNT_FIELDS
+                }
+        rest = wanted - set(ticker_of.values())
+        if rest:
+            ticker = func.upper(SecCompany.ticker)
+            ciks = dict((await self.db.execute(
+                select(ticker, SecCompany.cik).where(ticker.in_(rest))
+            )).all())
+            profiles = await CompanyFinancialsRepository(self.db).yahoo_profiles(ciks.values())
+            for symbol, cik in ciks.items():
+                profile = profiles.get(cik)
+                if profile is not None and profile.fetched_at is not None \
+                        and profile.strong_buy is not None:
+                    out[symbol] = {f: getattr(profile, f) or 0 for f in RATING_COUNT_FIELDS}
+        return out
+
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:
         """Remove outlier prices (likely currency-mixed data)."""
         if len(closes) == 0:
@@ -344,6 +406,15 @@ class WatchlistService:
             or utcnow() - item.estimates_synced_at >= self.ESTIMATES_REFRESH_AFTER
         )
         held_closes = await self._held_closes(yahoo_ticker)
+        # Recommendation counts: asked for only when no other pass keeps them — never for
+        # a held listing (the held pass does) or a Company-tab company (its chunk does) —
+        # on the weekly slow run, or when never asked.
+        stored = await self.stored_ratings([yahoo_ticker])
+        counts_due = (
+            yahoo_ticker.upper() not in await self.security_ids_by_ticker(held_only=True)
+            and yahoo_ticker.upper() not in stored
+            and (slow or item.ratings_synced_at is None)
+        )
 
         logger.info(f"Fetching data for {yahoo_ticker}{'' if slow else ' (.info only)'}...")
         await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -355,6 +426,23 @@ class WatchlistService:
         except Exception as e:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
             return {"error": str(e)}
+
+        # One request through the held pass's own reader. A fund has no coverage to ask
+        # about (`AnalystRatingService._fund_ids`): its answer is known without one. A
+        # failed ask keeps the old counts until the next slow run; only a rate limit is
+        # raised, and it stops the pass like `.info`'s.
+        fetched_counts: Optional[Dict[str, int]] = None
+        if counts_due:
+            if is_fund(info):
+                fetched_counts = dict.fromkeys(RATING_COUNT_FIELDS, 0)
+            else:
+                try:
+                    fetched_counts = await AnalystRatingService(self.db).fetch_counts(
+                        yahoo_ticker, yahoo_ticker
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to fetch the analyst counts of {yahoo_ticker}: {e}")
+                    return {"error": str(e)}
 
         if slow:
             # Forward estimates from analyst consensus — one parser with FundamentalsService,
@@ -390,12 +478,21 @@ class WatchlistService:
             "profit_margins": self._safe_float(info.get("profitMargins")),
             "market_cap": self._safe_int(info.get("marketCap")),
             "analyst_target": self._safe_float(info.get("targetMeanPrice")),
-            "analyst_rating": info.get("recommendationKey"),
             "analyst_count": self._safe_int(info.get("numberOfAnalystOpinions")),
             "last_synced": utcnow(),
         }
         if slow:
             data["estimates_synced_at"] = utcnow()
+        own = own_counts(item)
+        if counts_due:
+            data["ratings_synced_at"] = utcnow()
+            if fetched_counts is not None:
+                data.update(fetched_counts)
+                own = fetched_counts
+        # The label the score reads is the row's own (`watchlist_rating`), never Yahoo's
+        # `recommendationKey`: one rule for every rating label in the app.
+        rating = watchlist_rating(yahoo_ticker, own, stored)
+        data["analyst_rating"] = rating["consensus"] if rating else None
 
         # Use .info for 52-week high/low and moving averages (reliable, pre-computed)
         data["week52_high"] = self._safe_float(info.get("fiftyTwoWeekHigh"))

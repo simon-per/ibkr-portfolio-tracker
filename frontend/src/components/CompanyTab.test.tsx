@@ -201,7 +201,9 @@ describe('CompanyTab', () => {
     expect(description.getAttribute('aria-expanded')).toBe('true')
     expect(description.className).not.toContain('line-clamp-2')
     const street = within(overview).getByTestId('street-row').textContent
-    expect(street).toContain('Buy62 analysts')
+    // The consensus, then every count written out (the bar between carries no text).
+    expect(street).toContain('Buy20 Strong Buy · 35 Buy · 6 Hold · 1 Sell')
+    expect(street).not.toContain('analysts')
     expect(street).toContain('Target$230.00+23.3%$140.00–$300.00')
     expect(street).toContain('EarningsNov 19, 2026EPS est. $1.02')
     // Nothing about the account: this tab is about the company.

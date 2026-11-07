@@ -12,6 +12,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
+from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
 from app.models.corporate_action import CorporateAction
 from app.models.taxlot import TaxLot
 from app.models.security import Security
@@ -1511,22 +1512,22 @@ class PortfolioService:
             position["quantity"] = float(position["quantity"])
             position["cost_basis_eur"] = float(position["cost_basis_eur"])
 
-            # Add analyst rating if available. A zero-count row is the stored answer
-            # "no analysts cover this" (analyst_rating_service.no_rating): absent here.
+            # Add analyst rating if available, in the shape every table serves
+            # (`rating_of`): a zero-count row is the stored answer "no analysts cover
+            # this" (analyst_rating_service.no_rating), absent here.
             rating = ratings_by_security.get(security_id)
-            if rating and rating.total_ratings:
-                position["analyst_rating"] = {
-                    "strong_buy": rating.strong_buy,
-                    "buy": rating.buy,
-                    "hold": rating.hold,
-                    "sell": rating.sell,
-                    "strong_sell": rating.strong_sell,
+            shown = rating_of(
+                {f: getattr(rating, f) for f in RATING_COUNT_FIELDS} if rating else None
+            )
+            position["analyst_rating"] = (
+                {
+                    **shown,
                     "total_ratings": rating.total_ratings,
-                    "consensus": rating.consensus,
-                    "last_updated": rating.last_updated.isoformat()
+                    "last_updated": rating.last_updated.isoformat(),
                 }
-            else:
-                position["analyst_rating"] = None
+                if shown
+                else None
+            )
 
             positions_list.append(position)
 

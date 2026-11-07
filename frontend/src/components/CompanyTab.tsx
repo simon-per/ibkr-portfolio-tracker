@@ -26,7 +26,8 @@ import type {
   CompanyFinancialsResponse,
   CompanyFinancialsSeriesKey,
 } from '@/lib/api'
-import { ratingBadgeClass } from '@/lib/analystRating'
+import { ratingBadgeClass, ratingCountsText } from '@/lib/analystRating'
+import { AnalystRatingBar } from './AnalystRatingBadge'
 import { useKeepPreviousData } from '@/lib/CurrencyContext'
 import { companyFinancialsCompaniesQuery, companyFinancialsQuery } from '@/lib/queryCache'
 import { replaceRoute, useTabRoute } from '@/lib/tabRoute'
@@ -459,12 +460,15 @@ function StreetRow({ profile }: { profile: CompanyFinancialsProfile }) {
   const money = (v: number) => (profile.yahoo_currency ? formatCurrency(v, profile.yahoo_currency) : formatMultiple(v))
   const upside = profile.target_upside != null ? signedPercent(profile.target_upside) : null
   const items = [
+    // The full breakdown here: the chip, its bar and every count written out. The counts
+    // are the analysts, so Yahoo's separate target-analyst count is not repeated.
     profile.rating && (
-      <span key="rating" className="inline-flex items-center gap-2">
+      <span key="rating" className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ratingBadgeClass(profile.rating.consensus))}>
           {profile.rating.consensus}
         </span>
-        {profile.analysts != null && <span className="text-muted-foreground">{profile.analysts} analysts</span>}
+        <AnalystRatingBar counts={profile.rating} className="w-24" />
+        <span className="text-muted-foreground tabular-nums">{ratingCountsText(profile.rating)}</span>
       </span>
     ),
     profile.target_mean != null && (

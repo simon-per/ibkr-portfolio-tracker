@@ -1,3 +1,5 @@
+import type { AnalystRatingCounts } from '@/lib/api'
+
 /**
  * Where a consensus rating sits on the conviction scale, as a number a table can sort by.
  *
@@ -30,6 +32,30 @@ export function getRatingScore(rating: string | null | undefined): number {
   // "Strong Buy", "strong buy", "strong-buy" and "strong_buy" are one rating.
   const key = rating.trim().toLowerCase().replace(/[\s-]+/g, '_')
   return RATING_SCORES[key] ?? UNRATED_SCORE
+}
+
+/** The five counts, without the label — what the bar and its text are drawn from. */
+export type RatingCounts = Pick<AnalystRatingCounts, 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell'>
+
+/**
+ * The five counts in order, Strong Buy to Strong Sell, each with its name and the bar
+ * segment's paint. A diverging scale: two hues and a grey midpoint for Hold. The poles
+ * carry the most contrast against the surface, so light mode paints them darker and dark
+ * mode lighter than the mild steps.
+ */
+export const RATING_SEGMENTS: { key: keyof RatingCounts; label: string; className: string }[] = [
+  { key: 'strong_buy', label: 'Strong Buy', className: 'bg-green-700 dark:bg-green-400' },
+  { key: 'buy', label: 'Buy', className: 'bg-green-400 dark:bg-green-700' },
+  { key: 'hold', label: 'Hold', className: 'bg-zinc-400 dark:bg-zinc-500' },
+  { key: 'sell', label: 'Sell', className: 'bg-red-400 dark:bg-red-700' },
+  { key: 'strong_sell', label: 'Strong Sell', className: 'bg-red-700 dark:bg-red-400' },
+]
+
+/** "25 Strong Buy · 10 Buy · 3 Hold · 1 Sell": the counts that are not zero, in order. */
+export function ratingCountsText(counts: RatingCounts): string {
+  return RATING_SEGMENTS.filter((s) => counts[s.key] > 0)
+    .map((s) => `${counts[s.key]} ${s.label}`)
+    .join(' · ')
 }
 
 /**

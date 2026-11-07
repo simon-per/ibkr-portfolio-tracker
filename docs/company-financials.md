@@ -561,8 +561,9 @@ ways by the contract test): `industry, fiscal_year_end, description`; the price 
 price_date, return_1m, return_1y, return_5y, return_10y, week52_low, week52_high`; `forward_pe,
 peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell, consensus},
 analysts, target_low, target_mean, target_high, target_upside, yahoo_currency, next_earnings_date,
-next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `consensus` is
-`analyst_rating.consensus_of`, the rule every rating label in the app goes through;
+next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `rating` is
+`analyst_rating.rating_of` — null when all five counts are zero, as on the positions table —
+and its `consensus` `analyst_rating.consensus_of`, the rule every rating label in the app goes through;
 `yahoo_currency` is the targets' and the EPS estimate's (Yahoo's quote), which need not be the
 filings' `currency`.
 

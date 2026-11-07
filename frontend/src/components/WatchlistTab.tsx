@@ -144,7 +144,9 @@ export function WatchlistTab() {
     const sortable = (item: (typeof items)[number]): number | string | null | undefined => {
       const v = item[sortColumn]
       if (v == null) return v
-      return sortColumn === 'analyst_rating' ? getRatingScore(v as string) : (v as number | string)
+      return sortColumn === 'analyst_rating'
+        ? getRatingScore((v as WatchlistItem['analyst_rating'])?.consensus)
+        : (v as number | string)
     }
     return [...items].sort((a, b) => compareNullsLast(sortable(a), sortable(b), sortDirection))
   }, [items, sortColumn, sortDirection])

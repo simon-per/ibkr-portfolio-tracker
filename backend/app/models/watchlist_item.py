@@ -41,8 +41,20 @@ class WatchlistItem(Base):
 
     # Analyst consensus
     analyst_target: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # The consensus label of the counts the score was built from (`consensus_of`).
     analyst_rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     analyst_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Recommendation counts the watchlist asked Yahoo for itself
+    # (`AnalystRatingService.fetch_counts`), only for a ticker no other pass keeps counts
+    # for: a held listing's are `analyst_ratings`', a Company-tab company's
+    # `company_yahoo_profiles`' (`WatchlistService.stored_ratings`). NULL until asked.
+    strong_buy: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    buy: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hold: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sell: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    strong_sell: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # When those counts were last asked for, answered or not.
+    ratings_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Technical indicators
     week52_high: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
