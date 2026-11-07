@@ -106,6 +106,16 @@ Only what is still unverified.
     Sunday 05:00 EDGAR pass logs `Holding the restart: the running backend reports a sync in
     progress (stock pipeline or SEC EDGAR)` (I4). The Sunday pass's `ttm_dividend_gaps` /
     `stale_figures` list every company in scope, fetched or not (CO2).
+  - *Wave 1 (`review-w1-performance`).* Performance Attribution no longer warns of an unpriced
+    holding on 6M, YTD or 1Y (MBGL is floored like the timeline), and its total equals the
+    chart's flow-adjusted gain (V1). A range starting on a weekend (MTD on a Sunday 1st) opens
+    the chart and the benchmark on the Friday before (V2). The hero pill is the chart's
+    Profit/Loss end — Δ(Total Value − Money In), dividends and cash income included — so it
+    reads above the attribution total and never flashes another figure while that loads (V3;
+    seen on a local build against production data). Top 5 weight and the rebalance plan are
+    shares of the book with cash, like Positions (M5); Currency Exposure says "of the holdings".
+    A Forecast contribution typed earlier is stamped with today's base currency on the first
+    visit.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
@@ -363,35 +373,33 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    goal run. The plan, the per-item evidence and the repro scripts are kept outside the repo
    (they quote account figures): `C:\Users\simon\Desktop\ibkr-review-2026-11-07\` (PLAN.md,
    findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
-   Company pages approved). Items 2 below and several *Watching* entries are inside it.
+   Company pages approved). A /goal run is implementing it wave by wave, merged into `main`
+   locally; see *Watch after the next deploy*.
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
    tax software computes it from the trades.
-2. **Performance Attribution warns of 1 unpriced holding on 6M, YTD and 1Y:** it is MBGL, the
-   spin-off from SPGI — `attribution_rows` (`portfolio_service.py` ~1890/1904) skips the
-   position-start floor the timeline, the daily value and XIRR apply (review item V1).
-3. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
+2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
-4. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
+3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
    `alembic check`.
-5. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
+4. **KPI audit 2026-10-02 — low priority (owner):** deposit-driven % read as growth (Total Value
     chip, dividend chips; Period Gain % fixed on the fintech branch); MoM/YoY chips in the dividend tooltip; a 3% EUR risk-free rate (1W risk from 5 returns fixed on the fintech branch); PEG mixes three methods;
-    "Rose after sale" counts ETF rotations; two gain figures; cost basis labelled "total invested".
-6. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
+    "Rose after sale" counts ETF rotations; cost basis labelled "total invested".
+5. **Project the benchmark's baseline like the portfolio's** — the running cost basis is converted
     at each point's date, the portfolio's per lot at `open_date`; under 0.5%. Re-project the cost
     events at read time; **do not** make the portfolio convert per date (breaks the contributions
     identity).
-7. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
+6. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-8. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
+7. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
     estimates (needs a country→region map); exact World ex CH; nested funds; an identity detector.
     Researched future sources (N-PORT, commercial APIs — do not re-shop) are in docs/lookthrough.md.
-9. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-10. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
