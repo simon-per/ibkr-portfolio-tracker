@@ -29,12 +29,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Push `main` to deploy the Company tab's dividend-per-share fix** (`f15b782`, `1ee3278`,
-  committed 2026-11-07; the push is a production deploy and was left to the owner). Not within
-  ~10 minutes of a Berlin slot. Nothing to run by hand afterwards: the Sunday 05:00
-  `company_financials_refresh` reads the gap filings itself (see *Watch after the next deploy*);
-  `fetch_company_financials --symbol MA --force` shows it sooner for one company.
-
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
 - **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
@@ -99,15 +93,13 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Dividends per share from filing instances (2026-11-07, `dividend-filing-facts`):** migration
-  `a7c9e1f3b5d8` (`sec_filing_reads`). The first `company_financials_refresh` after the deploy
-  reports `filings_read` (at most 24 a company; the offline survey had 256 gap filings across 27
-  companies, ~860 MB) and no `filing_errors`; BKR, INTC and PCAR may need a second Sunday for
-  their oldest gaps. Then MA's TTM dividend per share runs unbroken FY2018–FY2026 (0.33 → 0.87
-  a quarter), MDLZ, XEL and COST have no gap, INTC and WMT show TTMs with their zero quarters,
-  and the next Sundays read about one filing a quarter (BKR). Measured offline on all 102
-  companies: gaps 280 → 134, no other metric's row moved (docs/company-financials.md *Filing
-  instances*, *Known gaps*).
+- **Dividends per share from filing instances (deployed 2026-11-07, `3be8444`):** MA is
+  backfilled and verified on production (docs/shipped-log.md). Unverified: the Sunday
+  2026-11-08 05:00 `company_financials_refresh` reports `filings_read` for the other gap
+  companies (at most 24 a company; the offline survey had 256 gap filings, ~860 MB) and no
+  `filing_errors`; BKR, INTC and PCAR may need a second Sunday for their oldest gaps. Then MDLZ,
+  XEL and COST have no gap, INTC and WMT show TTMs with their zero quarters, and later Sundays
+  read about one filing a quarter (BKR). The owner's eye on MA's chart in the browser.
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
   `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
@@ -373,7 +365,8 @@ One line each, newest first; drop the oldest.
 - **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
   companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
   only on an equity-statement or share-class member; now read once per filing from its XBRL
-  instance; a zero quarter the ladder shows is kept (INTC, WMT). Committed, push left to owner.
+  instance; a zero quarter the ladder shows is kept (INTC, WMT). Deployed on the owner's word;
+  MA backfilled and its live TTM verified unbroken.
 
 - **2026-11-07 (harmonization, Company links and overview, one /goal run)** — six leftovers on the
   shared rules; every holding's row links to its Company page through the URL hash; the Company

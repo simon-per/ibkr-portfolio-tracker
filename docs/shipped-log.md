@@ -7,6 +7,26 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-07 — Company tab: the dividend per share companyfacts leaves out
+
+- **Why**: MA's TTM dividend per share had a hole from FY19 to FY23 (owner's screenshot).
+  companyfacts carries only undimensioned facts, and MA tagged its 2019–mid-2023 dividend only
+  on the equity statement's common-stock column (confirmed in its Q2 2021 10-Q instance). 26 of
+  62 dividend payers had paid quarters without one; PCAR, INTC, MDLZ, XEL, BKR and COST tag the
+  same way. And a derived zero dividend always stayed absent, so INTC (semi-annual) and WMT
+  (annual) had no TTM at all.
+- **What** (`f15b782`, `1ee3278`): a gap quarter sends the pass to its filing's XBRL instance,
+  read once ever (`sec_filing_reads`, migration `a7c9e1f3b5d8`), facts on one whitelisted
+  us-gaap member only, filling never replacing; a zero quarter is kept where the ladder shows it
+  (docs/company-financials.md *Filing instances*, *Tagging slips*). The dividends-declared total
+  over a share count was measured and rejected (half the quarters more than 0.4–0.9% off).
+- **Measured offline** on all 102 companies with every gap filing read (256 filings): gaps
+  280 → 134, no other metric's row moved.
+- **Verified on production** (deployed `3be8444` the same evening, on the owner's word): `fetch_company_financials
+  --symbol MA --force` read 11 filings; `/api/company-financials/1141391?period=ttm` has 40
+  consecutive TTM quarters Q4 FY2016–Q3 FY2026, each year end equal to the filed year (1.39,
+  1.64, 1.81, 2.04, 2.37). The other companies fill in the Sunday 05:00 pass.
+
 ## Shipped 2026-10-25 — Company tab: more figures, and the Nasdaq-100
 
 - **Valuation and returns**: P/S, P/FCF and dividend yield beside the P/E (key figures, and a
