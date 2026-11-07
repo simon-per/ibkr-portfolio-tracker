@@ -93,6 +93,23 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **Analyst counts, valuation headline, watchlist and Company freshness (branch
+  `analyst-counts-and-freshness`, 4 commits, committed locally, not merged or deployed):**
+  migrations `b2d4f6a8c0e1` and `c3e5a7b9d1f2`. Seen only on a local build against production
+  data, with the watchlist's old-shape answer rewritten to the new one by the test script
+  (Positions, Company and Watchlist at 1440 light and dark, Watchlist at 390). After the deploy:
+  - The first 04:00 `watchlist_refresh` asks `recommendations` once for each ticker neither held
+    nor a Company-tab company (~13, no `rate_limited`); later runs only on the weekly slow run.
+    Every watchlist row shows the same label as Positions / the Company overview for that company
+    (NVDA was "Strong Buy" vs "Buy"); buy scores move where Yahoo's key differed.
+  - The first watchlist run records `reported_quarter` and fetches nothing extra; after the next
+    report of a watched company its growth matches Fundamentals the morning after.
+  - The first Mon–Sat 05:00 `company_filings_check` row in `/api/scheduler/history`: `watching`
+    about a third of the companies in an earnings season, `checked` = `watching`, `new_filings`
+    the companies with a 10-Q since Sunday, no warnings. Measure `watching` and the
+    submissions document sizes; the 105/180-day window is an estimate. The Company overview's
+    P/E and the Valuation card's headline agree.
+
 - **Dividends per share: filing instances, rate rules and the pass's check (deployed
   2026-11-07, `4cb7bd1`):** every gap company is backfilled on production (docs/shipped-log.md;
   90 gaps left, each a documented cause). Unverified: the Sunday 2026-11-08 05:00
@@ -330,10 +347,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
    tax software computes it from the trades.
-2. **One rating label.** The Watchlist prints Yahoo's own `recommendationKey`
-   (`watchlist_service.py:393`) while Positions and the Company overview label the counts
-   (`analyst_rating.consensus_of`): NVDA read "Strong Buy" on one and "Buy" on the others
-   (2026-11-07). Pick one rule.
+2. **Performance Attribution on 1Y warns of 1 unpriced holding** (found 2026-11-07) while the
+   timeline prices both endpoints: the set comes from `attribution_rows`
+   (`portfolio_service.py:1846-1952`, a lot at an endpoint or `last_realized_skipped`); needs a
+   production snapshot (or the container log's unpriced line) to name it — the owner's OK first.
 3. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 4. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,
@@ -361,6 +378,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 ## Recent sessions (last 5)
 
 One line each, newest first; drop the oldest.
+
+- **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
+  survey found one company's figures disagreeing across tabs; every rating now shows its
+  analyst counts under one label (owner-approved watchlist `recommendations` budget), the
+  valuation card heads with today's multiples, a report refreshes watchlist growth the next
+  run, and a Mon–Sat EDGAR check fetches a new 10-Q the next morning. Committed locally only.
 
 - **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
   companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
@@ -390,7 +413,3 @@ One line each, newest first; drop the oldest.
   constituents need no `securities` rows; storage came in at 17.6 MB, not the 8–12 MB estimated;
   an audit of every company's series fixed splits between filings (BKNG, CRWD, KLAC, NFLX), two
   revenue concepts (CRWD, ODFL) and million-fold unit slips (PCAR, STX).
-
-- **2026-10-25 (Company tab, agent team)** — two worktree teammates (backend, frontend) against
-  one contract; a 22-company EDGAR audit moved the revenue/NI chains (IBKR), fixed ORCL's
-  year-as-quarter and ONDS's thousands; SEC contact only in the VPS `.env`.
