@@ -49,6 +49,7 @@ const LookThroughTab = lazy(() => import('./LookThroughTab').then(m => ({ defaul
 import { AppHeader } from './AppHeader'
 import { AppFooter } from './AppFooter'
 import { SyncStatusMessage } from './SyncStatusMessage'
+import { CompanyLinksProvider } from './CompanyLink'
 import { BenchmarkPicker } from './BenchmarkPicker'
 import { benchmarkColor } from '@/lib/benchmarkColors'
 import {
@@ -376,10 +377,13 @@ export function Dashboard() {
   }
 
   return (
-    // The Tabs element is the page, so the section strip can sit directly under the header
-    // at full width while the panels stay in the centred column below it. The open tab
-    // lives in the URL's hash (`lib/tabRoute.ts`): a click replaces it, a company link
-    // pushes one, a reload keeps it.
+    // Every holding's row links to its company (`CompanyLink`); the provider is the one
+    // reader of the company list for those links.
+    <CompanyLinksProvider>
+    {/* The Tabs element is the page, so the section strip can sit directly under the header
+        at full width while the panels stay in the centred column below it. The open tab
+        lives in the URL's hash (`lib/tabRoute.ts`): a click replaces it, a company link
+        pushes one, a reload keeps it. */}
     <Tabs value={route.tab} onValueChange={selectTab} className="flex min-h-screen flex-col bg-background">
       {/* Header — shared with the crypto view; this view fills its three slots. */}
       <AppHeader
@@ -600,5 +604,6 @@ export function Dashboard() {
 
       <AppFooter />
     </Tabs>
+    </CompanyLinksProvider>
   )
 }

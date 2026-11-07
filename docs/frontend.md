@@ -617,6 +617,22 @@ Performance (or the Company tab without a company).
 - jsdom keeps one `location` per test file, so `testSetup.ts` resets the URL after every test.
   `lib/tabRoute.test.ts`, `components/Dashboard.route.test.tsx`.
 
+**Every held company one click away.** A holding's logo and name on Positions, Fundamentals, the
+Dividends holdings table and the Watchlist are a link to its company on the Company tab —
+the desktop cell's whole identity block, the phone card's name. One implementation:
+`components/CompanyLink.tsx` renders the anchor (hover title *Open company*, focusable, a modified
+click left to the browser, a plain one opening the company at its top), and resolves the row
+through `lib/companyLinks.ts`, one lookup built from `/api/company-financials/companies` — the
+list the Company tab's own picker reads, so a row only links to a company the tab can show. A
+held row resolves by security (`security_ids`: GOOGL finds Alphabet as GOOG does), a watchlist row
+by its security and then its ticker against the company's symbol. **No company, no link**: the
+children render exactly as before, wrapper-free. `CompanyLinksProvider` in `Dashboard` is the one
+reader of the list for links; the context's default is the empty lookup, so a table rendered
+without it — every component test — draws what it drew before. Neither file imports the Company
+tab, so its chunk stays its own. `components/companyLinkFamily.test.ts` fails a table of held
+securities that stops drawing its identity through `CompanyLink`, and a hand-built `#company/`
+href anywhere but `tabRoute.ts`.
+
 ## Two books — the Stocks | Crypto mode
 
 The header's **Stocks | Crypto** switch (`ModeToggle.tsx`, immediately before `ThemeToggle`) swaps

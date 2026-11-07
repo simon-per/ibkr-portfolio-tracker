@@ -9,6 +9,7 @@ import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Briefcase, Wallet } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { CompanyLink } from './CompanyLink'
 import { IconChip } from '@/components/ui/IconChip'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
@@ -213,23 +214,25 @@ export function positionColumns(deps: {
         ) : null
         const name = displayName(p.description) || p.symbol
         return view === 'table' ? (
-          <div className="flex items-center gap-3">
-            {positionAvatar(p)}
-            <div className="min-w-0">
-              <div className="max-w-[16rem] truncate font-medium" title={p.description}>
-                {name}
-                {tag}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {p.symbol} · {exchangeOf(p)}
+          <CompanyLink securityId={p.security_id} className="block">
+            <div className="flex items-center gap-3">
+              {positionAvatar(p)}
+              <div className="min-w-0">
+                <div className="max-w-[16rem] truncate font-medium" title={p.description}>
+                  {name}
+                  {tag}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {p.symbol} · {exchangeOf(p)}
+                </div>
               </div>
             </div>
-          </div>
+          </CompanyLink>
         ) : (
-          <>
+          <CompanyLink securityId={p.security_id}>
             {name}
             {tag}
-          </>
+          </CompanyLink>
         )
       },
     },

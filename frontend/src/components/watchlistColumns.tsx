@@ -4,6 +4,7 @@ import { ABSENT, cn, formatMarketCap, formatSignedPercent, marketCapParts } from
 import { TONE_CHIP, TONE_TEXT, type Tone } from '@/lib/tone'
 import type { WatchlistItem } from '@/lib/api'
 import type { Column } from '@/components/ui/DataTable'
+import { CompanyLink } from './CompanyLink'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 
 /**
@@ -163,27 +164,31 @@ export function watchlistColumns(deps: {
       avatar: watchlistAvatar,
       cell: (i, view) =>
         view === 'cards' ? (
-          i.symbol || i.yahoo_ticker
+          <CompanyLink securityId={i.security_id} ticker={i.yahoo_ticker}>
+            {i.symbol || i.yahoo_ticker}
+          </CompanyLink>
         ) : (
-          <div className="flex items-center gap-3">
-            {watchlistAvatar(i, 'h-8 w-8 text-[10px]')}
-            <div className="min-w-0">
-              <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
-              <div className="text-xs text-muted-foreground truncate max-w-[140px]">
-                {displayName(i.company_name) || i.yahoo_ticker}
-              </div>
-              {(i.notes || i.target_price !== null) && (
-                <div className="text-[10px] text-muted-foreground/70 mt-0.5 space-x-2">
-                  {i.notes && (
-                    <span className="truncate inline-block max-w-[100px] align-bottom">{i.notes}</span>
-                  )}
-                  {i.target_price !== null && (
-                    <span>TP: {formatCurrency(i.target_price, i.data_currency)}</span>
-                  )}
+          <CompanyLink securityId={i.security_id} ticker={i.yahoo_ticker} className="block">
+            <div className="flex items-center gap-3">
+              {watchlistAvatar(i, 'h-8 w-8 text-[10px]')}
+              <div className="min-w-0">
+                <div className="font-medium">{i.symbol || i.yahoo_ticker}</div>
+                <div className="text-xs text-muted-foreground truncate max-w-[140px]">
+                  {displayName(i.company_name) || i.yahoo_ticker}
                 </div>
-              )}
+                {(i.notes || i.target_price !== null) && (
+                  <div className="text-[10px] text-muted-foreground/70 mt-0.5 space-x-2">
+                    {i.notes && (
+                      <span className="truncate inline-block max-w-[100px] align-bottom">{i.notes}</span>
+                    )}
+                    {i.target_price !== null && (
+                      <span>TP: {formatCurrency(i.target_price, i.data_currency)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </CompanyLink>
         ),
     },
     // The desktop stacks these three under the symbol; on a card they are their own
