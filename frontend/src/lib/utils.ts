@@ -40,13 +40,23 @@ function numberFormat(options: Intl.NumberFormatOptions): Intl.NumberFormat {
   return format
 }
 
+/**
+ * `value`, or 0 when it rounds to zero at `digits` decimals — so a formatter never prints
+ * a signed zero ("-CHF 0.00", "-0.00%", "-0.0%"), whose minus claims a direction the
+ * figure does not have (review item M7). `Intl` keeps the sign of -0 and of any negative
+ * that rounds away.
+ */
+function unsignedZero(value: number, digits: number): number {
+  return Number.isFinite(value) && Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value
+}
+
 export function formatCurrency(value: number, currency: string = "EUR"): string {
   return numberFormat({
     style: "currency",
     currency: currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value)
+  }).format(unsignedZero(value, 2))
 }
 
 /**
@@ -145,7 +155,7 @@ export function formatPercent(value: number): string {
     style: "percent",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value / 100)
+  }).format(unsignedZero(value, 2) / 100)
 }
 
 /**
@@ -160,12 +170,12 @@ export function formatFractionPercent(fraction: number, digits: number = 1): str
     style: "percent",
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  }).format(fraction)
+  }).format(unsignedZero(fraction, digits + 2))
 }
 
 /** A valuation multiple with one decimal: "33.4", "1,204.0". */
 export function formatMultiple(value: number): string {
-  return numberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)
+  return numberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(unsignedZero(value, 1))
 }
 
 /**
@@ -345,9 +355,19 @@ function compactBody(abs: number, step?: number): string {
  */
 export function formatMarketCap(value: number | null): string {
   if (value === null) return ABSENT
-  if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`
-  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`
-  if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`
+  // A figure that rounds up to 1,000 of its unit rolls over to the next one, as
+  // `compactBody` does: 999.96B is "1.0T", never "1000.0B" (review item M7).
+  const units: [number, string, number][] = [[1e12, 'T', 1], [1e9, 'B', 1], [1e6, 'M', 0]]
+  for (let i = 0; i < units.length; i++) {
+    const [size, suffix, digits] = units[i]
+    if (value < size) continue
+    const printed = (value / size).toFixed(digits)
+    if (Number(printed) >= 1000 && i > 0) {
+      const [up, upSuffix, upDigits] = units[i - 1]
+      return `${(value / up).toFixed(upDigits)}${upSuffix}`
+    }
+    return `${printed}${suffix}`
+  }
   return formatCount(value)
 }
 

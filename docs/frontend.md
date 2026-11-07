@@ -475,7 +475,13 @@ sites wrote the plus by hand, half `>= 0` and half `> 0`, so the same zero print
 one screen and "CHF 0.00" on the next. The formatter prints the figure and its minus; this adds
 the plus, and a value that rounds to zero at the format's precision prints as an unsigned zero
 (no "+0.00%", no "-0.0%"). `formatSignedPercent(value, digits)` is the `toFixed` percentage
-form. `displayFamily.test.ts` refuses `? '+' :`, `` `+${ `` and `>+{` outside `utils.ts`.
+form. `displayFamily.test.ts` refuses `? '+' :`, `` `+${ `` and `>+{` outside `utils.ts`. The
+unsigned formatters drop a signed zero too (review item M7, 2026-11-07): `formatCurrency`,
+`formatPercent`, `formatFractionPercent` and `formatMultiple` print a value that rounds to zero
+as 0 — `Intl` keeps the minus of -0 and of a negative that rounds away ("-CHF 0.00") — and the
+drawdown tiles print through `formatSignedPercent`, a 0.00% max drawdown toned as the fall it is
+not. `formatMarketCap` rolls a figure rounding to 1,000 of its unit over to the next (999.96B is
+"1.0T").
 
 Three tables deliberately stay tables, each argued in its own file: `CurrencyExposureCard` (the
 comparison *between* rows is the point, and there is no identity column to promote), and the two

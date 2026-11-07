@@ -5,6 +5,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { DividendForwardYield } from '@/lib/api'
 import type { SortinoAbsence } from '@/lib/portfolioKpis'
+import { formatSignedPercent } from '@/lib/utils'
 
 /**
  * Beta needs a benchmark, and there are three separate reasons it can be
@@ -196,7 +197,7 @@ export function RiskMetricsCards({
           // the account is actually below its peak.
           iconTone={inDrawdown ? 'negative' : 'muted'}
           value={metrics.currentDrawdownPct !== null
-            ? `${metrics.currentDrawdownPct.toFixed(2)}%`
+            ? formatSignedPercent(metrics.currentDrawdownPct, 2)
             : null}
           tone={metrics.currentDrawdownPct === null ? 'muted'
             : inDrawdown ? 'negative' : 'positive'}
@@ -210,8 +211,8 @@ export function RiskMetricsCards({
             : metrics.maxDrawdownPct === 0
               ? 'Never below its opening value'
               : metrics.recoveredDate !== null
-                ? `Recovered ${shortDate(metrics.recoveredDate)} from ${metrics.maxDrawdownPct.toFixed(1)}%`
-                : `Worst ${metrics.maxDrawdownPct.toFixed(1)}%${
+                ? `Recovered ${shortDate(metrics.recoveredDate)} from ${formatSignedPercent(metrics.maxDrawdownPct, 1)}`
+                : `Worst ${formatSignedPercent(metrics.maxDrawdownPct, 1)}${
                     metrics.troughDate ? ` on ${shortDate(metrics.troughDate)}` : ''
                   }`}
         />
