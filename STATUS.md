@@ -93,6 +93,20 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **The 2026-11-07 review, implemented by a /goal run (merged into `main` locally wave by wave,
+  not pushed — the owner pushes):** what production must show once deployed.
+  - *Wave 0 (`review-w0-safety`).* yfinance now raises instead of hiding errors (Y2): the logs
+    carry more `… failed for TICKER` warnings from the secondary endpoints (each is an error
+    yfinance used to hide), a ratings `404` is a miss with back-off rather than zero analysts,
+    and a 429 on `quarterly_financials` stops the fundamentals/watchlist pass with
+    `rate_limited`. Company prices and dividends still report a delisted ticker as `no_data`,
+    never `errors`. A Sync press — or `POST /api/scheduler/trigger` — after any request-step
+    refusal (`1004`–`1009`, `1019`, `1021`, "may have reached IBKR") answers 429 / skips until
+    midnight ET (I2). `/api/scheduler/status` carries `edgar_in_progress`; a push during the
+    Sunday 05:00 EDGAR pass logs `Holding the restart: the running backend reports a sync in
+    progress (stock pipeline or SEC EDGAR)` (I4). The Sunday pass's `ttm_dividend_gaps` /
+    `stale_figures` list every company in scope, fetched or not (CO2).
+
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
   waiting on CI when this was written — confirm `/health` shows it):**
@@ -115,10 +129,10 @@ Only what is still unverified.
   2026-11-07, `4cb7bd1`):** every gap company is backfilled on production (docs/shipped-log.md;
   90 gaps left, each a documented cause). Unverified: the Sunday 2026-11-08 05:00
   `company_financials_refresh` reads few or no filings, has no `filing_errors`, and — its first
-  run with the check — lists `ttm_dividend_gaps` and `stale_figures` once as warnings; BKR will
-  not be among them on 11-08 (fetched by hand on 11-07, so that pass skips it — review item CO2
-  makes the lists cover every company, fetched or not); the Sunday after, the same names in the record
-  and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
+  run with the check — lists `ttm_dividend_gaps` and `stale_figures` once as warnings. If 11-08
+  runs the code before the review's CO2 fix, BKR is not among them (fetched by hand on 11-07, so
+  that pass skips it) and warns on 11-15 instead; with the fix deployed every company in scope is
+  listed, fetched or not. The Sunday after, the same names in the record and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
   `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
