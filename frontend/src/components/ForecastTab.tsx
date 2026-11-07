@@ -159,8 +159,10 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
     align: 'right',
     mobile: 'delta',
     // A book worth less than was paid in is a loss today.
+    // An absent gain is a dash with no tone, not a green one.
     tone: (p) =>
-      p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
+      p.gains === null ? undefined
+      : p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
     hint: { description: 'Value minus money in' },
     cell: (p) => (p.gains === null ? ABSENT : money(p.gains)),
   },
