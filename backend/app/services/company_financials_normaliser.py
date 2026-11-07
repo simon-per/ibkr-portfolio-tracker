@@ -1094,32 +1094,33 @@ def _quarter_totals(
 
 def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
     """
-    A fiscal year whose every dividend-per-share fact is one rate, and whose four quarters
-    each declared about the same money, paid that rate each quarter: the rungs and the year
-    carry one quarter's rate, not a sum. IBKR before 2020 tagged 0.10 on every rung
-    (declared 7M, 14M, 21M, 28M), BKNG its 2024 8.75, CEG its year beside three reported
-    quarters. Fills the quarters without a reported figure — a quarter derived from two rungs
-    is the difference of two rates (BKNG's FY2025 0.384 less nine months' 0.38 made a 0.004
-    fourth quarter) — and a filed year that carries the rate becomes the four quarters. An
-    annual or semi-annual declarer's totals are not equal (WMT, INTC), and a year with a
-    raise is not one rate: both stay as the ladder rules leave them.
+    A fiscal year — or its tail, from a quarter to the year end — whose every
+    dividend-per-share fact is one rate, and whose quarters each declared about the same
+    money, paid that rate each quarter: the rungs and the year carry one quarter's rate, not
+    a sum. IBKR before 2020 tagged 0.10 on every rung (declared 7M, 14M, 21M, 28M), BKNG its
+    2024 8.75, CEG its year beside three reported quarters; IBKR's 2025 is 0.08 from April
+    (its April-December context too) after 0.0625 in the first quarter.
+
+    A quarter takes the rate only where it has no reported figure — one derived from two
+    rungs is the difference of two rates (BKNG's FY2025 0.384 less nine months' 0.38 made a
+    0.004 fourth quarter) — and only where one of the rate's facts ends inside it: MA's 2021
+    is 0.44 from its second quarter, with 434M, 434M and 476M declared (within the totals'
+    tolerance), and its fourth quarter's raise to 0.49 is only in the year's 1.81, which is
+    no rate. A filed year that carries the rate becomes the four quarters, for a whole year
+    only. An annual or semi-annual declarer's totals are not equal (WMT, INTC): both stay as
+    the ladder rules leave them.
     """
     dps = values["dividends_per_share"]
     concepts = METRICS["dividends_per_share"].concepts
     by_concept = [_quarter_totals(totals[c], mapping) for c in DIVIDEND_TOTALS if c in totals]
     week = timedelta(days=7)
     for year in calendar:
-        facts = [
+        in_year = [
             o
             for c in concepts
             for (s, e), o in latest.get(c, {}).items()
             if s is not None and year.start <= s and e <= year.end + week and o.value > 0
         ]
-        if len(facts) < 2:
-            continue
-        low, high = min(o.value for o in facts), max(o.value for o in facts)
-        if high > low * (1 + FLAT_RATE_TOLERANCE):
-            continue
         # The year's quarters of declared totals, two at least: a year in progress counts
         # (BKNG's 2026 rate is on its six- and nine-month rungs months before the 10-K).
         quarters = max(
@@ -1130,35 +1131,56 @@ def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
             key=len,
             default=[],
         )
-        if len(quarters) < 2:
-            continue
-        mean = sum(v for _, v in quarters) / len(quarters)
-        if mean <= 0 or any(abs(v / mean - 1) > FLAT_TOTALS_TOLERANCE for _, v in quarters):
-            continue
-        rate = min(facts, key=lambda o: (o.error, -o.filed.toordinal()))
+        for i in range(len(quarters) - 1):
+            begins = year.start if i == 0 else quarters[i - 1][0] + timedelta(days=1)
+            tail = quarters[i:]
+            facts = [o for o in in_year if o.start >= begins - week]
+            if len(facts) < 2:
+                continue
+            low, high = min(o.value for o in facts), max(o.value for o in facts)
+            if high > low * (1 + FLAT_RATE_TOLERANCE):
+                continue
+            mean = sum(v for _, v in tail) / len(tail)
+            if mean <= 0 or any(abs(v / mean - 1) > FLAT_TOTALS_TOLERANCE for _, v in tail):
+                continue
+            _fill_rate(dps, keys, calendar, year, facts, tail, whole_year=i == 0)
+            break
 
-        def each_quarter(value: float, end: date) -> Obs:
-            return Obs(
-                value=value,
-                filed=rate.filed,
-                start=None,
-                end=end,
-                unit=rate.unit,
-                concept=f"{rate.concept} each quarter",
-                derived=True,
-            )
 
-        for end, _ in quarters:
-            label = keys.get(("Q", end)) or _quarter_label(end, calendar)
-            held = dps.get(("Q", end))
-            if (held is None or held.derived) and label is not None:
-                keys[("Q", end)] = label
-                dps[("Q", end)] = each_quarter(rate.value, end)
-        filed_year = [o for o in facts if _between(_days(o.start, o.end), YEAR_DAYS)]
-        found = [dps.get(("Q", end)) for end, _ in quarters]
-        if len(found) == 4 and filed_year and all(found):
-            keys.setdefault((ANNUAL, year.end), (year.name, ANNUAL))
-            dps[(ANNUAL, year.end)] = each_quarter(sum(o.value for o in found), year.end)
+def _fill_rate(dps, keys, calendar, year, facts, quarters, whole_year: bool) -> None:
+    """`_flat_rate_years`' writes: the rate in each quarter it is shown in, and a filed year
+    that carried it as the four quarters."""
+    rate = min(facts, key=lambda o: (o.error, -o.filed.toordinal()))
+    week = timedelta(days=7)
+
+    def each_quarter(value: float, end: date) -> Obs:
+        return Obs(
+            value=value,
+            filed=rate.filed,
+            start=None,
+            end=end,
+            unit=rate.unit,
+            concept=f"{rate.concept} each quarter",
+            derived=True,
+        )
+
+    previous = None
+    for end, _ in quarters:
+        shown = any(
+            (previous is None or o.end > previous + week) and o.end <= end + week
+            for o in facts
+        )
+        previous = end
+        label = keys.get(("Q", end)) or _quarter_label(end, calendar)
+        held = dps.get(("Q", end))
+        if shown and (held is None or held.derived) and label is not None:
+            keys[("Q", end)] = label
+            dps[("Q", end)] = each_quarter(rate.value, end)
+    filed_year = [o for o in facts if _between(_days(o.start, o.end), YEAR_DAYS)]
+    found = [dps.get(("Q", end)) for end, _ in quarters]
+    if whole_year and len(found) == 4 and filed_year and all(found):
+        keys.setdefault((ANNUAL, year.end), (year.name, ANNUAL))
+        dps[(ANNUAL, year.end)] = each_quarter(sum(o.value for o in found), year.end)
 
 
 # ── The whole thing ──────────────────────────────────────────────────────────

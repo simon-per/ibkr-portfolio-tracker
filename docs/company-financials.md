@@ -296,15 +296,19 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   whose every dividend-per-share fact is one rate (within `FLAT_RATE_TOLERANCE`, 2%: BKNG's
   9.60 over its 25:1 split is 0.384 beside the restated 0.38) and whose quarters of declared
   totals are each within `FLAT_TOTALS_TOLERANCE` (25%; IBKR tags 7M or 8M in millions) of
-  their mean paid that rate each quarter. Its quarters without a reported figure take the rate
-  — a quarter derived from two rungs is the difference of two rates (BKNG's 0.004 FY2025 Q4)
-  — and a filed year that carried the rate becomes the four quarters (IBKR's 0.40, CEG's
-  1.41). Two quarters of totals are enough, so a year in progress counts (BKNG's 2026, months
-  before its 10-K); the year itself waits for all four. An annual or semi-annual declarer's
-  quarters of totals are four or two times the mean, or nothing, and a year with a raise is
-  not one rate: both stay as the ladder rules leave them. Closed IBKR's years to 2023, BKNG,
-  CEG's fourth quarters and AMAT's 2014–2017 (offline over the 102 companies: gaps 134 → 95,
-  no other metric's row moved).
+  their mean paid that rate each quarter. **So does a year's tail**, from a quarter to the
+  year end: IBKR's 2025 is 0.0625 in the first quarter and 0.08 after (its April–December
+  context too, 35M, 36M, 36M declared). A quarter takes the rate only where it has no reported
+  figure — one derived from two rungs is the difference of two rates (BKNG's 0.004 FY2025 Q4)
+  — **and only where a fact of the rate ends inside it**: MA's 2021 is 0.44 from its second
+  quarter with 434M, 434M, 476M declared (within the tolerance), and its fourth quarter's raise
+  to 0.49 is only in the year's 1.81, no rate, so it is never overwritten. A filed year that
+  carried the rate becomes the four quarters, for a whole year only (IBKR's 0.40, CEG's 1.41).
+  Two quarters of totals are enough, so a year in progress counts (BKNG's 2026, months before
+  its 10-K). An annual or semi-annual declarer's quarters of totals are four or two times the
+  mean, or nothing: they stay as the ladder rules leave them. Closed IBKR's years to 2025,
+  BKNG, CEG's fourth quarters and AMAT's 2012 and 2014–2017 (offline over the 102 companies:
+  gaps 134 → 91, no other metric's row moved).
 - **One end date per period.** Ends within a week are one period (NVDA tagged one 2010 rung as
   ending a day before its quarter).
 
@@ -588,9 +592,9 @@ filings' `currency`.
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).
-- **Dividend per share gaps left** (about 95 quarters across 20 companies, 2026-11-07):
-  IBKR's years with a raise or its 2025 split in them (not one rate, so the totals cannot vouch
-  for a rung); AMAT before 2014 and MELI, AMGN and MAR tag each declaration on a one-day or
+- **Dividend per share gaps left** (about 90 quarters across 20 companies, 2026-11-07):
+  IBKR's three quarters before 2014, whose rungs no declared total vouches for; AMAT before
+  2012 and in FY2013, and MELI, AMGN and MAR, tag each declaration on a one-day or
   one-month context, or on AMAT's own members, with slips beside them (AMAT's FY2013 Q4 0.09
   against a 0.10 rate) — summing them would guess; some filings tag no dividend per share
   anywhere (WDC 2013–2015, CTAS's FY2017); 2008–2009 quarters reported only as comparatives

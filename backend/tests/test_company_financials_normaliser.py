@@ -847,6 +847,63 @@ def test_a_quarter_derived_from_two_rates_is_replaced_by_the_rate():
     assert _year(rows) == {"Q1": 0.38, "Q2": 0.384, "Q3": 0.384, "Q4": 0.384, "FY": 1.532}
 
 
+def _q(start, end, val, filed, accn, form="10-Q"):
+    return _f(start, end, val, filed, form=form, accn=accn)
+
+
+def test_a_rate_from_a_raise_to_the_year_end_is_each_quarters_after_it():
+    """IBKR's 2025: 0.0625 in the first quarter, then 0.08 on the second, third and an
+    April-December context; 35M, 36M and 36M declared: the fourth quarter paid 0.08."""
+    doc = _dps(
+        _q("2025-01-01", "2025-03-31", 0.0625, "2025-05-01", "q1"),
+        _q("2025-04-01", "2025-06-30", 0.08, "2025-08-01", "q2"),
+        _q("2025-07-01", "2025-09-30", 0.08, "2025-11-01", "q3"),
+        _q("2025-04-01", "2025-12-31", 0.08, "2026-02-20", "k", form="10-K"),
+    )
+    doc["facts"]["us-gaap"]["DividendsCommonStock"] = {
+        "units": {
+            "USD": [
+                _q("2025-01-01", "2025-03-31", 27e6, "2025-05-01", "q1"),
+                _q("2025-04-01", "2025-06-30", 35e6, "2025-08-01", "q2"),
+                _q("2025-07-01", "2025-09-30", 36e6, "2025-11-01", "q3"),
+                _q("2025-01-01", "2025-12-31", 134e6, "2026-02-20", "k", form="10-K"),
+            ]
+        }
+    }
+    # The calendar year every other figure gives (the April-December context alone would
+    # open a year in April).
+    doc["facts"]["us-gaap"]["Revenues"] = {
+        "units": {"USD": [_q("2025-01-01", "2025-12-31", 6e9, "2026-02-20", "k", "10-K")]}
+    }
+    year = _year(normalise(doc).rows, "2025")
+    assert year == {"Q1": 0.0625, "Q2": 0.08, "Q3": 0.08, "Q4": 0.08}
+
+
+def test_a_raise_only_the_year_shows_is_never_overwritten_by_the_rate():
+    """MA's 2021: 0.44 for three quarters, 0.49 declared in the fourth — only in the year's
+    1.81. The declared totals (434M, 434M, 434M, 476M) are within their tolerance of one
+    another, so the fourth quarter is guarded by having no 0.44 fact of its own."""
+    doc = _dps(
+        _q("2021-01-01", "2021-03-31", 0.44, "2021-04-29", "q1"),
+        _q("2021-04-01", "2021-06-30", 0.44, "2021-07-29", "q2"),
+        _q("2021-07-01", "2021-09-30", 0.44, "2021-10-28", "q3"),
+        _q("2021-01-01", "2021-09-30", 1.32, "2021-10-28", "q3"),
+        _q("2021-01-01", "2021-12-31", 1.81, "2022-02-11", "k", form="10-K"),
+    )
+    doc["facts"]["us-gaap"]["DividendsCommonStockCash"] = {
+        "units": {
+            "USD": [
+                _q("2021-01-01", "2021-03-31", 434e6, "2021-04-29", "q1"),
+                _q("2021-04-01", "2021-06-30", 434e6, "2021-07-29", "q2"),
+                _q("2021-07-01", "2021-09-30", 434e6, "2021-10-28", "q3"),
+                _q("2021-01-01", "2021-12-31", 1778e6, "2022-02-11", "k", form="10-K"),
+            ]
+        }
+    }
+    year = _year(normalise(doc).rows, "2021")
+    assert year == {"Q1": 0.44, "Q2": 0.44, "Q3": 0.44, "Q4": 0.49, "FY": 1.81}
+
+
 def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
     """HON's Q1 2009 10-Q tags dividends paid as -224M: a sign slip, not a refund."""
     q1, q2 = ("2009-01-01", "2009-03-31"), ("2009-04-01", "2009-06-30")
