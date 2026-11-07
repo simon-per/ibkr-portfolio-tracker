@@ -1083,7 +1083,10 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `symbol · name` in two groups, *Held* then *Nasdaq-100* (`companyGroups`), by CIK; the last pick
   remembered per browser under `company-financials:cik` through `lib/storage.ts`; a pick no longer
   listed falls back to the first held company; a company not held shows its logo by ISIN) with three
-  `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
+  `SegmentedControl`s in its aside. **A company in the URL wins** (2026-11-07, *The tab in the URL*
+  above): `#company/<cik>` — a holding's link or a reload — opens that company over the remembered
+  pick and becomes it; a pick in the picker replaces the hash without a history entry; a CIK the
+  list no longer has falls through like a stale pick. Under it the **Key figures** card (`KEY_STATS`: the server's
   `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
   FCF, the four margins, return on equity, shares, DPS with its payout ratio and the dividend
   yield, market cap, enterprise value, net cash, P/E, P/S, P/FCF, EV/EBIT, buybacks, dividends
