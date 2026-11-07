@@ -1,7 +1,7 @@
-from sqlalchemy import Integer, Float, String, Text, DateTime, BigInteger
+from sqlalchemy import Integer, Float, String, Text, Date, DateTime, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from app.database import Base
@@ -74,6 +74,10 @@ class WatchlistItem(Base):
     # When quarterly_financials and the estimates were last fetched; the growth columns
     # above are refreshed weekly from them (`WatchlistService.ESTIMATES_REFRESH_AFTER`).
     estimates_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # The newest quarter Yahoo's `.info` reported at the last run (`mostRecentQuarter`); a
+    # later one means the company reported, and the slow fields are fetched that run
+    # (`watchlist_service.new_quarter`).
+    reported_quarter: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
 
     def __repr__(self) -> str:

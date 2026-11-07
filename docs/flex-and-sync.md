@@ -723,7 +723,13 @@ MUTUALFUND was 'Stock').
 the estimates are read when `watchlist_items.estimates_synced_at` is NULL or older than
 `WatchlistService.ESTIMATES_REFRESH_AFTER` (7 days); the other runs read `.info` (and history) only,
 carry the stored growth columns, and build PEG and the buy score over them — a fast run never nulls
-a slow field. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
+a slow field. **A report reads them the next run** (2026-11-07, owner-approved): every run stores
+`.info`'s `mostRecentQuarter` as `reported_quarter`, and a later quarter than the stored one fetches
+the statements and estimates in that run (`new_quarter`, decided inside the fetch from the `.info`
+just read). Before, AMD's 2026-11-03 report left the watchlist on the old quarter's growth while
+Fundamentals (daily) had the new one. The first sighting only records the quarter, so a deploy
+costs nothing extra; a report costs one slow fetch a quarter per item.
+`tests/test_watchlist_report_refresh.py`. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
 `market_prices` closes instead of `history("1y")` (`_held_closes`; Yahoo's history is
 dividend-adjusted, the stored closes are not, so the RSI can differ slightly around an ex-date).
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now

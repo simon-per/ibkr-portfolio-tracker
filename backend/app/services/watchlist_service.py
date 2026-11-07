@@ -1,5 +1,5 @@
-from typing import Any, Dict, Iterable, Mapping, Optional, List
-from datetime import timedelta
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, List, Union
+from datetime import date, datetime, timedelta, timezone
 from app.clock import utc_today, utcnow
 import logging
 import yfinance as yf
@@ -34,6 +34,30 @@ RSI_MIN_CLOSES = 15
 # The buy score's analyst points by consensus label (`consensus_of`); no rating is the
 # neutral 6, as every other unknown input is neutral.
 RATING_POINTS = {"Strong Buy": 13, "Buy": 10, "Hold": 5, "Sell": 2, "Strong Sell": 0}
+
+
+def reported_quarter(info: Optional[Dict]) -> Optional[date]:
+    """
+    The end of the newest quarter Yahoo's figures cover: `.info`'s `mostRecentQuarter`,
+    epoch seconds, as a UTC date. None when absent or not a timestamp.
+    """
+    value = (info or {}).get("mostRecentQuarter")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc).date()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def new_quarter(info: Optional[Dict], known: Optional[date]) -> bool:
+    """
+    Whether Yahoo reports a newer quarter than the last run saw: a company reported, so the
+    statements and estimates behind the growth columns moved. Never on the first sighting
+    (`known` None): a deploy must not turn every item's next run into a full fetch.
+    """
+    reported = reported_quarter(info)
+    return known is not None and reported is not None and reported > known
 
 
 def own_counts(item) -> Dict[str, Optional[int]]:
@@ -251,14 +275,18 @@ class WatchlistService:
         return round(total, 1)
 
     async def _fetch_ticker_data(
-        self, yahoo_ticker: str, with_estimates: bool = True, with_history: bool = True,
+        self,
+        yahoo_ticker: str,
+        with_estimates: Union[bool, Callable[[Dict], bool]] = True,
+        with_history: bool = True,
     ) -> tuple:
         """
         Fetch .info, 1y history and the shared estimate endpoints in a single thread.
 
         `.info` is three requests; history, `quarterly_financials` and the estimates one
-        each. `with_estimates=False` skips the slow two (`ESTIMATES_REFRESH_AFTER`),
-        `with_history=False` the history (`_held_closes` had it): None in their places.
+        each. `with_estimates=False` skips the slow two (`ESTIMATES_REFRESH_AFTER`), and a
+        callable decides from the `.info` just read (`new_quarter`); `with_history=False`
+        skips the history (`_held_closes` had it): None in their places.
 
         A rate limit on any of them propagates: `sync_item` hands its text to `sync_all`,
         which abandons the pass. These reads used to swallow every exception, a 429
@@ -275,10 +303,8 @@ class WatchlistService:
                 read_optional(lambda: ticker.history(period="1y"), "history", yahoo_ticker)
                 if with_history else None
             )
-            frames = (
-                fetch_estimate_frames(ticker, info, yahoo_ticker) if with_estimates
-                else {}
-            )
+            wanted = with_estimates(info) if callable(with_estimates) else with_estimates
+            frames = fetch_estimate_frames(ticker, info, yahoo_ticker) if wanted else {}
             return (
                 info, frames.get("quarterly_financials"), history,
                 frames.get("revenue_estimate"), frames.get(EPS_TREND_GROWTH),
@@ -400,8 +426,11 @@ class WatchlistService:
 
         # Statements and estimates change a few times a quarter: asked weekly, and on the
         # other runs the growth columns they feed are carried from the row (GitHub issue
-        # #11, item d). A held ticker's RSI reads the closes the price pass stored.
-        slow = (
+        # #11, item d) — unless the company reported since the last run (`new_quarter`, read
+        # off the `.info` every run fetches anyway), so a report reaches the row the next
+        # morning, as it reaches Fundamentals, not up to a week later. A held ticker's RSI
+        # reads the closes the price pass stored.
+        slow_due = (
             item.estimates_synced_at is None
             or utcnow() - item.estimates_synced_at >= self.ESTIMATES_REFRESH_AFTER
         )
@@ -413,19 +442,26 @@ class WatchlistService:
         counts_due = (
             yahoo_ticker.upper() not in await self.security_ids_by_ticker(held_only=True)
             and yahoo_ticker.upper() not in stored
-            and (slow or item.ratings_synced_at is None)
+            and (slow_due or item.ratings_synced_at is None)
         )
 
-        logger.info(f"Fetching data for {yahoo_ticker}{'' if slow else ' (.info only)'}...")
+        logger.info(f"Fetching data for {yahoo_ticker}{'' if slow_due else ' (.info first)'}...")
         await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        def wants_estimates(info: Dict) -> bool:
+            return slow_due or new_quarter(info, item.reported_quarter)
 
         try:
             info, quarterly_financials, history, revenue_estimate, eps_trend_growth = await self._fetch_ticker_data(
-                yahoo_ticker, with_estimates=slow, with_history=held_closes is None,
+                yahoo_ticker, with_estimates=wants_estimates, with_history=held_closes is None,
             )
         except Exception as e:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
             return {"error": str(e)}
+        # The same pure test the fetch made, so `slow` says what was read.
+        slow = wants_estimates(info)
+        if slow and not slow_due:
+            logger.info(f"{yahoo_ticker} reported a new quarter; growth and estimates refreshed")
 
         # One request through the held pass's own reader. A fund has no coverage to ask
         # about (`AnalystRatingService._fund_ids`): its answer is known without one. A
@@ -483,6 +519,9 @@ class WatchlistService:
         }
         if slow:
             data["estimates_synced_at"] = utcnow()
+        # Kept when `.info` lacks it, so a missing field never re-arms `new_quarter`.
+        if (quarter := reported_quarter(info)) is not None:
+            data["reported_quarter"] = quarter
         own = own_counts(item)
         if counts_due:
             data["ratings_synced_at"] = utcnow()
