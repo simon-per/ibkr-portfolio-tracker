@@ -8,3 +8,6 @@ pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
 pytest-xdist==3.8.0
+# Starlette's TestClient prefers it and deprecates plain httpx for it (starlette 1.6); the
+# app's own HTTP clients stay on `httpx` from requirements.txt.
+httpx2==2.16.0
