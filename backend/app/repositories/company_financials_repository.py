@@ -142,6 +142,20 @@ class CompanyFinancialsRepository:
         row.facts_checked_at = checked_at
         row.facts_miss_count = (row.facts_miss_count or 0) + 1
 
+    async def record_profile(
+        self, cik: int, profile: Optional[dict], checked_at: datetime
+    ) -> None:
+        """
+        The submissions document's answer (`EdgarClient.submissions`), replacing what was
+        stored — a 404 (`None`) clears it: the SEC states nothing now. Stamped either way.
+        """
+        row = await self.ensure_company(cik)
+        profile = profile or {}
+        row.sic = profile.get("sic")
+        row.sic_description = profile.get("sic_description")
+        row.fiscal_year_end = profile.get("fiscal_year_end")
+        row.submissions_checked_at = checked_at
+
     # ── company_financials ───────────────────────────────────────────────────
 
     async def replace_rows(

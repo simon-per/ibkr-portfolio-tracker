@@ -29,6 +29,15 @@ never IBKR.
   security's answer, `sec_tickers` a constituent ticker's (GOOG's CIK is stored nowhere else).
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` — every XBRL fact a company
   has filed, every period, every filing. One request per company per week.
+- `https://data.sec.gov/submissions/CIK##########.json` — the company's SIC code and its
+  description (the overview's industry) and its fiscal year end (`MMDD`), stored on
+  `sec_companies` (`sic`, `sic_description`, `fiscal_year_end`; migration `e8c2a4f6b1d3`). The
+  document's filing list is read past and dropped. **At most monthly a company**
+  (`PROFILE_RECHECK_AFTER`, 30 days, on `submissions_checked_at`), after the figures in the same
+  Sunday pass, so a refusal there leaves the figures whole: the first Sunday asks every company
+  once, then about one in four a week. A 404 or a document stating nothing is an answer (stamped,
+  stored as NULL); a failure stamps nothing and warns (*The industry of N companies could not be
+  read*). The run reports `profiles_due`, `profiles_fetched`, `profile_errors`.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It is `EDGAR_USER_AGENT` in `backend/.env` (`.env.example` has the placeholder

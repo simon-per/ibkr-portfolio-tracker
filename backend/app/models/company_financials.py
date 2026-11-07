@@ -72,6 +72,17 @@ class SecCompany(Base):
         DateTime, nullable=True
     )
     prices_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The company's industry and fiscal year end from its EDGAR `submissions` document,
+    # for the Company tab's overview; NULL when the SEC states none. Asked at most every
+    # `company_financials_sync.PROFILE_RECHECK_AFTER` (`submissions_checked_at`), a 404
+    # included; never stamped on a transport failure or a 429/5xx.
+    sic: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sic_description: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # `MMDD`, as the SEC states it (`0126` for NVDA's late-January year end).
+    fiscal_year_end: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    submissions_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<SecCompany cik={self.cik} {self.ticker}>"
