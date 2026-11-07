@@ -256,6 +256,11 @@ scenario, and carrying today's money in would report a negative gain of that siz
 could not be loaded is `null`, never 0**: the grey band is omitted, Money In and Gains read `—`, and a
 notice under the chart says so, while Portfolio Value — which never needed the baseline — is
 unaffected. Falling back to 0 or to the start value would redraw the very lie the module removes.
+**Today's value is `null` too while the summary loads or after it failed** (review item M4,
+2026-11-07): the value tiles, the table's value column and the scenarios read `—`, the chart is a
+placeholder, and a failed summary says so under it; "Start from 0" still projects. It fell back to
+0, so the tab projected the whole book from nothing — a ten-year value short by the compounded
+book and gains of minus everything paid in.
 **The entered rate is the effective annual rate**: it compounds monthly at `(1 + r)^(1/12) − 1`,
 so twelve months at r grow the seed by exactly r (pinned in `forecast.test.ts`). It was `r/12`
 until 2026-10-14, which turned 8% entered into 8.30% a year — a projection more generous than the
@@ -266,7 +271,11 @@ rate on screen. The end-of-period annuity is unchanged and conventional.
 returns to it. Only a typed value is stored (`forecast.chosenMonthlyContribution`). The old key
 `forecast.monthlyContribution` was written back on every mount, so a stored `1000` was the default
 rather than a choice: it is dropped, and any other legacy value is migrated as a choice. Without
-contributions (failed load, or no `12m` window) the default stays 1,000.
+contributions (failed load, or no `12m` window) the default stays 1,000. **A typed value is
+stored with the base currency it was typed in** (`{amount, currency}`, review item U6): under
+another base currency it is ignored and the pace followed, so 2,000 CHF never projects as 2,000
+USD after a switch. A value stored before then (a bare number) is stamped with the base currency
+the first time the settings are known.
 
 Tests: `src/lib/portfolioKpis.test.ts`, `src/lib/rebalance.test.ts`,
 `src/lib/currencyExposure.test.ts`, `src/lib/forecast.test.ts`, plus jsdom tests beside each
