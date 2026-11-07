@@ -19,6 +19,7 @@ from app.services.edgar_filing_facts import (
     instance_name,
     parse_instance,
     reporting,
+    sources,
 )
 
 INSTANCE = (
@@ -191,3 +192,29 @@ def test_facts_read_cover_the_periods_they_end_on():
     facts = parse_instance(INSTANCE)
     assert covers(facts, date(2021, 6, 30)) and covers(facts, date(2020, 7, 4))
     assert not covers(facts, date(2021, 3, 31))
+
+
+def test_a_gap_asks_its_own_filing_then_the_ones_that_repeat_it():
+    """BKR's 2018 filings tag the dividend on two members (not read); its 2019 10-Qs repeat
+    2018's quarters, and the next two 10-Ks a year's figure, on one."""
+
+    def f(accn, form, filed, end):
+        return Filing(accn, form, date.fromisoformat(filed), date.fromisoformat(end))
+
+    by_accn = {
+        f.accn: f
+        for f in (
+            f("q3-18", "10-Q", "2018-10-30", "2018-09-30"),
+            f("q3-19", "10-Q", "2019-10-30", "2019-09-30"),
+            f("q3-20", "10-Q", "2020-10-30", "2020-09-30"),
+            f("k18", "10-K", "2019-02-19", "2018-12-29"),
+            f("k19", "10-K", "2020-02-13", "2019-12-28"),
+            f("k20", "10-K", "2021-02-12", "2020-12-26"),
+            f("k21", "10-K", "2022-02-11", "2021-12-25"),
+        )
+    }
+    assert [s.accn for s in sources(by_accn, date(2018, 9, 30))] == ["q3-18", "q3-19"]
+    # A fiscal year end, in 52/53-week years: the next two 10-Ks repeat it.
+    assert [s.accn for s in sources(by_accn, date(2018, 12, 29))] == ["k18", "k19", "k20"]
+    # No filing of its own in companyfacts: the one a year later may still hold it.
+    assert [s.accn for s in sources(by_accn, date(2017, 9, 30))] == ["q3-18"]

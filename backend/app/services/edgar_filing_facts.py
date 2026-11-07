@@ -28,7 +28,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.services.company_financials_normaliser import FORMS, METRICS
@@ -140,6 +140,24 @@ def reporting(by_accn: Dict[str, Filing], period_end: date) -> Optional[Filing]:
     if not candidates:
         return None
     return min(candidates, key=lambda f: (f.form.endswith("/A"), f.filed, f.accn))
+
+
+def sources(by_accn: Dict[str, Filing], period_end: date) -> List[Filing]:
+    """
+    The filings that may hold the quarter ending on `period_end`, in the order to ask them:
+    the one reporting it, then the one reporting the same quarter a year later (its
+    comparative), and for a fiscal year end the 10-K two years later as well (the statement
+    of equity shows three years). BKR's 2018 filings tag the dividend on two dimension
+    members, which are not read; its 2019 10-Qs and FY2020 10-K repeat those periods on one.
+    """
+    own = reporting(by_accn, period_end)
+    out = [own] if own is not None else []
+    years = 2 if own is not None and own.form.startswith("10-K") else 1
+    for n in range(1, years + 1):
+        later = reporting(by_accn, period_end + timedelta(days=365 * n))
+        if later is not None and later not in out:
+            out.append(later)
+    return out
 
 
 def covers(facts: Sequence[Dict[str, Any]], period_end: date) -> bool:

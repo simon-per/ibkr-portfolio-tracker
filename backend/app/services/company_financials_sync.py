@@ -74,7 +74,7 @@ from app.services.edgar_filing_facts import (
     filings,
     instance_name,
     parse_instance,
-    reporting,
+    sources,
 )
 from app.services.etf_basket_parsers import INVESTED_ASSET_CLASSES
 from app.services.market_data_service import MarketDataService
@@ -556,34 +556,40 @@ class CompanyFinancialsSync:
     ) -> Tuple[int, Optional[EdgarRefused]]:
         """
         The filings behind this company's dividend gaps, newest first, each read once ever
-        and at most `FILING_READS_PER_COMPANY` this pass; a gap the filings already read
-        this pass cover (a comparative quarter, a year) is not asked for again. Returns how
-        many were read, and the refusal that stopped them, if one did. A failure stamps
-        nothing and stops this company's reads: next week asks again.
+        and at most `FILING_READS_PER_COMPANY` this pass. A gap asks its `sources` in turn —
+        its own filing, then the ones that repeat it — until one holds it; a gap the filings
+        already read this pass cover (a comparative quarter, a year) is not asked for again.
+        Returns how many were read, and the refusal that stopped them, if one did. A failure
+        stamps nothing and stops this company's reads: next week asks again.
         """
         by_accn = filings(companyfacts)
         pending = dividend_gaps(rows)
         count = 0
         while pending and count < FILING_READS_PER_COMPANY:
-            filing = reporting(by_accn, pending.pop(0))
-            if filing is None or filing.accn in read:
-                continue
-            try:
-                found = await self._read_filing(client, cik, filing, summary)
-            except EdgarRefused as refused:
-                return count, refused
-            except EdgarError as e:
-                summary["filing_errors"] += 1
-                logger.warning(f"filing {filing.accn} of CIK {cik} failed: {e}")
-                break
-            await self.repo.record_filing_read(
-                cik, filing.accn, filing.form, filing.filed, found, utcnow()
-            )
-            await self.db.commit()
-            read.add(filing.accn)
-            count += 1
-            summary["filings_read"] += 1
-            pending = [gap for gap in pending if not covers(found, gap)]
+            gap = pending.pop(0)
+            for filing in sources(by_accn, gap):
+                if filing.accn in read:
+                    continue
+                if count >= FILING_READS_PER_COMPANY:
+                    break
+                try:
+                    found = await self._read_filing(client, cik, filing, summary)
+                except EdgarRefused as refused:
+                    return count, refused
+                except EdgarError as e:
+                    summary["filing_errors"] += 1
+                    logger.warning(f"filing {filing.accn} of CIK {cik} failed: {e}")
+                    return count, None
+                await self.repo.record_filing_read(
+                    cik, filing.accn, filing.form, filing.filed, found, utcnow()
+                )
+                await self.db.commit()
+                read.add(filing.accn)
+                count += 1
+                summary["filings_read"] += 1
+                pending = [g for g in pending if not covers(found, g)]
+                if covers(found, gap):
+                    break
         return count, None
 
     async def _read_filing(

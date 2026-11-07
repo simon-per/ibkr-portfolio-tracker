@@ -687,9 +687,43 @@ class EdgarWithFilings(Edgar):
         return [u for u in self.urls() if "/Archives/" in u]
 
 
-def _filings_edgar():
+# A quarter whose own filing holds nothing this reads (BKR's 2018 10-Qs tag the dividend on
+# two members), repeated as a comparative in the filing a year later.
+Q2_2020_10Q, FY20_10K, FY21_10K = (
+    "0000320193-20-000020",
+    "0000320193-21-000003",
+    "0000320193-22-000003",
+)
+COMPARATIVE_ONLY = {
+    "cik": APPLE_CIK,
+    "entityName": "Example",
+    "facts": {
+        "us-gaap": {
+            "PaymentsOfDividendsCommonStock": {
+                "units": {
+                    "USD": [
+                        _paid("2020-01-01", "2020-12-31", 1.6e9, FY20_10K, "2021-02-12", "10-K"),
+                        _paid("2021-01-01", "2021-12-31", 1.7e9, FY21_10K, "2022-02-11", "10-K"),
+                        _paid("2020-04-01", "2020-06-30", 3.9e8, Q2_2020_10Q, "2020-07-30"),
+                        _paid("2021-04-01", "2021-06-30", 4e8, Q2_10Q, "2021-07-29"),
+                    ]
+                }
+            },
+            "CommonStockDividendsPerShareDeclared": {
+                "units": {
+                    "USD/shares": [
+                        _paid("2021-04-01", "2021-06-30", 0.22, Q2_10Q, "2021-07-29"),
+                    ]
+                }
+            },
+        }
+    },
+}
+
+
+def _filings_edgar(doc=DIMENSION_ONLY):
     return EdgarWithFilings(
-        {APPLE_CIK: DIMENSION_ONLY},
+        {APPLE_CIK: doc},
         {
             filing_url(APPLE_CIK, Q2_10Q, "index.json"): {
                 "status_code": 200,
@@ -772,6 +806,27 @@ async def test_a_dividend_gap_reads_its_filing_once_and_fills_the_quarter(
     summary = await _sync(db, edgar).refresh(force=True)
     assert edgar.filing_urls() == [] and summary["filings_read"] == 0
     assert ("2021-06-30", "Q2") in await _dps_rows(db)
+
+
+@pytest.mark.asyncio
+async def test_a_gap_its_own_filing_lacks_is_read_from_the_filing_a_year_later(
+    db, configured
+):
+    await _hold(db, 1, "AAPL")
+    await db.commit()
+    edgar = _filings_edgar(COMPARATIVE_ONLY)
+
+    summary = await _sync(db, edgar).refresh()
+    assert summary["filings_read"] == 2
+    assert edgar.filing_urls() == [
+        filing_url(APPLE_CIK, Q2_2020_10Q, "index.json"),  # 404: holds nothing
+        filing_url(APPLE_CIK, Q2_10Q, "index.json"),
+        filing_url(APPLE_CIK, Q2_10Q, "aapl-20210630_htm.xml"),
+    ]
+    assert await _dps_rows(db) == {
+        ("2020-06-30", "Q2"): 0.20,  # the 2021 10-Q's comparative
+        ("2021-06-30", "Q2"): 0.22,  # companyfacts' own, never replaced
+    }
 
 
 @pytest.mark.asyncio

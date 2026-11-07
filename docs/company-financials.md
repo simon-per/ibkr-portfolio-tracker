@@ -77,7 +77,12 @@ instance (`<name>_htm.xml` for inline XBRL, else the one `<prefix>-<YYYYMMDD>.xm
 `parse_instance` keeps the dividend-per-share facts on **exactly one whitelisted us-gaap member**
 (`MEMBERS`); two members giving one period different values leave it out whole. A gap a read
 filing already covers (its comparatives: last year's quarter, the year-to-date rung, a 10-K's
-three years) is not asked for in the same pass.
+three years) is not asked for in the same pass. **A gap its own filing does not fill asks the
+filings that repeat it** (`sources`): the one reporting the same quarter a year later, and for
+a fiscal year the 10-K two years later too. BKR's 2017–2019 filings tag the dividend on two
+members (not read) and its later ones on one; the first production fill skipped the 2019 10-Qs
+because newer filings' comparatives had covered their own quarters, and BKR, INTC and PCAR
+kept three gaps each that the survey had filled (2026-11-07).
 
 - **Fill, never replace**: the normaliser takes the stored facts beside companyfacts' under their
   own filing's accession number (so the split vote and the latest-filing rule treat them as that
