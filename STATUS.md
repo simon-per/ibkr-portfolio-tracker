@@ -94,7 +94,8 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 Only what is still unverified.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
-  `analyst-counts-and-freshness`, 4 commits, committed locally, not merged or deployed):**
+  `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
+  waiting on CI when this was written — confirm `/health` shows it):**
   migrations `b2d4f6a8c0e1` and `c3e5a7b9d1f2`. Seen only on a local build against production
   data, with the watchlist's old-shape answer rewritten to the new one by the test script
   (Positions, Company and Watchlist at 1440 light and dark, Watchlist at 390). After the deploy:
@@ -383,7 +384,7 @@ One line each, newest first; drop the oldest.
   survey found one company's figures disagreeing across tabs; every rating now shows its
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
   valuation card heads with today's multiples, a report refreshes watchlist growth the next
-  run, and a Mon–Sat EDGAR check fetches a new 10-Q the next morning. Committed locally only.
+  run, and a Mon–Sat EDGAR check fetches a new 10-Q the next morning. Pushed (`d8ae10e`).
 
 - **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
   companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
