@@ -202,14 +202,15 @@ export function ForecastTab() {
   }
 
   // A choice stored without a currency (before U6, or typed before the settings loaded) is
-  // stamped with the base currency the first time that is known.
+  // stamped with the base currency the first time that is known — adjusted during render,
+  // so no frame reads it unstamped — and the stamp persisted below. Only a choice is ever
+  // written back, never the pace or the default.
+  if (settingsKnown && chosenContribution !== null && chosenContribution.currency === null) {
+    setChosenContribution({ ...chosenContribution, currency: baseCurrency })
+  }
   useEffect(() => {
-    if (settingsKnown && chosenContribution !== null && chosenContribution.currency === null) {
-      const stamped = { ...chosenContribution, currency: baseCurrency }
-      setChosenContribution(stamped)
-      writeChosen(stamped)
-    }
-  }, [settingsKnown, chosenContribution, baseCurrency])
+    if (chosenContribution?.currency) writeChosen(chosenContribution)
+  }, [chosenContribution])
 
   // Persist whenever values change, through the one guarded store (`lib/storage.ts`).
   useEffect(() => {
