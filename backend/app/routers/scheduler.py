@@ -12,6 +12,7 @@ from app.database import get_db
 from app.redact import redact_secrets
 from app.routers._params import DB_INT_MAX
 from app.repositories.sync_run_repository import SyncRunRepository
+from app.services.company_financials_sync import EDGAR_GATE
 from app.services.scheduler_service import (
     SCHEDULED_JOB_TYPES,
     STOCK_JOB_GROUP,
@@ -107,6 +108,10 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
         # reported here (its status is admin-gated, docs/crypto.md). Both branches carry
         # it: a sync started by POST runs whether or not the scheduler is armed.
         sync_in_progress = is_running(SYNC_PIPELINE)
+        # The SEC EDGAR jobs run under their own gate (`EDGAR_GATE`), invisible to the
+        # field above; a restart mid Sunday pass loses it for a week (review item I4), so
+        # deploy.sh holds on this too. Its own field: it is not a stock sync.
+        edgar_in_progress = is_running(EDGAR_GATE)
 
         if scheduler.scheduler is None:
             return {
@@ -114,6 +119,7 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
                 "message": "Scheduler is not running",
                 "jobs": [],
                 "sync_in_progress": sync_in_progress,
+                "edgar_in_progress": edgar_in_progress,
                 "last_sync": await _last_sync(scheduler, db),
             }
 
@@ -133,6 +139,7 @@ async def get_scheduler_status(db: AsyncSession = Depends(get_db)):
             "status": "running",
             "jobs": jobs,
             "sync_in_progress": sync_in_progress,
+            "edgar_in_progress": edgar_in_progress,
             "last_sync": await _last_sync(scheduler, db),
         }
 
