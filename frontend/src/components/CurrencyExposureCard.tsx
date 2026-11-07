@@ -82,7 +82,7 @@ export function CurrencyExposureCard({
               {/* One line, in muted ink: it is a standing limit of the method, not a
                   problem present right now, and amber on every visit teaches the reader to
                   skip amber. The share and the reason both stay on screen. */}
-              {exposure.lookThroughCount > 0 && (
+              {exposure.lookThroughCount > 0 && exposure.lookThroughPct != null && (
                 <p className="text-sm text-muted-foreground">
                   {exposure.lookThroughPct.toFixed(1)}% of the book sits in{' '}
                   {exposure.lookThroughCount} fund{exposure.lookThroughCount === 1 ? '' : 's'},
@@ -131,7 +131,7 @@ export function CurrencyExposureCard({
                           {formatMoneyWhole(row.marketValue, baseCurrency)}
                         </td>
                         <td className="py-2 pr-4 text-right tabular-nums">
-                          {row.pct.toFixed(1)}%
+                          {row.pct == null ? ABSENT : `${row.pct.toFixed(1)}%`}
                         </td>
                         <td className="py-2 pr-4 text-right tabular-nums">
                           {row.positionCount}

@@ -207,7 +207,9 @@ type; matching is by symbol, so a stock sharing a held fund's ticker would be fl
 because the flag is a caveat rather than a figure.
 
 Unpriced positions are excluded and counted, as above, and `foreignQuotedPct` returns `null` rather
-than `0` when nothing is priced: no positions is an unknown exposure, not an unhedged-free one.
+than `0` when nothing is priced: no positions is an unknown exposure, not an unhedged-free one. So,
+since 2026-11-07, do each row's `pct` and `lookThroughPct` (a dash on the card): they published `0`
+for a share of nothing, against the server's `share_pct` rule.
 
 ### The forecast (`forecast.ts`)
 

@@ -42,7 +42,8 @@ export const UNKNOWN_CURRENCY = 'Unknown'
 export interface CurrencyRow {
   currency: string
   marketValue: number
-  pct: number
+  /** Share of the priced book; null when nothing priced has a value (a share of nothing). */
+  pct: number | null
   positionCount: number
   /** Of the above, those that are funds — where the quote currency may mislead. */
   fundCount: number
@@ -56,7 +57,8 @@ export interface CurrencyExposure {
   unpricedCount: number
   /** Share of the book in funds whose quote currency need not be their exposure. */
   lookThroughValue: number
-  lookThroughPct: number
+  /** Null when nothing priced has a value: a share of nothing is absent, not 0%. */
+  lookThroughPct: number | null
   lookThroughCount: number
 }
 
@@ -113,9 +115,11 @@ export function computeCurrencyExposure(
     }
   }
 
+  // A share of nothing is absent, never 0% — the server's `percentages.share_pct` rule.
+  const share = (part: number) => (totalValue > 0 ? (part / totalValue) * 100 : null)
   const rows = [...byCurrency.values()].sort((a, b) => b.marketValue - a.marketValue)
   for (const row of rows) {
-    row.pct = totalValue > 0 ? (row.marketValue / totalValue) * 100 : 0
+    row.pct = share(row.marketValue)
   }
 
   return {
@@ -123,7 +127,7 @@ export function computeCurrencyExposure(
     totalValue,
     unpricedCount: positions.length - priced.length,
     lookThroughValue,
-    lookThroughPct: totalValue > 0 ? (lookThroughValue / totalValue) * 100 : 0,
+    lookThroughPct: share(lookThroughValue),
     lookThroughCount,
   }
 }
@@ -144,5 +148,5 @@ export function foreignQuotedPct(
   if (exposure.totalValue <= 0) return null
   const base = baseCurrency.trim().toUpperCase()
   const home = exposure.rows.find((r) => r.currency === base)
-  return 100 - (home ? home.pct : 0)
+  return 100 - (home?.pct ?? 0)
 }
