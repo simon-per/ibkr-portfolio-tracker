@@ -593,6 +593,30 @@ charts.
 
 ---
 
+## The tab in the URL (`lib/tabRoute.ts`, 2026-11-07)
+
+The tabs were uncontrolled state (`Tabs defaultValue="performance"`): a reload always landed on
+Performance, Back left the app, and nothing could link to a tab. Now `Tabs` takes an optional
+controlled `value` / `onValueChange`, and the Dashboard drives it from `location.hash`:
+`#dividends` for a tab, `#company/<cik>` for a company, nothing for Performance (the default keeps
+the URL bare). An unknown or malformed hash — the hidden `#analytics`, `#company/abc` — opens
+Performance (or the Company tab without a company).
+
+- **One history entry per jump, none per tab click.** A trigger click (or arrow key) *replaces* the
+  hash (`replaceRoute`, `history.replaceState`), so Back does not step through every tab looked at.
+  A company link is a plain `<a href="#company/<cik>">`, whose navigation *pushes* an entry, so Back
+  returns to the tab the click came from. Re-selecting the open tab keeps a company in the hash.
+- **One store, every reader.** `useTabRoute` reads the hash through `useSyncExternalStore`,
+  re-read on `hashchange`, `popstate` and `portfolio:route` — the event `replaceRoute` dispatches,
+  because `replaceState` fires neither of the others. The Dashboard and the Company tab read the
+  same route.
+- **Stocks mode only.** The crypto view never reads the hash; switching back to stocks reads it
+  afresh.
+- Lazy panels are untouched: `TabsContent` still renders nothing while inactive, so a tab's chunk
+  loads when the hash first names it.
+- jsdom keeps one `location` per test file, so `testSetup.ts` resets the URL after every test.
+  `lib/tabRoute.test.ts`, `components/Dashboard.route.test.tsx`.
+
 ## Two books — the Stocks | Crypto mode
 
 The header's **Stocks | Crypto** switch (`ModeToggle.tsx`, immediately before `ThemeToggle`) swaps
