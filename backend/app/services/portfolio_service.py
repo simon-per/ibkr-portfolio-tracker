@@ -81,6 +81,7 @@ class AttributionInputs:
     rate_currencies: frozenset
     rates_from: date
     rates_to: date
+    position_start: Dict[int, date]  # `_load_position_start_dates`
 
 
 def _shift_months(from_date: date, months: int) -> date:
@@ -319,6 +320,7 @@ class PortfolioService:
             rate_currencies=rate_currencies,
             rates_from=rates_start - timedelta(days=FX_MAX_CARRY_DAYS),
             rates_to=span_end,
+            position_start=await self._load_position_start_dates(),
         )
 
     async def get_portfolio_value_over_time(
@@ -1818,6 +1820,20 @@ class PortfolioService:
         )
         base_fx = preloaded.base_fx if preloaded is not None else await self._load_base_fx()
         empty["base_fx"] = base_fx
+        # A spun-off line is not held before its position began: its worth was still in
+        # the parent's close. The floor the timeline, the daily value and XIRR apply —
+        # without it attribution counted MBGL unpriced on every window reaching back
+        # before 2026-06-30, and its total fell short of the chart's gain (review item V1).
+        position_start = (
+            preloaded.position_start if preloaded is not None
+            else await self._load_position_start_dates()
+        )
+
+        def position_held_at(taxlot, on: date) -> bool:
+            started = position_start.get(taxlot.security_id)
+            if started is not None and on < started:
+                return False
+            return lot_held_at(taxlot, on)
 
         # Find effective dates with actual price data
         effective_end = self._find_latest_price_date(end_date, price_cache)
@@ -1886,8 +1902,8 @@ class PortfolioService:
                 return local * rate, local
 
             # Tax lot contributes to start value if held at effective_start's close
-            # (opened on or before it, exclude-on-close)
-            if lot_held_at(taxlot, effective_start):
+            # (opened on or before it, exclude-on-close, and its position begun)
+            if position_held_at(taxlot, effective_start):
                 price = self._get_market_price_with_fallback(sid, effective_start, price_cache)
                 pair = valued(taxlot.quantity, price, effective_start)
                 if pair is None:
@@ -1901,7 +1917,7 @@ class PortfolioService:
             # A lot held at NEITHER date never reaches `valued`, so a fully-sold
             # position keeps its legitimate zero end value and is never confused with
             # one that simply could not be priced.
-            if lot_held_at(taxlot, effective_end):
+            if position_held_at(taxlot, effective_end):
                 price = self._get_market_price_with_fallback(sid, effective_end, price_cache)
                 pair = valued(taxlot.quantity, price, effective_end)
                 if pair is None:

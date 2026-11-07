@@ -235,3 +235,33 @@ async def test_the_summary_and_the_last_timeline_point_still_agree():
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preload", [False, True])
+async def test_attribution_floors_the_line_like_the_timeline(preload):
+    """
+    Review item V1: attribution valued the child at the window start from the parent's
+    lot date, found no price, and counted it unpriced (MBGL on every window reaching back
+    before 2026-06-30); its total then fell short of the chart's gain. Floored like the
+    timeline, the child contributes its value from the day it began, and the totals agree.
+    """
+    engine, session = await _session()
+    try:
+        svc = PortfolioService(session)
+        preloaded = await svc.load_attribution_inputs(START, END) if preload else None
+        rows = await svc.attribution_rows(START, END, preloaded=preloaded)
+        assert rows["unpriced"] == set()
+        total = sum(r["pnl_base"] for r in rows["rows"].values())
+        timeline = await svc.get_portfolio_value_over_time(START, END)
+        gain = (
+            timeline[-1]["market_value_eur"] - timeline[0]["market_value_eur"]
+            - sum(p["external_flow_eur"] for p in timeline[1:])
+        )
+        assert float(total) == pytest.approx(gain)
+        assert float(rows["rows"][CHILD]["pnl_base"]) == pytest.approx(50.0)
+        attribution = await svc.get_performance_attribution(START, END)
+        assert attribution["unpriced_holdings"] == 0
+    finally:
+        await session.close()
+        await engine.dispose()
