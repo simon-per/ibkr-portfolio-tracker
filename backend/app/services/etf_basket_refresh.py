@@ -415,6 +415,11 @@ async def refresh_lookthrough_data(db: AsyncSession, as_of: Optional[date] = Non
                 "OpenFIGI answered HTTP 429; both identity passes stopped asking it and the "
                 "rest waits for the next run"
             )
+        if result["identities"].get("gleif_rate_limited"):
+            result["warnings"].append(
+                "GLEIF answered HTTP 429; the identity pass stopped asking it and the rest "
+                "waits for the next run"
+            )
     except Exception as e:
         try:
             await db.rollback()

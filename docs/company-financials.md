@@ -305,10 +305,12 @@ value) and `fetched_at`. **A period never reported has no row; nothing is stored
 ## Service and API
 
 `GET /api/company-financials/companies` — companies with stored figures, one per CIK: the held
-ones and the newest pass's Nasdaq-100 (above): `cik, security_id, symbol, name, isin, held,
-currency, first_period_end, last_period_end, last_fetched_at`. A held company is named by its
-listing with the lowest symbol (`security_id` set); one not held by its basket ticker, name and
-ISIN (`security_id` null; the ISIN finds its logo).
+ones and the newest pass's Nasdaq-100 (above): `cik, security_id, security_ids, symbol, name,
+isin, held, currency, first_period_end, last_period_end, last_fetched_at`. A held company is named
+by its listing with the lowest symbol (`security_id` set); one not held by its basket ticker, name
+and ISIN (`security_id` null; the ISIN finds its logo). `security_ids` names **every** held listing
+(2026-11-07), so a table row of any of them can link to the company — GOOG and GOOGL are both
+Alphabet, and only GOOG was named before; empty for a company not held.
 
 `GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=5y|10y|max`
 (defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,

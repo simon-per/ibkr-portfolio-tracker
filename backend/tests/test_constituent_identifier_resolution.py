@@ -321,11 +321,12 @@ class _Response:
 class _FakeProviders:
     """Stands in for `httpx.AsyncClient`: OpenFIGI by `idValue`, GLEIF by ISIN."""
 
-    def __init__(self, figis=None, leis=None, fail=(), throttle=()):
+    def __init__(self, figis=None, leis=None, fail=(), throttle=(), gleif_throttle=()):
         self.figis = figis or {}
         self.leis = leis or {}
         self.fail = set(fail)
         self.throttle = set(throttle)  # an OpenFIGI batch carrying one of these -> 429
+        self.gleif_throttle = set(gleif_throttle)  # a GLEIF ask for one of these -> 429
         self.asked = []
 
     def AsyncClient(self, *a, **k):
@@ -353,6 +354,8 @@ class _FakeProviders:
     async def get(self, url, params):
         isin = params["filter[isin]"]
         self.asked.append(isin)
+        if isin in self.gleif_throttle:
+            return _Response({"errors": [{"title": "Too Many Requests"}]}, status_code=429)
         answer = self.leis.get(isin)
         if isinstance(answer, BaseException):
             raise answer
@@ -459,6 +462,43 @@ async def test_a_429_in_the_isin_pass_stops_both_passes(db, providers, one_job_b
     assert await service.pending_constituent_identifiers() == [ASML_CINS]
     # GLEIF is another provider: the OpenFIGI breaker does not touch it.
     assert apple in providers.asked and microsoft in providers.asked
+
+
+@pytest.mark.asyncio
+async def test_a_gleif_429_stops_the_gleif_requests_and_stamps_nothing_unasked(db, providers):
+    """
+    The GLEIF loop caught every exception and asked about the next ISIN — after a 429 too.
+    Three ISINs, the second refused: two requests, the stop recorded as a stop rather than
+    an error, and neither the refused nor the unasked ISIN stamped, so the next run asks
+    both. OpenFIGI is another provider: its answers stand.
+    """
+    from app.models.isin_identity import IsinIdentity
+
+    apple, microsoft, nvidia = "US0378331005", "US5949181045", "US67066G1040"
+    providers.leis = {apple: "HWUPKR0MPOU8FGXBT394"}
+    providers.gleif_throttle = {microsoft}
+    service = IdentityService(db)
+
+    summary = await service.resolve([apple, microsoft, nvidia])
+
+    gleif_asks = [a for a in providers.asked if isinstance(a, str)]
+    assert gleif_asks == [apple, microsoft], "asked GLEIF again after its 429"
+    assert summary["gleif_rate_limited"] is True
+    assert summary["gleif_errors"] == 0
+    assert summary["gleif_resolved"] == 1
+    assert summary["openfigi_rate_limited"] is False
+    checked = {
+        row.isin for row in (await db.execute(
+            select(IsinIdentity).where(IsinIdentity.lei_checked_at.is_not(None))
+        )).scalars().all()
+    }
+    assert checked == {apple}
+
+    again = await service.resolve([nvidia])
+    assert [a for a in providers.asked if isinstance(a, str)] == [apple, microsoft], (
+        "the latch holds for the rest of the run"
+    )
+    assert again["gleif_rate_limited"] is True
 
 
 @pytest.mark.asyncio

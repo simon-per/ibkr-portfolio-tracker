@@ -3,14 +3,15 @@ AnalystRating Repository
 Handles database operations for analyst ratings.
 """
 from typing import List, Optional
-from datetime import timedelta
+from datetime import datetime, timedelta
 from app.clock import utcnow
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analyst_rating import AnalystRating
 from app.models.security import Security
 from app.repositories.fundamentals_repository import sync_scope
+from app.services.miss_backoff import miss_backoff_until
 
 #: How old a rating row has to be before a sync will refresh it.
 #:
@@ -24,6 +25,38 @@ from app.repositories.fundamentals_repository import sync_scope
 #: pass three or more days later. Whether it should follow fundamentals is the
 #: owner's call (issue #21); either way it changes here and nowhere else.
 STALE_AFTER = timedelta(days=3)
+
+
+def ratings_backoff_until(security: Security) -> Optional[datetime]:
+    """
+    When the ratings pass may next ask about `security`, or None when it is not backing
+    off: the price loop's rule (`miss_backoff`), on its own pair of columns.
+
+    A fetch that failed with something not a rate limit used to leave the security
+    unstamped, "so the next pass asks again" — every pass, for good, about a ticker Yahoo
+    cannot serve. No held exemption: every security this pass walks is held, and a rating
+    a few days old costs nothing.
+    """
+    return miss_backoff_until(security.ratings_checked_at, security.ratings_miss_count)
+
+
+def ratings_backing_off(security: Security, now: datetime) -> bool:
+    """True while `security` waits out a failed ratings fetch. The one predicate the
+    sync's work list and `/status`'s stale count both apply."""
+    until = ratings_backoff_until(security)
+    return until is not None and now < until
+
+
+def record_ratings_miss(security: Security, now: datetime) -> None:
+    """The fetch failed with something not a rate limit."""
+    security.ratings_miss_count = (security.ratings_miss_count or 0) + 1
+    security.ratings_checked_at = now
+
+
+def clear_ratings_backoff(security: Security) -> None:
+    """An answer was stored (ratings, or none) or the mapping changed."""
+    security.ratings_checked_at = None
+    security.ratings_miss_count = None
 
 
 class AnalystRatingRepository:
@@ -88,21 +121,33 @@ class AnalystRatingRepository:
     async def get_stale_ratings(
         self, older_than: timedelta = STALE_AFTER
     ) -> List[AnalystRating]:
-        """The rows a sync would refresh (`_stale`)."""
-        result = await self.session.execute(
-            select(AnalystRating).where(self._stale(older_than))
-        )
-        return list(result.scalars().all())
+        """The rows a sync would refresh (`_due`)."""
+        return await self._due(older_than)
 
     async def count_stale_ratings(self, older_than: timedelta = STALE_AFTER) -> int:
         """
         How many rows a sync would refresh. `/status` counts through this so it cannot
-        answer with a different query than the sync asks.
+        answer with a different query than the sync asks — off the same `_due` rows, so
+        the two cannot part over a security backing off.
         """
+        return len(await self._due(older_than))
+
+    async def _due(self, older_than: timedelta) -> List[AnalystRating]:
+        """
+        `_stale` rows, less a security waiting out a failed fetch (`ratings_backing_off`).
+        The back-off is computed per security, so it is applied after the query, as
+        `fundamentals_repository` does, rather than restated in SQL.
+        """
+        now = utcnow()
         result = await self.session.execute(
-            select(func.count(AnalystRating.id)).where(self._stale(older_than))
+            select(AnalystRating, Security)
+            .join(Security, Security.id == AnalystRating.security_id)
+            .where(self._stale(older_than))
         )
-        return int(result.scalar() or 0)
+        return [
+            rating for rating, security in result.all()
+            if not ratings_backing_off(security, now)
+        ]
 
     @staticmethod
     def in_scope():

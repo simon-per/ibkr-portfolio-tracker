@@ -410,6 +410,12 @@ off the 18:00 job as its last step, and four things about it are load-bearing:
   it; the summary carries `openfigi_rate_limited`, the evening job turns it into a warning, and
   `resolve_identities` prints it. GLEIF, another provider, is not stopped by it. A CINS/SEDOL
   batch may now span two idTypes: each job names its own, and the jobs stay grouped by kind.
+- **GLEIF has its own 429 breaker** (2026-11-07). `_resolve_gleif` caught every exception,
+  counted it in `gleif_errors` and asked about the next ISIN — after a refusal too. A 429 now
+  latches `gleif_rate_limited` and ends the run's GLEIF requests; the refused ISIN and the rest
+  stay unstamped, so the next run asks them. Same surfaces as OpenFIGI's: the summary flag, the
+  evening job's warning, `resolve_identities`' line. The two latches never touch each other.
+  `test_a_gleif_429_stops_the_gleif_requests_and_stamps_nothing_unasked`.
 
   **The cap and the reset together starved it, 2026-09-12 → 2026-10-15.** `replace_basket` cleared
   every FIGI ("re-derivable from one request"), the Invesco feeds were replaced on every refresh, and the

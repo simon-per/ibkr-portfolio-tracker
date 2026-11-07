@@ -13,6 +13,7 @@ import type {
   FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem, FundamentalsStatus,
 } from '@/lib/api'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { CompanyLink } from './CompanyLink'
 import { useIsSideBySide } from '@/lib/useMediaQuery'
 import { CalendarClock, Gauge, History, Layers, RefreshCw } from 'lucide-react'
 import { displayName } from '@/lib/securityName'
@@ -191,9 +192,11 @@ function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, Sort
       avatar: securityAvatar,
       cell: (row, view) =>
         view === 'table' ? (
-          <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} sub={displayName(row.description)} />
+          <CompanyLink securityId={row.security_id} className="block">
+            <SymbolWithAvatar symbol={row.symbol} securityId={row.security_id} sub={displayName(row.description)} />
+          </CompanyLink>
         ) : (
-          row.symbol
+          <CompanyLink securityId={row.security_id}>{row.symbol}</CompanyLink>
         ),
     },
     {

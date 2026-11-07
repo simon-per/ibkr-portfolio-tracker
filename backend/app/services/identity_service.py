@@ -33,6 +33,13 @@ ISINs and CINS/SEDOL — ask through one `_openfigi_batches` on the service's on
 and a refusal in either latches `openfigi_rate_limited` for both. Each used to carry its
 own copy of the loop and its own pacer, and `continue` past a 429 to the next batch.
 
+**So does a 429 from GLEIF, for GLEIF** (2026-11-07). Its loop caught every exception,
+counted it in `gleif_errors` and asked about the next ISIN — after a refusal too, a
+request a second into a limit it publishes nothing about. A 429 now latches
+`gleif_rate_limited` and ends the run's GLEIF requests; what was not asked stays unstamped,
+so the next run resumes it. The two latches are separate: one provider's refusal says
+nothing about the other.
+
 Never raises into its caller: an unresolvable ISIN degrades to grouping on the ISIN alone,
 which is correct and merely less complete.
 """
@@ -168,11 +175,14 @@ class IdentityService:
     # Latched by the first OpenFIGI 429 and read by both passes (`_openfigi_batches`). On
     # the class as well, so a service built through `__new__` in a test can read it.
     openfigi_rate_limited = False
+    # Latched by the first GLEIF 429 (`_resolve_gleif`), the same way.
+    gleif_rate_limited = False
 
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = IsinIdentityRepository(db)
         self.openfigi_rate_limited = False
+        self.gleif_rate_limited = False
         self._openfigi = OpenFigiClient()
 
     @property
@@ -275,6 +285,7 @@ class IdentityService:
 
         summary["rows_written"] = len(written)
         summary["openfigi_rate_limited"] = self.openfigi_rate_limited
+        summary["gleif_rate_limited"] = self.gleif_rate_limited
         return summary
 
     async def _persist(self, rows: List[Dict], written: Set[str], on_batch) -> None:
@@ -457,6 +468,8 @@ class IdentityService:
     async def _resolve_gleif(
         self, isins: List[str], summary: Dict, written: Set[str], on_batch=None
     ) -> None:
+        if self.gleif_rate_limited:
+            return
         headers = {
             "Accept": "application/vnd.api+json",
             "User-Agent": user_agent(),
@@ -467,6 +480,13 @@ class IdentityService:
                     await asyncio.sleep(GLEIF_MIN_INTERVAL_S)
                 try:
                     response = await client.get(GLEIF_URL, params={"filter[isin]": isin})
+                    if response.status_code == 429:
+                        self.gleif_rate_limited = True
+                        logger.warning(
+                            f"GLEIF answered HTTP 429; no further GLEIF request this run "
+                            f"({len(isins) - index} of {len(isins)} ISINs left unasked)"
+                        )
+                        return
                     response.raise_for_status()
                     payload = response.json()
                 except Exception as e:

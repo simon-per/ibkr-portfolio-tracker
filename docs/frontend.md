@@ -207,7 +207,9 @@ type; matching is by symbol, so a stock sharing a held fund's ticker would be fl
 because the flag is a caveat rather than a figure.
 
 Unpriced positions are excluded and counted, as above, and `foreignQuotedPct` returns `null` rather
-than `0` when nothing is priced: no positions is an unknown exposure, not an unhedged-free one.
+than `0` when nothing is priced: no positions is an unknown exposure, not an unhedged-free one. So,
+since 2026-11-07, do each row's `pct` and `lookThroughPct` (a dash on the card): they published `0`
+for a share of nothing, against the server's `share_pct` rule.
 
 ### The forecast (`forecast.ts`)
 
@@ -590,6 +592,46 @@ charts.
 ---
 
 ---
+
+## The tab in the URL (`lib/tabRoute.ts`, 2026-11-07)
+
+The tabs were uncontrolled state (`Tabs defaultValue="performance"`): a reload always landed on
+Performance, Back left the app, and nothing could link to a tab. Now `Tabs` takes an optional
+controlled `value` / `onValueChange`, and the Dashboard drives it from `location.hash`:
+`#dividends` for a tab, `#company/<cik>` for a company, nothing for Performance (the default keeps
+the URL bare). An unknown or malformed hash — the hidden `#analytics`, `#company/abc` — opens
+Performance (or the Company tab without a company).
+
+- **One history entry per jump, none per tab click.** A trigger click (or arrow key) *replaces* the
+  hash (`replaceRoute`, `history.replaceState`), so Back does not step through every tab looked at.
+  A company link is a plain `<a href="#company/<cik>">`, whose navigation *pushes* an entry, so Back
+  returns to the tab the click came from. Re-selecting the open tab keeps a company in the hash.
+- **One store, every reader.** `useTabRoute` reads the hash through `useSyncExternalStore`,
+  re-read on `hashchange`, `popstate` and `portfolio:route` — the event `replaceRoute` dispatches,
+  because `replaceState` fires neither of the others. The Dashboard and the Company tab read the
+  same route.
+- **Stocks mode only.** The crypto view never reads the hash; switching back to stocks reads it
+  afresh.
+- Lazy panels are untouched: `TabsContent` still renders nothing while inactive, so a tab's chunk
+  loads when the hash first names it.
+- jsdom keeps one `location` per test file, so `testSetup.ts` resets the URL after every test.
+  `lib/tabRoute.test.ts`, `components/Dashboard.route.test.tsx`.
+
+**Every held company one click away.** A holding's logo and name on Positions, Fundamentals, the
+Dividends holdings table and the Watchlist are a link to its company on the Company tab —
+the desktop cell's whole identity block, the phone card's name. One implementation:
+`components/CompanyLink.tsx` renders the anchor (hover title *Open company*, focusable, a modified
+click left to the browser, a plain one opening the company at its top), and resolves the row
+through `lib/companyLinks.ts`, one lookup built from `/api/company-financials/companies` — the
+list the Company tab's own picker reads, so a row only links to a company the tab can show. A
+held row resolves by security (`security_ids`: GOOGL finds Alphabet as GOOG does), a watchlist row
+by its security and then its ticker against the company's symbol. **No company, no link**: the
+children render exactly as before, wrapper-free. `CompanyLinksProvider` in `Dashboard` is the one
+reader of the list for links; the context's default is the empty lookup, so a table rendered
+without it — every component test — draws what it drew before. Neither file imports the Company
+tab, so its chunk stays its own. `components/companyLinkFamily.test.ts` fails a table of held
+securities that stops drawing its identity through `CompanyLink`, and a hand-built `#company/`
+href anywhere but `tabRoute.ts`.
 
 ## Two books — the Stocks | Crypto mode
 
@@ -1041,7 +1083,10 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `symbol · name` in two groups, *Held* then *Nasdaq-100* (`companyGroups`), by CIK; the last pick
   remembered per browser under `company-financials:cik` through `lib/storage.ts`; a pick no longer
   listed falls back to the first held company; a company not held shows its logo by ISIN) with three
-  `SegmentedControl`s in its aside. Under it the **Key figures** card (`KEY_STATS`: the server's
+  `SegmentedControl`s in its aside. **A company in the URL wins** (2026-11-07, *The tab in the URL*
+  above): `#company/<cik>` — a holding's link or a reload — opens that company over the remembered
+  pick and becomes it; a pick in the picker replaces the hash without a history entry; a CIK the
+  list no longer has falls through like a stale pick. Under it the **Key figures** card (`KEY_STATS`: the server's
   `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
   FCF, the four margins, return on equity, shares, DPS with its payout ratio and the dividend
   yield, market cap, enterprise value, net cash, P/E, P/S, P/FCF, EV/EBIT, buybacks, dividends

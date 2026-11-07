@@ -147,16 +147,18 @@ describe('computeCurrencyExposure', () => {
       const exposure = computeCurrencyExposure([])
       expect(exposure.rows).toEqual([])
       expect(exposure.totalValue).toBe(0)
-      expect(exposure.lookThroughPct).toBe(0)
+      // A share of nothing is absent, not 0% — the server's `share_pct` rule.
+      expect(exposure.lookThroughPct).toBeNull()
     })
 
     it('reports no rows at all when nothing can be valued', () => {
       // A zero-valued priced holding is now unpriced (its FX rate is missing), so there
       // is no row to give a percent to — which is the honest answer, and matches
       // foreignQuotedPct returning null rather than 0 on the same input.
-      const exposure = computeCurrencyExposure([pos(1, 'A', 'EUR', 0, 5)])
+      const exposure = computeCurrencyExposure([pos(1, 'A', 'EUR', 0, 5)], new Set(['A']))
       expect(exposure.rows).toHaveLength(0)
       expect(exposure.unpricedCount).toBe(1)
+      expect(exposure.lookThroughPct).toBeNull()
     })
   })
 })

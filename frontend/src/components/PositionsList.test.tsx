@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { PositionsList, positionColumns } from './PositionsList'
 import type { Position } from '@/lib/api'
+import { CompanyLinksContext, companyLinks } from '@/lib/companyLinks'
+import { FIXTURE_COMPANIES } from '@/lib/companyFinancials.fixture'
 
 /**
  * `PositionsList` had no test until it gained a yield-on-cost column.
@@ -324,5 +326,21 @@ describe('the cash line and the weight denominator (GitHub #52)', () => {
     const weightIndex = [...container.querySelectorAll('thead th')].findIndex((th) => th.textContent?.includes('Weight'))
     const weights = [...container.querySelectorAll('tbody tr')].map((tr) => tr.children[weightIndex].textContent)
     expect(weights).toEqual(['—', '—'])
+  })
+})
+
+describe('a position links to its company', () => {
+  it('when the Company tab has it, and only then', () => {
+    // NVDA is held as security 11 in the Company tab's fixture; VWCE is no SEC filer.
+    const NVDA = position({ security_id: 11, symbol: 'NVDA' })
+    render(
+      <CompanyLinksContext.Provider value={companyLinks(FIXTURE_COMPANIES)}>
+        <PositionsList positions={[NVDA, ETF]} cash={UNTRACKED_CASH} />
+      </CompanyLinksContext.Provider>,
+    )
+    const links = screen.getAllByRole('link')
+    expect(links).toHaveLength(1)
+    expect(links[0].getAttribute('href')).toBe('#company/1045810')
+    expect(links[0].textContent).toContain('NVDA')
   })
 })

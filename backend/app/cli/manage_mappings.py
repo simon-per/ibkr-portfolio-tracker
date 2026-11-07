@@ -54,6 +54,7 @@ from app.services.finpension_ingest import (
     PRICE_SOURCE_STATEMENT,
     purge_carried_prices,
 )
+from app.repositories.analyst_rating_repository import clear_ratings_backoff
 from app.repositories.fundamentals_repository import clear_fundamentals_backoff
 from app.services.market_data_service import MarketDataService, clear_price_backoff
 from app.services.yahoo_rate_limit import check_yahoo_hold, flush_hold_writes, is_rate_limit
@@ -493,10 +494,11 @@ async def cmd_set(
     )
     # A new ticker is a new question: the empty answers the old one earned must not
     # keep the price loop backing off from it (up to 30 days for a sold security), nor
-    # the fundamentals pass (issue #66).
+    # the fundamentals pass (issue #66), nor the ratings pass.
     if security:
         clear_price_backoff(security)
         clear_fundamentals_backoff(security)
+        clear_ratings_backoff(security)
     # Only a *verified* mapping hands the security to the price loop. Saving the row
     # without this leaves it inert -- `sync_securities` skips a manual security -- so
     # the flip is the second half of the same action, and it deliberately happens
@@ -580,6 +582,7 @@ async def cmd_disable(
     if security:
         clear_price_backoff(security)
         clear_fundamentals_backoff(security)
+        clear_ratings_backoff(security)
     await db.flush()
 
     deleted = 0

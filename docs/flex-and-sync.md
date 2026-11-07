@@ -653,6 +653,15 @@ warning on the row (`logos_result`), never the status.
   `_stale` query in `FundamentalsRepository._due`), and `/status` reports such a security as
   `securities_unavailable` — neither data nor "no data yet", so it raises no amber line and no
   Update button the back-off would answer with nothing. `tests/test_fundamentals_miss_backoff.py`.
+- **So does a rating Yahoo cannot serve** (2026-11-07). `fetch_rating_for_security` turns any
+  non-429 error into None, and the loop used to leave that security unstamped — re-asked every
+  pass, for good. It now stamps `securities.ratings_checked_at` / `ratings_miss_count` and waits
+  by the same rule (`analyst_rating_repository.ratings_backoff_until`). A stored answer — counts
+  or the zero-count no-coverage row — clears both, as do `manage_mappings set`/`disable`; a rate
+  limit stamps nothing. `ratings_backing_off` leaves the security out of both halves of
+  `sync_stale_ratings`' work list (stale rows and never-rated ones) and out of `/status`'s
+  `stale_ratings` (`AnalystRatingRepository._due`); the run reports `backing_off`.
+  `tests/test_analyst_rating_backoff.py`.
 - **Each fetch replaces a security's future earnings; the past is only added to** (issue #69).
   `earnings_events` is keyed on the exact datetime, so when Yahoo moved an upcoming event (a
   placeholder date replaced by the confirmed one) the upsert wrote the new row beside the old, and
@@ -1627,8 +1636,12 @@ last, so a rejection from any of them still carries a correlation id:
   made it a hazard was an id past int64 answering 500 with a traceback (below); with that a 422 from
   validation, an image request costs one primary-key or ISIN lookup and writes one uvicorn access
   line, whatever it answers. A 404-only counter would not shrink the log: every request writes that
-  line, exempt or counted, and a rejected one adds the limiter's own `Rate limited` WARNING — a 429
-  costs the log two lines where a 404 costs one.
+  line, exempt or counted, and a rejected one used to add the limiter's own `Rate limited` WARNING —
+  a 429 cost the log two lines where a 404 cost one. **Since 2026-11-07 the WARNING is once per
+  client per window**: `check` logs the refusal that found the limit spent (its count lands on
+  `limit + 1`, so no state beyond the counter) and counts the rest silently, so a client hammering
+  a closed window costs one access line per request and one WARNING per minute
+  (`test_a_window_of_refusals_logs_once`).
 - **`app/observability.py`** stamps `X-Request-ID` (reusing a plausible inbound one so it correlates
   across a proxy) and installs the handler for unhandled exceptions — the one path where `str(e)`
   still reached the client unredacted. The body is a fixed string plus the id; the log line,

@@ -32,6 +32,7 @@ import { DividendTtmChart } from './DividendTtmChart'
 import { DividendWithholdingControl } from './DividendWithholdingControl'
 import { ABSENT, cn, formatSigned, formatSignedPercent, placeholderDim } from '@/lib/utils'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { CompanyLink } from './CompanyLink'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { displayName } from '@/lib/securityName'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
@@ -78,25 +79,27 @@ function dividendColumns(deps: {
           <span className="ml-1.5 text-xs font-normal text-muted-foreground">est.</span>
         ) : null
         return view === 'table' ? (
-          <div className="flex items-center gap-3">
-            {dividendAvatar(row, 'h-8 w-8 text-[10px]')}
-            <div className="min-w-0">
-              <div className="max-w-[15rem] truncate font-medium" title={row.description}>
-                {displayName(row.description) || row.symbol}
-                {est}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {row.symbol}
-                {exchange && ` · ${exchange}`}
+          <CompanyLink securityId={row.security_id} className="block">
+            <div className="flex items-center gap-3">
+              {dividendAvatar(row, 'h-8 w-8 text-[10px]')}
+              <div className="min-w-0">
+                <div className="max-w-[15rem] truncate font-medium" title={row.description}>
+                  {displayName(row.description) || row.symbol}
+                  {est}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {row.symbol}
+                  {exchange && ` · ${exchange}`}
+                </div>
               </div>
             </div>
-          </div>
+          </CompanyLink>
         ) : (
-          <>
+          <CompanyLink securityId={row.security_id}>
             {row.symbol}
             {exchange && <span className="ml-1 text-xs font-normal text-muted-foreground">{exchange}</span>}
             {est}
-          </>
+          </CompanyLink>
         )
       },
     },

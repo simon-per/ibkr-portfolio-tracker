@@ -155,3 +155,40 @@ describe('a tab with an icon', () => {
     expect(tab.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
   })
 })
+
+describe('Tabs, controlled', () => {
+  function Controlled({ value, onValueChange }: { value: string; onValueChange: (v: string) => void }) {
+    return (
+      <Tabs value={value} onValueChange={onValueChange}>
+        <TabsList label="Sections">
+          <TabsTrigger value="one">One</TabsTrigger>
+          <TabsTrigger value="two">Two</TabsTrigger>
+        </TabsList>
+        <TabsContent value="one">Panel one</TabsContent>
+        <TabsContent value="two">Panel two</TabsContent>
+      </Tabs>
+    )
+  }
+
+  it('shows the tab it is given and reports a click without moving on its own', async () => {
+    const asked: string[] = []
+    const { rerender } = render(<Controlled value="two" onValueChange={(v) => asked.push(v)} />)
+    expect(screen.getByRole('tabpanel').textContent).toBe('Panel two')
+
+    await userEvent.click(screen.getByRole('tab', { name: 'One' }))
+    expect(asked).toEqual(['one'])
+    // The owner decides: until it passes the new value, the panel stays.
+    expect(screen.getByRole('tabpanel').textContent).toBe('Panel two')
+
+    rerender(<Controlled value="one" onValueChange={(v) => asked.push(v)} />)
+    expect(screen.getByRole('tabpanel').textContent).toBe('Panel one')
+  })
+
+  it('reports an arrow key the same way', async () => {
+    const asked: string[] = []
+    render(<Controlled value="one" onValueChange={(v) => asked.push(v)} />)
+    screen.getByRole('tab', { name: 'One' }).focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(asked).toEqual(['two'])
+  })
+})

@@ -150,6 +150,53 @@ async def test_the_company_list_declares_every_key_the_service_returns(db):
 
 
 @pytest.mark.asyncio
+async def test_the_company_list_names_every_held_listing(db):
+    """
+    GOOG and GOOGL are both Alphabet: a row of either must find the company. The list
+    named only the lowest symbol's listing; `security_ids` names every held one, and a
+    listing no longer held is not among them.
+    """
+    await _seed(db)
+    for sid, symbol, exchange, is_open in (
+        (2, "NVDB", "IBIS", True),
+        (3, "NVDC", "LSE", False),
+    ):
+        db.add(
+            Security(
+                id=sid,
+                isin="US67066G1040",
+                symbol=symbol,
+                description="NVIDIA CORP",
+                currency="EUR",
+                conid=sid,
+                asset_category="STK",
+                exchange=exchange,
+            )
+        )
+        db.add(
+            TaxLot(
+                security_id=sid,
+                open_date=utc_today() - timedelta(days=100),
+                close_date=None if is_open else utc_today() - timedelta(days=10),
+                quantity=Decimal("1"),
+                cost_basis=Decimal("100"),
+                price_per_unit=Decimal("100"),
+                currency="EUR",
+                cost_basis_eur=Decimal("100"),
+                is_open=is_open,
+            )
+        )
+        db.add(SecurityCik(security_id=sid, cik=1045810, sec_ticker="NVDA", cik_checked_at=utcnow()))
+    await db.commit()
+
+    companies = {c["cik"]: c for c in await CompanyFinancialsService(db).list_companies()}
+
+    assert companies[1045810]["security_id"] == 1
+    assert companies[1045810]["security_ids"] == [1, 2]
+    assert companies[320193]["security_ids"] == []
+
+
+@pytest.mark.asyncio
 async def test_a_company_without_figures_answers_the_same_shape(db):
     await _seed(db)
     db.add(SecCompany(cik=2, ticker="NONE"))

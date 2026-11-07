@@ -15,6 +15,13 @@ if (typeof document !== 'undefined') {
   const { configure } = await import('@testing-library/react')
   configure({ asyncUtilTimeout: 4000 })
 
+  // The open tab lives in the URL's hash (`lib/tabRoute.ts`), and jsdom keeps one location
+  // per file: a test that opened `#company/…` would otherwise start the next on that tab.
+  const { afterEach } = await import('vitest')
+  afterEach(() => {
+    window.history.replaceState(null, '', '/')
+  })
+
   // jsdom has no ResizeObserver, and `ScrollableTable`, Recharts' `ResponsiveContainer` and
   // the Fundamentals history page all construct one. A browser has had it since 2020, so this
   // is a gap in the test environment, not something a component should guard against. It

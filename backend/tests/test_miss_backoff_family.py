@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.models.security import Security
+from app.repositories.analyst_rating_repository import ratings_backoff_until
 from app.repositories.fundamentals_repository import fundamentals_backoff_until
 from app.services.market_data_service import price_backoff_until
 from app.services.miss_backoff import MISS_BACKOFF_CAP_DAYS, MISS_BACKOFF_SLACK
@@ -47,7 +48,7 @@ def test_no_module_doubles_a_backoff_of_its_own():
 
 def test_every_miss_count_column_goes_through_the_shared_rule():
     columns = {c.name for c in Security.__table__.columns if c.name.endswith("_miss_count")}
-    assert {"price_miss_count", "fundamentals_miss_count"} <= columns
+    assert {"price_miss_count", "fundamentals_miss_count", "ratings_miss_count"} <= columns
     handed = set()
     for _, tree in _modules():
         for node in ast.walk(tree):
@@ -64,10 +65,16 @@ def test_both_callers_keep_one_schedule():
         stamps = SimpleNamespace(
             price_checked_at=checked, price_miss_count=misses,
             fundamentals_checked_at=checked, fundamentals_miss_count=misses,
+            ratings_checked_at=checked, ratings_miss_count=misses,
         )
         days = min(2 ** (misses - 1), MISS_BACKOFF_CAP_DAYS)
         expected = checked + timedelta(days=days) - MISS_BACKOFF_SLACK
         assert price_backoff_until(stamps, is_held=False) == expected
         assert fundamentals_backoff_until(stamps) == expected
-    unstamped = SimpleNamespace(fundamentals_checked_at=None, fundamentals_miss_count=None)
+        assert ratings_backoff_until(stamps) == expected
+    unstamped = SimpleNamespace(
+        fundamentals_checked_at=None, fundamentals_miss_count=None,
+        ratings_checked_at=None, ratings_miss_count=None,
+    )
     assert fundamentals_backoff_until(unstamped) is None
+    assert ratings_backoff_until(unstamped) is None

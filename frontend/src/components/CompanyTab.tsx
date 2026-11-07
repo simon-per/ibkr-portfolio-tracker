@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Bar,
@@ -27,6 +27,7 @@ import type {
 } from '@/lib/api'
 import { useKeepPreviousData } from '@/lib/CurrencyContext'
 import { companyFinancialsCompaniesQuery, companyFinancialsQuery } from '@/lib/queryCache'
+import { replaceRoute, useTabRoute } from '@/lib/tabRoute'
 import {
   type CompanyBasis,
   type CompanyChartDef,
@@ -449,6 +450,10 @@ function ChartSkeletons() {
  */
 export function CompanyTab() {
   const keepPrevious = useKeepPreviousData()
+  // A company in the URL (`lib/tabRoute.ts`: a holding's link, or a reload) wins over this
+  // browser's last pick; one the list no longer has falls through like a stale pick.
+  const route = useTabRoute()
+  const linked = route.tab === 'company' ? route.cik : null
   const [picked, setPicked] = useState<number | null>(null)
   const [stored] = useState(readCompanyPick)
   const [period, setPeriod] = useState<CompanyFinancialsPeriod>('ttm')
@@ -457,7 +462,14 @@ export function CompanyTab() {
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const companies = useQuery(companyFinancialsCompaniesQuery)
-  const company = companies.data ? resolveCompany(companies.data, picked, stored) : null
+  const company = companies.data ? resolveCompany(companies.data, linked ?? picked, stored) : null
+  const shownCik = company?.cik ?? null
+
+  // A company opened by link becomes the remembered pick, so the tab's own trigger
+  // reopens it rather than the one picked before the link was followed.
+  useEffect(() => {
+    if (linked != null && shownCik === linked) writeCompanyPick(linked)
+  }, [linked, shownCik])
 
   const financials = useQuery({
     ...companyFinancialsQuery(company?.cik ?? -1, period, range),
@@ -471,6 +483,8 @@ export function CompanyTab() {
   const pick = (cik: number) => {
     setPicked(cik)
     writeCompanyPick(cik)
+    // Into the URL too, without a history entry: a reload keeps the company.
+    replaceRoute({ tab: 'company', cik })
   }
 
   if (companies.isError) {

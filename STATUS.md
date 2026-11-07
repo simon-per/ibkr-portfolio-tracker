@@ -7,11 +7,12 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-10-28.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-07.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
-is merged and deployed (`08de1a0`); the residency date still has to be entered. On 2026-10-17 both of the day's branches went
+is merged and deployed (`08de1a0`); the residency date is entered, and on 2026-11-07 the 2026
+report started on it and 2025 carried only its one warning. On 2026-10-17 both of the day's branches went
 to `main`: the owner's batch
 (dividend raises, resizable forecast chart, base-currency market caps, daily held-only
 fundamentals; deployed, backfill run) and the web session's fintech pass
@@ -36,10 +37,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   This clone's `core.hooksPath` still points at the pre-rename folder
   (`…\IBKR Investment Tracker\.git\hooks`), which no longer exists, so no git hook runs here
   today. CI refuses a tracked SQLite file either way.
-- **Enter the Swiss residency date** (deployed 2026-10-25; Tax tab → *Swiss residency*, or
-  `PUT /api/settings/swiss-residency`): until it is set the 2026 report still counts the months
-  before the move, and 2025 still reads as a Swiss year. Then check that 2026 starts on the move day and
-  2025 shows only its one warning (docs/tax.md *Swiss residency*).
 - **Confirm Taiwan's DA-1 treaty rate (#62).** The tax report splits TW withholding at 15%
   (art. 10(2) of the 2007 agreement), added on review with medium confidence; check it against
   the ESTV's DA-1 country list before a filing relies on the split.
@@ -96,21 +93,32 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Short-range returns and risk (2026-10-28):** on a range under a year the return card reads
-  *Period return* (`/api/portfolio/annualized-return` `method` `period`), not an annualised rate;
-  on 1W and early MTD, Sharpe, Sortino and Volatility show a dash (20-return floor). Checked only
-  on a demo database; the session could not reach production.
+- **The harmonization wave and the Company links (2026-11-07, `harmonize-company-links`):**
+  migration `d3b7f9a1c5e2` adds `securities.ratings_checked_at` / `ratings_miss_count`; after the
+  next Tue–Sat 05:00 `fundamentals_refresh` a rating fetch that failed is stamped and the ratings
+  result carries `backing_off`. A GLEIF 429 reads `gleif_rate_limited` (and a warning on the 18:00
+  record), not a run of `gleif_errors`. The container log carries one `Rate limited … further
+  refusals this window are not logged` line per client per minute. Allocation's percentages move
+  only on exact ties. In the browser: a holding's logo or name on Positions, Fundamentals,
+  Dividends and the Watchlist opens its company (GOOGL too, which needs the deployed
+  `security_ids`), Back returns, a reload keeps the tab — seen only on a local build against the
+  live API with `security_ids` stood in for.
 
-- **The Company tab (2026-10-25):** the first Sunday 05:00 `company_financials_refresh` row in
-  `/api/scheduler/history` (a success, `fetched` 0 when the first fill is under six days old;
-  `universe` 100); beside it the first `company_prices_refresh` row (a success, no
-  `rate_limited`, `fetched` 0 after a fill under six days old);
-  the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
+- **Short-range returns and risk (2026-10-28):** the API half is verified on production
+  (2026-11-07: `/api/portfolio/annualized-return` answers `method` `period` for a month, `xirr`
+  for over a year). Unseen in the browser: the card reading *Period return*, and Sharpe, Sortino
+  and Volatility showing a dash on 1W and early MTD (20-return floor).
+
+- **The Company tab (2026-10-25):** the 2026-11-01 Sunday rows were both successes:
+  `company_prices_refresh` fetched all 102 with no `rate_limited`; `company_financials_refresh`
+  had `universe` 100 but **0 due**, because every company was re-fetched after 2026-10-26 during
+  the fixes (`STALE_AFTER` is six days). So **Sunday 2026-11-08 is the first real refresh**: it
+  should fetch about 100 companies and bring Q3 2026 for most (every company still ended at Q2 or
+  earlier on 2026-11-07); the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
   toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
   starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
   months and a year; docs/company-financials.md *Known gaps*).
-  SPGI and NXPI end at Q1 2026 because EDGAR's companyfacts held no later 10-Q on 2026-10-25;
-  the Sunday pass should bring Q2.
+  SPGI and NXPI still end at Q1 2026; the 2026-11-08 pass should bring Q2 and Q3.
 
 - **The two UI fixes (`bluegill`, 2026-10-18), in a real browser:** verified on production at
   1366 dark — the Watchlist's Stock column stays pinned while the table scrolls sideways, and
@@ -301,14 +309,10 @@ Only what is still unverified.
 
 Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
-1. **Low leftovers from audit round 2** (not filed): analyst ratings re-ask a security on every
-   non-429 error and the GLEIF loop continues past a 429 (#66's siblings); the rate limiter logs
-   every rejection (two lines per refused request); `allocation_service` builds percentages from
-   float fractions outside `share_pct`; `currencyExposure.ts` publishes 0 for "nothing priced";
-   the Starlette TestClient warns to move to `httpx2` (the last 16 test warnings); KS 36's
-   derivatives indicator needs the Flex ingest to keep non-STK trades; accumulating funds'
-   taxable income (ESTV Kursliste) is not in the tax report (2025/2026 filings). (`gh issue list`), in
-   number order: bugs first, then tooling, then the product enhancements (#74–#78).
+1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
+   Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
+   `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
+   tax software computes it from the trades.
 2. **Drop `crypto_daily`** once compared (model, migration, smoke fixture, probe), with a CLI to
    map a CoinStats coin to CoinGecko by hand.
 3. **Tooling.** CI runs ESLint, ruff `E9,F` (#72), the image build and, through the suite,

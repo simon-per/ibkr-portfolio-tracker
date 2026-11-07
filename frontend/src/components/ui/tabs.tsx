@@ -17,7 +17,12 @@ import { cn } from "@/lib/utils"
  */
 
 interface TabsProps {
-  defaultValue: string
+  /** The first tab when uncontrolled. */
+  defaultValue?: string
+  /** Controlled: the selected tab, owned by the caller (the Dashboard keeps it in the URL). */
+  value?: string
+  /** Called with the tab a trigger or an arrow key selects, controlled or not. */
+  onValueChange?: (value: string) => void
   children: React.ReactNode
   className?: string
 }
@@ -36,12 +41,20 @@ function useTabsContext(component: string): TabsContextValue {
   return context
 }
 
-export function Tabs({ defaultValue, children, className }: TabsProps) {
-  const [value, setValue] = React.useState(defaultValue)
+export function Tabs({ defaultValue = '', value: controlled, onValueChange, children, className }: TabsProps) {
+  const [uncontrolled, setUncontrolled] = React.useState(defaultValue)
+  const value = controlled ?? uncontrolled
+  const setValue = React.useCallback(
+    (next: string) => {
+      if (controlled === undefined) setUncontrolled(next)
+      onValueChange?.(next)
+    },
+    [controlled, onValueChange],
+  )
   // Per-instance prefix, so two Tabs on one page cannot collide on element ids.
   const baseId = React.useId()
 
-  const context = React.useMemo(() => ({ value, setValue, baseId }), [value, baseId])
+  const context = React.useMemo(() => ({ value, setValue, baseId }), [value, setValue, baseId])
 
   return (
     <TabsContext.Provider value={context}>

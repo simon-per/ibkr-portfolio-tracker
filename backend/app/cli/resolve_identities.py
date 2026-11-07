@@ -155,6 +155,9 @@ async def resolve_identities(
                 f"{summary['gleif_ambiguous']} ambiguous (recorded as none), "
                 f"{summary['gleif_errors']} failed"
             )
+            if summary.get("gleif_rate_limited"):
+                print("GLEIF answered HTTP 429: nothing more was asked of it this run; "
+                      "the rest is still unasked and the next run resumes it.")
             print(f"Rows written: {summary['rows_written']}")
             if constituents:
                 print(

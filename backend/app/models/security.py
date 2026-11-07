@@ -77,6 +77,12 @@ class Security(Base):
     # the shared `miss_backoff` rule; a data answer and a mapping change clear them.
     fundamentals_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     fundamentals_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The same pair for the analyst ratings pass: when its `recommendations` fetch last
+    # failed with something not a rate limit, and how many times running.
+    # `analyst_rating_repository.ratings_backoff_until` reads them through the shared
+    # `miss_backoff` rule; a stored answer (ratings or none) and a mapping change clear them.
+    ratings_checked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    ratings_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # When the Alpha Vantage fallback was last asked about it: at most once a UTC day.
     alpha_vantage_asked_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 

@@ -83,6 +83,40 @@ describe('CompanyTab', () => {
     expect(get).not.toHaveBeenCalledWith(999, expect.anything(), expect.anything())
   })
 
+  it('opens the company the URL names, over the remembered pick, and remembers it', async () => {
+    localStorage.setItem(COMPANY_PICK_KEY, String(NVDA_CIK))
+    window.history.replaceState(null, '', `/#company/${AMZN_CIK}`)
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_CIK, 'ttm', '10y'))
+    expect(get).not.toHaveBeenCalledWith(NVDA_CIK, expect.anything(), expect.anything())
+    const select = await screen.findByRole('combobox', { name: 'Company' })
+    expect((select as HTMLSelectElement).value).toBe(String(AMZN_CIK))
+    await waitFor(() => expect(localStorage.getItem(COMPANY_PICK_KEY)).toBe(String(AMZN_CIK)))
+  })
+
+  it('writes a pick into the URL without a history entry', async () => {
+    window.history.replaceState(null, '', '/#company')
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    const select = await screen.findByRole('combobox', { name: 'Company' })
+    const entries = window.history.length
+    fireEvent.change(select, { target: { value: String(AMZN_CIK) } })
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_CIK, 'ttm', '10y'))
+    expect(window.location.hash).toBe(`#company/${AMZN_CIK}`)
+    expect(window.history.length).toBe(entries)
+  })
+
+  it('falls through a company the URL names that the list no longer has', async () => {
+    localStorage.setItem(COMPANY_PICK_KEY, String(AMZN_CIK))
+    window.history.replaceState(null, '', '/#company/999')
+    const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    await waitFor(() => expect(get).toHaveBeenCalledWith(AMZN_CIK, 'ttm', '10y'))
+    expect(get).not.toHaveBeenCalledWith(999, expect.anything(), expect.anything())
+    expect(localStorage.getItem(COMPANY_PICK_KEY)).toBe(String(AMZN_CIK))
+  })
+
   it('sends the period and range toggles to the server as query parameters', async () => {
     const get = vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()

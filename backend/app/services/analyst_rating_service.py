@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.etf_mappings import allocation_for_fund_isin
-from app.repositories.analyst_rating_repository import AnalystRatingRepository
+from app.clock import utcnow
+from app.repositories.analyst_rating_repository import (
+    AnalystRatingRepository, clear_ratings_backoff, ratings_backing_off, record_ratings_miss,
+)
 from app.repositories.fundamentals_repository import sync_scope
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
@@ -304,6 +307,7 @@ class AnalystRatingService:
                     # Save to database — a "no rating" answer too, which stamps the
                     # attempt (see `no_rating`).
                     await self.rating_repo.upsert(rating_data)
+                    clear_ratings_backoff(security)
                     await self.db.commit()
                     if any(rating_data[f] for f in RATING_COUNT_FIELDS):
                         ratings_updated += 1
@@ -311,7 +315,11 @@ class AnalystRatingService:
                         no_ratings += 1
                 else:
                     # The fetch failed for this security (not a rate limit — that
-                    # raised): left unstamped, so the next pass asks again.
+                    # raised). Stamped, so the next pass does not ask again before
+                    # `ratings_backoff_until`; it used to be left unstamped and re-asked
+                    # every pass, for good. A rating it already has keeps its counts.
+                    record_ratings_miss(security, utcnow())
+                    await self.db.commit()
                     errors += 1
                     logger.warning(f"Skipping {security.symbol} - rating fetch failed")
 
@@ -339,6 +347,8 @@ class AnalystRatingService:
                     )
                     break
                 logger.error(f"Error processing {symbol}: {e}")
+                # Any other failure is this security's miss, as on the fundamentals path.
+                await self._record_miss(security_id, symbol)
                 continue
 
         logger.info(
@@ -365,6 +375,18 @@ class AnalystRatingService:
                 'Do not retry manually — the next scheduled run resumes where it stopped.'
             ]
         return result
+
+    async def _record_miss(self, security_id: int, symbol: str) -> None:
+        """Stamp a failed fetch (`record_ratings_miss`) after the loop's rollback, as the
+        only write. Its own failure costs the stamp, never the pass."""
+        try:
+            security = await self.db.get(Security, security_id)
+            if security is not None:
+                record_ratings_miss(security, utcnow())
+                await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Could not stamp the failed rating fetch of {symbol}: {e}")
 
     async def sync_stale_ratings(self) -> Dict:
         """
@@ -397,7 +419,11 @@ class AnalystRatingService:
         all_securities = list(result.scalars().all())
 
         rated_ids = {r.security_id for r in await self.rating_repo.get_all()}
+        # Stale rows already leave out a security waiting out a failed fetch
+        # (`ratings_backing_off`); this leaves it out of the never-rated ones too.
         stale_ids = {r.security_id for r in await self.rating_repo.get_stale_ratings()}
+        now = utcnow()
+        backing = {s.id for s in all_securities if ratings_backing_off(s, now)}
         # Funds stay candidates, so their row keeps the staleness every other row has
         # (`/api/analyst-ratings/status`), but `sync_ratings_for_securities` re-stamps
         # them without a request.
@@ -405,7 +431,7 @@ class AnalystRatingService:
 
         security_ids = [
             s.id for s in all_securities
-            if s.id not in rated_ids or s.id in stale_ids
+            if (s.id not in rated_ids and s.id not in backing) or s.id in stale_ids
         ]
 
         if not security_ids:
@@ -413,6 +439,7 @@ class AnalystRatingService:
                 'securities_processed': 0,
                 'ratings_updated': 0,
                 'errors': 0,
+                'backing_off': len(backing),
                 'message': 'No stale or missing ratings to update'
             }
 
@@ -426,7 +453,9 @@ class AnalystRatingService:
             f"{funds} funds stored as no rating without asking)"
         )
 
-        return await self.sync_ratings_for_securities(security_ids)
+        result = await self.sync_ratings_for_securities(security_ids)
+        result['backing_off'] = len(backing)
+        return result
 
     async def get_rating_for_security(self, security_id: int) -> Optional[AnalystRating]:
         """Get cached analyst rating for a security"""

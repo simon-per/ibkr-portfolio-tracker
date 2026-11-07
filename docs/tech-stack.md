@@ -76,6 +76,10 @@ on x86_64 Linux. Until 2026-10-18 the image installed `requirements.txt` directl
 whatever PyPI served that minute rather than what CI tested, plus the test tooling and an unused
 `python-multipart` (issue #38).
 
+**`httpx2` is a test dependency only** (2026-11-07): Starlette 1.6's `TestClient` imports it
+before `httpx` and deprecates the fallback — the suite's only 16 warnings. The app's own clients
+stay on `httpx` from `requirements.txt`; the two install side by side.
+
 **Bumping a dependency** (or adding/removing one): edit the input file, re-run its compile
 command from `backend/`, and commit the input and the lock together.
 

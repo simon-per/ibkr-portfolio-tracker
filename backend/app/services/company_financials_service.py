@@ -576,8 +576,8 @@ class CompanyFinancialsService:
         self.db = db
         self.repo = CompanyFinancialsRepository(db)
 
-    async def _held_listings(self, ciks) -> Dict[int, Security]:
-        """CIK -> its held listing with the lowest symbol (GOOG before GOOGL)."""
+    async def _held_members(self, ciks) -> Dict[int, List[Security]]:
+        """CIK -> every held listing, lowest symbol first (GOOG before GOOGL)."""
         listings = await self.repo.listings(ciks)
         ids = [sid for sids in listings.values() for sid in sids]
         if not ids:
@@ -586,12 +586,19 @@ class CompanyFinancialsService:
             select(Security).where(held(), Security.id.in_(ids))
         )
         securities = {s.id: s for s in result.scalars()}
-        out: Dict[int, Security] = {}
+        out: Dict[int, List[Security]] = {}
         for cik, sids in listings.items():
-            members = [securities[i] for i in sids if i in securities]
+            members = sorted(
+                (securities[i] for i in sids if i in securities),
+                key=lambda s: (s.symbol, s.id),
+            )
             if members:
-                out[cik] = min(members, key=lambda s: (s.symbol, s.id))
+                out[cik] = members
         return out
+
+    async def _held_listings(self, ciks) -> Dict[int, Security]:
+        """CIK -> its held listing with the lowest symbol (GOOG before GOOGL)."""
+        return {cik: members[0] for cik, members in (await self._held_members(ciks)).items()}
 
     @staticmethod
     def _identity(company: SecCompany, listing: Optional[Security]) -> Dict[str, Any]:
@@ -621,7 +628,8 @@ class CompanyFinancialsService:
         newest full pass (`universe_seen_at`), one entry per company (CIK).
         """
         companies = await self.repo.companies()
-        listings = await self._held_listings(companies)
+        members = await self._held_members(companies)
+        listings = {cik: held_listings[0] for cik, held_listings in members.items()}
         latest = await self.repo.latest_universe_stamp()
         listed = [
             c
@@ -638,6 +646,9 @@ class CompanyFinancialsService:
             out.append(
                 {
                     **self._identity(company, listings.get(company.cik)),
+                    # Every held listing, so a row of any of them (GOOG and GOOGL are
+                    # both Alphabet) can link to the company.
+                    "security_ids": [s.id for s in members.get(company.cik, [])],
                     "currency": cov["currency"],
                     "first_period_end": cov["first"].isoformat()
                     if cov["first"]
