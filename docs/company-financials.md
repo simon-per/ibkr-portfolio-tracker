@@ -510,8 +510,12 @@ weekly pass keeps those). Its own `sync_runs` type, `company_filings_check` with
 weekly one and a check's partial lists must not stand in for it; it raises no finding warnings.
 Both jobs share one runner (`SchedulerService._edgar_job`). `tests/test_company_filings_check.py`.
 
-**What each pass checks** (owner's request, 2026-11-07): every company it writes is tested,
-and the record (`company_financials_result` in `/api/scheduler/history`) lists
+**What each pass checks** (owner's request, 2026-11-07): the Sunday pass tests the stored rows
+of **every** company in scope after its loop, fetched or not, and the weekday check the companies
+it fetched. Until review items CO2/DR3 the Sunday lists covered only the companies that pass
+fetched, so one the weekday check had fetched (not due on Sunday) dropped out of that Sunday's
+record and the next Sunday warned about it again as new. The record
+(`company_financials_result` in `/api/scheduler/history`) lists
 `ttm_dividend_gaps` — a dividend payer whose newest four quarters miss a dividend per share,
 so its TTM is absent now — and `stale_figures` — newest figures older than
 `FIGURES_STALE_AFTER` (150 days; a 10-Q is due 40–45 days after its quarter, a 10-K 60–90

@@ -867,6 +867,57 @@ async def test_the_pass_names_a_broken_ttm_and_stale_figures_and_warns_once(
 
 
 @pytest.mark.asyncio
+async def test_a_company_the_weekday_check_fetched_stays_in_sundays_lists(db, configured):
+    """
+    CO2/DR3: the weekday check fetches a company midweek (its `_one` stamps `fetched_at`),
+    so Sunday's pass finds it not due. Its lists still name it — they read the stored rows
+    of every company — and the Sunday after does not warn about it as new. No `force`
+    anywhere: the bug lived in the unforced path.
+    """
+    await _hold(db, 1, "AAPL")
+    await db.commit()
+    first = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    assert first["ttm_dividend_gaps"] == ["AAPL"]
+    await _record_scheduled(db, first)
+
+    company = await db.get(SecCompany, APPLE_CIK)
+    company.fetched_at = utcnow() - timedelta(days=2)  # the weekday check's `_one`
+    await db.commit()
+    sunday = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    assert sunday["companies_due"] == 0
+    assert sunday["ttm_dividend_gaps"] == ["AAPL"]
+    assert sunday["stale_figures"] == ["AAPL"]
+    assert not [w for w in sunday.get("warnings", []) if "AAPL" in w]
+    await _record_scheduled(db, sunday)
+
+    company = await db.get(SecCompany, APPLE_CIK)
+    company.fetched_at = utcnow() - timedelta(days=7)
+    await db.commit()
+    after = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    assert after["companies_due"] == 1
+    assert after["ttm_dividend_gaps"] == ["AAPL"]
+    assert not [w for w in after.get("warnings", []) if "AAPL" in w]
+
+
+async def _record_scheduled(db, summary):
+    """As the scheduled job records a pass (`company_financials_refresh_job`)."""
+    db.add(
+        SyncRun(
+            sync_type=SCHEDULED_SYNC_TYPE,
+            status="success",
+            details={
+                "type": SCHEDULED_SYNC_TYPE,
+                "company_financials_result": {
+                    k: v for k, v in summary.items() if k != "warnings"
+                },
+            },
+            finished_at=utcnow(),
+        )
+    )
+    await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_a_refused_filing_read_stops_the_pass_after_writing_the_figures(
     db, configured
 ):
