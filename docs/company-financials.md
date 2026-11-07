@@ -463,9 +463,12 @@ The Company tab opens on an overview of **the company itself** — never a portf
 **`profile`** on `/api/company-financials/{cik}` (`CompanyFinancialsService._profile`; pinned both
 ways by the contract test): `industry, fiscal_year_end, description`; the price line `price,
 price_date, return_1m, return_1y, return_5y, return_10y, week52_low, week52_high`; `forward_pe,
-peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell}, analysts,
-target_low, target_mean, target_high, target_upside, next_earnings_date, next_eps_estimate,
-yahoo_as_of`. Rates are fractions; the unknown is null.
+peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell, consensus},
+analysts, target_low, target_mean, target_high, target_upside, yahoo_currency, next_earnings_date,
+next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `consensus` is
+`analyst_rating.consensus_of`, the rule every rating label in the app goes through;
+`yahoo_currency` is the targets' and the EPS estimate's (Yahoo's quote), which need not be the
+filings' `currency`.
 
 - **One resolver** (`_yahoo_figures`): a held company's listing rows or the chunk's row, never a
   mix; `tests/test_company_overview_profile.py` pins which wins.

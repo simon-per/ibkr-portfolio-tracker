@@ -7,7 +7,7 @@ import { CurrencyProvider } from '@/lib/CurrencyProvider'
 import { api } from '@/lib/api'
 import { COMPANY_PICK_KEY } from '@/lib/companyFinancials'
 import {
-  AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, NVDA_CIK, emptySeriesSet, fixtureFinancials, fixtureSeries,
+  AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, FIXTURE_PROFILE, NVDA_CIK, emptySeriesSet, fixtureFinancials, fixtureSeries,
 } from '@/lib/companyFinancials.fixture'
 
 // Recharts draws nothing in jsdom; these tests cover the wiring around the charts.
@@ -148,30 +148,82 @@ describe('CompanyTab', () => {
     expect(card('fcf').textContent).toContain('YoY—')
   })
 
-  it('shows the key TTM figures above the charts and leaves out those not filed', async () => {
+  it('groups the key TTM figures by meaning and leaves out those not filed', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
     renderTab()
-    const stats = await screen.findByTestId('key-stats')
+    const stats = await screen.findByTestId('overview-figures')
     expect(stats.textContent).toContain('TTM · Q4 FY2025')
-    expect(stats.textContent).toContain('Revenue$130.5B')
-    expect(stats.textContent).toContain('YoY+114.2%')
-    expect(stats.textContent).toContain('EPS$2.94')
-    expect(stats.textContent).toContain('P/E48.3')
-    expect(stats.textContent).toContain('P/S26.9')
-    expect(stats.textContent).toContain('Market cap$3.5T')
-    expect(stats.textContent).toContain('Enterprise value$3.5T')
-    expect(stats.textContent).toContain('Net cash$34.8B')
-    expect(stats.textContent).toContain('EV/EBIT42.6')
-    expect(stats.textContent).toContain('P/FCF57.6')
-    expect(stats.textContent).toContain('Return on equity119.2%')
-    expect(stats.textContent).toContain('Dividend yield0.02%')
-    expect(stats.textContent).toContain('Payout1.2%')
-    expect(stats.textContent).toContain('Dividends paid$834M')
+    const group = (name: string) => within(stats).getByRole('region', { name }).textContent
+    expect(group('Valuation')).toContain('Market cap$3.5T')
+    expect(group('Valuation')).toContain('Enterprise value$3.5T')
+    expect(group('Valuation')).toContain('P/E48.3')
+    expect(group('Valuation')).toContain('Forward P/E31.2')
+    expect(group('Valuation')).toContain('PEG0.9')
+    expect(group('Valuation')).toContain('P/S26.9')
+    expect(group('Valuation')).toContain('P/FCF57.6')
+    expect(group('Valuation')).toContain('EV/EBIT42.6')
+    expect(group('Valuation')).toContain('Dividend yield0.02%')
+    expect(group('Growth')).toContain('Revenue$130.5B')
+    expect(group('Growth')).toContain('YoY+114.2%')
+    expect(group('Growth')).toContain('EPS$2.94')
+    expect(group('Growth')).toContain('EPS growth fwd+48.0%')
+    expect(group('Profitability')).toContain('Return on equity119.2%')
+    expect(group('Balance & returns')).toContain('Net cash$34.8B')
+    expect(group('Balance & returns')).toContain('Payout1.2%')
+    expect(group('Balance & returns')).toContain('Dividends paid$834M')
     expect(stats.textContent).not.toContain('Gross margin')
     expect(stats.textContent).not.toContain('Buybacks')
     // A falling share count is the gain it is.
     expect(within(stats).getByText('-0.5%').className).toMatch(/text-green-600/)
   })
+
+  it('opens on the company itself: industry, price, what it does, the Street', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials())
+    renderTab()
+    const overview = await screen.findByTestId('company-overview')
+    expect(within(overview).getByTestId('company-tags').textContent).toBe('Semiconductors & Related Devices · FY ends Jan')
+    const price = within(overview).getByTestId('price-line').textContent
+    expect(price).toContain('$186.60')
+    expect(price).toContain('Nov 6, 2026')
+    expect(price).toContain('1M+4.1%')
+    expect(price).toContain('1Y+54.9%')
+    expect(price).toContain('5Y p.a.+62.0%')
+    expect(price).not.toContain('10Y')
+    expect(within(overview).getByTestId('range-52w').textContent).toBe('52W$94.30$212.20')
+    // Two lines until clicked.
+    const description = within(overview).getByTestId('company-description')
+    expect(description.className).toContain('line-clamp-2')
+    fireEvent.click(description)
+    expect(description.getAttribute('aria-expanded')).toBe('true')
+    expect(description.className).not.toContain('line-clamp-2')
+    const street = within(overview).getByTestId('street-row').textContent
+    expect(street).toContain('Buy62 analysts')
+    expect(street).toContain('Target$230.00+23.3%$140.00–$300.00')
+    expect(street).toContain('EarningsNov 19, 2026EPS est. $1.02')
+    // Nothing about the account: this tab is about the company.
+    expect(overview.textContent).not.toMatch(/shares held|position|cost basis|gain/i)
+  })
+
+  it('leaves out what the company has no figure for, and the whole Street row without one', async () => {
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      profile: {
+        ...FIXTURE_PROFILE,
+        industry: null, fiscal_year_end: null, description: null, rating: null, analysts: null,
+        target_low: null, target_mean: null, target_high: null, target_upside: null,
+        next_earnings_date: null, next_eps_estimate: null, forward_pe: null, peg_ratio: null,
+        fwd_revenue_growth: null, fwd_eps_growth: null,
+      },
+    }))
+    renderTab()
+    const overview = await screen.findByTestId('company-overview')
+    expect(within(overview).queryByTestId('company-tags')).toBeNull()
+    expect(within(overview).queryByTestId('company-description')).toBeNull()
+    expect(within(overview).queryByTestId('street-row')).toBeNull()
+    expect(within(overview).getByTestId('overview-figures').textContent).not.toContain('Forward P/E')
+    expect(within(overview).getByTestId('price-line')).toBeTruthy()
+  })
+
+
 
   it('shows the latest margins instead of a CAGR, a dash for a missing one', async () => {
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({

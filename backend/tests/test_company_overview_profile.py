@@ -152,7 +152,7 @@ async def test_a_held_company_reads_its_listings_rows_and_never_the_chunks(db):
     assert profile["industry"] == "Semiconductors & Related Devices"
     assert profile["fiscal_year_end"] == "0126"
     assert (profile["forward_pe"], profile["description"]) == (30.0, "Chips.")
-    assert profile["rating"] == COUNTS and profile["analysts"] == 50
+    assert profile["rating"] == {**COUNTS, "consensus": "Buy"} and profile["analysts"] == 50
     assert profile["next_eps_estimate"] == 0.9
     assert profile["price"] == 100.0, "the held listing's newest daily close"
     assert profile["target_upside"] == pytest.approx(0.1)
@@ -185,7 +185,7 @@ async def test_a_company_nobody_holds_reads_the_chunks_row(db):
     )["profile"]
 
     assert (profile["forward_pe"], profile["description"]) == (28.0, "Phones.")
-    assert profile["rating"] == COUNTS
+    assert profile["rating"] == {**COUNTS, "consensus": "Buy"}
     assert profile["price"] == 200.0
     assert profile["target_upside"] == pytest.approx(0.25)
     assert profile["next_eps_estimate"] == 2.1

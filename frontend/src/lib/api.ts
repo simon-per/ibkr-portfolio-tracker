@@ -1658,6 +1658,8 @@ export interface CompanyFinancialsRating {
   hold: number;
   sell: number;
   strong_sell: number;
+  /** The label every rating in the app shows (`AnalystRating.consensus`'s rule). */
+  consensus: string;
 }
 
 /**
@@ -1695,6 +1697,8 @@ export interface CompanyFinancialsProfile {
   target_high: number | null;
   /** The mean target over the newest close; null across currencies or from an old close. */
   target_upside: number | null;
+  /** The currency of the targets and the EPS estimate (Yahoo's quote). */
+  yahoo_currency: string | null;
   /** UTC. */
   next_earnings_date: string | null;
   next_eps_estimate: number | null;

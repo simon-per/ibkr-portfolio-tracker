@@ -3,6 +3,7 @@ import type {
   CompanyFinancialsCompany,
   CompanyFinancialsKeyStats,
   CompanyFinancialsPeriod,
+  CompanyFinancialsProfile,
   CompanyFinancialsRange,
   CompanyFinancialsResponse,
   CompanyFinancialsSeries,
@@ -164,11 +165,25 @@ export function chartRows(
 }
 
 const YEAR_END_LABEL = /^(?:Q4\s+)?FY(\d{4})$/
+const DATE_LABEL = /^(\d{4})-(\d{2})-(\d{2})$/
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /** A fiscal-year end as an axis prints it: "Q4 FY2025" and "FY2025" → "FY25"; others unchanged. */
 export function shortPeriodLabel(label: string): string {
   const m = YEAR_END_LABEL.exec(label)
   return m ? `FY${m[1].slice(2)}` : label
+}
+
+/** A period as a header or tooltip names it: a close's date in full ("Nov 6, 2026"), else as served. */
+export function periodText(label: string): string {
+  const d = DATE_LABEL.exec(label)
+  return d ? `${MONTHS[Number(d[2]) - 1]} ${Number(d[3])}, ${d[1]}` : label
+}
+
+/** The SEC's `MMDD` fiscal year end as its month ("0126" → "Jan"); null when not a date. */
+export function fiscalYearEndMonth(mmdd: string | null | undefined): string | null {
+  if (!mmdd || !/^\d{4}$/.test(mmdd)) return null
+  return MONTHS[Number(mmdd.slice(0, 2)) - 1] ?? null
 }
 
 /**
@@ -281,10 +296,72 @@ export const KEY_STATS: readonly KeyStatDef[] = [
   { key: 'dividends_paid', label: 'Dividends paid', format: 'money' },
 ]
 
-/** The key stats the company has a figure for. */
-export function visibleKeyStats(stats: CompanyFinancialsKeyStats | undefined): KeyStatDef[] {
-  if (!stats) return []
-  return KEY_STATS.filter((def) => stats[def.key] != null)
+/** The profile's forward figures the overview prints beside the trailing ones (Yahoo's). */
+export type ProfileFigureKey = 'forward_pe' | 'peg_ratio' | 'fwd_revenue_growth' | 'fwd_eps_growth'
+
+export type OverviewFigure =
+  | { source: 'stats'; def: KeyStatDef }
+  | { source: 'profile'; key: ProfileFigureKey; label: string; format: KeyStatDef['format'] }
+
+export interface OverviewGroup {
+  title: string
+  figures: readonly OverviewFigure[]
+}
+
+function stat(key: KeyStatKey): OverviewFigure {
+  const def = KEY_STATS.find((d) => d.key === key)
+  if (!def) throw new Error(`no key stat ${key}`)
+  return { source: 'stats', def }
+}
+
+/**
+ * The overview's figures, grouped by meaning, not by source: every key stat in exactly one
+ * group (`companyFinancials.test.ts` pins that none is dropped), the forward figures beside
+ * the trailing ones they extend.
+ */
+export const OVERVIEW_GROUPS: readonly OverviewGroup[] = [
+  { title: 'Valuation', figures: [
+    stat('market_cap'), stat('enterprise_value'), stat('pe_ratio'),
+    { source: 'profile', key: 'forward_pe', label: 'Forward P/E', format: 'multiple' },
+    { source: 'profile', key: 'peg_ratio', label: 'PEG', format: 'multiple' },
+    stat('ps_ratio'), stat('pfcf_ratio'), stat('ev_ebit'), stat('dividend_yield'),
+  ] },
+  { title: 'Growth', figures: [
+    stat('revenue'), stat('revenue_cagr_5y'),
+    { source: 'profile', key: 'fwd_revenue_growth', label: 'Revenue growth fwd', format: 'signed' },
+    stat('net_income'), stat('eps_diluted'), stat('eps_cagr_5y'),
+    { source: 'profile', key: 'fwd_eps_growth', label: 'EPS growth fwd', format: 'signed' },
+    stat('fcf'), stat('fcf_per_share'),
+  ] },
+  { title: 'Profitability', figures: [
+    stat('gross_margin'), stat('operating_margin'), stat('net_margin'), stat('fcf_margin'), stat('roe'),
+  ] },
+  { title: 'Balance & returns', figures: [
+    stat('net_cash'), stat('diluted_shares'), stat('buybacks'), stat('dividends_per_share'), stat('dividends_paid'),
+  ] },
+]
+
+/** A figure's value: the key stats' or the profile's; null when absent. */
+export function overviewValue(
+  figure: OverviewFigure,
+  stats: CompanyFinancialsKeyStats | undefined,
+  profile: CompanyFinancialsProfile | undefined,
+): number | null {
+  if (figure.source === 'stats') return stats?.[figure.def.key] ?? null
+  return profile?.[figure.key] ?? null
+}
+
+/** The groups with the figures the company has; a group with none is left out. */
+export function visibleOverviewGroups(
+  stats: CompanyFinancialsKeyStats | undefined,
+  profile: CompanyFinancialsProfile | undefined,
+): OverviewGroup[] {
+  return OVERVIEW_GROUPS
+    .map((group) => ({
+      ...group,
+      figures: group.figures.filter((f) => overviewValue(f, stats, profile) != null),
+    }))
+    .filter((group) => group.figures.length > 0)
 }
 
 export function latestOf(response: CompanyFinancialsResponse, key: CompanyFinancialsSeriesKey): number | null {

@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
+from app.models.analyst_rating import consensus_of
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
@@ -860,6 +861,7 @@ class CompanyFinancialsService:
             else None
         )
         next_date = yahoo["next_earnings_date"]
+        counts = yahoo["counts"]
         return {
             "industry": company.sic_description,
             "fiscal_year_end": company.fiscal_year_end,
@@ -869,12 +871,15 @@ class CompanyFinancialsService:
             "peg_ratio": figure("peg_ratio"),
             "fwd_revenue_growth": figure("fwd_revenue_growth"),
             "fwd_eps_growth": figure("fwd_eps_growth"),
-            "rating": yahoo["counts"],
+            "rating": None
+            if counts is None
+            else {**counts, "consensus": consensus_of(**counts)},
             "analysts": figure("number_of_analysts"),
             "target_low": figure("target_low_price"),
             "target_mean": target,
             "target_high": figure("target_high_price"),
             "target_upside": upside,
+            "yahoo_currency": figure("data_currency"),
             "next_earnings_date": utc_iso(next_date) if next_date is not None else None,
             "next_eps_estimate": yahoo["next_eps_estimate"],
             "yahoo_as_of": utc_iso(yahoo["as_of"]) if yahoo["as_of"] is not None else None,

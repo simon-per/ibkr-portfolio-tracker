@@ -73,9 +73,9 @@ export const FIXTURE_PROFILE: CompanyFinancialsProfile = {
   return_1m: 0.041, return_1y: 0.549, return_5y: 0.62, return_10y: null,
   week52_low: 94.3, week52_high: 212.2,
   forward_pe: 31.2, peg_ratio: 0.9, fwd_revenue_growth: 0.52, fwd_eps_growth: 0.48,
-  rating: { strong_buy: 20, buy: 35, hold: 6, sell: 1, strong_sell: 0 },
+  rating: { strong_buy: 20, buy: 35, hold: 6, sell: 1, strong_sell: 0, consensus: 'Buy' },
   analysts: 62,
-  target_low: 140, target_mean: 230, target_high: 300, target_upside: 0.2326,
+  target_low: 140, target_mean: 230, target_high: 300, target_upside: 0.2326, yahoo_currency: 'USD',
   next_earnings_date: '2026-11-19T21:20:00+00:00', next_eps_estimate: 1.02,
   yahoo_as_of: '2026-11-07T04:03:00+00:00',
 }

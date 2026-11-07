@@ -181,6 +181,9 @@ class CompanyFinancialsRating(BaseModel):
     hold: int
     sell: int
     strong_sell: int
+    consensus: str = Field(
+        ..., description="`analyst_rating.consensus_of`, the label every rating shows."
+    )
 
 
 class CompanyFinancialsProfile(BaseModel):
@@ -215,6 +218,9 @@ class CompanyFinancialsProfile(BaseModel):
         None,
         description="The mean target over the newest close; null unless both are in one "
         "currency and the close is current.",
+    )
+    yahoo_currency: Optional[str] = Field(
+        None, description="The currency of the targets and the EPS estimate (Yahoo's quote)."
     )
     next_earnings_date: Optional[str] = Field(None, description="UTC.")
     next_eps_estimate: Optional[float] = None

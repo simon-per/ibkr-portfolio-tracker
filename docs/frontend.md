@@ -1086,12 +1086,8 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `SegmentedControl`s in its aside. **A company in the URL wins** (2026-11-07, *The tab in the URL*
   above): `#company/<cik>` — a holding's link or a reload — opens that company over the remembered
   pick and becomes it; a pick in the picker replaces the hash without a history entry; a CIK the
-  list no longer has falls through like a stale pick. Under it the **Key figures** card (`KEY_STATS`: the server's
-  `key_stats`, the newest TTM point whatever period the charts show — revenue, net income, EPS,
-  FCF, the four margins, return on equity, shares, DPS with its payout ratio and the dividend
-  yield, market cap, enterprise value, net cash, P/E, P/S, P/FCF, EV/EBIT, buybacks, dividends
-  paid, with YoY
-  and 5-year CAGR notes; a figure the company does not file is left out, never a dash row), then
+  list no longer has falls through like a stale pick. **The picker card's body is the overview**
+  (2026-11-07, replacing the flat Key figures strip; *The overview* below), then
   a grid of up to eleven cards (revenue, operating income, net income, FCF, margins, valuation
   — P/E, P/FCF, P/S —, return on equity, shares, buybacks & dividends, cash & debt, DPS), 2 per row from `lg`, 1 below, each with a 320px plot
   (260px on a phone); the expand button (desktop) makes one card span the row with a 460px plot,
@@ -1118,7 +1114,36 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   `ResponsiveContainer` re-renders and the bars restart their animation from zero, so every plot
   looks empty.
 - Tests: `CompanyTab.test.tsx` (picker, remembered pick, toggles as parameters, Total | Per share
-  without a request, legend toggles, expand, the CAGR spans, key figures, the hidden dividends
+  without a request, legend toggles, expand, the CAGR spans, the overview, the hidden dividends
   card, a margin never filed, no-data and `warnings[]`), `companyFinancials.test.ts` (rows and
-  their YoY, gaps, ticks, `chartView`, `seriesWithData`, `visibleKeyStats`) over the NVDA-like
+  their YoY, gaps, ticks, `chartView`, `seriesWithData`, the overview groups) over the NVDA-like
   fixture in `companyFinancials.fixture.ts`.
+
+### The overview (2026-11-07)
+
+**The company itself, never a portfolio figure** (owner): no quantity, value, weight, gain or
+income — those are the other tabs'. `CompanyOverview` in `CompanyTab.tsx`, the body of the picker
+card, from the response's `key_stats` and `profile` (docs/company-financials.md *The overview*):
+
+- **Identity**: the picker stays the name; under it `industry · FY ends <month>` (the SEC's SIC
+  description, `fiscalYearEndMonth` of the `MMDD` year end).
+- **Price line**: the newest market close and its date, the 1M · 1Y · 5Y p.a. · 10Y p.a. changes
+  (signed tone; a span the server has none for is left out), and the 52-week range of the closes
+  with the close marked (`RangeBar`).
+- **Description**: Yahoo's business summary, two lines (`line-clamp-2`); the text itself is the
+  button that expands it (`aria-expanded`), no "read more" prose.
+- **Figures grouped by meaning, not by source** (`OVERVIEW_GROUPS`): Valuation (market cap, EV,
+  P/E, forward P/E, PEG, P/S, P/FCF, EV/EBIT, dividend yield), Growth (revenue and its YoY, revenue
+  5Y, forward revenue growth, net income, EPS and its YoY, EPS 5Y, forward EPS growth, FCF and its
+  YoY, FCF per share), Profitability (the four margins, ROE), Balance & returns (net cash, shares
+  and their YoY, buybacks, DPS with payout, dividends paid). **Every `KEY_STATS` figure lands in
+  exactly one group** — `companyFinancials.test.ts` fails a dropped one; the forward figures
+  (`profile`) sit beside the trailing ones they extend. A figure with no value is left out, a
+  group with none too; the period tag (`TTM · Q4 FY2025`) heads them. One column on a phone, two
+  from 440 px, four from `lg`.
+- **The Street row**: the consensus chip (`profile.rating.consensus`, the server's one rule
+  `analyst_rating.consensus_of`, drawn by `ratingBadgeClass` as the positions table draws it) and
+  the analyst count; the mean target with its upside and the low–high, in Yahoo's quote currency
+  (`yahoo_currency`, which need not be the filings'); the next earnings date with the EPS
+  estimate. Each item only when present; the row only when one is — a Nasdaq-100 company the
+  05:00 chunk has not reached yet has none.
