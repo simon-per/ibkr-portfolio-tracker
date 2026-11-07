@@ -130,6 +130,23 @@ async def test_a_missing_quarter_keeps_the_stored_one(db, yahoo):
     assert item.reported_quarter == Q2
 
 
+@pytest.mark.asyncio
+async def test_an_older_answer_never_moves_the_stored_quarter_back(db, yahoo):
+    """
+    Y8: Yahoo alternating between two `mostRecentQuarter` values stored the older over the
+    newer, so the next run saw a "new" quarter and paid the slow fetch every other run.
+    """
+    item = await _item(db, known=Q3)
+    slow_runs = []
+    for quarter in (Q2, Q3, Q2, Q3):
+        yahoo["quarter"], yahoo["reads"] = quarter, []
+        await WatchlistService(db).sync_item("AMD", force=True)
+        await db.refresh(item)
+        slow_runs.append(bool(SLOW & set(yahoo["reads"])))
+        assert item.reported_quarter == Q3
+    assert slow_runs == [False, False, False, False]
+
+
 @pytest.mark.parametrize("value", [None, "1751241600", True, 0, -5, 10**20])
 def test_anything_but_a_timestamp_is_no_quarter(value):
     assert reported_quarter({"mostRecentQuarter": value}) is None

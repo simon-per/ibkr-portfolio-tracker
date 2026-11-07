@@ -751,7 +751,9 @@ a slow field. **A report reads them the next run** (2026-11-07, owner-approved):
 the statements and estimates in that run (`new_quarter`, decided inside the fetch from the `.info`
 just read). Before, AMD's 2026-11-03 report left the watchlist on the old quarter's growth while
 Fundamentals (daily) had the new one. The first sighting only records the quarter, so a deploy
-costs nothing extra; a report costs one slow fetch a quarter per item.
+costs nothing extra; a report costs one slow fetch a quarter per item. The stored quarter only
+moves forward (review item Y8): an older answer stored over the newer one re-armed the slow fetch
+on the next run, every other run while Yahoo alternated between two values.
 `tests/test_watchlist_report_refresh.py`. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
 `market_prices` closes instead of `history("1y")` (`_held_closes`; Yahoo's history is
 dividend-adjusted, the stored closes are not, so the RSI can differ slightly around an ex-date).

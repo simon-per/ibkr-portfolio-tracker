@@ -519,8 +519,12 @@ class WatchlistService:
         }
         if slow:
             data["estimates_synced_at"] = utcnow()
-        # Kept when `.info` lacks it, so a missing field never re-arms `new_quarter`.
-        if (quarter := reported_quarter(info)) is not None:
+        # Kept when `.info` lacks it, so a missing field never re-arms `new_quarter`; and
+        # never moved back (review item Y8): an older answer stored over the newer one
+        # re-armed the full fetch on the next run, every other run while Yahoo alternated.
+        if (quarter := reported_quarter(info)) is not None and (
+            item.reported_quarter is None or quarter > item.reported_quarter
+        ):
             data["reported_quarter"] = quarter
         own = own_counts(item)
         if counts_due:
