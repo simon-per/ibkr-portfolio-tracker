@@ -125,6 +125,16 @@ from one dominant one.
   and only what was held at the start was in the denominator — and mis-sized a book carrying old
   gains, which earn on their value, not their cost. Same sign as the gain by construction; on 1Y
   it sits near the XIRR card. `null` when that capital is not positive, never a stand-in.
+- **The hero's period gain is the value chart's Profit/Loss line at its end** (review items V3,
+  M1, M3, 2026-11-07): Δ(Total Value − Money In) between the first and last measurable points
+  when cash is tracked (`cashIsTracked` on the last point, the chart's own rule), else the
+  flow-adjusted gain (Δ market value less the range's external flows). It used to prefer
+  `/api/portfolio/attribution`'s `total_pnl_eur` and fall back to the change in *unrealized*
+  profit while that loaded or failed — a −3,238 red pill flashed on a +3,746 year on about half
+  the loads — and once loaded it was price-only, leaving dividends and cash income out, so it
+  disagreed with the line beneath it on every range. Read off the timeline alone it has nothing
+  to wait for. The per-security attribution bars stay price-only; that card is a different
+  question.
 - **The XIRR card annualises only a year of money at work** (2026-10-17, the GIPS rule). Under a
   year `/api/portfolio/annualized-return` answers `method: "period"`: XIRR's rate compounded over
   the span from the first flow to the last (`calculate_xirr`, `ANNUALIZE_FROM_DAYS` = 360), which

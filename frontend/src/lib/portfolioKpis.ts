@@ -1,5 +1,7 @@
-import type { BenchmarkValuePoint } from './api'
+import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
+import { cashIsTracked } from './portfolioCash'
 import { isValuable, type ValuablePosition } from './positionValuation'
+import { rawProfit } from './rangeProfit'
 
 /** Trading days per year, for annualising a daily return series. Shared with `rollingRisk.ts`. */
 export const TRADING_DAYS = 252
@@ -320,10 +322,15 @@ export interface PeriodChange {
  * `(+0.00%)` beside a value change of the whole book. `?? null` downstream cannot
  * recover a `0` once it is published, which is why the refusal has to happen here.
  *
- * `periodGain` prefers the attribution endpoint's `total_pnl_eur` when the caller has
- * it: that figure counts a realized gain, while the local fallback — the change in
- * *unrealized* profit — drops when a winner is sold, because the gain leaves the
- * unrealized pool and shows up nowhere.
+ * **`periodGain` is the value chart's Profit/Loss line at its end** (review items V3, M1,
+ * M3, 2026-11-07): Δ(Total Value − Money In) when cash is tracked (`cashIsTracked` on the
+ * last point, the chart's own rule), else the flow-adjusted gain — Δ market value less
+ * the range's external flows, so a sale's realized gain is in it. It used to prefer the
+ * attribution endpoint's `total_pnl_eur` and fall back to the change in *unrealized*
+ * profit while that loaded or failed: the pill flashed −3,238 on a +3,746 year, and once
+ * loaded it was a price-only figure that left out dividends and cash income, so it
+ * disagreed with the chart's line under it on every range. Read off the series, the pill
+ * has no second request to wait for. The per-security attribution bars stay price-only.
  *
  * **`periodGainPercent` divides that gain by the capital that earned it**: the opening
  * value plus every purchase and sale weighted by the share of the range it was at work
@@ -338,10 +345,7 @@ export interface PeriodChange {
  * `null` for the whole thing when no point in the range is measurable, because a line
  * built from unpriced days is the fabricated-loss shape this exists to remove.
  */
-export function periodChange(
-  series: ValueSeriesPoint[],
-  attributionPnl?: number | null,
-): PeriodChange | null {
+export function periodChange(series: PortfolioValuePoint[]): PeriodChange | null {
   const measurable = series.filter(isMeasurable)
   if (measurable.length === 0) return null
 
@@ -353,13 +357,13 @@ export function periodChange(
   const absoluteChange = currentValue - startValue
   const percentageChange = startValue > 0 ? (absoluteChange / startValue) * 100 : null
 
-  const startProfit = first.market_value_eur - first.cost_basis_eur
-  const currentProfit = last.market_value_eur - last.cost_basis_eur
-  const periodGain = attributionPnl ?? currentProfit - startProfit
-
   // The measurable span with its interior intact — an interior day's flow still happened
   // even when its value could not be read — from the first point that held anything.
   const span = series.slice(series.indexOf(first), series.lastIndexOf(last) + 1)
+
+  const periodGain = cashIsTracked(series[series.length - 1])
+    ? rawProfit(last, true) - rawProfit(first, true)
+    : flowAdjustedGain(span)
   const seed = span.findIndex((p) => p.market_value_eur > 0)
   const window = seed === -1 ? [] : span.slice(seed)
   const capital = window.length >= 2 ? modifiedDietzCapital(window).averageCapital : 0
@@ -375,6 +379,14 @@ export function periodChange(
     periodGain,
     periodGainPercent,
   }
+}
+
+/** Δ market value less the window's external flows: what the holdings earned. */
+function flowAdjustedGain(window: ValueSeriesPoint[]): number {
+  if (window.length === 0) return 0
+  let flows = 0
+  for (let i = 1; i < window.length; i++) flows += externalFlow(window[i - 1], window[i])
+  return window[window.length - 1].market_value_eur - window[0].market_value_eur - flows
 }
 
 /**

@@ -260,11 +260,11 @@ export function Dashboard() {
   // The header line's value change and period gain over the selected range. Extracted
   // to `periodChange` and unit-tested: inline it read the raw endpoints of a series every
   // other consumer trims, and published `0%` for two percentages that were undefined —
-  // see its docstring. Both percentages are `number | null` now and the two spans below
-  // render nothing for null.
+  // see its docstring. The gain is the chart's own Profit/Loss end, read off this series
+  // alone: no second request to wait for, so no fallback to flash while one loads.
   const performanceMetrics = useMemo(
-    () => (valueOverTime ? periodChange(valueOverTime, attribution?.total_pnl_eur) : null),
-    [valueOverTime, attribution],
+    () => (valueOverTime ? periodChange(valueOverTime) : null),
+    [valueOverTime],
   )
 
   // Calculate KPIs

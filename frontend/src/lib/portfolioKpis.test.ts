@@ -21,6 +21,7 @@ import {
 } from './portfolioKpis'
 import type { ValueSeriesPoint } from './portfolioKpis'
 import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
+import { rangeProfitSeries } from './rangeProfit'
 
 function point(
   date: string, mv: number, cost: number, flow?: number,
@@ -701,11 +702,32 @@ describe('periodChange', () => {
     expect([r.startDate, r.endDate]).toEqual([day(0), day(1)])
   })
 
-  it('prefers the attribution P&L, which counts a realized gain', () => {
-    const series = [point(day(0), 1000, 900, 0), point(day(1), 1100, 900, 0)]
-    expect(periodChange(series, 250)!.periodGain).toBe(250)
-    // An explicit null from the endpoint falls back exactly as an absent one does.
-    expect(periodChange(series, null)!.periodGain).toBe(100)
+  it("is the chart's Profit/Loss end when cash is tracked: dividends and cash income count", () => {
+    // V3/M1/M3: 1000 in, worth 1100 in holdings, plus 30 of dividends in cash. The chart's
+    // line ends at +130; the price-only attribution total (+100) used to head the pill.
+    const tracked = (p: PortfolioValuePoint, cash: number, moneyIn: number): PortfolioValuePoint => ({
+      ...p, cash_eur: cash, total_value_eur: p.market_value_eur + cash, money_in_eur: moneyIn,
+      cash_source: 'ibkr',
+    })
+    const series = [
+      tracked(point(day(0), 1000, 1000, 0), 0, 1000),
+      tracked(point(day(1), 1050, 1000, 0), 10, 1000),
+      tracked(point(day(2), 1100, 1000, 0), 30, 1000),
+    ]
+    const r = periodChange(series)!
+    expect(r.periodGain).toBe(130)
+    expect(r.periodGain).toBe(rangeProfitSeries(series, true).at(-1))
+  })
+
+  it('without tracked cash, is the flow-adjusted gain — a sale keeps its realized gain', () => {
+    // Held 1000 (cost 900); sold half for 600 on day 1; the rest worth 550 on day 2. The
+    // unrealized delta reads 100 → 100 (0); what the holdings earned is 550 − 1000 + 600.
+    const series = [
+      point(day(0), 1000, 900, 0),
+      point(day(1), 500, 450, -600),
+      point(day(2), 550, 450, 0),
+    ]
+    expect(periodChange(series)!.periodGain).toBe(150)
   })
 
   it('reads the first and last MEASURABLE points, like every other consumer of the series', () => {
