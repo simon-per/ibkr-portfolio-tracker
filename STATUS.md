@@ -29,6 +29,12 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
+- **Push `main` to deploy the Company tab's dividend-per-share fix** (`f15b782`, `1ee3278`,
+  committed 2026-11-07; the push is a production deploy and was left to the owner). Not within
+  ~10 minutes of a Berlin slot. Nothing to run by hand afterwards: the Sunday 05:00
+  `company_financials_refresh` reads the gap filings itself (see *Watch after the next deploy*);
+  `fetch_company_financials --symbol MA --force` shows it sooner for one company.
+
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
 - **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
@@ -92,6 +98,16 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **Dividends per share from filing instances (2026-11-07, `dividend-filing-facts`):** migration
+  `a7c9e1f3b5d8` (`sec_filing_reads`). The first `company_financials_refresh` after the deploy
+  reports `filings_read` (at most 24 a company; the offline survey had 256 gap filings across 27
+  companies, ~860 MB) and no `filing_errors`; BKR, INTC and PCAR may need a second Sunday for
+  their oldest gaps. Then MA's TTM dividend per share runs unbroken FY2018–FY2026 (0.33 → 0.87
+  a quarter), MDLZ, XEL and COST have no gap, INTC and WMT show TTMs with their zero quarters,
+  and the next Sundays read about one filing a quarter (BKR). Measured offline on all 102
+  companies: gaps 280 → 134, no other metric's row moved (docs/company-financials.md *Filing
+  instances*, *Known gaps*).
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
   `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
@@ -354,6 +370,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
+  companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
+  only on an equity-statement or share-class member; now read once per filing from its XBRL
+  instance; a zero quarter the ladder shows is kept (INTC, WMT). Committed, push left to owner.
+
 - **2026-11-07 (harmonization, Company links and overview, one /goal run)** — six leftovers on the
   shared rules; every holding's row links to its Company page through the URL hash; the Company
   tab opens on an overview of the company (SEC industry, price line, grouped figures, Street row,
@@ -378,5 +399,3 @@ One line each, newest first; drop the oldest.
 - **2026-10-25 (Company tab, agent team)** — two worktree teammates (backend, frontend) against
   one contract; a 22-company EDGAR audit moved the revenue/NI chains (IBKR), fixed ORCL's
   year-as-quarter and ONDS's thousands; SEC contact only in the VPS `.env`.
-- **2026-10-25 (PR #80 merged)** — Swiss residency deployed; the move's country and date
-  kept out of the public docs (the setting holds it); Trading212 lots need nothing (in Jan).
