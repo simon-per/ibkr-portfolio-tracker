@@ -797,6 +797,56 @@ def test_a_fact_read_from_a_filing_never_replaces_companyfacts():
     assert _row(rows, "dividends_per_share", date(2021, 6, 30), "Q2")["value"] == 0.44
 
 
+def _rate_ladder(dps, totals, totals_concept="DividendsCommonStock"):
+    """One year's dividend ladder, every rung tagged `dps[i]`, beside declared totals."""
+    ends = ("2017-03-31", "2017-06-30", "2017-09-30", "2017-12-31")
+    filed = ("2017-05-01", "2017-08-01", "2017-11-01", "2018-02-20")
+
+    def rung(i, val):
+        form = "10-K" if i == 3 else "10-Q"
+        return _f("2017-01-01", ends[i], val, filed[i], form=form, accn=f"a{i}")
+
+    doc = _dps(*(rung(i, v) for i, v in enumerate(dps)))
+    doc["facts"]["us-gaap"][totals_concept] = {
+        "units": {"USD": [rung(i, v) for i, v in enumerate(totals)]}
+    }
+    return normalise(doc).rows
+
+
+def _year(rows, year="2017"):
+    return {
+        r["fiscal_period"]: round(r["value"], 4)
+        for r in rows
+        if r["metric"] == "dividends_per_share" and r["period_end"].isoformat()[:4] == year
+    }
+
+
+def test_one_rate_on_every_rung_is_each_quarters_when_the_totals_say_so():
+    """IBKR before 2020 tagged 0.10 on its three-, six-, nine- and twelve-month contexts;
+    7M, 14M, 21M and 28M declared say it paid 0.10 each quarter, 0.40 in the year."""
+    rows = _rate_ladder([0.10] * 4, [7e6, 14e6, 21e6, 28e6])
+    assert _year(rows) == {"Q1": 0.10, "Q2": 0.10, "Q3": 0.10, "Q4": 0.10, "FY": 0.40}
+
+
+def test_an_annual_declaration_is_no_rate_on_every_rung():
+    """Declared once, in the first quarter (WMT): the totals do not grow, and the quarters
+    after it stay as the ladder leaves them (absent here: no zero is shown)."""
+    rows = _rate_ladder([2.12] * 4, [6.0e9] * 4)
+    assert _year(rows) == {"Q1": 2.12, "FY": 2.12}
+
+
+def test_a_year_with_a_raise_is_not_one_rate():
+    rows = _rate_ladder([0.10, 0.10, 0.12, 0.12], [7e6, 14e6, 22e6, 30e6])
+    assert "Q2" not in _year(rows) and _year(rows)["FY"] == 0.12
+
+
+def test_a_quarter_derived_from_two_rates_is_replaced_by_the_rate():
+    """BKNG's FY2025 0.384 (9.60 over its 25:1 split) less nine months' restated 0.38 made a
+    0.004 fourth quarter; the reported first quarter stays as reported."""
+    rows = _rate_ladder([0.38, 0.38, 0.38, 0.384], [3.19e8, 6.34e8, 9.48e8, 1.259e9], "Dividends")
+    assert _year(rows) == {"Q1": 0.38, "Q2": 0.384, "Q3": 0.384, "Q4": 0.384, "FY": 1.532}
+
+
 def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
     """HON's Q1 2009 10-Q tags dividends paid as -224M: a sign slip, not a refund."""
     q1, q2 = ("2009-01-01", "2009-03-31"), ("2009-04-01", "2009-06-30")

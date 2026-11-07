@@ -370,6 +370,17 @@ NEIGHBOUR_MIN_COUNTS = 2
 # exactly as in a split: REGN's counts before 2014 read 25% high (a "5:4"), DXCM's 2020
 # quarters carried 3 for its 4:1. When a filing's basic counts vote, they decide.
 SPLIT_WITNESS = "WeightedAverageNumberOfSharesOutstandingBasic"
+#: The dividends declared in money, read only to witness a dividend ladder that carries one
+#: rate on every rung (`_flat_rate_years`) and never stored: IBKR's 0.10 on its three-, six-,
+#: nine- and twelve-month contexts beside 7M, 14M, 21M and 28M declared.
+DIVIDEND_TOTALS = ("DividendsCommonStockCash", "DividendsCommonStock", "Dividends")
+#: A year's dividend figures are one rate when the largest is within this of the smallest
+#: (BKNG's 9.60 over its 25:1 split is 0.384 beside the restated 0.38); a raise is more.
+FLAT_RATE_TOLERANCE = 0.02
+#: ... and its quarters' declared totals each within this of their mean. Coarse on purpose:
+#: IBKR tags 7M or 8M a quarter in millions, while an annual declarer's quarters (WMT) or a
+#: semi-annual one's (INTC) are four times or twice the mean, or nothing.
+FLAT_TOTALS_TOLERANCE = 0.25
 
 # The ratios companies split by, and no change. Not every whole number: adjacent periods'
 # weighted counts differ by a few percent, and BKNG's 24.3 snapped to 24, not 25. No 3:2,
@@ -460,6 +471,7 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
     wanted[SPLIT_WITNESS] = SHARES
+    wanted.update({c: MONETARY for c in DIVIDEND_TOTALS})
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
@@ -1065,6 +1077,90 @@ def _implied_shares(
     return shares if shares > 0 else None
 
 
+def _quarter_totals(
+    periods: Dict[Tuple[Optional[date], date], Obs], mapping: Dict[date, date]
+) -> Dict[date, float]:
+    """A declared-dividends concept's quarters by canonical end, Q4 also as the year less
+    three reported quarters (CEG tags its quarters and its year, no nine months)."""
+    q, y, _ = _quarters_and_years(MONETARY, periods, non_negative=True)
+    q, y = _rekey(q, mapping), _rekey(y, mapping)
+    out = {end: o.value for end, o in q.items()}
+    for end, year in y.items():
+        inside = [v for e, v in out.items() if year.start is not None and year.start < e < end]
+        if end not in out and len(inside) == 3:
+            out[end] = year.value - sum(inside)
+    return out
+
+
+def _flat_rate_years(values, keys, calendar, latest, totals, mapping) -> None:
+    """
+    A fiscal year whose every dividend-per-share fact is one rate, and whose four quarters
+    each declared about the same money, paid that rate each quarter: the rungs and the year
+    carry one quarter's rate, not a sum. IBKR before 2020 tagged 0.10 on every rung
+    (declared 7M, 14M, 21M, 28M), BKNG its 2024 8.75, CEG its year beside three reported
+    quarters. Fills the quarters without a reported figure — a quarter derived from two rungs
+    is the difference of two rates (BKNG's FY2025 0.384 less nine months' 0.38 made a 0.004
+    fourth quarter) — and a filed year that carries the rate becomes the four quarters. An
+    annual or semi-annual declarer's totals are not equal (WMT, INTC), and a year with a
+    raise is not one rate: both stay as the ladder rules leave them.
+    """
+    dps = values["dividends_per_share"]
+    concepts = METRICS["dividends_per_share"].concepts
+    by_concept = [_quarter_totals(totals[c], mapping) for c in DIVIDEND_TOTALS if c in totals]
+    week = timedelta(days=7)
+    for year in calendar:
+        facts = [
+            o
+            for c in concepts
+            for (s, e), o in latest.get(c, {}).items()
+            if s is not None and year.start <= s and e <= year.end + week and o.value > 0
+        ]
+        if len(facts) < 2:
+            continue
+        low, high = min(o.value for o in facts), max(o.value for o in facts)
+        if high > low * (1 + FLAT_RATE_TOLERANCE):
+            continue
+        # The year's quarters of declared totals, two at least: a year in progress counts
+        # (BKNG's 2026 rate is on its six- and nine-month rungs months before the 10-K).
+        quarters = max(
+            (
+                [(e, t[e]) for e in sorted(t) if year.start < e <= year.end + week]
+                for t in by_concept
+            ),
+            key=len,
+            default=[],
+        )
+        if len(quarters) < 2:
+            continue
+        mean = sum(v for _, v in quarters) / len(quarters)
+        if mean <= 0 or any(abs(v / mean - 1) > FLAT_TOTALS_TOLERANCE for _, v in quarters):
+            continue
+        rate = min(facts, key=lambda o: (o.error, -o.filed.toordinal()))
+
+        def each_quarter(value: float, end: date) -> Obs:
+            return Obs(
+                value=value,
+                filed=rate.filed,
+                start=None,
+                end=end,
+                unit=rate.unit,
+                concept=f"{rate.concept} each quarter",
+                derived=True,
+            )
+
+        for end, _ in quarters:
+            label = keys.get(("Q", end)) or _quarter_label(end, calendar)
+            held = dps.get(("Q", end))
+            if (held is None or held.derived) and label is not None:
+                keys[("Q", end)] = label
+                dps[("Q", end)] = each_quarter(rate.value, end)
+        filed_year = [o for o in facts if _between(_days(o.start, o.end), YEAR_DAYS)]
+        found = [dps.get(("Q", end)) for end, _ in quarters]
+        if len(found) == 4 and filed_year and all(found):
+            keys.setdefault((ANNUAL, year.end), (year.name, ANNUAL))
+            dps[(ANNUAL, year.end)] = each_quarter(sum(o.value for o in found), year.end)
+
+
 # ── The whole thing ──────────────────────────────────────────────────────────
 
 
@@ -1127,6 +1223,7 @@ def normalise(
         return result
     multiplier = adjustments(facts)
     latest = _latest([f for f in facts if f.concept != SPLIT_WITNESS], multiplier)
+    totals = {c: latest.pop(c) for c in DIVIDEND_TOTALS if c in latest}
 
     quarters: Dict[str, Dict[date, Obs]] = {}
     years: Dict[str, Dict[date, Obs]] = {}
@@ -1182,6 +1279,8 @@ def normalise(
                 if end in source:
                     values[metric][key] = source[end]
                     break
+
+    _flat_rate_years(values, keys, calendar, latest, totals, mapping)
 
     # Q4 = FY less the three quarters, across the chain, when no single concept could give
     # it: ORCL tags the year as `Revenues` and its quarters as `RevenueFromContract...`, so
