@@ -192,7 +192,8 @@ describe('the monthly contribution defaults to the real pace', () => {
     const button = await paceButton()
     expect(input().value).toBe('2500')
     expect(button.getAttribute('aria-pressed')).toBe('false')
-    expect(localStorage.getItem(CHOSEN)).toBe('2500')
+    // Kept with no currency yet: these tests never load the settings.
+    expect(JSON.parse(localStorage.getItem(CHOSEN)!)).toEqual({ amount: 2500, currency: null })
 
     fireEvent.click(button)
     expect(input().value).toBe('1234')
@@ -205,12 +206,48 @@ describe('the monthly contribution defaults to the real pace', () => {
     await paceButton()
 
     fireEvent.change(input(), { target: { value: '800' } })
-    expect(localStorage.getItem(CHOSEN)).toBe('800')
+    expect(JSON.parse(localStorage.getItem(CHOSEN)!).amount).toBe(800)
     unmount()
 
     renderTab()
     await paceButton()
     expect(input().value).toBe('800')
+  })
+
+  it('stores a choice with its base currency, and ignores it under another (U6)', async () => {
+    const settings = (base: string) => ({
+      base_currency: base, supported_currencies: ['EUR', 'CHF', 'USD'],
+      dividend_forecast_withholding_pct: 15,
+    })
+    mockApi({ contributions: withPace })
+    const getSettings = vi.spyOn(api, 'getSettings').mockResolvedValue(settings('CHF'))
+    const { unmount } = renderTab()
+    await screen.findByText('CHF')
+    await paceButton()
+    fireEvent.change(input(), { target: { value: '2000' } })
+    expect(JSON.parse(localStorage.getItem(CHOSEN)!)).toEqual({ amount: 2000, currency: 'CHF' })
+    unmount()
+
+    // The base switched to USD: 2000 CHF is not 2000 USD, so the pace is followed.
+    getSettings.mockResolvedValue(settings('USD'))
+    renderTab()
+    await screen.findByText('USD')
+    expect((await paceButton()).getAttribute('aria-pressed')).toBe('true')
+    expect(input().value).toBe('1234')
+  })
+
+  it('stamps a choice stored before U6 with the base currency once it is known', async () => {
+    localStorage.setItem(CHOSEN, '2500')
+    mockApi({ contributions: withPace })
+    vi.spyOn(api, 'getSettings').mockResolvedValue({
+      base_currency: 'CHF', supported_currencies: ['EUR', 'CHF'], dividend_forecast_withholding_pct: 15,
+    })
+    renderTab()
+    await paceButton()
+    expect(input().value).toBe('2500')
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem(CHOSEN)!)).toEqual({ amount: 2500, currency: 'CHF' }),
+    )
   })
 
   it('keeps the old default, and offers no pace, when contributions failed to load', async () => {
@@ -220,6 +257,32 @@ describe('the monthly contribution defaults to the real pace', () => {
     await screen.findByRole('alert')
     expect(input().value).toBe('1000')
     expect(screen.queryByRole('button', { name: /My pace/ })).toBeNull()
+  })
+})
+
+describe("without today's value (review item M4)", () => {
+  it('projects nothing from zero while the summary loads', async () => {
+    mockApi()
+    vi.spyOn(api, 'getPortfolioSummary').mockReturnValue(new Promise(() => {}))
+    renderTab()
+    // Money in needs only the contributions, which do load.
+    await waitFor(async () => expect(amount((await oneYearRow())[3])).toBe(55_000 + 12_000))
+    const [, value, gains] = await oneYearRow()
+    expect(value.textContent).toBe('—')
+    expect(gains.textContent).toBe('—')
+    const start = screen.getByRole('group', { name: 'Starting point' })
+    expect(within(start).getAllByRole('button')[0].textContent).toBe('Current (—)')
+  })
+
+  it('says so when the summary failed, and still projects from scratch on request', async () => {
+    mockApi()
+    vi.spyOn(api, 'getPortfolioSummary').mockRejectedValue(new Error('backend down'))
+    renderTab()
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Today's portfolio value isn't available/)
+    expect((await oneYearRow())[1].textContent).toBe('—')
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Starting point' })).getAllByRole('button')[1])
+    expect(amount((await oneYearRow())[1])).toBeGreaterThan(0)
   })
 })
 

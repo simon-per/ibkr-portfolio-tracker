@@ -289,12 +289,16 @@ at the action that created it. Four things about it are load-bearing:
   loud behaviour — the floor is driven by recorded fact, and no record is no licence to drop
   a holding quietly.
 
-It reaches `_calculate_timeline_swept`, `_calculate_daily_value` and
-`holdings_snapshot_as_of` — the last because a 31 December before the spinoff was serving a
-Steuerwert badged *partial* over a holding that did not exist. `/api/portfolio/attribution`
-deliberately still excludes-and-counts it: a line that did not exist at the window start has
-no start value to attribute against, and combining parent and child is a larger change than
-this. Tests: `tests/test_spinoff_position_start.py`, plus the floor case in
+It reaches `_calculate_timeline_swept`, `_calculate_daily_value`, `holdings_snapshot_as_of`
+— the last because a 31 December before the spinoff was serving a Steuerwert badged *partial*
+over a holding that did not exist — XIRR, and since 2026-11-07 `attribution_rows` (review item
+V1). Attribution used to exclude-and-count the child on every window opening before the
+spinoff (MBGL read `unpriced_holdings: 1` on 6M, YTD and 1Y), so its total fell short of the
+chart's gain. No combining of parent and child is needed: floored, the child is held at
+neither endpoint before it began, and from that day its whole value is its contribution while
+the parent's falls by the same business — the pair is the timeline's gain to the cent
+(`AttributionInputs.position_start` carries the floor for a multi-window caller). Tests:
+`tests/test_spinoff_position_start.py`, plus the floor case in
 `tests/test_timeline_equivalence.py` — the two walks must skip identically or the chart and
 every point query disagree about the same day.
 

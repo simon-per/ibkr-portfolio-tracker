@@ -84,6 +84,10 @@ export function computeCurrencyExposure(
   fundSymbols: ReadonlySet<string> = new Set(),
 ): CurrencyExposure {
   const priced = positions.filter((p) => !isUnpriced(p))
+  // Deliberately **holdings only**, not `bookTotal` (review item DR5): the client knows
+  // the cash balance only in the base currency, not which currencies IBKR holds it in, so
+  // a share of the book would put the cash in no bucket or in the wrong one. These rows
+  // are shares of the holdings, and the card says so.
   const totalValue = priced.reduce((s, p) => s + p.market_value_eur, 0)
 
   const byCurrency = new Map<string, CurrencyRow>()

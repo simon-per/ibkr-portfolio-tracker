@@ -260,16 +260,19 @@ export function Dashboard() {
   // The header line's value change and period gain over the selected range. Extracted
   // to `periodChange` and unit-tested: inline it read the raw endpoints of a series every
   // other consumer trims, and published `0%` for two percentages that were undefined —
-  // see its docstring. Both percentages are `number | null` now and the two spans below
-  // render nothing for null.
+  // see its docstring. The gain is the chart's own Profit/Loss end, read off this series
+  // alone: no second request to wait for, so no fallback to flash while one loads.
   const performanceMetrics = useMemo(
-    () => (valueOverTime ? periodChange(valueOverTime, attribution?.total_pnl_eur) : null),
-    [valueOverTime, attribution],
+    () => (valueOverTime ? periodChange(valueOverTime) : null),
+    [valueOverTime],
   )
 
-  // Calculate KPIs
+  // Calculate KPIs — whenever both have loaded, however short the series. Each series
+  // metric is already null below its own floor, and Win rate, Top 5 and the dividend
+  // figures do not read the series at all: gating the row on two points blanked all of
+  // them on the first day of an MTD or YTD (review item M2).
   const kpiMetrics = useMemo(() => {
-    if (!valueOverTime || valueOverTime.length < 2 || !positions) {
+    if (!valueOverTime || !positions) {
       return null
     }
 
@@ -300,7 +303,7 @@ export function Dashboard() {
 
     // 6. Top 5 Concentration, footnoted with the effective holdings it cannot express:
     // a top-5 weight reads the same for five equal positions and one dominant one.
-    const top5Weight = concentrationPct(positions, 5)
+    const top5Weight = concentrationPct(positions, accountCash, 5)
     const { effectiveHoldings } = herfindahlConcentration(positions)
 
     return {
@@ -320,12 +323,12 @@ export function Dashboard() {
       top5Weight,
       effectiveHoldings,
     }
-  }, [valueOverTime, positions, annualizedReturn])
+  }, [valueOverTime, positions, annualizedReturn, accountCash])
 
   // The risk side of the same series. Kept in a second memo because beta also
   // depends on the benchmark selection, which the return KPIs do not.
   const riskMetrics = useMemo(() => {
-    if (!valueOverTime || valueOverTime.length < 2 || !positions) {
+    if (!valueOverTime || !positions) {
       return null
     }
 

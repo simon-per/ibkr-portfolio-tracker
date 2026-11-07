@@ -116,7 +116,13 @@ from one dominant one.
   inception pair's Modified-Dietz return is the move from nothing held *to* the seed, which the
   seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
   bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
-  so it is latent here and live on any younger account or after a backfill.
+  so it is latent here and live on any younger account or after a backfill. **Every series metric
+  walks `measurableReturns(series)`** (review item M6, 2026-11-07): the drawdown and the rolling
+  ledger already seeded this way, while volatility, Sharpe and Sortino read `dailyReturns` raw and
+  counted the inception pair. The rolling beta takes `betaPairs`, `betaAndCorrelation`'s own day
+  filter (it had re-derived one that let a cost-basis-only day and the benchmark's own flow days
+  through), and a heatmap month drops its leading zero-valued points, so the month of the first
+  purchase is measured from its first close instead of blanked.
 - **The hero's period return divides by the capital that earned the gain** (2026-10-17):
   `periodGainPercent` is the range's gain over its Modified Dietz average invested capital
   (`modifiedDietzCapital`, the denominator each heatmap month already used), walked from the first
@@ -125,6 +131,16 @@ from one dominant one.
   and only what was held at the start was in the denominator — and mis-sized a book carrying old
   gains, which earn on their value, not their cost. Same sign as the gain by construction; on 1Y
   it sits near the XIRR card. `null` when that capital is not positive, never a stand-in.
+- **The hero's period gain is the value chart's Profit/Loss line at its end** (review items V3,
+  M1, M3, 2026-11-07): Δ(Total Value − Money In) between the first and last measurable points
+  when cash is tracked (`cashIsTracked` on the last point, the chart's own rule), else the
+  flow-adjusted gain (Δ market value less the range's external flows). It used to prefer
+  `/api/portfolio/attribution`'s `total_pnl_eur` and fall back to the change in *unrealized*
+  profit while that loaded or failed — a −3,238 red pill flashed on a +3,746 year on about half
+  the loads — and once loaded it was price-only, leaving dividends and cash income out, so it
+  disagreed with the line beneath it on every range. Read off the timeline alone it has nothing
+  to wait for. The per-security attribution bars stay price-only; that card is a different
+  question.
 - **The XIRR card annualises only a year of money at work** (2026-10-17, the GIPS rule). Under a
   year `/api/portfolio/annualized-return` answers `method: "period"`: XIRR's rate compounded over
   the span from the first flow to the last (`calculate_xirr`, `ANNUALIZE_FROM_DAYS` = 360), which
@@ -240,6 +256,11 @@ scenario, and carrying today's money in would report a negative gain of that siz
 could not be loaded is `null`, never 0**: the grey band is omitted, Money In and Gains read `—`, and a
 notice under the chart says so, while Portfolio Value — which never needed the baseline — is
 unaffected. Falling back to 0 or to the start value would redraw the very lie the module removes.
+**Today's value is `null` too while the summary loads or after it failed** (review item M4,
+2026-11-07): the value tiles, the table's value column and the scenarios read `—`, the chart is a
+placeholder, and a failed summary says so under it; "Start from 0" still projects. It fell back to
+0, so the tab projected the whole book from nothing — a ten-year value short by the compounded
+book and gains of minus everything paid in.
 **The entered rate is the effective annual rate**: it compounds monthly at `(1 + r)^(1/12) − 1`,
 so twelve months at r grow the seed by exactly r (pinned in `forecast.test.ts`). It was `r/12`
 until 2026-10-14, which turned 8% entered into 8.30% a year — a projection more generous than the
@@ -250,7 +271,11 @@ rate on screen. The end-of-period annuity is unchanged and conventional.
 returns to it. Only a typed value is stored (`forecast.chosenMonthlyContribution`). The old key
 `forecast.monthlyContribution` was written back on every mount, so a stored `1000` was the default
 rather than a choice: it is dropped, and any other legacy value is migrated as a choice. Without
-contributions (failed load, or no `12m` window) the default stays 1,000.
+contributions (failed load, or no `12m` window) the default stays 1,000. **A typed value is
+stored with the base currency it was typed in** (`{amount, currency}`, review item U6): under
+another base currency it is ignored and the pace followed, so 2,000 CHF never projects as 2,000
+USD after a switch. A value stored before then (a bare number) is stamped with the base currency
+the first time the settings are known.
 
 Tests: `src/lib/portfolioKpis.test.ts`, `src/lib/rebalance.test.ts`,
 `src/lib/currencyExposure.test.ts`, `src/lib/forecast.test.ts`, plus jsdom tests beside each
@@ -450,7 +475,13 @@ sites wrote the plus by hand, half `>= 0` and half `> 0`, so the same zero print
 one screen and "CHF 0.00" on the next. The formatter prints the figure and its minus; this adds
 the plus, and a value that rounds to zero at the format's precision prints as an unsigned zero
 (no "+0.00%", no "-0.0%"). `formatSignedPercent(value, digits)` is the `toFixed` percentage
-form. `displayFamily.test.ts` refuses `? '+' :`, `` `+${ `` and `>+{` outside `utils.ts`.
+form. `displayFamily.test.ts` refuses `? '+' :`, `` `+${ `` and `>+{` outside `utils.ts`. The
+unsigned formatters drop a signed zero too (review item M7, 2026-11-07): `formatCurrency`,
+`formatPercent`, `formatFractionPercent` and `formatMultiple` print a value that rounds to zero
+as 0 — `Intl` keeps the minus of -0 and of a negative that rounds away ("-CHF 0.00") — and the
+drawdown tiles print through `formatSignedPercent`, a 0.00% max drawdown toned as the fall it is
+not. `formatMarketCap` rolls a figure rounding to 1,000 of its unit over to the next (999.96B is
+"1.0T").
 
 Three tables deliberately stay tables, each argued in its own file: `CurrencyExposureCard` (the
 comparison *between* rows is the point, and there is no identity column to promote), and the two
@@ -946,8 +977,14 @@ rows, never recomputed), largest holding by account weight, and the next dividen
 passes the attribution, positions, summary cash and `dividendBreakdown.upcoming` it already holds.
 Each pick has two absences — `undefined` (not loaded) renders a dash, `null` (loaded, no such
 row: nothing lost money this range) renders "None" — and an empty book renders no strip.
-**`weightDenominator` is the one definition of "weight"**: valued holdings plus in-book cash.
-`PositionsList` reads it too, so the tile's weight and the table row's cannot drift. In-book cash
+**`bookTotal` (`lib/positionValuation.ts`) is the one definition of "weight"**: valued holdings
+plus in-book cash, with `bookShare` the percentage. `PositionsList`, the Largest holding tile,
+Top 5 (`concentrationPct`) and the rebalance plan all divide by it; until review items M5/DR5
+(2026-11-07) Top 5 and the rebalance plan divided by holdings alone, so the same holding read a
+larger share there than on Positions or the Allocation tab beside the plan.
+`computeCurrencyExposure` stays holdings-only on purpose — the client does not know which
+currencies the cash is held in — and says "of the holdings". `src/lib/bookShareFamily.test.ts`
+fails any other sum of market values. In-book cash
 is `inBookCash` (`lib/portfolioCash.ts`): a tracked, **positive** balance, else 0 — the client
 mirror of the backend's `UninvestedCash.in_book`, which Allocation and Look-through divide by, so a
 holding reads one share on all three tabs. A margin debit is left out rather than subtracted

@@ -417,7 +417,9 @@ async def test_over_the_whole_history_the_two_anchors_agree_to_the_cent():
 
 
 @pytest.mark.asyncio
-async def test_a_weekend_start_anchors_on_the_monday_the_chart_also_starts_on():
+async def test_a_weekend_start_anchors_on_the_friday_the_chart_also_starts_on():
+    """A range is measured from the last close before it (review item V2): the chart
+    opens a weekend start on the Friday, and the window anchor with it."""
     engine, session = await _session()
     try:
         await _standard_book(session)
@@ -426,8 +428,8 @@ async def test_a_weekend_start_anchors_on_the_monday_the_chart_also_starts_on():
         pts = await svc.calculate_benchmark_value_over_time(start, end, "dax", anchor="window")
         chart = await PortfolioService(session).get_portfolio_value_over_time(start, end)
 
-        assert svc.last_anchor.on_date == date(2026, 3, 9)
-        assert pts[0]["date"] == chart[0]["date"] == "2026-03-09"
+        assert svc.last_anchor.on_date == date(2026, 3, 6)
+        assert pts[0]["date"] == chart[0]["date"] == "2026-03-06"
         assert pts[0]["benchmark_value_eur"] == pytest.approx(chart[0]["total_value_eur"], abs=0.02)
     finally:
         await engine.dispose()

@@ -14,6 +14,8 @@
  * may spell this rule out for itself.
  */
 
+import { inBookCash, type AccountCash } from './portfolioCash'
+
 /** The minimum a position must expose to be judged. Structural, so each caller keeps its
  *  own richer input type without this module knowing about any of them. */
 export interface ValuablePosition {
@@ -50,4 +52,29 @@ export function isUnpriced(p: ValuablePosition): boolean {
 /** The complement, for callers that read better in the positive. */
 export function isValuable(p: ValuablePosition): boolean {
   return !isUnpriced(p)
+}
+
+/**
+ * **The one "% of the book" denominator** (review items M5, DR5, 2026-11-07): holdings the
+ * backend could value plus in-book cash (`inBookCash` — positive and tracked, the rule
+ * Allocation and Look-through share server-side). Positions' weights, the Largest holding
+ * tile, Top 5 and the rebalance plan all divide by it; until then Top 5 and the rebalance
+ * plan divided by holdings alone, so the same holding read a larger share there than one
+ * card away.
+ *
+ * `null` while the cash is not loaded (`AccountCash`): without it there is no denominator,
+ * and holdings alone overstate every weight by the cash share (#70).
+ */
+export function bookTotal(
+  positions: readonly ValuablePosition[],
+  cash: AccountCash | undefined,
+): number | null {
+  if (!cash) return null
+  const holdings = positions.reduce((sum, p) => (isUnpriced(p) ? sum : sum + p.market_value_eur), 0)
+  return holdings + inBookCash(cash)
+}
+
+/** `value` as a percent of `total` (`bookTotal`); `null` when there is no positive total. */
+export function bookShare(value: number, total: number | null): number | null {
+  return total === null || total <= 0 ? null : (value / total) * 100
 }

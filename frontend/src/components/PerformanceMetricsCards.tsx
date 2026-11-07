@@ -137,8 +137,11 @@ export function PerformanceMetricsCards({
           tile
           label="Max drawdown"
           icon={TrendingDown}
-          value={metrics.maxDrawdown !== null ? `${metrics.maxDrawdown.toFixed(2)}%` : null}
-          tone={metrics.maxDrawdown === null ? 'muted' : 'negative'}
+          value={metrics.maxDrawdown !== null ? formatSignedPercent(metrics.maxDrawdown, 2) : null}
+          // Red only for a fall the figure shows: a range that never fell prints 0.00%,
+          // and a red zero contradicts itself (review item M7).
+          tone={metrics.maxDrawdown === null ? 'muted'
+            : formatSignedPercent(metrics.maxDrawdown, 2) === formatSignedPercent(0, 2) ? 'positive' : 'negative'}
           // Not "no decline": with nothing measurable in the range there is no decline to
           // measure, and the two must not share a rendering.
           sub={metrics.maxDrawdown !== null ? undefined : 'Not enough history in this range'}

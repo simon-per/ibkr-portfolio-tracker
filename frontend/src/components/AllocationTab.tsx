@@ -4,8 +4,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { api } from '@/lib/api'
-import { positionsQuery } from '@/lib/queryCache'
-import { cashIsTracked } from '@/lib/portfolioCash'
+import { positionsQuery, summaryQuery } from '@/lib/queryCache'
+import { cashIsTracked, summaryCash } from '@/lib/portfolioCash'
 import type { AllocationCategory } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { Blocks, Globe, RefreshCw, Shapes, X, type LucideIcon } from 'lucide-react'
@@ -415,6 +415,9 @@ export function AllocationTab() {
   // The same key the Dashboard uses, so this is a cache hit rather than a
   // second request for data already on the page.
   const { data: positions, isLoading: positionsLoading, isError: positionsError } = useQuery(positionsQuery)
+  // The rebalance plan's book total takes the account's cash, as Positions' weights do.
+  const { data: summary } = useQuery(summaryQuery)
+  const accountCash = useMemo(() => summaryCash(summary), [summary])
 
   const syncMutation = useMutation({
     mutationFn: () => api.syncAllocationData(false),
@@ -605,6 +608,7 @@ export function AllocationTab() {
 
       <RebalanceCard
         positions={positions}
+        cash={accountCash}
         isLoading={positionsLoading}
         isError={positionsError}
       />

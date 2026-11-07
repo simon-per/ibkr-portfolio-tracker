@@ -80,3 +80,34 @@ async def test_a_profitable_mid_period_sale_is_not_a_phantom_loss():
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("weekend_start", [date(2026, 2, 7), date(2026, 2, 8)])
+async def test_a_weekend_range_opens_on_the_close_attribution_measures_from(weekend_start):
+    """
+    Review item V2: attribution opens a range at the last close on or before its start,
+    the timeline began on the Monday after a weekend start, so Monday's move was in one
+    figure and not the other. The chart's first point is now that Friday's close, and its
+    flow-adjusted gain is attribution's total.
+    """
+    from app.services.portfolio_service import range_open
+
+    friday, monday, end = date(2026, 2, 6), date(2026, 2, 9), date(2026, 2, 13)
+    assert range_open(weekend_start) == friday and range_open(monday) == monday
+    engine, session = await _make_session()
+    try:
+        session.add_all([
+            _lot(2, date(2025, 6, 1), "10", "100"),
+            _price(2, friday, "10"), _price(2, monday, "13"), _price(2, end, "14"),
+        ])
+        await session.flush()
+        svc = PortfolioService(session)
+        chart = await svc.get_portfolio_value_over_time(weekend_start, end)
+        assert chart[0]["date"] == friday.isoformat()
+        gain = chart[-1]["market_value_eur"] - chart[0]["market_value_eur"]
+        out = await svc.get_performance_attribution(weekend_start, end)
+        assert out["total_pnl_eur"] == pytest.approx(gain) == pytest.approx(40.0)
+    finally:
+        await session.close()
+        await engine.dispose()

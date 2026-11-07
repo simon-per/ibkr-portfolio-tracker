@@ -21,6 +21,7 @@ import {
 } from './portfolioKpis'
 import type { ValueSeriesPoint } from './portfolioKpis'
 import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
+import { rangeProfitSeries } from './rangeProfit'
 
 function point(
   date: string, mv: number, cost: number, flow?: number,
@@ -493,21 +494,32 @@ describe('betaAndCorrelation', () => {
 })
 
 describe('concentrationPct', () => {
+  const held = (v: number) => ({ market_value_eur: v, market_price: 1 })
+  const UNTRACKED = { amount: 0, cash_source: 'unknown' as const }
+
   it('sums the largest N by value', () => {
-    const positions = [10, 50, 20, 5, 5, 10].map((v) => ({ market_value_eur: v }))
+    const positions = [10, 50, 20, 5, 5, 10].map(held)
     // top 5 of 100 total = 95
-    expect(concentrationPct(positions)).toBeCloseTo(95, 6)
+    expect(concentrationPct(positions, UNTRACKED)).toBeCloseTo(95, 6)
+  })
+
+  it('is a share of the book, cash included, like the Positions weights (M5)', () => {
+    const positions = [60, 20, 10, 5, 3, 2].map(held)
+    // The top five hold 98 of a 100 book plus 25 in cash: 78.4%, never 98% of holdings alone.
+    expect(concentrationPct(positions, { amount: 25, cash_source: 'ibkr' })).toBeCloseTo(78.4, 6)
+    // Not loaded: absent, not divided by holdings alone.
+    expect(concentrationPct(positions, undefined)).toBeNull()
   })
 
   it('is 100% when there are fewer positions than N', () => {
-    expect(concentrationPct([{ market_value_eur: 7 }])).toBeCloseTo(100, 6)
+    expect(concentrationPct([held(7)], UNTRACKED)).toBeCloseTo(100, 6)
   })
 
   it('handles an empty portfolio', () => {
     // null, not 0: the card tones anything under 50% as good news, so a zero here is a
     // green all-clear drawn from no data at all.
-    expect(concentrationPct([])).toBeNull()
-    expect(concentrationPct([{ market_value_eur: 0 }])).toBeNull()
+    expect(concentrationPct([], UNTRACKED)).toBeNull()
+    expect(concentrationPct([{ market_value_eur: 0, market_price: null }], UNTRACKED)).toBeNull()
   })
 })
 
@@ -637,6 +649,23 @@ describe('a range that starts before inception', () => {
     expect(firstValuedPoint([preInception(0), preInception(1)])).toBeNull()
   })
 
+  it('leaves the move from nothing to the first close out of volatility, Sharpe and Sortino (M6)', () => {
+    // The first lot cost 1000 and closed at 990: the inception pair's Modified Dietz return
+    // is (990 − 0 − 1000) / 500 = −2%, a move the book never made. Every series metric
+    // walks the same returns as the drawdown — those after the seed.
+    const after = compounded(alternating(MIN_RETURNS + 2, 0.01), 990).map((p, i) => ({
+      ...p, date: `2026-04-${String(i + 1).padStart(2, '0')}`,
+    }))
+    const withInception: PortfolioValuePoint[] = [
+      { ...point('2026-03-31', 0, 0, 0), unpriced_holdings: 0 },
+      { ...after[0], external_flow_eur: 1000 },
+      ...after.slice(1),
+    ]
+    expect(annualizedVolatilityPct(withInception)).toBeCloseTo(annualizedVolatilityPct(after)!, 9)
+    expect(sharpeRatio(withInception)).toBeCloseTo(sharpeRatio(after)!, 9)
+    expect(sortinoDetail(withInception).ratio).toBeCloseTo(sortinoDetail(after).ratio!, 9)
+  })
+
   it('reports the real fall, not a measured zero', () => {
     expect(maxDrawdownPct(series)).toBeCloseTo(-10, 6)
   })
@@ -701,11 +730,32 @@ describe('periodChange', () => {
     expect([r.startDate, r.endDate]).toEqual([day(0), day(1)])
   })
 
-  it('prefers the attribution P&L, which counts a realized gain', () => {
-    const series = [point(day(0), 1000, 900, 0), point(day(1), 1100, 900, 0)]
-    expect(periodChange(series, 250)!.periodGain).toBe(250)
-    // An explicit null from the endpoint falls back exactly as an absent one does.
-    expect(periodChange(series, null)!.periodGain).toBe(100)
+  it("is the chart's Profit/Loss end when cash is tracked: dividends and cash income count", () => {
+    // V3/M1/M3: 1000 in, worth 1100 in holdings, plus 30 of dividends in cash. The chart's
+    // line ends at +130; the price-only attribution total (+100) used to head the pill.
+    const tracked = (p: PortfolioValuePoint, cash: number, moneyIn: number): PortfolioValuePoint => ({
+      ...p, cash_eur: cash, total_value_eur: p.market_value_eur + cash, money_in_eur: moneyIn,
+      cash_source: 'ibkr',
+    })
+    const series = [
+      tracked(point(day(0), 1000, 1000, 0), 0, 1000),
+      tracked(point(day(1), 1050, 1000, 0), 10, 1000),
+      tracked(point(day(2), 1100, 1000, 0), 30, 1000),
+    ]
+    const r = periodChange(series)!
+    expect(r.periodGain).toBe(130)
+    expect(r.periodGain).toBe(rangeProfitSeries(series, true).at(-1))
+  })
+
+  it('without tracked cash, is the flow-adjusted gain — a sale keeps its realized gain', () => {
+    // Held 1000 (cost 900); sold half for 600 on day 1; the rest worth 550 on day 2. The
+    // unrealized delta reads 100 → 100 (0); what the holdings earned is 550 − 1000 + 600.
+    const series = [
+      point(day(0), 1000, 900, 0),
+      point(day(1), 500, 450, -600),
+      point(day(2), 550, 450, 0),
+    ]
+    expect(periodChange(series)!.periodGain).toBe(150)
   })
 
   it('reads the first and last MEASURABLE points, like every other consumer of the series', () => {

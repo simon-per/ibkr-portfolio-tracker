@@ -42,8 +42,10 @@ function withProviders(node: React.ReactNode) {
   )
 }
 
+const UNTRACKED = { amount: 0, cash_source: 'unknown' as const }
+
 function renderCard(positions: DriftInput[] = equalFour) {
-  return withProviders(<RebalanceCard positions={positions} />)
+  return withProviders(<RebalanceCard positions={positions} cash={UNTRACKED} />)
 }
 
 function targetInput(symbol: string): HTMLInputElement {
@@ -212,7 +214,7 @@ describe('RebalanceCard', () => {
     // Two securities share the ticker ASML, so a symbol-keyed target would
     // drive both from one field.
     localStorage.setItem('allocationTargets', JSON.stringify({ 7: 70, 8: 30 }))
-    withProviders(<RebalanceCard positions={[pos(7, 'ASML', 600), pos(8, 'ASML', 400)]} />)
+    withProviders(<RebalanceCard positions={[pos(7, 'ASML', 600), pos(8, 'ASML', 400)]} cash={UNTRACKED} />)
     const inputs = screen.getAllByLabelText('Target weight for ASML') as HTMLInputElement[]
     expect(inputs.map((i) => i.value).sort()).toEqual(['30', '70'])
   })

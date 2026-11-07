@@ -170,8 +170,10 @@ describe('forecastBaseline', () => {
     })
   })
 
-  it('has nothing to project from without a summary, and still refuses to invent a baseline', () => {
-    expect(forecastBaseline(undefined, undefined, false)).toEqual({ startValue: 0, moneyInToDate: null })
+  it('has nothing to project from without a summary, and invents no start (M4)', () => {
+    expect(forecastBaseline(undefined, undefined, false)).toEqual({ startValue: null, moneyInToDate: null })
+    // From scratch needs no summary at all.
+    expect(forecastBaseline(undefined, undefined, true)).toEqual({ startValue: 0, moneyInToDate: 0 })
   })
 })
 

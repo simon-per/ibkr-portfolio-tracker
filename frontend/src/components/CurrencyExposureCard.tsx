@@ -46,7 +46,7 @@ export function CurrencyExposureCard({
     ? "Couldn't load positions, so currency exposure can't be measured."
     : foreign === null
       ? 'Nothing priced yet, so there is no exposure to report.'
-      : `${foreign.toFixed(0)}% of the book is quoted outside ${baseCurrency}.`
+      : `${foreign.toFixed(0)}% of the holdings is quoted outside ${baseCurrency}.`
 
   return (
     <Card>

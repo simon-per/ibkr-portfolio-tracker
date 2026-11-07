@@ -18,6 +18,7 @@ import {
   type TargetMap,
 } from '@/lib/rebalance'
 import { displayName } from '@/lib/securityName'
+import type { AccountCash } from '@/lib/portfolioCash'
 
 const BAND_KEY = 'allocationBandPp'
 
@@ -45,11 +46,13 @@ function driftClass(row: DriftRow): string {
 
 interface RebalanceCardProps {
   positions: DriftInput[] | undefined
+  /** The account's cash, for the book total (`bookTotal`); undefined until loaded. */
+  cash?: AccountCash
   isLoading?: boolean
   isError?: boolean
 }
 
-export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardProps) {
+export function RebalanceCard({ positions, cash, isLoading, isError }: RebalanceCardProps) {
   const { baseCurrency } = useBaseCurrency()
   const [targets, setTargets] = useState<TargetMap>(() => readTargets())
   const [bandPp, setBandPp] = useState(() => {
@@ -68,8 +71,8 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
   }, [bandPp])
 
   const plan = useMemo(
-    () => computeRebalancePlan(positions ?? [], targets, bandPp),
-    [positions, targets, bandPp],
+    () => computeRebalancePlan(positions ?? [], targets, bandPp, cash),
+    [positions, targets, bandPp, cash],
   )
 
   const sorted = useMemo(

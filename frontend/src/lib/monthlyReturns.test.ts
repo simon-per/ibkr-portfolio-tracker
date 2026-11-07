@@ -368,3 +368,16 @@ describe('monthlyReturnRows', () => {
     expect(row.ytd?.shortenedBy).toEqual({ unpriced: false, range: true })
   })
 })
+
+describe('the month of the first purchase (review item M6)', () => {
+  it('is measured from the first close that held anything, not blanked', () => {
+    const r = computeModifiedDietzReturn([
+      point('2026-03-02', 0, 0, 0),
+      point('2026-03-03', 0, 0, 0),
+      point('2026-03-04', 1000, 1000, 1000),
+      point('2026-03-31', 1050, 1000, 0),
+    ])
+    expect(r?.returnPercent).toBeCloseTo(5, 6)
+    expect(r?.partial).toBeUndefined()
+  })
+})

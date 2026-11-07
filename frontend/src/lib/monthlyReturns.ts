@@ -86,9 +86,14 @@ export function computeModifiedDietzReturn(
   while (hi > lo && !isMeasurable(points[hi])) hi--
 
   const trimmed = lo !== 0 || hi !== points.length - 1
+  // Nothing held yet is not a stale start: the month of the first purchase is measured
+  // from the first close that held anything, as every other walk seeds
+  // (`firstValuedPoint`). It returned null from a zero start, blanking that month
+  // (review item M6).
+  while (lo < hi && isMeasurable(points[lo]) && points[lo].market_value_eur <= 0) lo++
   const truncated = bounds?.rangeStart !== undefined && bounds.rangeStart > bounds.periodStart
   const partial = trimmed || truncated
-  const window = trimmed ? points.slice(lo, hi + 1) : points
+  const window = points.slice(lo, hi + 1)
 
   if (window.length < 2) return null
   const startMV = window[0].market_value_eur

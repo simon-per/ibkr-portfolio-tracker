@@ -78,7 +78,9 @@ export function PerformanceInsights({
         label="Largest holding"
         value={largest && `${largest.weightPct.toFixed(1)}%`}
         absent={largest}
-        who={largest && { symbol: largest.symbol, securityId: largest.securityId, detail: money(largest.marketValue) }}
+        who={largest && {
+          symbol: largest.symbol, securityId: largest.securityId, detail: money(largest.marketValue), figure: true,
+        }}
       />
       <InsightTile
         icon={HandCoins}
@@ -109,7 +111,8 @@ interface InsightTileProps {
   value: ReactNode
   /** The pick itself: `undefined` renders a dash, `null` renders "None". */
   absent: unknown
-  who: { symbol: string; securityId: number; detail: string } | null | undefined
+  /** `figure`: the detail is an amount, which is never cut short (review item VI7). */
+  who: { symbol: string; securityId: number; detail: string; figure?: boolean } | null | undefined
 }
 
 function InsightTile({ icon, tone, label, tag, value, absent, who }: InsightTileProps) {
@@ -136,14 +139,24 @@ function InsightTile({ icon, tone, label, tag, value, absent, who }: InsightTile
       </div>
       {who && (
         <CompanyLink securityId={who.securityId} className="block min-w-0">
-          <div className="flex min-w-0 items-center gap-2 text-xs">
+          {/* An amount wraps under the symbol when the tile is too narrow for both (a
+              390 px phone); a name truncates instead. */}
+          <div className={cn('flex min-w-0 items-center gap-x-2 text-xs', who.figure && 'flex-wrap gap-y-0.5')}>
             <TickerAvatar
               symbol={who.symbol}
               securityId={who.securityId}
               className="h-5 w-5 text-[8px]"
             />
             <span className="shrink-0 font-semibold">{who.symbol}</span>
-            <span className="min-w-0 truncate text-muted-foreground">{who.detail}</span>
+            <span
+              className={
+                who.figure
+                  ? 'shrink-0 whitespace-nowrap tabular-nums text-muted-foreground'
+                  : 'min-w-0 truncate text-muted-foreground'
+              }
+            >
+              {who.detail}
+            </span>
           </div>
         </CompanyLink>
       )}

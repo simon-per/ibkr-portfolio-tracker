@@ -1,5 +1,8 @@
-import type { BenchmarkValuePoint } from './api'
-import { isValuable, type ValuablePosition } from './positionValuation'
+import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
+import { cashIsTracked } from './portfolioCash'
+import type { AccountCash } from './portfolioCash'
+import { bookShare, bookTotal, isValuable, type ValuablePosition } from './positionValuation'
+import { rawProfit } from './rangeProfit'
 
 /** Trading days per year, for annualising a daily return series. Shared with `rollingRisk.ts`. */
 export const TRADING_DAYS = 252
@@ -166,6 +169,20 @@ export function dailyReturns(series: ValueSeriesPoint[]): number[] {
   return dailyReturnSeries(series).map((r) => r.ret)
 }
 
+/**
+ * **The returns every series metric walks** (review item M6, 2026-11-07): the daily
+ * returns dated after the first point that held anything (`firstValuedPoint`,
+ * `returnsAfter`); none when nothing was ever held. Drawdown and the rolling ledger read
+ * them this way; volatility, Sharpe and Sortino read `dailyReturns` raw, so on a range
+ * that opens on the inception day they counted the move from nothing to the first close
+ * — a large, invented return — and the card's Sharpe disagreed with the rolling chart's
+ * last window. One function now, for all of them.
+ */
+export function measurableReturns(series: ValueSeriesPoint[]): { date: string; ret: number }[] {
+  const seed = firstValuedPoint(series)
+  return seed === null ? [] : returnsAfter(seed, dailyReturnSeries(series))
+}
+
 /** Mean and (population) standard deviation of a sample. */
 export function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
   const mean = values.reduce((s, v) => s + v, 0) / values.length
@@ -193,7 +210,7 @@ export function meanAndStdDev(values: number[]): { mean: number; stdDev: number 
 export function maxDrawdownPct(series: ValueSeriesPoint[]): number | null {
   const seed = firstValuedPoint(series)
   if (seed === null) return null
-  const returns = returnsAfter(seed, dailyReturnSeries(series)).map((r) => r.ret)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length === 0) return null
 
   let worst = 0
@@ -238,7 +255,7 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
   // fall — `currentDrawdownPct` stays 0 as well, so the card's green prose was doubly
   // wrong. And only the returns after the seed are walked — see `returnsAfter`.
   const seed = firstValuedPoint(series)
-  const measurable = seed === null ? [] : returnsAfter(seed, dailyReturnSeries(series))
+  const measurable = measurableReturns(series)
   if (measurable.length === 0 || seed === null) {
     return {
       maxDrawdownPct: null,
@@ -320,10 +337,15 @@ export interface PeriodChange {
  * `(+0.00%)` beside a value change of the whole book. `?? null` downstream cannot
  * recover a `0` once it is published, which is why the refusal has to happen here.
  *
- * `periodGain` prefers the attribution endpoint's `total_pnl_eur` when the caller has
- * it: that figure counts a realized gain, while the local fallback — the change in
- * *unrealized* profit — drops when a winner is sold, because the gain leaves the
- * unrealized pool and shows up nowhere.
+ * **`periodGain` is the value chart's Profit/Loss line at its end** (review items V3, M1,
+ * M3, 2026-11-07): Δ(Total Value − Money In) when cash is tracked (`cashIsTracked` on the
+ * last point, the chart's own rule), else the flow-adjusted gain — Δ market value less
+ * the range's external flows, so a sale's realized gain is in it. It used to prefer the
+ * attribution endpoint's `total_pnl_eur` and fall back to the change in *unrealized*
+ * profit while that loaded or failed: the pill flashed −3,238 on a +3,746 year, and once
+ * loaded it was a price-only figure that left out dividends and cash income, so it
+ * disagreed with the chart's line under it on every range. Read off the series, the pill
+ * has no second request to wait for. The per-security attribution bars stay price-only.
  *
  * **`periodGainPercent` divides that gain by the capital that earned it**: the opening
  * value plus every purchase and sale weighted by the share of the range it was at work
@@ -338,10 +360,7 @@ export interface PeriodChange {
  * `null` for the whole thing when no point in the range is measurable, because a line
  * built from unpriced days is the fabricated-loss shape this exists to remove.
  */
-export function periodChange(
-  series: ValueSeriesPoint[],
-  attributionPnl?: number | null,
-): PeriodChange | null {
+export function periodChange(series: PortfolioValuePoint[]): PeriodChange | null {
   const measurable = series.filter(isMeasurable)
   if (measurable.length === 0) return null
 
@@ -353,13 +372,13 @@ export function periodChange(
   const absoluteChange = currentValue - startValue
   const percentageChange = startValue > 0 ? (absoluteChange / startValue) * 100 : null
 
-  const startProfit = first.market_value_eur - first.cost_basis_eur
-  const currentProfit = last.market_value_eur - last.cost_basis_eur
-  const periodGain = attributionPnl ?? currentProfit - startProfit
-
   // The measurable span with its interior intact — an interior day's flow still happened
   // even when its value could not be read — from the first point that held anything.
   const span = series.slice(series.indexOf(first), series.lastIndexOf(last) + 1)
+
+  const periodGain = cashIsTracked(series[series.length - 1])
+    ? rawProfit(last, true) - rawProfit(first, true)
+    : flowAdjustedGain(span)
   const seed = span.findIndex((p) => p.market_value_eur > 0)
   const window = seed === -1 ? [] : span.slice(seed)
   const capital = window.length >= 2 ? modifiedDietzCapital(window).averageCapital : 0
@@ -377,6 +396,14 @@ export function periodChange(
   }
 }
 
+/** Δ market value less the window's external flows: what the holdings earned. */
+function flowAdjustedGain(window: ValueSeriesPoint[]): number {
+  if (window.length === 0) return 0
+  let flows = 0
+  for (let i = 1; i < window.length; i++) flows += externalFlow(window[i - 1], window[i])
+  return window[window.length - 1].market_value_eur - window[0].market_value_eur - flows
+}
+
 /**
  * Annualised volatility of the flow-adjusted daily returns, as a percent.
  *
@@ -386,7 +413,7 @@ export function periodChange(
  * days is an unknown volatility, not a calm one.
  */
 export function annualizedVolatilityPct(series: ValueSeriesPoint[]): number | null {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return null
   return meanAndStdDev(returns).stdDev * Math.sqrt(TRADING_DAYS) * 100
 }
@@ -408,7 +435,7 @@ export function annualizedVolatilityPct(series: ValueSeriesPoint[]): number | nu
  * invites doubt.
  */
 export function sharpeRatio(series: ValueSeriesPoint[]): number | null {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return null
 
   const { mean, stdDev } = meanAndStdDev(returns)
@@ -449,7 +476,7 @@ export type SortinoAbsence = 'insufficient_history' | 'no_downside'
 export function sortinoDetail(
   series: ValueSeriesPoint[],
 ): { ratio: number | null; absence: SortinoAbsence | null } {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return { ratio: null, absence: 'insufficient_history' }
 
   const dailyRiskFree = RISK_FREE_RATE / TRADING_DAYS
@@ -463,7 +490,9 @@ export function sortinoDetail(
 }
 
 /**
- * Share of market value held in the largest N positions, as a percent.
+ * Share of the book held in the largest N positions, as a percent — of `bookTotal`, the
+ * denominator Positions' weights use (review item M5: it divided by holdings alone, so
+ * Top 5 read higher than the sum of the same five weights one card away).
  *
  * `null` — never `0` — when nothing is priced. A `0` here is not merely unknown, it is
  * *reassuring*: the card tones anything under 50% as good news, so an unpriced portfolio
@@ -473,16 +502,23 @@ export function sortinoDetail(
  * green zero appeared with the qualifier that would have explained it silently dropped.
  */
 export function concentrationPct(
-  positions: { market_value_eur: number }[],
+  positions: readonly ValuablePosition[],
+  cash: AccountCash | undefined,
   topN: number = 5,
 ): number | null {
-  const total = positions.reduce((s, p) => s + p.market_value_eur, 0)
-  if (total <= 0) return null
-  const top = [...positions]
-    .sort((a, b) => b.market_value_eur - a.market_value_eur)
+  const largest = positions
+    .filter(isValuable)
+    .map((p) => p.market_value_eur)
+    .sort((a, b) => b - a)
     .slice(0, topN)
-    .reduce((s, p) => s + p.market_value_eur, 0)
-  return (top / total) * 100
+  if (largest.length === 0) return null
+  return bookShare(sumOf(largest), bookTotal(positions, cash))
+}
+
+function sumOf(values: number[]): number {
+  let total = 0
+  for (const v of values) total += v
+  return total
 }
 
 /**
@@ -606,9 +642,25 @@ export function betaAndCorrelation(
   portfolio: ValueSeriesPoint[],
   benchmark: ValueSeriesPoint[],
 ): { beta: number | null; correlation: number | null; sampleDays: number } {
+  return betaOfPairs(betaPairs(portfolio, benchmark))
+}
+
+/** A day both series moved on with no flow on either: the sample beta regresses. */
+export interface BetaPair {
+  date: string
+  port: number
+  bench: number
+}
+
+/**
+ * The days `betaAndCorrelation` regresses, each with both returns — **the one day filter**
+ * for every beta (review item M6): the rolling beta re-derived its own from the Dietz
+ * returns and a flow-date set, which let a cost-basis-only day and the benchmark's own
+ * contribution days through.
+ */
+export function betaPairs(portfolio: ValueSeriesPoint[], benchmark: ValueSeriesPoint[]): BetaPair[] {
   const byDate = new Map(benchmark.map((p) => [p.date, p]))
-  const portReturns: number[] = []
-  const benchReturns: number[] = []
+  const pairs: BetaPair[] = []
 
   for (let i = 1; i < portfolio.length; i++) {
     const prev = portfolio[i - 1]
@@ -636,10 +688,21 @@ export function betaAndCorrelation(
     ) continue
 
     if (prev.market_value_eur <= 0 || benchPrev.market_value_eur <= 0) continue
-    portReturns.push(curr.market_value_eur / prev.market_value_eur - 1)
-    benchReturns.push(benchCurr.market_value_eur / benchPrev.market_value_eur - 1)
+    pairs.push({
+      date: curr.date,
+      port: curr.market_value_eur / prev.market_value_eur - 1,
+      bench: benchCurr.market_value_eur / benchPrev.market_value_eur - 1,
+    })
   }
+  return pairs
+}
 
+/** Beta and correlation over `pairs`; null below `MIN_PAIRED_RETURNS`. */
+export function betaOfPairs(
+  pairs: readonly BetaPair[],
+): { beta: number | null; correlation: number | null; sampleDays: number } {
+  const portReturns = pairs.map((p) => p.port)
+  const benchReturns = pairs.map((p) => p.bench)
   const sampleDays = portReturns.length
   if (sampleDays < MIN_PAIRED_RETURNS) return { beta: null, correlation: null, sampleDays }
 

@@ -18,6 +18,7 @@ import {
   parseLocalDate,
   tooltipValue,
   formatMarketCap,
+  formatMultiple,
   marketCapParts,
   ABSENT,
 } from './utils'
@@ -451,5 +452,25 @@ describe('formatAxisMoney with the axis step', () => {
         expect(Math.abs(read - tick), `${tick} -> ${label}`).toBeLessThan(1e-9 * Math.max(1, Math.abs(tick)))
       }
     }
+  })
+})
+
+describe('no signed zero (review item M7)', () => {
+  it('prints a value that rounds to zero unsigned', () => {
+    expect(formatCurrency(-0.001, 'CHF')).toBe(formatCurrency(0, 'CHF'))
+    expect(formatCurrency(-0, 'EUR')).toBe('€0.00')
+    expect(formatPercent(-0.001)).toBe('0.00%')
+    expect(formatFractionPercent(-0.0001)).toBe('0.0%')
+    expect(formatMultiple(-0.01)).toBe('0.0')
+    // Anything that does not round away keeps its sign.
+    expect(formatPercent(-0.01)).toBe('-0.01%')
+    expect(formatCurrency(-0.01, 'EUR')).toBe('-€0.01')
+  })
+
+  it('rolls a market cap that rounds to 1,000 of its unit over to the next', () => {
+    expect(formatMarketCap(999.96e9)).toBe('1.0T')
+    expect(formatMarketCap(999.6e6)).toBe('1.0B')
+    expect(formatMarketCap(999.4e9)).toBe('999.4B')
+    expect(formatMarketCap(1.234e12)).toBe('1.2T')
   })
 })

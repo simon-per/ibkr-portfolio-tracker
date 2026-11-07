@@ -141,18 +141,25 @@ export function monthlyPace(contributions: ContributionsResponse | undefined): n
  *
  * `moneyInToDate` is `null`, never 0, when the contributions response is absent or carries
  * no all-time window: the reader has to distinguish "nothing paid in" from "we do not know".
+ *
+ * **`startValue` is `null` without the summary** (loading or failed) unless projecting from
+ * scratch (review items M4, U6, 2026-11-07). It fell back to 0, so the tab projected the
+ * whole book from nothing while the summary loaded or after it failed — a ten-year value
+ * short by the compounded book, and gains of minus everything ever paid in.
  */
 export function forecastBaseline(
   summary: PortfolioSummary | undefined,
   contributions: ContributionsResponse | undefined,
   startFromZero: boolean,
-): Pick<ForecastInputs, 'startValue' | 'moneyInToDate'> {
+): { startValue: number | null; moneyInToDate: number | null } {
   if (startFromZero) return { startValue: 0, moneyInToDate: 0 }
 
   const startValue =
-    summary != null && cashIsTracked(summary) && summary.total_value_eur != null
-      ? summary.total_value_eur
-      : summary?.total_market_value_eur ?? 0
+    summary == null
+      ? null
+      : cashIsTracked(summary) && summary.total_value_eur != null
+        ? summary.total_value_eur
+        : summary.total_market_value_eur
 
   const allTime = contributions?.windows.find((w) => w.label === 'all')
   return { startValue, moneyInToDate: allTime ? allTime.money_in_eur : null }

@@ -10,7 +10,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader'
 import { chartColor, NEUTRAL_COLOR } from '@/lib/chartPalette'
 import { XAxis, YAxis, CartesianGrid, Legend, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
-import { contributionsQuery, summaryQuery } from '@/lib/queryCache'
+import { contributionsQuery, settingsQuery, summaryQuery } from '@/lib/queryCache'
 import { ABSENT, formatAxisMoney } from '@/lib/utils'
 import { niceTicks } from '@/lib/niceTicks'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -52,25 +52,61 @@ function readNumber(key: string, fallback: number, min: number, max: number): nu
 }
 
 /**
+ * A typed contribution and the base currency it was typed in (review item U6). Stored as a
+ * bare number until 2026-11-07 and labelled with whatever the base currency was at read
+ * time, so after a switch "2000 CHF" projected as 2000 USD. `currency` is null for a value
+ * stored before then, or typed before the settings loaded; the tab stamps it with the base
+ * currency once that is known.
+ */
+interface ChosenContribution {
+  amount: number
+  currency: string | null
+}
+
+function validAmount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_CONTRIBUTION
+}
+
+function writeChosen(chosen: ChosenContribution | null) {
+  writeStored(STORAGE_KEYS.chosenMonthlyContribution, chosen === null ? null : JSON.stringify(chosen))
+}
+
+/**
  * The contribution the owner deliberately chose, or `null` to follow their real pace.
  * Migrates the legacy key once: any value other than the auto-written default was typed by
  * someone and is kept as a choice; the default itself is dropped. Idempotent, so a second
- * call (StrictMode) reads the migrated key.
+ * call (StrictMode) reads the migrated key. A bare number under the current key (before
+ * U6) reads as a choice with no currency yet.
  */
-function readChosenContribution(): number | null {
-  const chosen = readValid(STORAGE_KEYS.chosenMonthlyContribution, 0, MAX_CONTRIBUTION)
-  if (chosen !== null) return chosen
-  const legacy = readValid(LEGACY_CONTRIBUTION_KEY, 0, MAX_CONTRIBUTION)
-  if (legacy !== null && legacy !== LEGACY_DEFAULT_CONTRIBUTION) {
-    writeStored(STORAGE_KEYS.chosenMonthlyContribution, String(legacy))
+function readChosenContribution(): ChosenContribution | null {
+  const raw = readStored(STORAGE_KEYS.chosenMonthlyContribution)
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (validAmount(parsed)) return { amount: parsed, currency: null }
+      if (parsed && typeof parsed === 'object') {
+        const { amount, currency } = parsed as { amount?: unknown; currency?: unknown }
+        if (validAmount(amount)) {
+          return { amount, currency: typeof currency === 'string' ? currency : null }
+        }
+      }
+    } catch {
+      // Unreadable: treated as nothing chosen.
+    }
   }
+  const legacy = readValid(LEGACY_CONTRIBUTION_KEY, 0, MAX_CONTRIBUTION)
+  const kept = legacy !== null && legacy !== LEGACY_DEFAULT_CONTRIBUTION
+    ? { amount: legacy, currency: null }
+    : null
+  if (kept) writeChosen(kept)
   writeStored(LEGACY_CONTRIBUTION_KEY, null)
-  return legacy === LEGACY_DEFAULT_CONTRIBUTION ? null : legacy
+  return kept
 }
 
 interface ProjectionRow {
   year: number
-  value: number
+  /** `null` while today's value is unknown (the summary loading or failed). */
+  value: number | null
   moneyIn: number | null
   gains: number | null
 }
@@ -114,7 +150,7 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
     align: 'right',
     mobile: 'value',
     cellClassName: 'font-semibold',
-    cell: (p) => money(p.value),
+    cell: (p) => (p.value === null ? ABSENT : money(p.value)),
   },
   {
     key: 'gains',
@@ -123,8 +159,10 @@ const projectionColumns = (money: (value: number) => string): Column<ProjectionR
     align: 'right',
     mobile: 'delta',
     // A book worth less than was paid in is a loss today.
+    // An absent gain is a dash with no tone, not a green one.
     tone: (p) =>
-      p.gains !== null && p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
+      p.gains === null ? undefined
+      : p.gains < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
     hint: { description: 'Value minus money in' },
     cell: (p) => (p.gains === null ? ABSENT : money(p.gains)),
   },
@@ -151,12 +189,30 @@ export function ForecastTab() {
   })
   const [forecastYears, setForecastYears] = useState(() => readNumber(STORAGE_KEYS.forecastYears, 10, 1, 30))
 
+  // The settings under the CurrencyProvider's own key: whether `baseCurrency` is the
+  // account's or still the fallback.
+  const { data: settings } = useQuery(settingsQuery)
+  const settingsKnown = settings !== undefined
+
   // The contribution is stored on an edit and never on mount: writing it back on mount is
   // what made the old default indistinguishable from a choice. `null` follows the real pace.
+  // Stored with the base currency it was typed in, once that is known.
   const chooseContribution = (value: number | null) => {
-    setChosenContribution(value)
-    writeStored(STORAGE_KEYS.chosenMonthlyContribution, value === null ? null : String(value))
+    const chosen = value === null ? null : { amount: value, currency: settingsKnown ? baseCurrency : null }
+    setChosenContribution(chosen)
+    writeChosen(chosen)
   }
+
+  // A choice stored without a currency (before U6, or typed before the settings loaded) is
+  // stamped with the base currency the first time that is known — adjusted during render,
+  // so no frame reads it unstamped — and the stamp persisted below. Only a choice is ever
+  // written back, never the pace or the default.
+  if (settingsKnown && chosenContribution !== null && chosenContribution.currency === null) {
+    setChosenContribution({ ...chosenContribution, currency: baseCurrency })
+  }
+  useEffect(() => {
+    if (chosenContribution?.currency) writeChosen(chosenContribution)
+  }, [chosenContribution])
 
   // Persist whenever values change, through the one guarded store (`lib/storage.ts`).
   useEffect(() => {
@@ -193,11 +249,22 @@ export function ForecastTab() {
   // which `forecastBaseline` resolves — Total Value where cash is tracked, and money in
   // to date from the contributions endpoint, or `null` when that could not be loaded.
   const current = forecastBaseline(summary, contributions, false)
-  const { startValue, moneyInToDate } = forecastBaseline(summary, contributions, startFromZero)
+  const baseline = forecastBaseline(summary, contributions, startFromZero)
+  const { moneyInToDate } = baseline
+  // Nothing is projected from a value nobody has: while the summary loads or after it
+  // failed, the value figures are absent rather than projected from 0 (review item M4).
+  const baselineKnown = baseline.startValue !== null
+  const startValue = baseline.startValue ?? 0
 
   const pace = monthlyPace(contributions)
-  const monthlyContribution = chosenContribution ?? pace ?? FALLBACK_CONTRIBUTION
-  const followingPace = chosenContribution === null && pace !== null
+  // A choice typed in another base currency is not this one's amount: follow the pace.
+  const chosenAmount =
+    chosenContribution !== null &&
+    (chosenContribution.currency === null || chosenContribution.currency === baseCurrency)
+      ? chosenContribution.amount
+      : null
+  const monthlyContribution = chosenAmount ?? pace ?? FALLBACK_CONTRIBUTION
+  const followingPace = chosenAmount === null && pace !== null
 
   const inputs = useMemo(
     () => ({ startValue, moneyInToDate, monthlyContribution, annualReturnPct: expectedReturn }),
@@ -209,9 +276,12 @@ export function ForecastTab() {
   // point — so moving the baseline off market value would have been four edits, and the
   // table and the chart had already drifted into publishing two different quantities
   // under one name. `lib/forecast.ts` is the single copy.
-  const projections = useMemo(
-    () => HORIZON_YEARS.map((year) => ({ year, ...projectForecast(inputs, year * 12) })),
-    [inputs],
+  const projections = useMemo<ProjectionRow[]>(
+    () => HORIZON_YEARS.map((year) => {
+      const point = projectForecast(inputs, year * 12)
+      return baselineKnown ? { year, ...point } : { year, ...point, value: null, gains: null }
+    }),
+    [inputs, baselineKnown],
   )
 
   const scenarios = useMemo(
@@ -347,7 +417,9 @@ export function ForecastTab() {
                 options={[
                   {
                     value: 'current',
-                    label: `Current (${summaryError ? 'unavailable' : money(current.startValue)})`,
+                    label: `Current (${
+                      summaryError ? 'unavailable' : current.startValue === null ? ABSENT : money(current.startValue)
+                    })`,
                   },
                   { value: 'zero', label: money(0) },
                 ]}
@@ -366,8 +438,8 @@ export function ForecastTab() {
             hero
             icon={Telescope}
             label={`Value in ${yearsLabel}`}
-            value={money(horizon.value)}
-            sparkline={monthlyData.map((d) => d.value)}
+            value={baselineKnown ? money(horizon.value) : null}
+            sparkline={baselineKnown ? monthlyData.map((d) => d.value) : undefined}
           />
           <KpiCard
             tile
@@ -379,8 +451,8 @@ export function ForecastTab() {
             tile
             icon={Sprout}
             label="Gains"
-            tone={horizon.gains === null ? 'neutral' : horizon.gains < 0 ? 'negative' : 'positive'}
-            value={horizon.gains === null ? null : money(horizon.gains)}
+            tone={!baselineKnown || horizon.gains === null ? 'neutral' : horizon.gains < 0 ? 'negative' : 'positive'}
+            value={!baselineKnown || horizon.gains === null ? null : money(horizon.gains)}
           />
         </KpiPanel>
       )}
@@ -397,6 +469,9 @@ export function ForecastTab() {
         <CardContent className="pt-2">
           {/* Height in CSS on the wrapper: 640px was 76% of an 844px phone screen. */}
           <div className="h-[260px] w-full sm:h-[360px] lg:h-[420px]">
+          {!baselineKnown ? (
+            <div className="h-full w-full animate-pulse rounded-lg bg-muted" />
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
@@ -463,7 +538,16 @@ export function ForecastTab() {
               />
             </AreaChart>
           </ResponsiveContainer>
+          )}
           </div>
+          {!startFromZero && summaryError && (
+            <p
+              role="alert"
+              className="mt-3 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-xs text-warn"
+            >
+              Today's portfolio value isn't available, so nothing is projected from it.
+            </p>
+          )}
           {/* Said only when the load failed: flashing it while the baseline is still
               loading would teach the reader to skip it. */}
           {startFromZero || moneyInToDate !== null || contributionsPending ? null : (
@@ -503,7 +587,7 @@ export function ForecastTab() {
                 tile
                 icon={scenario.icon}
                 label={scenario.name}
-                value={money(scenario.value)}
+                value={baselineKnown ? money(scenario.value) : null}
                 sub={`${scenario.rate}% a year`}
               />
             ))}

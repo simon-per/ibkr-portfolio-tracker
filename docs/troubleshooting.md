@@ -198,11 +198,6 @@ decision; read the entry before "fixing" one.
 - **`/api/portfolio/activity` shows dividends net, with estimates badged.** A `yfinance_estimate` row
   is a gross guess with no withholding and reads *Dividend · est.* It splices like every other
   reader — pre-boundary estimates survive and stay badged.
-- **`/api/portfolio/attribution` excludes-and-counts a line that did not exist at the window start.**
-  A spun-off security has no start value to attribute against, so for a window opening before the
-  spinoff it is dropped from both sides and reported as `unpriced_holdings: 1` — visible on the ALL
-  range. Doing it properly means combining parent and child. The timeline, the summary and the
-  Steuerwert all handle it.
 - **A price inside the session is an intraday value, not a close, and that is normal.** Five of
   the seven market-data slots run mid-session, so the newest row is provisional until the market
   shuts; it is re-fetched at every slot for three days and settles on its own. Only a wrong value

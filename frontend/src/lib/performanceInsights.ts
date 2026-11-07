@@ -9,8 +9,8 @@
  * dash there would claim the answer is unknown.
  */
 import type { DividendUpcomingPayment, Position, SecurityAttribution } from '@/lib/api'
-import { inBookCash, type AccountCash } from '@/lib/portfolioCash'
-import { isUnpriced } from '@/lib/positionValuation'
+import type { AccountCash } from '@/lib/portfolioCash'
+import { bookShare, bookTotal, isUnpriced } from '@/lib/positionValuation'
 
 export interface Mover {
   securityId: number
@@ -38,22 +38,6 @@ export interface NextDividend {
   estimated: boolean
 }
 
-/**
- * What a position weight is a share of, so the table and the tiles cannot disagree:
- * valued holdings plus in-book cash (`inBookCash` — positive and tracked, the rule
- * Allocation and Look-through share server-side).
- *
- * `null` while the cash is not loaded (`AccountCash`): without it there is no denominator,
- * and holdings alone overstated every weight by the cash share (#70).
- */
-export function weightDenominator(
-  positions: readonly Position[],
-  cash: AccountCash | undefined,
-): number | null {
-  if (!cash) return null
-  const holdings = positions.reduce((sum, p) => (isUnpriced(p) ? sum : sum + p.market_value_eur), 0)
-  return holdings + inBookCash(cash)
-}
 
 /**
  * The best (`'best'`) or worst (`'worst'`) contributor to the range's P&L. Only a strictly
@@ -95,16 +79,17 @@ export function largestHolding(
   if (!positions) return undefined
   const valued = positions.filter((p) => !isUnpriced(p))
   if (valued.length === 0) return null
-  const total = weightDenominator(positions, cash)
+  const total = bookTotal(positions, cash)
   if (total === null) return undefined
-  if (total <= 0) return null
   const top = valued.reduce((a, b) => (b.market_value_eur > a.market_value_eur ? b : a))
+  const weightPct = bookShare(top.market_value_eur, total)
+  if (weightPct === null) return null
   return {
     securityId: top.security_id,
     symbol: top.symbol,
     description: top.description,
     marketValue: top.market_value_eur,
-    weightPct: (top.market_value_eur / total) * 100,
+    weightPct,
   }
 }
 

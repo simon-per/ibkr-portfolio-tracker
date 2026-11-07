@@ -103,3 +103,25 @@ describe('drawdownEpisodes', () => {
     expect(eps[0].peakDate).toBe('2026-01-03')
   })
 })
+
+describe('one day filter for every beta (review item M6)', () => {
+  it("draws the card's beta on the last window, a cost-basis-only day skipped by both", async () => {
+    const { betaAndCorrelation } = await import('./portfolioKpis')
+    const n = 80
+    const bench = series(Array.from({ length: n }, (_, i) => 1000 * (1 + 0.02 * Math.sin(i / 3))))
+    const port: number[] = [1000]
+    for (let i = 1; i < n; i++) {
+      const br = bench[i].market_value_eur / bench[i - 1].market_value_eur - 1
+      port.push(port[i - 1] * (1 + (i % 7 === 0 ? 0.5 : 2) * br))
+    }
+    const p = series(port)
+    // A cost-basis change with no external flow recorded: the card's filter skips it.
+    for (let i = 50; i < n; i++) p[i] = { ...p[i], cost_basis_eur: p[i].cost_basis_eur + 100 }
+    const rolling = rollingMetrics(p, bench, n - 1)
+    const last = rolling[rolling.length - 1]
+    const card = betaAndCorrelation(p, bench)
+    expect(last.pairedDays).toBe(card.sampleDays)
+    expect(last.beta).toBeCloseTo(card.beta!, 9)
+    expect(last.correlation).toBeCloseTo(card.correlation!, 9)
+  })
+})
