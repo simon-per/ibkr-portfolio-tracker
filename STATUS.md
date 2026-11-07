@@ -93,11 +93,13 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Dividends per share from filing instances (deployed 2026-11-07, `d9808be`):** every gap
-  company is backfilled on production (docs/shipped-log.md; 133 gaps left, each a documented
-  cause). Unverified: the Sunday 2026-11-08 05:00 `company_financials_refresh` reports few or no
-  `filings_read` (every gap's sources are read) and no `filing_errors`; later Sundays read about
-  one filing a quarter (BKR). The owner's eye on MA's, INTC's and WMT's charts in the browser.
+- **Dividends per share: filing instances, rate rules and the pass's check (deployed
+  2026-11-07, `4cb7bd1`):** every gap company is backfilled on production (docs/shipped-log.md;
+  90 gaps left, each a documented cause). Unverified: the Sunday 2026-11-08 05:00
+  `company_financials_refresh` reads few or no filings, has no `filing_errors`, and — its first
+  run with the check — lists `ttm_dividend_gaps` (expect BKR, whose Q2 2026 10-Q companyfacts
+  lacks) and `stale_figures` once as warnings; the Sunday after, the same names in the record
+  and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
   `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
@@ -363,8 +365,10 @@ One line each, newest first; drop the oldest.
 - **2026-11-07 (Company tab: missing dividends per share, /goal run)** — MA's FY19–FY23 hole:
   companyfacts drops dimensioned facts, and MA (and PCAR, INTC, MDLZ, XEL, BKR, COST) tag DPS
   only on an equity-statement or share-class member; now read once per filing from its XBRL
-  instance; a zero quarter the ladder shows is kept (INTC, WMT). Deployed on the owner's word;
-  all gap companies backfilled at one SEC request per 3 s (gaps 260 → 133 on production, MA's already filled).
+  instance; a zero quarter the ladder shows is kept (INTC, WMT); one rate on every rung,
+  vouched for by the declared totals (IBKR, BKNG, CEG); each pass now names broken TTMs and
+  stale figures. Deployed on the owner's word; all gap companies backfilled at one SEC request
+  per 3 s (gaps 260 → 90 on production, MA's already filled).
 
 - **2026-11-07 (harmonization, Company links and overview, one /goal run)** — six leftovers on the
   shared rules; every holding's row links to its Company page through the URL hash; the Company

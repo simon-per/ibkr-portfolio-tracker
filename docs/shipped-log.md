@@ -34,6 +34,14 @@
   the 22 companies with gaps read 71 more. Production: 260 gaps (MA's already filled) → 133 across 22 companies,
   COST, MDLZ, XEL and GEHC none, BKR 4, INTC 2, PCAR 1; four `manual_company_financials_fetch`
   rows, all success.
+- **One rate on every rung, and the pass's check** (`258ba5e`, `ebe7e7b`, `4cb7bd1`, owner's
+  request to close what can be closed and to have the data checked): a fiscal year, or its
+  tail from a quarter to the year end, whose dividend figures are one rate and whose quarters
+  declared the same money paid that rate each quarter (IBKR, BKNG, CEG, AMAT); each EDGAR pass
+  lists `ttm_dividend_gaps` and `stale_figures` and warns about new names. The check's first
+  run (the IBKR/BKNG/CEG/AMAT backfill) named IBKR, whose Q4 2025 followed an April raise —
+  which the tail rule then closed. Production: 133 → 90 gaps; IBKR's live TTM dividend runs 40
+  quarters without a hole (Q3 FY2026 0.335).
 
 ## Shipped 2026-10-25 — Company tab: more figures, and the Nasdaq-100
 
