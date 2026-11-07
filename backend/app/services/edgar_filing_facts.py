@@ -129,6 +129,13 @@ def dividend_gaps(rows: Iterable[Dict[str, Any]]) -> List[date]:
     return sorted(paid - have, reverse=True)
 
 
+def ttm_dividend_gap(rows: Sequence[Dict[str, Any]]) -> bool:
+    """Whether a dividend gap falls in the company's newest four quarters: its TTM dividend
+    per share is absent now."""
+    newest = sorted({r["period_end"] for r in rows if r["fiscal_period"] != "FY"})[-4:]
+    return any(gap in newest for gap in dividend_gaps(rows))
+
+
 def reporting(by_accn: Dict[str, Filing], period_end: date) -> Optional[Filing]:
     """The filing that reports the quarter ending on `period_end` — the original before an
     amendment, which may restate one note and tag nothing else."""

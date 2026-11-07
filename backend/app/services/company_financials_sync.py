@@ -26,6 +26,12 @@ figure on a dimension member companyfacts leaves out (MA from 2019 to mid-2023).
 is read once ever and what it held is stored (`sec_filing_reads`); at most
 `FILING_READS_PER_COMPANY` a company a pass, newest first.
 
+**What the pass checks** (`ttm_dividend_gaps`, `stale_figures` in its record): a dividend
+payer whose newest four quarters miss a dividend per share (its TTM is absent now), and a
+company whose newest figures are older than `FIGURES_STALE_AFTER` (a filing EDGAR has not
+served). A warning names only the companies the previous scheduled run did not list, so a
+known gap is a line of the record, not a banner every week.
+
 **Bounded** (`STALE_AFTER`, `CIK_RECHECK_AFTER`, `miss_backoff`): a company is fetched at
 most once in `STALE_AFTER`; a held ticker the SEC does not list is looked up again after
 `CIK_RECHECK_AFTER`; the ticker list is asked at most once a pass; a CIK whose document has
@@ -48,7 +54,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utcnow
+from app.clock import utc_today, utcnow
 from app.config import settings
 from app.etf_mappings import is_known_etf_isin
 from app.models.etf_basket import EtfHolding
@@ -59,6 +65,7 @@ from app.repositories.company_financials_repository import (
 )
 from app.repositories.etf_basket_repository import EtfBasketRepository
 from app.repositories.security_repository import held
+from app.repositories.sync_run_repository import SyncRunRepository
 from app.services.company_financials_normaliser import normalise
 from app.services.edgar_client import (
     EdgarClient,
@@ -75,6 +82,7 @@ from app.services.edgar_filing_facts import (
     instance_name,
     parse_instance,
     sources,
+    ttm_dividend_gap,
 )
 from app.services.etf_basket_parsers import INVESTED_ASSET_CLASSES
 from app.services.market_data_service import MarketDataService
@@ -103,6 +111,10 @@ UNIVERSE_SIZE = 100
 #: reads MA's six years of dividend gaps in about ten, BKR's nine in about twenty; a company
 #: that keeps tagging only on a dimension member needs one a quarter after that.
 FILING_READS_PER_COMPANY = 24
+#: A company's newest figures older than this are a filing EDGAR has not served: a 10-Q is
+#: due 40-45 days after its quarter and a 10-K 60-90 days after the year, so the newest
+#: period end is at most about 135 days old (a year's end, until the next first quarter).
+FIGURES_STALE_AFTER = timedelta(days=150)
 
 NOT_CONFIGURED_WARNING = (
     "EDGAR_USER_AGENT is not set; company financials were not refreshed."
@@ -268,6 +280,8 @@ class CompanyFinancialsSync:
             "filings_read": 0,
             "filing_errors": 0,
             "filings_unreadable": 0,
+            "ttm_dividend_gaps": [],
+            "stale_figures": [],
         }
         warnings: List[str] = []
         if missing_baskets:
@@ -332,7 +346,9 @@ class CompanyFinancialsSync:
                 due = await self._due(targets, now, force)
                 summary["companies_due"] = len(due)
                 for target in due:
-                    outcome = await self._one(client, target.cik, summary)
+                    outcome = await self._one(
+                        client, target.cik, summary, target.symbols[0]
+                    )
                     summary["outcomes"].append(
                         {
                             "cik": target.cik,
@@ -367,6 +383,7 @@ class CompanyFinancialsSync:
                 f"The industry of {p} compan{'y' if p == 1 else 'ies'} could not be read "
                 f"from EDGAR; asked again next week."
             )
+        warnings.extend(await self._new_findings(summary))
         f = summary["filing_errors"]
         if f:
             warnings.append(
@@ -517,7 +534,38 @@ class CompanyFinancialsSync:
         await self.db.commit()
         summary["profiles_fetched"] += 1
 
-    async def _one(self, client: EdgarClient, cik: int, summary: Dict[str, Any]) -> str:
+    async def _new_findings(self, summary: Dict[str, Any]) -> List[str]:
+        """Warnings for the companies this pass found with a broken TTM dividend per share
+        or stale figures that the previous scheduled run did not list."""
+        previous = await SyncRunRepository(self.db).get_latest(
+            sync_type=SCHEDULED_SYNC_TYPE
+        )
+        # The scheduled job records this summary under `company_financials_result`.
+        details = (previous.details or {}) if previous is not None else {}
+        before = details.get("company_financials_result") or {}
+
+        def new_since(key: str) -> List[str]:
+            return [s for s in summary[key] if s not in (before.get(key) or [])]
+
+        out = []
+        new = new_since("ttm_dividend_gaps")
+        if new:
+            out.append(
+                f"No TTM dividend per share for {', '.join(new)}: a quarter of the newest "
+                f"four has dividends paid and no dividend per share EDGAR gives."
+            )
+        new = new_since("stale_figures")
+        if new:
+            out.append(
+                f"The newest figures of {', '.join(new)} are more than "
+                f"{FIGURES_STALE_AFTER.days} days old: EDGAR has not served a newer 10-Q or "
+                f"10-K."
+            )
+        return out
+
+    async def _one(
+        self, client: EdgarClient, cik: int, summary: Dict[str, Any], label: str
+    ) -> str:
         try:
             facts = await client.company_facts(cik)
         except EdgarError as e:
@@ -540,6 +588,11 @@ class CompanyFinancialsSync:
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)
+        if ttm_dividend_gap(result.rows):
+            summary["ttm_dividend_gaps"].append(label)
+        newest = max(r["period_end"] for r in result.rows)
+        if utc_today() - newest > FIGURES_STALE_AFTER:
+            summary["stale_figures"].append(label)
         if refused is not None:
             # The figures are written; the refusal still stops the pass.
             raise refused

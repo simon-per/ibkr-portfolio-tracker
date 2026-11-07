@@ -286,11 +286,25 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
   the zero equals its quarters, each as reported where it was: ADP's FY2016 10-K tagged
   FY2015's 1.95 on the nine-month context against the reported 0.48 + 0.49 + 0.49, and the
   zero fourth quarter that made was never declared (the year less the three quarters gives the
-  0.49). Without the rule INTC and WMT had no TTM at all. IBKR's pre-2020 fiscal years still read
-  one quarter's rate — the facts carry nothing that tells them from an annual payer's
-  (accepted, documented here). The quarters are the declared basis, so a company declaring two
-  dividends in one quarter (GEHC's Q3 2025, HPE's Q1 FY2016) shows that quarter double and
-  another at 0; the TTM sums them right.
+  0.49). Without the rule INTC and WMT had no TTM at all. The quarters are the declared basis,
+  so a company declaring two dividends in one quarter (GEHC's Q3 2025, HPE's Q1 FY2016) shows
+  that quarter double and another at 0; the TTM sums them right.
+- **One rate on every rung** (`_flat_rate_years`, 2026-11-07). The per-share facts alone
+  cannot tell IBKR's 0.10 on its three-, six-, nine- and twelve-month contexts from an annual
+  declarer's; the dividends declared in money can (`DIVIDEND_TOTALS`, read as a witness and
+  never stored, like the basic share count): IBKR declared 7M, 14M, 21M, 28M. A fiscal year
+  whose every dividend-per-share fact is one rate (within `FLAT_RATE_TOLERANCE`, 2%: BKNG's
+  9.60 over its 25:1 split is 0.384 beside the restated 0.38) and whose quarters of declared
+  totals are each within `FLAT_TOTALS_TOLERANCE` (25%; IBKR tags 7M or 8M in millions) of
+  their mean paid that rate each quarter. Its quarters without a reported figure take the rate
+  — a quarter derived from two rungs is the difference of two rates (BKNG's 0.004 FY2025 Q4)
+  — and a filed year that carried the rate becomes the four quarters (IBKR's 0.40, CEG's
+  1.41). Two quarters of totals are enough, so a year in progress counts (BKNG's 2026, months
+  before its 10-K); the year itself waits for all four. An annual or semi-annual declarer's
+  quarters of totals are four or two times the mean, or nothing, and a year with a raise is
+  not one rate: both stay as the ladder rules leave them. Closed IBKR's years to 2023, BKNG,
+  CEG's fourth quarters and AMAT's 2014–2017 (offline over the 102 companies: gaps 134 → 95,
+  no other metric's row moved).
 - **One end date per period.** Ends within a week are one period (NVDA tagged one 2010 rung as
   ending a day before its quarter).
 
@@ -473,6 +487,17 @@ Sunday pass picks up the week's. Under its own gate, `EDGAR_GATE`, never `SYNC_P
 shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh` row in
 `sync_runs`; a company EDGAR could not serve is a warning, never the status.
 
+**What each pass checks** (owner's request, 2026-11-07): every company it writes is tested,
+and the record (`company_financials_result` in `/api/scheduler/history`) lists
+`ttm_dividend_gaps` — a dividend payer whose newest four quarters miss a dividend per share,
+so its TTM is absent now — and `stale_figures` — newest figures older than
+`FIGURES_STALE_AFTER` (150 days; a 10-Q is due 40–45 days after its quarter, a 10-K 60–90
+after the year, so the newest period end is at most about 135 days old). **A warning names
+only the companies the previous scheduled run did not list**: a gap nothing can close (BKR's
+Q2 2026 10-Q is missing from companyfacts until the 2027 one repeats it) is a line of the
+record every week, not a banner the reader learns to skip. The first run after the deploy
+warns about all of them once.
+
 **First fill** (inside the container; the CLI's own `single_flight` fences its own process only):
 
     docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_financials --dry-run
@@ -563,13 +588,14 @@ filings' `currency`.
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).
-- **Dividend per share gaps left after the filing instances** (134 quarters across 23
-  companies, 2026-11-07): IBKR and BKNG tag one quarter's rate on every rung (above); CEG tags
-  one quarter's rate on the year, so its fourth quarters stay absent; AMAT and MELI tag each
-  declaration on a one-day or one-month context, or on AMAT's own members; some filings tag no
-  dividend per share anywhere (WDC 2013–2015, CTAS's FY2017); 2008–2009 quarters reported only
-  as comparatives before XBRL (MA, PCAR, FAST, ROP); TMUS before 2018 and LITE paid preferred or
-  other dividends, not common.
+- **Dividend per share gaps left** (about 95 quarters across 20 companies, 2026-11-07):
+  IBKR's years with a raise or its 2025 split in them (not one rate, so the totals cannot vouch
+  for a rung); AMAT before 2014 and MELI, AMGN and MAR tag each declaration on a one-day or
+  one-month context, or on AMAT's own members, with slips beside them (AMAT's FY2013 Q4 0.09
+  against a 0.10 rate) — summing them would guess; some filings tag no dividend per share
+  anywhere (WDC 2013–2015, CTAS's FY2017); 2008–2009 quarters reported only as comparatives
+  before XBRL (MA, PCAR, FAST, ROP); BKR's Q2 2026 10-Q is missing from companyfacts (as ALNY's,
+  below); TMUS before 2018 and LITE paid preferred or other dividends, not common.
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from

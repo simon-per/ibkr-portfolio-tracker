@@ -830,6 +830,43 @@ async def test_a_gap_its_own_filing_lacks_is_read_from_the_filing_a_year_later(
 
 
 @pytest.mark.asyncio
+async def test_the_pass_names_a_broken_ttm_and_stale_figures_and_warns_once(
+    db, configured
+):
+    """No filing holds the 2021 dividend here (every file a 404), and the newest figures
+    are from 2021: both lists name the company, and the warnings do until a scheduled run
+    has recorded it."""
+    await _hold(db, 1, "AAPL")
+    await db.commit()
+    summary = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh()
+    assert summary["ttm_dividend_gaps"] == ["AAPL"]
+    assert summary["stale_figures"] == ["AAPL"]
+    assert any("No TTM dividend per share for AAPL" in w for w in summary["warnings"])
+    assert any("newest figures of AAPL" in w for w in summary["warnings"])
+
+    # As the scheduled job records it (`company_financials_refresh_job`).
+    db.add(
+        SyncRun(
+            sync_type=SCHEDULED_SYNC_TYPE,
+            status="success",
+            details={
+                "type": SCHEDULED_SYNC_TYPE,
+                "company_financials_result": {
+                    k: v for k, v in summary.items() if k != "warnings"
+                },
+            },
+            finished_at=utcnow(),
+        )
+    )
+    await db.commit()
+    summary = await _sync(db, EdgarWithFilings({APPLE_CIK: DIMENSION_ONLY}, {})).refresh(
+        force=True
+    )
+    assert summary["ttm_dividend_gaps"] == ["AAPL"]  # still listed in the record
+    assert not [w for w in summary.get("warnings", []) if "AAPL" in w]
+
+
+@pytest.mark.asyncio
 async def test_a_refused_filing_read_stops_the_pass_after_writing_the_figures(
     db, configured
 ):
