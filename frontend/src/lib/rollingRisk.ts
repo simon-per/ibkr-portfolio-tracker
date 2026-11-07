@@ -14,14 +14,12 @@
  *   zero is measurable and zero, and seeding from it fabricates an opening fall.
  */
 import {
+  betaOfPairs,
+  betaPairs,
   dailyReturnSeries,
-  externalFlow,
   firstValuedPoint,
-  isMeasurable,
   meanAndStdDev,
-  returnsAfter,
-  FLOW_EPSILON,
-  MIN_PAIRED_RETURNS,
+  measurableReturns,
   RISK_FREE_RATE,
   TRADING_DAYS,
   type ValueSeriesPoint,
@@ -42,15 +40,6 @@ export interface RollingPoint {
   pairedDays: number
 }
 
-/** Dates on which the portfolio saw a flow — beta skips them (see `betaAndCorrelation`). */
-function flowDates(series: ValueSeriesPoint[]): Set<string> {
-  const out = new Set<string>()
-  for (let i = 1; i < series.length; i++) {
-    if (!isMeasurable(series[i - 1]) || !isMeasurable(series[i])) continue
-    if (Math.abs(externalFlow(series[i - 1], series[i])) > FLOW_EPSILON) out.add(series[i].date)
-  }
-  return out
-}
 
 /**
  * Sharpe, volatility, beta and correlation over a trailing window, one point per day
@@ -61,16 +50,12 @@ export function rollingMetrics(
   benchmark: ValueSeriesPoint[] | undefined,
   windowDays: number = ROLLING_WINDOW_DAYS,
 ): RollingPoint[] {
-  const seed = firstValuedPoint(portfolio)
-  if (seed === null) return []
-  const returns = returnsAfter(seed, dailyReturnSeries(portfolio))
+  const returns = measurableReturns(portfolio)
   if (returns.length < windowDays) return []
 
-  const benchByDate = new Map<string, number>()
-  if (benchmark) {
-    for (const r of dailyReturnSeries(benchmark)) benchByDate.set(r.date, r.ret)
-  }
-  const skip = flowDates(portfolio)
+  // `betaAndCorrelation`'s own day filter, so the last window's beta is the card's beta
+  // over the same days.
+  const pairs = benchmark ? betaPairs(portfolio, benchmark) : []
 
   const out: RollingPoint[] = []
   for (let end = windowDays; end <= returns.length; end++) {
@@ -88,33 +73,19 @@ export function rollingMetrics(
       }
     }
 
-    const p: number[] = []
-    const b: number[] = []
-    for (const r of window) {
-      const br = benchByDate.get(r.date)
-      if (br === undefined || skip.has(r.date)) continue
-      p.push(r.ret)
-      b.push(br)
-    }
-    let beta: number | null = null
-    let correlation: number | null = null
-    if (p.length >= MIN_PAIRED_RETURNS) {
-      const mp = meanAndStdDev(p)
-      const mb = meanAndStdDev(b)
-      let cov = 0
-      for (let i = 0; i < p.length; i++) cov += (p[i] - mp.mean) * (b[i] - mb.mean)
-      cov /= p.length
-      if (mb.stdDev > 0) beta = cov / (mb.stdDev * mb.stdDev)
-      if (mb.stdDev > 0 && mp.stdDev > 0) correlation = cov / (mp.stdDev * mb.stdDev)
-    }
+    const from = window[0].date
+    const to = window[window.length - 1].date
+    const { beta, correlation, sampleDays } = betaOfPairs(
+      pairs.filter((pair) => pair.date >= from && pair.date <= to),
+    )
 
     out.push({
-      date: window[window.length - 1].date,
+      date: to,
       sharpe,
       volatilityPct,
       beta,
       correlation,
-      pairedDays: p.length,
+      pairedDays: sampleDays,
     })
   }
   return out
@@ -170,7 +141,7 @@ export function drawdownEpisodes(
 ): DrawdownEpisode[] {
   const seed = firstValuedPoint(portfolio)
   if (seed === null) return []
-  const returns = returnsAfter(seed, dailyReturnSeries(portfolio))
+  const returns = measurableReturns(portfolio)
   if (returns.length === 0) return []
   const benchReturns = benchmark ? dailyReturnSeries(benchmark) : []
 

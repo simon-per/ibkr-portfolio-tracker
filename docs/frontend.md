@@ -116,7 +116,13 @@ from one dominant one.
   inception pair's Modified-Dietz return is the move from nothing held *to* the seed, which the
   seed's value already contains, and applying it again fabricated a −2% opening drawdown for a lot
   bought at 100 that closed at 99. The 2Y button crossed this account's inception on 2026-05-28,
-  so it is latent here and live on any younger account or after a backfill.
+  so it is latent here and live on any younger account or after a backfill. **Every series metric
+  walks `measurableReturns(series)`** (review item M6, 2026-11-07): the drawdown and the rolling
+  ledger already seeded this way, while volatility, Sharpe and Sortino read `dailyReturns` raw and
+  counted the inception pair. The rolling beta takes `betaPairs`, `betaAndCorrelation`'s own day
+  filter (it had re-derived one that let a cost-basis-only day and the benchmark's own flow days
+  through), and a heatmap month drops its leading zero-valued points, so the month of the first
+  purchase is measured from its first close instead of blanked.
 - **The hero's period return divides by the capital that earned the gain** (2026-10-17):
   `periodGainPercent` is the range's gain over its Modified Dietz average invested capital
   (`modifiedDietzCapital`, the denominator each heatmap month already used), walked from the first

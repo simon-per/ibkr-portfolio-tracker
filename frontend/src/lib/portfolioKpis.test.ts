@@ -649,6 +649,23 @@ describe('a range that starts before inception', () => {
     expect(firstValuedPoint([preInception(0), preInception(1)])).toBeNull()
   })
 
+  it('leaves the move from nothing to the first close out of volatility, Sharpe and Sortino (M6)', () => {
+    // The first lot cost 1000 and closed at 990: the inception pair's Modified Dietz return
+    // is (990 − 0 − 1000) / 500 = −2%, a move the book never made. Every series metric
+    // walks the same returns as the drawdown — those after the seed.
+    const after = compounded(alternating(MIN_RETURNS + 2, 0.01), 990).map((p, i) => ({
+      ...p, date: `2026-04-${String(i + 1).padStart(2, '0')}`,
+    }))
+    const withInception: PortfolioValuePoint[] = [
+      { ...point('2026-03-31', 0, 0, 0), unpriced_holdings: 0 },
+      { ...after[0], external_flow_eur: 1000 },
+      ...after.slice(1),
+    ]
+    expect(annualizedVolatilityPct(withInception)).toBeCloseTo(annualizedVolatilityPct(after)!, 9)
+    expect(sharpeRatio(withInception)).toBeCloseTo(sharpeRatio(after)!, 9)
+    expect(sortinoDetail(withInception).ratio).toBeCloseTo(sortinoDetail(after).ratio!, 9)
+  })
+
   it('reports the real fall, not a measured zero', () => {
     expect(maxDrawdownPct(series)).toBeCloseTo(-10, 6)
   })

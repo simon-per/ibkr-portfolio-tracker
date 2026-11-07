@@ -169,6 +169,20 @@ export function dailyReturns(series: ValueSeriesPoint[]): number[] {
   return dailyReturnSeries(series).map((r) => r.ret)
 }
 
+/**
+ * **The returns every series metric walks** (review item M6, 2026-11-07): the daily
+ * returns dated after the first point that held anything (`firstValuedPoint`,
+ * `returnsAfter`); none when nothing was ever held. Drawdown and the rolling ledger read
+ * them this way; volatility, Sharpe and Sortino read `dailyReturns` raw, so on a range
+ * that opens on the inception day they counted the move from nothing to the first close
+ * — a large, invented return — and the card's Sharpe disagreed with the rolling chart's
+ * last window. One function now, for all of them.
+ */
+export function measurableReturns(series: ValueSeriesPoint[]): { date: string; ret: number }[] {
+  const seed = firstValuedPoint(series)
+  return seed === null ? [] : returnsAfter(seed, dailyReturnSeries(series))
+}
+
 /** Mean and (population) standard deviation of a sample. */
 export function meanAndStdDev(values: number[]): { mean: number; stdDev: number } {
   const mean = values.reduce((s, v) => s + v, 0) / values.length
@@ -196,7 +210,7 @@ export function meanAndStdDev(values: number[]): { mean: number; stdDev: number 
 export function maxDrawdownPct(series: ValueSeriesPoint[]): number | null {
   const seed = firstValuedPoint(series)
   if (seed === null) return null
-  const returns = returnsAfter(seed, dailyReturnSeries(series)).map((r) => r.ret)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length === 0) return null
 
   let worst = 0
@@ -241,7 +255,7 @@ export function drawdownDetail(series: ValueSeriesPoint[]): {
   // fall — `currentDrawdownPct` stays 0 as well, so the card's green prose was doubly
   // wrong. And only the returns after the seed are walked — see `returnsAfter`.
   const seed = firstValuedPoint(series)
-  const measurable = seed === null ? [] : returnsAfter(seed, dailyReturnSeries(series))
+  const measurable = measurableReturns(series)
   if (measurable.length === 0 || seed === null) {
     return {
       maxDrawdownPct: null,
@@ -399,7 +413,7 @@ function flowAdjustedGain(window: ValueSeriesPoint[]): number {
  * days is an unknown volatility, not a calm one.
  */
 export function annualizedVolatilityPct(series: ValueSeriesPoint[]): number | null {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return null
   return meanAndStdDev(returns).stdDev * Math.sqrt(TRADING_DAYS) * 100
 }
@@ -421,7 +435,7 @@ export function annualizedVolatilityPct(series: ValueSeriesPoint[]): number | nu
  * invites doubt.
  */
 export function sharpeRatio(series: ValueSeriesPoint[]): number | null {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return null
 
   const { mean, stdDev } = meanAndStdDev(returns)
@@ -462,7 +476,7 @@ export type SortinoAbsence = 'insufficient_history' | 'no_downside'
 export function sortinoDetail(
   series: ValueSeriesPoint[],
 ): { ratio: number | null; absence: SortinoAbsence | null } {
-  const returns = dailyReturns(series)
+  const returns = measurableReturns(series).map((r) => r.ret)
   if (returns.length < MIN_RETURNS) return { ratio: null, absence: 'insufficient_history' }
 
   const dailyRiskFree = RISK_FREE_RATE / TRADING_DAYS
@@ -628,9 +642,25 @@ export function betaAndCorrelation(
   portfolio: ValueSeriesPoint[],
   benchmark: ValueSeriesPoint[],
 ): { beta: number | null; correlation: number | null; sampleDays: number } {
+  return betaOfPairs(betaPairs(portfolio, benchmark))
+}
+
+/** A day both series moved on with no flow on either: the sample beta regresses. */
+export interface BetaPair {
+  date: string
+  port: number
+  bench: number
+}
+
+/**
+ * The days `betaAndCorrelation` regresses, each with both returns — **the one day filter**
+ * for every beta (review item M6): the rolling beta re-derived its own from the Dietz
+ * returns and a flow-date set, which let a cost-basis-only day and the benchmark's own
+ * contribution days through.
+ */
+export function betaPairs(portfolio: ValueSeriesPoint[], benchmark: ValueSeriesPoint[]): BetaPair[] {
   const byDate = new Map(benchmark.map((p) => [p.date, p]))
-  const portReturns: number[] = []
-  const benchReturns: number[] = []
+  const pairs: BetaPair[] = []
 
   for (let i = 1; i < portfolio.length; i++) {
     const prev = portfolio[i - 1]
@@ -658,10 +688,21 @@ export function betaAndCorrelation(
     ) continue
 
     if (prev.market_value_eur <= 0 || benchPrev.market_value_eur <= 0) continue
-    portReturns.push(curr.market_value_eur / prev.market_value_eur - 1)
-    benchReturns.push(benchCurr.market_value_eur / benchPrev.market_value_eur - 1)
+    pairs.push({
+      date: curr.date,
+      port: curr.market_value_eur / prev.market_value_eur - 1,
+      bench: benchCurr.market_value_eur / benchPrev.market_value_eur - 1,
+    })
   }
+  return pairs
+}
 
+/** Beta and correlation over `pairs`; null below `MIN_PAIRED_RETURNS`. */
+export function betaOfPairs(
+  pairs: readonly BetaPair[],
+): { beta: number | null; correlation: number | null; sampleDays: number } {
+  const portReturns = pairs.map((p) => p.port)
+  const benchReturns = pairs.map((p) => p.bench)
   const sampleDays = portReturns.length
   if (sampleDays < MIN_PAIRED_RETURNS) return { beta: null, correlation: null, sampleDays }
 
