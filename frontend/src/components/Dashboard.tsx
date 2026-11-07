@@ -267,9 +267,12 @@ export function Dashboard() {
     [valueOverTime],
   )
 
-  // Calculate KPIs
+  // Calculate KPIs — whenever both have loaded, however short the series. Each series
+  // metric is already null below its own floor, and Win rate, Top 5 and the dividend
+  // figures do not read the series at all: gating the row on two points blanked all of
+  // them on the first day of an MTD or YTD (review item M2).
   const kpiMetrics = useMemo(() => {
-    if (!valueOverTime || valueOverTime.length < 2 || !positions) {
+    if (!valueOverTime || !positions) {
       return null
     }
 
@@ -325,7 +328,7 @@ export function Dashboard() {
   // The risk side of the same series. Kept in a second memo because beta also
   // depends on the benchmark selection, which the return KPIs do not.
   const riskMetrics = useMemo(() => {
-    if (!valueOverTime || valueOverTime.length < 2 || !positions) {
+    if (!valueOverTime || !positions) {
       return null
     }
 
