@@ -2,6 +2,9 @@
 The EDGAR pass: SEC filers' companyfacts in, `company_financials` rows out
 (docs/company-financials.md). Run by the weekly scheduled job and by
 `app/cli/fetch_company_financials.py`; both hold `EDGAR_GATE` and record a `sync_runs` row.
+**The weekday check** (`check_filings`) fetches, between the weekly passes, the companies
+whose next 10-Q or 10-K the SEC now lists — one small request for each company whose filing
+is due, so a report reaches the tab the next morning rather than on Sunday.
 
 **Scope**, two parts, one request per company (CIK) whichever brought it in:
 
@@ -94,6 +97,9 @@ logger = logging.getLogger(__name__)
 EDGAR_GATE = "edgar"
 SCHEDULED_SYNC_TYPE = "company_financials_refresh"
 MANUAL_SYNC_TYPE = "manual_company_financials_fetch"
+#: The weekday check's own type: `_new_findings` compares a weekly pass with the previous
+#: weekly one, and a check's partial lists must not stand in for it.
+CHECK_SYNC_TYPE = "company_filings_check"
 
 #: Under a week, so the weekly pass refetches every company it fetched the week before.
 STALE_AFTER = timedelta(days=6)
@@ -115,6 +121,17 @@ FILING_READS_PER_COMPANY = 24
 #: due 40-45 days after its quarter and a 10-K 60-90 days after the year, so the newest
 #: period end is at most about 135 days old (a year's end, until the next first quarter).
 FIGURES_STALE_AFTER = timedelta(days=150)
+#: The weekday check watches a company for its next 10-Q or 10-K from this long after its
+#: newest stored period end — the quarter (about 91 days) plus the two weeks the quickest
+#: filers take — until `FILING_WATCH_UNTIL`; past that only the weekly pass asks, so a
+#: company that stopped filing is not asked about every day.
+FILING_EXPECTED_AFTER = timedelta(days=105)
+FILING_WATCH_UNTIL = FIGURES_STALE_AFTER + timedelta(days=30)
+#: A company fetched within this is not checked: the Sunday pass, or a check that found it.
+CHECKED_WITHIN = timedelta(hours=20)
+#: A filing's period counts as new only this far past the stored one. A quarter is ~91 days
+#: on; a `reportDate` a few days off the stored period end must not refetch every day.
+NEW_PERIOD_MARGIN = timedelta(days=14)
 
 NOT_CONFIGURED_WARNING = (
     "EDGAR_USER_AGENT is not set; company financials were not refreshed."
@@ -405,6 +422,123 @@ class CompanyFinancialsSync:
         if warnings:
             summary["warnings"] = warnings
         return summary
+
+    async def check_filings(self) -> Dict[str, Any]:
+        """
+        The weekday check. For each company in scope whose next filing is due
+        (`_filing_due`), one `submissions` request for the period its newest 10-Q or 10-K
+        reports; a later one than stored fetches the company through `_one`, exactly as the
+        weekly pass does. Pure database until then: no ticker list, no CIK lookups (the
+        weekly pass keeps those). Returns a summary for a `sync_runs` row.
+        """
+        if not is_configured():
+            return {
+                "status": "skipped",
+                "message": "Company filings: skipped, EDGAR_USER_AGENT is not set",
+                "warnings": [NOT_CONFIGURED_WARNING],
+            }
+        now = utcnow()
+        securities = await self.in_scope()
+        constituents, _ = await self.universe()
+        stamps = await self.repo.cik_rows(s.id for s in securities)
+        known, _ = await self._known_tickers()
+        due = await self._filing_due(
+            self._targets(securities, stamps, constituents, known), now
+        )
+        summary: Dict[str, Any] = {
+            "status": "success",
+            "watching": len(due),
+            "checked": 0,
+            "new_filings": 0,
+            "fetched": 0,
+            "rows_written": 0,
+            "no_data": 0,
+            "errors": 0,
+            "stopped": None,
+            "outcomes": [],
+            "filings_read": 0,
+            "filing_errors": 0,
+            "filings_unreadable": 0,
+            "ttm_dividend_gaps": [],
+            "stale_figures": [],
+        }
+        warnings: List[str] = []
+        async with EdgarClient(
+            settings.edgar_user_agent.strip(),
+            transport=self._transport,
+            sleep=self._sleep,
+        ) as client:
+            try:
+                for target, stored_end in due:
+                    try:
+                        reported = await client.latest_report(target.cik)
+                    except EdgarError as e:
+                        summary["errors"] += 1
+                        logger.warning(f"submissions for CIK {target.cik} failed: {e}")
+                        continue
+                    summary["checked"] += 1
+                    if reported is None or reported < stored_end + NEW_PERIOD_MARGIN:
+                        continue
+                    summary["new_filings"] += 1
+                    outcome = await self._one(
+                        client, target.cik, summary, target.symbols[0]
+                    )
+                    summary["outcomes"].append(
+                        {"cik": target.cik, "symbols": target.symbols, "outcome": outcome}
+                    )
+            except EdgarRefused as refused:
+                summary["stopped"] = refused.status
+                hint = "" if refused.status == 429 else " Check EDGAR_USER_AGENT."
+                warnings.append(
+                    f"The SEC answered HTTP {refused.status}; the filings check stopped "
+                    f"and the rest waits for the next one.{hint}"
+                )
+        failed = sum(1 for o in summary["outcomes"] if o["outcome"].startswith("error"))
+        if failed:
+            warnings.append(
+                f"{failed} compan{'y' if failed == 1 else 'ies'} with a new filing could "
+                f"not be fetched from EDGAR and keep their previous figures."
+            )
+        summary["message"] = (
+            f"Company filings: {summary['checked']} of {summary['watching']} due checked, "
+            f"{summary['new_filings']} new, {summary['fetched']} fetched"
+        )
+        if warnings:
+            summary["warnings"] = warnings
+        return summary
+
+    async def _filing_due(
+        self, targets: Sequence[Target], now: datetime
+    ) -> List[Tuple[Target, Any]]:
+        """
+        The targets whose next 10-Q or 10-K is due, each with its newest stored period end:
+        figures stored, the newest between `FILING_EXPECTED_AFTER` and `FILING_WATCH_UNTIL`
+        old, not backed off, not fetched within `CHECKED_WITHIN`. A company with no figures
+        is the weekly pass's.
+        """
+        ciks = [t.cik for t in targets]
+        companies = await self.repo.companies(ciks)
+        coverage = await self.repo.coverage(ciks)
+        today = utc_today()
+        due: List[Tuple[Target, Any]] = []
+        for target in targets:
+            newest = (coverage.get(target.cik) or {}).get("last")
+            if newest is None:
+                continue
+            if not FILING_EXPECTED_AFTER <= today - newest <= FILING_WATCH_UNTIL:
+                continue
+            company = companies.get(target.cik)
+            wait = facts_backoff_until(company)
+            if wait is not None and wait > now:
+                continue
+            if (
+                company is not None
+                and company.fetched_at is not None
+                and company.fetched_at > now - CHECKED_WITHIN
+            ):
+                continue
+            due.append((target, newest))
+        return due
 
     async def _known_tickers(self) -> tuple:
         """
