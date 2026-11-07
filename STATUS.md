@@ -93,6 +93,16 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
+  `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
+  (about 9 companies asked, no `rate_limited`, the message `Company figures: N of M refreshed`),
+  and the rotation fills the index-only companies within ~2 weeks (`company_yahoo_profiles`); until
+  then their Street row is absent, by design. The first Sunday `company_financials_refresh` after
+  the deploy reports `profiles_fetched` ≈ the company count (industry and fiscal year end), the
+  next Sundays about none until 30 days pass. Held companies' business summaries appear after the
+  first 05:00 run (`fundamental_metrics.business_summary`). The owner's eye on the overview with
+  real data — checked only against mocked profiles on a local build (1366/390 px, both themes).
+
 - **The harmonization wave and the Company links (2026-11-07, `harmonize-company-links`):**
   migration `d3b7f9a1c5e2` adds `securities.ratings_checked_at` / `ratings_miss_count`; after the
   next Tue–Sat 05:00 `fundamentals_refresh` a rating fetch that failed is stamped and the ratings
@@ -341,6 +351,12 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-07 (harmonization, Company links and overview, one /goal run)** — six leftovers on the
+  shared rules; every holding's row links to its Company page through the URL hash; the Company
+  tab opens on an overview of the company (SEC industry, price line, grouped figures, Street row,
+  a price card) with Yahoo figures for index-only companies a chunk a day (owner-approved).
+  Branches `harmonize-company-links` and `company-overview` (stacked), unmerged.
+
 - **2026-10-25 (Company tab: P/E)** — owner-approved weekly Yahoo closes per CIK (about a
   hundred requests a Sunday, 5.1 MB first fill) for a P/E in the key figures and a P/E card; the
   fill exposed EPS gaps (COST's 16-week Q4, continuing-ops and BasicAndDiluted EPS, EXC's
@@ -360,5 +376,3 @@ One line each, newest first; drop the oldest.
   year-as-quarter and ONDS's thousands; SEC contact only in the VPS `.env`.
 - **2026-10-25 (PR #80 merged)** — Swiss residency deployed; the move's country and date
   kept out of the public docs (the setting holds it); Trading212 lots need nothing (in Jan).
-- **2026-10-24 (Swiss residency)** — the tax report takes a "Swiss taxpayer from" date
-  (docs/tax.md); the same morning's sync check found the Flex ingest healthy.
