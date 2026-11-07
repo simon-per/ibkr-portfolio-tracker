@@ -218,3 +218,33 @@ def test_a_gap_asks_its_own_filing_then_the_ones_that_repeat_it():
     assert [s.accn for s in sources(by_accn, date(2018, 12, 29))] == ["k18", "k19", "k20"]
     # No filing of its own in companyfacts: the one a year later may still hold it.
     assert [s.accn for s in sources(by_accn, date(2017, 9, 30))] == ["q3-18"]
+
+
+def test_one_set_of_periodic_forms():
+    """
+    DR6: the normaliser, the filing reads and the weekday check each decided "is this a
+    10-Q/10-K" — the check with `{10-Q, 10-K}`, the others with amendments and transition
+    reports. One set now; no module under app/ spells a second one.
+    """
+    import ast
+    import pathlib
+
+    from app.services import company_financials_normaliser, edgar_client, edgar_filing_facts
+
+    assert company_financials_normaliser.FORMS is edgar_client.PERIODIC_FORMS
+    assert edgar_filing_facts.FORMS is edgar_client.PERIODIC_FORMS
+    assert "10-QT" in edgar_client.PERIODIC_FORMS
+
+    app_dir = pathlib.Path(edgar_client.__file__).resolve().parents[1]
+    owners = []
+    for path in sorted(app_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+                values = {
+                    e.value for e in node.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                }
+                if {"10-Q", "10-K"} <= values:
+                    owners.append(f"{path.relative_to(app_dir).as_posix()}:{node.lineno}")
+    assert owners == [owners[0]] and owners[0].startswith("services/edgar_client.py"), owners

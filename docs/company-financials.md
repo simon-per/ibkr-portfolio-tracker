@@ -500,7 +500,9 @@ weekly pass's scope while its next filing is due — figures stored, the newest 
 `FILING_EXPECTED_AFTER` (105 days: the quarter and the two weeks the quickest filers take) and
 `FILING_WATCH_UNTIL` (`FIGURES_STALE_AFTER` + 30 days) old, not backed off, not fetched within
 `CHECKED_WITHIN` (20 hours) — and asks its `submissions` document for the period its newest 10-Q
-or 10-K reports (`EdgarClient.latest_report`). Only a period at least `NEW_PERIOD_MARGIN` (14
+or 10-K reports (`EdgarClient.latest_report`; amendments and transition reports count, by
+the one `edgar_client.PERIODIC_FORMS` the normaliser and the filing reads use too — review item
+DR6). Only a period at least `NEW_PERIOD_MARGIN` (14
 days) past the stored one fetches companyfacts, through `_one` like the weekly pass (filing
 instances included); a `reportDate` a few days off a stored period end must not refetch every
 day. Estimated, not yet measured: about a third of the ~100 companies in the window during an

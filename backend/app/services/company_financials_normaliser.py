@@ -51,6 +51,8 @@ from datetime import date, timedelta
 from fractions import Fraction
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from app.services.edgar_client import PERIODIC_FORMS
+
 # ── What each metric is, and where it may come from ──────────────────────────
 
 MONETARY = "monetary"
@@ -298,11 +300,8 @@ SHARE_COUNT_SLIPS: Tuple[Fraction, ...] = (
 ANNUAL = "FY"
 QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 
-#: Forms whose facts count. 10-K/10-Q and their amendments and transition reports; an 8-K's
-#: or a proxy's stray fact does not, and a 20-F's are IFRS and out of scope.
-FORMS = frozenset(
-    {"10-K", "10-K/A", "10-Q", "10-Q/A", "10-KT", "10-KT/A", "10-QT", "10-QT/A"}
-)
+#: Forms whose facts count: `edgar_client.PERIODIC_FORMS`, the one set.
+FORMS = PERIODIC_FORMS
 
 # 12 to 14 weeks, or a retailer's 16- and 17-week fourth quarter: COST's 112 days had no Q4
 # from its ladder, so its year-end balances never reached a quarter (no Q4 cash or equity).
