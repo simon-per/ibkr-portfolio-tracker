@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
 import { ABSENT, formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
-import { getRatingScore } from '@/lib/analystRating'
+import { getRatingScore, ratingBadgeClass } from '@/lib/analystRating'
 import { compareNullsLast, type SortDirection } from '@/lib/nullsLast'
 import { cashIsTracked, inBookCash, type AccountCash } from '@/lib/portfolioCash'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -44,22 +44,6 @@ interface PositionsListProps {
 }
 
 type SortColumn = 'symbol' | 'description' | 'rating' | 'quantity' | 'cost_basis_eur' | 'market_value_eur' | 'gain_loss_eur' | 'gain_loss_percent' | 'portfolio_percent' | 'yield_on_cost'
-
-/** A soft chip per consensus: the rating is context for a holding, not an alarm. */
-const getRatingBadgeColor = (consensus: string): string => {
-  switch (consensus.toLowerCase()) {
-    case 'strong buy':
-    case 'buy':
-      return 'bg-green-500/10 text-green-700 dark:text-green-400'
-    case 'hold':
-      return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
-    case 'sell':
-    case 'strong sell':
-      return 'bg-red-500/10 text-red-700 dark:text-red-400'
-    default:
-      return 'bg-muted text-muted-foreground'
-  }
-}
 
 // The rating sort score lives in `lib/analystRating.ts`, shared with the watchlist — the
 // two tables ranked the same ratings by different rules until 2026-09-12.
@@ -258,7 +242,7 @@ export function positionColumns(deps: {
           view === 'table' ? <span className="text-xs text-muted-foreground">{ABSENT}</span> : null
         ) : (
           <span
-            className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${getRatingBadgeColor(p.analyst_rating.consensus)}`}
+            className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${ratingBadgeClass(p.analyst_rating.consensus)}`}
             title={`Strong Buy ${p.analyst_rating.strong_buy} · Buy ${p.analyst_rating.buy} · Hold ${p.analyst_rating.hold} · Sell ${p.analyst_rating.sell} · Strong Sell ${p.analyst_rating.strong_sell}`}
           >
             {p.analyst_rating.consensus}
