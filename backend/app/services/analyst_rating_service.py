@@ -21,7 +21,7 @@ from app.repositories.fundamentals_repository import sync_scope
 from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.models.analyst_rating import AnalystRating
+from app.models.analyst_rating import AnalystRating, RATING_COUNT_FIELDS
 from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
@@ -89,9 +89,6 @@ def _count(row, column: str) -> int:
     if number != number or number in (float('inf'), float('-inf')):  # NaN / Inf
         return 0
     return int(number)
-
-
-RATING_COUNT_FIELDS = ('strong_buy', 'buy', 'hold', 'sell', 'strong_sell')
 
 
 def no_rating(security_id: int) -> Dict:

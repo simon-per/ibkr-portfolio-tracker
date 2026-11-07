@@ -296,9 +296,11 @@ async def _seed(session: AsyncSession) -> None:
         TODAY - timedelta(days=30), time(20)), eps_estimate=1.5, reported_eps=1.6,
         surprise_percent=6.7, is_upcoming=False))
     # A watchlist name quoted in USD: its cap is served in the base currency too.
+    # Its analyst counts are its own (no pass keeps NVDA's here): served with their label.
     session.add(WatchlistItem(yahoo_ticker="NVDA", symbol="NVDA", company_name="NVIDIA",
                               market_cap=4_000_000_000_000, data_currency="USD",
-                              currency="USD"))
+                              currency="USD", strong_buy=20, buy=30, hold=2, sell=0,
+                              strong_sell=0))
     # A watchlist name that is one of our securities (AAPL, sold): served with its id.
     session.add(WatchlistItem(yahoo_ticker="AAPL", symbol="AAPL", company_name="Apple"))
 
@@ -1125,6 +1127,11 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     # not carries none.
     assert watch["AAPL"]["security_id"] == 3
     assert nvda["security_id"] is None
+    # The counts and their `consensus_of` label, the positions table's shape.
+    assert nvda["analyst_rating"] == {
+        "strong_buy": 20, "buy": 30, "hold": 2, "sell": 0, "strong_sell": 0,
+        "consensus": "Buy",
+    }
     ratings = client.get("/api/analyst-ratings/status").json()
     assert ratings["newest_update"].endswith("+00:00")
     assert client.get("/api/analyst-ratings/4").json()["last_updated"].endswith("+00:00")

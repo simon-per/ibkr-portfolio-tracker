@@ -70,7 +70,10 @@ function position({ symbol, rating }: (typeof FIXTURE)[number], i: number): Posi
   } as Position
 }
 
-/** The watchlist receives the snake_case key. */
+/**
+ * The watchlist receives the positions table's counts-and-label shape (it carried Yahoo's
+ * snake_case `recommendationKey` until 2026-11-07).
+ */
 function watchlistItem({ symbol, rating }: (typeof FIXTURE)[number], i: number): WatchlistItem {
   return {
     id: i + 1, yahoo_ticker: symbol, symbol, company_name: `${symbol} Corp`, notes: null,
@@ -78,7 +81,9 @@ function watchlistItem({ symbol, rating }: (typeof FIXTURE)[number], i: number):
     forward_pe: null, peg_ratio: null, ev_to_ebitda: null, revenue_growth: null,
     earnings_growth: null, fwd_revenue_growth: null, fwd_eps_growth: null,
     profit_margins: null, market_cap: null, market_cap_base: null, analyst_target: null,
-    analyst_rating: rating,
+    analyst_rating: rating
+      ? { strong_buy: 1, buy: 0, hold: 0, sell: 0, strong_sell: 0, consensus: DISPLAY[rating] }
+      : null,
     analyst_count: null, week52_high: null, week52_low: null, pct_from_52w_high: null,
     ma200: null, ma50: null, pct_from_ma200: null, rsi14: null, buy_score: null,
     data_currency: null, last_synced: null, created_at: null,

@@ -593,6 +593,27 @@ charts.
 
 ---
 
+## Analyst ratings — one shape, one bar (2026-11-07)
+
+Owner's request: show the counts behind every rating, not only a label. The positions table,
+the watchlist and the Company overview carry one shape, `AnalystRatingCounts` (five counts and
+`consensus`, the server's `analyst_rating.rating_of`; Positions' `AnalystRating` extends it),
+and never all zeros — "no analysts cover this" arrives as `null`. The watchlist used to print
+Yahoo's own `recommendationKey`, which disagreed with the counts' label (NVDA "Strong Buy"
+there, "Buy" everywhere else); the server now labels its counts too (docs/flex-and-sync.md,
+*The watchlist fetches its slow fields weekly*).
+
+- **Tables** draw `AnalystRatingBadge`: the consensus chip with a 4 px bar of the counts beneath
+  (`AnalystRatingBar`), the counts on hover (`ratingCountsText`: "25 Strong Buy · 10 Buy · 3
+  Hold · 1 Sell", zeros left out). Sorting stays on `getRatingScore(consensus)`, one scale for
+  both tables (`ratingSortFamily.test.tsx`).
+- **The Company overview** writes the counts out beside a wider bar (*The overview* below).
+- **The bar's paint** (`RATING_SEGMENTS` in `lib/analystRating.ts`) is a diverging scale: two
+  hues and a grey midpoint for Hold, never the chip's yellow. The poles carry the most contrast
+  against the surface, so light mode paints them darker than the mild steps and dark mode
+  lighter; segments are separated by a 1 px gap (a 2 px gap swallowed a one-analyst segment).
+  The bar is a secondary encoding — the chip's label and the counts carry the values.
+
 ## The tab in the URL (`lib/tabRoute.ts`, 2026-11-07)
 
 The tabs were uncontrolled state (`Tabs defaultValue="performance"`): a reload always landed on
@@ -1109,6 +1130,11 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   hides or shows the series (never the last one) and the y axis refits. A series with no value
   anywhere gets no chip (`seriesWithData`: MA files no gross margin). Hovering dims the other
   periods' bars. The shares card tones growth the other way (`inverse`): fewer shares is green.
+  **The valuation card heads with today's multiples** (`current`, 2026-11-07): until a period
+  is hovered its headline and chips read `key_stats` (the newest close over the newest TTM),
+  dated by `profile.price_date`, so it agrees with the overview's P/E; it fell back to the last
+  quarter end's (AMD read P/E 115.4 above and 134.1 in the card). With no current multiple known
+  it heads with the last period as before.
 - **Absences.** A null point is a gap: no bar, a broken line, never a zero. The dividends, buybacks
   & dividends and cash & debt cards are drawn only when some point has a value. A response with no
   value anywhere is one warning and no charts; `warnings[]` render as warnings above the grid.
@@ -1159,8 +1185,10 @@ card, from the response's `key_stats` and `profile` (docs/company-financials.md 
   group with none too; the period tag (`TTM · Q4 FY2025`) heads them. One column on a phone, two
   from 440 px, four from `lg`.
 - **The Street row**: the consensus chip (`profile.rating.consensus`, the server's one rule
-  `analyst_rating.consensus_of`, drawn by `ratingBadgeClass` as the positions table draws it) and
-  the analyst count; the mean target with its upside and the low–high, in Yahoo's quote currency
+  `analyst_rating.consensus_of`, drawn by `ratingBadgeClass` as the positions table draws it),
+  the counts' bar (`AnalystRatingBar`, *Analyst ratings* below) and every count written out
+  (`ratingCountsText`) — Yahoo's separate target-analyst count (`analysts`) is no longer printed,
+  since the counts are the analysts; the mean target with its upside and the low–high, in Yahoo's quote currency
   (`yahoo_currency`, which need not be the filings'); the next earnings date with the EPS
   estimate. Each item only when present; the row only when one is — a Nasdaq-100 company the
   05:00 chunk has not reached yet has none.

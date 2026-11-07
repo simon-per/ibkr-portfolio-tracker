@@ -27,8 +27,10 @@ from app.services.watchlist_service import WatchlistService
 from tests.memory_db import memory_engine
 
 # Statements one GET issues for the fixed 3-item watchlist below, whatever the security
-# count: base currency, the items, the securities, the mappings, the basket candidates.
-GET_STATEMENTS = 5
+# count: base currency, the items, the securities, the mappings, the basket candidates,
+# the SEC tickers that key a Company-tab company's stored rating counts
+# (`stored_ratings`; its two other reads run only when a ticker is held or a company).
+GET_STATEMENTS = 6
 
 
 async def _session():

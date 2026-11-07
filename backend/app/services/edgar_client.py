@@ -6,7 +6,8 @@ SEC EDGAR's endpoints the Company tab reads (docs/company-financials.md).
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`: every XBRL fact a
   company has filed, every period and every filing, in one document.
 - `https://data.sec.gov/submissions/CIK##########.json`: the company's SIC industry and
-  fiscal year end (and its filing list, which is not read). At most monthly a company.
+  fiscal year end, at most monthly a company; and, on the weekday check, the period its
+  newest 10-Q or 10-K reports (`latest_report`), only while that filing is due.
 - `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/`: one filing's `index.json`
   and its XBRL instance, for a figure companyfacts leaves out (`edgar_filing_facts`). Once
   per filing ever.
@@ -30,6 +31,7 @@ Touches neither Yahoo nor IBKR.
 import asyncio
 import re
 import time
+from datetime import date
 from typing import Any, Callable, Dict, Optional
 
 import httpx
@@ -195,6 +197,19 @@ class EdgarClient(PacedGet):
             raise EdgarError(f"submissions for CIK {cik} is not an object")
         return submissions_profile(body)
 
+    async def latest_report(self, cik: int) -> Optional[date]:
+        """
+        The period end the company's newest 10-Q or 10-K reports, from its `submissions`
+        document (`latest_periodic_report`); None when the SEC has no document (404) or it
+        lists no such filing.
+        """
+        body = await self._get_json(SUBMISSIONS_URL.format(cik=cik))
+        if body is None:
+            return None
+        if not isinstance(body, dict):
+            raise EdgarError(f"submissions for CIK {cik} is not an object")
+        return latest_periodic_report(body)
+
     async def filing_index(self, cik: int, accn: str) -> Optional[Dict[str, Any]]:
         """One filing's list of files (`index.json`), or None when the SEC has none (404)."""
         body = await self._get_json(filing_url(cik, accn, "index.json"))
@@ -209,6 +224,32 @@ class EdgarClient(PacedGet):
 
 
 _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
+
+#: The filings whose figures companyfacts carries into the Company tab's rows.
+PERIODIC_FORMS = frozenset({"10-Q", "10-K"})
+
+
+def latest_periodic_report(body: Dict[str, Any]) -> Optional[date]:
+    """
+    The newest `reportDate` (the period end) of a 10-Q or 10-K among a submissions
+    document's recent filings (`filings.recent`, parallel arrays); None when there is none
+    or the document is not that shape. Never a guess: an unparseable date is skipped.
+    """
+    recent = (body.get("filings") or {}).get("recent") or {}
+    forms, reports = recent.get("form"), recent.get("reportDate")
+    if not isinstance(forms, list) or not isinstance(reports, list):
+        return None
+    newest: Optional[date] = None
+    for form, report in zip(forms, reports):
+        if form not in PERIODIC_FORMS or not isinstance(report, str):
+            continue
+        try:
+            day = date.fromisoformat(report)
+        except ValueError:
+            continue
+        if newest is None or day > newest:
+            newest = day
+    return newest
 
 
 def submissions_profile(body: Dict[str, Any]) -> Dict[str, Any]:

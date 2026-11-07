@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import type { Position } from '@/lib/api'
 import { ABSENT, formatPercent, formatQuantity } from '@/lib/utils'
 import { isUnpriced } from '@/lib/positionValuation'
-import { getRatingScore, ratingBadgeClass } from '@/lib/analystRating'
+import { getRatingScore } from '@/lib/analystRating'
+import { AnalystRatingBadge } from './AnalystRatingBadge'
 import { compareNullsLast, type SortDirection } from '@/lib/nullsLast'
 import { cashIsTracked, inBookCash, type AccountCash } from '@/lib/portfolioCash'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
@@ -241,12 +242,7 @@ export function positionColumns(deps: {
           // card it would be a stray dash floating in the badge row, saying nothing.
           view === 'table' ? <span className="text-xs text-muted-foreground">{ABSENT}</span> : null
         ) : (
-          <span
-            className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${ratingBadgeClass(p.analyst_rating.consensus)}`}
-            title={`Strong Buy ${p.analyst_rating.strong_buy} · Buy ${p.analyst_rating.buy} · Hold ${p.analyst_rating.hold} · Sell ${p.analyst_rating.sell} · Strong Sell ${p.analyst_rating.strong_sell}`}
-          >
-            {p.analyst_rating.consensus}
-          </span>
+          <AnalystRatingBadge rating={p.analyst_rating} />
         ),
     },
     {

@@ -317,6 +317,13 @@ FUNDAMENTALS_REFRESH_DAYS = 'tue-sat'
 COMPANY_FINANCIALS_REFRESH_HOUR = FUNDAMENTALS_REFRESH_HOUR
 COMPANY_FINANCIALS_REFRESH_DAYS = 'sun'
 
+# The weekday filings check (`CompanyFinancialsSync.check_filings`): the same hour on every
+# other day, so a 10-Q filed during a US day reaches the Company tab the next morning, not
+# on Sunday. One small request for each company whose filing is due, under EDGAR_GATE; next
+# to the 05:00 fundamentals (Yahoo, SYNC_PIPELINE) it shares no upstream and no gate.
+COMPANY_FILINGS_CHECK_HOUR = COMPANY_FINANCIALS_REFRESH_HOUR
+COMPANY_FILINGS_CHECK_DAYS = 'mon-sat'
+
 # The Company tab's weekly closes from Yahoo (`company_price_sync`, for the P/E): the same
 # Sunday hour, after the week's last close. Yahoo, so under SYNC_PIPELINE like every Yahoo
 # job; nothing else Yahoo runs on a Sunday, and the hour is already guarded.
@@ -327,7 +334,7 @@ COMPANY_PRICES_REFRESH_DAYS = COMPANY_FINANCIALS_REFRESH_DAYS
 # against. Not the same thing as PORTFOLIO_SYNC_HOURS since the upkeep slots exist.
 ALL_SYNC_HOURS = tuple(sorted({
     *PORTFOLIO_SYNC_HOURS, WATCHLIST_REFRESH_HOUR, FUNDAMENTALS_REFRESH_HOUR,
-    COMPANY_FINANCIALS_REFRESH_HOUR, COMPANY_PRICES_REFRESH_HOUR,
+    COMPANY_FINANCIALS_REFRESH_HOUR, COMPANY_FILINGS_CHECK_HOUR, COMPANY_PRICES_REFRESH_HOUR,
 }))
 
 # The crypto sync (docs/crypto.md) rides the portfolio's eight slots **by derivation,
@@ -1907,36 +1914,56 @@ class SchedulerService:
         and nothing here re-implements any of it. Records a `sync_runs` row either way;
         never `last_sync_result`, which is the portfolio's "last sync".
         """
-        from app.services.company_financials_sync import (
-            EDGAR_GATE, SCHEDULED_SYNC_TYPE, CompanyFinancialsSync,
+        from app.services.company_financials_sync import SCHEDULED_SYNC_TYPE
+
+        return await self._edgar_job(
+            SCHEDULED_SYNC_TYPE, "company_financials_result", "Company financials refresh",
+            lambda sync: sync.refresh(),
         )
 
+    async def company_filings_check_job(self) -> dict:
+        """
+        The weekday filings check (docs/company-financials.md, *Schedule*), at
+        COMPANY_FILINGS_CHECK_HOUR on COMPANY_FILINGS_CHECK_DAYS: the companies whose next
+        10-Q or 10-K the SEC now lists, through `CompanyFinancialsSync.check_filings`.
+        """
+        from app.services.company_financials_sync import CHECK_SYNC_TYPE
+
+        return await self._edgar_job(
+            CHECK_SYNC_TYPE, "company_filings_result", "Company filings check",
+            lambda sync: sync.check_filings(),
+        )
+
+    async def _edgar_job(self, sync_type: str, result_key: str, label: str, run) -> dict:
+        """One EDGAR job under `EDGAR_GATE`: `run(CompanyFinancialsSync)`'s summary as a
+        `sync_runs` row under `sync_type`, its body under `result_key`, its warnings
+        lifted. Busy is `skipped`; a crash is `error`, never raised to the scheduler."""
+        from app.services.company_financials_sync import EDGAR_GATE, CompanyFinancialsSync
+
         started_at = utcnow()
-        result = {"type": SCHEDULED_SYNC_TYPE, "timestamp": utc_iso(started_at)}
+        result = {"type": sync_type, "timestamp": utc_iso(started_at)}
         try:
             with single_flight(EDGAR_GATE):
                 async with AsyncSessionLocal() as db:
-                    summary = await CompanyFinancialsSync(db).refresh()
+                    summary = await run(CompanyFinancialsSync(db))
         except SyncBusy as e:
             result.update(status="skipped", reason="busy", message=str(e))
         except Exception as e:
-            logger.error(f"Company financials refresh failed: {e}", exc_info=True)
+            logger.error(f"{label} failed: {e}", exc_info=True)
             result.update(
                 status="error",
-                message=f"Company financials refresh failed: {type(e).__name__}: {e}",
+                message=f"{label} failed: {type(e).__name__}: {e}",
             )
         else:
             result.update(
                 status=summary["status"],
                 message=summary["message"],
-                company_financials_result={
-                    k: v for k, v in summary.items() if k != "warnings"
-                },
+                **{result_key: {k: v for k, v in summary.items() if k != "warnings"}},
             )
             if summary.get("warnings"):
                 result["warnings"] = list(summary["warnings"])
         await self._record_run(result, started_at)
-        logger.info(f"Company financials refresh: {result.get('status')} — {result.get('message')}")
+        logger.info(f"{label}: {result.get('status')} — {result.get('message')}")
         return result
 
     async def company_prices_refresh_job(self, scheduled: bool = False) -> Optional[dict]:
@@ -2351,6 +2378,17 @@ class SchedulerService:
             f'Europe/Berlin)',
             group=UPKEEP_JOB_GROUP,
         )
+        # The weekday filings check — see COMPANY_FILINGS_CHECK_HOUR.
+        self._add_or_keep(
+            'company_filings_check', company_filings_check_job_entry,
+            CronTrigger(
+                day_of_week=COMPANY_FILINGS_CHECK_DAYS,
+                hour=COMPANY_FILINGS_CHECK_HOUR, minute=0, timezone='Europe/Berlin',
+            ),
+            f'Company Filings Check (Mon-Sat {COMPANY_FILINGS_CHECK_HOUR:02d}:00 '
+            f'Europe/Berlin)',
+            group=UPKEEP_JOB_GROUP,
+        )
         # Their weekly closes from Yahoo — see COMPANY_PRICES_REFRESH_HOUR.
         self._add_or_keep(
             'company_prices_refresh', company_prices_refresh_job_entry,
@@ -2494,6 +2532,10 @@ async def fundamentals_refresh_job_entry() -> Optional[dict]:
 
 async def company_financials_refresh_job_entry() -> dict:
     return await get_scheduler().company_financials_refresh_job()
+
+
+async def company_filings_check_job_entry() -> dict:
+    return await get_scheduler().company_filings_check_job()
 
 
 async def company_prices_refresh_job_entry() -> Optional[dict]:

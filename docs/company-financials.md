@@ -491,6 +491,25 @@ Sunday pass picks up the week's. Under its own gate, `EDGAR_GATE`, never `SYNC_P
 shares no upstream with Yahoo or IBKR. It records a `company_financials_refresh` row in
 `sync_runs`; a company EDGAR could not serve is a warning, never the status.
 
+**The weekday filings check, Monday to Saturday 05:00** (2026-11-07,
+`COMPANY_FILINGS_CHECK_HOUR`/`_DAYS`; job `company_filings_check`,
+`CompanyFinancialsSync.check_filings`). The Sunday pass alone left a 10-Q up to a week off the
+tab: on 2026-11-07 AMD still ended at Q2 FY2026 with its Q3 10-Q filed on 2026-11-04, and the
+key figures' P/E disagreed with Fundamentals' (Yahoo, daily). The check watches a company in the
+weekly pass's scope while its next filing is due — figures stored, the newest period end between
+`FILING_EXPECTED_AFTER` (105 days: the quarter and the two weeks the quickest filers take) and
+`FILING_WATCH_UNTIL` (`FIGURES_STALE_AFTER` + 30 days) old, not backed off, not fetched within
+`CHECKED_WITHIN` (20 hours) — and asks its `submissions` document for the period its newest 10-Q
+or 10-K reports (`EdgarClient.latest_report`). Only a period at least `NEW_PERIOD_MARGIN` (14
+days) past the stored one fetches companyfacts, through `_one` like the weekly pass (filing
+instances included); a `reportDate` a few days off a stored period end must not refetch every
+day. Estimated, not yet measured: about a third of the ~100 companies in the window during an
+earnings season, one small request each, then none until the next quarter. No ticker list and no CIK lookups (the
+weekly pass keeps those). Its own `sync_runs` type, `company_filings_check` with
+`company_filings_result`, because `_new_findings` compares a weekly pass with the previous
+weekly one and a check's partial lists must not stand in for it; it raises no finding warnings.
+Both jobs share one runner (`SchedulerService._edgar_job`). `tests/test_company_filings_check.py`.
+
 **What each pass checks** (owner's request, 2026-11-07): every company it writes is tested,
 and the record (`company_financials_result` in `/api/scheduler/history`) lists
 `ttm_dividend_gaps` — a dividend payer whose newest four quarters miss a dividend per share,
@@ -561,8 +580,9 @@ ways by the contract test): `industry, fiscal_year_end, description`; the price 
 price_date, return_1m, return_1y, return_5y, return_10y, week52_low, week52_high`; `forward_pe,
 peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell, consensus},
 analysts, target_low, target_mean, target_high, target_upside, yahoo_currency, next_earnings_date,
-next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `consensus` is
-`analyst_rating.consensus_of`, the rule every rating label in the app goes through;
+next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `rating` is
+`analyst_rating.rating_of` — null when all five counts are zero, as on the positions table —
+and its `consensus` `analyst_rating.consensus_of`, the rule every rating label in the app goes through;
 `yahoo_currency` is the targets' and the EPS estimate's (Yahoo's quote), which need not be the
 filings' `currency`.
 

@@ -584,6 +584,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then the Company tab's chunk of companies nobody holds ([company-financials.md](company-financials.md) *The overview*), then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
 | 05:00, **Sunday** | 23:00 Sat | `company_financials_refresh` — SEC EDGAR companyfacts for held US-listed filers, weekly, own gate (`EDGAR_GATE`) and upkeep group ([company-financials.md](company-financials.md)) | no |
 | 05:00, **Sunday** | 23:00 Sat | `company_prices_refresh` — the Company tab's weekly closes, one history request per listed company, `SYNC_PIPELINE`, upkeep group ([company-financials.md](company-financials.md) *Prices*) | **yes** |
+| 05:00, Mon–Sat | 23:00 | `company_filings_check` — one SEC `submissions` request for each company whose next 10-Q/10-K is due, companyfacts only for a new one; `EDGAR_GATE`, upkeep group ([company-financials.md](company-financials.md) *Schedule*) | no |
 
 **The company financials take the fundamentals' hour on the one day it is free** (2026-10-25):
 Sunday 05:00, weekly. Nothing else runs at 05:00 on a Sunday, the hour is already in
@@ -723,11 +724,29 @@ MUTUALFUND was 'Stock').
 the estimates are read when `watchlist_items.estimates_synced_at` is NULL or older than
 `WatchlistService.ESTIMATES_REFRESH_AFTER` (7 days); the other runs read `.info` (and history) only,
 carry the stored growth columns, and build PEG and the buy score over them — a fast run never nulls
-a slow field. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
+a slow field. **A report reads them the next run** (2026-11-07, owner-approved): every run stores
+`.info`'s `mostRecentQuarter` as `reported_quarter`, and a later quarter than the stored one fetches
+the statements and estimates in that run (`new_quarter`, decided inside the fetch from the `.info`
+just read). Before, AMD's 2026-11-03 report left the watchlist on the old quarter's growth while
+Fundamentals (daily) had the new one. The first sighting only records the quarter, so a deploy
+costs nothing extra; a report costs one slow fetch a quarter per item.
+`tests/test_watchlist_report_refresh.py`. A ticker that resolves to a held, Yahoo-eligible security takes its RSI from a year of
 `market_prices` closes instead of `history("1y")` (`_held_closes`; Yahoo's history is
 dividend-adjusted, the stored closes are not, so the RSI can differ slightly around an ex-date).
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
+
+**Analyst counts** (owner-approved 2026-11-07, CLAUDE.md rule 1: about one request a week for
+each ticker below, ~13 then). A row's rating is five counts labelled by `consensus_of`, never
+Yahoo's `recommendationKey`. A held listing's counts are `analyst_ratings`' and a Company-tab
+company's (by SEC ticker) `company_yahoo_profiles`', both read at response time
+(`WatchlistService.stored_ratings`, `watchlist_rating`) so the row shows what the positions
+table or the overview shows. Only a ticker in neither costs a `recommendations` request
+(`AnalystRatingService.fetch_counts`, the held pass's reader, so its 429 stops the pass) — on
+the slow run, or the first run when `ratings_synced_at` is NULL; a fund is answered with zeros
+and never asked. A failed ask keeps the old counts until the next slow run. The buy score's
+analyst points key off the same label (`RATING_POINTS`), so a ticker whose Yahoo key differed
+from its counts' label scores differently than before. `tests/test_watchlist_ratings.py`.
 
 **The crypto sync rides every one of the portfolio's slots, and adds none.** `CRYPTO_SYNC_HOURS`
 is *derived* from `PORTFOLIO_SYNC_HOURS` — not from `ALL_SYNC_HOURS`, which since the watchlist

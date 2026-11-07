@@ -201,7 +201,9 @@ describe('CompanyTab', () => {
     expect(description.getAttribute('aria-expanded')).toBe('true')
     expect(description.className).not.toContain('line-clamp-2')
     const street = within(overview).getByTestId('street-row').textContent
-    expect(street).toContain('Buy62 analysts')
+    // The consensus, then every count written out (the bar between carries no text).
+    expect(street).toContain('Buy20 Strong Buy · 35 Buy · 6 Hold · 1 Sell')
+    expect(street).not.toContain('analysts')
     expect(street).toContain('Target$230.00+23.3%$140.00–$300.00')
     expect(street).toContain('EarningsNov 19, 2026EPS est. $1.02')
     // Nothing about the account: this tab is about the company.
@@ -263,6 +265,35 @@ describe('CompanyTab', () => {
     expect(card('valuation').textContent).toContain('P/S26.9')
     expect(card('valuation').textContent).not.toContain('CAGR')
     expect(within(card('roe')).getByTestId('headline').textContent).toBe('119.2%')
+  })
+
+  it("heads the valuation card with today's multiples, the key figures', dated by the close", async () => {
+    // AMD on 2026-11-07: the key figures read P/E 115.4 while the card headed with the last
+    // quarter end's 134.1 — two P/Es on one page.
+    const data = fixtureFinancials()
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue({
+      ...data,
+      key_stats: { ...data.key_stats, pe_ratio: 40.04, pfcf_ratio: 50.1, ps_ratio: 20.2 },
+    })
+    renderTab()
+    await screen.findAllByTestId('chart')
+    const valuation = card('valuation')
+    expect(within(valuation).getByTestId('headline').textContent).toBe('40.0')
+    expect(valuation.textContent).toContain('Nov 6, 2026')
+    expect(valuation.textContent).toContain('P/FCF50.1')
+    expect(valuation.textContent).toContain('P/S20.2')
+  })
+
+  it('heads the valuation card with the last period when no current multiple is known', async () => {
+    const data = fixtureFinancials()
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue({
+      ...data,
+      key_stats: { ...data.key_stats, pe_ratio: null, pfcf_ratio: null, ps_ratio: null },
+    })
+    renderTab()
+    await screen.findAllByTestId('chart')
+    expect(within(card('valuation')).getByTestId('headline').textContent).toBe('48.3')
+    expect(card('valuation').textContent).not.toContain('Nov 6, 2026')
   })
 
   it('hides the valuation card for a company without stored prices', async () => {

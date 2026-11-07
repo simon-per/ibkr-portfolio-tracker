@@ -2,8 +2,12 @@ from sqlalchemy import Integer, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
+from typing import Any, Dict, Mapping, Optional
 
 from app.database import Base
+
+#: The five recommendation counts, in Yahoo's order from most to least bullish.
+RATING_COUNT_FIELDS = ('strong_buy', 'buy', 'hold', 'sell', 'strong_sell')
 
 
 def consensus_of(
@@ -28,6 +32,22 @@ def consensus_of(
     if score <= 4.5:
         return "Sell"
     return "Strong Sell"
+
+
+def rating_of(counts: Optional[Mapping[str, Optional[int]]]) -> Optional[Dict[str, Any]]:
+    """
+    The rating a company shows: its five counts and their consensus (`consensus_of`), or
+    None when there is none to show — no counts known, or Yahoo's answer "no analysts cover
+    this" (all zero, `analyst_rating_service.no_rating`). The one shape the positions
+    table, the watchlist and the Company overview serve, so a company's rating reads the
+    same wherever it appears.
+    """
+    if counts is None:
+        return None
+    values = {f: int(counts.get(f) or 0) for f in RATING_COUNT_FIELDS}
+    if not any(values.values()):
+        return None
+    return {**values, 'consensus': consensus_of(**values)}
 
 
 class AnalystRating(Base):
