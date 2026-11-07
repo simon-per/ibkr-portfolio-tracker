@@ -38,6 +38,7 @@ from app.models.company_financials import (
     CompanySplit,
     CompanyYahooProfile,
     SecCompany,
+    SecFilingRead,
     SecTicker,
     SecurityCik,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "CompanySplit",
     "CompanyYahooProfile",
     "SecCompany",
+    "SecFilingRead",
     "SecTicker",
     "SecurityCik",
     "CryptoSnapshot",

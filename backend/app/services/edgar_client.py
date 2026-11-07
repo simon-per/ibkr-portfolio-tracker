@@ -1,5 +1,5 @@
 """
-SEC EDGAR's three JSON endpoints the Company tab reads (docs/company-financials.md).
+SEC EDGAR's endpoints the Company tab reads (docs/company-financials.md).
 
 - `https://www.sec.gov/files/company_tickers.json`: every ticker the SEC lists, with its
   CIK. One request a pass, and only when a held security has no CIK on record yet.
@@ -7,6 +7,9 @@ SEC EDGAR's three JSON endpoints the Company tab reads (docs/company-financials.
   company has filed, every period and every filing, in one document.
 - `https://data.sec.gov/submissions/CIK##########.json`: the company's SIC industry and
   fiscal year end (and its filing list, which is not read). At most monthly a company.
+- `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/`: one filing's `index.json`
+  and its XBRL instance, for a figure companyfacts leaves out (`edgar_filing_facts`). Once
+  per filing ever.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It comes from `EDGAR_USER_AGENT` (app/config.py), never from the code — the
@@ -37,6 +40,7 @@ from app.services.paced_http import PacedGet, json_body
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
+FILING_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/{name}"
 
 REQUEST_TIMEOUT_S = 60.0
 MIN_INTERVAL_S = 0.2
@@ -66,6 +70,11 @@ def is_configured() -> bool:
 def sec_ticker(symbol: str) -> str:
     """A symbol as the SEC's list spells it: IBKR's "BRK B" and Yahoo's "BRK.B" are "BRK-B"."""
     return symbol.strip().upper().replace(" ", "-").replace(".", "-")
+
+
+def filing_url(cik: int, accn: str, name: str) -> str:
+    """A file of one filing: its folder is the accession number without dashes."""
+    return FILING_URL.format(cik=int(cik), folder=accn.replace("-", ""), name=name)
 
 
 class EdgarClient(PacedGet):
@@ -104,8 +113,11 @@ class EdgarClient(PacedGet):
             await self._client.aclose()
             self._client = None
 
-    async def _get_json(self, url: str) -> Optional[Any]:
-        """The decoded body, None on a 404; `EdgarRefused` or `EdgarError` otherwise."""
+    async def _get(
+        self, url: str, accept: str = "application/json"
+    ) -> Optional[httpx.Response]:
+        """The 200 response, None on a 404; `EdgarRefused` or `EdgarError` otherwise."""
+        headers = {**self._headers, "Accept": accept}
         last: Optional[str] = None
         last_status: Optional[int] = None
         for attempt in range(len(RETRY_DELAYS_S) + 1):
@@ -115,7 +127,7 @@ class EdgarClient(PacedGet):
                 response = await self._send(
                     url,
                     params=None,
-                    headers=self._headers,
+                    headers=headers,
                     transient=EdgarError,
                 )
             except EdgarError as e:
@@ -131,12 +143,17 @@ class EdgarClient(PacedGet):
                 continue
             if status != 200:
                 raise EdgarError(f"{url}: HTTP {status}")
-            return json_body(url, response, EdgarError)
+            return response
         if last_status == 429:
             # Still rate-limited after the back-off: asking the next company would only
             # spend more of the same limit.
             raise EdgarRefused(429)
         raise EdgarError(f"{last} (after {len(RETRY_DELAYS_S) + 1} attempts)")
+
+    async def _get_json(self, url: str) -> Optional[Any]:
+        """The decoded body, None on a 404; `EdgarRefused` or `EdgarError` otherwise."""
+        response = await self._get(url)
+        return None if response is None else json_body(url, response, EdgarError)
 
     async def company_tickers(self) -> Dict[str, int]:
         """SEC ticker -> CIK. An answer that is not the expected shape is `EdgarError`."""
@@ -177,6 +194,18 @@ class EdgarClient(PacedGet):
         if not isinstance(body, dict):
             raise EdgarError(f"submissions for CIK {cik} is not an object")
         return submissions_profile(body)
+
+    async def filing_index(self, cik: int, accn: str) -> Optional[Dict[str, Any]]:
+        """One filing's list of files (`index.json`), or None when the SEC has none (404)."""
+        body = await self._get_json(filing_url(cik, accn, "index.json"))
+        if body is not None and not isinstance(body, dict):
+            raise EdgarError(f"the index of filing {accn} is not an object")
+        return body
+
+    async def filing_document(self, cik: int, accn: str, name: str) -> Optional[bytes]:
+        """One file of a filing, as bytes, or None when the SEC has none (404)."""
+        response = await self._get(filing_url(cik, accn, name), accept="application/xml")
+        return None if response is None else response.content
 
 
 _FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")

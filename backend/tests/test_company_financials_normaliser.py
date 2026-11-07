@@ -749,6 +749,54 @@ def test_a_zero_quarter_a_reported_quarter_contradicts_stays_absent():
     assert q4["value"] == pytest.approx(0.49)
 
 
+def _filed(start, end, val, accn, filed, form="10-Q"):
+    """A fact read from a filing's instance (`edgar_filing_facts`)."""
+    return {
+        "concept": "CommonStockDividendsPerShareDeclared",
+        "unit": "USD/shares",
+        "start": start,
+        "end": end,
+        "val": val,
+        "accn": accn,
+        "form": form,
+        "filed": filed,
+    }
+
+
+def test_facts_read_from_filings_fill_what_companyfacts_lacks():
+    """MA tagged its 2019-2023 dividend only on the equity statement's column, which
+    companyfacts leaves out: the Company tab's TTM had a hole there (2026-11-07)."""
+    doc = _dps(_f("2020-01-01", "2020-12-31", 1.64, "2021-02-12", form="10-K"))
+    read = [
+        _filed("2021-01-01", "2021-03-31", 0.44, "q1", "2021-04-29"),
+        _filed("2021-04-01", "2021-06-30", 0.44, "q2", "2021-07-29"),
+        _filed("2021-01-01", "2021-06-30", 0.88, "q2", "2021-07-29"),
+        _filed("2021-01-01", "2021-09-30", 1.32, "q3", "2021-10-28"),
+        _filed("2021-01-01", "2021-12-31", 1.81, "k", "2022-02-11", form="10-K"),
+    ]
+    assert [r["period_end"] for r in normalise(doc).rows] == [date(2020, 12, 31)]
+    rows = normalise(doc, read).rows
+    found = {
+        (r["period_end"], r["fiscal_period"]): round(r["value"], 4)
+        for r in rows
+        if r["metric"] == "dividends_per_share"
+    }
+    assert found[(date(2021, 6, 30), "Q2")] == 0.44
+    assert found[(date(2021, 9, 30), "Q3")] == 0.44
+    assert found[(date(2021, 12, 31), "Q4")] == 0.49  # the year less nine months
+    assert found[(date(2021, 12, 31), "FY")] == 1.81
+
+
+def test_a_fact_read_from_a_filing_never_replaces_companyfacts():
+    doc = _dps(
+        _f("2021-04-01", "2021-06-30", 0.44, "2021-07-29"),
+        _f("2021-01-01", "2021-12-31", 1.81, "2022-02-11", form="10-K"),
+    )
+    read = [_filed("2021-04-01", "2021-06-30", 0.99, "later", "2022-07-28")]
+    rows = normalise(doc, read).rows
+    assert _row(rows, "dividends_per_share", date(2021, 6, 30), "Q2")["value"] == 0.44
+
+
 def test_a_negative_reported_figure_that_cannot_be_negative_stays_absent():
     """HON's Q1 2009 10-Q tags dividends paid as -224M: a sign slip, not a refund."""
     q1, q2 = ("2009-01-01", "2009-03-31"), ("2009-04-01", "2009-06-30")

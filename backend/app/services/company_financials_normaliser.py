@@ -520,6 +520,39 @@ def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     return out
 
 
+def _filing_facts(
+    base: Sequence[Fact], filing_facts: Iterable[Dict[str, Any]]
+) -> List[Fact]:
+    """
+    Facts read from the filings themselves (`edgar_filing_facts`: a dividend per share a
+    company tagged only on a dimension member, which companyfacts leaves out), as `Fact`s
+    under their own filing's accession number, so the split vote and the latest-filing rule
+    treat them as that filing's. They only fill: a period companyfacts has any fact of that
+    concept for keeps companyfacts' answer.
+    """
+    wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
+    never_negative = {
+        c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
+    }
+    tagged = {(f.concept, f.start, f.end) for f in base}
+    out: List[Fact] = []
+    for row in filing_facts:
+        concept, unit = row.get("concept"), row.get("unit")
+        kind = wanted.get(concept)
+        if kind is None or not isinstance(unit, str) or not _unit_fits(kind, unit):
+            continue
+        start, end, filed = (_date(row.get(k)) for k in ("start", "end", "filed"))
+        val, accn, form = row.get("val"), row.get("accn"), row.get("form")
+        if None in (start, end, filed) or not accn or form not in FORMS:
+            continue
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        if (concept in never_negative and val < 0) or (concept, start, end) in tagged:
+            continue
+        out.append(Fact(concept, kind, unit, start, end, float(val), accn, filed, form))
+    return out
+
+
 # ── Splits and scale slips ───────────────────────────────────────────────────
 
 
@@ -1077,15 +1110,19 @@ def _fill_shares_from_eps(values, keys) -> None:
         )
 
 
-def normalise(companyfacts: Dict[str, Any]) -> Normalised:
+def normalise(
+    companyfacts: Dict[str, Any], filing_facts: Iterable[Dict[str, Any]] = ()
+) -> Normalised:
     """
     Rows for `company_financials`: dicts with `period_end`, `fiscal_year`,
     `fiscal_period` (Q1-Q4 or FY), `metric`, `value`, `unit`, `source_concept`, `filed`.
     An empty result means the document carries no us-gaap 10-Q/10-K figures this module
-    reads (an IFRS 20-F filer, a fund).
+    reads (an IFRS 20-F filer, a fund). `filing_facts` are facts read from the filings
+    themselves (`{concept, unit, start, end, val, accn, form, filed}`, `_filing_facts`).
     """
     result = Normalised(entity_name=(companyfacts or {}).get("entityName"))
-    facts = _drop_lone_slips(_facts(companyfacts))
+    base = _facts(companyfacts)
+    facts = _drop_lone_slips(base + _filing_facts(base, filing_facts))
     if not facts:
         return result
     multiplier = adjustments(facts)

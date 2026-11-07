@@ -22,6 +22,7 @@ from app.config import settings
 from app.models.company_financials import (
     CompanyFinancial,
     SecCompany,
+    SecFilingRead,
     SecTicker,
     SecurityCik,
 )
@@ -44,6 +45,7 @@ from app.services.edgar_client import (
     RETRY_DELAYS_S,
     SUBMISSIONS_URL,
     TICKERS_URL,
+    filing_url,
     sec_ticker,
 )
 
@@ -625,3 +627,164 @@ async def test_the_scheduled_job_without_a_user_agent_records_its_warning(
     assert result["warnings"] == [NOT_CONFIGURED_WARNING]
     run = (await db.execute(select(SyncRun))).scalar_one()
     assert run.warnings == [NOT_CONFIGURED_WARNING]
+
+
+# ── Filing instances: the dividend per share companyfacts leaves out ─────────
+
+INSTANCE = (Path(__file__).parent / "fixtures" / "edgar_dimensioned_dividends.xbrl").read_bytes()
+Q1_10Q, Q2_10Q, FY_10K = "0000320193-21-000010", "0000320193-21-000020", "0000320193-21-000005"
+
+
+def _paid(start, end, val, accn, filed, form="10-Q"):
+    return {"start": start, "end": end, "val": val, "accn": accn, "filed": filed, "form": form}
+
+
+# A company paying a dividend each quarter whose 2021 dividend per share companyfacts lacks,
+# as MA's from 2019 to mid-2023: it is tagged only on the equity statement's column.
+DIMENSION_ONLY = {
+    "cik": APPLE_CIK,
+    "entityName": "Example",
+    "facts": {
+        "us-gaap": {
+            "PaymentsOfDividendsCommonStock": {
+                "units": {
+                    "USD": [
+                        _paid("2020-01-01", "2020-12-31", 1.6e9, FY_10K, "2021-02-12", "10-K"),
+                        _paid("2021-01-01", "2021-03-31", 4e8, Q1_10Q, "2021-04-29"),
+                        _paid("2021-01-01", "2021-06-30", 8e8, Q2_10Q, "2021-07-29"),
+                        _paid("2021-04-01", "2021-06-30", 4e8, Q2_10Q, "2021-07-29"),
+                    ]
+                }
+            },
+            "CommonStockDividendsPerShareDeclared": {
+                "units": {
+                    "USD/shares": [
+                        _paid("2020-01-01", "2020-12-31", 1.60, FY_10K, "2021-02-12", "10-K"),
+                    ]
+                }
+            },
+        }
+    },
+}
+
+
+class EdgarWithFilings(Edgar):
+    """The fake SEC, also serving filings' files by URL: `files` maps a URL to the
+    `httpx.Response` keyword arguments it answers with; any other filing file is a 404."""
+
+    def __init__(self, facts, files):
+        super().__init__(facts)
+        self.files = files
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url in self.files and not self.status.get(url):
+            self.requests.append(request)
+            return httpx.Response(**self.files[url])
+        return super().handler(request)
+
+    def filing_urls(self):
+        return [u for u in self.urls() if "/Archives/" in u]
+
+
+def _filings_edgar():
+    return EdgarWithFilings(
+        {APPLE_CIK: DIMENSION_ONLY},
+        {
+            filing_url(APPLE_CIK, Q2_10Q, "index.json"): {
+                "status_code": 200,
+                "json": {
+                    "directory": {
+                        "item": [
+                            {"name": "aapl-20210630.htm"},
+                            {"name": "aapl-20210630_htm.xml"},
+                            {"name": "FilingSummary.xml"},
+                        ]
+                    }
+                },
+            },
+            filing_url(APPLE_CIK, Q2_10Q, "aapl-20210630_htm.xml"): {
+                "status_code": 200,
+                "content": INSTANCE,
+            },
+        },
+    )
+
+
+async def _dps_rows(db):
+    rows = (
+        await db.execute(
+            select(CompanyFinancial).where(
+                CompanyFinancial.cik == APPLE_CIK,
+                CompanyFinancial.metric == "dividends_per_share",
+            )
+        )
+    ).scalars()
+    return {(r.period_end.isoformat(), r.fiscal_period): r.value for r in rows}
+
+
+@pytest.mark.asyncio
+async def test_a_dividend_gap_reads_its_filing_once_and_fills_the_quarter(
+    db, configured, monkeypatch
+):
+    """Newest gap first, at most `FILING_READS_PER_COMPANY` a pass, each filing once ever;
+    a filing EDGAR has no index for is an answer (stored, holding nothing)."""
+    monkeypatch.setattr(company_financials_sync, "FILING_READS_PER_COMPANY", 1)
+    await _hold(db, 1, "AAPL")
+    await db.commit()
+    edgar = _filings_edgar()
+
+    summary = await _sync(db, edgar).refresh()
+    assert summary["status"] == "success", summary
+    assert summary["filings_read"] == 1
+    assert edgar.filing_urls() == [
+        filing_url(APPLE_CIK, Q2_10Q, "index.json"),
+        filing_url(APPLE_CIK, Q2_10Q, "aapl-20210630_htm.xml"),
+    ]
+    # The quarter, and the year before's from the filing's comparative.
+    assert await _dps_rows(db) == {
+        ("2020-06-30", "Q2"): 0.20,
+        ("2020-12-31", "FY"): 1.60,
+        ("2021-06-30", "Q2"): 0.22,
+    }
+    read = (await db.execute(select(SecFilingRead))).scalar_one()
+    assert (read.accn, read.form, read.filed.isoformat()) == (Q2_10Q, "10-Q", "2021-07-29")
+    assert {(f["start"], f["end"], f["val"]) for f in read.facts} == {
+        ("2020-04-01", "2020-06-30", 0.20),
+        ("2021-01-01", "2021-06-30", 0.44),
+        ("2021-04-01", "2021-06-30", 0.22),
+    }
+
+    # The next pass asks for the first quarter's filing, never the second's again.
+    edgar = _filings_edgar()
+    summary = await _sync(db, edgar).refresh(force=True)
+    assert edgar.filing_urls() == [filing_url(APPLE_CIK, Q1_10Q, "index.json")]
+    assert summary["filings_read"] == 1
+    assert await _count(db, SecFilingRead) == 2
+    assert await _dps_rows(db) == {
+        ("2020-06-30", "Q2"): 0.20,
+        ("2020-12-31", "FY"): 1.60,
+        ("2021-06-30", "Q2"): 0.22,
+    }
+
+    # And then none: every gap's filing has been read.
+    edgar = _filings_edgar()
+    summary = await _sync(db, edgar).refresh(force=True)
+    assert edgar.filing_urls() == [] and summary["filings_read"] == 0
+    assert ("2021-06-30", "Q2") in await _dps_rows(db)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_filing_read_stops_the_pass_after_writing_the_figures(
+    db, configured
+):
+    await _hold(db, 1, "AAPL")
+    await db.commit()
+    edgar = _filings_edgar()
+    edgar.status[filing_url(APPLE_CIK, Q2_10Q, "index.json")] = [403]
+
+    summary = await _sync(db, edgar).refresh()
+    assert summary["stopped"] == 403
+    assert await _count(db, SecFilingRead) == 0  # nothing stamped: asked next pass
+    assert await _dps_rows(db) == {("2020-12-31", "FY"): 1.60}  # companyfacts' written
+    assert not [u for u in edgar.urls() if "/submissions/" in u]  # the pass stopped

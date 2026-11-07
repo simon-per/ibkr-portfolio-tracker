@@ -20,6 +20,12 @@ The EDGAR pass: SEC filers' companyfacts in, `company_financials` rows out
 A foreign filer (ASML's and NU's 20-F) has a CIK but files IFRS, so its document yields no
 row: a miss, backed off like any other.
 
+**Filing instances** (`edgar_filing_facts`): a quarter with dividends paid and no dividend
+per share sends the pass to the filing that reports it, whose XBRL instance may tag the
+figure on a dimension member companyfacts leaves out (MA from 2019 to mid-2023). Each filing
+is read once ever and what it held is stored (`sec_filing_reads`); at most
+`FILING_READS_PER_COMPANY` a company a pass, newest first.
+
 **Bounded** (`STALE_AFTER`, `CIK_RECHECK_AFTER`, `miss_backoff`): a company is fetched at
 most once in `STALE_AFTER`; a held ticker the SEC does not list is looked up again after
 `CIK_RECHECK_AFTER`; the ticker list is asked at most once a pass; a CIK whose document has
@@ -33,9 +39,10 @@ Touches neither Yahoo nor IBKR.
 
 import asyncio
 import logging
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -60,6 +67,15 @@ from app.services.edgar_client import (
     is_configured,
     sec_ticker,
 )
+from app.services.edgar_filing_facts import (
+    Filing,
+    covers,
+    dividend_gaps,
+    filings,
+    instance_name,
+    parse_instance,
+    reporting,
+)
 from app.services.etf_basket_parsers import INVESTED_ASSET_CLASSES
 from app.services.market_data_service import MarketDataService
 
@@ -83,6 +99,10 @@ CIK_RECHECK_AFTER = timedelta(days=30)
 UNIVERSE_FUNDS = ("QQQM",)
 #: Companies, not lines: GOOG and GOOGL are one, so the index's 101 lines are 100.
 UNIVERSE_SIZE = 100
+#: Filing instances read for one company in one pass (two requests each). The first fill
+#: reads MA's six years of dividend gaps in about ten, BKR's nine in about twenty; a company
+#: that keeps tagging only on a dimension member needs one a quarter after that.
+FILING_READS_PER_COMPANY = 24
 
 NOT_CONFIGURED_WARNING = (
     "EDGAR_USER_AGENT is not set; company financials were not refreshed."
@@ -245,6 +265,9 @@ class CompanyFinancialsSync:
             "profiles_due": 0,
             "profiles_fetched": 0,
             "profile_errors": 0,
+            "filings_read": 0,
+            "filing_errors": 0,
+            "filings_unreadable": 0,
         }
         warnings: List[str] = []
         if missing_baskets:
@@ -344,10 +367,23 @@ class CompanyFinancialsSync:
                 f"The industry of {p} compan{'y' if p == 1 else 'ies'} could not be read "
                 f"from EDGAR; asked again next week."
             )
+        f = summary["filing_errors"]
+        if f:
+            warnings.append(
+                f"{f} filing{'' if f == 1 else 's'} could not be read from EDGAR for a "
+                f"missing dividend per share; asked again next week."
+            )
+        u = summary["filings_unreadable"]
+        if u:
+            warnings.append(
+                f"{u} filing instance{'' if u == 1 else 's'} EDGAR served could not be "
+                f"parsed; recorded as holding nothing."
+            )
         summary["message"] = (
             f"Company financials: {summary['fetched']} of {summary['companies_due']} "
             f"companies fetched, {summary['rows_written']} rows, "
-            f"{summary['no_data']} without 10-Q/10-K figures, {failed} failed"
+            f"{summary['no_data']} without 10-Q/10-K figures, {failed} failed, "
+            f"{summary['filings_read']} filings read"
         )
         if warnings:
             summary["warnings"] = warnings
@@ -488,14 +524,96 @@ class CompanyFinancialsSync:
             summary["errors"] += 1
             logger.warning(f"companyfacts for CIK {cik} failed: {e}")
             return f"error: {e}"
-        result = normalise(facts) if facts is not None else None
+        stored = await self.repo.filing_reads(cik) if facts is not None else {}
+        result = normalise(facts, _filing_facts(stored)) if facts is not None else None
         if result is None or not result.has_data:
             await self.repo.record_miss(cik, utcnow())
             await self.db.commit()
             summary["no_data"] += 1
             return "no 10-Q/10-K figures" if facts is not None else "not found"
+        read, refused = await self._read_filings(
+            client, cik, facts, result.rows, set(stored), summary
+        )
+        if read:
+            result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
         await self.repo.replace_rows(cik, result.rows, utcnow(), result.entity_name)
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)
+        if refused is not None:
+            # The figures are written; the refusal still stops the pass.
+            raise refused
         return f"{len(result.rows)} rows"
+
+    async def _read_filings(
+        self,
+        client: EdgarClient,
+        cik: int,
+        companyfacts: Dict[str, Any],
+        rows: Sequence[dict],
+        read: set,
+        summary: Dict[str, Any],
+    ) -> Tuple[int, Optional[EdgarRefused]]:
+        """
+        The filings behind this company's dividend gaps, newest first, each read once ever
+        and at most `FILING_READS_PER_COMPANY` this pass; a gap the filings already read
+        this pass cover (a comparative quarter, a year) is not asked for again. Returns how
+        many were read, and the refusal that stopped them, if one did. A failure stamps
+        nothing and stops this company's reads: next week asks again.
+        """
+        by_accn = filings(companyfacts)
+        pending = dividend_gaps(rows)
+        count = 0
+        while pending and count < FILING_READS_PER_COMPANY:
+            filing = reporting(by_accn, pending.pop(0))
+            if filing is None or filing.accn in read:
+                continue
+            try:
+                found = await self._read_filing(client, cik, filing, summary)
+            except EdgarRefused as refused:
+                return count, refused
+            except EdgarError as e:
+                summary["filing_errors"] += 1
+                logger.warning(f"filing {filing.accn} of CIK {cik} failed: {e}")
+                break
+            await self.repo.record_filing_read(
+                cik, filing.accn, filing.form, filing.filed, found, utcnow()
+            )
+            await self.db.commit()
+            read.add(filing.accn)
+            count += 1
+            summary["filings_read"] += 1
+            pending = [gap for gap in pending if not covers(found, gap)]
+        return count, None
+
+    async def _read_filing(
+        self,
+        client: EdgarClient,
+        cik: int,
+        filing: Filing,
+        summary: Dict[str, Any],
+    ) -> List[dict]:
+        """What one filing's instance holds; nothing when it has none, or none EDGAR lists."""
+        index = await client.filing_index(cik, filing.accn)
+        name = instance_name(index) if index is not None else None
+        if name is None:
+            return []
+        body = await client.filing_document(cik, filing.accn, name)
+        if body is None:
+            return []
+        try:
+            return parse_instance(body)
+        except ET.ParseError as e:
+            summary["filings_unreadable"] += 1
+            logger.warning(f"filing {filing.accn} of CIK {cik}: {name} is not XML ({e})")
+            return []
+
+
+def _filing_facts(stored: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The stored reads as the normaliser takes them: each fact with its filing's
+    accession number, form and filing date."""
+    return [
+        {**fact, "accn": row.accn, "form": row.form, "filed": row.filed.isoformat()}
+        for row in stored.values()
+        for fact in row.facts or ()
+    ]

@@ -1,6 +1,6 @@
 """
-Reads and writes of `company_financials`, `sec_companies`, `security_ciks` and the
-company prices (docs/company-financials.md).
+Reads and writes of `company_financials`, `sec_companies`, `security_ciks`,
+`sec_filing_reads` and the company prices (docs/company-financials.md).
 
 `replace_rows` is the only write of a company's figures and it **refuses whole**: the
 company's rows are deleted and the new set inserted in one transaction, so a reader never
@@ -20,6 +20,7 @@ from app.models.company_financials import (
     CompanySplit,
     CompanyYahooProfile,
     SecCompany,
+    SecFilingRead,
     SecTicker,
     SecurityCik,
 )
@@ -196,6 +197,37 @@ class CompanyFinancialsRepository:
         company.fetched_at = fetched_at
         company.facts_checked_at = None
         company.facts_miss_count = None
+
+    # ── sec_filing_reads ─────────────────────────────────────────────────────
+
+    async def filing_reads(self, cik: int) -> Dict[str, SecFilingRead]:
+        """Every filing of this company whose instance was read, by accession number."""
+        result = await self.session.execute(
+            select(SecFilingRead).where(SecFilingRead.cik == cik)
+        )
+        return {row.accn: row for row in result.scalars()}
+
+    async def record_filing_read(
+        self,
+        cik: int,
+        accn: str,
+        form: str,
+        filed: date,
+        facts: Sequence[dict],
+        read_at: datetime,
+    ) -> None:
+        """What one filing held, nothing included: the filing is never asked again."""
+        await self.ensure_company(cik)
+        self.session.add(
+            SecFilingRead(
+                cik=cik,
+                accn=accn,
+                form=form,
+                filed=filed,
+                facts=list(facts),
+                read_at=read_at,
+            )
+        )
 
     async def rows_for(self, cik: int) -> List[CompanyFinancial]:
         result = await self.session.execute(

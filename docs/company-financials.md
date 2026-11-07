@@ -13,8 +13,9 @@ never IBKR.
 
 | piece | file |
 |---|---|
-| the two SEC endpoints, pacing, retries | `backend/app/services/edgar_client.py` |
+| the SEC endpoints, pacing, retries | `backend/app/services/edgar_client.py` |
 | companyfacts → rows (every rule below) | `backend/app/services/company_financials_normaliser.py` |
+| a filing's instance → the dividend per share companyfacts leaves out | `backend/app/services/edgar_filing_facts.py` (table `sec_filing_reads`, migration `a7c9e1f3b5d8`) |
 | the pass: scope, CIKs, back-off, writes | `backend/app/services/company_financials_sync.py` |
 | TTM, FCF, margins, CAGR, YoY | `backend/app/services/company_financials_service.py` |
 | tables | `backend/app/models/company_financials.py` (migration `d1e3f5a7b9c2`) |
@@ -38,6 +39,8 @@ never IBKR.
   once, then about one in four a week. A 404 or a document stating nothing is an answer (stamped,
   stored as NULL); a failure stamps nothing and warns (*The industry of N companies could not be
   read*). The run reports `profiles_due`, `profiles_fetched`, `profile_errors`.
+- `https://www.sec.gov/Archives/edgar/data/<cik>/<accession>/index.json` and the filing's
+  XBRL instance beside it — *Filing instances* below. Once per filing, ever.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It is `EDGAR_USER_AGENT` in `backend/.env` (`.env.example` has the placeholder
@@ -50,7 +53,53 @@ and the CLI exits 1 (its `--dry-run` still lists what is due).
 **companyfacts carries the standard taxonomies only** (us-gaap, dei, srt, …), never a company's
 own extension concepts. A figure a company tags only under its own namespace is not in the
 document at all, so no whitelist of extension names can reach it from this source (NVDA's capex,
-below).
+below). **It also carries only facts tagged without a dimension** — the dividend per share many
+companies tag only on a column of the statement of equity, which *Filing instances* reads from
+the filing instead.
+
+### Filing instances
+
+**Why** (2026-11-07, from MA's chart): the TTM dividend per share had a hole wherever one
+quarter was missing, and 26 of the 62 dividend payers had quarters with dividends paid and no
+dividend per share. The dominant cause was the tagging: MA (2019 to mid-2023), PCAR, INTC, MDLZ,
+XEL and COST tag the figure only on a dimension member — `StatementEquityComponentsAxis`
+(`CommonStockMember` or `RetainedEarningsMember`, the equity statement's column),
+`StatementClassOfStockAxis` (BKR's `CommonClassAMember`), `DividendsAxis`
+(`DividendDeclaredMember`, COST) — so companyfacts never had it. The undimensioned total
+(`DividendsCommonStockCash`) is there, but over any share count it missed the tagged figure by
+more than 0.4–0.9% for half the quarters and 3–4% for a tenth (measured over 1,400): no stand-in.
+
+**How** (`edgar_filing_facts`, `CompanyFinancialsSync._read_filings`): after a company's
+companyfacts is normalised, each quarter with dividends paid and no dividend per share (newest
+first) names the filing that reports it — the 10-Q whose own period ends there, the 10-K for a
+fourth quarter, the original before an amendment (`reporting`). Its `index.json` names the
+instance (`<name>_htm.xml` for inline XBRL, else the one `<prefix>-<YYYYMMDD>.xml`), and
+`parse_instance` keeps the dividend-per-share facts on **exactly one whitelisted us-gaap member**
+(`MEMBERS`); two members giving one period different values leave it out whole. A gap a read
+filing already covers (its comparatives: last year's quarter, the year-to-date rung, a 10-K's
+three years) is not asked for in the same pass.
+
+- **Fill, never replace**: the normaliser takes the stored facts beside companyfacts' under their
+  own filing's accession number (so the split vote and the latest-filing rule treat them as that
+  filing's), and only for a (concept, period) companyfacts has no fact for.
+- **Once per filing, ever** (`sec_filing_reads`): a filing never changes, so what it held is
+  stored, nothing included, and never asked again; a 404 index or a filing with no single
+  instance is stored as nothing. A failure stamps nothing and stops that company's reads for the
+  pass (`filing_errors`, a warning); a 401/403/429 writes the company's figures, then stops the
+  pass. A document that is not XML is stored as nothing, with a warning (`filings_unreadable`).
+- **Bounded**: two requests a filing, at most `FILING_READS_PER_COMPANY` (24) a company a pass.
+  The survey (every gap filing of the 102 companies, 2026-11-07) was 256 filings and about
+  860 MB; with the comparatives the first pass reads fewer. After it, a company that keeps
+  tagging only on a member (BKR) costs one filing a quarter. A company paying only preferred
+  dividends (TMUS before 2018) has gaps too: its filings are read once and hold nothing.
+- **Members not read**: a second share class, special dividends, subsequent events, two
+  dimensions, typed members, and a company's own extension members (AMAT's per-quarter ones).
+  The 2009–2013 filings hold no dimensioned dividend at all.
+
+The survey's effect on the 102 companies: gaps 280 → 134 with the zero rule below, no other
+metric's row moved, no existing dividend per share changed but MCHP's FY2011 Q4 (0.173 → 0, its
+two dividends declared in Q3 now sum to the year). MA, MDLZ, XEL and COST have no gap left;
+PCAR one, INTC two, BKR four.
 
 ## Limits and bounds
 
@@ -320,7 +369,9 @@ is named after the year before.
 `company_financials`: one row per (CIK, period end, fiscal period, metric) — Q4 and FY
 share a period end, hence the fiscal period in the key — with `fiscal_year`, `value` (float),
 `unit` (`USD`, `USD/shares` or `shares`), `source_concept`, `filed` (the newest filing behind the
-value) and `fetched_at`. **A period never reported has no row; nothing is stored as 0.**
+value) and `fetched_at`. **A period never reported has no row; nothing is stored as 0.** A
+dividend per share read from a filing's instance carries its concept's name like any other; its
+filing is in `sec_filing_reads` (cik, accn, form, filed, `facts` as JSON, read_at).
 
 ## Service and API
 
@@ -507,6 +558,13 @@ filings' `currency`.
   filing's XBRL instance, a different source.
 - A unit slip in a monetary concept that no newer filing overlaps is not caught (the share-count
   check has NI / EPS to compare with; revenue has nothing).
+- **Dividend per share gaps left after the filing instances** (134 quarters across 23
+  companies, 2026-11-07): IBKR and BKNG tag one quarter's rate on every rung (above); CEG tags
+  one quarter's rate on the year, so its fourth quarters stay absent; AMAT and MELI tag each
+  declaration on a one-day or one-month context, or on AMAT's own members; some filings tag no
+  dividend per share anywhere (WDC 2013–2015, CTAS's FY2017); 2008–2009 quarters reported only
+  as comparatives before XBRL (MA, PCAR, FAST, ROP); TMUS before 2018 and LITE paid preferred or
+  other dividends, not common.
 - **KDP before 2018** mixes Dr Pepper Snapple's and Keurig's filings (the 2018 reverse merger moved
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from

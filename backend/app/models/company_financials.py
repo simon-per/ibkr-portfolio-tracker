@@ -1,13 +1,15 @@
 """
 Fundamentals history from SEC EDGAR, one company at a time (docs/company-financials.md).
 
-Four tables, and two for its share price. `sec_companies` is one SEC filer the pass fetches — a held company, or a
+Five tables, and two for its share price. `sec_companies` is one SEC filer the pass fetches — a held company, or a
 Nasdaq-100 constituent the account does not hold — keyed by its Central Index Key, with
 the pass's stamps. `company_financials` holds its normalised figures, one row per (company,
 period, metric), in the reporting currency as filed. `security_ciks` maps a held security
 to its CIK: a mapping table rather than a column on `securities` because the answer "asked,
 and the SEC lists no such ticker" needs a row of its own (the `IsinIdentity` /
 `SecurityLogo` pattern); `sec_tickers` does the same for a constituent's ticker.
+`sec_filing_reads` keeps what one filing's XBRL instance held that companyfacts leaves out
+(`edgar_filing_facts`), so each filing is read once ever.
 `company_prices` and `company_splits` are Yahoo's weekly closes and split events for each
 company, for its P/E (`company_price_sync`).
 
@@ -20,6 +22,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Date,
     DateTime,
@@ -170,6 +173,31 @@ class CompanyFinancial(Base):
             f"<CompanyFinancial {self.cik} {self.fiscal_period} "
             f"{self.period_end} {self.metric}={self.value}>"
         )
+
+
+class SecFilingRead(Base):
+    """
+    One 10-Q/10-K whose XBRL instance the EDGAR pass has read for the figures companyfacts
+    leaves out — a dividend per share tagged only on a dimension member
+    (`edgar_filing_facts`) — and what it found: `facts`, a list of `{concept, unit, start,
+    end, val}`, empty when the filing held none. A filing never changes, so a row means the
+    filing is never asked again; `form` and `filed` are companyfacts' for that accession
+    number, which the normaliser needs beside each fact.
+    """
+
+    __tablename__ = "sec_filing_reads"
+
+    cik: Mapped[int] = mapped_column(
+        ForeignKey("sec_companies.cik", ondelete="CASCADE"), primary_key=True
+    )
+    accn: Mapped[str] = mapped_column(String(25), primary_key=True)
+    form: Mapped[str] = mapped_column(String(10), nullable=False)
+    filed: Mapped[date] = mapped_column(Date, nullable=False)
+    facts: Mapped[list] = mapped_column(JSON, nullable=False)
+    read_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<SecFilingRead {self.cik} {self.accn} facts={len(self.facts or [])}>"
 
 
 class CompanyPrice(Base):
