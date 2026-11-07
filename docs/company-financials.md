@@ -29,6 +29,15 @@ never IBKR.
   security's answer, `sec_tickers` a constituent ticker's (GOOG's CIK is stored nowhere else).
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` — every XBRL fact a company
   has filed, every period, every filing. One request per company per week.
+- `https://data.sec.gov/submissions/CIK##########.json` — the company's SIC code and its
+  description (the overview's industry) and its fiscal year end (`MMDD`), stored on
+  `sec_companies` (`sic`, `sic_description`, `fiscal_year_end`; migration `e8c2a4f6b1d3`). The
+  document's filing list is read past and dropped. **At most monthly a company**
+  (`PROFILE_RECHECK_AFTER`, 30 days, on `submissions_checked_at`), after the figures in the same
+  Sunday pass, so a refusal there leaves the figures whole: the first Sunday asks every company
+  once, then about one in four a week. A 404 or a document stating nothing is an answer (stamped,
+  stored as NULL); a failure stamps nothing and warns (*The industry of N companies could not be
+  read*). The run reports `profiles_due`, `profiles_fetched`, `profile_errors`.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It is `EDGAR_USER_AGENT` in `backend/.env` (`.env.example` has the placeholder
@@ -314,7 +323,7 @@ Alphabet, and only GOOG was named before; empty for a company not held.
 
 `GET /api/company-financials/{cik}?period=quarterly|ttm|annual&range=5y|10y|max`
 (defaults `ttm`, `10y`): the same identity fields, then `currency, period, range, as_of,
-warnings, key_stats, series`, each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
+warnings, key_stats, profile, series` (`profile` and `series.price`: *The overview* below), each series `{points: [{period_end, label, value, yoy}], cagr, yoy}` — every point
 carries its own YoY by the series' rule (it may compare with a point before the range), for the
 tab's hover — and `cagrs` `{y3, y5, y10}`. The series: revenue, revenue per share, operating
 income, net income, diluted EPS, FCF, FCF after SBC, FCF per share, FCF after SBC per share,
@@ -432,6 +441,49 @@ The P/E's closes come from Yahoo (`company_price_sync`, CLAUDE.md rule 1; enable
       docker exec backend-portfolio-backend-1 python -m app.cli.fetch_company_prices
 
   `--symbol`, `--force` as above; it records a `manual_company_prices_fetch` row.
+
+## The overview
+
+The Company tab opens on an overview of **the company itself** — never a portfolio figure
+(owner, 2026-11-07; docs/frontend.md *The Company tab*). Beyond the figures above it reads:
+
+- **Industry and fiscal year end** from the SEC's submissions document (*Sources*).
+- **Yahoo's company-level figures** — analyst rating counts, price targets, forward P/E, PEG,
+  forward revenue and EPS growth, the next earnings date and its EPS estimate, the business
+  summary. **A held company reads its listing's own rows**, kept by the daily held pass:
+  `fundamental_metrics` (which keeps `business_summary` from the `.info` it already reads, at no
+  extra request), `analyst_ratings`, `earnings_events`. **A company nobody holds** reads
+  `company_yahoo_profiles` (migration `f1a3c5e7b9d2`), filled a chunk a run by
+  `company_profile_sync` inside the 05:00 `fundamentals_refresh` (CLAUDE.md rule 1, approved by
+  the owner 2026-11-07 for that budget; docs/flex-and-sync.md has it). Both through the same
+  readers — `fundamentals_service.extract_metrics` and `extract_earnings`,
+  `AnalystRatingService.fetch_counts` — so one company's figures never have two parsers. Until the
+  rotation reaches a company (two weeks for the first fill), its Yahoo figures are absent.
+
+**`profile`** on `/api/company-financials/{cik}` (`CompanyFinancialsService._profile`; pinned both
+ways by the contract test): `industry, fiscal_year_end, description`; the price line `price,
+price_date, return_1m, return_1y, return_5y, return_10y, week52_low, week52_high`; `forward_pe,
+peg_ratio, fwd_revenue_growth, fwd_eps_growth, rating {strong_buy … strong_sell, consensus},
+analysts, target_low, target_mean, target_high, target_upside, yahoo_currency, next_earnings_date,
+next_eps_estimate, yahoo_as_of`. Rates are fractions; the unknown is null. `consensus` is
+`analyst_rating.consensus_of`, the rule every rating label in the app goes through;
+`yahoo_currency` is the targets' and the EPS estimate's (Yahoo's quote), which need not be the
+filings' `currency`.
+
+- **One resolver** (`_yahoo_figures`): a held company's listing rows or the chunk's row, never a
+  mix; `tests/test_company_overview_profile.py` pins which wins.
+- **The price line is the market's, the multiples' basis is the figures'.** `_closes` reads the
+  weekly closes and the held listing's newest daily close once; the P/E and its kin take them
+  through `_on_eps_basis` (a split after the newest filing scales them), the price line and
+  `series.price` take them as quoted — a 10:1 split would otherwise show ten times the price.
+  `price_line`: the newest close and its date; the 1M change against the newest close on or before
+  a month back (within `PRICE_MATCH_DAYS`), 1Y by `yoy`, 5Y and 10Y by `cagrs` (annualised); the
+  52-week low and high of the closes — weekly closes, not intraday prices.
+- **The upside** is the mean target over the newest close, only when the target's
+  `data_currency` is the closes' currency and the close is within `PRICE_MAX_AGE_DAYS`.
+- **`series.price`** (`price_series`): the market closes shaped like any series, the range counted
+  back from the newest close, each point's YoY and the CAGRs by the same rules, `label` = the date.
+  The Period toggle does not apply.
 
 ## Known gaps and out of scope
 

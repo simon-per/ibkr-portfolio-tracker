@@ -24,6 +24,7 @@ from app.schemas.company_financials import (
     CompanyFinancialsCompany,
     CompanyFinancialsKeyStats,
     CompanyFinancialsPoint,
+    CompanyFinancialsProfile,
     CompanyFinancialsResponse,
     CompanyFinancialsSeries,
     CompanyFinancialsSeriesSet,
@@ -130,6 +131,7 @@ async def test_the_response_declares_every_key_the_service_returns(db, period, c
     assert set(body) == _fields(CompanyFinancialsResponse)
     assert set(body["series"]) == _fields(CompanyFinancialsSeriesSet)
     assert set(body["key_stats"]) == _fields(CompanyFinancialsKeyStats)
+    assert set(body["profile"]) == _fields(CompanyFinancialsProfile)
     for series in body["series"].values():
         assert set(series) == _fields(CompanyFinancialsSeries)
         assert set(series["cagrs"]) == _fields(CompanyFinancialsCagrs)

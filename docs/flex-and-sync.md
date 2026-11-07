@@ -581,7 +581,7 @@ Tests: `tests/test_flex_xml_sanitizer.py`, `tests/test_flex_ingestion_e2e.py`.
 | 00:00 | 18:00 | `ibkr_only_sync_job` — IBKR + FX, **skips unless 18:00 failed** | no |
 | every hour above, daily | | `crypto_sync_{n}` — CoinStats only, own gate and job group ([crypto.md](crypto.md)) | no |
 | 04:00, Tue–Sat | 22:00 | `watchlist_refresh` — the watchlist only, own job group | **yes** |
-| 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
+| 05:00, Tue–Sat | 23:00 | `fundamentals_refresh` — stale fundamentals, then stale analyst ratings, held securities only, then the Company tab's chunk of companies nobody holds ([company-financials.md](company-financials.md) *The overview*), then due holding logos from logo.dev ([logos.md](logos.md)), own job group | **yes** |
 | 05:00, **Sunday** | 23:00 Sat | `company_financials_refresh` — SEC EDGAR companyfacts for held US-listed filers, weekly, own gate (`EDGAR_GATE`) and upkeep group ([company-financials.md](company-financials.md)) | no |
 | 05:00, **Sunday** | 23:00 Sat | `company_prices_refresh` — the Company tab's weekly closes, one history request per listed company, `SYNC_PIPELINE`, upkeep group ([company-financials.md](company-financials.md) *Prices*) | **yes** |
 
@@ -697,6 +697,18 @@ fourth pass). Paced as the manual sync is: 1–3 s before each security's burst 
 securities in each loop, so ~40 securities take roughly 10 minutes. A no-coverage rating answer is
 stored as a zero-count row (`analyst_rating_service.no_rating`) so it is not re-asked inside the
 staleness window.
+
+**Third, the Company tab's chunk** (owner-approved 2026-11-07, `company_profile_sync`): Yahoo's
+company-level figures — rating counts and targets, forward P/E, PEG, forward growth, the next
+earnings date, the business summary — for the Nasdaq-100 companies **nobody holds** (a held company
+reads the two passes above). Each is refreshed once per `ROTATION_DAYS` (14), oldest first, so a
+run asks `chunk_size(n)` = ⌈n / `RUNS_PER_ROTATION`⌉ companies: about 9 at `REQUESTS_PER_COMPANY`
+(7: `_fetch_yahoo_data`'s six and `fetch_counts`' one), **about 60 requests a run**, on top of the
+held pass's. The first fill takes a rotation, and no CLI fills it faster. It runs only when neither
+pass before it was rate-limited (same IP), awaits the hold before each company, abandons on a 429
+with nothing stamped, and refuses a company whole (figures and counts, or neither); a miss backs off
+on the shared schedule. Its own failure is a warning (`profiles_result`), never the job's status.
+`RUNS_PER_WEEK` (5) is `FUNDAMENTALS_REFRESH_DAYS`' count, pinned by `tests/test_company_profile_sync.py`.
 
 **The pass also fills the allocation columns** (issue #11, item c): `sector`, `industry`,
 `country`, `asset_type` and `allocation_last_updated`, from the `.info` it already holds, through

@@ -73,6 +73,9 @@ MANUAL_SYNC_TYPE = "manual_company_financials_fetch"
 
 #: Under a week, so the weekly pass refetches every company it fetched the week before.
 STALE_AFTER = timedelta(days=6)
+#: How long a company's industry and fiscal year end (`submissions`) are believed before
+#: the pass asks again. They change about never, so not weekly like the figures.
+PROFILE_RECHECK_AFTER = timedelta(days=30)
 CIK_RECHECK_AFTER = timedelta(days=30)
 
 #: The funds whose stored baskets name the companies stored beyond the held ones: the
@@ -239,6 +242,9 @@ class CompanyFinancialsSync:
             "errors": 0,
             "stopped": None,
             "outcomes": [],
+            "profiles_due": 0,
+            "profiles_fetched": 0,
+            "profile_errors": 0,
         }
         warnings: List[str] = []
         if missing_baskets:
@@ -252,6 +258,7 @@ class CompanyFinancialsSync:
             due = await self._due(targets, now, force)
             summary["universe"] = sum(1 for c in constituents if c.ticker in known)
             summary["companies_due"] = len(due)
+            summary["profiles_due"] = len(await self._profiles_due(targets, now, force))
             summary["outcomes"] = [
                 {"cik": t.cik, "symbols": t.symbols, "outcome": "due"} for t in due
             ]
@@ -310,6 +317,12 @@ class CompanyFinancialsSync:
                             "outcome": outcome,
                         }
                     )
+                # Then the industry and fiscal year end, at most monthly a company. After
+                # the figures, so a refusal there leaves the figures' pass whole.
+                profiles = await self._profiles_due(targets, now, force)
+                summary["profiles_due"] = len(profiles)
+                for target in profiles:
+                    await self._profile(client, target.cik, summary)
             except EdgarRefused as refused:
                 summary["stopped"] = refused.status
                 hint = "" if refused.status == 429 else " Check EDGAR_USER_AGENT."
@@ -324,6 +337,12 @@ class CompanyFinancialsSync:
             warnings.append(
                 f"{n} compan{'y' if n == 1 else 'ies'} could not be fetched from EDGAR "
                 f"and keep their previous figures."
+            )
+        p = summary["profile_errors"]
+        if p:
+            warnings.append(
+                f"The industry of {p} compan{'y' if p == 1 else 'ies'} could not be read "
+                f"from EDGAR; asked again next week."
             )
         summary["message"] = (
             f"Company financials: {summary['fetched']} of {summary['companies_due']} "
@@ -432,6 +451,35 @@ class CompanyFinancialsSync:
                 continue
             due.append(target)
         return due
+
+    async def _profiles_due(
+        self, targets: Sequence[Target], now: datetime, force: bool
+    ) -> List[Target]:
+        """The targets whose industry was never asked, or not within `PROFILE_RECHECK_AFTER`."""
+        if force:
+            return list(targets)
+        companies = await self.repo.companies(t.cik for t in targets)
+        due: List[Target] = []
+        for target in targets:
+            company = companies.get(target.cik)
+            stamp = company.submissions_checked_at if company is not None else None
+            if stamp is None or stamp <= now - PROFILE_RECHECK_AFTER:
+                due.append(target)
+        return due
+
+    async def _profile(
+        self, client: EdgarClient, cik: int, summary: Dict[str, Any]
+    ) -> None:
+        """One company's submissions document; a failure stamps nothing (next week asks)."""
+        try:
+            profile = await client.submissions(cik)
+        except EdgarError as e:
+            summary["profile_errors"] += 1
+            logger.warning(f"submissions for CIK {cik} failed: {e}")
+            return
+        await self.repo.record_profile(cik, profile, utcnow())
+        await self.db.commit()
+        summary["profiles_fetched"] += 1
 
     async def _one(self, client: EdgarClient, cik: int, summary: Dict[str, Any]) -> str:
         try:

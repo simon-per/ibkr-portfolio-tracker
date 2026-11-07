@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, Float, String, ForeignKey, DateTime, BigInteger
+from sqlalchemy import Integer, Float, String, ForeignKey, DateTime, BigInteger, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -50,6 +50,8 @@ class FundamentalMetrics(Base):
     # Classification
     quote_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # ETF, EQUITY
     data_currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # Yahoo's `longBusinessSummary`, for the Company tab's overview (`extract_metrics`).
+    business_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Timestamps
     last_updated: Mapped[datetime] = mapped_column(DateTime, nullable=False)

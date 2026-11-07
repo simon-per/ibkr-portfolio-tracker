@@ -33,6 +33,7 @@ from app.services import company_financials_sync, scheduler_service
 from app.services.company_financials_sync import (
     CIK_RECHECK_AFTER,
     NOT_CONFIGURED_WARNING,
+    PROFILE_RECHECK_AFTER,
     SCHEDULED_SYNC_TYPE,
     STALE_AFTER,
     CompanyFinancialsSync,
@@ -41,6 +42,7 @@ from app.services.edgar_client import (
     FACTS_URL,
     MIN_INTERVAL_S,
     RETRY_DELAYS_S,
+    SUBMISSIONS_URL,
     TICKERS_URL,
     sec_ticker,
 )
@@ -61,6 +63,18 @@ TICKERS = {
 }
 FUND = "US46138G6492"  # QQQM
 IFRS_ONLY = {"cik": ASML_CIK, "entityName": "ASML", "facts": {"ifrs-full": {}}}
+
+
+# The submissions document, trimmed to what the pass reads (and a filing list it skips).
+SUBMISSIONS = {
+    NVDA_CIK: {
+        "cik": str(NVDA_CIK),
+        "sic": "3674",
+        "sicDescription": "Semiconductors & Related Devices",
+        "fiscalYearEnd": "0126",
+        "filings": {"recent": {"form": ["10-Q"]}},
+    },
+}
 
 
 class Edgar:
@@ -91,6 +105,8 @@ class Edgar:
         for cik, body in self.facts.items():
             if url == FACTS_URL.format(cik=cik):
                 return httpx.Response(200, json=body)
+            if url == SUBMISSIONS_URL.format(cik=cik):
+                return httpx.Response(200, json=SUBMISSIONS.get(cik, {}))
         return httpx.Response(404)
 
     @property
@@ -99,6 +115,10 @@ class Edgar:
 
     def urls(self):
         return [str(r.url) for r in self.requests]
+
+    def facts_urls(self):
+        """The figures' requests: every URL but the monthly industry lookups."""
+        return [u for u in self.urls() if "/submissions/" not in u]
 
 
 @pytest.fixture
@@ -197,7 +217,10 @@ async def test_one_request_per_company_and_rows_under_every_listing(db, configur
     assert urls.count(FACTS_URL.format(cik=ALPHABET_CIK)) == 1  # GOOG and GOOGL: once
     assert urls.count(FACTS_URL.format(cik=NVDA_CIK)) == 1
     assert urls.count(FACTS_URL.format(cik=ASML_CIK)) == 1
-    assert len(urls) == 4
+    # And each company's industry, once: Alphabet's two listings ask once.
+    for cik in (NVDA_CIK, ALPHABET_CIK, ASML_CIK):
+        assert urls.count(SUBMISSIONS_URL.format(cik=cik)) == 1
+    assert len(urls) == 7
     assert all(r.headers["user-agent"] == UA for r in edgar.requests)
 
     nvda = await _count(db, CompanyFinancial, CompanyFinancial.cik == NVDA_CIK)
@@ -349,6 +372,62 @@ async def test_a_dry_run_asks_and_writes_nothing(db, configured):
     assert await _count(db, SecurityCik) == 0
 
 
+@pytest.mark.asyncio
+async def test_the_industry_and_year_end_are_stored_and_asked_monthly(db, configured):
+    await _book(db)
+    summary = await _sync(db, Edgar()).refresh()
+    assert summary["profiles_fetched"] == 3, summary
+
+    companies = {c.cik: c for c in (await db.execute(select(SecCompany))).scalars()}
+    nvidia, asml = companies[NVDA_CIK], companies[ASML_CIK]
+    assert (nvidia.sic, nvidia.sic_description, nvidia.fiscal_year_end) == (
+        3674,
+        "Semiconductors & Related Devices",
+        "0126",
+    )
+    # A document that states nothing is an answer: stamped, nothing stored.
+    assert (asml.sic, asml.sic_description, asml.fiscal_year_end) == (None, None, None)
+    assert asml.submissions_checked_at is not None
+
+    # A week later the figures are due again and the industry is not.
+    for row in companies.values():
+        if row.fetched_at is not None:
+            row.fetched_at = utcnow() - STALE_AFTER - timedelta(hours=1)
+    await db.commit()
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    assert not [u for u in edgar.urls() if "/submissions/" in u]
+
+    # A month later it is.
+    for row in companies.values():
+        row.submissions_checked_at = utcnow() - PROFILE_RECHECK_AFTER - timedelta(hours=1)
+    await db.commit()
+    dry = await _sync(db, Edgar()).refresh(dry_run=True)
+    assert dry["profiles_due"] == 3
+    edgar = Edgar()
+    await _sync(db, edgar).refresh()
+    assert sorted(u for u in edgar.urls() if "/submissions/" in u) == sorted(
+        SUBMISSIONS_URL.format(cik=c) for c in (NVDA_CIK, ALPHABET_CIK, ASML_CIK)
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_industry_the_sec_could_not_serve_stamps_nothing_and_says_so(
+    db, configured
+):
+    await _book(db)
+    url = SUBMISSIONS_URL.format(cik=NVDA_CIK)
+    edgar = Edgar(status={url: [503] * (len(RETRY_DELAYS_S) + 1)})
+    summary = await _sync(db, edgar).refresh(symbols=["NVDA"])
+
+    assert summary["status"] == "success"
+    assert summary["fetched"] == 1, "the figures are not held hostage by the industry"
+    assert summary["profile_errors"] == 1 and summary["profiles_fetched"] == 0
+    assert any("industry" in w for w in summary["warnings"])
+    nvidia = await db.get(SecCompany, NVDA_CIK)
+    assert nvidia.submissions_checked_at is None and nvidia.sic is None
+
+
 async def _qqqm(db, lines):
     """A stored QQQM basket: (ticker, isin, weight, asset_class) per line, in file order."""
     for i, (ticker, isin, weight, asset_class) in enumerate(lines):
@@ -392,7 +471,7 @@ async def test_the_nasdaq_100_is_fetched_from_the_stored_basket_without_a_securi
     summary = await _sync(db, edgar).refresh()
 
     assert summary["status"] == "success", summary
-    urls = edgar.urls()
+    urls = edgar.facts_urls()
     # One ticker list, then one request per company: NVDA held and listed, Alphabet twice
     # listed, the money-market fund and the cash line no company at all.
     assert sorted(urls) == sorted(
@@ -417,7 +496,7 @@ async def test_the_universe_is_the_heaviest_companies_not_lines(
     await _qqqm(db, NASDAQ_100)
     edgar = Edgar()
     await _sync(db, edgar).refresh()
-    asked = {u for u in edgar.urls() if u != TICKERS_URL}
+    asked = {u for u in edgar.facts_urls() if u != TICKERS_URL}
     assert asked == {FACTS_URL.format(cik=c) for c in (NVDA_CIK, APPLE_CIK)}
 
 
@@ -441,7 +520,7 @@ async def test_a_narrowed_pass_leaves_the_universe_stamps_alone(db, configured, 
     stamp = (await db.get(SecCompany, NVDA_CIK)).universe_seen_at
     edgar = Edgar()
     summary = await _sync(db, edgar).refresh(symbols=["AAPL"], force=True)
-    assert [u for u in edgar.urls()] == [FACTS_URL.format(cik=APPLE_CIK)]
+    assert edgar.facts_urls() == [FACTS_URL.format(cik=APPLE_CIK)]
     assert summary["fetched"] == 1
     for company in (await db.execute(select(SecCompany))).scalars():
         await db.refresh(company)

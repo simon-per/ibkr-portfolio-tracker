@@ -21,10 +21,12 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import type {
   CompanyFinancialsPeriod,
+  CompanyFinancialsProfile,
   CompanyFinancialsRange,
   CompanyFinancialsResponse,
   CompanyFinancialsSeriesKey,
 } from '@/lib/api'
+import { ratingBadgeClass } from '@/lib/analystRating'
 import { useKeepPreviousData } from '@/lib/CurrencyContext'
 import { companyFinancialsCompaniesQuery, companyFinancialsQuery } from '@/lib/queryCache'
 import { replaceRoute, useTabRoute } from '@/lib/tabRoute'
@@ -34,6 +36,7 @@ import {
   type CompanyChartRow,
   type CompanyValueFormat,
   type KeyStatDef,
+  type OverviewFigure,
   BASIS_OPTIONS,
   CAGR_SPANS,
   PERIOD_OPTIONS,
@@ -42,14 +45,17 @@ import {
   chartRows,
   chartView,
   companyGroups,
+  fiscalYearEndMonth,
   growthOf,
   hasAnyData,
+  overviewValue,
+  periodText,
   readCompanyPick,
   resolveCompany,
   seriesWithData,
   shortPeriodLabel,
   visibleCharts,
-  visibleKeyStats,
+  visibleOverviewGroups,
   writeCompanyPick,
 } from '@/lib/companyFinancials'
 import { chartColor, LOSS_COLOR } from '@/lib/chartPalette'
@@ -143,7 +149,7 @@ function ChartTooltip({ active, payload, series, format }: {
   const named = series.length > 1
   return (
     <div style={CHART_TOOLTIP_STYLE} className="space-y-0.5 px-2.5 py-2 shadow-md">
-      <p style={CHART_TOOLTIP_LABEL_STYLE}>{row.label}</p>
+      <p style={CHART_TOOLTIP_LABEL_STYLE}>{periodText(row.label)}</p>
       {rows.map((s) => (
         <p key={s.key} className="flex items-center gap-1.5">
           {named && (
@@ -242,8 +248,12 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
       cursor={chart.kind === 'bar' ? { fill: 'hsl(var(--muted))', opacity: 0.5 } : { stroke: 'hsl(var(--muted-foreground))' }}
     />
   )
-  // The right margin leaves room for the newest period's label, centred on the last bar.
-  const margin = { top: 8, right: 16, left: 0, bottom: 0 }
+  // The right margin leaves room for the newest period's label, centred on the last bar or
+  // on a line's last point at the very edge: about half its width, so the price card's
+  // "Nov '26" is not cut where "FY25" fitted in 16px.
+  const lastTick = periodTicks.at(-1)
+  const right = Math.max(16, Math.ceil((lastTick ? shortPeriodLabel(lastTick).length : 0) * 3.6))
+  const margin = { top: 8, right, left: 0, bottom: 0 }
   const plotHeight = isCompact ? 'h-[260px]' : expanded ? 'h-[460px]' : 'h-[320px]'
 
   return (
@@ -271,7 +281,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
               {leadValue == null ? ABSENT : format(leadValue)}
             </p>
             <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-              <span className="tabular-nums">{row?.label ?? ABSENT}</span>
+              <span className="tabular-nums">{row ? periodText(row.label) : ABSENT}</span>
               {pointYoy != null && <Stat label="YoY" value={pointYoy} tone={growthTone(pointYoy, inverse)} />}
             </p>
           </div>
@@ -365,51 +375,201 @@ function keyStatText(def: Pick<KeyStatDef, 'format'>, value: number, currency: s
   return def.format === 'signed' ? signedPercent(value) : valueFormatter(def.format, currency)(value)
 }
 
-/** The newest TTM point's figures, whatever period the charts below show. */
-function KeyStats({ data }: { data: CompanyFinancialsResponse }) {
-  const stats = data.key_stats
-  const defs = visibleKeyStats(stats)
-  if (defs.length === 0) return null
+/** The price line's changes, shortest first; the multi-year ones are annualised. */
+const RETURNS: readonly { key: 'return_1m' | 'return_1y' | 'return_5y' | 'return_10y'; label: string }[] = [
+  { key: 'return_1m', label: '1M' },
+  { key: 'return_1y', label: '1Y' },
+  { key: 'return_5y', label: '5Y p.a.' },
+  { key: 'return_10y', label: '10Y p.a.' },
+]
+
+/** The 52-week range of the closes, with the newest close marked on it. */
+function RangeBar({ low, high, price, format }: {
+  low: number | null
+  high: number | null
+  price: number
+  format: (v: number) => string
+}) {
+  if (low == null || high == null || high <= low) return null
+  const at = Math.min(1, Math.max(0, (price - low) / (high - low)))
   return (
-    <Card data-testid="key-stats">
-      <SectionHeader
-        title="Key figures"
-        className="pb-1 [&_h3]:text-base"
-        aside={<span className="text-xs tabular-nums text-muted-foreground">TTM · {stats.label}</span>}
-      />
-      <CardContent className="pt-0">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
-          {defs.map((def) => {
-            const value = stats[def.key] as number
-            const printed = keyStatText(def, value, data.currency)
-            const noteValue = def.note ? stats[def.note.key] : null
-            const notePrinted = def.note && noteValue != null ? keyStatText(def.note, noteValue, data.currency) : null
-            return (
-              <div key={def.key} className="min-w-0">
-                <dt className="truncate text-xs text-muted-foreground">{def.label}</dt>
-                <dd
-                  className={cn(
-                    'text-lg font-semibold tabular-nums leading-tight',
-                    def.format === 'signed' && TONE_TEXT[growthTone(printed, def.inverse ?? false)],
-                  )}
-                >
-                  {printed}
-                </dd>
-                {def.note && notePrinted != null && (
-                  <dd className="text-xs">
-                    <Stat
-                      label={def.note.label}
-                      value={notePrinted}
-                      tone={def.note.format === 'signed' ? growthTone(notePrinted, def.inverse ?? false) : 'neutral'}
+    <span className="inline-flex items-center gap-2 text-xs tabular-nums text-muted-foreground" data-testid="range-52w">
+      <span>52W</span>
+      <span>{format(low)}</span>
+      <span aria-hidden="true" className="relative h-1.5 w-20 rounded-full bg-muted sm:w-28">
+        <span className="absolute top-1/2 h-3 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-primary" style={{ left: `${at * 100}%` }} />
+      </span>
+      <span>{format(high)}</span>
+    </span>
+  )
+}
+
+/** What the company does: two lines, the rest a click away. */
+function Description({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={() => setOpen((v) => !v)}
+      data-testid="company-description"
+      className={cn(
+        'block w-full rounded-sm text-left text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        !open && 'line-clamp-2',
+      )}
+    >
+      {text}
+    </button>
+  )
+}
+
+/** One figure of a group: its label, its value, and the note beside it (YoY, payout). */
+function FigureRow({ figure, data }: { figure: OverviewFigure; data: CompanyFinancialsResponse }) {
+  const value = overviewValue(figure, data.key_stats, data.profile) as number
+  const def = figure.source === 'stats' ? figure.def : figure
+  const label = figure.source === 'stats' ? figure.def.label : figure.label
+  const inverse = figure.source === 'stats' ? figure.def.inverse ?? false : false
+  const printed = keyStatText(def, value, data.currency)
+  const note = figure.source === 'stats' ? figure.def.note : undefined
+  const noteValue = note ? data.key_stats[note.key] : null
+  const notePrinted = note && noteValue != null ? keyStatText(note, noteValue, data.currency) : null
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
+      <dt className="min-w-0 text-muted-foreground">{label}</dt>
+      <dd className="ml-auto text-right">
+        <span className={cn('font-medium tabular-nums', def.format === 'signed' && TONE_TEXT[growthTone(printed, inverse)])}>
+          {printed}
+        </span>
+        {note && notePrinted != null && (
+          <span className="ml-1.5 text-xs">
+            <Stat
+              label={note.label}
+              value={notePrinted}
+              tone={note.format === 'signed' ? growthTone(notePrinted, inverse) : 'neutral'}
+            />
+          </span>
+        )}
+      </dd>
+    </div>
+  )
+}
+
+/** The Street's view and the next report: each item only when Yahoo had it. */
+function StreetRow({ profile }: { profile: CompanyFinancialsProfile }) {
+  const money = (v: number) => (profile.yahoo_currency ? formatCurrency(v, profile.yahoo_currency) : formatMultiple(v))
+  const upside = profile.target_upside != null ? signedPercent(profile.target_upside) : null
+  const items = [
+    profile.rating && (
+      <span key="rating" className="inline-flex items-center gap-2">
+        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ratingBadgeClass(profile.rating.consensus))}>
+          {profile.rating.consensus}
+        </span>
+        {profile.analysts != null && <span className="text-muted-foreground">{profile.analysts} analysts</span>}
+      </span>
+    ),
+    profile.target_mean != null && (
+      <span key="target" className="inline-flex flex-wrap items-baseline gap-x-1.5">
+        <span className="text-muted-foreground">Target</span>
+        <span className="font-medium tabular-nums">{money(profile.target_mean)}</span>
+        {upside && <span className={cn('tabular-nums', TONE_TEXT[growthTone(upside, false)])}>{upside}</span>}
+        {profile.target_low != null && profile.target_high != null && (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {money(profile.target_low)}–{money(profile.target_high)}
+          </span>
+        )}
+      </span>
+    ),
+    profile.next_earnings_date && (
+      <span key="earnings" className="inline-flex flex-wrap items-baseline gap-x-1.5">
+        <span className="text-muted-foreground">Earnings</span>
+        <span className="font-medium tabular-nums">{periodText(profile.next_earnings_date.slice(0, 10))}</span>
+        {profile.next_eps_estimate != null && (
+          <span className="text-xs tabular-nums text-muted-foreground">EPS est. {money(profile.next_eps_estimate)}</span>
+        )}
+      </span>
+    ),
+  ].filter(Boolean)
+  if (items.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-3 text-sm" data-testid="street-row">
+      {items}
+    </div>
+  )
+}
+
+/**
+ * The company itself, at a glance (docs/frontend.md, *The Company tab*): its industry and
+ * fiscal year, its price and how it moved, what it does, its figures grouped by meaning,
+ * and what the Street expects. No portfolio figure: this tab is about the company.
+ */
+function CompanyOverview({ data }: { data: CompanyFinancialsResponse }) {
+  const profile = data.profile
+  const fyMonth = fiscalYearEndMonth(profile.fiscal_year_end)
+  const tags = [profile.industry, fyMonth && `FY ends ${fyMonth}`].filter(Boolean)
+  const price = (v: number) => formatCurrency(v, data.currency)
+  const groups = visibleOverviewGroups(data.key_stats, profile)
+  const returns = RETURNS.flatMap((r) => {
+    const v = profile[r.key]
+    return v == null ? [] : [{ ...r, printed: signedPercent(v) }]
+  })
+  return (
+    <div className="space-y-4" data-testid="company-overview">
+      {tags.length > 0 && <p className="text-sm text-muted-foreground" data-testid="company-tags">{tags.join(' · ')}</p>}
+      {profile.price != null && (
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-2" data-testid="price-line">
+          <div>
+            <p className="text-2xl font-semibold tabular-nums leading-tight">{price(profile.price)}</p>
+            {profile.price_date && (
+              <p className="text-xs tabular-nums text-muted-foreground">{periodText(profile.price_date)}</p>
+            )}
+          </div>
+          {returns.length > 0 && (
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {returns.map((r) => (
+                <Stat key={r.key} label={r.label} value={r.printed} tone={growthTone(r.printed, false)} />
+              ))}
+            </span>
+          )}
+          <RangeBar low={profile.week52_low} high={profile.week52_high} price={profile.price} format={price} />
+        </div>
+      )}
+      {profile.description && <Description key={data.cik} text={profile.description} />}
+      {groups.length > 0 && (
+        <div className="space-y-2" data-testid="overview-figures">
+          {data.key_stats.label && (
+            <p className="text-xs tabular-nums text-muted-foreground">TTM · {data.key_stats.label}</p>
+          )}
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 min-[440px]:grid-cols-2 lg:grid-cols-4">
+            {groups.map((group) => (
+              <section key={group.title} aria-label={group.title} className="min-w-0">
+                <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{group.title}</h4>
+                <dl className="mt-2 space-y-1.5">
+                  {group.figures.map((figure) => (
+                    <FigureRow
+                      key={figure.source === 'stats' ? figure.def.key : figure.key}
+                      figure={figure}
+                      data={data}
                     />
-                  </dd>
-                )}
-              </div>
-            )
-          })}
-        </dl>
-      </CardContent>
-    </Card>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </div>
+      )}
+      <StreetRow profile={profile} />
+    </div>
+  )
+}
+
+/** The overview while its first company loads. */
+function OverviewSkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden="true">
+      <div className="h-4 w-56 animate-pulse rounded bg-muted" />
+      <div className="h-8 w-40 animate-pulse rounded bg-muted" />
+      <div className="h-24 animate-pulse rounded bg-muted" />
+    </div>
   )
 }
 
@@ -552,6 +712,15 @@ export function CompanyTab() {
             </>
           }
         />
+        {/* The overview is the card's body: one card names the company and says what it is. */}
+        {!financials.isError && (
+          <CardContent
+            aria-busy={financials.isPlaceholderData || undefined}
+            className={cn('pt-0', placeholderDim(financials.isPlaceholderData))}
+          >
+            {data ? <CompanyOverview data={data} /> : <OverviewSkeleton />}
+          </CardContent>
+        )}
       </Card>
 
       {financials.isError ? (
@@ -572,7 +741,6 @@ export function CompanyTab() {
             <Notice>No financial data for {data.symbol}.</Notice>
           ) : (
             <>
-            {data && <KeyStats data={data} />}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {data
                 ? charts.map((chart) => (

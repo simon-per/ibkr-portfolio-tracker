@@ -31,6 +31,113 @@ from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 logger = logging.getLogger(__name__)
 
 
+def extract_metrics(info: Dict, quarterly_financials=None, eps_trend_growth=None,
+                    revenue_estimate=None, symbol: str = "") -> Optional[Dict]:
+    """
+    Fundamental metrics from a Yahoo `.info` dict and the estimate frames, or None when it
+    carries nothing: empty, or every value None — yfinance has answered an unknown symbol
+    with `{'trailingPegRatio': None}`, which used to become a row of stand-ins typed EQUITY.
+
+    **The one reader of a company's `.info` figures**: the held pass keys the result by
+    security (`FundamentalsService._extract_metrics`), the Company tab's chunk by CIK
+    (`company_profile_sync`). Two readers would be two figures under one name, drifting.
+    """
+    if not info or all(value is None for value in info.values()):
+        logger.info(f"No fundamental data available for {symbol}")
+        return None
+
+    # Forward estimates from analyst consensus — one parser with the watchlist.
+    fwd_rev, fwd_eps = forward_growth(revenue_estimate, eps_trend_growth, info, symbol)
+    trailing_pe = safe_float(info.get('trailingPE'))
+    summary = info.get('longBusinessSummary')
+
+    metrics_data = {
+        'trailing_pe': trailing_pe,
+        'forward_pe': safe_float(info.get('forwardPE')),
+        # One tier order with the watchlist, in one place (`peg_ratio.resolve_peg`).
+        'peg_ratio': resolve_peg(info, trailing_pe, fwd_eps),
+        'price_to_sales': safe_float(info.get('priceToSalesTrailing12Months')),
+        'price_to_book': safe_float(info.get('priceToBook')),
+        # TTM growth from quarterly financials (always current, no lag), else .info.
+        'revenue_growth': trailing_growth(quarterly_financials, REVENUE_ROWS, info.get('revenueGrowth')),
+        'earnings_growth': trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get('earningsGrowth')),
+        'fwd_revenue_growth': fwd_rev,
+        'fwd_eps_growth': fwd_eps,
+        'profit_margins': safe_float(info.get('profitMargins')),
+        'gross_margins': safe_float(info.get('grossMargins')),
+        'operating_margins': safe_float(info.get('operatingMargins')),
+        'market_cap': safe_int(info.get('marketCap')),
+        'number_of_analysts': safe_int(info.get('numberOfAnalystOpinions')),
+        'target_mean_price': safe_float(info.get('targetMeanPrice')),
+        'target_high_price': safe_float(info.get('targetHighPrice')),
+        'target_low_price': safe_float(info.get('targetLowPrice')),
+        'quote_type': info.get('quoteType', 'EQUITY'),
+        'data_currency': info.get('currency'),
+        # What the company does, for the Company tab's overview: in the `.info` already
+        # fetched, so it costs no request.
+        'business_summary': (summary.strip() or None) if isinstance(summary, str) else None,
+    }
+
+    logger.info(f"Got fundamentals for {symbol} (type={metrics_data['quote_type']})")
+    return metrics_data
+
+
+def extract_earnings(earnings_dates, symbol: str = "") -> List[Dict]:
+    """
+    Earnings events from a Yahoo `earnings_dates` frame — the one reader, for the held pass
+    (`FundamentalsService._extract_earnings`) and the Company tab's chunk alike.
+    """
+    if earnings_dates is None or (hasattr(earnings_dates, 'empty') and earnings_dates.empty):
+        logger.info(f"No earnings dates for {symbol}")
+        return []
+
+    now = utcnow()
+    events = []
+
+    for date_idx, row in earnings_dates.iterrows():
+        try:
+            if hasattr(date_idx, 'to_pydatetime'):
+                earnings_dt = date_idx.to_pydatetime()
+            else:
+                earnings_dt = datetime.fromisoformat(str(date_idx))
+
+            if earnings_dt.tzinfo is not None:
+                # Convert, then drop the tzinfo. `replace(tzinfo=None)` alone
+                # *discards* the offset and keeps the wall clock, which stored
+                # exchange-local time in a column `app/clock.py` declares to be naive
+                # UTC — and `get_upcoming_earnings` compares these rows against
+                # `utcnow()`.
+                #
+                # Apple reporting at 16:30 America/New_York (20:30 UTC) was stored as
+                # 16:30, so from 16:30 UTC — 12:30 ET, four hours before the release
+                # and before the US market even closes — the event dropped off the
+                # upcoming calendar and reappeared under history with
+                # `reported_eps` still NULL. The mirror case runs the other way: TSMC
+                # at 14:00 Asia/Taipei (06:00 UTC) stayed "upcoming" for eight hours
+                # after it had already happened.
+                earnings_dt = earnings_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+            eps_estimate = safe_float(row.get('EPS Estimate'))
+            reported_eps = safe_float(row.get('Reported EPS'))
+            surprise_pct = safe_float(row.get('Surprise(%)'))
+
+            is_upcoming = earnings_dt > now and reported_eps is None
+
+            events.append({
+                'earnings_date': earnings_dt,
+                'eps_estimate': eps_estimate,
+                'reported_eps': reported_eps,
+                'surprise_percent': surprise_pct,
+                'is_upcoming': is_upcoming,
+            })
+        except Exception as e:
+            logger.warning(f"Skipping earnings row for {symbol}: {e}")
+            continue
+
+    logger.info(f"Got {len(events)} earnings events for {symbol}")
+    return events
+
+
 class FundamentalsService:
     """Service for fetching and caching fundamental metrics and earnings data."""
 
@@ -92,99 +199,18 @@ class FundamentalsService:
 
     def _extract_metrics(self, security: Security, info: Dict, quarterly_financials=None,
                          eps_trend_growth=None, revenue_estimate=None) -> Optional[Dict]:
-        """
-        Extract fundamental metrics from a Yahoo Finance info dict, or None when it carries
-        nothing: empty, or every value None — yfinance has answered an unknown symbol with
-        `{'trailingPegRatio': None}`, which used to become a row of stand-ins typed EQUITY.
-        """
-        if not info or all(value is None for value in info.values()):
-            logger.info(f"No fundamental data available for {security.symbol}")
-            return None
-
-        # Forward estimates from analyst consensus — one parser with the watchlist.
-        fwd_rev, fwd_eps = forward_growth(revenue_estimate, eps_trend_growth, info, security.symbol)
-        trailing_pe = self._safe_float(info.get('trailingPE'))
-
-        metrics_data = {
-            'security_id': security.id,
-            'trailing_pe': trailing_pe,
-            'forward_pe': self._safe_float(info.get('forwardPE')),
-            # One tier order with the watchlist, in one place (`peg_ratio.resolve_peg`).
-            'peg_ratio': resolve_peg(info, trailing_pe, fwd_eps),
-            'price_to_sales': self._safe_float(info.get('priceToSalesTrailing12Months')),
-            'price_to_book': self._safe_float(info.get('priceToBook')),
-            # TTM growth from quarterly financials (always current, no lag), else .info.
-            'revenue_growth': trailing_growth(quarterly_financials, REVENUE_ROWS, info.get('revenueGrowth')),
-            'earnings_growth': trailing_growth(quarterly_financials, EARNINGS_ROWS, info.get('earningsGrowth')),
-            'fwd_revenue_growth': fwd_rev,
-            'fwd_eps_growth': fwd_eps,
-            'profit_margins': self._safe_float(info.get('profitMargins')),
-            'gross_margins': self._safe_float(info.get('grossMargins')),
-            'operating_margins': self._safe_float(info.get('operatingMargins')),
-            'market_cap': self._safe_int(info.get('marketCap')),
-            'number_of_analysts': self._safe_int(info.get('numberOfAnalystOpinions')),
-            'target_mean_price': self._safe_float(info.get('targetMeanPrice')),
-            'target_high_price': self._safe_float(info.get('targetHighPrice')),
-            'target_low_price': self._safe_float(info.get('targetLowPrice')),
-            'quote_type': info.get('quoteType', 'EQUITY'),
-            'data_currency': info.get('currency'),
-        }
-
-        logger.info(f"Got fundamentals for {security.symbol} (type={metrics_data['quote_type']})")
-        return metrics_data
+        """`extract_metrics`, keyed by the held security."""
+        metrics = extract_metrics(
+            info, quarterly_financials, eps_trend_growth, revenue_estimate, security.symbol
+        )
+        return None if metrics is None else {'security_id': security.id, **metrics}
 
     def _extract_earnings(self, security: Security, earnings_dates) -> List[Dict]:
-        """Extract earnings events from a Yahoo Finance earnings_dates DataFrame."""
-        if earnings_dates is None or (hasattr(earnings_dates, 'empty') and earnings_dates.empty):
-            logger.info(f"No earnings dates for {security.symbol}")
-            return []
-
-        now = utcnow()
-        events = []
-
-        for date_idx, row in earnings_dates.iterrows():
-            try:
-                if hasattr(date_idx, 'to_pydatetime'):
-                    earnings_dt = date_idx.to_pydatetime()
-                else:
-                    earnings_dt = datetime.fromisoformat(str(date_idx))
-
-                if earnings_dt.tzinfo is not None:
-                    # Convert, then drop the tzinfo. `replace(tzinfo=None)` alone
-                    # *discards* the offset and keeps the wall clock, which stored
-                    # exchange-local time in a column `app/clock.py` declares to be naive
-                    # UTC — and `get_upcoming_earnings` compares these rows against
-                    # `utcnow()`.
-                    #
-                    # Apple reporting at 16:30 America/New_York (20:30 UTC) was stored as
-                    # 16:30, so from 16:30 UTC — 12:30 ET, four hours before the release
-                    # and before the US market even closes — the event dropped off the
-                    # upcoming calendar and reappeared under history with
-                    # `reported_eps` still NULL. The mirror case runs the other way: TSMC
-                    # at 14:00 Asia/Taipei (06:00 UTC) stayed "upcoming" for eight hours
-                    # after it had already happened.
-                    earnings_dt = earnings_dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-                eps_estimate = self._safe_float(row.get('EPS Estimate'))
-                reported_eps = self._safe_float(row.get('Reported EPS'))
-                surprise_pct = self._safe_float(row.get('Surprise(%)'))
-
-                is_upcoming = earnings_dt > now and reported_eps is None
-
-                events.append({
-                    'security_id': security.id,
-                    'earnings_date': earnings_dt,
-                    'eps_estimate': eps_estimate,
-                    'reported_eps': reported_eps,
-                    'surprise_percent': surprise_pct,
-                    'is_upcoming': is_upcoming,
-                })
-            except Exception as e:
-                logger.warning(f"Skipping earnings row for {security.symbol}: {e}")
-                continue
-
-        logger.info(f"Got {len(events)} earnings events for {security.symbol}")
-        return events
+        """`extract_earnings`, keyed by the held security."""
+        return [
+            {'security_id': security.id, **event}
+            for event in extract_earnings(earnings_dates, security.symbol)
+        ]
 
     async def sync_fundamentals_data(self, force_refresh: bool = False) -> Dict:
         """Sync fundamental metrics and earnings for every held security."""

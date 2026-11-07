@@ -6,6 +6,30 @@ from datetime import datetime
 from app.database import Base
 
 
+def consensus_of(
+    strong_buy: int, buy: int, hold: int, sell: int, strong_sell: int
+) -> str:
+    """
+    The consensus label of five recommendation counts, by their weighted average on a
+    1 (Strong Buy) to 5 (Strong Sell) scale; "No Rating" when there are none. The one rule:
+    a held security's rating (`AnalystRating.consensus`) and the Company tab overview's
+    (`company_financials_service`) both read it.
+    """
+    total = strong_buy + buy + hold + sell + strong_sell
+    if total == 0:
+        return "No Rating"
+    score = (strong_buy * 1 + buy * 2 + hold * 3 + sell * 4 + strong_sell * 5) / total
+    if score <= 1.5:
+        return "Strong Buy"
+    if score <= 2.5:
+        return "Buy"
+    if score <= 3.5:
+        return "Hold"
+    if score <= 4.5:
+        return "Sell"
+    return "Strong Sell"
+
+
 class AnalystRating(Base):
     """
     Stores analyst recommendations for securities from Yahoo Finance.
@@ -46,33 +70,10 @@ class AnalystRating(Base):
 
     @property
     def consensus(self) -> str:
-        """
-        Returns consensus rating based on weighted average.
-        Scale: 1 (Strong Buy) to 5 (Strong Sell)
-        """
-        if self.total_ratings == 0:
-            return "No Rating"
-
-        # Weighted score calculation
-        score = (
-            self.strong_buy * 1 +
-            self.buy * 2 +
-            self.hold * 3 +
-            self.sell * 4 +
-            self.strong_sell * 5
-        ) / self.total_ratings
-
-        # Map score to consensus rating
-        if score <= 1.5:
-            return "Strong Buy"
-        elif score <= 2.5:
-            return "Buy"
-        elif score <= 3.5:
-            return "Hold"
-        elif score <= 4.5:
-            return "Sell"
-        else:
-            return "Strong Sell"
+        """The consensus label of these counts (`consensus_of`)."""
+        return consensus_of(
+            self.strong_buy, self.buy, self.hold, self.sell, self.strong_sell
+        )
 
     def __repr__(self) -> str:
         return (

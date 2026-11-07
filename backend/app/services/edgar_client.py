@@ -1,10 +1,12 @@
 """
-SEC EDGAR's two JSON endpoints the Company tab reads (docs/company-financials.md).
+SEC EDGAR's three JSON endpoints the Company tab reads (docs/company-financials.md).
 
 - `https://www.sec.gov/files/company_tickers.json`: every ticker the SEC lists, with its
   CIK. One request a pass, and only when a held security has no CIK on record yet.
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`: every XBRL fact a
   company has filed, every period and every filing, in one document.
+- `https://data.sec.gov/submissions/CIK##########.json`: the company's SIC industry and
+  fiscal year end (and its filing list, which is not read). At most monthly a company.
 
 **The SEC requires a User-Agent naming the client and a contact address** and answers 403
 without one. It comes from `EDGAR_USER_AGENT` (app/config.py), never from the code — the
@@ -23,6 +25,7 @@ Touches neither Yahoo nor IBKR.
 """
 
 import asyncio
+import re
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -33,6 +36,7 @@ from app.services.paced_http import PacedGet, json_body
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
+SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
 REQUEST_TIMEOUT_S = 60.0
 MIN_INTERVAL_S = 0.2
@@ -160,3 +164,40 @@ class EdgarClient(PacedGet):
         if body is not None and not isinstance(body, dict):
             raise EdgarError(f"companyfacts for CIK {cik} is not an object")
         return body
+
+    async def submissions(self, cik: int) -> Optional[Dict[str, Any]]:
+        """
+        The company's industry and fiscal year end from its `submissions` document
+        (`submissions_profile`), or None when the SEC has none (404). The document's filing
+        list is read past and dropped.
+        """
+        body = await self._get_json(SUBMISSIONS_URL.format(cik=cik))
+        if body is None:
+            return None
+        if not isinstance(body, dict):
+            raise EdgarError(f"submissions for CIK {cik} is not an object")
+        return submissions_profile(body)
+
+
+_FISCAL_YEAR_END = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
+
+
+def submissions_profile(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    `{sic, sic_description, fiscal_year_end}` from a submissions document, each None when
+    the SEC states none or states it in a shape this does not recognise — never a guess.
+    The SEC sends the SIC code as a string ("3674") and the year end as `MMDD` ("0126").
+    """
+    sic_raw = body.get("sic")
+    sic = int(sic_raw) if isinstance(sic_raw, str) and sic_raw.isdigit() else None
+    description = body.get("sicDescription")
+    year_end = body.get("fiscalYearEnd")
+    return {
+        "sic": sic or None,
+        "sic_description": description.strip()[:200] or None
+        if isinstance(description, str)
+        else None,
+        "fiscal_year_end": year_end
+        if isinstance(year_end, str) and _FISCAL_YEAR_END.fullmatch(year_end)
+        else None,
+    }

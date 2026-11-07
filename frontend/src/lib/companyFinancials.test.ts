@@ -11,10 +11,14 @@ import {
   resolveCompany,
   seriesWithData,
   visibleCharts,
-  visibleKeyStats,
+  KEY_STATS,
+  OVERVIEW_GROUPS,
+  fiscalYearEndMonth,
+  periodText,
+  visibleOverviewGroups,
 } from './companyFinancials'
 import {
-  AAPL_CIK, AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, NVDA_CIK, emptySeriesSet, fixtureFinancials,
+  AAPL_CIK, AMZN_CIK, FIXTURE_COMPANIES, FIXTURE_KEY_STATS, FIXTURE_PROFILE, NVDA_CIK, emptySeriesSet, fixtureFinancials,
   fixtureSeries,
 } from './companyFinancials.fixture'
 
@@ -113,17 +117,44 @@ describe('seriesWithData', () => {
   })
 })
 
-describe('visibleKeyStats', () => {
-  it('lists only the figures the company has', () => {
-    const keys = visibleKeyStats(FIXTURE_KEY_STATS).map((d) => d.key)
-    expect(keys).toContain('revenue')
-    expect(keys).toContain('dividends_paid')
-    expect(keys).toContain('pe_ratio')
-    expect(keys).toEqual(expect.arrayContaining(['ps_ratio', 'pfcf_ratio', 'dividend_yield', 'roe']))
-    expect(visibleKeyStats({ ...FIXTURE_KEY_STATS, pe_ratio: null }).map((d) => d.key)).not.toContain('pe_ratio')
+describe('the overview groups', () => {
+  const keysOf = (groups: ReturnType<typeof visibleOverviewGroups>) =>
+    groups.flatMap((g) => g.figures.map((f) => (f.source === 'stats' ? f.def.key : f.key)))
+
+  it('place every key figure in exactly one group, so the overview drops none', () => {
+    const placed = OVERVIEW_GROUPS.flatMap((g) => g.figures)
+      .filter((f) => f.source === 'stats')
+      .map((f) => (f.source === 'stats' ? f.def.key : ''))
+    expect([...placed].sort()).toEqual(KEY_STATS.map((d) => d.key).sort())
+    expect(new Set(placed).size).toBe(placed.length)
+  })
+
+  it('list only the figures the company has, forward ones beside the trailing', () => {
+    const groups = visibleOverviewGroups(FIXTURE_KEY_STATS, FIXTURE_PROFILE)
+    expect(groups.map((g) => g.title)).toEqual(['Valuation', 'Growth', 'Profitability', 'Balance & returns'])
+    const keys = keysOf(groups)
+    expect(keys).toEqual(expect.arrayContaining(['revenue', 'pe_ratio', 'forward_pe', 'peg_ratio', 'fwd_eps_growth', 'dividends_paid']))
     expect(keys).not.toContain('gross_margin')
     expect(keys).not.toContain('buybacks')
-    expect(visibleKeyStats(undefined)).toEqual([])
+    expect(keysOf(visibleOverviewGroups({ ...FIXTURE_KEY_STATS, pe_ratio: null }, undefined))).not.toContain('pe_ratio')
+    expect(keysOf(visibleOverviewGroups(FIXTURE_KEY_STATS, undefined))).not.toContain('forward_pe')
+    expect(visibleOverviewGroups(undefined, undefined)).toEqual([])
+  })
+})
+
+describe('dates and fiscal years', () => {
+  it("print a close's date short on an axis and in full in a header", () => {
+    expect(shortPeriodLabel('2026-11-06')).toBe("Nov '26")
+    expect(shortPeriodLabel('Q4 FY2025')).toBe('FY25')
+    expect(periodText('2026-11-06')).toBe('Nov 6, 2026')
+    expect(periodText('Q3 FY2025')).toBe('Q3 FY2025')
+  })
+
+  it("name the fiscal year's last month, or nothing", () => {
+    expect(fiscalYearEndMonth('0126')).toBe('Jan')
+    expect(fiscalYearEndMonth('1231')).toBe('Dec')
+    expect(fiscalYearEndMonth('1399')).toBeNull()
+    expect(fiscalYearEndMonth(null)).toBeNull()
   })
 })
 

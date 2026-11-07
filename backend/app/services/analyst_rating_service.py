@@ -176,7 +176,23 @@ class AnalystRatingService:
         """
         try:
             yahoo_ticker = await self._get_yahoo_ticker(security)
-            logger.info(f"Fetching analyst rating for {security.symbol} ({yahoo_ticker})...")
+        except Exception as e:
+            if is_rate_limit(e):
+                raise
+            logger.error(f"Error resolving the ticker of {security.symbol}: {e}")
+            return None
+        counts = await self.fetch_counts(yahoo_ticker, security.symbol)
+        return None if counts is None else {'security_id': security.id, **counts}
+
+    async def fetch_counts(self, yahoo_ticker: str, label: str) -> Optional[Dict]:
+        """
+        One ticker's current-period recommendation counts — all zero when Yahoo answered
+        that there is no current rating — or None when the fetch itself failed. Keyed by
+        nothing: the held pass adds the security, the Company tab's chunk
+        (`company_profile_sync`) the CIK, so both read Yahoo's answer one way.
+        """
+        try:
+            logger.info(f"Fetching analyst rating for {label} ({yahoo_ticker})...")
 
             # A refusal anywhere in the process holds this too (issue #57); re-raised
             # below as the rate limit it stands for.
@@ -193,29 +209,23 @@ class AnalystRatingService:
             recommendations = await asyncio.to_thread(_fetch)
 
             if recommendations is None or recommendations.empty:
-                logger.info(f"No analyst ratings available for {security.symbol}")
-                return no_rating(security.id)
+                logger.info(f"No analyst ratings available for {label}")
+                return dict.fromkeys(RATING_COUNT_FIELDS, 0)
 
             latest = select_current_period(recommendations)
             if latest is None:
-                logger.info(f"No current-period analyst ratings for {security.symbol}")
-                return no_rating(security.id)
+                logger.info(f"No current-period analyst ratings for {label}")
+                return dict.fromkeys(RATING_COUNT_FIELDS, 0)
 
-            rating_data = {
-                'security_id': security.id,
+            counts = {
                 'strong_buy': _count(latest, 'strongBuy'),
                 'buy': _count(latest, 'buy'),
                 'hold': _count(latest, 'hold'),
                 'sell': _count(latest, 'sell'),
                 'strong_sell': _count(latest, 'strongSell'),
             }
-
-            total = sum([rating_data['strong_buy'], rating_data['buy'],
-                        rating_data['hold'], rating_data['sell'],
-                        rating_data['strong_sell']])
-
-            logger.info(f"Found {total} analyst ratings for {security.symbol}")
-            return rating_data
+            logger.info(f"Found {sum(counts.values())} analyst ratings for {label}")
+            return counts
 
         except Exception as e:
             # A rate limit is not this security's problem and must not be absorbed as
@@ -228,7 +238,7 @@ class AnalystRatingService:
             # time: nothing it could catch was ever raised.
             if is_rate_limit(e):
                 raise
-            logger.error(f"Error fetching rating for {security.symbol}: {e}")
+            logger.error(f"Error fetching rating for {label}: {e}")
             return None
 
     async def sync_ratings_for_securities(self, security_ids: Optional[List[int]] = None) -> Dict:

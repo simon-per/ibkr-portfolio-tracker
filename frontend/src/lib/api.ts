@@ -1647,6 +1647,62 @@ export interface CompanyFinancialsSeriesSet {
   dividend_yield: CompanyFinancialsSeries;
   /** TTM net income over the year's mean equity, a fraction. */
   roe: CompanyFinancialsSeries;
+  /** The market closes; each point's `label` is its date. The range applies, the period not. */
+  price: CompanyFinancialsSeries;
+}
+
+/** The current period's analyst recommendation counts; all zero is "no coverage". */
+export interface CompanyFinancialsRating {
+  strong_buy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strong_sell: number;
+  /** The label every rating in the app shows (`AnalystRating.consensus`'s rule). */
+  consensus: string;
+}
+
+/**
+ * The overview's company-level figures: the SEC's industry and fiscal year end, the price
+ * line from the market closes, and Yahoo's figures (a held company's from its listing, any
+ * other's from the 05:00 chunk). Fractions for rates; null for anything unknown.
+ */
+export interface CompanyFinancialsProfile {
+  /** The SEC's SIC description. */
+  industry: string | null;
+  /** `MMDD`, as the SEC states it. */
+  fiscal_year_end: string | null;
+  /** Yahoo's business summary. */
+  description: string | null;
+  /** The newest market close, in `currency`. */
+  price: number | null;
+  price_date: string | null;
+  return_1m: number | null;
+  return_1y: number | null;
+  /** Annualised. */
+  return_5y: number | null;
+  /** Annualised. */
+  return_10y: number | null;
+  /** Of the weekly closes, not intraday. */
+  week52_low: number | null;
+  week52_high: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  fwd_revenue_growth: number | null;
+  fwd_eps_growth: number | null;
+  rating: CompanyFinancialsRating | null;
+  analysts: number | null;
+  target_low: number | null;
+  target_mean: number | null;
+  target_high: number | null;
+  /** The mean target over the newest close; null across currencies or from an old close. */
+  target_upside: number | null;
+  /** The currency of the targets and the EPS estimate (Yahoo's quote). */
+  yahoo_currency: string | null;
+  /** UTC. */
+  next_earnings_date: string | null;
+  next_eps_estimate: number | null;
+  yahoo_as_of: string | null;
 }
 
 /** The newest TTM point's figures, whatever period the charts show. Fractions for rates. */
@@ -1711,6 +1767,7 @@ export interface CompanyFinancialsResponse {
   as_of: string | null;
   warnings: string[];
   key_stats: CompanyFinancialsKeyStats;
+  profile: CompanyFinancialsProfile;
   series: CompanyFinancialsSeriesSet;
 }
 

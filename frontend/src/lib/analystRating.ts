@@ -31,3 +31,22 @@ export function getRatingScore(rating: string | null | undefined): number {
   const key = rating.trim().toLowerCase().replace(/[\s-]+/g, '_')
   return RATING_SCORES[key] ?? UNRATED_SCORE
 }
+
+/**
+ * The chip a consensus label wears — a soft tint, since a rating is context for a company,
+ * not an alarm. The positions table and the Company tab's overview draw the same chip.
+ */
+export function ratingBadgeClass(consensus: string | null | undefined): string {
+  switch (getRatingScore(consensus)) {
+    case 5:
+    case 4:
+      return 'bg-green-500/10 text-green-700 dark:text-green-400'
+    case 3:
+      return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
+    case 2:
+    case 1:
+      return 'bg-red-500/10 text-red-700 dark:text-red-400'
+    default:
+      return 'bg-muted text-muted-foreground'
+  }
+}

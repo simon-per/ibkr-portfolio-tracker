@@ -53,19 +53,24 @@ fold a decade of exchange-rate moves into every growth rate.
 
 from bisect import bisect_right
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utc_today
+from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
+from app.models.analyst_rating import consensus_of
+from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
+from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
+from app.repositories.fundamentals_repository import FundamentalsRepository
 from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.security_repository import held
 from app.repositories.sync_run_repository import utc_iso
+from app.services.analyst_rating_service import RATING_COUNT_FIELDS
 from app.services.company_financials_normaliser import ANNUAL, SPLIT_RATIOS
 
 PERIODS = ("quarterly", "ttm", "annual")
@@ -325,6 +330,75 @@ def cagrs(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
 
 
 Prices = Sequence[Tuple[date, float]]
+
+#: The overview's 1M change looks this far back (to a close within `PRICE_MATCH_DAYS`).
+ONE_MONTH_DAYS = 30
+#: The 52-week range: the closes inside this many days of the newest.
+WEEK52_DAYS = 365
+PRICE_LINE_FIELDS = (
+    "price",
+    "price_date",
+    "return_1m",
+    "return_1y",
+    "return_5y",
+    "return_10y",
+    "week52_low",
+    "week52_high",
+)
+
+
+def price_line(closes: Prices) -> Dict[str, Any]:
+    """
+    The overview's price line from the market closes, oldest first: the newest close and
+    its date, its change over a month and a year, the 5- and 10-year annualised growth (the
+    figures' own `growth_at` rule), and the low and high of the closes in the last 52 weeks
+    — weekly closes, so a range of closes, not of intraday prices. None for what the closes
+    cannot say.
+    """
+    if not closes:
+        return dict.fromkeys(PRICE_LINE_FIELDS)
+    last_day, last = closes[-1]
+    month = close_at(closes, last_day - timedelta(days=ONE_MONTH_DAYS))
+    grown = cagrs(closes)
+    year = [c for d, c in closes if d > last_day - timedelta(days=WEEK52_DAYS)]
+    return {
+        "price": last,
+        "price_date": last_day.isoformat(),
+        "return_1m": last / month - 1 if month else None,
+        "return_1y": yoy(closes),
+        "return_5y": grown["y5"],
+        "return_10y": grown["y10"],
+        "week52_low": min(year),
+        "week52_high": max(year),
+    }
+
+
+def price_series(closes: Prices, range_key: str) -> Dict[str, Any]:
+    """
+    The market closes as one more series, shaped like the figures' (`build_series`): the
+    range counted back from the newest close, each point's YoY and the CAGRs by the same
+    rules. The Period toggle does not apply: a close has no fiscal period.
+    """
+    years = RANGES[range_key]
+    start = 0
+    if years is not None and closes:
+        cutoff = _years_before(closes[-1][0], years)
+        start = next((i for i, (d, _) in enumerate(closes) if d > cutoff), len(closes))
+    shown = closes[start:]
+    return {
+        "points": [
+            {
+                "period_end": d.isoformat(),
+                "label": d.isoformat(),
+                "value": value,
+                "yoy": yoy_at(closes, start + i),
+            }
+            for i, (d, value) in enumerate(shown)
+        ],
+        "cagr": cagr(shown),
+        "yoy": yoy(closes),
+        "cagrs": cagrs(closes),
+    }
 
 
 def close_at(prices: Prices, day: date) -> Optional[float]:
@@ -660,7 +734,7 @@ class CompanyFinancialsService:
         out.sort(key=lambda c: (c["symbol"], c["cik"]))
         return out
 
-    async def _prices(
+    async def _closes(
         self,
         cik: int,
         rows: Sequence[CompanyFinancial],
@@ -669,7 +743,8 @@ class CompanyFinancialsService:
     ) -> List[Tuple[date, float]]:
         """
         The company's weekly closes in its reporting currency, and the held listing's
-        newest daily close after them, on the figures' split basis (`eps_basis`).
+        newest daily close after them, as the market quoted them — the overview's price.
+        `_on_eps_basis` puts the same closes on the figures' split basis for the multiples.
         """
         if not rows or currency is None:
             return []
@@ -686,8 +761,129 @@ class CompanyFinancialsService:
                 and (not closes or daily.date > closes[-1][0])
             ):
                 closes.append((daily.date, float(daily.close_price)))
+        return closes
+
+    async def _on_eps_basis(
+        self, cik: int, rows: Sequence[CompanyFinancial], closes: Prices
+    ) -> List[Tuple[date, float]]:
+        """`closes` on the figures' split basis (`eps_basis`), for the P/E and its kin."""
+        if not closes:
+            return []
         splits = [(s.date, s.ratio) for s in await self.repo.splits_for(cik)]
         return eps_basis(closes, splits, max(r.filed for r in rows))
+
+    async def _yahoo_figures(
+        self, company: SecCompany, listing: Optional[Security]
+    ) -> Dict[str, Any]:
+        """
+        The overview's Yahoo figures, from one source per company: **a held company's from
+        its listing's own rows** (the daily held pass: `fundamental_metrics`,
+        `analyst_ratings`, `earnings_events`), any other's from `company_yahoo_profiles`
+        (the 05:00 chunk, `company_profile_sync`). Never both, never a mix.
+        """
+        if listing is not None:
+            figures = await FundamentalsRepository(self.db).get_metrics_by_security_id(
+                listing.id
+            )
+            rating = await AnalystRatingRepository(self.db).get_by_security_id(listing.id)
+            upcoming = (
+                await self.db.execute(
+                    select(EarningsEvent)
+                    .where(
+                        EarningsEvent.security_id == listing.id,
+                        EarningsEvent.earnings_date > utcnow(),
+                    )
+                    .order_by(EarningsEvent.earnings_date)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            return {
+                "figures": figures,
+                "as_of": figures.last_updated if figures is not None else None,
+                "counts": None
+                if rating is None
+                else {f: getattr(rating, f) for f in RATING_COUNT_FIELDS},
+                "next_earnings_date": upcoming.earnings_date if upcoming else None,
+                "next_eps_estimate": upcoming.eps_estimate if upcoming else None,
+            }
+        row = (await self.repo.yahoo_profiles([company.cik])).get(company.cik)
+        if row is None or row.fetched_at is None:
+            return {
+                "figures": None,
+                "as_of": None,
+                "counts": None,
+                "next_earnings_date": None,
+                "next_eps_estimate": None,
+            }
+        return {
+            "figures": row,
+            "as_of": row.fetched_at,
+            "counts": None
+            if row.strong_buy is None
+            else {f: getattr(row, f) or 0 for f in RATING_COUNT_FIELDS},
+            "next_earnings_date": row.next_earnings_date,
+            "next_eps_estimate": row.next_eps_estimate,
+        }
+
+    async def _profile(
+        self,
+        company: SecCompany,
+        listing: Optional[Security],
+        closes: Prices,
+        currency: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        The overview's company-level figures (docs/company-financials.md, *The overview*):
+        the SEC's industry and fiscal year end, the price line from the market closes, and
+        the Yahoo figures (`_yahoo_figures`). The upside is the mean target over the newest
+        close only when both are in one currency and the close is current.
+        """
+        yahoo = await self._yahoo_figures(company, listing)
+        figures = yahoo["figures"]
+
+        def figure(name: str) -> Any:
+            return getattr(figures, name, None) if figures is not None else None
+
+        line = price_line(closes)
+        price = line["price"]
+        current = (
+            price is not None
+            and price > 0
+            and (utc_today() - closes[-1][0]).days <= PRICE_MAX_AGE_DAYS
+        )
+        target = figure("target_mean_price")
+        upside = (
+            target / price - 1
+            if target is not None
+            and current
+            and currency is not None
+            and figure("data_currency") == currency
+            else None
+        )
+        next_date = yahoo["next_earnings_date"]
+        counts = yahoo["counts"]
+        return {
+            "industry": company.sic_description,
+            "fiscal_year_end": company.fiscal_year_end,
+            "description": figure("business_summary"),
+            **line,
+            "forward_pe": figure("forward_pe"),
+            "peg_ratio": figure("peg_ratio"),
+            "fwd_revenue_growth": figure("fwd_revenue_growth"),
+            "fwd_eps_growth": figure("fwd_eps_growth"),
+            "rating": None
+            if counts is None
+            else {**counts, "consensus": consensus_of(**counts)},
+            "analysts": figure("number_of_analysts"),
+            "target_low": figure("target_low_price"),
+            "target_mean": target,
+            "target_high": figure("target_high_price"),
+            "target_upside": upside,
+            "yahoo_currency": figure("data_currency"),
+            "next_earnings_date": utc_iso(next_date) if next_date is not None else None,
+            "next_eps_estimate": yahoo["next_eps_estimate"],
+            "yahoo_as_of": utc_iso(yahoo["as_of"]) if yahoo["as_of"] is not None else None,
+        }
 
     async def get_financials(
         self,
@@ -699,9 +895,9 @@ class CompanyFinancialsService:
         coverage = (await self.repo.coverage([company.cik])).get(company.cik)
         listing = (await self._held_listings([company.cik])).get(company.cik)
         identity = self._identity(company, listing)
-        prices = await self._prices(
-            company.cik, rows, coverage["currency"] if coverage else None, listing
-        )
+        currency = coverage["currency"] if coverage else None
+        closes = await self._closes(company.cik, rows, currency, listing)
+        prices = await self._on_eps_basis(company.cik, rows, closes)
         current = None
         if prices and (utc_today() - prices[-1][0]).days <= PRICE_MAX_AGE_DAYS:
             current = prices[-1][1]
@@ -718,5 +914,9 @@ class CompanyFinancialsService:
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
             "key_stats": key_stats(rows, current),
-            "series": build_series(rows, period, range_key, prices),
+            "profile": await self._profile(company, listing, closes, currency),
+            "series": {
+                **build_series(rows, period, range_key, prices),
+                "price": price_series(closes, range_key),
+            },
         }
