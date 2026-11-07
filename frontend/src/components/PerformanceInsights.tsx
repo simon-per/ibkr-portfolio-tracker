@@ -139,7 +139,9 @@ function InsightTile({ icon, tone, label, tag, value, absent, who }: InsightTile
       </div>
       {who && (
         <CompanyLink securityId={who.securityId} className="block min-w-0">
-          <div className="flex min-w-0 items-center gap-2 text-xs">
+          {/* An amount wraps under the symbol when the tile is too narrow for both (a
+              390 px phone); a name truncates instead. */}
+          <div className={cn('flex min-w-0 items-center gap-x-2 text-xs', who.figure && 'flex-wrap gap-y-0.5')}>
             <TickerAvatar
               symbol={who.symbol}
               securityId={who.securityId}
