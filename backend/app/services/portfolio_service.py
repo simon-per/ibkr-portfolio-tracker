@@ -84,6 +84,23 @@ class AttributionInputs:
     position_start: Dict[int, date]  # `_load_position_start_dates`
 
 
+def range_open(start: date) -> date:
+    """
+    The day a range's figures open on: `start`, or the Friday before a weekend start.
+
+    A range's gain is measured from the last close before it — attribution and XIRR open
+    at `_find_latest_price_date(start)` — but the timeline emitted weekdays only from
+    `start`, so a weekend start (MTD on a Sunday 1st, any 1W/1M/3M on a Saturday or
+    Sunday) began the chart on Monday's close and lost Monday's move: MTD on 2026-11-07
+    read the chart's first point on 11-02 while attribution opened at 10-30 (review item
+    V2). The timeline and the window-anchored benchmark open here, so the chart's first
+    point is the anchor close the other figures measure from.
+    """
+    while start.weekday() >= 5:
+        start -= timedelta(days=1)
+    return start
+
+
 def _shift_months(from_date: date, months: int) -> date:
     """
     The same day-of-month ``months`` before ``from_date``, clamped to the length
@@ -341,7 +358,11 @@ class PortfolioService:
         `contributions` is that caller's own `_contribution_inputs` under the same
         `base_fx`, and `cash_service` its instance, so the money-in splice and the cash
         ledgers are read once for the request rather than once per reader (GitHub #73).
+
+        A weekend `start_date` opens on the Friday before (`range_open`): the first point
+        is the close the range's gain is measured from.
         """
+        start_date = range_open(start_date)
         # Get ALL taxlots (open + closed) for historical accuracy
         if preloaded is not None:
             taxlots_with_securities = preloaded.taxlots_with_securities
@@ -421,7 +442,10 @@ class PortfolioService:
             exchange_rate_cache, price_currency_cache, base_fx,
             disposals_by_day=disposals_by_day,
             realized_skipped_by_day=realized_skipped_by_day,
-            position_start=await self._load_position_start_dates(),
+            position_start=(
+                preloaded.position_start if preloaded is not None
+                else await self._load_position_start_dates()
+            ),
             cash_events=cash_events,
             money_in_legs=contributions["money_in_legs"],
             cash_source=cash_source,

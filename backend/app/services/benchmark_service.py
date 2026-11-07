@@ -609,12 +609,17 @@ class BenchmarkService:
         window mode, the seed plus the contributions since: what the window started
         with plus what was added, so `gain_loss_eur` is the index's gain on that capital.
         """
+        from app.services.portfolio_service import range_open
+
         self.last_anchor = None
         bench = BENCHMARKS.get(benchmark_key)
         if not bench:
             return []
         if anchor not in ANCHOR_MODES:
             raise ValueError(f"anchor must be one of {ANCHOR_MODES}, got {anchor!r}")
+        # The portfolio's timeline opens a weekend start on the Friday before; the
+        # benchmark opens with it, so the window anchor stays the chart's first point.
+        start_date = range_open(start_date)
         if anchor == "window":
             return await self._window_anchored_series(start_date, end_date, bench)
 
@@ -799,8 +804,8 @@ class BenchmarkService:
         """
         The first weekday in [start, end] the index can be priced on (with the usual
         14-day fallback) and, for a non-EUR index, converted on. The portfolio emits a
-        point on every weekday, so this is normally `start_date` itself, or the Monday
-        after a weekend start.
+        point on every weekday from `range_open(start)`, and so does this: it is
+        normally `start_date` itself (a weekend start already moved to the Friday).
         """
         d = start_date
         while d <= end_date:

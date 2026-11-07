@@ -347,6 +347,12 @@ other way:
 - **Legs strictly after the anchor buy or sell shares; a leg on the anchor day is inside the
   seed.** The portfolio's anchor point already contains that day's purchases (`events <= d`),
   so the window is `(anchor, end]`, the one `calculate_xirr` and `/attribution` use.
+- **A weekend start opens on the Friday before** (`portfolio_service.range_open`, review item
+  V2, 2026-11-07). A range's gain is measured from the last close before it — attribution and
+  XIRR open at `_find_latest_price_date(start)` — and the timeline used to begin on the Monday
+  after a weekend start, losing Monday's move from the chart (MTD on 2026-11-07: attribution
+  opened at 10-30, the chart at 11-02). The timeline and both benchmark modes now open there,
+  so the chart's first point is the close every other figure measures from.
 - **It is a seeded walk, never a scale or a shift.** Scaling the absolute series so its first
   point matched would scale the in-window deposits too, and the portfolio would then appear to
   outperform by exactly what was paid in. `_share_events_for_legs` and `_walk` are one
