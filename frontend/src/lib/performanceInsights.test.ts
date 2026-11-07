@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DividendUpcomingPayment, Position, SecurityAttribution } from '@/lib/api'
-import { largestHolding, nextDividend, topMover, weightDenominator } from './performanceInsights'
+import { largestHolding, nextDividend, topMover } from './performanceInsights'
+import { bookTotal as weightDenominator } from './positionValuation'
 
 /** Made-up figures throughout. */
 function attr(security_id: number, symbol: string, pnl: number): SecurityAttribution {

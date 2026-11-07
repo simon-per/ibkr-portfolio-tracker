@@ -303,7 +303,7 @@ export function Dashboard() {
 
     // 6. Top 5 Concentration, footnoted with the effective holdings it cannot express:
     // a top-5 weight reads the same for five equal positions and one dominant one.
-    const top5Weight = concentrationPct(positions, 5)
+    const top5Weight = concentrationPct(positions, accountCash, 5)
     const { effectiveHoldings } = herfindahlConcentration(positions)
 
     return {
@@ -323,7 +323,7 @@ export function Dashboard() {
       top5Weight,
       effectiveHoldings,
     }
-  }, [valueOverTime, positions, annualizedReturn])
+  }, [valueOverTime, positions, annualizedReturn, accountCash])
 
   // The risk side of the same series. Kept in a second memo because beta also
   // depends on the benchmark selection, which the return KPIs do not.

@@ -71,7 +71,7 @@ function expand() {
 describe('CurrencyExposureCard', () => {
   it('leads with the share quoted outside the base currency', () => {
     renderCard()
-    expect(screen.getByText(/80% of the book is quoted outside EUR/)).toBeTruthy()
+    expect(screen.getByText(/80% of the holdings is quoted outside EUR/)).toBeTruthy()
   })
 
   it('starts collapsed', () => {
@@ -136,7 +136,7 @@ describe('CurrencyExposureCard', () => {
     it('says so instead of reporting an exposure of zero', () => {
       renderUnloaded()
       expect(screen.getByText(/Couldn't load positions, so currency exposure/)).toBeTruthy()
-      expect(screen.queryByText(/% of the book is quoted outside/)).toBeNull()
+      expect(screen.queryByText(/% of the holdings is quoted outside/)).toBeNull()
     })
 
     it('renders no table when expanded', () => {

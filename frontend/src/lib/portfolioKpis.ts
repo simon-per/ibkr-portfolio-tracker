@@ -1,6 +1,7 @@
 import type { BenchmarkValuePoint, PortfolioValuePoint } from './api'
 import { cashIsTracked } from './portfolioCash'
-import { isValuable, type ValuablePosition } from './positionValuation'
+import type { AccountCash } from './portfolioCash'
+import { bookShare, bookTotal, isValuable, type ValuablePosition } from './positionValuation'
 import { rawProfit } from './rangeProfit'
 
 /** Trading days per year, for annualising a daily return series. Shared with `rollingRisk.ts`. */
@@ -475,7 +476,9 @@ export function sortinoDetail(
 }
 
 /**
- * Share of market value held in the largest N positions, as a percent.
+ * Share of the book held in the largest N positions, as a percent — of `bookTotal`, the
+ * denominator Positions' weights use (review item M5: it divided by holdings alone, so
+ * Top 5 read higher than the sum of the same five weights one card away).
  *
  * `null` — never `0` — when nothing is priced. A `0` here is not merely unknown, it is
  * *reassuring*: the card tones anything under 50% as good news, so an unpriced portfolio
@@ -485,16 +488,23 @@ export function sortinoDetail(
  * green zero appeared with the qualifier that would have explained it silently dropped.
  */
 export function concentrationPct(
-  positions: { market_value_eur: number }[],
+  positions: readonly ValuablePosition[],
+  cash: AccountCash | undefined,
   topN: number = 5,
 ): number | null {
-  const total = positions.reduce((s, p) => s + p.market_value_eur, 0)
-  if (total <= 0) return null
-  const top = [...positions]
-    .sort((a, b) => b.market_value_eur - a.market_value_eur)
+  const largest = positions
+    .filter(isValuable)
+    .map((p) => p.market_value_eur)
+    .sort((a, b) => b - a)
     .slice(0, topN)
-    .reduce((s, p) => s + p.market_value_eur, 0)
-  return (top / total) * 100
+  if (largest.length === 0) return null
+  return bookShare(sumOf(largest), bookTotal(positions, cash))
+}
+
+function sumOf(values: number[]): number {
+  let total = 0
+  for (const v of values) total += v
+  return total
 }
 
 /**

@@ -15,7 +15,7 @@ import { IconChip } from '@/components/ui/IconChip'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
 import { displayName } from '@/lib/securityName'
-import { weightDenominator } from '@/lib/performanceInsights'
+import { bookTotal } from '@/lib/positionValuation'
 
 interface PositionsListProps {
   positions: Position[]
@@ -364,9 +364,9 @@ export function PositionsList({
   const cashAmount = cashTracked ? cash!.amount : 0
   // A debit is still shown as a balance, but it is not in the denominator, so it has no share.
   const cashInBook = inBookCash(cash)
-  // `weightDenominator` is shared with the Performance tab's "Largest holding" tile, so the
-  // tile's weight and this row's cannot disagree.
-  const totalMarketValue = useMemo(() => weightDenominator(positions ?? [], cash), [positions, cash])
+  // `bookTotal` is the one "% of the book" denominator — the Largest holding tile, Top 5
+  // and the rebalance plan divide by it too, so no two weights of one holding disagree.
+  const totalMarketValue = useMemo(() => bookTotal(positions ?? [], cash), [positions, cash])
 
   /** Named on screen, in the order the table shows them. */
   const unpriced = useMemo(

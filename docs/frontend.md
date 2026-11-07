@@ -956,8 +956,14 @@ rows, never recomputed), largest holding by account weight, and the next dividen
 passes the attribution, positions, summary cash and `dividendBreakdown.upcoming` it already holds.
 Each pick has two absences — `undefined` (not loaded) renders a dash, `null` (loaded, no such
 row: nothing lost money this range) renders "None" — and an empty book renders no strip.
-**`weightDenominator` is the one definition of "weight"**: valued holdings plus in-book cash.
-`PositionsList` reads it too, so the tile's weight and the table row's cannot drift. In-book cash
+**`bookTotal` (`lib/positionValuation.ts`) is the one definition of "weight"**: valued holdings
+plus in-book cash, with `bookShare` the percentage. `PositionsList`, the Largest holding tile,
+Top 5 (`concentrationPct`) and the rebalance plan all divide by it; until review items M5/DR5
+(2026-11-07) Top 5 and the rebalance plan divided by holdings alone, so the same holding read a
+larger share there than on Positions or the Allocation tab beside the plan.
+`computeCurrencyExposure` stays holdings-only on purpose — the client does not know which
+currencies the cash is held in — and says "of the holdings". `src/lib/bookShareFamily.test.ts`
+fails any other sum of market values. In-book cash
 is `inBookCash` (`lib/portfolioCash.ts`): a tracked, **positive** balance, else 0 — the client
 mirror of the backend's `UninvestedCash.in_book`, which Allocation and Look-through divide by, so a
 holding reads one share on all three tabs. A margin debit is left out rather than subtracted

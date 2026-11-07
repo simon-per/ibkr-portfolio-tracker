@@ -494,21 +494,32 @@ describe('betaAndCorrelation', () => {
 })
 
 describe('concentrationPct', () => {
+  const held = (v: number) => ({ market_value_eur: v, market_price: 1 })
+  const UNTRACKED = { amount: 0, cash_source: 'unknown' as const }
+
   it('sums the largest N by value', () => {
-    const positions = [10, 50, 20, 5, 5, 10].map((v) => ({ market_value_eur: v }))
+    const positions = [10, 50, 20, 5, 5, 10].map(held)
     // top 5 of 100 total = 95
-    expect(concentrationPct(positions)).toBeCloseTo(95, 6)
+    expect(concentrationPct(positions, UNTRACKED)).toBeCloseTo(95, 6)
+  })
+
+  it('is a share of the book, cash included, like the Positions weights (M5)', () => {
+    const positions = [60, 20, 10, 5, 3, 2].map(held)
+    // The top five hold 98 of a 100 book plus 25 in cash: 78.4%, never 98% of holdings alone.
+    expect(concentrationPct(positions, { amount: 25, cash_source: 'ibkr' })).toBeCloseTo(78.4, 6)
+    // Not loaded: absent, not divided by holdings alone.
+    expect(concentrationPct(positions, undefined)).toBeNull()
   })
 
   it('is 100% when there are fewer positions than N', () => {
-    expect(concentrationPct([{ market_value_eur: 7 }])).toBeCloseTo(100, 6)
+    expect(concentrationPct([held(7)], UNTRACKED)).toBeCloseTo(100, 6)
   })
 
   it('handles an empty portfolio', () => {
     // null, not 0: the card tones anything under 50% as good news, so a zero here is a
     // green all-clear drawn from no data at all.
-    expect(concentrationPct([])).toBeNull()
-    expect(concentrationPct([{ market_value_eur: 0 }])).toBeNull()
+    expect(concentrationPct([], UNTRACKED)).toBeNull()
+    expect(concentrationPct([{ market_value_eur: 0, market_price: null }], UNTRACKED)).toBeNull()
   })
 })
 

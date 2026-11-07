@@ -21,7 +21,8 @@
  *    weight to two different holdings.
  */
 
-import { isUnpriced } from './positionValuation'
+import type { AccountCash } from './portfolioCash'
+import { bookShare, bookTotal, isUnpriced } from './positionValuation'
 
 /** Percent of the whole portfolio, keyed by `security_id`. */
 export type TargetMap = Record<number, number>
@@ -56,7 +57,8 @@ export interface DriftRow {
 
 export interface RebalancePlan {
   rows: DriftRow[]
-  totalValue: number
+  /** `bookTotal`: valued holdings plus in-book cash; null until the cash has loaded. */
+  totalValue: number | null
   /** Sum of the targets actually set. 100 means fully specified. */
   targetSumPct: number
   /** Current weight sitting in positions that have a target. */
@@ -88,26 +90,30 @@ export const DEFAULT_BAND_PP = 5
 // fully-sold premise and why this is narrower than `summary.unpriced_holdings` all live in
 // `positionValuation.ts`.
 
+/**
+ * Weights are shares of the whole book (`bookTotal`: valued holdings plus in-book cash),
+ * the denominator the Allocation tab beside this card and Positions use (review item DR5);
+ * a target's trade can therefore be paid from cash. `cash` undefined (not loaded) leaves
+ * every weight, and so every piece of advice, absent rather than divided by holdings alone.
+ */
 export function computeRebalancePlan(
   positions: DriftInput[],
   targets: TargetMap,
   bandPp: number = DEFAULT_BAND_PP,
+  cash?: AccountCash,
 ): RebalancePlan {
-  const totalValue = positions
-    .filter((p) => !isUnpriced(p))
-    .reduce((s, p) => s + p.market_value_eur, 0)
+  const totalValue = bookTotal(positions, cash)
 
   const rows: DriftRow[] = positions.map((p) => {
     const unpriced = isUnpriced(p)
     const target = targets[p.security_id]
     const targetPct = typeof target === 'number' ? target : null
-    const currentPct =
-      unpriced || totalValue <= 0 ? null : (p.market_value_eur / totalValue) * 100
+    const currentPct = unpriced ? null : bookShare(p.market_value_eur, totalValue)
 
     // Advice needs both a target and a weight to compare it against.
-    const comparable = targetPct !== null && currentPct !== null
+    const comparable = targetPct !== null && currentPct !== null && totalValue !== null
     const driftPp = comparable ? currentPct! - targetPct! : null
-    const tradeValue = comparable ? (targetPct! / 100) * totalValue - p.market_value_eur : null
+    const tradeValue = comparable ? (targetPct! / 100) * totalValue! - p.market_value_eur : null
 
     return {
       securityId: p.security_id,
@@ -130,16 +136,17 @@ export function computeRebalancePlan(
   for (const [key, targetPct] of Object.entries(targets)) {
     const securityId = Number(key)
     if (heldIds.has(securityId)) continue
-    const driftPp = totalValue > 0 ? -targetPct : null
+    const book = totalValue !== null && totalValue > 0 ? totalValue : null
+    const driftPp = book !== null ? -targetPct : null
     rows.push({
       securityId,
       symbol: `#${securityId}`,
       description: 'Not currently held',
       marketValue: 0,
-      currentPct: totalValue > 0 ? 0 : null,
+      currentPct: book !== null ? 0 : null,
       targetPct,
       driftPp,
-      tradeValue: totalValue > 0 ? (targetPct / 100) * totalValue : null,
+      tradeValue: book !== null ? (targetPct / 100) * book : null,
       withinBand: driftPp === null ? null : Math.abs(driftPp) <= bandPp,
       unpriced: false,
       unheld: true,
