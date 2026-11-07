@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import { useBaseCurrency } from '@/lib/CurrencyContext'
 import { readStored, writeStored, useRememberedOpen } from '@/lib/storage'
 import { TARGETS_KEY, readTargets } from '@/lib/rebalanceTargets'
@@ -112,17 +113,19 @@ export function RebalanceCard({ positions, isLoading, isError }: RebalanceCardPr
         avatar: rebalanceAvatar,
         cell: (row, view) =>
           view === 'table' ? (
-            <div className="flex items-center gap-2.5">
-              {rebalanceAvatar(row, 'h-7 w-7 text-[10px]')}
-              <div className="min-w-0">
-                <span className="font-medium">{row.symbol}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {row.unpriced ? 'No price' : displayName(row.description)}
-                </span>
+            <CompanyLink securityId={row.securityId} className="block">
+              <div className="flex items-center gap-2.5">
+                {rebalanceAvatar(row, 'h-7 w-7 text-[10px]')}
+                <div className="min-w-0">
+                  <span className="font-medium">{row.symbol}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {row.unpriced ? 'No price' : displayName(row.description)}
+                  </span>
+                </div>
               </div>
-            </div>
+            </CompanyLink>
           ) : (
-            row.symbol
+            <CompanyLink securityId={row.securityId}>{row.symbol}</CompanyLink>
           ),
       },
       {

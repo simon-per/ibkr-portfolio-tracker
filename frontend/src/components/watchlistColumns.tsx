@@ -164,11 +164,11 @@ export function watchlistColumns(deps: {
       avatar: watchlistAvatar,
       cell: (i, view) =>
         view === 'cards' ? (
-          <CompanyLink securityId={i.security_id} ticker={i.yahoo_ticker}>
+          <CompanyLink securityId={i.security_id} isin={i.isin} ticker={i.yahoo_ticker}>
             {i.symbol || i.yahoo_ticker}
           </CompanyLink>
         ) : (
-          <CompanyLink securityId={i.security_id} ticker={i.yahoo_ticker} className="block">
+          <CompanyLink securityId={i.security_id} isin={i.isin} ticker={i.yahoo_ticker} className="block">
             <div className="flex items-center gap-3">
               {watchlistAvatar(i, 'h-8 w-8 text-[10px]')}
               <div className="min-w-0">

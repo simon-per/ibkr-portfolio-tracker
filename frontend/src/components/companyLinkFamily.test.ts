@@ -8,7 +8,20 @@ import { describe, expect, it } from 'vitest'
  * own `#company/…` href would need its own lookup — the four tables, four lookups this
  * replaced before they were written.
  */
-const sources = import.meta.glob(['./*.tsx', '../lib/*.ts'], { query: '?raw', import: 'default', eager: true })
+const sources = import.meta.glob(['./*.tsx', './ui/*.tsx', '../lib/*.ts'], { query: '?raw', import: 'default', eager: true })
+
+/** Drawing one of these is naming a security or a company. */
+const IDENTITY = /<(TickerAvatar|ConstituentAvatar|SymbolWithAvatar)\b/
+
+/** The modules that draw an identity and rightly do not link it, each with its reason. */
+const EXEMPT: Record<string, string> = {
+  './CompanyTab.tsx': 'the Company page itself: its picker names the company it already shows',
+  './LookThroughCharts.tsx':
+    "the treemap's click selects the company in the table below, whose row links; its avatar sits in a tooltip",
+  './ConstituentAvatar.tsx': 'the avatar itself',
+  './ui/TickerAvatar.tsx': 'the avatar itself',
+  './ui/DataTable.tsx': 'draws the avatar its columns hand it; the cell beside it carries the link',
+}
 
 const source = (path: string) => {
   const src = sources[path]
@@ -22,6 +35,17 @@ describe('links to the Company tab', () => {
       // Both renderings of the identity: the desktop cell and the phone card's title.
       expect(source(path).match(/<CompanyLink\b/g)?.length ?? 0, path).toBeGreaterThanOrEqual(2)
     }
+  })
+
+  it('every component that names a security or a company links it (owner: "link everything")', () => {
+    const unlinked = Object.entries(sources)
+      .filter(([path]) => path.endsWith('.tsx') && !/\.test\.tsx$/.test(path))
+      .filter(([path, src]) => IDENTITY.test(src as string) && !(path in EXEMPT))
+      .filter(([, src]) => !/<CompanyLink\b/.test(src as string))
+      .map(([path]) => path)
+    expect(unlinked).toEqual([])
+    // A stale exemption would wave through the next module of that name.
+    for (const path of Object.keys(EXEMPT)) expect(sources[path], path).toBeTypeOf('string')
   })
 
   it('no module but the route builds a company href by hand', () => {

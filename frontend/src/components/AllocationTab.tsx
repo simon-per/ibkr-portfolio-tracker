@@ -13,6 +13,7 @@ import { RebalanceCard } from './RebalanceCard'
 import { CurrencyExposureCard } from './CurrencyExposureCard'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import {
   allocationSectorPaint, assetTypePaint, regionPaint, type SectorPaint,
@@ -144,12 +145,14 @@ function drillDownColumns(deps: {
       avatar: drillDownAvatar,
       cell: (pos, view) =>
         view === 'table' && pos.security_id != null ? (
-          <div className="flex items-center gap-2.5">
-            {drillDownAvatar(pos, 'h-7 w-7 text-[10px]')}
-            {pos.symbol}
-          </div>
+          <CompanyLink securityId={pos.security_id} className="block">
+            <div className="flex items-center gap-2.5">
+              {drillDownAvatar(pos, 'h-7 w-7 text-[10px]')}
+              {pos.symbol}
+            </div>
+          </CompanyLink>
         ) : (
-          pos.symbol
+          <CompanyLink securityId={pos.security_id}>{pos.symbol}</CompanyLink>
         ),
     },
     {

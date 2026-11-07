@@ -23,17 +23,31 @@ export function CompanyLinksProvider({ children }: { children: ReactNode }) {
  */
 export function CompanyLink({
   securityId,
+  isin,
+  isins,
   ticker,
+  decorative = false,
   className,
   children,
-}: CompanyRef & { className?: string; children: ReactNode }) {
-  const cik = useCompanyCik({ securityId, ticker })
+}: CompanyRef & {
+  /**
+   * A second link to the same company in the same row — the logo beside a linked name:
+   * clickable, but out of the tab order and hidden from screen readers, so the row is one
+   * link to them, not two.
+   */
+  decorative?: boolean
+  className?: string
+  children: ReactNode
+}) {
+  const cik = useCompanyCik({ securityId, isin, isins, ticker })
   if (cik == null) return <>{children}</>
   return (
     <a
       href={companyHref(cik)}
       title="Open company"
       onClick={toTop}
+      tabIndex={decorative ? -1 : undefined}
+      aria-hidden={decorative || undefined}
       className={cn(
         'rounded-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         className,

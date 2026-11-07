@@ -17,6 +17,7 @@ import { CollapsibleCardHeader } from '@/components/ui/CollapsibleCardHeader'
 import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTable'
 import { CompositionBar, ExposureTreemap } from './LookThroughCharts'
 import { ConstituentAvatar } from './ConstituentAvatar'
+import { CompanyLink } from './CompanyLink'
 import { buildExposureGroups, buildPartition, cashRow } from '@/lib/lookthroughChart'
 import { CASH_BUCKET, STRUCTURAL_PAINT } from '@/lib/sectorColors'
 import { paintBackground } from '@/lib/chartPaint'
@@ -91,12 +92,14 @@ export function lookthroughColumns(deps: {
       avatar: companyAvatar,
       cell: (row, view) =>
         view === 'table' ? (
-          <div className="flex items-center gap-3">
-            {companyAvatar(row, 'h-8 w-8 text-[10px]')}
-            <span className="max-w-[240px] truncate" title={row.name}>{displayName(row.name)}</span>
-          </div>
+          <CompanyLink isins={row.isins} ticker={listingTickers(row.listings)[0]} className="block">
+            <div className="flex items-center gap-3">
+              {companyAvatar(row, 'h-8 w-8 text-[10px]')}
+              <span className="max-w-[240px] truncate" title={row.name}>{displayName(row.name)}</span>
+            </div>
+          </CompanyLink>
         ) : (
-          displayName(row.name)
+          <CompanyLink isins={row.isins} ticker={listingTickers(row.listings)[0]}>{displayName(row.name)}</CompanyLink>
         ),
     },
     {

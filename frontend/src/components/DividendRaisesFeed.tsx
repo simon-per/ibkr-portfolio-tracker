@@ -2,6 +2,7 @@ import type { DividendRaise } from '@/lib/api'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import { RAISE_BAND_PCT } from '@/lib/dividendGrowth'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import { formatPrice, formatQuantity, parseLocalDate } from '@/lib/utils'
 import { DeltaChip } from './DeltaChip'
 
@@ -43,9 +44,13 @@ export function DividendRaisesFeed({ raises, id }: { raises: DividendRaise[]; id
           <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap rounded-md bg-muted px-1.5 py-0.5 text-center text-xs font-medium tabular-nums text-muted-foreground">
             {shortDay(r.date)}
           </span>
-          <TickerAvatar symbol={r.symbol} securityId={r.security_id} className="h-7 w-7 shrink-0 text-[10px]" />
+          <CompanyLink securityId={r.security_id} decorative className="shrink-0">
+            <TickerAvatar symbol={r.symbol} securityId={r.security_id} className="h-7 w-7 shrink-0 text-[10px]" />
+          </CompanyLink>
           <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            <span className="min-w-0 max-w-full truncate font-medium">{r.symbol}</span>
+            <span className="min-w-0 max-w-full truncate font-medium">
+              <CompanyLink securityId={r.security_id}>{r.symbol}</CompanyLink>
+            </span>
             <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
               {r.currency
                 ? `${formatPrice(r.level_from, r.currency)} → ${formatPrice(r.level_to, r.currency)}`

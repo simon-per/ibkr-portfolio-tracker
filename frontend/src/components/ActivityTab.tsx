@@ -1,4 +1,5 @@
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import { useMemo, useState } from 'react'
 import { hashKey, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
@@ -191,19 +192,23 @@ function activityColumns(deps: {
         const detail = detailOf(row)
         // The type badge sits under the title on a card, so a cash row is titled "Cash"
         // rather than repeating "Deposit" twice.
-        if (view !== 'table') return row.symbol ?? 'Cash'
+        if (view !== 'table') {
+          return row.symbol ? <CompanyLink securityId={row.security_id}>{row.symbol}</CompanyLink> : 'Cash'
+        }
         return (
-          <div className="flex items-center gap-3">
-            {activityAvatar(row, 'h-8 w-8 text-[10px]')}
-            <div className="min-w-0">
-              <div className="font-medium">{row.symbol ?? 'Cash'}</div>
-              {detail && (
-                <div className="max-w-[22rem] truncate text-xs text-muted-foreground" title={row.description}>
-                  {detail}
-                </div>
-              )}
+          <CompanyLink securityId={row.symbol ? row.security_id : null} className="block">
+            <div className="flex items-center gap-3">
+              {activityAvatar(row, 'h-8 w-8 text-[10px]')}
+              <div className="min-w-0">
+                <div className="font-medium">{row.symbol ?? 'Cash'}</div>
+                {detail && (
+                  <div className="max-w-[22rem] truncate text-xs text-muted-foreground" title={row.description}>
+                    {detail}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </CompanyLink>
         )
       },
     },

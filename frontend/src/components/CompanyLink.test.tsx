@@ -30,6 +30,20 @@ describe('CompanyLink', () => {
     expect(container.innerHTML).toBe('<span>Fund</span>')
   })
 
+  it('makes a logo beside a linked name a mouse-only twin, so a row is one link to a keyboard', () => {
+    render(withLinks(
+      <>
+        <CompanyLink securityId={11} decorative><span>logo</span></CompanyLink>
+        <CompanyLink securityId={11}>NVDA</CompanyLink>
+      </>,
+    ))
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+    const logo = screen.getByText('logo').closest('a')!
+    expect(logo.getAttribute('href')).toBe(`#company/${NVDA_CIK}`)
+    expect(logo.getAttribute('tabindex')).toBe('-1')
+    expect(logo.getAttribute('aria-hidden')).toBe('true')
+  })
+
   it('draws no link outside the Dashboard, where there is no company list', () => {
     render(<CompanyLink securityId={11}>NVIDIA</CompanyLink>)
     expect(screen.queryByRole('link')).toBeNull()

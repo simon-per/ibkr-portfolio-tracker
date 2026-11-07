@@ -5,6 +5,7 @@ import type { DividendUpcomingPayment } from '@/lib/api'
 import { formatDelta } from '@/lib/delta'
 import { payoutVerdict } from '@/lib/dividendGrowth'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import { DividendSubheading } from './DividendSubheading'
 
 interface DividendCalendarProps {
@@ -97,7 +98,9 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                       {dayLabel(p.date)}
                     </span>
                     <span className="relative shrink-0">
-                      <TickerAvatar symbol={p.symbol} securityId={p.security_id} className="h-7 w-7 text-[10px]" />
+                      <CompanyLink securityId={p.security_id} decorative>
+                        <TickerAvatar symbol={p.symbol} securityId={p.security_id} className="h-7 w-7 text-[10px]" />
+                      </CompanyLink>
                       <span
                         className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-card"
                         style={{ backgroundColor: colorOf(p.symbol) }}
@@ -110,7 +113,9 @@ export function DividendCalendar({ upcoming, colorOf }: DividendCalendarProps) {
                         warning on the row — first. Only the symbol truncates now; the
                         badge sits right after it and the notes wrap under. */}
                     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                      <span className="min-w-0 max-w-full truncate font-medium">{p.symbol}</span>
+                      <span className="min-w-0 max-w-full truncate font-medium">
+                        <CompanyLink securityId={p.security_id}>{p.symbol}</CompanyLink>
+                      </span>
                       {payoutVerdict(p.per_share_change_pct) === 'raised' && (
                         <span
                           className="shrink-0 whitespace-nowrap rounded-full bg-gain-soft px-1.5 py-0.5 text-[0.7rem] font-medium tabular-nums text-gain"

@@ -15,6 +15,7 @@ import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { SwissResidencyControl } from '@/components/SwissResidencyControl'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import type { Tone } from '@/lib/tone'
 import { displayName } from '@/lib/securityName'
 import {
@@ -65,12 +66,16 @@ function symbolCell(
   securityId?: number | null,
 ) {
   if (!symbol) return ABSENT
-  if (view === 'cards') return symbol
+  if (view === 'cards') {
+    return <CompanyLink securityId={securityId} isin={isin} ticker={symbol}>{symbol}</CompanyLink>
+  }
   return (
-    <span className="flex items-center gap-2.5">
-      {symbolAvatar(symbol, isin, 'h-7 w-7 text-[10px]', securityId)}
-      <span>{symbol}</span>
-    </span>
+    <CompanyLink securityId={securityId} isin={isin} ticker={symbol} className="block">
+      <span className="flex items-center gap-2.5">
+        {symbolAvatar(symbol, isin, 'h-7 w-7 text-[10px]', securityId)}
+        <span>{symbol}</span>
+      </span>
+    </CompanyLink>
   )
 }
 

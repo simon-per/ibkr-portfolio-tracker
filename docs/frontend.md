@@ -617,21 +617,30 @@ Performance (or the Company tab without a company).
 - jsdom keeps one `location` per test file, so `testSetup.ts` resets the URL after every test.
   `lib/tabRoute.test.ts`, `components/Dashboard.route.test.tsx`.
 
-**Every held company one click away.** A holding's logo and name on Positions, Fundamentals, the
-Dividends holdings table and the Watchlist are a link to its company on the Company tab —
-the desktop cell's whole identity block, the phone card's name. One implementation:
+**Every company one click away** (owner: "link everything", 2026-11-07). Wherever the app names a
+security or a company with its logo, the logo and name link to its company on the Company tab:
+Positions, Fundamentals (holdings, earnings history and calendar), the Dividends holdings table,
+calendar and raises feed, the Watchlist, Activity, Allocation's drill-down, Rebalance,
+Look-through's companies table, the four Tax tables and the Performance insight cards — the
+desktop cell's whole identity block, the phone card's name. Where the logo and the name are
+separate elements (the dividend calendar, the raises feed) the logo is a `decorative` twin: it
+clicks through but stays out of the tab order and away from screen readers, so a row is one link.
+One implementation:
 `components/CompanyLink.tsx` renders the anchor (hover title *Open company*, focusable, a modified
 click left to the browser, a plain one opening the company at its top), and resolves the row
 through `lib/companyLinks.ts`, one lookup built from `/api/company-financials/companies` — the
 list the Company tab's own picker reads, so a row only links to a company the tab can show. A
-held row resolves by security (`security_ids`: GOOGL finds Alphabet as GOOG does), a watchlist row
-by its security and then its ticker against the company's symbol. **No company, no link**: the
+held row resolves by security (`security_ids`: GOOGL finds Alphabet as GOOG does); a row that may
+be no security of ours — a watchlist ticker, a look-through constituent, a tax row — by its ISIN
+against the company's, then its ticker against the company's symbol. **No company, no link**: the
 children render exactly as before, wrapper-free. `CompanyLinksProvider` in `Dashboard` is the one
 reader of the list for links; the context's default is the empty lookup, so a table rendered
 without it — every component test — draws what it drew before. Neither file imports the Company
-tab, so its chunk stays its own. `components/companyLinkFamily.test.ts` fails a table of held
-securities that stops drawing its identity through `CompanyLink`, and a hand-built `#company/`
-href anywhere but `tabRoute.ts`.
+tab, so its chunk stays its own. `components/companyLinkFamily.test.ts` fails **any component
+that draws a `TickerAvatar`, `ConstituentAvatar` or `SymbolWithAvatar` without a `CompanyLink`**
+— exempt, each with its reason: the Company tab itself, the look-through treemap (its click
+selects the company in the table below, whose row links), the avatars and `DataTable` — and a
+hand-built `#company/` href anywhere but `tabRoute.ts`.
 
 ## Two books — the Stocks | Crypto mode
 

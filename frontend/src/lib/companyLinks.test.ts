@@ -26,6 +26,13 @@ describe('companyLinks', () => {
     expect(companyCikFor(links, { securityId: 999, ticker: ' NVDA ' })).toBe(NVDA_CIK)
   })
 
+  it("finds a company by any of its ISINs, before the ticker", () => {
+    expect(companyCikFor(links, { isin: 'us0378331005' })).toBe(AAPL_CIK)
+    expect(companyCikFor(links, { isins: ['IE00B4L5Y983', 'US0378331005'] })).toBe(AAPL_CIK)
+    expect(companyCikFor(links, { isin: 'US0378331005', ticker: 'NVDA' })).toBe(AAPL_CIK)
+    expect(companyCikFor(links, { isins: ['IE00B4L5Y983'] })).toBeNull()
+  })
+
   it('prefers the security over the ticker', () => {
     expect(companyCikFor(links, { securityId: 11, ticker: 'AAPL' })).toBe(NVDA_CIK)
   })

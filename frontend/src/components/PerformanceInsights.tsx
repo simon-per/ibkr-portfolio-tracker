@@ -3,6 +3,7 @@ import { ChartPie, HandCoins, TrendingDown, TrendingUp, type LucideIcon } from '
 import { KpiPanel } from '@/components/ui/KpiCard'
 import { IconChip } from '@/components/ui/IconChip'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { CompanyLink } from './CompanyLink'
 import type {
   DividendUpcomingPayment, PerformanceAttributionResponse, Position,
 } from '@/lib/api'
@@ -134,15 +135,17 @@ function InsightTile({ icon, tone, label, tag, value, absent, who }: InsightTile
         {present ? value : known ? 'None' : ABSENT}
       </div>
       {who && (
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          <TickerAvatar
-            symbol={who.symbol}
-            securityId={who.securityId}
-            className="h-5 w-5 text-[8px]"
-          />
-          <span className="shrink-0 font-semibold">{who.symbol}</span>
-          <span className="min-w-0 truncate text-muted-foreground">{who.detail}</span>
-        </div>
+        <CompanyLink securityId={who.securityId} className="block min-w-0">
+          <div className="flex min-w-0 items-center gap-2 text-xs">
+            <TickerAvatar
+              symbol={who.symbol}
+              securityId={who.securityId}
+              className="h-5 w-5 text-[8px]"
+            />
+            <span className="shrink-0 font-semibold">{who.symbol}</span>
+            <span className="min-w-0 truncate text-muted-foreground">{who.detail}</span>
+          </div>
+        </CompanyLink>
       )}
     </div>
   )
