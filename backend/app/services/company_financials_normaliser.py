@@ -52,7 +52,7 @@ from datetime import date, timedelta
 from fractions import Fraction
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from app.services.edgar_client import PERIODIC_FORMS
+from app.services.edgar_client import ANNUAL_FORM_PREFIXES, PERIODIC_FORMS
 
 # ── What each metric is, and where it may come from ──────────────────────────
 
@@ -482,15 +482,56 @@ def _unit_fits(kind: str, unit: str) -> bool:
     return unit == "shares"
 
 
+# A 20-F filer's IFRS concepts, read as their US-GAAP twins so every chain, ladder and vote
+# below applies unchanged (review item R6, 2026-11-08: NU and TSMC file `ifrs-full`, annual
+# only). Only clear equivalents: an IFRS concept with no exact twin (`Borrowings`, which is
+# not long-term debt) stays unread, and its metric absent.
+IFRS_TWINS: Dict[str, str] = {
+    "Revenue": "Revenues",
+    "RevenueFromContractsWithCustomers": "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "ProfitLossAttributableToOwnersOfParent": "NetIncomeLoss",
+    "ProfitLoss": "ProfitLoss",
+    "DilutedEarningsLossPerShare": "EarningsPerShareDiluted",
+    "ProfitLossFromOperatingActivities": "OperatingIncomeLoss",
+    "GrossProfit": "GrossProfit",
+    "CostOfSales": "CostOfRevenue",
+    "CashFlowsFromUsedInOperatingActivities": "NetCashProvidedByUsedInOperatingActivities",
+    "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": (
+        "PaymentsToAcquirePropertyPlantAndEquipment"
+    ),
+    "AdjustedWeightedAverageShares": "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "DividendsRecognisedAsDistributionsToOwnersPerShare": "CommonStockDividendsPerShareDeclared",
+    "DividendsPaidClassifiedAsFinancingActivities": "PaymentsOfDividends",
+    "PaymentsToAcquireOrRedeemEntitysShares": "PaymentsForRepurchaseOfCommonStock",
+    "CashAndCashEquivalents": "CashAndCashEquivalentsAtCarryingValue",
+    "EquityAttributableToOwnersOfParent": "StockholdersEquity",
+    "Equity": "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+}
+
+
+def _taxonomy(companyfacts: Dict[str, Any], wanted: Dict[str, str]) -> Dict[str, Any]:
+    """
+    The us-gaap block, or — for a filer with no us-gaap concept a chain reads — its
+    `ifrs-full` block keyed by the US-GAAP twins (`IFRS_TWINS`). Never both: a filer that
+    switched taxonomies would otherwise count one year twice.
+    """
+    facts = (companyfacts or {}).get("facts") or {}
+    gaap = facts.get("us-gaap") or {}
+    if any(concept in gaap for concept in wanted):
+        return gaap
+    ifrs = facts.get("ifrs-full") or {}
+    return {twin: ifrs[name] for name, twin in IFRS_TWINS.items() if name in ifrs}
+
+
 def _facts(companyfacts: Dict[str, Any]) -> List[Fact]:
     """Every usable fact of every concept a chain names, in the concept's main unit."""
-    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
     wanted[SPLIT_WITNESS] = SHARES
     wanted.update({c: MONETARY for c in DIVIDEND_TOTALS})
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
+    gaap = _taxonomy(companyfacts, wanted)
     out: List[Fact] = []
     for concept, kind in wanted.items():
         units = (gaap.get(concept) or {}).get("units") or {}
@@ -873,7 +914,7 @@ def _latest(
     every: Dict[Tuple[str, Optional[date], date], Dict[date, Fact]] = defaultdict(dict)
     for f in facts:
         key = (f.concept, f.start, f.end)
-        if f.form.startswith("10-K"):
+        if f.form.startswith(ANNUAL_FORM_PREFIXES):
             annual_form[key] = True
         held = chosen.get(key)
         if held is None or (f.filed, f.accn) > (held.filed, held.accn):
@@ -1387,8 +1428,9 @@ def normalise(
     """
     Rows for `company_financials`: dicts with `period_end`, `fiscal_year`,
     `fiscal_period` (Q1-Q4 or FY), `metric`, `value`, `unit`, `source_concept`, `filed`.
-    An empty result means the document carries no us-gaap 10-Q/10-K figures this module
-    reads (an IFRS 20-F filer, a fund). `filing_facts` are facts read from the filings
+    An empty result means the document carries no 10-Q/10-K/20-F figure this module reads,
+    in us-gaap or, for a 20-F filer, ifrs-full (`IFRS_TWINS`): a fund, a 40-F filer.
+    `filing_facts` are facts read from the filings
     themselves (`{concept, unit, start, end, val, accn, form, filed}`, `_filing_facts`).
     """
     result = Normalised(entity_name=(companyfacts or {}).get("entityName"))

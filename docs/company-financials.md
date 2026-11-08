@@ -119,7 +119,7 @@ PCAR one, INTC two, BKR four.
   weekly pass refetches everything once and a CLI run the same week spends nothing.
 - **Misses back off** through `miss_backoff.miss_backoff_until` on
   `sec_companies.facts_checked_at` / `facts_miss_count`: a 404, or a document with no us-gaap
-  10-Q/10-K figure this reads (an IFRS 20-F filer such as ASML or NU, a fund), is asked again on
+  10-Q/10-K/20-F figure this reads (a 40-F filer, a fund), is asked again on
   days 1, 2, 4, … up to every 30. A data answer clears both. `--force` asks anyway.
 - **Refuse whole**: a company's rows are deleted and the new set inserted in one transaction
   (`CompanyFinancialsRepository.replace_rows`), committed per company.
@@ -134,8 +134,8 @@ EXCHANGE_SUFFIXES` entries with an empty suffix — NASDAQ, NYSE, ARCA, AMEX, BA
 fund (`etf_mappings.is_known_etf_isin`). The symbol is spelled the SEC's way (`sec_ticker`: "BRK B"
 and "BRK.B" are "BRK-B") and looked up in the ticker list. A Xetra or Euronext listing never
 reaches EDGAR, a UCITS fund whose ticker collides with a US one (SMH) is excluded by its ISIN, and a
-foreign private issuer listed in New York (ASML, NU) gets its CIK and then a miss: its document
-holds IFRS 20-F figures only.
+foreign private issuer listed in New York (ASML, NU) gets its CIK and its **annual 20-F figures**
+(*Annual-only filers*, below).
 
 **The Nasdaq-100** — `CompanyFinancialsSync.universe`: the `UNIVERSE_SIZE` (100) heaviest
 distinct companies in the stored basket of each fund in `UNIVERSE_FUNDS` (`QQQM`, resolved through
@@ -722,6 +722,31 @@ only once opened (about six queries a peer); the industry and `SIC 3674` (or `SI
 on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose rows link through
 `CompanyLink`. Figures stay in each company's reporting currency, as everywhere on the tab.
 
+## Annual-only filers
+
+Review item R6 (2026-11-08). One companyfacts read each on the server that day: **ASML** files its
+20-F in US GAAP (623 us-gaap concepts, no ifrs-full); **NU** and **TSMC** in IFRS (`ifrs-full`,
+151 and 334 concepts; NU in USD, TSMC in TWD with a USD convenience translation of the latest year).
+All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
+
+- **The 20-F is an annual report**: it joins the one `PERIODIC_FORMS` set, and
+  `ANNUAL_FORM_PREFIXES` (`10-K`, `20-F`) is the one test of "this filing states a year", read by
+  the normaliser and the filing reads alike.
+- **IFRS concepts are read under their US-GAAP twins** (`IFRS_TWINS`), so every chain, ladder and
+  vote applies unchanged; only exact equivalents (revenue, profit attributable to owners, diluted EPS,
+  operating profit, operating cash flow, capex, diluted shares, dividends, buybacks, cash, equity).
+  A filer with any us-gaap chain concept is read in us-gaap alone, never both.
+  A concept reported in two currencies keeps the one it reports most, so TSMC is in TWD and its ADR's
+  USD closes match nothing: no multiples, rather than wrong ones.
+- **An annual-only filer's TTM is its fiscal years** (`_series_points`): each year is its own
+  trailing twelve months, so the default view and the key figures show the latest year; the
+  quarterly view stays empty.
+- They are asked again when their miss back-off runs out (at most 30 days); TSMC is in scope only
+  while something names its US listing (held as 2330 on the TWSE, it is not a US listing).
+- The weekday check treats a 20-F like any periodic report: from 105 to 180 days after a fiscal
+  year end it asks such a filer's filing list daily and finds that year already stored — about 75
+  small requests a filer a year, accepted rather than a second cadence for three companies.
+
 ## Known gaps and out of scope
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property
@@ -747,7 +772,8 @@ on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose
   then until its Q1 2027 10-Q restates the quarter. Deriving it as six months less Q2 is not done.
 - **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
   HONA and SPCX are new filers with too few quarters for a TTM.
-- Non-US listings, foreign private issuers (20-F, 40-F), IFRS figures.
+- Non-US listings; a 40-F filer; a 20-F filer's quarters (its 6-Ks carry no XBRL figures this
+  reads); IFRS concepts without an exact US-GAAP twin (`Borrowings`, so no net cash for NU or TSMC).
 - EBITDA (D&A tagged unevenly, above), so no EV/EBITDA; return on invested capital (it needs a
   tax rate and invested capital, neither tagged consistently).
 - **Market cap of a multi-class company** (GOOGL, META): its count is tagged per class, which

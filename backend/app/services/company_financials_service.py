@@ -583,10 +583,14 @@ def _with_roe(points: List[Point], rows: Sequence[CompanyFinancial], period: str
 
 def _series_points(rows: Sequence[CompanyFinancial], period: str) -> List[Point]:
     """Every period of `period`, oldest first, with its derived series."""
-    if period == "annual":
+    quarterly = _points(rows, annual=False) if period != "annual" else []
+    if period == "annual" or (period == "ttm" and not quarterly):
+        # A filer of annual reports only (a 20-F, review item R6): each fiscal year is its
+        # own trailing twelve months, so TTM — and the key figures — read the years.
         points = _points(rows, annual=True)
+        period = "annual"
     else:
-        points = _points(rows, annual=False)
+        points = quarterly
         if period == "ttm":
             points = _ttm(points)
     for point in points:

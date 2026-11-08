@@ -235,7 +235,8 @@ def _f(start, end, val, filed, form="10-Q", accn=None):
     return fact
 
 
-def test_an_ifrs_filer_yields_nothing():
+def test_an_ifrs_filer_yields_its_annual_figures():
+    """Review item R6: a 20-F filer's IFRS facts are read under their US-GAAP twins."""
     doc = {
         "cik": 2,
         "entityName": "A 20-F filer",
@@ -257,7 +258,10 @@ def test_an_ifrs_filer_yields_nothing():
             }
         },
     }
-    assert not normalise(doc).has_data
+    rows = normalise(doc).rows
+    assert [(r["fiscal_period"], r["metric"], r["value"], r["unit"]) for r in rows] == [
+        ("FY", "revenue", 1e9, "EUR")
+    ]
     assert not normalise({}).has_data
 
 
