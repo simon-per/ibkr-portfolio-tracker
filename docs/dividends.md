@@ -592,10 +592,17 @@ Yahoo's `amount_per_share` sizes only what IBKR never paid — the history befor
 **A split guard:** an IBKR rate more than 1.5× away from Yahoo's for the same dividend keeps Yahoo's,
 because Yahoo restates history for a split and IBKR's cash line keeps the pre-split rate. An **unpaired**
 IBKR payment joins as amount-only evidence (`HistPayment.cadence=False`): it sizes, it never bends
-the schedule. An **open accrual** is the newest amount of all (`gross / quantity`), replacing the Yahoo
-row of the same ex-date or joining as amount-only evidence — so a declared raise carries into every
-later projection the day IBKR lists it. Every amount converts at **one** rate per currency (the newest
-cached), so an exchange-rate move cannot make a level payer look varying.
+the schedule. An **open accrual** is the newest amount of all (IBKR's declared `grossRate`, else
+`gross / quantity`), replacing the Yahoo row of the same ex-date or joining as amount-only evidence — so
+a declared raise carries into every later projection the day IBKR lists it. Every amount converts at
+**one** rate per currency (the newest cached), so an exchange-rate move cannot make a level payer look
+varying — **the accrual included**: it is stored in the payment's own currency and converted when read
+(review item D2, 2026-11-08). Its EUR columns froze the rate of the day it was stored, so an unchanged
+dividend read as a raise or a cut (±1% on Mastercard, two days running) in the level, the per-share
+growth, the raises feed and the calendar's tag; and `gross / quantity` read the rate back off a gross
+rounded to the cent. A row stored before the native columns existed falls back to its EUR until the
+next sync replaces it (`accrual_gross_per_share`, `accrual_net_eur`;
+`tests/test_dividend_accrual_native.py`).
 
 **Steady or varying, decided from the payments at read time — nothing is stored or hand-classified**
 (`dividend_forecast.is_steady`). Over the last ≤ 8 regular payments within ~2 years: a *drop* is a
@@ -844,8 +851,10 @@ until 2026-09-19.
   An enabled section listing nothing means everything has been paid, so an empty list still clears.
 - **Ingested unconditionally**, like the Cash Report, so ticking the section in the portal is the
   whole setup — no flag, no redeploy, and an empty table is the supported default.
-- Amounts convert at the **newest cached** rate, not at the pay date: that date is in the future and
-  has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
+- Amounts are stored **in the payment's own currency** (`gross_rate`, `gross_amount`,
+  `withholding_tax`, `net_amount`) and converted when read, at the rate the forecast sizes everything
+  else with (D2 above). The `_eur` columns keep the same amounts at the **newest cached** rate of the
+  day the row was stored, not at the pay date: that date is in the future and has no rate. Same `_latest_fx_to_eur` the forecast already sizes projections with, and a currency
   with no cached rate is skipped and warned about rather than stored unconverted. "Newest" is
   bounded like every FX read (`fx_policy.newest_published_rate`, `FX_MAX_CARRY_DAYS`, issue #56): a
   currency whose newest published rate is older is skipped and counted too, and the forecast leaves
@@ -1293,13 +1302,13 @@ projection is sized from (`regular_payments`, one preparation for both).
   under `app/`, and `dividendGrowth.test.ts` refuses a second declaration or a
   per-share change compared against a number of its own anywhere else in `src/`.
 - **An announced raise is tagged on the calendar** (`upcoming[].per_share_change_pct`,
-  GitHub issue #74, 2026-10-18): an open accrual's gross per share (`gross / quantity`
-  through `accrual_gross_per_share_eur`, the reading the forecast sizes it with, turned
-  back into the payment currency at the forecast's sizing rate) against the stated rate
+  GitHub issue #74, 2026-10-18): an open accrual's gross per share in the payment's own
+  currency (`accrual_gross_per_share`, the reading the forecast sizes it with — no
+  exchange rate enters the tag) against the stated rate
   (`per_share_native`) of the last regular IBKR payment before its ex-date — a `special`
   or `bonus` row is never that base. Absent, never 0: no regular payment before it, a
   last payment whose rate never parsed (not an older rate), another currency, no cached
-  rate, or an accrual the forecast's own rule calls special (`is_special_near` — an
+  rate for a row stored before its native amounts, or an accrual the forecast's own rule calls special (`is_special_near` — an
   accrual carries no kind, so `special_payments` over the same history decides, on the
   history entry the accrual was matched into). Every other `upcoming` entry is null.
   Signed; the calendar shows "+x%" only for a raise by `payoutVerdict`. A split between

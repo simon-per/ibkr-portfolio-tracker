@@ -310,19 +310,58 @@ _IBKR_WHT_COUNTRY_RE = re.compile(r"\s-\s*([A-Z]{2})\s+TAX\b", re.IGNORECASE)
 SPECIAL_DIVIDEND_KINDS = frozenset({"special", "bonus"})
 
 
-def accrual_gross_per_share_eur(accrual: Dict) -> Optional[Decimal]:
+def accrual_gross_per_share(accrual: Dict, fx_to_eur: Dict[str, Decimal]) -> Optional[Decimal]:
     """
-    An open accrual's gross per share, in EUR at the rate it was stored at (the newest
-    cached one): ``gross / quantity``, or None when either is missing.
+    An open accrual's gross per share in the payment's own currency: IBKR's declared
+    ``grossRate``, else ``gross / quantity``; None when there is neither.
 
     One reading of an announced amount for the forecast, which sizes the declared
     dividend with it, and the calendar's raise tag, which compares it with the last
     regular payment — so the tag and the projection cannot be two different amounts.
+
+    **Native, because the EUR it was stored in froze the rate of the day it was
+    stored** (review item D2): every other amount in the forecast is converted at the
+    newest rate, so an unchanged dividend read as a raise or a cut whenever the rate had
+    moved since. A row stored before the native columns existed has only that EUR; it is
+    turned back through ``fx_to_eur``, which is what every reading did until then, and
+    the next sync replaces it.
     """
-    qty, gross = accrual.get("quantity"), accrual.get("gross_eur")
-    if not qty or qty <= 0 or not gross or gross <= 0:
+    rate = accrual.get("gross_rate")
+    if rate is not None and rate > 0:
+        return rate
+    qty = accrual.get("quantity")
+    if not qty or qty <= 0:
         return None
-    return gross / qty
+    gross = accrual.get("gross")
+    if gross is not None:
+        return gross / qty if gross > 0 else None
+    gross_eur = accrual.get("gross_eur")
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    if not gross_eur or gross_eur <= 0 or fx is None:
+        return None
+    return gross_eur / qty / fx
+
+
+def accrual_gross_per_share_eur(
+    accrual: Dict, fx_to_eur: Dict[str, Decimal]
+) -> Optional[Decimal]:
+    """`accrual_gross_per_share` at ``fx_to_eur``'s rate; None without one."""
+    native = accrual_gross_per_share(accrual, fx_to_eur)
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    return native * fx if native is not None and fx is not None else None
+
+
+def accrual_net_eur(accrual: Dict, fx_to_eur: Dict[str, Decimal]) -> Decimal:
+    """
+    An open accrual's net in EUR at ``fx_to_eur``'s rate — the stored EUR only for a row
+    without its native net (stored before 2026-11-08) or a currency with no rate today,
+    which is still the amount IBKR announced at a rate that held when it was stored.
+    """
+    net = accrual.get("net")
+    fx = fx_to_eur.get(accrual.get("currency") or "")
+    if net is not None and fx is not None:
+        return net * fx
+    return accrual["net_eur"]
 
 
 def parse_ibkr_dividend_description(
@@ -1170,13 +1209,17 @@ class DividendService:
             # statement, 2026-10-04: TSMC gross 259, tax 54.39, net 204.61), the opposite
             # of the cash ledger's WHTAX lines; this flipped it negative until then. abs()
             # rather than trusting either sign, since the net is what matters downstream.
-            wht = abs(a.get("tax") or Decimal("0")) * rate
-            net = a.get("net_amount")
-            net_eur = net * rate if net is not None else gross - wht
+            gross_native = a.get("gross_amount") or Decimal("0")
+            wht_native = abs(a.get("tax") or Decimal("0"))
+            net_native = a.get("net_amount")
+            if net_native is None:
+                net_native = gross_native - wht_native
+            net_eur = net_native * rate
             if net_eur <= 0:
                 # A reversal or a zero accrual is not an upcoming payment.
                 continue
             seen.add(key)
+            gross_rate = a.get("gross_rate")
             rows.append({
                 "security_id": security_id,
                 "ex_date": a.get("ex_date"),
@@ -1184,8 +1227,13 @@ class DividendService:
                 "currency": currency,
                 "quantity": a.get("quantity"),
                 "gross_amount_eur": gross,
-                "withholding_tax_eur": wht,
+                "withholding_tax_eur": wht_native * rate,
                 "net_amount_eur": net_eur,
+                # In the payment's own currency, converted when read (review item D2).
+                "gross_rate": gross_rate if gross_rate is not None and gross_rate > 0 else None,
+                "gross_amount": gross_native,
+                "withholding_tax": wht_native,
+                "net_amount": net_native,
                 "last_seen_at": now,
             })
 
@@ -1256,8 +1304,11 @@ class DividendService:
 
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
-        ``{security_id: [{ex_date, pay_date, currency, net_eur, quantity, gross_eur,
-        wht_eur}, ...]}`` for every open accrual.
+        ``{security_id: [{ex_date, pay_date, currency, quantity, gross_rate, gross, wht,
+        net, gross_eur, wht_eur, net_eur}, ...]}`` for every open accrual: the amounts in
+        the payment's own currency (None on a row stored before 2026-11-08), and in EUR
+        at the rate of the day the row was stored. Read through `accrual_gross_per_share`
+        and `accrual_net_eur`, which convert at today's rate.
 
         Empty whenever the Flex section is not enabled, which is the supported default —
         the caller then dates its projections from a measured lag instead and labels them
@@ -1285,12 +1336,16 @@ class DividendService:
                 "pay_date": r.pay_date,
                 # The payment's own currency: the raise tag compares per share in it.
                 "currency": r.currency,
-                "net_eur": r.net_amount_eur,
-                # What the forecast sizes from (gross / quantity) and the withholding
-                # ladder's first rung (tax / gross).
+                # What the forecast sizes from (the rate, else gross / quantity) and the
+                # withholding ladder's first rung (tax / gross).
                 "quantity": r.quantity,
+                "gross_rate": r.gross_rate,
+                "gross": r.gross_amount,
+                "wht": r.withholding_tax,
+                "net": r.net_amount,
                 "gross_eur": r.gross_amount_eur,
                 "wht_eur": r.withholding_tax_eur,
+                "net_eur": r.net_amount_eur,
             })
         return out
 
@@ -1826,7 +1881,8 @@ class DividendService:
         ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE and self._is_income(p)]
         fx_to_eur = await self._latest_fx_to_eur(
             {s.currency for s in securities.values() if s.currency}
-            | {p.currency for p in ibkr_rows if p.currency},
+            | {p.currency for p in ibkr_rows if p.currency}
+            | {a["currency"] for acc in accruals_by_sec.values() for a in acc if a.get("currency")},
             as_of,
         )
 
@@ -1967,7 +2023,7 @@ class DividendService:
                 continue
             for a in accruals:
                 ex = a.get("ex_date")
-                ps = accrual_gross_per_share_eur(a)     # EUR at the newest cached rate
+                ps = accrual_gross_per_share_eur(a, fx_to_eur)  # at the newest cached rate
                 if ex is None or ps is None:
                     continue
                 entries = hist_by_sec[sid]
@@ -2831,17 +2887,16 @@ class DividendService:
                 if not before:
                     return None
                 last = max(before, key=lambda p: p.pay_date or p.ex_date)
-                per_share_eur = accrual_gross_per_share_eur(a)
-                currency = a.get("currency")
-                rate = sizing_fx.get(currency) if currency else None
-                if (per_share_eur is None or rate is None or currency != last.currency
+                # Both in the payment's own currency: no exchange rate enters the tag.
+                per_share = accrual_gross_per_share(a, sizing_fx)
+                if (per_share is None or a.get("currency") != last.currency
                         or not last.per_share_native or last.per_share_native <= 0):
                     return None
                 # The accrual's own entry in the history `_forecast_inputs` built: the
                 # nearest within the window it was matched into that history with.
                 if is_special_near(hist_by_sec.get(sid, []), on, ACCRUAL_MATCH_DAYS):
                     return None
-                return self._pct(per_share_eur / rate, last.per_share_native)
+                return self._pct(per_share, last.per_share_native)
 
             for sid, accruals in accruals_by_sec.items():
                 if shares_at(sid, as_of) <= 0:
@@ -2849,7 +2904,7 @@ class DividendService:
                 for a in accruals:
                     if a["pay_date"] > next_12m_end:
                         continue
-                    amt = base_fx.convert(a["net_eur"], a["pay_date"])
+                    amt = base_fx.convert(accrual_net_eur(a, sizing_fx), a["pay_date"])
                     upcoming.append({
                         "date": a["pay_date"].isoformat(),
                         "ex_date": a["ex_date"].isoformat() if a["ex_date"] else None,

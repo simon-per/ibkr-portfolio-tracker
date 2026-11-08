@@ -275,8 +275,8 @@ INGESTED_ATTRS: Dict[str, frozenset] = {
     # section is off by default; the extractor is tolerant of that, so ticking it in the
     # portal is the whole setup.
     "OpenDividendAccrual": frozenset({
-        "conid", "currency", "exDate", "payDate", "quantity", "grossAmount", "tax",
-        "netAmount", "symbol",
+        "conid", "currency", "exDate", "payDate", "quantity", "grossRate", "grossAmount",
+        "tax", "netAmount", "symbol",
     }),
     # IBKR's posting (on the ex-date) and reversal (on the pay date) of each dividend:
     # both rows carry both dates, which is all `extract_dividend_date_pairs` reads.
@@ -1127,6 +1127,9 @@ class IBKRService:
                 'pay_date': pay_date,
                 'currency': getattr(acc, 'currency', None),
                 'quantity': _dec(getattr(acc, 'quantity', None)),
+                # The declared rate per share, exact: gross / quantity reads it back off a
+                # gross rounded to the cent (0.872 for a 0.87 dividend on a few shares).
+                'gross_rate': _dec(getattr(acc, 'grossRate', None)),
                 'gross_amount': _dec(getattr(acc, 'grossAmount', None)),
                 'tax': _dec(getattr(acc, 'tax', None)),
                 'net_amount': _dec(getattr(acc, 'netAmount', None)),

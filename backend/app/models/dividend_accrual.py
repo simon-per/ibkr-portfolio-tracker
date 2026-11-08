@@ -37,10 +37,14 @@ class DividendAccrual(Base):
     Flex portal is the whole setup — no flag, no redeploy. Until then the forecast falls
     back to a pay date measured from history, and says which it used.
 
-    Amounts are EUR, converted at the newest cached rate (within `FX_MAX_CARRY_DAYS`)
-    rather than at the pay date — that date is in the future and has no rate, and
-    `_latest_fx_to_eur` is the same cache-only helper the forecast already sizes
-    projections with.
+    **The amounts are kept in the payment's own currency** (`gross_rate`, `gross_amount`,
+    `withholding_tax`, `net_amount`, review item D2, 2026-11-08) and converted when read,
+    at the rate the rest of the forecast is sized at. The `_eur` columns hold the same
+    amounts at the newest cached rate of the day the row was stored (within
+    `FX_MAX_CARRY_DAYS`): read back as they were, an unchanged dividend moved with the
+    exchange rate from one day to the next and the raises feed and the calendar's tag read
+    it as a raise or a cut. They stay as the fallback for a row stored before the native
+    columns existed, which the next sync replaces.
     """
     __tablename__ = "dividend_accruals"
 
@@ -61,6 +65,13 @@ class DividendAccrual(Base):
     #: tax as a negative and the ingest flips it once, on the way in.
     withholding_tax_eur: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     net_amount_eur: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    #: IBKR's declared gross per share (``grossRate``), in ``currency``. NULL on a row
+    #: stored before 2026-11-08 or on a statement that leaves the rate out.
+    gross_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    #: The same amounts as the `_eur` columns, in ``currency``, as IBKR states them.
+    gross_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    withholding_tax: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    net_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     #: When this row last appeared in a statement. The wholesale replace makes it equal
     #: to the last sync, so it answers "is this table being maintained at all" — which is
     #: the question an empty table cannot distinguish from a disabled section.
