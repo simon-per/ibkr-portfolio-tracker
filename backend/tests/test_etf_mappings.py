@@ -132,3 +132,12 @@ def test_an_unmapped_symbol_reports_itself_rather_than_guessing():
     # The caller branches on `is_known_etf`, so the None is the contract.
     assert not is_known_etf("NOT_AN_ETF")
     assert get_etf_allocation("NOT_AN_ETF") is None
+
+
+@pytest.mark.parametrize("symbol", ["IWDA", "CH0117044948"])
+def test_an_msci_world_fund_holds_no_emerging_markets(symbol):
+    """Review item L3: MSCI World is developed markets only; a 3% emerging-markets bucket
+    copied between the two rows put a share on the Regions chart that neither fund holds."""
+    regions = ETF_ALLOCATIONS[symbol]["geographic"]
+    assert not any("Emerging" in region for region in regions)
+
