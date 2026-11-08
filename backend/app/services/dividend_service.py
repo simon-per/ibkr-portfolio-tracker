@@ -239,10 +239,31 @@ ACCRUAL_MATCH_DAYS = 15
 WHT_ADJUSTMENT_MAX_LOOKBACK_DAYS = 185
 
 
+# How far Yahoo's ex-date may sit from the one IBKR booked for the same dividend and the
+# two still be read as one. A day or two of disagreement between sources is ordinary; no
+# payer pays twice within it.
+EXACT_PAIR_SLACK_DAYS = 3
+
+
+ExactPairs = Dict[int, List[Tuple[date, date]]]
+
+
+async def load_exact_date_pairs(db) -> ExactPairs:
+    """``{security_id: [(ex_date, pay_date), ...]}`` from IBKR's accrual log
+    (`dividend_date_pairs`) — what every caller of `match_estimates_to_ibkr` passes."""
+    from app.models.dividend_date_pair import DividendDatePair
+
+    out: ExactPairs = defaultdict(list)
+    for r in (await db.execute(select(DividendDatePair))).scalars().all():
+        out[r.security_id].append((r.ex_date, r.pay_date))
+    return out
+
+
 def match_estimates_to_ibkr(
     estimates: Iterable,
     ibkr_rows: Iterable,
     *,
+    exact_pairs: Optional[ExactPairs],
     max_lag_days: Optional[int] = None,
 ) -> List[Tuple[Any, Any]]:
     """
@@ -269,6 +290,15 @@ def match_estimates_to_ibkr(
     mis-dates a projection, so the two may legitimately diverge later. Left as None it
     is decided per IBKR row by `max_pay_lag_days` from the payment's currency.
 
+    **IBKR's own pairs come first** (``exact_pairs``, from `dividend_date_pairs`,
+    `load_exact_date_pairs`): a payment IBKR booked against an ex-date pairs with the
+    estimate on that ex-date (within `EXACT_PAIR_SLACK_DAYS`), with no window at all.
+    Proximity is the fallback for a payment IBKR's log does not cover. A Korean
+    year-end pays 105-110 days after its ex-date, past any window that is still safe
+    for a quarterly payer, so proximity alone left it unpaired: two entries for one
+    dividend (review item D4). Required, so no caller can leave it out; ``None`` says a
+    caller has none, which tests do.
+
     Returns ``[(estimate, ibkr_row), ...]`` in IBKR pay-date order.
     """
     consumed: set = set()
@@ -278,7 +308,30 @@ def match_estimates_to_ibkr(
         key=lambda p: (p.ex_date or p.pay_date),
         reverse=True,  # nearest to the pay date first
     )
-    for row in sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date)):
+    rows = sorted(ibkr_rows, key=lambda p: (p.pay_date or p.ex_date))
+
+    booked = {
+        (sid, pay): ex for sid, prs in (exact_pairs or {}).items() for ex, pay in prs
+    }
+    unpaired = []
+    for row in rows:
+        ex_booked = booked.get((row.security_id, row.pay_date or row.ex_date))
+        if ex_booked is None:
+            unpaired.append(row)
+            continue
+        near = [
+            est for est in candidates
+            if id(est) not in consumed and est.security_id == row.security_id
+            and abs(((est.ex_date or est.pay_date) - ex_booked).days) <= EXACT_PAIR_SLACK_DAYS
+        ]
+        if not near:
+            unpaired.append(row)
+            continue
+        est = min(near, key=lambda e: abs(((e.ex_date or e.pay_date) - ex_booked).days))
+        consumed.add(id(est))
+        pairs.append((est, row))
+
+    for row in unpaired:
         pay = row.pay_date or row.ex_date
         window = (max_lag_days if max_lag_days is not None
                   else max_pay_lag_days(getattr(row, "currency", None)))
@@ -291,6 +344,7 @@ def match_estimates_to_ibkr(
                 consumed.add(id(est))
                 pairs.append((est, row))
                 break
+    pairs.sort(key=lambda pair: pair[1].pay_date or pair[1].ex_date)
     return pairs
 
 
@@ -1294,14 +1348,9 @@ class DividendService:
         await self.db.flush()
         return {"dividend_date_pairs": added}
 
-    async def _exact_date_pairs(self) -> Dict[int, List[Tuple[date, date]]]:
+    async def _exact_date_pairs(self) -> ExactPairs:
         """``{security_id: [(ex_date, pay_date), ...]}`` from IBKR's accrual log."""
-        from app.models.dividend_date_pair import DividendDatePair
-
-        out: Dict[int, List[Tuple[date, date]]] = defaultdict(list)
-        for r in (await self.db.execute(select(DividendDatePair))).scalars().all():
-            out[r.security_id].append((r.ex_date, r.pay_date))
-        return out
+        return await load_exact_date_pairs(self.db)
 
     async def _open_accruals(self) -> Dict[int, List[Dict]]:
         """
@@ -1468,7 +1517,12 @@ class DividendService:
                 or (p.net_amount_eur or Decimal("0")) > 0)
 
     @staticmethod
-    def _splice_by_era(payments: List, *, boundary: Optional[date] = None) -> tuple:
+    def _splice_by_era(
+        payments: List,
+        *,
+        exact_pairs: Optional[ExactPairs],
+        boundary: Optional[date] = None,
+    ) -> tuple:
         """
         Honest mix of the two sources: yfinance estimates strictly BEFORE the first
         IBKR payment date, authoritative IBKR rows from there on.
@@ -1485,6 +1539,8 @@ class DividendService:
         by ``EX_TO_PAY_MAX_LAG_DAYS`` on both sides, because the duplicate match below
         needs the IBKR row that pairs with a windowed estimate — which can fall outside
         the window even when the estimate does not.
+
+        ``exact_pairs`` is `load_exact_date_pairs`, passed on to the matcher.
         """
         ibkr_rows = [p for p in payments if p.source == IBKR_SOURCE]
         if boundary is None:
@@ -1517,7 +1573,8 @@ class DividendService:
         # the reason they are a shared function live on `match_estimates_to_ibkr`.
         consumed = {
             id(est) for est, _ in match_estimates_to_ibkr(
-                [p for p in kept if p.source != IBKR_SOURCE], ibkr_rows
+                [p for p in kept if p.source != IBKR_SOURCE], ibkr_rows,
+                exact_pairs=exact_pairs,
             )
         }
 
@@ -1561,7 +1618,8 @@ class DividendService:
         ibkr_rows = [p for p in raw_payments if p.source == IBKR_SOURCE]
         lags: Dict[int, List[int]] = defaultdict(list)
         if ibkr_rows:
-            for est, row in match_estimates_to_ibkr(estimates, ibkr_rows):
+            for est, row in match_estimates_to_ibkr(estimates, ibkr_rows,
+                                                    exact_pairs=exact_pairs):
                 if row.security_id in exact_pairs:
                     continue
                 ex = est.ex_date or est.pay_date
@@ -1914,6 +1972,7 @@ class DividendService:
         paired = match_estimates_to_ibkr(
             [p for sid, rows in schedule_source.items() for p in rows],
             [p for p in ibkr_rows if p.security_id in schedule_source],
+            exact_pairs=date_pairs,
         )
         ibkr_for_estimate = {id(est): row for est, row in paired}
         paired_ibkr = {id(row) for _, row in paired}
@@ -2078,7 +2137,9 @@ class DividendService:
         of withholding tax; gross and withholding totals are reported separately.
         """
         raw_payments = await self.repo.get_computed_dividends()
-        payments, ibkr_from = self._splice_by_era(raw_payments)
+        payments, ibkr_from = self._splice_by_era(
+            raw_payments, exact_pairs=await self._exact_date_pairs()
+        )
         payments = [p for p in payments if self._is_income(p)]
         # An estimate's net is its gross less the ladder withholding, the same split the
         # Dividends tab uses, so the card and the tab carry one net per month.
@@ -2469,7 +2530,15 @@ class DividendService:
         raw_payments = await self.repo.get_computed_dividends()
         if replay:
             raw_payments = [p for p in raw_payments if self._known_by(p, as_of)]
-        all_payments, ibkr_from = self._splice_by_era(raw_payments)
+        # IBKR's own (ex-date, pay date) pairs: they pair the two sources' records of
+        # one dividend here, and size and date the projections below.
+        exact_pairs = await self._exact_date_pairs()
+        if replay:
+            exact_pairs = {
+                sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
+                for sid, pairs in exact_pairs.items()
+            }
+        all_payments, ibkr_from = self._splice_by_era(raw_payments, exact_pairs=exact_pairs)
         all_payments = [p for p in all_payments if self._is_income(p)]
 
         securities = {
@@ -2643,14 +2712,8 @@ class DividendService:
         horizon_end = max(win_end or date.min, date(as_of.year + 1, 12, 31))
 
         if include_forecast:
-            # IBKR's own (ex-date, pay date) pairs, and the open accruals read above. Read
-            # first: both size the projections as well as dating them.
-            exact_pairs = await self._exact_date_pairs()
-            if replay:
-                exact_pairs = {
-                    sid: [(ex, pay) for ex, pay in pairs if pay <= as_of]
-                    for sid, pairs in exact_pairs.items()
-                }
+            # IBKR's own (ex-date, pay date) pairs and the open accruals, both read above,
+            # size the projections as well as dating them.
             (hist_by_sec, basis_by_sec, lots_by_sec, shares_at, ex_dated, wht_by_sec,
              sizing_fx) = await self._forecast_inputs(
                 raw_payments, securities, as_of, net_factor,
@@ -2942,16 +3005,27 @@ class DividendService:
                 elif (p.ex_date or p.pay_date) is not None:
                     est_ex_by_sec[p.security_id].append(p.ex_date or p.pay_date)
 
+            # The ex-dates IBKR booked a payment against that has landed: the matcher's
+            # first rule, asked of one date below.
+            booked_paid: Dict[int, List[date]] = defaultdict(list)
+            for sid, prs in exact_pairs.items():
+                landed = {pay for pay, _ in ibkr_pays_by_sec.get(sid, ())}
+                booked_paid[sid].extend(b_ex for b_ex, b_pay in prs if b_pay in landed)
+
             def _cash_has_landed(sid: int, ex: date) -> bool:
                 """
-                True when an IBKR payment sits inside the lag window after ``ex`` —
-                the same test `match_estimates_to_ibkr` makes, asked of one date.
+                True when IBKR booked a landed payment against ``ex``, or an IBKR
+                payment sits inside the lag window after it — the same two tests
+                `match_estimates_to_ibkr` makes, asked of one date.
 
                 One implementation for both pending tails deliberately. Two copies
                 of this window would be free to drift, and the drifted one would go
                 on looking right: a dividend still shown as owed after the cash
                 arrived, or dropped before it did.
                 """
+                if any(abs((b - ex).days) <= EXACT_PAIR_SLACK_DAYS
+                       for b in booked_paid.get(sid, ())):
+                    return True
                 return any(ex < pay <= ex + timedelta(days=window)
                            for pay, window in ibkr_pays_by_sec.get(sid, ()))
 

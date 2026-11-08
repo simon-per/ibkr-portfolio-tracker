@@ -1699,9 +1699,11 @@ class PortfolioService:
         # Inflows: net dividends received in the window. Era-spliced exactly like
         # the dividend views, so the two sources never double-count a payment.
         from app.repositories.dividend_repository import DividendRepository
-        from app.services.dividend_service import DividendService
+        from app.services.dividend_service import DividendService, load_exact_date_pairs
         raw_dividends = await DividendRepository(self.db).get_computed_dividends()
-        payments, _ = DividendService._splice_by_era(raw_dividends)
+        payments, _ = DividendService._splice_by_era(
+            raw_dividends, exact_pairs=await load_exact_date_pairs(self.db)
+        )
         # Via the shared helpers, not the columns: rows predating the
         # withholding-fields migration carry gross with a NULL net, and keying on
         # net alone silently dropped that income here. An estimate's net is its gross

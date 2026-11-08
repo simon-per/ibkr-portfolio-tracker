@@ -45,6 +45,7 @@ from app.services.dividend_service import (
     DividendService,
     EX_TO_PAY_MAX_LAG_DAYS,
     SLOW_PAYER_MAX_LAG_DAYS,
+    load_exact_date_pairs,
 )
 
 logger = logging.getLogger(__name__)
@@ -354,7 +355,9 @@ class ActivityService:
         lag = timedelta(days=max(EX_TO_PAY_MAX_LAG_DAYS, SLOW_PAYER_MAX_LAG_DAYS))
         widened = await repo.get_between(start - lag, end + lag)
         ibkr_from = await repo.earliest_ibkr_payment_date()
-        kept, _ = DividendService._splice_by_era(widened, boundary=ibkr_from)
+        kept, _ = DividendService._splice_by_era(
+            widened, boundary=ibkr_from, exact_pairs=await load_exact_date_pairs(self.db)
+        )
 
         # Back to the window the caller asked for, now that the duplicates are gone.
         payments = [

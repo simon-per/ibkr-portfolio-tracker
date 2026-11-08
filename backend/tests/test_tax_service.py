@@ -24,16 +24,19 @@ from app.repositories.trade_repository import TradeRepository
 from app.repositories.dividend_repository import DividendRepository
 from app.services.tax_service import TaxService
 from app.clock import utc_today
+from app.models.dividend_date_pair import DividendDatePair
 from tests.memory_db import memory_engine
 
 
 async def _make_session():
     # corporate_actions comes along because the holdings snapshot asks it when a position
     # actually began (a spun-off line's lots predate its listing); the two cash tables
-    # because the IBKR cash line beside the holdings reads every cash ledger.
+    # because the IBKR cash line beside the holdings reads every cash ledger; IBKR's
+    # (ex, pay) pairs because the era splice pairs the two sources' records by them.
     tables = [Security.__table__, TaxLot.__table__, Trade.__table__,
               DividendPayment.__table__, AppSetting.__table__, MarketPrice.__table__,
-              CorporateAction.__table__, CashFlow.__table__, CashBalance.__table__]
+              CorporateAction.__table__, CashFlow.__table__, CashBalance.__table__,
+              DividendDatePair.__table__]
     engine = await memory_engine(tables=tables)
     session = AsyncSession(engine, expire_on_commit=False)
     session.add(Security(

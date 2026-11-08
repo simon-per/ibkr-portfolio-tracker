@@ -202,6 +202,15 @@ the dividend stayed *pending* beside the money that had arrived, and no lag was 
 is why the Asian payers sat on "ex-date · pay date unknown" for good. Keyed on the payment row's own
 currency so the matcher decides from the rows alone. 75 stays under a quarterly cycle, and the
 one-to-one match takes the nearest estimate, so the previous quarter is never swallowed.
+**IBKR's own pairs come first** (review item D4, 2026-11-08): a payment IBKR booked against an
+ex-date in `dividend_date_pairs` pairs with the estimate on that ex-date (within
+`EXACT_PAIR_SLACK_DAYS`, 3), with no window; proximity is the fallback for a payment the log does not
+cover. A Korean year-end pays 105-110 days after its ex-date, past 75, so proximity alone left it
+unpaired — two entries for one dividend — or handed its cash to the next quarter's estimate.
+`exact_pairs` is a required keyword of the matcher and of `_splice_by_era`, so every reader that
+splices (breakdown, summary card, XIRR inflows, DA-1 income, ledger) loads it through
+`load_exact_date_pairs`, and `_cash_has_landed` asks the same two questions of one date
+(`tests/test_dividend_exact_pairing.py`, with an AST walk refusing `exact_pairs=None` in app code).
 Never by amount: one side is gross and the other net, so equal amounts are exactly what cannot be
 relied on. One-to-one is what makes the window safe for a monthly payer, whose cycle is shorter than
 the window — each IBKR payment consumes at most one estimate, so earlier months survive.
@@ -830,8 +839,9 @@ that most needs seeing: a payment overdue by months. `_open_accruals` filtered a
 
 **The matcher is one function now.** `_splice_by_era` wants the estimates to *drop* and
 `_measured_pay_lags` wants the ex→pay distances to *keep*, off the identical pairing — per security,
-nearest-first, one-to-one, bounded, never by amount. `match_estimates_to_ibkr` is that pairing, with
-`max_lag_days` a parameter precisely because the callers may legitimately diverge on it. A second
+nearest-first, one-to-one, bounded, never by amount, IBKR's own pairs first.
+`match_estimates_to_ibkr` is that pairing, with `max_lag_days` a parameter precisely because the
+callers may legitimately diverge on it. A second
 copy of this is the failure mode at the top of CLAUDE.md.
 
 The handoff — **projection → yfinance row / accrual → actual cash** — is pinned as a table over

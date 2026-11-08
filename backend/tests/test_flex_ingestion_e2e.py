@@ -39,6 +39,7 @@ from app.services.ibkr_service import IBKRService
 from app.services.sync_helper import persist_transactions
 from app.services.dividend_service import DividendService
 from app.services.tax_service import TaxService
+from app.models.dividend_date_pair import DividendDatePair
 from tests.memory_db import memory_engine
 
 
@@ -101,7 +102,7 @@ async def _make_session():
               CorporateAction.__table__, DividendPayment.__table__,
               AppSetting.__table__, MarketPrice.__table__,
               CashFlow.__table__, CashBalance.__table__,
-              DividendWithholdingAdjustment.__table__]
+              DividendWithholdingAdjustment.__table__, DividendDatePair.__table__]
     engine = await memory_engine(tables=tables)
     return engine, AsyncSession(engine, expire_on_commit=False)
 
