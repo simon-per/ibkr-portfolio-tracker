@@ -21,6 +21,13 @@ describe('the watchlist badge cells', () => {
     }
   })
 
+  it('show only the upside on a card without a rating', () => {
+    const col = columns.find((c) => c.key === 'analyst_rating')!
+    const text = render(<>{col.cell({ ...(bare as object), target_upside: 0.5 } as never, 'cards')}</>)
+      .container.textContent
+    expect(text).toBe('+50% upside')
+  })
+
   it('keep the dash in the table', () => {
     const col = columns.find((c) => c.key === 'buy_score')!
     expect(render(<>{col.cell(bare, 'table')}</>).container.textContent).toBe('—')

@@ -265,9 +265,9 @@ export function watchlistColumns(deps: {
           <div className="flex flex-col items-start gap-1 whitespace-nowrap">
             {i.analyst_rating ? (
               <AnalystRatingBadge rating={i.analyst_rating} />
-            ) : (
+            ) : view === 'table' ? (
               <span className="text-xs text-muted-foreground">{ABSENT}</span>
-            )}
+            ) : null}
             {upside !== null && (
               <div
                 className={`text-[11px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}

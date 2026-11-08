@@ -151,21 +151,23 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
       <SectionHeader
         variant="bare"
         icon={Layers}
-        title={<span className="text-sm">ETF Holdings ({etfs.length})</span>}
+        title={<span className="text-sm">Funds ({etfs.length})</span>}
         className="mb-3"
       />
       <div className="flex flex-wrap gap-2">
         {etfs.map((etf) => (
           <div
             key={etf.security_id}
-            className="inline-flex items-center gap-2 rounded-full border bg-muted/30 py-1 pl-1 pr-3 text-sm"
+            // min-w-0/max-w-full: a 3a fund's long name pushed the chip past a phone's width.
+            className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border bg-muted/30 py-1 pl-1 pr-3 text-sm"
           >
-            <TickerAvatar symbol={etf.symbol} securityId={etf.security_id} className="h-6 w-6 text-[9px]" />
-            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.neutral)}>
-              ETF
+            <TickerAvatar symbol={etf.symbol} securityId={etf.security_id} className="h-6 w-6 shrink-0 text-[9px]" />
+            {/* "Fund", not "ETF": the section holds the 3a mutual funds too (review item VI4). */}
+            <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.neutral)}>
+              Fund
             </span>
-            <span className="font-medium">{etf.symbol}</span>
-            <span className="text-xs text-muted-foreground truncate max-w-[160px]">{displayName(etf.description)}</span>
+            <span className="shrink-0 font-medium">{etf.symbol}</span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground max-w-[160px]">{displayName(etf.description)}</span>
           </div>
         ))}
       </div>
