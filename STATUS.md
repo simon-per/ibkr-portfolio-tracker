@@ -99,6 +99,18 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
+- **Screener spans and cache, BKR's EPS, median spans (local commits `5318889`, `3fc8bd9`,
+  `55bd813` on `main`, not pushed):** migration `e7a9c1d3f5b8` (`sec_filing_reads.reader`, every
+  existing read becomes 1). After the push: the screener's first open still takes the 8–9 s, a
+  second open (another browser, or after the 30-minute client cache) should answer in well under
+  a second; the 3Y | 5Y | 10Y switch in the browser; BKR's and MRNA's 3Y P/E chips gone. **BKR's
+  EPS needs the next Sunday pass (2026-11-15)** — or, sooner, the CLI with `--symbol BKR
+  --force` (EDGAR only): its record should show about 13–16 `filings_read` for BKR, then BKR's
+  quarterly EPS from Q1 2023 on its page and a current P/E and P/E medians. The same pass reads
+  each other EPS-gap filing once (11 companies, mostly 2008–2015 quarters; GOOG's 2015 stays
+  empty: three classes). Unverified: BKR's 10-K for FY2025 tags its year's EPS on the Class A
+  too (its Q4 needs it); if not, Q4 FY2025 stays absent and TTM EPS starts at Q1 2026.
+
 - **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
   the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
   on production: the Allocation tab's three charts and drill-downs with the new buckets (the old
@@ -488,14 +500,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
-8. **The screener takes 8–9 s on production** (uncached; 2.5 s locally). A server-side cache
-    would fix it; its key must follow the held listings' daily closes as well as the Sunday
-    figures (docs/company-financials.md *Screener*). Same shape as the look-through
-    fundamentals card's 8 s. Two P/E-median findings from the same read (2026-11-08):
-    `medians()` anchors each window at the company's *last* P/E, not the newest TTM point, so a
-    company with no recent P/E keeps an old median (BKR's and MRNA's 3Y chips describe 2019–22
-    and 2020–23); and BKR has no diluted EPS after 2022 in the stored figures — likely the Class A
-    member tagging that hid its dividend per share (*Filing instances*), unverified.
+8. **The look-through fundamentals card takes ~8 s** (uncached), the shape the screener had;
+    the screener's key (`_screener_key`, docs/company-financials.md *Screener*) is the pattern.
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
     against what IBKR paid, in the payment's own currency so FX is not an error.
@@ -510,6 +516,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-08 (P/E medians follow-up, local commits on `main`, not pushed)** — median spans end
+  at the newest point; BKR's Class A-only EPS read from its filings (confirmed on its Q3 2026
+  10-Q; `sec_filing_reads.reader`); the screener serves 3/5/10Y medians with a switch and keeps
+  its answer server-side under a key of everything it reads.
 - **2026-11-08 (feature survey; branch `allocation-one-source`, merged and pushed)** — verified the Sunday EDGAR
   pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
   `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company
@@ -531,11 +541,4 @@ One line each, newest first; drop the oldest.
   vouched for by the declared totals (IBKR, BKNG, CEG); each pass now names broken TTMs and
   stale figures. Deployed on the owner's word; all gap companies backfilled at one SEC request
   per 3 s (gaps 260 → 90 on production, MA's already filled).
-
-- **2026-11-07 (harmonization, Company links and overview, one /goal run)** — six leftovers on the
-  shared rules; every holding's row links to its Company page through the URL hash; the Company
-  tab opens on an overview of the company (SEC industry, price line, grouped figures, Street row,
-  a price card) with Yahoo figures for index-only companies a chunk a day (owner-approved).
-  Merged to `main` and pushed the same day (`harmonize-company-links`, `company-overview`); then
-  every company the app names links to its page, and a 3Y range.
 
