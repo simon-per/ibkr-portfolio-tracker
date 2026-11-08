@@ -110,15 +110,6 @@ export function analystUpside(item: WatchlistItem): number | null {
     : null
 }
 
-/** Stored PEG, falling back to P/E over forward EPS growth. */
-export function pegOf(item: WatchlistItem): number | null {
-  return (
-    item.peg_ratio ??
-    (item.trailing_pe && item.fwd_eps_growth && item.fwd_eps_growth > 0
-      ? item.trailing_pe / (item.fwd_eps_growth * 100)
-      : null)
-  )
-}
 
 const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : ABSENT)
 
@@ -319,7 +310,9 @@ export function watchlistColumns(deps: {
         description: 'P/E over EPS growth',
       },
       cell: (i) => {
-        const peg = pegOf(i)
+        // As served: the server's PEG already falls back through its tiers and refuses a
+        // negative P/E (review items DR4/U3: a client copy here painted -0.16 green).
+        const peg = i.peg_ratio
         return peg !== null ? (
           <span
             className={

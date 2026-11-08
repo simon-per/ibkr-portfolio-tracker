@@ -184,11 +184,9 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
  * they reach the phone through the glossary instead of dying with the hover.
  */
 export function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, SortKey>[] {
-  const peg = (row: FundamentalMetrics) =>
-    row.peg_ratio ??
-    (row.trailing_pe && row.fwd_eps_growth && row.fwd_eps_growth > 0
-      ? row.trailing_pe / (row.fwd_eps_growth * 100)
-      : null)
+  // As served: the server's PEG already falls back through its tiers and refuses a
+  // negative P/E (review items DR4/U3: a client copy here painted one green).
+  const peg = (row: FundamentalMetrics) => row.peg_ratio
 
   return [
     {
