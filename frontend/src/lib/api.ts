@@ -1753,8 +1753,9 @@ export interface CompanyPeers {
 
 /**
  * One company of the screener: the overview's key figures, its own dividend record, and
- * today's P/E, P/FCF and P/S against their own 5-year medians. `*_vs_median` is today's over
- * the median, less one (+0.25: a quarter above the company's history). Money is in `currency`.
+ * today's P/E, P/FCF and P/S against their own 3-, 5- and 10-year medians. `*_median` is the
+ * Valuation card's chips, `*_vs_median` today's over each, less one (+0.25: a quarter above
+ * the company's history). Money is in `currency`.
  */
 export interface CompanyScreenerRow {
   cik: number;
@@ -1777,14 +1778,14 @@ export interface CompanyScreenerRow {
   roe: number | null;
   net_cash: number | null;
   pe_ratio: number | null;
-  pe_median_5y: number | null;
-  pe_vs_median: number | null;
+  pe_median: CompanyFinancialsCagrs;
+  pe_vs_median: CompanyFinancialsCagrs;
   pfcf_ratio: number | null;
-  pfcf_median_5y: number | null;
-  pfcf_vs_median: number | null;
+  pfcf_median: CompanyFinancialsCagrs;
+  pfcf_vs_median: CompanyFinancialsCagrs;
   ps_ratio: number | null;
-  ps_median_5y: number | null;
-  ps_vs_median: number | null;
+  ps_median: CompanyFinancialsCagrs;
+  ps_vs_median: CompanyFinancialsCagrs;
   dividend_yield: number | null;
   dps_cagr_5y: number | null;
   raise_years: number | null;

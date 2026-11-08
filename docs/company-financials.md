@@ -757,22 +757,33 @@ on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose
 company `list_companies` lists, one row each, in that order — the overview's key figures
 (`_priced`, `key_stats`), the company's own dividend record (`dividend_track`, handed the
 `key_stats` it already has rather than recomputing them), and today's P/E, P/FCF and P/S against
-**their own 5-year medians**: `multiple_medians` takes `build_series`' two steps on the TTM view
-(each TTM point valued at its period end's close) and the one `medians`, so a row's median is the
-Valuation card's 5Y chip on that company's page, and `*_vs_median` is `premium` — today's over the
-median, less one, null when either is missing or not positive (a loss year's P/E has no history to
-be read against). `tests/test_company_screener.py` compares every row with its own page.
+**their own 3-, 5- and 10-year medians**: `multiple_medians` takes `build_series`' two steps on
+the TTM view (each TTM point valued at its period end's close) and the one `medians`, so a row's
+`pe_median` (`{y3, y5, y10}`, likewise `pfcf_`, `ps_`) is the Valuation card's chips on that
+company's page, and `*_vs_median` is `premium` for each span — today's over the median, less one,
+null when either is missing or not positive (a loss year's P/E has no history to be read against).
+Every span in one answer, so the card's switch asks nothing. `tests/test_company_screener.py`
+compares every row with its own page.
 
-- **No server cache.** It reads every listed company's figures — about 2.5 s for 120 synthetic
-  companies locally, expect a few seconds on the VPS — so the card asks only once opened and the
-  client keeps the answer 30 minutes (`companyScreenerQuery`), the trade the Look-through's
-  fundamentals card already makes. Cache it server-side if it starts to matter; the held listings'
-  daily closes are what any key would have to follow.
+- **Kept server-side** (2026-11-08): reading every listed company's figures took 8–9 s on the VPS
+  (2.5 s for 120 synthetic companies locally). The answer is kept in the process
+  (`_screener_cache`, one uvicorn worker) under `_screener_key`, every input a row reads that a
+  write can change: today (a close ages past `PRICE_MAX_AGE_DAYS`); `list_companies` itself
+  (identity, held listings, membership, the figures' coverage and fetch stamp, so a refetch moves
+  it); each company's `prices_fetched_at` (every price write stamps it, splits included) and
+  industry; the held listings' newest daily closes, value included (a provisional close is
+  rewritten in place); and their price-restating corporate actions (`_split_since`). The key is
+  read before the figures, so an answer is never older than its key. Nothing expires on a timer:
+  an unmoved key has nothing new to read. A hand edit of the database bypasses it until the next
+  restart or write. The client still keeps the answer 30 minutes (`companyScreenerQuery`) and asks
+  only once the card is opened. `tests/test_company_screener.py` writes each kind of input once.
 - **On the tab:** a collapsed *Screener* card at the top of the Company tab (`CompanyScreenerCard`)
-  with All | Held, opening on the cheapest against their own 5-year P/E (ascending, blanks last).
-  Columns (`screenerColumns`, in `tableFamily.test.tsx`): market cap, P/E, its 5Y median, P/E,
-  P/FCF and P/S vs 5Y, revenue and EPS 5-year CAGR, FCF margin, ROE, dividend yield, raise
-  streak. A row links to the company's page through `CompanyLink`.
+  with All | Held and 3Y | 5Y | 10Y (the median span, 5Y first), opening on the cheapest against
+  their own P/E median (ascending, blanks last); the sort stays on its column across spans.
+  Columns (`screenerColumns(span)`, in `tableFamily.test.tsx`): market cap, P/E, its median, P/E,
+  P/FCF and P/S vs their medians — headed `P/E 5Y`, `vs 5Y` and so on for the span — revenue and
+  EPS 5-year CAGR, FCF margin, ROE, dividend yield, raise streak. A row links to the company's page
+  through `CompanyLink`.
 
 ## Annual-only filers
 

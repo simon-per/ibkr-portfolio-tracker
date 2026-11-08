@@ -5,7 +5,7 @@ import { DataTable, type Column } from '@/components/ui/DataTable'
 import { IconChip } from '@/components/ui/IconChip'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
-import type { CompanyScreenerRow } from '@/lib/api'
+import type { CompanyFinancialsCagrs, CompanyScreenerRow } from '@/lib/api'
 import { compareNullsLast } from '@/lib/nullsLast'
 import { companyScreenerQuery } from '@/lib/queryCache'
 import { displayName } from '@/lib/securityName'
@@ -20,10 +20,21 @@ import {
 } from '@/lib/utils'
 import { CompanyLink } from './CompanyLink'
 
+/** The span of the company's own history today's multiples are read against. */
+export type MedianSpan = keyof CompanyFinancialsCagrs
+const SPAN_OPTIONS: { value: MedianSpan; label: string }[] = [
+  { value: 'y3', label: '3Y' },
+  { value: 'y5', label: '5Y' },
+  { value: 'y10', label: '10Y' },
+]
+const SPAN_YEARS: Record<MedianSpan, number> = { y3: 3, y5: 5, y10: 10 }
+
+// The figures served once per span ({y3, y5, y10}); the rest are one figure.
+const BY_SPAN = ['pe_median', 'pe_vs_median', 'pfcf_vs_median', 'ps_vs_median'] as const
+type SpanKey = (typeof BY_SPAN)[number]
 type FigureKey =
-  | 'market_cap' | 'pe_ratio' | 'pe_median_5y' | 'pe_vs_median' | 'pfcf_vs_median'
-  | 'ps_vs_median' | 'revenue_cagr_5y' | 'eps_cagr_5y' | 'fcf_margin' | 'roe'
-  | 'dividend_yield' | 'raise_years'
+  | SpanKey | 'market_cap' | 'pe_ratio' | 'revenue_cagr_5y' | 'eps_cagr_5y' | 'fcf_margin'
+  | 'roe' | 'dividend_yield' | 'raise_years'
 export type ScreenerSortKey = 'symbol' | FigureKey
 
 type Shown = 'all' | 'held'
@@ -32,7 +43,9 @@ const SHOWN_OPTIONS: { value: Shown; label: string }[] = [
   { value: 'held', label: 'Held' },
 ]
 
-const figure = (row: CompanyScreenerRow, key: FigureKey): number | null => row[key] ?? null
+const isBySpan = (key: FigureKey): key is SpanKey => (BY_SPAN as readonly string[]).includes(key)
+const figure = (row: CompanyScreenerRow, key: FigureKey, span: MedianSpan): number | null =>
+  isBySpan(key) ? row[key][span] : (row[key] ?? null)
 
 const signed = (v: number | null) => (v == null ? ABSENT : formatSigned(v, (n) => formatFractionPercent(n)))
 const growthTone = (v: number | null) => {
@@ -57,10 +70,13 @@ const companyAvatar = (row: CompanyScreenerRow, className: string) => (
 
 /**
  * The screener's columns: each company's overview figures in one line, its P/E, P/FCF and P/S
- * against its own 5-year medians, growth, quality and dividend record. Money in the company's
- * reporting currency. Module-level, so `tableFamily.test.tsx` holds it to the shared conventions.
+ * against its own medians over `span`, growth, quality and dividend record. Money in the
+ * company's reporting currency. Module-level, so `tableFamily.test.tsx` holds it to the shared
+ * conventions.
  */
-export function screenerColumns(): Column<CompanyScreenerRow, ScreenerSortKey>[] {
+export function screenerColumns(span: MedianSpan = 'y5'): Column<CompanyScreenerRow, ScreenerSortKey>[] {
+  const label = SPAN_OPTIONS.find((o) => o.value === span)?.label ?? span
+  const years = SPAN_YEARS[span]
   const numeric = (
     key: FigureKey,
     header: string,
@@ -73,7 +89,7 @@ export function screenerColumns(): Column<CompanyScreenerRow, ScreenerSortKey>[]
     shortHeader,
     sortKey: key,
     align: 'right',
-    cell: (row) => print(figure(row, key), row),
+    cell: (row) => print(figure(row, key, span), row),
     ...extra,
   })
   const multiple = (v: number | null) => (v == null ? ABSENT : formatMultiple(v))
@@ -109,19 +125,19 @@ export function screenerColumns(): Column<CompanyScreenerRow, ScreenerSortKey>[]
     numeric('market_cap', 'Mkt cap', 'Market cap', (v, row) =>
       v == null || !row.currency ? ABSENT : formatCompactMoney(v, row.currency)),
     numeric('pe_ratio', 'P/E', 'P/E', multiple, { mobile: 'value' }),
-    numeric('pe_median_5y', 'P/E 5Y', 'P/E 5Y median', multiple, {
+    numeric('pe_median', `P/E ${label}`, `P/E ${label} median`, multiple, {
       cellClassName: 'text-muted-foreground',
-      hint: { description: 'Its own 5-year median' },
+      hint: { description: `Its own ${years}-year median` },
     }),
-    numeric('pe_vs_median', 'vs 5Y', 'P/E vs 5Y median', signed, {
+    numeric('pe_vs_median', `vs ${label}`, `P/E vs ${label} median`, signed, {
       mobile: 'delta',
-      hint: { description: 'P/E against its 5-year median' },
+      hint: { description: `P/E against its ${years}-year median` },
     }),
-    numeric('pfcf_vs_median', 'P/FCF vs 5Y', 'P/FCF vs 5Y median', signed, {
-      hint: { description: 'P/FCF against its 5-year median' },
+    numeric('pfcf_vs_median', `P/FCF vs ${label}`, `P/FCF vs ${label} median`, signed, {
+      hint: { description: `P/FCF against its ${years}-year median` },
     }),
-    numeric('ps_vs_median', 'P/S vs 5Y', 'P/S vs 5Y median', signed, {
-      hint: { description: 'P/S against its 5-year median' },
+    numeric('ps_vs_median', `P/S vs ${label}`, `P/S vs ${label} median`, signed, {
+      hint: { description: `P/S against its ${years}-year median` },
     }),
     numeric('revenue_cagr_5y', 'Rev 5Y', 'Revenue 5Y growth', signed, {
       tone: (row) => growthTone(row.revenue_cagr_5y),
@@ -145,16 +161,18 @@ export function screenerColumns(): Column<CompanyScreenerRow, ScreenerSortKey>[]
 /**
  * Every company the tab lists in one sortable table: today's multiples against the company's
  * own history first, growth, quality and dividends after. Collapsed: it asks the server only
- * once opened, and it opens on the cheapest against their own 5-year P/E median.
+ * once opened, and it opens on the cheapest against their own 5-year P/E median. The 3Y | 5Y |
+ * 10Y switch reads another span of the same answer: every span is served at once.
  */
 export function CompanyScreenerCard() {
   const [open, setOpen] = useState(false)
   const contentId = useId()
   const screener = useQuery({ ...companyScreenerQuery, enabled: open })
   const [shown, setShown] = useState<Shown>('all')
+  const [span, setSpan] = useState<MedianSpan>('y5')
   const [sortKey, setSortKey] = useState<ScreenerSortKey>('pe_vs_median')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const columns = useMemo(() => screenerColumns(), [])
+  const columns = useMemo(() => screenerColumns(span), [span])
 
   const onSort = (key: ScreenerSortKey) => {
     if (sortKey === key) {
@@ -167,11 +185,11 @@ export function CompanyScreenerCard() {
 
   const rows = useMemo(() => {
     const served = (screener.data ?? []).filter((row) => shown === 'all' || row.held)
-    const value = (row: CompanyScreenerRow) => (sortKey === 'symbol' ? row.symbol : figure(row, sortKey))
+    const value = (row: CompanyScreenerRow) => (sortKey === 'symbol' ? row.symbol : figure(row, sortKey, span))
     return [...served].sort(
       (a, b) => compareNullsLast(value(a), value(b), sortDir) || a.symbol.localeCompare(b.symbol),
     )
-  }, [screener.data, shown, sortKey, sortDir])
+  }, [screener.data, shown, span, sortKey, sortDir])
 
   return (
     <section aria-label="Screener" className="rounded-xl border border-border/70 bg-card">
@@ -194,7 +212,10 @@ export function CompanyScreenerCard() {
       </button>
       {open && (
         <div id={contentId} className="space-y-3 px-4 pb-3" data-testid="company-screener">
-          <SegmentedControl label="Show" value={shown} onChange={setShown} options={SHOWN_OPTIONS} />
+          <div className="flex flex-wrap items-center gap-2">
+            <SegmentedControl label="Show" value={shown} onChange={setShown} options={SHOWN_OPTIONS} />
+            <SegmentedControl label="Median span" value={span} onChange={setSpan} options={SPAN_OPTIONS} />
+          </div>
           {screener.isError ? (
             <p className="py-4 text-sm text-muted-foreground">Couldn't load the screener.</p>
           ) : !screener.data ? (

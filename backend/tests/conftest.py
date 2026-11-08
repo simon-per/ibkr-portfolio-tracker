@@ -58,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 import app.models  # noqa: E402,F401  (every table on Base.metadata)
 from app import rate_limit  # noqa: E402
 from app.config import settings  # noqa: E402
+from app.services.company_financials_service import reset_screener_cache  # noqa: E402
 from app.services.currency_service import reset_frankfurter_rejections  # noqa: E402
 from app.services import yahoo_rate_limit  # noqa: E402
 from tests.memory_db import memory_engine  # noqa: E402
@@ -89,10 +90,12 @@ def _neutral_process_state(monkeypatch):
     rate_limit.reset()
     reset_frankfurter_rejections()
     yahoo_rate_limit.reset_yahoo_hold()
+    reset_screener_cache()  # the screener's kept answer is per process too
     yield
     rate_limit.reset()
     reset_frankfurter_rejections()
     yahoo_rate_limit.reset_yahoo_hold()
+    reset_screener_cache()
 
 
 @pytest_asyncio.fixture

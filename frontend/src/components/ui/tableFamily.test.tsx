@@ -178,13 +178,14 @@ const SPARSE_PEER = {
   },
 }
 
+const NO_SPANS = { y3: null, y5: null, y10: null }
 const SPARSE_SCREENER = {
   cik: 1, security_id: null, symbol: 'X', name: '', isin: null, held: false, currency: null,
   industry: null, period_end: null, market_cap: null, revenue_yoy: null, revenue_cagr_5y: null,
   eps_yoy: null, eps_cagr_5y: null, gross_margin: null, operating_margin: null, fcf_margin: null,
-  roe: null, net_cash: null, pe_ratio: null, pe_median_5y: null, pe_vs_median: null,
-  pfcf_ratio: null, pfcf_median_5y: null, pfcf_vs_median: null, ps_ratio: null,
-  ps_median_5y: null, ps_vs_median: null, dividend_yield: null, dps_cagr_5y: null,
+  roe: null, net_cash: null, pe_ratio: null, pe_median: NO_SPANS, pe_vs_median: NO_SPANS,
+  pfcf_ratio: null, pfcf_median: NO_SPANS, pfcf_vs_median: NO_SPANS, ps_ratio: null,
+  ps_median: NO_SPANS, ps_vs_median: NO_SPANS, dividend_yield: null, dps_cagr_5y: null,
   raise_years: null, payout_ratio: null,
 }
 

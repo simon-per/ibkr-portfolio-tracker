@@ -260,8 +260,9 @@ class CompanyPeer(BaseModel):
 class CompanyScreenerRow(BaseModel):
     """
     One company of the screener: who, the overview's key figures (`key_stats`), its own
-    dividend record (`dividend_track`), and P/E, P/FCF and P/S against their own 5-year
-    medians — `*_vs_median` is today's over the median, less one.
+    dividend record (`dividend_track`), and P/E, P/FCF and P/S against their own 3-, 5- and
+    10-year medians — `*_median` is the Valuation card's chips, `*_vs_median` today's over
+    each, less one.
     """
 
     cik: int
@@ -284,14 +285,14 @@ class CompanyScreenerRow(BaseModel):
     roe: Optional[float] = None
     net_cash: Optional[float] = None
     pe_ratio: Optional[float] = None
-    pe_median_5y: Optional[float] = None
-    pe_vs_median: Optional[float] = None
+    pe_median: CompanyFinancialsCagrs
+    pe_vs_median: CompanyFinancialsCagrs
     pfcf_ratio: Optional[float] = None
-    pfcf_median_5y: Optional[float] = None
-    pfcf_vs_median: Optional[float] = None
+    pfcf_median: CompanyFinancialsCagrs
+    pfcf_vs_median: CompanyFinancialsCagrs
     ps_ratio: Optional[float] = None
-    ps_median_5y: Optional[float] = None
-    ps_vs_median: Optional[float] = None
+    ps_median: CompanyFinancialsCagrs
+    ps_vs_median: CompanyFinancialsCagrs
     dividend_yield: Optional[float] = None
     dps_cagr_5y: Optional[float] = None
     raise_years: Optional[int] = None

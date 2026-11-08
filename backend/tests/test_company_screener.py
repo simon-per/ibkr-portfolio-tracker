@@ -1,7 +1,7 @@
 """
 The screener (2026-11-08): every company the Company tab lists, one row each, with the
 overview's key figures, its own dividend record, and P/E, P/FCF and P/S against their own
-5-year medians.
+3-, 5- and 10-year medians.
 
 The family check is that a row is the company's own page in one line: its key figures are
 the overview's (`key_stats` through `_priced`) and its medians are the Valuation card's
@@ -11,12 +11,24 @@ is not satisfied by two columns of nulls. Pure DB.
 """
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import update
 
 from app.clock import utc_today, utcnow
-from app.models.company_financials import CompanyFinancial, CompanyPrice, SecCompany
+from app.models.company_financials import (
+    CompanyFinancial,
+    CompanyPrice,
+    SecCompany,
+    SecurityCik,
+)
+from app.models.corporate_action import CorporateAction
+from app.models.market_price import MarketPrice
+from app.models.security import Security
+from app.models.taxlot import TaxLot
 from app.schemas.company_financials import CompanyScreenerRow
+from app.services import company_financials_service
 from app.services.company_financials_service import (
     SCREENED_MULTIPLES,
     CompanyFinancialsService,
@@ -100,21 +112,27 @@ async def test_a_row_is_its_companys_page_in_one_line(db):
             assert row[key] == stats[key], f"{row['symbol']} {key}"
         assert row["currency"] == page["currency"]
         for name, short in (("pe_ratio", "pe"), ("pfcf_ratio", "pfcf"), ("ps_ratio", "ps")):
-            assert row[f"{short}_median_5y"] == page["series"][name]["medians"]["y5"], (
-                f"{row['symbol']} {name}: the screener's median is not the Valuation card's"
+            assert row[f"{short}_median"] == page["series"][name]["medians"], (
+                f"{row['symbol']} {name}: the screener's medians are not the Valuation card's"
             )
 
 
 @pytest.mark.asyncio
 async def test_a_company_with_history_reads_today_against_its_own_median(db):
-    """Not vacuous: AAA's six years give every screened multiple a median, and the premium is
-    today's over it."""
+    """Not vacuous: AAA's six years give every screened multiple a 3- and a 5-year median,
+    and each premium is today's over its own window's; ten years it has not."""
     await _book(db)
     aaa = next(r for r in await CompanyFinancialsService(db).screener() if r["symbol"] == "AAA")
     for short in ("pe", "pfcf", "ps"):
-        today, median = aaa[f"{short}_ratio"], aaa[f"{short}_median_5y"]
-        assert today is not None and median is not None, short
-        assert aaa[f"{short}_vs_median"] == pytest.approx(today / median - 1), short
+        today = aaa[f"{short}_ratio"]
+        assert today is not None, short
+        for window in ("y3", "y5"):
+            median = aaa[f"{short}_median"][window]
+            assert median is not None, (short, window)
+            assert aaa[f"{short}_vs_median"][window] == pytest.approx(today / median - 1)
+        assert aaa[f"{short}_median"]["y10"] is None
+        assert aaa[f"{short}_vs_median"]["y10"] is None
+    assert aaa["pe_median"]["y3"] != aaa["pe_median"]["y5"]   # the windows differ
     assert aaa["raise_years"] == 5          # FY2021..FY2025 each above the year before
     assert aaa["dps_cagr_5y"] == pytest.approx(0.05)
 
@@ -124,8 +142,8 @@ async def test_a_company_without_five_years_has_no_median_rather_than_a_short_on
     await _book(db)
     bbb = next(r for r in await CompanyFinancialsService(db).screener() if r["symbol"] == "BBB")
     for short in ("pe", "pfcf", "ps"):
-        assert bbb[f"{short}_median_5y"] is None
-        assert bbb[f"{short}_vs_median"] is None
+        assert bbb[f"{short}_median"] == {"y3": None, "y5": None, "y10": None}
+        assert bbb[f"{short}_vs_median"] == {"y3": None, "y5": None, "y10": None}
 
 
 @pytest.mark.asyncio
@@ -150,6 +168,76 @@ def test_every_screened_multiple_is_a_valuation_series():
     from app.services.company_financials_service import VALUATIONS
 
     assert set(SCREENED_MULTIPLES) <= set(VALUATIONS)
+
+
+async def _hold_aaa(db):
+    """AAA held: its listing's daily close is the multiples' today."""
+    db.add(Security(id=1, isin="US0000000001", symbol="AAA", description="AAA Inc",
+                    currency="USD", conid=9001, asset_category="STK", exchange="NASDAQ"))
+    await db.flush()
+    db.add(TaxLot(security_id=1, open_date=date(2025, 1, 2), is_open=True,
+                  quantity=Decimal("1"), cost_basis=Decimal("10"),
+                  price_per_unit=Decimal("10"), currency="USD", cost_basis_eur=Decimal("9")))
+    db.add(SecurityCik(security_id=1, cik=1, sec_ticker="AAA", cik_checked_at=utcnow()))
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_answer_is_kept_until_something_a_row_reads_is_written(db, monkeypatch):
+    """8-9 s on the VPS: kept while nothing it reads moves, and computed again after each
+    kind of write — a held listing's daily close, a price pass, a refetch, a split IBKR
+    booked, a new day."""
+    await _book(db)
+    await _hold_aaa(db)
+    computed = []
+    original = CompanyFinancialsService._screen
+
+    async def counting(self, listed):
+        computed.append(len(listed))
+        return await original(self, listed)
+
+    monkeypatch.setattr(CompanyFinancialsService, "_screen", counting)
+    service = CompanyFinancialsService(db)
+    aaa = lambda rows: next(r for r in rows if r["symbol"] == "AAA")  # noqa: E731
+
+    first = await service.screener()
+    assert await service.screener() == first
+    assert len(computed) == 1
+
+    db.add(MarketPrice(security_id=1, date=utc_today(), close_price=Decimal("120"),
+                       currency="USD", source="test"))
+    await db.commit()
+    moved = await service.screener()
+    assert len(computed) == 2
+    assert aaa(moved)["pe_ratio"] != aaa(first)["pe_ratio"]
+
+    company = await db.get(SecCompany, 2)
+    company.prices_fetched_at = utcnow()
+    await db.commit()
+    await service.screener()
+    assert len(computed) == 3
+
+    await db.execute(
+        update(CompanyFinancial).where(CompanyFinancial.cik == 2)
+        .values(fetched_at=utcnow() + timedelta(seconds=1))
+    )
+    await db.commit()
+    await service.screener()
+    assert len(computed) == 4
+
+    db.add(CorporateAction(ib_key="aaa-split", conid="9001", security_id=1,
+                           action_type="FORWARDSPLIT", action_date=utc_today(),
+                           description="AAA 2 FOR 1 SPLIT", quantity=Decimal("1")))
+    await db.commit()
+    await service.screener()
+    assert len(computed) == 5
+
+    monkeypatch.setattr(company_financials_service, "utc_today",
+                        lambda: utc_today() + timedelta(days=1))
+    await service.screener()
+    assert len(computed) == 6
+    await service.screener()
+    assert len(computed) == 6
 
 
 @pytest.mark.asyncio

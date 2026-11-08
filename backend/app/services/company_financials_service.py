@@ -51,6 +51,7 @@ Figures stay in the reporting currency. Converting a history into the base curre
 fold a decade of exchange-rate moves into every growth rate.
 """
 
+import copy
 import json
 from bisect import bisect_right
 from dataclasses import dataclass, field
@@ -58,7 +59,7 @@ from statistics import median
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
@@ -810,6 +811,14 @@ def build_series(
 #: The multiples the screener reads against their own history.
 SCREENED_MULTIPLES = ("pe_ratio", "pfcf_ratio", "ps_ratio")
 
+#: The screener's last answer and the key it was computed under (`_screener_key`): reading
+#: every company's figures takes 8–9 s on the VPS. One process holds it (one uvicorn worker).
+_screener_cache: Dict[str, Any] = {}
+
+
+def reset_screener_cache() -> None:
+    _screener_cache.clear()
+
 
 def multiple_medians(
     rows: Sequence[CompanyFinancial], prices: Prices
@@ -1200,11 +1209,62 @@ class CompanyFinancialsService:
         """
         The screener (2026-11-08): every company the tab lists (`list_companies`), one row
         each, with the overview's key figures (`_priced`, `key_stats`), its own dividend
-        record (`dividend_track`), and today's P/E, P/FCF and P/S against their own 5-year
-        medians (`multiple_medians`, `premium`). So a row is that company's page in one line
+        record (`dividend_track`), and today's P/E, P/FCF and P/S against their own 3-, 5-
+        and 10-year medians (`multiple_medians`, `premium`) — every window, so the card's
+        3Y | 5Y | 10Y switch asks nothing. So a row is that company's page in one line
         (`tests/test_company_screener.py`). In the tab's list order; the client sorts.
+
+        Kept while `_screener_key` holds: the key is read before the figures, so an answer
+        is never older than the key it is kept under.
         """
         listed = await self.list_companies()
+        key = await self._screener_key(listed)
+        if _screener_cache.get("key") != key:
+            _screener_cache.update(key=key, rows=await self._screen(listed))
+        return copy.deepcopy(_screener_cache["rows"])
+
+    async def _screener_key(self, listed: List[Dict[str, Any]]) -> tuple:
+        """
+        Everything a screener row reads that a write can change: today (a close ages past
+        `PRICE_MAX_AGE_DAYS`); the listed companies with their held listings and their
+        figures' coverage and fetch stamp (`list_companies`: a refetch, a sale, a change of
+        the index); each company's closes and splits (`prices_fetched_at`, stamped by every
+        price write) and industry; the held listings' newest daily closes; and their
+        price-restating corporate actions (`_split_since`). A few small queries.
+        """
+        from app.models.corporate_action import CorporateAction
+        from app.services.sync_helper import PRICE_RESTATING_ACTIONS
+
+        companies = (
+            await self.db.execute(
+                select(SecCompany.cik, SecCompany.prices_fetched_at, SecCompany.sic_description)
+                .where(SecCompany.cik.in_([c["cik"] for c in listed]))
+                .order_by(SecCompany.cik)
+            )
+        ).all()
+        held = sorted({c["security_id"] for c in listed if c["security_id"] is not None})
+        daily = await MarketPriceRepository(self.db).get_latest_prices(held)
+        actions = (
+            await self.db.execute(
+                select(func.count(CorporateAction.id), func.max(CorporateAction.id)).where(
+                    CorporateAction.security_id.in_(held),
+                    CorporateAction.action_type.in_(PRICE_RESTATING_ACTIONS),
+                )
+            )
+        ).one()
+        return (
+            utc_today(),
+            json.dumps(listed, sort_keys=True, default=str),
+            tuple(tuple(row) for row in companies),
+            tuple(
+                (sid, p.date, str(p.close_price), p.currency)
+                for sid, p in sorted(daily.items())
+            ),
+            tuple(actions),
+        )
+
+    async def _screen(self, listed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """The screener's rows, computed: one company's page in one line each."""
         companies = await self.repo.companies({c["cik"] for c in listed})
         out: List[Dict[str, Any]] = []
         for entry in listed:
@@ -1216,37 +1276,36 @@ class CompanyFinancialsService:
             stats = key_stats(rows, priced["current"])
             track = dividend_track(rows, stats)
             own = multiple_medians(rows, priced["prices"])
-            out.append(
-                {
-                    **{key: entry[key] for key in ("cik", "security_id", "symbol", "name", "isin", "held")},
-                    "currency": priced["currency"],
-                    "industry": company.sic_description,
-                    "period_end": stats["period_end"],
-                    "market_cap": stats["market_cap"],
-                    "revenue_yoy": stats["revenue_yoy"],
-                    "revenue_cagr_5y": stats["revenue_cagr_5y"],
-                    "eps_yoy": stats["eps_yoy"],
-                    "eps_cagr_5y": stats["eps_cagr_5y"],
-                    "gross_margin": stats["gross_margin"],
-                    "operating_margin": stats["operating_margin"],
-                    "fcf_margin": stats["fcf_margin"],
-                    "roe": stats["roe"],
-                    "net_cash": stats["net_cash"],
-                    "pe_ratio": stats["pe_ratio"],
-                    "pe_median_5y": own["pe_ratio"]["y5"],
-                    "pe_vs_median": premium(stats["pe_ratio"], own["pe_ratio"]["y5"]),
-                    "pfcf_ratio": stats["pfcf_ratio"],
-                    "pfcf_median_5y": own["pfcf_ratio"]["y5"],
-                    "pfcf_vs_median": premium(stats["pfcf_ratio"], own["pfcf_ratio"]["y5"]),
-                    "ps_ratio": stats["ps_ratio"],
-                    "ps_median_5y": own["ps_ratio"]["y5"],
-                    "ps_vs_median": premium(stats["ps_ratio"], own["ps_ratio"]["y5"]),
-                    "dividend_yield": stats["dividend_yield"],
-                    "dps_cagr_5y": track["dps_cagr_5y"],
-                    "raise_years": track["raise_years"],
-                    "payout_ratio": stats["payout_ratio"],
+            row: Dict[str, Any] = {
+                **{key: entry[key] for key in ("cik", "security_id", "symbol", "name", "isin", "held")},
+                "currency": priced["currency"],
+                "industry": company.sic_description,
+                "period_end": stats["period_end"],
+                "market_cap": stats["market_cap"],
+                "revenue_yoy": stats["revenue_yoy"],
+                "revenue_cagr_5y": stats["revenue_cagr_5y"],
+                "eps_yoy": stats["eps_yoy"],
+                "eps_cagr_5y": stats["eps_cagr_5y"],
+                "gross_margin": stats["gross_margin"],
+                "operating_margin": stats["operating_margin"],
+                "fcf_margin": stats["fcf_margin"],
+                "roe": stats["roe"],
+                "net_cash": stats["net_cash"],
+                "dividend_yield": stats["dividend_yield"],
+                "dps_cagr_5y": track["dps_cagr_5y"],
+                "raise_years": track["raise_years"],
+                "payout_ratio": stats["payout_ratio"],
+            }
+            # Today's multiple, its own medians (the Valuation card's chips) and today's
+            # over each, less one.
+            for name in SCREENED_MULTIPLES:
+                short = name.removesuffix("_ratio")
+                row[name] = stats[name]
+                row[f"{short}_median"] = own[name]
+                row[f"{short}_vs_median"] = {
+                    window: premium(stats[name], value) for window, value in own[name].items()
                 }
-            )
+            out.append(row)
         return out
 
     async def get_financials(
