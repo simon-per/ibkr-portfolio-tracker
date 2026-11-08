@@ -168,6 +168,9 @@ the same "% of portfolio" header.
 - **A constituent that is itself a fund gets its own bucket, not a company row.** Live risk:
   iShares baskets carry the BlackRock ICS liquidity fund as a line item. v1 does not recurse —
   that needs a depth cap and a visited set, because a feeder can hold its own share class.
+  An issuer with no class column says so another way: Defiance's money-market line (QTUM's FGXXX)
+  is named a fund by its ticker's shape (five letters ending in XX) or its name
+  (`_defiance_asset_class`, review item L5, 2026-11-08); it was a company row before.
 - **A repeated ISIN inside one basket is summed.** Copying `import_prices.py`'s last-row-wins
   rule for a repeated date would silently drop weight; hence `UNIQUE(fund_isin, line_no)`.
 - **The truncated tail is a named row carrying a value**, or the visible percentages sum to well

@@ -287,6 +287,25 @@ def test_defiance_tells_a_cusip_a_cins_and_a_sedol_apart_in_one_column():
     assert [r.asset_class for r in basket.rows] == [None, None, None, "Cash"]
 
 
+def test_defiance_names_a_money_market_line_a_fund_not_a_company():
+    """
+    Review item L5: QTUM's FGXXX line (First American Government Obligations Fund) carried
+    no class, so the look-through counted a money-market fund as a company. By its ticker's
+    shape or its name it is a fund now, which `counts_as_invested` keeps out of the company
+    rows (the nested-fund bucket).
+    """
+    basket = parse_defiance(defiance_html([
+        ("NET", "Cloudflare Inc", "18915M107", "80.00%", "296,018"),
+        ("FGXXX", "First American Government Obligations Fund 12/01/2031", "31846V336", "15.00%", "1"),
+        ("ABCXX", "Some Cash Reserve", "123456789", "4.00%", "1"),
+        ("Cash&Other", "Cash & Other", "Cash&Other", "1.00%", "3,495,084"),
+    ]), QTUM, "QTUM", FETCHED)
+
+    classes = [r.asset_class for r in basket.rows]
+    assert classes == [None, "Money Market Fund", "Money Market Fund", "Cash"]
+    assert "fund" in classes[1].lower()
+
+
 def test_defiance_clamps_its_forward_dated_as_of_to_the_fetch_date():
     """
     `Data as of 08/17/2026` on a file fetched on the 16th describing Friday the 14th's close:
