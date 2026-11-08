@@ -11,6 +11,7 @@ import { activityColumns } from '../ActivityTab'
 import { drillDownColumns } from '../AllocationTab'
 import { drawdownColumns } from '../AnalyticsTab'
 import { projectionColumns } from '../ForecastTab'
+import { forecastMonthColumns } from '../DividendForecastTrend'
 import { EARNINGS_COLUMNS, metricsColumns } from '../FundamentalsTab'
 import {
   BY_COUNTRY_COLUMNS, DIVIDEND_INCOME_COLUMNS, HOLDINGS_COLUMNS, REALIZED_COLUMNS,
@@ -248,6 +249,11 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   ['Tax by country', BY_COUNTRY_COLUMNS(money) as never, SPARSE_TAX_COUNTRY],
   ['Tax realized gains', REALIZED_COLUMNS(money) as never, SPARSE_TAX_REALIZED],
   ['Tax holdings', HOLDINGS_COLUMNS(money) as never, SPARSE_TAX_HOLDING],
+  [
+    'Forecast by month',
+    forecastMonthColumns(money) as never,
+    { month: '2026-01', change: 0, buys: 0, raises: 0, other: 0 },
+  ],
 ]
 
 describe.each(FAMILY)('%s columns follow the shared conventions', (_name, columns, sparseRow) => {

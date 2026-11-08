@@ -25,6 +25,7 @@
  */
 import type {
   DividendForecastChange,
+  DividendForecastHistoryPoint,
   DividendForecastHistoryResponse,
 } from './api'
 import { growthPct } from './dividendGrowth'
@@ -93,6 +94,51 @@ export interface ForecastTrend {
   parts: ForecastTrendPart[]
   /** Set only when the breakdown starts later than the line does. */
   partsSince: string | null
+  /** The change month by month, newest first (`forecastMonths`). */
+  months: ForecastTrendMonth[]
+}
+
+/** One calendar month's change of the forecast, split as the header splits the total. */
+export interface ForecastTrendMonth {
+  /** `YYYY-MM`. */
+  month: string
+  change: number
+  buys: number
+  raises: number
+  /** Timing, newly forecast, currency and the unexplained rest. */
+  other: number
+}
+
+const OTHER_KEYS: ForecastPartKey[] = ['timing', 'newly_forecast', 'fx', 'unattributed']
+
+/**
+ * How the forecast grew month by month (review item FD1, 2026-11-08): each month's last
+ * snapshot's cumulative breakdown less the previous month's, the first month less
+ * nothing — so the months add up exactly to the newest breakdown, the since-start parts
+ * the header prints. Only snapshots on the newest breakdown's chain (its `since`) are
+ * read, and not the chain's first day, which is the anchor and changes nothing; a month
+ * without a snapshot has its change in the next month that has one. Newest first.
+ */
+export function forecastMonths(points: readonly DividendForecastHistoryPoint[]): ForecastTrendMonth[] {
+  const since = points.at(-1)?.breakdown?.since
+  if (since == null) return []
+  const lastOfMonth = new Map<string, DividendForecastChange>()
+  for (const p of points) {
+    if (p.breakdown?.since === since && p.date > since) {
+      lastOfMonth.set(p.date.slice(0, 7), p.breakdown)
+    }
+  }
+  const months: ForecastTrendMonth[] = []
+  let before: DividendForecastChange | null = null
+  for (const [month, cum] of [...lastOfMonth].sort(([a], [b]) => a.localeCompare(b))) {
+    const delta = (key: ForecastPartKey) => cum[key] - (before?.[key] ?? 0)
+    const buys = delta('shares')
+    const raises = delta('raises')
+    const other = OTHER_KEYS.reduce((sum, key) => sum + delta(key), 0)
+    months.push({ month, change: buys + raises + other, buys, raises, other })
+    before = cum
+  }
+  return months.reverse()
 }
 
 /** "from buys", or "from sales" when the share count fell. */
@@ -146,6 +192,7 @@ export function forecastTrend(
     fromRaises: material(breakdown?.raises),
     parts,
     partsSince: breakdown && breakdown.since !== visible[0].date ? breakdown.since : null,
+    months: forecastMonths(visible),
   }
   const drawn = visible.map((p) => ({
     date: p.date, value: p.next_12m_eur, received: p.ttm_net_eur,

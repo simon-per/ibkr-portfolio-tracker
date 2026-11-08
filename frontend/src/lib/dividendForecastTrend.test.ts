@@ -4,7 +4,9 @@ import type {
   DividendForecastHistoryPoint,
   DividendForecastHistoryResponse,
 } from './api'
-import { forecastTrend, fromBuysLabel, fromRaisesLabel, utcToday } from './dividendForecastTrend'
+import {
+  forecastMonths, forecastTrend, fromBuysLabel, fromRaisesLabel, utcToday,
+} from './dividendForecastTrend'
 
 function point(
   date: string,
@@ -198,6 +200,58 @@ describe('forecastTrend with the live figure', () => {
     expect(trend.latest).toBe(360)
     expect(trend.sincePct).toBe(20)
     expect(trend.mtdPct).toBe(5.88)
+  })
+})
+
+describe('forecastMonths', () => {
+  // Cumulative breakdowns since 08-28, as the server serves them, over three months.
+  const points = [
+    point('2026-08-28', 300, { breakdown: change() }),
+    point('2026-08-31', 302, { breakdown: change({ shares: 1.5, timing: 0.5 }) }),
+    point('2026-09-15', 315, { breakdown: change({ shares: 10, raises: 2, timing: 3 }) }),
+    point('2026-09-30', 325.29, {
+      breakdown: change({ shares: 18.84, raises: 3.22, timing: 2.73, fx: 0.5 }),
+    }),
+    point('2026-10-31', 369.66, {
+      breakdown: change({ shares: 56.35, raises: 4.51, timing: 8.2, fx: 0.4, unattributed: 0.2 }),
+    }),
+    point('2026-11-05', 375.03, {
+      breakdown: change({ shares: 60, raises: 4.51, timing: 9.92, fx: 0.4, unattributed: 0.2 }),
+    }),
+  ]
+
+  it("splits each month's change into buys, raises and the rest, newest first", () => {
+    const months = forecastMonths(points)
+    expect(months.map((m) => m.month)).toEqual(['2026-11', '2026-10', '2026-09', '2026-08'])
+    const october = months[1]
+    expect(october.buys).toBeCloseTo(37.51)
+    expect(october.raises).toBeCloseTo(1.29)
+    expect(october.other).toBeCloseTo(5.47 - 0.1 + 0.2)
+    expect(october.change).toBeCloseTo(october.buys + october.raises + october.other)
+    // The first month is its cumulative figure: the breakdown starts from nothing.
+    expect(months[3]).toMatchObject({ month: '2026-08', buys: 1.5, raises: 0, other: 0.5 })
+  })
+
+  it('adds up exactly to the since-start parts the header prints', () => {
+    const months = forecastMonths(points)
+    const newest = points.at(-1)!.breakdown!
+    const sum = (key: 'buys' | 'raises' | 'other') => months.reduce((s, m) => s + m[key], 0)
+    expect(sum('buys')).toBeCloseTo(newest.shares, 10)
+    expect(sum('raises')).toBeCloseTo(newest.raises, 10)
+    expect(sum('other')).toBeCloseTo(
+      newest.timing + newest.newly_forecast + newest.fx + newest.unattributed, 10,
+    )
+  })
+
+  it('reads only the newest chain, and nothing without a breakdown', () => {
+    expect(forecastMonths([point('2026-09-01', 300)])).toEqual([])
+    const other = [point('2026-07-31', 280, { breakdown: change({ since: '2026-07-01', shares: 99 }) }),
+      ...points]
+    expect(forecastMonths(other)).toEqual(forecastMonths(points))
+  })
+
+  it('rides on the trend', () => {
+    expect(forecastTrend(history(points), null, '2026-11-05')!.months).toEqual(forecastMonths(points))
   })
 })
 

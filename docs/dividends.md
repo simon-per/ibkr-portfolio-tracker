@@ -1245,6 +1245,12 @@ that it keeps growing, and have the breakdown available without it being the lou
   book's per-share growth is not repeated there (it is the table's Growth column per
   payer) — the owner's call on 2026-10-14, the whole line being an estimate;
   `reconstructed` and `growth.per_share` are still served.
+- **The open card lists the change month by month** (`forecastMonths`, review item FD1,
+  2026-11-08): per calendar month, buys, raises and the other parts together, newest first —
+  each month's last snapshot's cumulative breakdown less the previous month's (the chain's
+  start day is the anchor and lists nothing). No server change: the months add up exactly to
+  the newest breakdown, which is what the header prints since the start
+  (`dividendForecastTrend.test.ts` pins the sum).
 - **Today is the breakdown's live figure, not the newest snapshot** (since 2026-10-14).
   The KPI tile shows `growth.next_12m_eur`, recomputed on every read; the card showed the
   last stored row under the same label, so the two disagreed whenever the forecast had
