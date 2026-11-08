@@ -534,7 +534,10 @@ Computed in `company_financials_service` only:
 - **Medians** (`medians`, review item R3, 2026-11-08): a valuation multiple's own median over
   the last 3, 5 and 10 years, positive values only, on the whole history like `cagrs`; null with
   fewer than three values in a span or a history shorter than it, and null for every other
-  series. The Valuation card shows them where a growth card shows its CAGRs.
+  series. The Valuation card shows them where a growth card shows its CAGRs. **Each span ends
+  at the newest point, whether or not it has a value** (2026-11-08): anchored at the last
+  multiple, a company whose P/E stopped kept a median of years before — BKR's 3Y chip read
+  2019–22 and MRNA's 2020–23 on their 2026 pages.
 - **The latest quarter** (`latest_quarter`, review item R4, 2026-11-08): the newest quarter on
   its own — label, filing date, revenue, diluted EPS and FCF against the same quarter a year
   before (the YoY rule), the operating margin's change in points — the overview's row of what the

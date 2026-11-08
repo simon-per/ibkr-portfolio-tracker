@@ -491,6 +491,22 @@ def test_a_multiple_carries_its_own_medians_and_nothing_else_does():
     assert medians(years[:2]) == {"y3": None, "y5": None, "y10": None}
 
 
+def test_a_median_ends_at_the_newest_point_not_the_last_value():
+    """A company whose P/E stopped years ago (BKR's EPS, MRNA's losses) has no 3-year median
+    of the years before; its longer windows still read what is inside them."""
+    from datetime import date as _date
+
+    from app.services.company_financials_service import medians
+
+    history = [(_date(2016 + i, 12, 31), pe) for i, pe in enumerate(
+        (12.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0))]          # 2016..2022
+    stopped = history + [(_date(y, 12, 31), None) for y in (2023, 2024, 2025)]
+    # Anchored at 2025: nothing inside 2023-2025, and 2021-2022 alone are two values.
+    assert medians(stopped) == {"y3": None, "y5": None, "y10": 20.0}
+    # The same history ending in 2022 still reads its own last three years.
+    assert medians(history)["y3"] == 25.0
+
+
 def test_the_latest_quarter_against_the_same_one_a_year_before():
     """Review item R4: the overview's row of what the newest report said."""
     from datetime import date as _date

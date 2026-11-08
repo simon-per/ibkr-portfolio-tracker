@@ -336,15 +336,19 @@ def growth_at(points: Sequence[tuple], index: int, years: int) -> Optional[float
 
 def medians(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
     """
-    The median of the positive values over the `CAGR_YEARS` up to the latest point, keyed
+    The median of the positive values over the `CAGR_YEARS` up to the newest point, keyed
     `y3`, `y5`, `y10` — a multiple's own history to read today's against (review item
     R3, 2026-11-08), where a growth rate means nothing. None with fewer than three values
     in the span or no span covered: a median of one quarter is that quarter.
+
+    The span ends at the newest point whether or not it has a value: anchored at the last
+    known one, a company whose P/E stopped (losses, a missing EPS) kept a median of years
+    before — BKR's 3-year chip read 2019–22 in 2026, MRNA's 2020–23 (2026-11-08).
     """
     known = [(d, v) for d, v in points if v is not None]
     if not known:
         return {f"y{n}": None for n in CAGR_YEARS}
-    last = known[-1][0]
+    last = points[-1][0]
     out: Dict[str, Optional[float]] = {}
     for n in CAGR_YEARS:
         since = _years_before(last, n)
