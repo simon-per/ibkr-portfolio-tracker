@@ -96,6 +96,11 @@ Two measured details that look like nits:
   rate is parsed and never stored, so after k skips a re-export missing up to k rows passed
   the old guard and the wholesale replace deleted the difference. With no run on record it
   falls back to the stored count.
+- **A row with no CHF/EUR rate refuses the file** (review item C4, 2026-11-08). It used to be skipped
+  with a warning that the cash would read short — the opposite of what happened for a purchase,
+  whose cash stayed in while its lot was left out, so the balance read high and the holdings
+  short. Now `FinpensionIngestError` names the dates, the CLI rolls back, and the stored ledger
+  stays as it was until a rate for them is cached.
 - **Price rows are inserted with ON CONFLICT DO NOTHING, never a bare add.** The replace
   deletes only our own `finpension_*` rows, and for a fund pinned to Yahoo the market-data
   sync re-fetches the trailing `PROVISIONAL_PRICE_DAYS` even when cached — its upsert
@@ -134,7 +139,10 @@ names, else `isin[:2]`, and both Swisscanto ISINs begin `CH`, so 3a income would
 bucket that is definitionally not a foreign-withholding reclaim — a claim against a country that
 withheld nothing.
 
-`tax_exempt_accounts()` is resolved once and applied at four sites: the dividend/DA-1 select,
+`tax_exempt_accounts()` reads the labels off securities, trades **and the cash ledger** (review item
+C5, 2026-11-08: an account only paid into, nothing bought yet, has neither of the first two, and
+its deductible deposits were missing from the report). It is resolved once and applied at four
+sites: the dividend/DA-1 select,
 the realized-gains select, `holdings_snapshot_as_of` and its closed-lot fallback. Realized
 gains filter on **`Trade.account`, not the joined security** — that join is an outer one
 because `Trade.security_id` is nullable by design, so a Security-side clause would silently
@@ -178,7 +186,7 @@ fund at a six-month-old NAV for ever with nothing saying so.
 **A `sibling` fund is priced from another share class of the same fund** (since 2026-09-12,
 the owner's call). The bounded carry traded the wrong things for the EM tranche: its share
 count never changes between uploads, an EM index drifts a few percent a month, and the
-position is ~0.6% of the book — so going *unpriced* after 45 business days removed 464 EUR
+position is ~0.6% of the book — so going *unpriced* after 45 calendar days removed 464 EUR
 from the total to avoid a stale-price error of perhaps 15. Yahoo does not quote the tranche
 held (`CH1529078078`, the NMT class), but it quotes the same fund's NT class
 (`0P0000S0OE.SW`, CHF, daily) at a level ~49% higher — the very thing the NAV check refuses

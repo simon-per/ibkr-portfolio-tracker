@@ -55,10 +55,15 @@ from tests.memory_db import memory_engine
 
 TODAY = utc_today()
 
-# What the fix measured (see the module docstring for before).
-SUMMARY_MAX_QUERIES = 9
-CLOSED_POSITIONS_MAX_QUERIES = 8
-DECOMPOSITION_MAX_QUERIES = 11
+# What the fix measured (see the module docstring for before), plus, since 2026-11-08,
+# the corporate actions that moved cash, one read for the derived balance whatever their
+# number (review item C6) — on the summary and the decomposition alike.
+SUMMARY_MAX_QUERIES = 10
+# Two more since 2026-11-08, one query each whatever the number of securities: the closed
+# lots' cost at their open-date rate (review item V4), and the sold securities' splits,
+# across which no post-sale move is computed (V5).
+CLOSED_POSITIONS_MAX_QUERIES = 10
+DECOMPOSITION_MAX_QUERIES = 12
 
 
 async def _engine():

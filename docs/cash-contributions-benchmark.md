@@ -32,8 +32,15 @@ missed.
 ### Derived from what moved, never from what is held
 
     cash = Σ trades (proceeds + commission)
-         + Σ cash flows (deposits, withdrawals, cash legs of transfers)
+         + Σ corporate-action proceeds (cash in lieu, a cash merger)
+         + Σ cash flows (deposits, withdrawals, cash legs of transfers, each once)
          + Σ IBKR dividend payments, net of withholding
+
+The corporate-action line since review item C6 (2026-11-08): the Activity ledger showed that cash
+and the balance did not, so the cash line ran short by it until the next measured level. An action
+whose cash IBKR also booked as a trade (same contract, day and amount) is that trade's and counts
+once. No statement sample with corporate-action cash was at hand to confirm IBKR never books it a
+third way; the measured balance's correction on such a day is where a double count would show.
 
 anchored at **zero before the first record**, which is definitional rather than an
 assumption: the account did not exist.
@@ -92,7 +99,10 @@ Six rules, each of which would be a wrong number the other way:
   reader served a balance off by the whole trade with nothing saying so — the silent
   half-result #26 fixed for realized P&L. `_derived_events` counts them;
   `CashService.unconverted_trades(base_fx)` reports the count (off the instance's last
-  derivation), and above 0 `uninvested_cash` returns `UNKNOWN` with `balance=None` —
+  derivation) — **up to a date** when asked (`up_to`, review item C7, 2026-11-08: a balance
+  before the trade does not contain it, so one unconvertible November trade no longer blanked
+  the opening and year-end cash and the margin check of every earlier year) — and above 0
+  `uninvested_cash` (counting up to its `on_date`) returns `UNKNOWN` with `balance=None` —
   the same state as no ledger at all, which every surface already renders as absent.
   Every reader of the raw events consults it too: the timeline drops the cash events and
   stamps every point `unknown`, and the decomposition reads cash as untracked and drops
@@ -594,7 +604,20 @@ which is the opposite shape: the pillar 3a deposits landed 2026-08-25 against pu
 monthly loops also clamp at `as_of`, as the windows already did, or the identity holds only when no row is
 future-dated.
 
-### Transfers are never money in
+### Transfers are never money in — but capital transferred later is not profit either
+
+**`capital_legs`** (review item C2, 2026-11-08). Before `coverage_from` a transfer's capital rides
+in the lot legs. After it, a cash transfer — finpension's vested benefits, an IBKR transfer's cash
+leg — entered Total Value and nothing beside it: the chart read it as profit and the benchmark never
+invested it. `_contribution_inputs` now returns `capital_legs` = `money_in_legs` plus every
+transfer row's cash from `coverage_from` on (signed, so a transfer out lowers it), and the chart's
+Money In line, the benchmark and the decomposition's external flows read it. The monthly bars, the
+windows and the 3a deduction keep `money_in_legs`: savings are deposits. IBKR can book one transfer's
+cash twice (the reclassified deposit and the `<Transfers>` row), and `CashFlowLedger.cash_moves`
+counts it once for these legs and for the derived cash balance alike. A lot transferred **in kind**
+whose own open date falls after `coverage_from` is not detected (troubleshooting.md, *Accepted rough
+edges*). Tests: `tests/test_capital_transferred_in.py`.
+
 
 An incoming transfer moves capital saved years earlier somewhere else, and the transferred lots already
 carry their own `open_date` — so counting it would both invent savings in a month that had none *and*
@@ -611,7 +634,11 @@ left out of the match keys, or every no-cash transfer would collide on `(date, 0
 **This is the highest-risk number in the feature**: an unexcluded transfer shows a portfolio-sized fake
 contribution. `app/cli/manage_cash_flows.py` is the manual override — `list` marks which rows count as
 added, `reclassify <ib_key> --as TRANSFER_IN` fixes one, `--dry-run` on the mutating path, and every
-edit records a `sync_runs` row (`manual_cash_flow`).
+edit records a `sync_runs` row (`manual_cash_flow`). **A reclassification is kept by every later ingest**
+(`cash_flows.flow_type_manual`, review item I1, 2026-11-08; `list` marks the type with `*`): the
+statement re-delivers a row for about a month, and the upsert wrote its own type back the next day —
+in both directions, the transfer match included. `CashFlowRepository.upsert` keeps the owner's type
+and logs the disagreement. Tests: `tests/test_cash_flow_reclassify_survives.py`.
 
 Three things this account's real data settled, so nobody re-investigates them:
 

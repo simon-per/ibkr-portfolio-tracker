@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.etf_mappings import is_known_etf_isin, symbol_for_fund_isin
 from app.etf_sources import basket_proxy_for
+from app.models.corporate_action import CorporateAction
 from app.models.security import Security
 from app.models.trade import Trade
 from app.repositories.etf_basket_repository import EtfBasketRepository
@@ -52,7 +53,7 @@ from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.lookthrough_service import LookthroughService
 from app.services.native_amounts import NativeToBase
-from app.services.realized_trades import realized_from_sell_trades
+from app.services.realized_trades import gain_in_base, realized_from_sell_trades
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS, PortfolioService
 from app.services.sector_taxonomy import UNKNOWN as SECTOR_UNKNOWN, normalise as normalise_sector
 
@@ -138,7 +139,8 @@ class PerformanceAnalyticsService:
         # trade as fees and interest, so the window reads as untracked cash instead.
         if await cash_service.unconverted_trades(base_fx):
             cash_source, corrections = CASH_UNKNOWN, []
-        flows: List[Tuple[date, Decimal]] = inputs["money_in_legs"]
+        # External flows: money in and capital transferred in (C2), the chart's own line.
+        flows: List[Tuple[date, Decimal]] = inputs["capital_legs"]
 
         async def window(ws: date, we: date) -> Dict:
             return await self._decompose_window(
@@ -509,6 +511,9 @@ class PerformanceAnalyticsService:
         (`source: closed_lots`). Cost is the closed lots' cost basis in both cases, so
         the return percentage is against what was actually paid.
 
+        `post_sale_pct` is refused (None) across a split: the close before it and the
+        newest after it are on two share bases (review item V5).
+
         `post_sale_pct` needs a price *after* the last close. The market-data sync
         prices a sold security once a day, in the 18:00 pass, and backs off one every
         provider comes back empty for — a delisted ticker — so it is None for those,
@@ -547,6 +552,8 @@ class PerformanceAnalyticsService:
             )).scalars().all(),
             NativeToBase(self.portfolio.currency_service, base_fx),
         )).by_security
+        # Their lots' cost at the rate it was paid in, for `gain_in_base` (V4).
+        closed_cost = await self.portfolio.closed_cost_by_security(base_fx)
 
         grouped: Dict[int, Dict] = {}
         for r in rows:
@@ -574,6 +581,17 @@ class PerformanceAnalyticsService:
             for sid, g in grouped.items()
             if sid in latest_by_sid and latest_by_sid[sid].date > g["last_close"]
         })
+        # The splits each sold security went through, for `post_sale_pct` (review item V5):
+        # a close before a split and one after it are on two share bases.
+        from app.services.sync_helper import PRICE_RESTATING_ACTIONS
+        splits_by_sid: Dict[int, List[date]] = {}
+        for split_sid, split_day in (await self.db.execute(
+            select(CorporateAction.security_id, CorporateAction.action_date).where(
+                CorporateAction.security_id.in_(list(grouped)),
+                CorporateAction.action_type.in_(PRICE_RESTATING_ACTIONS),
+            )
+        )).all():
+            splits_by_sid.setdefault(split_sid, []).append(split_day)
         positions: List[Dict] = []
         fx_fallbacks = 0
         for sid, g in grouped.items():
@@ -587,7 +605,7 @@ class PerformanceAnalyticsService:
             # no IBKR figure to give (issue #58).
             sold = by_security.get(sid)
             if sold is not None and sold.net_sales > 0 and sold.converted and not sold.unconvertible:
-                realized = sold.gain
+                realized = gain_in_base(sold, closed_cost.get(sid))
                 source = "trade"
             else:
                 realized = g["proceeds"] - g["cost"]
@@ -607,7 +625,10 @@ class PerformanceAnalyticsService:
             post_sale_pct: Optional[float] = None
             post_sale_days: Optional[int] = None
             latest = latest_by_sid.get(sid)
-            if latest is not None and latest.date > g["last_close"]:
+            split_between = latest is not None and any(
+                g["last_close"] < d <= latest.date for d in splits_by_sid.get(sid, ())
+            )
+            if latest is not None and latest.date > g["last_close"] and not split_between:
                 around_close = around_close_by_sid[sid]
                 ref = around_close[-1] if around_close else None
                 if (

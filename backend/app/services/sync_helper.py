@@ -20,10 +20,11 @@ day. Quantities per open date are immune to that drift, and unlike the security'
 net quantity (used until issue #54) a rebuy cannot hide a sale.
 """
 import logging
+import re
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, select
 
@@ -116,6 +117,10 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     invalidated = await invalidate_prices_for_splits(
         MarketPriceRepository(db), persisted["newly_restating_actions"]
     )
+    # The lots it closed before the split, onto the share basis those prices are now on.
+    rescaled = await rescale_lots_closed_before_splits(
+        db, persisted["newly_restating_actions"]
+    )
 
     # Real dividend income (gross/withholding/net) from <CashTransactions>. Flex-only.
     cash_txns = await ibkr_service.extract_cash_transactions(flex_data)
@@ -196,11 +201,15 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
             f"accruals were not applied"
         )
     else:
+        taxlots_data = await ibkr_service.extract_taxlots(flex_data)
+        # A lot opened by a BUY is dated by that trade (the trades are persisted above,
+        # so this statement's own are among them).
+        date_lots_by_their_buys(taxlots_data, await trade_repo.buy_dates_by_instant())
         recon = await reconcile_taxlots(
             taxlot_repo=taxlot_repo,
             currency_service=currency_service,
             conid_to_security_id=conid_to_security_id,
-            taxlots_data=await ibkr_service.extract_taxlots(flex_data),
+            taxlots_data=taxlots_data,
             report_to_date=to_date,
             trade_repo=trade_repo,
             corp_action_repo=corp_action_repo,
@@ -228,6 +237,7 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
             f"TRANSFER (matched a position transfer's cash leg) — excluded from money added"
         )
     warnings.extend(invalidated["notes"])
+    warnings.extend(rescaled["notes"])
     # A dividend skipped for want of an FX rate rides on a *successful* sync, so it is
     # structurally invisible unless hoisted here.
     warnings.extend(dividend_result.get("warnings") or [])
@@ -246,6 +256,8 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         "lots_closed_full": recon["lots_closed_full"],
         "lots_closed_partial": recon["lots_closed_partial"],
         "lots_restamped": recon["lots_restamped"],
+        # Closures undone because IBKR busted the sale in this statement (Phase D2).
+        "lots_unclosed": recon.get("lots_unclosed", 0),
         "trades_seen": len(trades_data),
         "corporate_actions_seen": len(corp_actions_data),
         "prices_invalidated": invalidated["prices_invalidated"],
@@ -642,6 +654,65 @@ async def invalidate_prices_for_splits(
     }
 
 
+_SPLIT_RATIO_RE = re.compile(
+    r"\bSPLIT\s+(\d+(?:\.\d+)?)\s+FOR\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE
+)
+
+
+def split_ratio(description: Optional[str]) -> Optional[Decimal]:
+    """New shares per old from IBKR's ``actionDescription`` ("... SPLIT 10 FOR 1 ...",
+    a reverse split "SPLIT 1 FOR 10"); None when it states none."""
+    m = _SPLIT_RATIO_RE.search(description or "")
+    if not m:
+        return None
+    new, old = Decimal(m.group(1)), Decimal(m.group(2))
+    return new / old if new > 0 and old > 0 else None
+
+
+async def rescale_lots_closed_before_splits(session, actions: List[Dict]) -> Dict:
+    """
+    Restate the lots a newly seen split's security closed before it onto the new share
+    basis: shares times the ratio, price per share over it, cost unchanged (review item
+    V5, 2026-11-08). Same newly-inserted actions as `invalidate_prices_for_splits`, so it
+    runs once per split.
+
+    The price history is refetched split-adjusted (above), and IBKR restates the open
+    lots itself; a closed lot kept its old share count, so its days before the sale were
+    valued at the old count times the adjusted price — a 10-for-1 split cut them to a
+    tenth — and its realized approximation with them. A split whose description states
+    no ratio is named in the notes and left alone.
+    """
+    rescaled, notes = 0, []
+    for action in sorted(actions, key=lambda a: a["action_date"]):
+        ratio = split_ratio(action.get("description"))
+        if ratio is None:
+            notes.append(
+                f"{action.get('symbol') or action['security_id']}: {action['action_type']} on "
+                f"{action['action_date']} states no ratio — its earlier closed lots keep "
+                f"their share count"
+            )
+            continue
+        lots = (await session.execute(
+            select(TaxLot).where(
+                TaxLot.security_id == action["security_id"],
+                TaxLot.is_open == False,  # noqa: E712 - SQL comparison, not identity
+                TaxLot.close_date < action["action_date"],
+            )
+        )).scalars().all()
+        for lot in lots:
+            lot.quantity = lot.quantity * ratio
+            lot.price_per_unit = lot.price_per_unit / ratio
+            rescaled += 1
+        if lots:
+            logger.info(
+                f"security_id={action['security_id']}: {len(lots)} closed lot(s) restated "
+                f"for the {ratio}-for-1 {action['action_type']} on {action['action_date']}"
+            )
+    if rescaled:
+        await session.flush()
+    return {"closed_lots_rescaled": rescaled, "notes": notes}
+
+
 class EmptyStatementError(Exception):
     """
     Raised when an IBKR sync yields zero incoming tax lots while the database
@@ -710,6 +781,61 @@ PRICE_RESTATING_ACTIONS = {
 POSITION_CREATING_ACTIONS = {
     "SPINOFF", "CONTRACTSPINOFF",
 }
+
+
+def date_lots_by_their_buys(
+    taxlots_data: List[Dict], buys: Dict[Tuple[str, datetime], date]
+) -> int:
+    """
+    Give each lot opened by a BUY that trade's own ``trade_date``, in place; returns how
+    many changed. The lot keeps the date IBKR's ``openDateTime`` gave it as
+    ``statement_open_date``, which the reconcile needs once (`_redated_snapshot`).
+
+    **Why** (review item C1, 2026-11-08): ``openDateTime`` is US Eastern and the trade's
+    ``tradeDate`` exchange-local. A KRX buy at 09:05 in Seoul executes at 20:05 the
+    evening before in New York, so the lot entered the holdings a day before its cash
+    left (which goes by the trade date): the Total Value spiked by the purchase for a day,
+    and every range starting that day anchored on it. ``buys`` is
+    `TradeRepository.buy_dates_by_instant`, keyed on the instant both rows carry. A lot
+    whose purchase is not on record with an instant (a transfer, a split, a trade stored
+    before the instants were) keeps its ``openDateTime`` date.
+    """
+    changed = 0
+    for lot in taxlots_data:
+        opened_at = lot.get("opened_at")
+        traded = buys.get((str(lot["conid"]), opened_at)) if opened_at else None
+        if traded is not None and traded != lot["open_date"]:
+            lot["statement_open_date"] = lot["open_date"]
+            lot["open_date"] = traded
+            changed += 1
+    if changed:
+        logger.info(f"Dated {changed} lot(s) by the trade that opened them")
+    return changed
+
+
+def _redated_snapshot(snap_lots: List[Dict], incoming_lots: List[Dict]) -> List[Dict]:
+    """
+    The snapshot with each lot stored under its ``openDateTime`` date moved to the trade
+    date its incoming counterpart now carries (`date_lots_by_their_buys`), so the sync
+    that first dates a lot by its trade does not see it vanish from one day and appear on
+    the next. Seen as a sale it would be booked as one whenever the security also had a
+    real sale in the window. A snapshot lot moves only when nothing incoming sits on its
+    own date at its price, and an incoming lot redated from that date at that price does;
+    every later sync finds the dates equal and moves nothing.
+    """
+    on_own_date = {(lot["open_date"], lot["price_per_unit"]) for lot in incoming_lots}
+    redated = {
+        (lot["statement_open_date"], lot["price_per_unit"]): lot["open_date"]
+        for lot in incoming_lots
+        if lot.get("statement_open_date") is not None
+    }
+    out = []
+    for lot in snap_lots:
+        key = (lot["open_date"], lot["price_per_unit"])
+        if key not in on_own_date and key in redated:
+            lot = {**lot, "open_date": redated[key]}
+        out.append(lot)
+    return out
 
 
 def _missing_per_lot(snap_lots: List[Dict], incoming_lots: List[Dict]) -> List[Decimal]:
@@ -918,7 +1044,9 @@ async def reconcile_taxlots(
         }
 
         new_open_lots.append(taxlot_data)
-        incoming_lots[security_id].append(taxlot_data)
+        incoming_lots[security_id].append(
+            {**taxlot_data, "statement_open_date": lot_data.get("statement_open_date")}
+        )
         taxlots_count += 1
         total_cost_basis_eur += cost_basis_eur
         incoming_qty[security_id] += lot_data["quantity"]
@@ -951,7 +1079,9 @@ async def reconcile_taxlots(
         security_id_to_conid = {sid: str(conid) for sid, conid in rows if conid is not None}
 
     for security_id, snap_lots in snapshot.items():
-        missing = _missing_per_lot(snap_lots, incoming_lots.get(security_id, []))
+        incoming_here = incoming_lots.get(security_id, [])
+        snap_lots = _redated_snapshot(snap_lots, incoming_here)
+        missing = _missing_per_lot(snap_lots, incoming_here)
         sold_qty = sum(missing, Decimal("0"))
 
         if sold_qty <= 0:
@@ -1066,6 +1196,11 @@ async def reconcile_taxlots(
     # Written before Phase E, which queries closed lots back out of the DB.
     await taxlot_repo.create_many(new_closed_lots)
 
+    # --- Phase D2: undo a closure whose sale IBKR has since busted ---
+    lots_unclosed = await _undo_busted_closures(
+        taxlot_repo, trade_repo, snapshot, incoming_lots
+    )
+
     # --- Phase E: adopt real sale dates for lots closed before <Trades> existed ---
     lots_restamped = await restamp_unsourced_closed_lots(taxlot_repo, trade_repo)
 
@@ -1081,8 +1216,94 @@ async def reconcile_taxlots(
         "lots_closed_full": lots_closed_full,
         "lots_closed_partial": lots_closed_partial,
         "lots_restamped": lots_restamped,
+        "lots_unclosed": lots_unclosed,
         "total_cost_basis_eur": total_cost_basis_eur,
     }
+
+
+async def _undo_busted_closures(
+    taxlot_repo: TaxLotRepository,
+    trade_repo: Optional[TradeRepository],
+    snapshot: Dict[int, List[Dict]],
+    incoming_lots: Dict[int, List[Dict]],
+) -> int:
+    """
+    Remove the closed lots a sale IBKR has since busted had booked; returns how many
+    changed (review item I3, 2026-11-08).
+
+    A SELL closes its lot in the sync that carries it (``close_source='trade'``). When
+    IBKR busts it in a LATER statement, the CANCELSELL arrives with the sale's trade date
+    and the lot is reported open again under its original open date — and the closed lot
+    stayed beside it, so every day before the "sale" held the shares twice. Within one
+    statement the pair cancels before anything closes (`uncancelled_sales`); this is the
+    case across two.
+
+    Only what both sides agree on is undone: on a closed lot's open date the statement
+    reports shares the snapshot did not hold (they came back), and on its close date the
+    trade-closed shares exceed what the sales still standing that day sold (the sale is
+    gone). The smaller of the two, newest closure first; a partial one shrinks the lot.
+    """
+    if trade_repo is None:
+        return 0
+    returned: Dict[Tuple[int, date], Decimal] = {}
+    for security_id, lots in incoming_lots.items():
+        held_before: Dict[date, Decimal] = defaultdict(Decimal)
+        for lot in snapshot.get(security_id, ()):
+            held_before[lot["open_date"]] += lot["quantity"]
+        reported: Dict[date, Decimal] = defaultdict(Decimal)
+        for lot in lots:
+            reported[lot["open_date"]] += lot["quantity"]
+        for open_date, qty in reported.items():
+            if qty > held_before[open_date]:
+                returned[(security_id, open_date)] = qty - held_before[open_date]
+    if not returned:
+        return 0
+
+    security_ids = sorted({sid for sid, _ in returned})
+    closed = (await taxlot_repo.session.execute(
+        select(TaxLot).where(
+            TaxLot.security_id.in_(security_ids),
+            TaxLot.is_open == False,  # noqa: E712 - SQL comparison, not identity
+            TaxLot.close_source == "trade",
+        )
+    )).scalars().all()
+    if not closed:
+        return 0
+    trades = (await trade_repo.session.execute(
+        select(Trade).where(Trade.security_id.in_(security_ids), Trade.account == IBKR)
+    )).scalars().all()
+
+    changed = 0
+    for security_id in security_ids:
+        mine = [lot for lot in closed if lot.security_id == security_id]
+        standing: Dict[date, Decimal] = defaultdict(Decimal)
+        for sale in uncancelled_sales(t for t in trades if t.security_id == security_id):
+            standing[sale.trade_date] += abs(sale.quantity)
+        booked: Dict[date, Decimal] = defaultdict(Decimal)
+        for lot in mine:
+            booked[lot.close_date] += lot.quantity
+        gone = {d: booked[d] - standing[d] for d in booked if booked[d] > standing[d]}
+        for lot in sorted(mine, key=lambda lot: (lot.close_date, lot.id), reverse=True):
+            back = returned.get((security_id, lot.open_date), Decimal("0"))
+            take = min(lot.quantity, back, gone.get(lot.close_date, Decimal("0")))
+            if take <= 0:
+                continue
+            returned[(security_id, lot.open_date)] = back - take
+            gone[lot.close_date] -= take
+            logger.info(
+                f"Undoing the closure of {take} share(s) of security_id={security_id} "
+                f"(opened {lot.open_date}, closed {lot.close_date}): IBKR busted the sale"
+            )
+            if take == lot.quantity:
+                await taxlot_repo.session.delete(lot)
+            else:
+                keep = (lot.quantity - take) / lot.quantity
+                lot.cost_basis = lot.cost_basis * keep
+                lot.cost_basis_eur = lot.cost_basis_eur * keep
+                lot.quantity -= take
+            changed += 1
+    await taxlot_repo.session.flush()
+    return changed
 
 
 async def restamp_unsourced_closed_lots(

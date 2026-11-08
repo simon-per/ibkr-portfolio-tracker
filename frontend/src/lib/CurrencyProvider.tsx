@@ -1,15 +1,48 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import {
   CurrencyContext, DEFAULT_SUPPORTED, FALLBACK_CURRENCY, type CurrencyContextValue,
 } from './CurrencyContext'
-import { dependsOnBaseCurrency, settingsQuery } from './queryCache'
+import { dependsOnBaseCurrency, servedBaseCurrency, settingsQuery } from './queryCache'
+import type { AppSettings } from './api'
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
 
   const { data, isError: settingsFailed } = useQuery(settingsQuery)
+
+  // A response converted into another base currency than the cached settings name means
+  // the base changed elsewhere (another device, a CLI) while these settings are kept for
+  // the session (`staleTime: Infinity`): the label would sit on figures in the other
+  // currency (review item C3, 2026-11-08). Refresh the settings once per such currency,
+  // and if the base did change, reset what was converted into the old one — what a switch
+  // made here does.
+  const settingsBase = data?.base_currency
+  useEffect(() => {
+    if (!settingsBase) return
+    let askedAbout: string | null = null
+    const check = (key: readonly unknown[], response: unknown) => {
+      if (key[0] === 'settings') return
+      const served = servedBaseCurrency(response)
+      if (served === null || served === settingsBase || served === askedAbout) return
+      askedAbout = served
+      void queryClient.invalidateQueries({ queryKey: ['settings'] }).then(() => {
+        const now = queryClient.getQueryData<AppSettings>(['settings'])?.base_currency
+        if (now && now !== settingsBase) {
+          void queryClient.resetQueries({ predicate: dependsOnBaseCurrency })
+        }
+      })
+    }
+    const cache = queryClient.getQueryCache()
+    // What arrived before the settings did, then everything after.
+    for (const query of cache.getAll()) check(query.queryKey, query.state.data)
+    return cache.subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'success') {
+        check(event.query.queryKey, event.action.data)
+      }
+    })
+  }, [queryClient, settingsBase])
 
   const mutation = useMutation({
     mutationFn: (currency: string) => api.updateBaseCurrency(currency),

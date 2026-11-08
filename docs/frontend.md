@@ -335,6 +335,13 @@ missing it costs a wrong figure.
   `health` and `logos`. **The crypto book is reset too**: it is stored in USD but served in the base
   currency. Keying every money query on the currency was rejected: about 55 key sites, and one that
   forgot would bring the bug back. `CurrencyProvider.reset.test.tsx` pins it.
+- **A base currency changed elsewhere is noticed from the responses** (review item C3,
+  2026-11-08). The settings are read once a session (`staleTime: Infinity`), so a switch made on
+  another device left this one's label on figures served in the new currency. `CurrencyProvider`
+  watches the cache: a response whose top-level `base_currency` (`servedBaseCurrency`) is not the
+  settings' refreshes the settings, once per such currency, and when they did change resets
+  `dependsOnBaseCurrency` as a switch made here does. It also checks what was cached before the
+  settings arrived. `CurrencyProvider.drift.test.tsx` pins it.
 - **A query keyed on a control keeps its last response while the next one loads**
   (`useKeepPreviousData` in `CurrencyContext.tsx`, #68). Look-through's Top 25/50/100, Activity's
   pages and the Dividends period rendered skeletons until the new response arrived, so the control

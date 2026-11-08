@@ -549,10 +549,15 @@ async def ingest_finpension_report(
             counts["lots_closed"] += len(closed)
 
     if unconvertible:
-        warnings.append(
-            f"No CHF/EUR rate for {', '.join(sorted(unconvertible))}; those rows were "
-            f"skipped rather than stored unconverted. The derived cash balance will be "
-            f"short by their amounts until the rate is available and the file re-imported."
+        # Refused whole (review item C4, 2026-11-08). Skipping the row stored a ledger
+        # that looked complete and was not: a skipped purchase left its lot out and its
+        # cash in, so the balance read high — the opposite of what the old warning
+        # said — and every holding figure short. The caller's transaction rolls the
+        # wholesale delete above back, so the stored ledger stays as it was.
+        raise FinpensionIngestError(
+            f"No CHF/EUR rate for {', '.join(sorted(unconvertible))}, so those rows "
+            f"cannot be stored in EUR. Nothing was changed; re-import once a rate for "
+            f"those dates is cached."
         )
 
     # --- Persist lots -------------------------------------------------------------

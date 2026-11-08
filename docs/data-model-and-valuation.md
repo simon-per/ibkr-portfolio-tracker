@@ -149,6 +149,18 @@ rather than realigning. One stray row silently stamped **every later lot** with 
 ibflex 0.15 does parse the field (`parse_element_attr` returns a `datetime`); the comment claiming
 otherwise was wrong. Don't reintroduce index matching. Tests: `tests/test_ibkr_parsers.py`.
 
+**A lot opened by a BUY is dated by that trade** (review item C1, 2026-11-08). `openDateTime` is US
+Eastern; `tradeDate` is exchange-local, and the cash leaves on it. A KRX buy at 09:05 in Seoul executes
+at 20:05 the evening before in New York, so the lot entered the holdings a day before its cash left:
+each SK Hynix lot a day before its trade, the Total Value up by the purchase for a day and every range starting that day anchored on it. The ingest stores each trade's
+`dateTime` as `trades.executed_at` (naive UTC, migration `e5a7c9d1f3b4`), and
+`date_lots_by_their_buys` gives a lot whose `openDateTime` is a BUY's instant that trade's
+`trade_date` — from the table, so the date holds once the trade has left the statement window. A lot no
+purchase with an instant explains (a transfer, a split, a trade stored before the instants were) keeps
+its `openDateTime` date. The first sync that redates a lot moves its snapshot twin to the new date
+before the diff (`_redated_snapshot`): seen vanishing from one day it would be booked as a sale
+whenever the security also had a real sale in the window. Tests: `tests/test_lot_trade_date.py`.
+
 `restamp_unsourced_closed_lots()` then fixes lots closed *before* `<Trades>` existed: those carry the
 date the sync **noticed** the drop, not the sale date (CRM and NFLX read 2026-04-17 for a 2026-03-13
 sale). A lot is only re-stamped when exactly one SELL for that security matches its quantity and isn't
@@ -213,9 +225,31 @@ answers it: `trade_kind`, `sale_sign` (+1 sale, −1 its cancellation, 0 otherwi
   without cancellations: the closed positions used to need only the *realized* figure to convert,
   so a sale with a realized P&L of exactly zero and no rate for its proceeds read as `trade`; it
   now falls back like any other unconvertible sale.
+- **A realized gain in the base currency prices its cost at the rate it was bought at**
+  (`gain_in_base`, review item V4, 2026-11-08). IBKR's `fifoPnlRealized` is in the trade's
+  currency; converted at the sale date it priced the cost at the sale date too, while every
+  unrealized figure prices cost at the open date — a USD holding bought at one rate and sold at
+  another carried its FX move on the cost inside the gain (the CHF realized headline read high by
+  that much). The summary and the closed positions take each security's net proceeds (proceeds +
+  commission) at each sale's date less IBKR's FIFO cost (net proceeds − realized, in the trade's
+  currency) at its closed lots' open-date rate (their `cost_basis_eur` in the base currency over
+  their `cost_basis`). For a holding in the base currency that is IBKR's figure exactly. IBKR's
+  figure converted at the sale date stays wherever the lots cannot vouch for the sales: a row
+  without a rate, two currencies, or closed lots whose cost is not IBKR's cost of the sales within
+  1% (cost, not shares: a split restates the closed lots' share count, never their cost). The tax
+  report and the Activity ledger keep IBKR's per-trade figure at the sale date, as the statement
+  shows it. Tests: `tests/test_realized_cost_at_open_rate.py`.
 - **Reconcile and the restamp read `uncancelled_sales`.** A SELL busted inside the window no
   longer settles a drop as `close_source='trade'` on the busted date — the drop, if any, goes to
   inference — and a cancelled SELL is no restamp candidate.
+- **A sale busted in a LATER statement undoes its closure** (`_undo_busted_closures`, Phase D2,
+  review item I3, 2026-11-08). The SELL closed its lot in the sync that carried it; the CANCELSELL
+  arrives one statement later with the sale's trade date and the lot comes back under its old open
+  date, and the closed lot used to stay beside it — the shares held twice on every day before the
+  "sale". Undone only where both sides agree: the statement reports shares on the closed lot's open
+  date that the snapshot did not hold, and on its close date the trade-closed shares exceed what the
+  sales still standing sold. The smaller of the two, newest first; a partial one shrinks the lot.
+  `lots_unclosed` on the sync result counts them. Tests: `tests/test_busted_sale_across_statements.py`.
 
 `tests/test_trade_kind_family.py` fails any comparison against `buy_sell` (or a trade-kind literal
 in a module that imports the trade model) outside `app/models/trade.py`, and any `.realized_pnl`
@@ -370,6 +404,14 @@ IBKR restates the lot quantity immediately — leaving a step change in the char
 So `invalidate_prices_for_splits()` deletes `market_prices` up to and including the action date
 (`MarketPriceRepository.delete_up_to`), and the next market-data sync refetches them — one extra
 request per security, since fetching is range-based.
+
+**And the lots sold before it** (`rescale_lots_closed_before_splits`, review item V5, 2026-11-08).
+IBKR restates the open lots; a lot closed before the split kept its old share count, so its days
+before the sale were valued at the old count times the adjusted price (a tenth of the truth for a
+10-for-1) and its realized approximation with them. The same newly inserted actions rescale every lot
+of the security closed before the action date: shares times the ratio, price per share over it, cost
+unchanged. The ratio is read off IBKR's description ("SPLIT 10 FOR 1", `split_ratio`); one that
+states none is named in `warnings[]` and left alone. Once per split, like the purge.
 
 **Holidays are not "missing" forever.** `get_missing_dates()` skipped weekends but not market holidays,
 so a date the exchange never traded (4 July, Good Friday) stayed missing permanently — and one such date

@@ -1,9 +1,10 @@
-from typing import List, Optional
-from datetime import date
+from typing import Dict, List, Optional, Tuple
+from datetime import date, datetime
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.trade import Trade
+from app.accounts import IBKR
+from app.models.trade import Trade, buy_sign
 
 
 class TradeRepository:
@@ -42,6 +43,20 @@ class TradeRepository:
         stmt = stmt.order_by(Trade.trade_date.asc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def buy_dates_by_instant(self) -> Dict[Tuple[str, datetime], date]:
+        """
+        ``{(conid, executed_at): trade_date}`` for every IBKR purchase whose instant is
+        known: what dates the lot each one opened (`date_lots_by_their_buys`).
+        """
+        result = await self.session.execute(
+            select(Trade).where(Trade.executed_at.is_not(None), Trade.account == IBKR)
+        )
+        return {
+            (str(t.conid), t.executed_at): t.trade_date
+            for t in result.scalars().all()
+            if buy_sign(t) == 1
+        }
 
     async def get_all(self) -> List[Trade]:
         """Every trade, oldest first — the cash balance runs from the account's start."""

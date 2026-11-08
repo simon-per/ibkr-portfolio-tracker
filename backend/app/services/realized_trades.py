@@ -27,6 +27,16 @@ A row converts when both its proceeds and its realized figure do; a missing figu
 taken as zero, as every reader did before -- IBKR sends `fifoPnlRealized` on every
 execution and the finpension importer computes it, so it is not NULL in practice.
 `tests/test_trade_kind_family.py` fails a `.realized_pnl` read anywhere else in `app/`.
+
+**A gain in the base currency is not IBKR's gain converted** (review item V4,
+2026-11-08). IBKR states it in the trade's currency, proceeds less FIFO cost, and
+converting the difference at the sale date's rate prices the cost at the sale date too —
+while every unrealized figure here prices cost at the open date (`cost_basis_eur`). A
+holding bought at one rate and sold at another then read two different gains depending
+on which side of the sale it was asked. `gain_in_base` keeps IBKR's FIFO cost and
+prices it at the rate its closed lots were bought at; the summary and the closed
+positions read it. The tax report and the Activity ledger keep IBKR's per-trade figure
+converted at the sale date, which is what the statement shows.
 """
 import logging
 from dataclasses import dataclass, field
@@ -63,6 +73,53 @@ class SecurityRealized:
     net_sales: int = 0
     converted: int = 0
     unconvertible: int = 0
+    # Over the converted rows, for `gain_in_base`: proceeds net of commission in the
+    # base currency at each sale's date, IBKR's FIFO cost in the trades' own currency
+    # (proceeds + commission - realized), the shares sold, and the currencies seen.
+    net_proceeds: Decimal = ZERO
+    cost_native: Decimal = ZERO
+    quantity: Decimal = ZERO
+    currencies: set = field(default_factory=set)
+
+
+@dataclass
+class ClosedCost:
+    """One security's closed lots: shares, and cost in their own currency and in the base
+    currency at each lot's open date (`PortfolioService.closed_cost_by_security`)."""
+
+    quantity: Decimal = ZERO
+    cost_native: Decimal = ZERO
+    cost_base: Decimal = ZERO
+    currencies: set = field(default_factory=set)
+
+
+# How far the closed lots' cost may differ from IBKR's FIFO cost of the sales and still
+# be the lots those sales closed: commissions rounded on either side. Cost rather than
+# shares, because a split restates the closed lots' share count and never their cost.
+COST_TOLERANCE = Decimal("0.01")
+
+
+def gain_in_base(sold: SecurityRealized, closed: Optional[ClosedCost]) -> Decimal:
+    """
+    A security's realized gain in the base currency, cost at the rate it was bought at:
+    the sales' net proceeds (each at its own date's rate) less IBKR's FIFO cost at the
+    closed lots' open-date rate (their base-currency cost over their own-currency cost).
+    For a holding in the base currency itself that is IBKR's figure exactly.
+
+    IBKR's figure converted at the sale date (``sold.gain``) wherever the lots cannot
+    vouch for the sales: a row without a rate, a currency the two do not share, or
+    closed lots whose cost is not IBKR's cost of the sales within `COST_TOLERANCE` (a
+    sale whose lot was closed by some other path, or before the trade ledger began).
+    """
+    if closed is None or sold.unconvertible or not sold.converted:
+        return sold.gain
+    if len(sold.currencies) != 1 or closed.currencies != sold.currencies:
+        return sold.gain
+    if closed.cost_native <= 0 or sold.cost_native <= 0:
+        return sold.gain
+    if abs(closed.cost_native - sold.cost_native) > sold.cost_native * COST_TOLERANCE:
+        return sold.gain
+    return sold.net_proceeds - sold.cost_native * (closed.cost_base / closed.cost_native)
 
 
 @dataclass
@@ -101,13 +158,13 @@ async def realized_from_sell_trades(
             continue
         sec = result.by_security.setdefault(t.security_id, SecurityRealized())
         sec.net_sales += sign
-        proceeds = await to_base.convert(
-            t.proceeds if t.proceeds is not None else ZERO, t.currency, t.trade_date
-        )
-        gain = await to_base.convert(
-            t.realized_pnl if t.realized_pnl is not None else ZERO, t.currency, t.trade_date
-        )
-        if proceeds is None or gain is None:
+        native_proceeds = t.proceeds if t.proceeds is not None else ZERO
+        native_net = native_proceeds + (t.commission or ZERO)
+        native_gain = t.realized_pnl if t.realized_pnl is not None else ZERO
+        proceeds = await to_base.convert(native_proceeds, t.currency, t.trade_date)
+        gain = await to_base.convert(native_gain, t.currency, t.trade_date)
+        net = await to_base.convert(native_net, t.currency, t.trade_date)
+        if proceeds is None or gain is None or net is None:
             logger.warning(
                 f"Realized: skipping trade {t.ib_key} -- no FX for {t.currency} near {t.trade_date}"
             )
@@ -117,6 +174,10 @@ async def realized_from_sell_trades(
         sec.converted += 1
         sec.proceeds += proceeds
         sec.gain += gain
+        sec.net_proceeds += net
+        sec.cost_native += native_net - native_gain
+        sec.quantity -= t.quantity if t.quantity is not None else ZERO
+        sec.currencies.add(t.currency)
         result.rows.append(ConvertedSale(
             trade=t, proceeds=proceeds, gain=gain,
             gain_reported=t.realized_pnl is not None,

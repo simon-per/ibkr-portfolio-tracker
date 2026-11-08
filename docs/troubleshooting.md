@@ -54,7 +54,7 @@
 | A `market_data_only` run reports `benchmarks_fetched: 0` | Expected at every slot but the first after a session: each benchmark is asked once per finished session, so Sunday and Monday report 0 all day. Zero at 08:00 Tuesday to Saturday as well is the bug fixed 2026-10-17 (issue #4) — check the log for "pipeline busy" |
 | The chart steps at a split date | Cached pre-split closes. A *new* split purges them automatically; for an older one delete that security's `market_prices` and let the 18:00 `full_sync` (the 730-day pass) refill them |
 | A new currency appears | Nothing to do if it's in `WARM_CURRENCIES` or the ECB set. Otherwise add it there — one edit, no extra request |
-| "Money added" spikes in one month | A transfer booked as a deposit. `manage_cash_flows list`, then `reclassify <ib_key> --as TRANSFER_IN`. **Never** trust an Added figure without eyeballing that list first |
+| "Money added" spikes in one month | A transfer booked as a deposit. `manage_cash_flows list`, then `reclassify <ib_key> --as TRANSFER_IN` (kept by later syncs since 2026-11-08). **Never** trust an Added figure without eyeballing that list first |
 | A month I know I invested in reads low on the Money In per Month chart | Working as intended: the bar is money *in*, so capital rotated between holdings is not in it. Selling one holding to buy another puts the same money to work twice, and only the second trip looks like activity — August 2026 put 30,617 CHF into new positions against 7,211 actually paid in, and September 3,639 against **zero**. Hover the bar for the deployed, released and net figures. Do not net the gap away and do not promote deployed back to a bar |
 | "Money added" is blank or `—` | Expected before `deposits_from`: no IBKR deposit ledger exists for the pre-transfer years. Not a bug — Deployed covers that era |
 | Realized gains look low + a `warnings[]` entry names a currency (tax report) or "N sales unpriced" under *Realized gain* (hero, `unpriced_disposals`) | No FX rate for that trade date (or no price near a closed lot's close date), so the sale was **omitted** rather than mis-scaled. Check `WARM_CURRENCIES` covers it |
@@ -120,6 +120,13 @@
 
 Moved from STATUS.md on 2026-10-14. Each is known, measured and accepted, mostly by owner
 decision; read the entry before "fixing" one.
+
+- **A lot transferred in kind with an open date after the deposit ledger begins reads as profit.**
+  Cash transferred in after `coverage_from` has its own leg (`capital_legs`, review item C2), but
+  an in-kind lot is only told apart from a purchase by the absence of a BUY, which is no evidence
+  before the trade ledger begins, and a spin-off line or a stock dividend lacks one too. Every
+  in-kind transfer seen so far carried its original, earlier open dates, which the lot legs count.
+  Accepted 2026-11-08; fix it the day one arrives dated inside the ledger.
 
 - **Credentials: nothing open, by owner decision — do not re-raise.** The IBKR Flex token leaked
   through `/api/scheduler/history` until the 2026-07-28 scrub and was not rotated (2026-08-17:
@@ -210,8 +217,8 @@ decision; read the entry before "fixing" one.
   still attempted, as before.
 - **`market_cap_base` is null for minor-unit quotes** (GBp/ZAc/ILA) until Yahoo's `marketCap`
   scale for them is verified. Those rows show their own figure with the code and sort last, on the
-  Fundamentals tab and the Watchlist alike. So does a cap whose currency has no rate cached in the
-  last 30 days, e.g. a watchlist name added since the last FX pass.
+  Fundamentals tab and the Watchlist alike. So does a cap whose currency has no rate cached within
+  `FX_MAX_CARRY_DAYS` (14), e.g. a watchlist name added since the last FX pass.
 - **The monthly heatmap's YTD changed method on 2026-10-14**: it is now the months compounded,
   each measured from the previous month-end, so it differs from earlier reads by design.
 - **A heatmap month or YTD cut by the selected range is unmarked on the surface** (owner,

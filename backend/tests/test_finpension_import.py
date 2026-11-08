@@ -415,19 +415,23 @@ async def test_the_importer_only_ever_replaces_its_own_account(db):
 # ── FX ──────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_an_unconvertible_date_skips_its_row_and_says_so(db):
+async def test_an_unconvertible_date_refuses_the_file_and_changes_nothing(db):
     """
-    The third site of the `_to_eur` rule. The tax copy and the dividend copy were both
-    fixed to return None on FX failure; storing the unconverted CHF amount in an EUR
-    column is the bug those fixes were for.
+    The third site of the `_to_eur` rule: never the unconverted CHF amount in an EUR
+    column. And refused whole (review item C4): skipping the row stored a ledger that
+    looked complete — a skipped purchase kept its cash and lost its lot, so the balance
+    read high while the warning said short.
     """
-    result = await _apply(db, REAL_SHAPE, fx=StubFx(fails_on={date(2026, 8, 26)}))
+    await _apply(db, REAL_SHAPE)
     await db.commit()
+    before = [(f.ib_key, f.amount_eur) for f in await _rows(db, CashFlow, account=PILLAR3A)]
 
-    assert result["deposits"] == 2
-    assert any("No CHF/EUR rate" in w for w in result["warnings"])
-    assert all(f.amount_eur is not None
-               for f in await _rows(db, CashFlow, account=PILLAR3A))
+    with pytest.raises(FinpensionIngestError, match="No CHF/EUR rate for 2026-08-26"):
+        await _apply(db, REAL_SHAPE, fx=StubFx(fails_on={date(2026, 8, 26)}), force=True)
+    await db.rollback()
+
+    after = [(f.ib_key, f.amount_eur) for f in await _rows(db, CashFlow, account=PILLAR3A)]
+    assert after == before
 
 
 # ── The CLI contract ────────────────────────────────────────────────────────

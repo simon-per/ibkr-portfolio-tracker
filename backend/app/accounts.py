@@ -53,14 +53,19 @@ async def tax_exempt_accounts(db) -> list[str]:
     Every caller guards on truthiness before building a ``NOT IN``, because an
     empty one is a clause with nothing to say and the failure direction here is a
     wrong tax return.
+
+    The cash ledger is read too (review item C5, 2026-11-08): a 3a account that has
+    only been paid into — deposits, nothing bought yet — has no security or trade,
+    and its deductible deposits were missing from the tax report.
     """
     from sqlalchemy import select
 
+    from app.models.cash_flow import CashFlow
     from app.models.security import Security
     from app.models.trade import Trade
 
     labels = set()
-    for column in (Security.account, Trade.account):
+    for column in (Security.account, Trade.account, CashFlow.account):
         rows = await db.execute(select(column).distinct())
         labels.update(a for a in rows.scalars().all() if is_tax_exempt(a))
 
