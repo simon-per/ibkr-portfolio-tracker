@@ -322,7 +322,9 @@ snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
   **The Realized gains tile counts the same sales** (review item T2, 2026-11-08): it read the sale
   rows ("15 sales") beside the criteria's "0 of 12"; it takes `sales` when on record, else the rows.
 - **`margin_used`, `min_cash_balance`.** The lowest **end-of-day** IBKR balance over the year
-  (1 January to `holdings_as_of`), the balance carried in included, from the same events the
+  (1 January to `holdings_as_of`), the balance carried in included — as the first day's level only
+  when nothing is booked that day (review item T5, 2026-11-08: a residency starting on a day whose
+  deposit lifted a negative carried balance read as margin used) — from the same events the
   year-end cash line reads; `margin_used` is that minimum, rounded to cents, below zero. Null
   while an IBKR trade has no exchange rate (`unconverted_trades`: the balance is short by the
   whole trade). Two limits of the derivation, stated: an intraday dip that closes the day

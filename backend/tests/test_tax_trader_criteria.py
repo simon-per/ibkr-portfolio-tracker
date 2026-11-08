@@ -123,6 +123,19 @@ def test_the_lowest_balance_counts_the_carried_balance_and_closes_days():
     assert lowest_balance(events, start, end) == Decimal("-10")
 
 
+def test_a_carried_balance_the_first_day_lifts_is_not_a_low():
+    """
+    Review item T5: the balance carried into the window is the first day's end-of-day
+    balance only when nothing is booked that day. A residency starting on a day whose
+    deposit lifts a negative carried balance read as margin used.
+    """
+    start, end = date(YEAR, 3, 1), date(YEAR, 12, 31)
+    events = [(date(YEAR, 2, 27), Decimal("-40")), (start, Decimal("100"))]
+    assert lowest_balance(events, start, end) == Decimal("60")
+    # Nothing on the first day: the carried balance is that day's level.
+    assert lowest_balance(events[:1], start, end) == Decimal("-40")
+
+
 def test_the_turnover_is_volume_over_securities_and_signed_cash():
     d = Decimal
     assert turnover_multiple(d("900"), d("400"), d("100")) == 1.8
