@@ -96,6 +96,11 @@ Two measured details that look like nits:
   rate is parsed and never stored, so after k skips a re-export missing up to k rows passed
   the old guard and the wholesale replace deleted the difference. With no run on record it
   falls back to the stored count.
+- **A row with no CHF/EUR rate refuses the file** (review item C4, 2026-11-08). It used to be skipped
+  with a warning that the cash would read short — the opposite of what happened for a purchase,
+  whose cash stayed in while its lot was left out, so the balance read high and the holdings
+  short. Now `FinpensionIngestError` names the dates, the CLI rolls back, and the stored ledger
+  stays as it was until a rate for them is cached.
 - **Price rows are inserted with ON CONFLICT DO NOTHING, never a bare add.** The replace
   deletes only our own `finpension_*` rows, and for a fund pinned to Yahoo the market-data
   sync re-fetches the trailing `PROVISIONAL_PRICE_DAYS` even when cached — its upsert
