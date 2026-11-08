@@ -760,6 +760,12 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
+**An empty `.info` is refused** (review item Y3, 2026-11-08): yfinance answers a symbol it cannot
+serve with `{'trailingPegRatio': None}`, which the watchlist stored as a fresh row of blanks with a
+score from neutral fallbacks. `yahoo_estimates.info_is_empty` is the one test, shared with
+`extract_metrics`; the item returns an error and its row stays as it was
+(`tests/test_watchlist_empty_info.py`).
+
 **Analyst counts** (owner-approved 2026-11-07, CLAUDE.md rule 1: about one request a week for
 each ticker below, ~13 then). A row's rating is five counts labelled by `consensus_of`, never
 Yahoo's `recommendationKey`. A held listing's counts are `analyst_ratings`' and a Company-tab

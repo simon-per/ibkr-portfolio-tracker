@@ -24,7 +24,8 @@ from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, info_is_empty, is_fund,
+    read_optional,
 )
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
@@ -42,7 +43,7 @@ def extract_metrics(info: Dict, quarterly_financials=None, eps_trend_growth=None
     security (`FundamentalsService._extract_metrics`), the Company tab's chunk by CIK
     (`company_profile_sync`). Two readers would be two figures under one name, drifting.
     """
-    if not info or all(value is None for value in info.values()):
+    if info_is_empty(info):
         logger.info(f"No fundamental data available for {symbol}")
         return None
 

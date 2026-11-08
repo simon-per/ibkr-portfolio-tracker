@@ -69,6 +69,17 @@ def read_optional(read: Callable[[], T], endpoint: str, label: str) -> Optional[
         return None
 
 
+def info_is_empty(info: Optional[Dict]) -> bool:
+    """
+    True when a `.info` carries nothing: empty, or every value None. yfinance answers an
+    unknown symbol, and a quoteSummary error it swallowed, with `{'trailingPegRatio':
+    None}`. The one test the fundamentals passes and the watchlist both refuse it with
+    (review item Y3): the watchlist stored it as a fresh row of blanks, its score built
+    from neutral fallbacks.
+    """
+    return not info or all(value is None for value in info.values())
+
+
 def is_fund_quote_type(quote_type: Optional[str]) -> bool:
     """The one quoteType test for "a fund": also read off the stored
     `fundamental_metrics.quote_type` (`FundamentalMetrics.is_fund`, the ratings pass)."""

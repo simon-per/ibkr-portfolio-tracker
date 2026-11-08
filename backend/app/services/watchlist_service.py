@@ -19,7 +19,8 @@ from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, info_is_empty, is_fund,
+    read_optional,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
@@ -441,6 +442,11 @@ class WatchlistService:
         except Exception as e:
             logger.error(f"Failed to fetch {yahoo_ticker}: {e}")
             return {"error": str(e)}
+        if info_is_empty(info):
+            # Refused, as the fundamentals passes refuse it: written, it was a fresh row
+            # of blanks under today's time and a score from neutral fallbacks (Y3).
+            logger.warning(f"{yahoo_ticker}: Yahoo answered with no data; row left as it was")
+            return {"error": f"Yahoo returned no data for {yahoo_ticker}"}
         # The same pure test the fetch made, so `slow` says what was read.
         slow = wants_estimates(info)
         if slow and not slow_due:
