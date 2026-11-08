@@ -504,6 +504,10 @@ and each is wrong the other way round:
 - **The basket a fund actually reads comes from `LookthroughService._alias_proxied_baskets`**, not
   from a second copy of the proxy rule, so the age reported is the age of the file the numbers came
   from. For a proxied fund that is the *source's*, which is also where the threshold comes from.
+  **Every reader loads a held fund's basket through `_held_baskets`**, which applies the alias: the
+  evening ISIN pass's ranking (`material_constituent_isins`) read the baskets without it until review
+  item L4 (2026-11-08), so the 3a funds' borrowed constituents were never asked about. A test fails
+  any other method of the service that asks the repository for baskets.
 - **The threshold is `stale_after_days`**, the same per-adapter table the tab badges on. A second
   constant here would be the third definition of "stale", after the one that already badged Vanguard
   permanently. The fetch-after table is not a second definition of stale: it lives beside it and is

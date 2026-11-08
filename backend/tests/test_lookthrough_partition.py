@@ -936,6 +936,47 @@ async def test_a_fund_with_no_basket_of_its_own_borrows_the_one_it_proxies(sessi
 
 
 @pytest.mark.asyncio
+async def test_the_evening_isin_pass_ranks_a_borrowed_baskets_constituents(session):
+    """
+    Review item L4: `material_constituent_isins` read the held funds' baskets without the
+    proxy alias, so a fund that borrows its basket (the 3a funds) ranked nothing and the
+    evening ISIN pass never asked about what it holds. Both readers now load through
+    `_held_baskets`.
+    """
+    await _standard_book(session)
+    amazon = "US0231351067"  # in VT's basket only: nothing but the alias can rank it
+    session.add_all([
+        _basket(VT_ISIN, "100"),
+        _holding(VT_ISIN, 1, amazon, "Amazon.com Inc", "100"),
+    ])
+    await session.flush()
+
+    ranked = await LookthroughService(session).material_constituent_isins()
+    assert amazon in ranked
+
+
+def test_every_reader_of_a_held_funds_basket_goes_through_the_alias():
+    """The family: in the look-through service only `_held_baskets` asks the repository for
+    baskets, so a new reader cannot skip the proxies the way the ranking did."""
+    import ast
+    import inspect
+
+    from app.services import lookthrough_service
+
+    tree = ast.parse(inspect.getsource(lookthrough_service))
+    callers = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(fn):
+                if (
+                    isinstance(node, ast.Attribute)
+                    and node.attr in ("get_baskets", "get_holdings")
+                ):
+                    callers.add(fn.name)
+    assert callers == {"_held_baskets"}
+
+
+@pytest.mark.asyncio
 async def test_a_borrowed_basket_still_closes_the_partition(session):
     """The whole point of aliasing rather than copying: nothing downstream has a proxy branch."""
     await _standard_book(session)
