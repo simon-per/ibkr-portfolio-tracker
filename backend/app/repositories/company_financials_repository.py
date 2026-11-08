@@ -9,6 +9,7 @@ the stretch of closes one fetch covers.
 """
 
 from datetime import date, datetime
+import json
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import delete, func, select
@@ -183,11 +184,16 @@ class CompanyFinancialsRepository:
         rows: Sequence[dict],
         fetched_at: datetime,
         entity_name: Optional[str] = None,
+        splits: Sequence[dict] = (),
     ) -> None:
-        """Every figure of one company, replaced as one set; clears its miss stamps."""
+        """
+        Every figure of one company, replaced as one set with the splits its filings
+        restated history for; clears its miss stamps.
+        """
         company = await self.ensure_company(cik)
         if entity_name and not company.name:
             company.name = entity_name
+        company.filed_splits = json.dumps(list(splits)) if splits else None
         await self.session.execute(
             delete(CompanyFinancial).where(CompanyFinancial.cik == cik)
         )

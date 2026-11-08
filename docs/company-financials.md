@@ -485,6 +485,15 @@ Computed in `company_financials_service` only:
   Only a ratio in `SPLIT_RATIOS` counts: Yahoo books a spin-off as a fractional split (SPGI's
   1.057 on 2026-07-01), which moves no share count. Its pre-spin-off closes stay as Yahoo
   lowered them, so a P/E before a spin-off reads that fraction low (accepted).
+- **A split the filings restated for and Yahoo never booked** (`filed_splits`, review item CO1,
+  2026-11-08): the normaliser emits each change of split factor between two consecutive filings
+  as `{after, by, ratio}` (the last filing on the old basis, the first on the new), stored as
+  `sec_companies.filed_splits` with the rows. `eps_basis` treats one as booked when a Yahoo split
+  of its ratio (±2%) falls within 14 days of that interval; otherwise the closes up to `after`
+  are divided by its ratio and the closes inside the interval are left out (either basis — a
+  multiple there is absent). HON's 1:2 at its 2026 Aerospace separation halved every earlier
+  P/E. A single filing voted off its neighbours both ways is a mis-vote, not two splits. NULL
+  until a company's next facts fetch writes it.
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not

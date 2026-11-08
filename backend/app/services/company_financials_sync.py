@@ -744,7 +744,9 @@ class CompanyFinancialsSync:
         )
         if read:
             result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
-        await self.repo.replace_rows(cik, result.rows, utcnow(), result.entity_name)
+        await self.repo.replace_rows(
+            cik, result.rows, utcnow(), result.entity_name, result.splits
+        )
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)

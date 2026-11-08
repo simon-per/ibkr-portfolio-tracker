@@ -51,6 +51,7 @@ Figures stay in the reporting currency. Converting a history into the base curre
 fold a decade of exchange-rate moves into every growth rate.
 """
 
+import json
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from statistics import median
@@ -145,6 +146,10 @@ PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
 PRICE_MAX_AGE_DAYS = 14
 SPLIT_RATIO_TOLERANCE = 0.005
+# How near a filed split (`eps_basis`) a Yahoo split of its ratio must fall to be the same
+# one: Yahoo's ratio is the exchange's, the filings' a snapped vote.
+FILED_SPLIT_SLACK_DAYS = 14
+FILED_SPLIT_RATIO_TOLERANCE = 0.02
 # The market cap's share count must sit this near the diluted average: a filer that tags one
 # class of several without its class (half of GOOGL's, 87% of META's) is no company's count.
 MARKET_CAP_SHARE_TOLERANCE = 0.10
@@ -436,13 +441,22 @@ def close_at(prices: Prices, day: date) -> Optional[float]:
 
 
 def eps_basis(
-    prices: Prices, splits: Prices, newest_filed: Optional[date]
+    prices: Prices,
+    splits: Prices,
+    newest_filed: Optional[date],
+    filed: Sequence[Dict[str, Any]] = (),
 ) -> List[Tuple[date, float]]:
     """
     Closes on the figures' split basis. Yahoo adjusts a history to the day it was fetched;
     the normaliser restates the figures to the newest filing, which has not seen a split
     after it, so each such split's ratio scales the closes back up. Only a split ratio
     counts: a spin-off Yahoo books as a split changes no share count.
+
+    `filed` are the splits the filings restated history for (`filed_splits`). One Yahoo
+    booked near it is in the closes already; one it did not leaves every close before it
+    on the old basis (HON's 1:2, review item CO1), so those are divided by its ratio. The
+    closes between the last filing on the old basis and the first on the new may be on
+    either, and are left out: a multiple there is unknown.
     """
     factor = 1.0
     for day, ratio in splits:
@@ -450,7 +464,26 @@ def eps_basis(
             abs(ratio / float(r) - 1) <= SPLIT_RATIO_TOLERANCE for r in SPLIT_RATIOS
         ):
             factor *= ratio
-    return [(day, close * factor) for day, close in prices]
+    unbooked = []
+    for event in filed:
+        after, by = date.fromisoformat(event["after"]), date.fromisoformat(event["by"])
+        slack = timedelta(days=FILED_SPLIT_SLACK_DAYS)
+        if not any(
+            after - slack <= day <= by + slack
+            and abs(ratio / event["ratio"] - 1) <= FILED_SPLIT_RATIO_TOLERANCE
+            for day, ratio in splits
+        ):
+            unbooked.append((after, by, event["ratio"]))
+    out = []
+    for day, close in prices:
+        if any(after < day <= by for after, by, _ in unbooked):
+            continue
+        scale = factor
+        for after, _, ratio in unbooked:
+            if day <= after:
+                scale /= ratio
+        out.append((day, close * scale))
+    return out
 
 
 def valuations(close: Optional[float], figures: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
@@ -909,7 +942,9 @@ class CompanyFinancialsService:
         if not closes:
             return []
         splits = [(s.date, s.ratio) for s in await self.repo.splits_for(cik)]
-        return eps_basis(closes, splits, max(r.filed for r in rows))
+        company = await self.db.get(SecCompany, cik)
+        filed = json.loads(company.filed_splits) if company and company.filed_splits else []
+        return eps_basis(closes, splits, max(r.filed for r in rows), filed)
 
     async def _yahoo_figures(
         self, company: SecCompany, listing: Optional[Security]

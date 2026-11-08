@@ -438,6 +438,10 @@ class Normalised:
     rows: List[Dict[str, Any]] = field(default_factory=list)
     currency: Optional[str] = None
     entity_name: Optional[str] = None
+    # The splits the filings restated history for (`filed_splits`): each
+    # {"after", "by", "ratio"} — the last filing on the old basis, the first on the new
+    # (ISO dates), and new shares per old.
+    splits: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -660,11 +664,15 @@ def _vote(votes: Counter, fallback: Fraction) -> Fraction:
     return min(winners, key=lambda k: abs(float(k) - float(fallback)))
 
 
-def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
+def adjustments(
+    facts: Iterable[Fact], events: Optional[List[Dict[str, Any]]] = None
+) -> Dict[Tuple[str, str], float]:
     """
     (concept, accn) -> the multiplier that puts that filing's values of that concept into
     the newest filing's basis: its split factor (shares up, per-share down, money
     untouched) times the concept's own scale slip, if any. See the module docstring.
+    `events`, when given, receives each change of split factor between two consecutive
+    filings (`filed_splits`).
     """
     by_accn: Dict[str, List[Fact]] = defaultdict(list)
     by_period: Dict[Tuple[str, Optional[date], date], List[Fact]] = defaultdict(list)
@@ -683,6 +691,7 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
     # Share-count facts of the filings already walked, for `_neighbour_split`.
     walked_counts: Dict[str, List[Fact]] = defaultdict(list)
     previous_split = Fraction(1)
+    previous_accn: Optional[str] = None
     for accn in sorted(by_accn, key=lambda a: (filed_of[a], a), reverse=True):
         pairs = []
         split_votes: Counter = Counter()
@@ -733,8 +742,36 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
         for f in by_accn[accn]:
             if f.kind == SHARES and f.val > 0:
                 walked_counts[f.concept].append(f)
-        previous_split = split
+        if events is not None and previous_accn is not None and split != previous_split:
+            events.append({
+                "after": filed_of[accn].isoformat(),
+                "by": filed_of[previous_accn].isoformat(),
+                "ratio": float(split / previous_split),
+            })
+        previous_split, previous_accn = split, accn
     return multiplier
+
+
+def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The splits the filings restated history for, oldest first (review item CO1,
+    2026-11-08): the closes before one Yahoo never booked are on the old share basis while
+    the figures are on the new (HON's 1:2 at its 2026 Aerospace separation doubled every
+    earlier EPS and halved every earlier P/E), and `eps_basis` scales them. A single filing
+    voted off its neighbours both ways is a mis-vote, not two splits, and is left out.
+    """
+    kept: List[Dict[str, Any]] = []
+    for event in sorted(events, key=lambda e: e["after"]):
+        last = kept[-1] if kept else None
+        if (
+            last is not None
+            and last["by"] == event["after"]
+            and abs(last["ratio"] * event["ratio"] - 1) <= NEIGHBOUR_TOLERANCE
+        ):
+            kept.pop()
+            continue
+        kept.append(event)
+    return kept
 
 
 def _neighbour_split(
@@ -1314,7 +1351,9 @@ def normalise(
     facts = _drop_lone_slips(base + _filing_facts(base, filing_facts))
     if not facts:
         return result
-    multiplier = adjustments(facts)
+    events: List[Dict[str, Any]] = []
+    multiplier = adjustments(facts, events)
+    result.splits = filed_splits(events)
     latest = _latest([f for f in facts if f.concept != SPLIT_WITNESS], multiplier)
     totals = {c: latest.pop(c) for c in DIVIDEND_TOTALS if c in latest}
 
