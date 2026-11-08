@@ -85,6 +85,10 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   1046179) through the app's `EdgarClient` with the server's User-Agent, which lives only in the
   VPS `.env`; the /goal run could make neither an SEC request nor an ssh call. Run the read on the
   VPS (or say so and a session will), then build R6 on what it shows.
+- **Optional: put 2026's broker interest on record (T4).** Margin interest is reported only for a year
+  whose start the ingested statements reach; the Flex sync covers about its own window from the
+  deploy on. A Client Portal statement from 2026-01-01 with Cash Transactions, fed through
+  `app/cli/ingest_flex_xml.py` over ssh, fills 2026's figure; otherwise it starts with 2027.
 - **Whitelist KLAC's investments concept (CO8).** The first Sunday pass after the wave-5 deploy
   warns "Short-term investments outside the concept chain for KLAC (…)"; add that concept to the
   `short_term_investments` chain in `company_financials_normaliser.py` once its values look like
@@ -194,6 +198,18 @@ Only what is still unverified.
     coverage figure (R2; `GET /api/portfolio/lookthrough/fundamentals`, a few seconds is expected:
     it reads every covered company's figures). Seen on a local build against production data with
     the two new routes answered by stand-ins, at 1440 and 390, light and dark.
+  - *Wave 7 (`review-w7-lookthrough-tax`).* No migration. The first evening basket refresh rewrites
+    every US-adapter basket once (each now keeps a derived row's CUSIP, L2); after the next ISIN pass
+    Shopify, Thomson Reuters and Hydro One each fold into one look-through row. A basket below 80%
+    in securities is refused at write and named in the refresh's warnings (L1). QTUM's money-market
+    line sits with the nested funds, not the companies (L5). The Coverage tile is green with only the
+    two Swisscanto proxies borrowed (L6); the 3a funds are named, not shown as ISINs (L7); MSCI World
+    rows show no emerging-markets share on Allocation's Regions (L3). The Tax tab's DA-1 table ends in
+    a total row (T1); the Realized gains tile counts sales as KS 36 does (T2); ASML's New York
+    dividends file under NL alone (T3); the Flex sync starts keeping broker interest — the Activity
+    ledger shows its bookings, and `/api/tax/report`'s `trader_criteria.margin_interest` stays null
+    until a year's start is on record (T4). Seen on a local build against production data with the
+    new fields filled in as the new server would, at 1440 and 390, light and dark.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
