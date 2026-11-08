@@ -473,6 +473,14 @@ class FundamentalsService:
                 'description': sec.description,
                 'exchange': sec.exchange,
                 'currency': sec.currency,
+                # The server's one fund predicate (review items VI4/R7): Yahoo's quote type
+                # where it answered, else the security's own asset category — a pillar 3a
+                # fund priced off a NAV has no Yahoo quote type and read as an all-dash
+                # stock row behind the client's own `!== 'ETF'`.
+                'is_fund': (
+                    m.is_fund if m is not None and m.quote_type
+                    else (sec.asset_category or '').upper() == 'FUND'
+                ),
             }
             if m:
                 entry.update({

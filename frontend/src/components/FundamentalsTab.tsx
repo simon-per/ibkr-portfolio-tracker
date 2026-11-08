@@ -323,8 +323,10 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('symbol')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  const stocks = useMemo(() => data.filter((d) => d.quote_type !== 'ETF'), [data])
-  const etfs = useMemo(() => data.filter((d) => d.quote_type === 'ETF'), [data])
+  // The server's fund predicate (`is_fund`, review items VI4/R7): a client `!== 'ETF'`
+  // read a MUTUALFUND and a NAV-priced 3a fund as stock rows of dashes.
+  const stocks = useMemo(() => data.filter((d) => !d.is_fund), [data])
+  const etfs = useMemo(() => data.filter((d) => d.is_fund), [data])
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {

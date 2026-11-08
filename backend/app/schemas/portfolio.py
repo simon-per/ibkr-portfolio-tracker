@@ -380,6 +380,9 @@ class FundamentalMetricsResponse(BaseModel):
     peg_ratio: Optional[float] = None
     price_to_sales: Optional[float] = None
     price_to_book: Optional[float] = None
+    # Whether this is a fund (ETF, mutual fund, a 3a fund priced off its NAV): the server's
+    # one predicate, which the Fundamentals tab splits its two tables by.
+    is_fund: bool = False
     revenue_growth: Optional[float] = None
     earnings_growth: Optional[float] = None
     # What the two above compare: "ttm" (the last four quarters against the four before,

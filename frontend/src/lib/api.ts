@@ -658,6 +658,8 @@ export type GrowthBasis = 'ttm' | 'quarter'
 
 export interface FundamentalMetrics {
   security_id: number;
+  /** The server's fund predicate: Yahoo's quote type, else the security's asset category. */
+  is_fund: boolean;
   symbol: string;
   description: string;
   exchange: string | null;
