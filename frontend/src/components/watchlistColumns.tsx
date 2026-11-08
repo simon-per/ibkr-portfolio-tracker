@@ -103,11 +103,12 @@ export function scoreTone(score: number | null): Tone {
   return 'negative'
 }
 
-/** Upside to the analyst mean target, or null when either side is missing. */
+/**
+ * Upside to the analyst mean target in percent, as the server serves it
+ * (`target_upside`, the overview's guarded helper: review item DR7); null without one.
+ */
 export function analystUpside(item: WatchlistItem): number | null {
-  return item.analyst_target && item.current_price && item.current_price > 0
-    ? ((item.analyst_target - item.current_price) / item.current_price) * 100
-    : null
+  return item.target_upside != null ? item.target_upside * 100 : null
 }
 
 

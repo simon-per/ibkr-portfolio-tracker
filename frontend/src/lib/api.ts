@@ -777,6 +777,8 @@ export interface WatchlistItem {
   /** `market_cap` in the base currency; null when it cannot be converted. */
   market_cap_base: number | null;
   analyst_target: number | null;
+  /** The mean target over the price, less one (0.12 is +12%); null on a currency mismatch. */
+  target_upside?: number | null;
   /** A held name's counts are the positions table's, a Company-tab name's its overview's. */
   analyst_rating: AnalystRatingCounts | null;
   analyst_count: number | null;

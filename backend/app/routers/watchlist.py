@@ -5,7 +5,9 @@ from app.database import get_db
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
 from app.services.ticker_isin import isins_by_yahoo_ticker
-from app.services.company_yahoo import GROWTH_QUARTER, counts_of, source_columns
+from app.services.company_yahoo import (
+    GROWTH_QUARTER, counts_of, source_columns, target_upside,
+)
 from app.services.watchlist_service import WatchlistService, watchlist_rating
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
@@ -230,6 +232,10 @@ def _item_to_response(item, market_cap_base=None, security_id=None,
         peg_ratio=f["peg_ratio"] if "peg_ratio" in f else _compute_peg(item),
         ev_to_ebitda=item.ev_to_ebitda,
         analyst_target=pick("analyst_target"),
+        # The one upside (`company_yahoo.target_upside`, DR7), over the row's own price.
+        target_upside=target_upside(
+            pick("analyst_target"), item.current_price, pick("data_currency"), item.currency
+        ),
         analyst_rating=rating,
         analyst_count=pick("analyst_count"),
         # What the growth compares (`company_yahoo.served_growth`): the filings' TTM, else

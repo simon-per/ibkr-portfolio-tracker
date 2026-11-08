@@ -460,6 +460,9 @@ class WatchlistItemResponse(BaseModel):
     market_cap: Optional[int] = None            # the listing's own currency
     market_cap_base: Optional[int] = None       # the same in the base currency, or None
     analyst_target: Optional[float] = None
+    # The mean target over the price, less one (0.12 is +12%), through the overview's
+    # guarded helper (`company_yahoo.target_upside`); None on a currency mismatch.
+    target_upside: Optional[float] = None
     # The counts a held listing or a Company-tab company already keeps, else the
     # watchlist's own (`watchlist_service.watchlist_rating`); None when none are known.
     analyst_rating: Optional[AnalystRatingCounts] = None

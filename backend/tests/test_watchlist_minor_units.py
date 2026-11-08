@@ -60,3 +60,17 @@ async def test_a_pence_quote_is_shown_in_pounds(db, monkeypatch):
     assert row.pct_from_52w_high == pytest.approx(-16.67, abs=0.01)
     # The cap's scale is not verified: still refused in the base currency.
     assert row.market_cap_base is None
+    # The one upside (review item DR7), pence and pounds counted as one currency.
+    assert row.target_upside == pytest.approx(0.4)
+
+
+def test_the_one_upside_refuses_what_it_cannot_compare():
+    from app.services.company_yahoo import target_upside
+
+    assert target_upside(110.0, 100.0, "USD", "USD") == pytest.approx(0.1)
+    assert target_upside(700.0, 5.0, "GBP", "GBP") == pytest.approx(139.0)
+    assert target_upside(7.0, 5.0, "GBp", "GBP") == pytest.approx(0.4)
+    assert target_upside(110.0, 100.0, "KZT", "USD") is None
+    assert target_upside(110.0, 100.0, None, "USD") is None
+    assert target_upside(110.0, 0.0, "USD", "USD") is None
+    assert target_upside(None, 100.0, "USD", "USD") is None

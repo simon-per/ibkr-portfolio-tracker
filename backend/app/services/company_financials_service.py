@@ -687,7 +687,7 @@ def build_series(
     return out
 
 
-from app.services.company_yahoo import counts_of  # noqa: E402
+from app.services.company_yahoo import counts_of, target_upside  # noqa: E402
 
 
 class CompanyFinancialsService:
@@ -892,14 +892,9 @@ class CompanyFinancialsService:
             and price > 0
             and (utc_today() - closes[-1][0]).days <= PRICE_MAX_AGE_DAYS
         )
-        target = figure("target_mean_price")
         upside = (
-            target / price - 1
-            if target is not None
-            and current
-            and currency is not None
-            and figure("data_currency") == currency
-            else None
+            target_upside(figure("target_mean_price"), price, figure("data_currency"), currency)
+            if current else None
         )
         next_date = yahoo["next_earnings_date"]
         counts = yahoo["counts"]
@@ -916,7 +911,7 @@ class CompanyFinancialsService:
             "rating": rating_of(counts),
             "analysts": figure("number_of_analysts"),
             "target_low": figure("target_low_price"),
-            "target_mean": target,
+            "target_mean": figure("target_mean_price"),
             "target_high": figure("target_high_price"),
             "target_upside": upside,
             "yahoo_currency": figure("data_currency"),

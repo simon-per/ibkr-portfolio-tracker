@@ -76,7 +76,7 @@ def watchlist_rating(
 
 
 from app.services.company_yahoo import (  # noqa: E402 - below the module helpers on purpose
-    TickerSource, counts_of, source_columns, sources_for_tickers,
+    TickerSource, counts_of, source_columns, sources_for_tickers, target_upside,
 )
 
 
@@ -261,10 +261,10 @@ class WatchlistService:
         rating = data.get("analyst_rating")
         rating_sub = RATING_POINTS.get(rating, 6) if rating else 6
 
-        target = data.get("analyst_target")
-        price = data.get("current_price")
-        if target is not None and price is not None and price > 0:
-            upside = (target - price) / price * 100
+        # The one upside (`company_yahoo.target_upside`), as the column shows it (DR7).
+        fraction = data.get("target_upside")
+        if fraction is not None:
+            upside = fraction * 100
             upside_sub = 12 if upside > 30 else 10 if upside > 20 else 7 if upside > 10 else 4 if upside > 0 else 0
         else:
             upside_sub = 6
@@ -592,7 +592,12 @@ class WatchlistService:
             logger.warning(f"Failed to compute RSI ({yahoo_ticker}): {e}")
 
         # Compute composite buy score
+        data["target_upside"] = target_upside(
+            data.get("analyst_target"), data.get("current_price"),
+            data.get("data_currency"), data.get("currency"),
+        )
         data["buy_score"] = self._compute_buy_score(data)
+        data.pop("target_upside")
 
         await self.repo.update_cached_data(item.id, data)
         await self.db.commit()

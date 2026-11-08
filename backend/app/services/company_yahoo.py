@@ -287,3 +287,30 @@ def source_columns(source: Optional[TickerSource]) -> Dict[str, object]:
     if minor and columns.get("analyst_target") is not None:
         columns["analyst_target"] = columns["analyst_target"] / float(minor[1])
     return columns
+
+
+def target_upside(
+    target: Optional[float],
+    price: Optional[float],
+    target_currency: Optional[str],
+    price_currency: Optional[str],
+) -> Optional[float]:
+    """
+    The analyst mean target over the price, less one (0.12 is +12%), or None: a figure
+    missing, a price not positive, a currency unknown, or two currencies (a minor unit
+    counts as its major, `minor_unit`). The one upside: the overview, the watchlist's
+    column and its buy score all read it (review item DR7, 2026-11-08) — the watchlist
+    computed its own twice, unguarded, beside the overview's guarded one.
+    """
+    if target is None or price is None or price <= 0:
+        return None
+    if not target_currency or not price_currency:
+        return None
+
+    def major(code: str) -> str:
+        minor = minor_unit(code)
+        return minor[0] if minor else code.upper()
+
+    if major(target_currency) != major(price_currency):
+        return None
+    return target / price - 1
