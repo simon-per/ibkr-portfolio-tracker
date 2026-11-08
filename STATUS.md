@@ -163,8 +163,8 @@ Only what is still unverified.
     After the Sunday pass: HON's P/E, P/S and P/FCF before its Aerospace separation read about
     twice the old values and run on continuously, the quarter around the event blank (CO1); HON's
     newest Q4 operating margin is no longer 57% (CO6); ONDS has a TTM share count and P/S again
-    (CO4). The pass's warnings name KLAC's investments concept outside the chain (CO8) — its
-    net cash stays cash alone until that concept is whitelisted, a one-line follow-up. The six
+    (CO4). A filer whose investments sit outside the chain is named in the pass's warnings (CO8;
+    KLAC's own is chained, below). The six
     companies stuck on Q1 2026 (AEP, CDNS, EXC, PYPL, SPGI, NXPI): the first Monday
     `company_filings_check` after the deploy asks them, reads each newest filing's instance once
     (`filings_read`), and their newest quarter appears; a company whose companyfacts still lags
