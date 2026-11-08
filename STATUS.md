@@ -75,6 +75,12 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   rollback past `9e57366` is conceivable. `failed-deploys/` is never pruned; check `df -h` and
   logrotate while there.
 
+- **Optional: give the older Asian-session lots their trade date (C1).** A lot is redated only when
+  its BUY's `dateTime` is on record, which the Flex window delivers for about a month; older KRX
+  and TWSE lots (one SK Hynix lot among them) keep the evening-before date. A Client Portal download
+  covering their purchases, fed through `app/cli/ingest_flex_xml.py` over ssh, stores the instants;
+  the next sync then redates them. Nothing breaks without it.
+
 ## Watching
 
 - **IBKR: 18:00 Berlin (12:00 ET) is the primary slot, 00:00 the recovery.** A normal day: a
@@ -130,6 +136,19 @@ Only what is still unverified.
     round level is (FD1, FD3). A new forecast withholding rate refreshes the Tax tab's
     projection, the dividend summary, XIRR and the activity ledger at once (T6). Seen on a local
     build against production data, the track figures faked (the endpoint is not deployed).
+  - *Wave 3 (`review-w3-ledger`).* Migrations `e5a7c9d1f3b4` (`trades.executed_at`) and
+    `f6b8d0e2a4c5` (`cash_flows.flow_type_manual`), plain ADD COLUMNs, NULL on arrival, no
+    request. After the first Flex sync: the trades of its window carry `executed_at`, and an
+    Asian-session lot bought inside the window moves to its trade date — the Total Value no longer
+    steps up by the purchase the evening before (C1); the sync's `lots_closed_*` must not move on
+    that sync (no phantom sale). The CHF realized headline drops by the FX on the cost of USD sales
+    (cost at the rate bought at, V4); Closed positions agree with it. The chart's Money In includes
+    cash transferred in after the deposit ledger began (none on record now, so no change is
+    expected), and `cash_flows` transfer twins count once (C2). The cash line adds corporate-action
+    cash: on a day with cash in lieu, the measured balance's correction should shrink, not double
+    (C6). A finpension file with a row lacking a CHF/EUR rate is refused whole (C4). The tax
+    report's earlier years keep their opening/year-end cash and margin check when a later trade has
+    no rate (C7).
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
