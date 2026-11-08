@@ -9,7 +9,9 @@ from app.database import get_db
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
 from app.routers._params import DbId
 from app.repositories.sync_run_repository import utc_iso
+from app.models.analyst_rating import rating_of
 from app.services.analyst_rating_service import AnalystRatingService
+from app.services.company_yahoo import canonical_listings, counts_of
 from app.single_flight import PUBLIC_SYNC_COOLDOWN_SECONDS, SYNC_PIPELINE, SyncBusy, single_flight
 
 
@@ -146,23 +148,24 @@ async def get_analyst_rating(security_id: DbId, db: AsyncSession = Depends(get_d
     Returns:
         Analyst rating data or 404 if not found
     """
+    # The company's rating, as the positions table and the overview show it (review item
+    # DR8): its canonical listing's counts through `rating_of`. Yahoo's "no analysts cover
+    # this" is no rating here as everywhere else, not "No Rating" over five zeros.
+    canonical = await canonical_listings(db)
     rating_service = AnalystRatingService(db)
-    rating = await rating_service.get_rating_for_security(security_id)
-
-    if not rating:
+    rating = await rating_service.get_rating_for_security(
+        canonical.get(security_id, security_id)
+    )
+    shown = rating_of(counts_of(rating))
+    if shown is None:
         raise HTTPException(
             status_code=404,
             detail=f"No analyst rating found for security {security_id}"
         )
 
     return {
-        "security_id": rating.security_id,
-        "strong_buy": rating.strong_buy,
-        "buy": rating.buy,
-        "hold": rating.hold,
-        "sell": rating.sell,
-        "strong_sell": rating.strong_sell,
+        "security_id": security_id,
+        **shown,
         "total_ratings": rating.total_ratings,
-        "consensus": rating.consensus,
         "last_updated": utc_iso(rating.last_updated),
     }
