@@ -29,13 +29,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
-- **Merge and push branch `allocation-one-source` (local, 2 commits on `ed28a64`) when happy.**
-  The Allocation tab's Sectors and Regions as the look-through rolled up (`f752903`), and the
-  Company tab's Screener (`9c6c790`). The new Allocation was not seen on real data: an ssh read of
-  production's basket countries was refused in that session, so the first real view is after the
-  deploy (*Watch after the next deploy* below). The screener was seen on a local build with its
-  route answered from the live per-company pages.
-
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
 - **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
@@ -107,7 +100,10 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 Only what is still unverified.
 
 - **Allocation from the look-through, and the Company screener (branch `allocation-one-source`,
-  not yet merged).** No migration, no new upstream request. After the deploy:
+  merged into `main` and pushed 2026-11-08).** No migration, no new upstream request. Neither was
+  seen on production data before the push: an ssh read of the basket countries was refused in
+  that session, and the screener was seen only on a local build answered from the live
+  per-company pages. After the deploy:
   - *Allocation* (docs/lookthrough.md, *Allocation is a rollup of this decomposition*): Regions
     shows only North America, Europe, Asia Pacific, Latin America, Middle East & Africa, Unknown
     and Cash — no country name, no "Emerging Markets", no "Other"; Sectors the eleven canonical
@@ -516,10 +512,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
-- **2026-11-08 (feature survey; branch `allocation-one-source`, local)** — verified the Sunday EDGAR
+- **2026-11-08 (feature survey; branch `allocation-one-source`, merged and pushed)** — verified the Sunday EDGAR
   pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
   `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company
-  screener reads each company against its own 5-year multiples. Not merged or pushed.
+  screener reads each company against its own 5-year multiples.
 - **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
   tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
