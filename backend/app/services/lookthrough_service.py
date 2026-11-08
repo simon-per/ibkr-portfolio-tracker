@@ -41,6 +41,7 @@ those contributions are summed and reported split (`direct_value_eur` /
 `import_prices.py`'s last-row-wins rule for a repeated date would silently drop weight here.
 """
 import logging
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
@@ -56,6 +57,9 @@ from app.services.company_identity import IdentityMember
 from app.services.identity_service import group_companies
 from app.services.etf_basket_parsers import MIN_BASKET_COVERAGE_PCT, counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
+from app.services.region_taxonomy import (
+    UNKNOWN as REGION_UNKNOWN, region_of, region_of_isin,
+)
 from app.clock import utc_today
 
 logger = logging.getLogger(__name__)
@@ -149,6 +153,43 @@ IDENTITY_COVERAGE_TARGET_PCT = Decimal("99.5")
 IDENTITY_MAX_ISINS = 2500
 
 
+@dataclass
+class Decomposition:
+    """
+    Every valued holding split into the companies it is made of, before any presentation.
+
+    **The one answer two tabs read.** `get_lookthrough` presents it as company rows, and
+    `AllocationService.get_portfolio_allocation` rolls it up into the Sectors and Regions charts
+    (docs/lookthrough.md, *Allocation is a rollup of this decomposition*). Until 2026-11-08 the
+    Allocation tab spread each fund by `etf_mappings.py`'s hand-written percentages while this
+    service measured the same funds from their baskets, so one company could be Technology here
+    and the fund it sat in 30% Financials there.
+
+    Amounts are unrounded Decimals in EUR-projected base currency; each reader rounds once.
+    `companies` is complete and sorted (no truncation) and each row carries two underscored keys
+    the look-through response never publishes: `_region` and `_holdings` (held security id ->
+    what it contributes to the company). `unattributed` is, per held fund, the value no company
+    carries: a decomposed fund's residual and nested funds, or all of a fund with no basket.
+    """
+    today: date
+    base_currency: str
+    cash: UninvestedCash
+    warnings: List[str]
+    unvaluable: List[Dict]
+    empty: bool
+    total: Decimal = Decimal("0")
+    direct_equity: Decimal = Decimal("0")
+    looked_through: Decimal = Decimal("0")
+    residual: Decimal = Decimal("0")
+    nested: Decimal = Decimal("0")
+    uncovered: Decimal = Decimal("0")
+    fund_coverage: List[Dict] = field(default_factory=list)
+    companies: List[Dict] = field(default_factory=list)
+    identity: Dict = field(default_factory=dict)
+    holdings: Dict[int, Dict] = field(default_factory=dict)
+    unattributed: Dict[int, Decimal] = field(default_factory=dict)
+
+
 class LookthroughService:
     """Aggregates direct holdings and fund constituents into company-level exposure."""
 
@@ -156,17 +197,84 @@ class LookthroughService:
         self.db = db
 
     async def get_lookthrough(self, limit: int = 50) -> Dict:
+        limit = max(1, min(int(limit), COMPANY_LIMIT_MAX))
+        d = await self.decompose()
+        if d.empty:
+            # An empty portfolio is not a failure and must not claim to be one — the same
+            # distinction PortfolioSummaryCards draws between "no data yet" and "the
+            # backend didn't answer".
+            return self._empty(d.today, d.base_currency, d.unvaluable, d.warnings, d.cash)
+
+        total = d.total
+        rows_out = d.companies
+        # What every company's "% of portfolio" is a share of: holdings plus positive
+        # uninvested cash, the denominator Allocation and Positions divide by (GitHub #28).
+        book = total + d.cash.in_book
+
+        shown = rows_out[:limit]
+        shown_value = sum((r["value_eur"] for r in shown), Decimal("0"))
+        companies_value = sum((r["value_eur"] for r in rows_out), Decimal("0"))
+        covered = d.direct_equity + d.looked_through
+
+        basket_dates = [
+            e["basket_as_of"] for e in d.fund_coverage if e["basket_as_of"]
+        ]
+
+        return {
+            "as_of": d.today.isoformat(),
+            "base_currency": d.base_currency,
+            "total_market_value_eur": self._q(total),
+            **self._cash_fields(d.cash, total),
+            "direct_equity_eur": self._q(d.direct_equity),
+            "looked_through_equity_eur": self._q(d.looked_through),
+            # The residual is published as the ROUNDED remainder, not as its own rounded sum.
+            # Σ of five independently-rounded buckets is not the rounded total — on the real
+            # book the two differed by a cent — and a partition that fails to close by a cent
+            # is still a partition that fails to close, both for the test that pins it and for
+            # anyone adding the columns up on screen. The residual is the right bucket to carry
+            # it because "whatever is left of a decomposed fund" is literally its definition.
+            "fund_residual_eur": self._residual_remainder(
+                total, d.direct_equity, d.looked_through, d.nested, d.uncovered
+            ),
+            "nested_fund_eur": self._q(d.nested),
+            "uncovered_fund_eur": self._q(d.uncovered),
+            # A share of nothing is not 0%: with no valued book there is no coverage to
+            # state, and a 0.0 reads as "nothing could be looked through" (`share_pct`).
+            #
+            # Of the INVESTED book, not of `book`: it measures how much of the holdings the
+            # baskets attribute. Cash has no basket to be missing, so counting it in the
+            # denominator would read a sale as falling coverage.
+            "coverage_pct": share_pct(covered, total),
+            "companies": [self._present_row(r, book) for r in shown],
+            "companies_shown": len(shown),
+            "company_count_total": len(rows_out),
+            "shown_value_eur": self._q(shown_value),
+            "other_companies_eur": self._q(companies_value - shown_value),
+            "other_companies_count": len(rows_out) - len(shown),
+            "funds": [self._present_fund(e) for e in
+                      sorted(d.fund_coverage, key=lambda e: -e["market_value_eur"])],
+            "oldest_basket_as_of": min(basket_dates) if basket_dates else None,
+            "unvaluable_positions": len(d.unvaluable),
+            "unvaluable_symbols": [p["symbol"] for p in d.unvaluable],
+            "identity": d.identity,
+            "warnings": d.warnings,
+        }
+
+    async def decompose(self) -> Decomposition:
+        """
+        Every valued holding split into companies: the work behind `get_lookthrough`, and the
+        one source the Allocation tab's Sectors and Regions charts roll up. See `Decomposition`.
+        """
         from app.services.portfolio_service import PortfolioService
 
-        limit = max(1, min(int(limit), COMPANY_LIMIT_MAX))
         today = utc_today()
 
         portfolio_service = PortfolioService(self.db)
         positions = await portfolio_service.get_positions_breakdown()
         base_currency = await portfolio_service.get_base_currency()
 
-        # The same read Allocation makes, through the same helper, so "% of portfolio" means
-        # one denominator on both tabs (GitHub #28).
+        # Read once, here, for both tabs: Allocation takes the balance from this
+        # decomposition, so "% of portfolio" means one denominator on both (GitHub #28).
         cash = await CashService(self.db).uninvested_cash(
             await portfolio_service._load_base_fx(), today
         )
@@ -180,21 +288,35 @@ class LookthroughService:
             )
         valuable, unvaluable = self._split_by_valuability(positions)
 
+        decomposition = Decomposition(
+            today=today, base_currency=base_currency, cash=cash,
+            warnings=warnings, unvaluable=unvaluable, empty=not valuable,
+        )
         if not valuable:
-            # An empty portfolio is not a failure and must not claim to be one — the same
-            # distinction PortfolioSummaryCards draws between "no data yet" and "the
-            # backend didn't answer".
-            return self._empty(today, base_currency, unvaluable, warnings, cash)
+            return decomposition
 
         # `total` is the INVESTED book: the partition closes on it and coverage is measured
-        # against it. `book` adds positive uninvested cash and is what every company's
-        # "% of portfolio" is a share of. Unknown or negative cash adds nothing, so `book`
-        # falls back to `total`, exactly as Allocation's denominator does.
+        # against it. Each reader's "% of portfolio" divides by `total` plus positive
+        # uninvested cash; unknown or negative cash adds nothing.
         total = sum((p["_mv"] for p in valuable), Decimal("0"))
-        book = total + cash.in_book
 
         direct_positions = [p for p in valuable if not is_known_etf_isin(p["isin"])]
         fund_positions = [p for p in valuable if is_known_etf_isin(p["isin"])]
+
+        # Every valued holding, for the Allocation drill-down's rows, and per fund the value
+        # no company carries (see `Decomposition`).
+        held: Dict[int, Dict] = {
+            p["security_id"]: {
+                "security_id": p["security_id"],
+                "symbol": p["symbol"],
+                "description": p.get("description") or p["symbol"],
+                "isin": p["isin"],
+                "is_fund": is_known_etf_isin(p["isin"]),
+                "value": p["_mv"],
+            }
+            for p in valuable
+        }
+        unattributed: Dict[int, Decimal] = {}
 
         held_fund_isins = sorted({p["isin"].strip().upper() for p in fund_positions})
         baskets, holdings, proxied_from = await self._held_baskets(held_fund_isins)
@@ -212,20 +334,27 @@ class LookthroughService:
         nested_total = Decimal("0")
         uncovered_total = Decimal("0")
 
-        # `securities.sector` is the only sector a directly-held company has, and it reaches this
-        # service nowhere else: `get_positions_breakdown()` builds its dicts from the ORM rows but
-        # never copies the column. Widening that helper would change `/api/portfolio/positions` and
-        # the `Position` contract for two consumers that do not want it, so the lookup is local.
-        direct_sectors = await self._direct_sectors(direct_positions)
+        # `securities.sector` and `.country` are the only classification a directly-held company
+        # has, and they reach this service nowhere else: `get_positions_breakdown()` builds its
+        # dicts from the ORM rows but never copies the columns. Widening that helper would change
+        # `/api/portfolio/positions` and the `Position` contract for two consumers that do not
+        # want it, so the lookup is local.
+        direct_classes = await self._direct_classification(direct_positions)
 
         for pos in direct_positions:
             ref = f"sec:{pos['security_id']}"
             direct_equity += pos["_mv"]
+            sector, region = direct_classes.get(
+                pos["security_id"], (UNKNOWN, REGION_UNKNOWN)
+            )
             contributions[ref] = {
                 "kind": "direct",
                 "value": pos["_mv"],
                 "listing": f"{pos['symbol']}@{pos['exchange'] or '?'}",
-                "sector": direct_sectors.get(pos["security_id"], UNKNOWN),
+                "sector": sector,
+                "region": region,
+                "isin": pos["isin"],
+                "holding": pos["security_id"],
             }
             members.append(
                 IdentityMember(
@@ -266,6 +395,7 @@ class LookthroughService:
 
             if status != "looked_through":
                 uncovered_total += value
+                unattributed[pos["security_id"]] = value
                 fund_coverage.append(entry)
                 continue
 
@@ -340,6 +470,7 @@ class LookthroughService:
             nested_total += fund_nested_value
             residual_total += fund_residual
             entry["residual_eur"] = fund_residual
+            unattributed[pos["security_id"]] = fund_residual + fund_nested_value
             fund_coverage.append(entry)
 
             for row in rows:
@@ -357,6 +488,12 @@ class LookthroughService:
                     # Already loaded — `get_holdings()` selects whole entities, so reading this
                     # costs no query and no column list to keep in step.
                     "sector": normalise_sector(row.sector),
+                    # The issuer's country of risk, where it publishes one (iShares, DWS); the
+                    # other adapters leave it NULL, and the company's region then comes from
+                    # another contribution or from its ISIN (`_build_rows`).
+                    "region": region_of(row.country),
+                    "isin": row.constituent_isin,
+                    "holding": pos["security_id"],
                 }
                 members.append(
                     IdentityMember(
@@ -376,58 +513,22 @@ class LookthroughService:
         groups = await group_companies(self.db, members)
         rows_out, aggregates = self._build_rows(groups, contributions, total)
 
-        shown = rows_out[:limit]
-        shown_value = sum((r["value_eur"] for r in shown), Decimal("0"))
-        companies_value = sum((r["value_eur"] for r in rows_out), Decimal("0"))
-        covered = direct_equity + looked_through
-
         warnings.extend(
             self._coverage_warnings(fund_coverage, uncovered_total, total, unvaluable)
         )
 
-        basket_dates = [
-            e["basket_as_of"] for e in fund_coverage if e["basket_as_of"]
-        ]
-
-        return {
-            "as_of": today.isoformat(),
-            "base_currency": base_currency,
-            "total_market_value_eur": self._q(total),
-            **self._cash_fields(cash, total),
-            "direct_equity_eur": self._q(direct_equity),
-            "looked_through_equity_eur": self._q(looked_through),
-            # The residual is published as the ROUNDED remainder, not as its own rounded sum.
-            # Σ of five independently-rounded buckets is not the rounded total — on the real
-            # book the two differed by a cent — and a partition that fails to close by a cent
-            # is still a partition that fails to close, both for the test that pins it and for
-            # anyone adding the columns up on screen. The residual is the right bucket to carry
-            # it because "whatever is left of a decomposed fund" is literally its definition.
-            "fund_residual_eur": self._residual_remainder(
-                total, direct_equity, looked_through, nested_total, uncovered_total
-            ),
-            "nested_fund_eur": self._q(nested_total),
-            "uncovered_fund_eur": self._q(uncovered_total),
-            # A share of nothing is not 0%: with no valued book there is no coverage to
-            # state, and a 0.0 reads as "nothing could be looked through" (`share_pct`).
-            #
-            # Of the INVESTED book, not of `book`: it measures how much of the holdings the
-            # baskets attribute. Cash has no basket to be missing, so counting it in the
-            # denominator would read a sale as falling coverage.
-            "coverage_pct": share_pct(covered, total),
-            "companies": [self._present_row(r, book) for r in shown],
-            "companies_shown": len(shown),
-            "company_count_total": len(rows_out),
-            "shown_value_eur": self._q(shown_value),
-            "other_companies_eur": self._q(companies_value - shown_value),
-            "other_companies_count": len(rows_out) - len(shown),
-            "funds": [self._present_fund(e) for e in
-                      sorted(fund_coverage, key=lambda e: -e["market_value_eur"])],
-            "oldest_basket_as_of": min(basket_dates) if basket_dates else None,
-            "unvaluable_positions": len(unvaluable),
-            "unvaluable_symbols": [p["symbol"] for p in unvaluable],
-            "identity": aggregates,
-            "warnings": warnings,
-        }
+        decomposition.total = total
+        decomposition.direct_equity = direct_equity
+        decomposition.looked_through = looked_through
+        decomposition.residual = residual_total
+        decomposition.nested = nested_total
+        decomposition.uncovered = uncovered_total
+        decomposition.fund_coverage = fund_coverage
+        decomposition.companies = rows_out
+        decomposition.identity = aggregates
+        decomposition.holdings = held
+        decomposition.unattributed = unattributed
+        return decomposition
 
     async def material_constituent_isins(
         self,
@@ -496,9 +597,12 @@ class LookthroughService:
             running += value
         return out
 
-    async def _direct_sectors(self, positions: List[Dict]) -> Dict[int, str]:
+    async def _direct_classification(
+        self, positions: List[Dict]
+    ) -> Dict[int, Tuple[str, str]]:
         """
-        Canonical sector per directly-held security id, from `securities.sector`.
+        Canonical (sector, region) per directly-held security id, from `securities.sector` and
+        `securities.country` — both written by the same Yahoo `.info` read (`apply_allocation`).
 
         Expect gaps and do not read them as breakage: `POST /api/allocation/sync` and, since
         2026-10-17, the daily fundamentals pass write that column, so an IBKR-ingested security
@@ -515,9 +619,14 @@ class LookthroughService:
         if not ids:
             return {}
         result = await self.db.execute(
-            select(Security.id, Security.sector).where(Security.id.in_(ids))
+            select(Security.id, Security.sector, Security.country).where(
+                Security.id.in_(ids)
+            )
         )
-        return {row[0]: normalise_sector(row[1]) for row in result.all()}
+        return {
+            row[0]: (normalise_sector(row[1]), region_of(row[2]))
+            for row in result.all()
+        }
 
     # ------------------------------------------------------------------ classification
 
@@ -705,6 +814,9 @@ class LookthroughService:
             listings: List[str] = []
             value = Decimal("0")
             sector_votes: Dict[str, Decimal] = {}
+            region_votes: Dict[str, Decimal] = {}
+            registered_votes: Dict[str, Decimal] = {}
+            by_holding: Dict[int, Decimal] = {}
 
             for member in group.members:
                 contribution = contributions.get(member.ref)
@@ -721,6 +833,23 @@ class LookthroughService:
                     sector_votes[sector] = (
                         sector_votes.get(sector, Decimal("0")) + contribution["value"]
                     )
+                # The region votes the same way. A stated country (a basket's country of risk,
+                # Yahoo's for a held stock) outranks the ISIN's registration prefix, which
+                # decides only when nothing stated one (`region_taxonomy`).
+                region = contribution.get("region") or REGION_UNKNOWN
+                if region != REGION_UNKNOWN:
+                    region_votes[region] = (
+                        region_votes.get(region, Decimal("0")) + contribution["value"]
+                    )
+                registered = region_of_isin(contribution.get("isin"))
+                if registered != REGION_UNKNOWN:
+                    registered_votes[registered] = (
+                        registered_votes.get(registered, Decimal("0")) + contribution["value"]
+                    )
+                holding = contribution["holding"]
+                by_holding[holding] = (
+                    by_holding.get(holding, Decimal("0")) + contribution["value"]
+                )
                 if contribution["kind"] == "direct":
                     direct += contribution["value"]
                     listings.append(contribution["listing"])
@@ -746,13 +875,8 @@ class LookthroughService:
             if group.partially_resolved:
                 partially += 1
 
-            # Ties break on the sector name so the answer cannot depend on dict insertion order,
-            # which depends on member order, which the caller is free to shuffle.
-            sector = (
-                max(sector_votes.items(), key=lambda kv: (kv[1], kv[0]))[0]
-                if sector_votes
-                else UNKNOWN
-            )
+            sector = self._vote(sector_votes, UNKNOWN)
+            region = self._vote(region_votes or registered_votes, REGION_UNKNOWN)
 
             rows.append({
                 "company_key": group.key,
@@ -769,6 +893,11 @@ class LookthroughService:
                 ),
                 "partially_resolved": group.partially_resolved,
                 "identity_conflicts": group.override_conflicts,
+                # Read by the Allocation rollup and never published here (`_present_row` drops
+                # every underscored key): the company's region, and what each held security
+                # contributes to the company.
+                "_region": region,
+                "_holdings": by_holding,
             })
 
         # Descending value, then key ascending. The tie-break is not cosmetic: thousands of
@@ -786,6 +915,18 @@ class LookthroughService:
             "unresolved_value_eur": self._q(unresolved_value),
         }
         return rows, aggregates
+
+    @staticmethod
+    def _vote(votes: Dict[str, Decimal], unknown: str) -> str:
+        """
+        The value-weighted winner of a classification vote, or `unknown` when nothing voted.
+
+        Ties break on the name so the answer cannot depend on dict insertion order, which
+        depends on member order, which the caller is free to shuffle.
+        """
+        if not votes:
+            return unknown
+        return max(votes.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
     def _coverage_warnings(
         self,
@@ -879,7 +1020,7 @@ class LookthroughService:
 
     def _present_row(self, row: Dict, book: Decimal) -> Dict:
         return {
-            **row,
+            **{k: v for k, v in row.items() if not k.startswith("_")},
             "value_eur": self._q(row["value_eur"]),
             "direct_value_eur": self._q(row["direct_value_eur"]),
             "via_funds_value_eur": self._q(row["via_funds_value_eur"]),

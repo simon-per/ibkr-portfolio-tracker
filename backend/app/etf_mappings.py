@@ -1,22 +1,21 @@
 """
-Manual ETF allocation mappings for sector and geographic breakdown.
-These percentages are approximate based on ETF holdings and methodology.
+The fund registry: which securities are funds, keyed by ISIN.
 
-**The two dimensions are not equally well sourced, and the entries say which is which.**
-Yahoo's `Ticker(...).funds_data.sector_weightings` returns a real measured sector split for
-a fund, so a `sector` block can be copied from it and dated. It exposes **no country or
-region weights at all** (`equity_holdings` is valuation ratios, `asset_classes` is
-stock/bond/cash) — so every `geographic` block here is hand-derived, and the best available
-evidence is `top_holdings`, whose usefulness depends entirely on how much of the fund those
-ten names cover. That coverage is recorded per entry, because it is the difference between
-a measurement and a guess: GRID's top ten is 59.6% of the fund, QTUM's is 14.9%.
-
-Do not "improve" a geographic block from an ETF's *sector* data or from `.info` — a fund
-carries no `country`, which is exactly why the look-through table exists.
+**It no longer carries allocation percentages.** Until 2026-11-08 every entry held hand-written
+`sector` and `geographic` blocks, and the Allocation tab spread each fund's value by them. They
+were estimates — sectors copied from Yahoo's `funds_data`, regions derived from top-ten holdings
+covering as little as 15% of a fund — and they were a second answer beside the stored baskets the
+Look-through measured the same funds from. This docstring used to list the two preconditions for
+retiring them, and both are met: every held fund has a stored basket (the two 3a funds through
+their declared, accepted proxies), and `app/services/region_taxonomy.py` is the one
+country-to-region map. The Allocation tab is now a rollup of `LookthroughService.decompose`
+(docs/lookthrough.md, *Allocation is a rollup of this decomposition*); a fund without a basket
+lands in `Unknown` there, under its own name, rather than being spread by a guess. The name
+`ETF_ALLOCATIONS` survives because every fundness predicate below reads it.
 
 **`isins` per entry exists because a symbol is not an identity, and this table was
 already wrong about one fund.** `securities` identity is `isin + exchange`, symbols are
-not unique, and `SMH` is the live collision: this account holds the **UCITS** VanEck
+not unique, and `SMH` is the live collision: this account held the **UCITS** VanEck
 Semiconductor fund (`IE00BMC38736`, LSE, USD) while the far better-known `SMH` is the
 US-listed VanEck fund — a symbol-keyed lookup cannot tell them apart, and the two are
 different instruments with different domiciles. So every entry declares the ISINs it
@@ -26,486 +25,58 @@ once (`securities.asset_type` said "Stock" while this table said "ETF"); a third
 would be the same bug a third time, so nothing outside this module may decide it.
 `tests/test_etf_source_registry.py::test_every_declared_source_is_a_known_fund` holds the
 line the one place it could realistically be crossed, by requiring `FUND_SOURCES` and
-`ETF_ALLOCATIONS` to name the same ISINs in **both** directions. (Earlier revisions of
-this docstring cited a `tests/test_fund_predicate_family.py` that has never existed — a
-claimed guard is worse than an acknowledged gap, since it stops anyone looking.)
+`ETF_ALLOCATIONS` to name the same ISINs in **both** directions.
 
-**The successor to the two percent blocks is `etf_holdings`, and the precondition for
-migrating is written down here so the two do not silently diverge.** Real constituent
-files carry a sector and a country of risk *per holding*, so once every held fund has a
-stored basket the `sector` and `geographic` blocks here become measurable rather than
-estimated. That switch is deliberately not made yet, and one of its three original
-blockers is now cleared:
-
-- coverage is **11 of 12 funds** (was 6), but VWCE — 9.2% of the book — reaches that only
-  by borrowing VT's basket, and DBPG is excluded outright. So the Allocation tab's numbers
-  would start depending on whether a scraper succeeded, and one of them would be an
-  approximation presented in a table that states none;
-- `countryOfRisk` is a **country** while `geographic` buckets are **regions**, so
-  switching needs a new hand-maintained country-to-region map — a new drift surface
-  rather than a removed one;
-- ~~a third sector taxonomy~~ **resolved**: `app/services/sector_taxonomy.py` normalises
-  Yahoo's, iShares', DWS's and First Trust's spellings into the eleven names
-  `AllocationTab.tsx` already displays, and the look-through view groups on it.
-
-Until the first two are resolved, **this table is the live answer for the three
-allocation charts** and `lookthrough_service` says so from its own side — it serves a
-per-company sector for *grouping* and publishes no sector total anywhere.
+**A fund missing from here is not loudly broken.** It takes the `securities.asset_type` column
+default "Stock", so it is drawn as one *company* on the Look-through and in the Allocation
+charts, at a plausible weight. SOXQ (2026-07-27) and IQQ (2026-08-21) each sat in that state
+until added — add a fund here, and its holdings source to `etf_sources.py`, before or as it is
+bought.
 """
 
 ETF_ALLOCATIONS = {
-    # iShares Core MSCI World (IWDA). Developed markets only: no emerging-markets bucket
-    # (review item L3 — a 3.0 had been carried here, a share World does not hold).
-    "IWDA": {
-        "isins": ["IE00B4L5Y983"],
-        "asset_type": "ETF",
-        "geographic": {
-            "North America": 74.0,
-            "Europe": 16.0,
-            "Asia Pacific": 10.0,
-        },
-        "sector": {
-            "Technology": 23.0,
-            "Financial Services": 14.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Industrials": 10.0,
-            "Communication Services": 8.0,
-            "Consumer Defensive": 7.0,
-            "Energy": 5.0,
-            "Real Estate": 3.0,
-            "Utilities": 3.0,
-            "Basic Materials": 4.0,
-        },
-    },
-
-    # Vanguard FTSE All-World (VWCE)
-    "VWCE": {
-        "isins": ["IE00BK5BQT80"],
-        "asset_type": "ETF",
-        "geographic": {
-            "North America": 65.0,
-            "Europe": 16.0,
-            "Asia Pacific": 12.0,
-            "Emerging Markets": 7.0,
-        },
-        "sector": {
-            "Technology": 22.0,
-            "Financial Services": 15.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Industrials": 11.0,
-            "Communication Services": 7.0,
-            "Consumer Defensive": 6.0,
-            "Energy": 5.0,
-            "Basic Materials": 5.0,
-            "Real Estate": 3.0,
-            "Utilities": 3.0,
-        },
-    },
-
-    # iShares Core S&P 500 (SXR8)
-    "SXR8": {
-        "isins": ["IE00B5BMR087"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 30.0,
-            "Financial Services": 13.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Communication Services": 9.0,
-            "Industrials": 8.0,
-            "Consumer Defensive": 6.0,
-            "Energy": 4.0,
-            "Real Estate": 3.0,
-            "Utilities": 2.0,
-            "Basic Materials": 2.0,
-        },
-    },
-
-    # Vanguard S&P 500 (VOO) — **not held.** Present only because `etf_sources.py` declares
-    # it as DBPG's basket proxy, and `test_etf_source_registry.py` requires the two tables to
-    # name the same ISINs in both directions. Both blocks are deliberately identical to SXR8
-    # and DBPG above: all three track the S&P 500, and three entries for one index disagreeing
-    # in this table would be the dominant failure mode in miniature. Change one, change all
-    # three. Nothing reads these while the fund is unheld — they exist so that buying it
-    # cannot land it in an *Unknown* bucket.
-    "VOO": {
-        "isins": ["US9229083632"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 30.0,
-            "Financial Services": 13.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Communication Services": 9.0,
-            "Industrials": 8.0,
-            "Consumer Defensive": 6.0,
-            "Energy": 4.0,
-            "Real Estate": 3.0,
-            "Utilities": 2.0,
-            "Basic Materials": 2.0,
-        },
-    },
-
-    # Xtrackers NASDAQ 100 (XNAS)
-    "XNAS": {
-        "isins": ["IE00BMFKG444"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 55.0,
-            "Communication Services": 18.0,
-            "Consumer Cyclical": 15.0,
-            "Healthcare": 6.0,
-            "Industrials": 4.0,
-            "Consumer Defensive": 2.0,
-        },
-    },
-
-    # iShares Nasdaq 100 (IQQ) and Invesco NASDAQ 100 (QQQM) — the US-domiciled replacements
-    # bought during the 2026-08 rotation out of the Ireland-domiciled sleeve.
-    #
-    # Both blocks are **pinned identical to XNAS above**, for the reason VOO / SXR8 / DBPG are
-    # pinned to each other: all three track the Nasdaq-100, so a different split here would not
-    # be new information, it would be three answers to one question drifting apart — and the
-    # Allocation tab would show the same index differently depending on which wrapper was held.
-    # Change one and change all three.
-    "IQQ": {
-        "isins": ["US46438T3095"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 55.0,
-            "Communication Services": 18.0,
-            "Consumer Cyclical": 15.0,
-            "Healthcare": 6.0,
-            "Industrials": 4.0,
-            "Consumer Defensive": 2.0,
-        },
-    },
-    "QQQM": {
-        "isins": ["US46138G6492"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 55.0,
-            "Communication Services": 18.0,
-            "Consumer Cyclical": 15.0,
-            "Healthcare": 6.0,
-            "Industrials": 4.0,
-            "Consumer Defensive": 2.0,
-        },
-    },
-
-    # Xtrackers S&P 500 2x Leveraged (DBPG)
-    "DBPG": {
-        "isins": ["LU0411078552"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 100.0,
-        },
-        "sector": {
-            "Technology": 30.0,
-            "Financial Services": 13.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Communication Services": 9.0,
-            "Industrials": 8.0,
-            "Consumer Defensive": 6.0,
-            "Energy": 4.0,
-            "Real Estate": 3.0,
-            "Utilities": 2.0,
-            "Basic Materials": 2.0,
-        },
-    },
-
-    # VanEck Semiconductor UCITS ETF (SMH) — IE00BMC38736, Irish-domiciled, LSE-listed,
-    # USD. NOT the US-listed VanEck SMH, which is the one every search result describes.
-    # Both track the same MVIS semiconductor index, so the blocks below hold for either,
-    # but the ISIN is what tells them apart and the holdings files are per-ISIN.
-    "SMH": {
-        "isins": ["IE00BMC38736"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 60.0,
-            "Taiwan": 20.0,
-            "Netherlands": 10.0,
-            "South Korea": 10.0,
-        },
-        "sector": {
-            "Technology": 100.0,
-        },
-    },
-
-    # Invesco PHLX Semiconductor ETF (SOXQ)
-    #
-    # Held since 2026-07-27 and previously unmapped, which is worse than it looks:
-    # without an entry here `is_known_etf` is False, so the position falls through
-    # to `security.asset_type` — whose column default is "Stock" — and to
-    # `security.sector`/`security.country`, which Yahoo leaves empty for a fund.
-    # The result was a holding absent from the sector *and* geographic treemaps
-    # and counted as a stock in the third, with no sync able to fix it.
-    #
-    # Approximate, as everywhere in this file. Sector is unambiguous for a pure
-    # semiconductor fund; the geography skews more US than SMH because the PHLX
-    # SOX index is limited to US-listed names. Adjust if you want it tighter.
-    "SOXQ": {
-        "isins": ["US46138G6153"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 80.0,
-            "Taiwan": 10.0,
-            "Netherlands": 8.0,
-            "South Korea": 2.0,
-        },
-        "sector": {
-            "Technology": 100.0,
-        },
-    },
-
-    # Xtrackers Artificial Intelligence & Big Data (XAIX)
-    "XAIX": {
-        "isins": ["IE00BGV5VN51"],
-        "asset_type": "ETF",
-        "geographic": {
-            "United States": 85.0,
-            "Europe": 10.0,
-            "Asia Pacific": 5.0,
-        },
-        "sector": {
-            "Technology": 90.0,
-            "Communication Services": 7.0,
-            "Industrials": 3.0,
-        },
-    },
-
-    # iShares Core MSCI Emerging Markets IMI (EMIM)
-    "EMIM": {
-        "isins": ["IE00BKM4GZ66"],
-        "asset_type": "ETF",
-        "geographic": {
-            "China": 30.0,
-            "India": 20.0,
-            "Taiwan": 17.0,
-            "Brazil": 7.0,
-            "Saudi Arabia": 5.0,
-            "South Africa": 4.0,
-            "Other Emerging Markets": 17.0,
-        },
-        "sector": {
-            "Technology": 22.0,
-            "Financial Services": 21.0,
-            "Consumer Cyclical": 14.0,
-            "Communication Services": 10.0,
-            "Energy": 8.0,
-            "Basic Materials": 8.0,
-            "Industrials": 6.0,
-            "Healthcare": 5.0,
-            "Consumer Defensive": 4.0,
-            "Utilities": 2.0,
-        },
-    },
-
-    # iShares MSCI EM (IEEM) — not held; declared because it is the look-through basket
-    # donor for the Swisscanto EM 3a tranche (app/etf_sources.py). Same split as EMIM and
-    # that tranche: one index, one allocation, whichever wrapper is read.
-    "IEEM": {
-        "isins": ["IE00B0M63177"],
-        "asset_type": "ETF",
-        "geographic": {
-            "China": 30.0,
-            "India": 20.0,
-            "Taiwan": 17.0,
-            "Brazil": 7.0,
-            "Saudi Arabia": 5.0,
-            "South Africa": 4.0,
-            "Other Emerging Markets": 17.0,
-        },
-        "sector": {
-            "Technology": 22.0,
-            "Financial Services": 21.0,
-            "Consumer Cyclical": 14.0,
-            "Communication Services": 10.0,
-            "Energy": 8.0,
-            "Basic Materials": 8.0,
-            "Industrials": 6.0,
-            "Healthcare": 5.0,
-            "Consumer Defensive": 4.0,
-            "Utilities": 2.0,
-        },
-    },
-
-    # Vanguard Total World Stock (VT) — bought 2026-08-06.
-    # Sector: Yahoo funds_data, 2026-08-06 (Technology carries the +0.01 rounding).
-    # Geographic: deliberately identical to VWCE above. VT tracks FTSE Global All Cap and
-    # VWCE tracks FTSE All-World — the same index family, differing by small-cap inclusion,
-    # which barely moves a regional weight. Two funds on one index disagreeing in this
-    # table would be this codebase's dominant failure mode in miniature, so they are
-    # pinned together on purpose: change one and change the other.
-    # `etf_sources.py` now makes the same judgement one level down — VWCE borrows VT's
-    # constituent basket outright — so if the two ever stop being interchangeable, both
-    # places have to move, not just this one.
-    "VT": {
-        "isins": ["US9220427424"],
-        "asset_type": "ETF",
-        "geographic": {
-            "North America": 65.0,
-            "Europe": 16.0,
-            "Asia Pacific": 12.0,
-            "Emerging Markets": 7.0,
-        },
-        "sector": {
-            "Technology": 31.19,
-            "Financial Services": 15.72,
-            "Industrials": 11.74,
-            "Consumer Cyclical": 8.99,
-            "Healthcare": 8.31,
-            "Communication Services": 7.4,
-            "Consumer Defensive": 4.53,
-            "Basic Materials": 3.81,
-            "Energy": 3.55,
-            "Utilities": 2.48,
-            "Real Estate": 2.28,
-        },
-    },
-
-    # First Trust NASDAQ Clean Edge Smart Grid Infrastructure (GRID) — bought 2026-08-06.
-    # Sector: Yahoo funds_data, 2026-08-06. Its 0.01 Basic Materials sliver is folded into
-    # Industrials rather than kept — a 0.01% category is noise that renders as a treemap
-    # tile indistinguishable from a real one.
-    # Geographic: derived from top_holdings, which covers **59.6%** of the fund — the
-    # strongest basis of the three. Within it the split is 30.2 North America
-    # (JCI/ETN/PWR/NVT/HUBB) against 29.4 Europe (Schneider FR, ABB CH, E.ON DE,
-    # National Grid GB, Prysmian IT), i.e. almost exactly even. Note JCI, ETN and NVT are
-    # Irish plcs counted by their **US listing**, consistent with the rest of this table
-    # and with `currencyExposure.ts`: where a thing trades is what we can actually observe.
-    # The tail is given a little Asia Pacific, which the measured decile has none of.
-    "GRID": {
-        "isins": ["US33737A1088"],
-        "asset_type": "ETF",
-        "geographic": {
-            "North America": 48.0,
-            "Europe": 42.0,
-            "Asia Pacific": 10.0,
-        },
-        "sector": {
-            "Industrials": 66.46,
-            "Utilities": 18.76,
-            "Technology": 11.5,
-            "Consumer Cyclical": 3.28,
-        },
-    },
-
-    # Defiance Quantum (QTUM) — bought 2026-08-06.
-    # Sector: Yahoo funds_data, 2026-08-06.
-    # Geographic: the weakest block in this file, and flagged rather than dressed up. The
-    # top ten covers only **14.9%** of the fund, so it is a thin sample — mitigated, but
-    # only partly, by the fund being near equal-weighted (every top holding sits in
-    # 1.41-1.62%), which makes that decile more representative of the whole than a
-    # cap-weighted fund's would be. Within it: 12.0 North America, 1.5 Asia Pacific
-    # (NEC 6701.T), 1.4 Europe (Airbus AIR.PA). The tail of a quantum-computing index
-    # carries more Japanese and European names than the head does, so Asia Pacific and
-    # Europe are set above their measured share deliberately.
-    # If this matters later, replace it with Defiance's own published country weights;
-    # that is a real source and this is an estimate.
-    "QTUM": {
-        "isins": ["US26922A4206"],
-        "asset_type": "ETF",
-        "geographic": {
-            "North America": 65.0,
-            "Asia Pacific": 20.0,
-            "Europe": 15.0,
-        },
-        "sector": {
-            "Technology": 77.75,
-            "Industrials": 10.95,
-            "Communication Services": 7.16,
-            "Consumer Cyclical": 2.76,
-            "Healthcare": 1.38,
-        },
-    },
+    # iShares Core MSCI World. Also the basket donor for the Swisscanto World ex CH 3a tranche.
+    "IWDA": {"isins": ["IE00B4L5Y983"], "asset_type": "ETF"},
+    # Vanguard FTSE All-World; borrows VT's basket (etf_sources.py).
+    "VWCE": {"isins": ["IE00BK5BQT80"], "asset_type": "ETF"},
+    # iShares Core S&P 500.
+    "SXR8": {"isins": ["IE00B5BMR087"], "asset_type": "ETF"},
+    # Vanguard S&P 500 — not held; declared because it is DBPG's basket proxy, and
+    # `test_etf_source_registry.py` requires the two tables to name the same ISINs.
+    "VOO": {"isins": ["US9229083632"], "asset_type": "ETF"},
+    # Xtrackers NASDAQ 100.
+    "XNAS": {"isins": ["IE00BMFKG444"], "asset_type": "ETF"},
+    # iShares Nasdaq 100 and Invesco NASDAQ 100 — the US-domiciled replacements bought in the
+    # 2026-08 rotation out of the Ireland-domiciled sleeve.
+    "IQQ": {"isins": ["US46438T3095"], "asset_type": "ETF"},
+    "QQQM": {"isins": ["US46138G6492"], "asset_type": "ETF"},
+    # Xtrackers S&P 500 2x Leveraged — synthetic; decomposed only through its proxy.
+    "DBPG": {"isins": ["LU0411078552"], "asset_type": "ETF"},
+    # VanEck Semiconductor UCITS ETF — Irish-domiciled, LSE-listed. NOT the US-listed SMH.
+    "SMH": {"isins": ["IE00BMC38736"], "asset_type": "ETF"},
+    # Invesco PHLX Semiconductor ETF.
+    "SOXQ": {"isins": ["US46138G6153"], "asset_type": "ETF"},
+    # Xtrackers Artificial Intelligence & Big Data.
+    "XAIX": {"isins": ["IE00BGV5VN51"], "asset_type": "ETF"},
+    # iShares Core MSCI Emerging Markets IMI.
+    "EMIM": {"isins": ["IE00BKM4GZ66"], "asset_type": "ETF"},
+    # iShares MSCI EM — not held; the basket donor for the Swisscanto EM 3a tranche.
+    "IEEM": {"isins": ["IE00B0M63177"], "asset_type": "ETF"},
+    # Vanguard Total World Stock.
+    "VT": {"isins": ["US9220427424"], "asset_type": "ETF"},
+    # First Trust NASDAQ Clean Edge Smart Grid Infrastructure.
+    "GRID": {"isins": ["US33737A1088"], "asset_type": "ETF"},
+    # Defiance Quantum.
+    "QTUM": {"isins": ["US26922A4206"], "asset_type": "ETF"},
 
     # --- Swiss pillar 3a (finpension), Swisscanto institutional tranches -------------
     # Keyed by ISIN like everything else here; the "symbol" is the ISIN because
     # finpension publishes no ticker and `ticker_mappings` keys on (symbol, exchange),
     # so the symbol must never change.
-
-    # Pinned **identical to EMIM above**, for the reason VOO / SXR8 / DBPG are pinned to
-    # each other: both track MSCI Emerging Markets (this one the standard index, EMIM
-    # the IMI variant), and a different split here would make the Allocation tab show
-    # the same index differently depending on which wrapper was held.
-    "CH1529078078": {
-        "isins": ["CH1529078078"],
-        "asset_type": "ETF",
-        "geographic": {
-            "China": 30.0,
-            "India": 20.0,
-            "Taiwan": 17.0,
-            "Brazil": 7.0,
-            "Saudi Arabia": 5.0,
-            "South Africa": 4.0,
-            "Other Emerging Markets": 17.0,
-        },
-        "sector": {
-            "Technology": 22.0,
-            "Financial Services": 21.0,
-            "Consumer Cyclical": 14.0,
-            "Communication Services": 10.0,
-            "Energy": 8.0,
-            "Basic Materials": 8.0,
-            "Industrials": 6.0,
-            "Healthcare": 5.0,
-            "Consumer Defensive": 4.0,
-            "Utilities": 2.0,
-        },
-    },
-
-    # MSCI World **ex Switzerland**, so this is IWDA's split with Switzerland taken out
-    # and renormalised, rather than pinned to it. Switzerland is ~2.5% of MSCI World and
-    # sits entirely inside the Europe bucket, so Europe drops from 15 to 13 and the
-    # other three take the difference. Small, and deliberate: pinning to IWDA would put
-    # Swiss weight into a fund whose entire distinguishing feature is not holding any.
-    #
-    # The sector split IS pinned to IWDA's — removing one 2.5% country moves it by less
-    # than this table's precision, and inventing decimals to express that would be
-    # false precision rather than accuracy.
-    "CH0117044948": {
-        "isins": ["CH0117044948"],
-        "asset_type": "ETF",
-        # MSCI World ex Switzerland: developed markets only, so no emerging-markets bucket
-        # (review item L3; the 3.0 was copied from IWDA's row).
-        "geographic": {
-            "North America": 76.0,
-            "Europe": 14.0,
-            "Asia Pacific": 10.0,
-        },
-        "sector": {
-            "Technology": 23.0,
-            "Financial Services": 14.0,
-            "Healthcare": 12.0,
-            "Consumer Cyclical": 11.0,
-            "Industrials": 10.0,
-            "Communication Services": 8.0,
-            "Consumer Defensive": 7.0,
-            "Energy": 5.0,
-            "Real Estate": 3.0,
-            "Utilities": 3.0,
-            "Basic Materials": 4.0,
-        },
-    },
+    # Swisscanto Index Equity Fund Emerging Markets (IEEM's basket, etf_sources.py).
+    "CH1529078078": {"isins": ["CH1529078078"], "asset_type": "ETF"},
+    # Swisscanto IPF I Index Equity Fund World ex CH (IWDA's basket, etf_sources.py).
+    "CH0117044948": {"isins": ["CH0117044948"], "asset_type": "ETF"},
 }
 
 
@@ -528,9 +99,9 @@ def is_known_etf(symbol: str) -> bool:
     **Not the fundness predicate — use `is_known_etf_isin`.** A symbol is not an
     identity: this account holds the *UCITS* VanEck fund `IE00BMC38736`, and the far
     better-known US `SMH` shares its ticker, so a symbol lookup cannot tell them apart
-    and would hand one fund the other's sector and region split. Worse, a *stock* whose
-    ticker collides with a row here would be distributed across eleven sectors as though
-    it were a fund — a fabricated allocation rather than a caveat.
+    and would hand one fund the other's basket. Worse, a *stock* whose ticker collides
+    with a row here would be decomposed as though it were a fund — a fabricated
+    allocation rather than a caveat.
 
     Kept for lookups over the table itself (and because `symbol_for_fund_isin` is the
     inverse), never for classifying a security. `tests/test_fundness_predicate.py` fails
@@ -591,7 +162,7 @@ def symbol_for_fund_isin(isin: str):
 
 def allocation_for_fund_isin(isin: str):
     """
-    A held security's allocation row, resolved from its **ISIN**, or None.
+    A held security's registry row (`isins`, `asset_type`), resolved from its **ISIN**, or None.
 
     The accessor `allocation_service` should use, and the reason it is one function rather
     than a composition at the call site: the two-step form

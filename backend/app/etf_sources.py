@@ -182,9 +182,10 @@ FUND_SOURCES: Dict[str, FundSource] = {
     # is a defensible one and the arithmetic says which way it errs:
     #
     # - The two track the same index family. VT is FTSE Global All Cap, VWCE is FTSE
-    #   All-World; the difference is small-cap inclusion. `ETF_ALLOCATIONS` already pins
-    #   their regional splits together for exactly this reason, so the judgement is not new
-    #   here — what is new is applying it to 10,032 company rows instead of four regions.
+    #   All-World; the difference is small-cap inclusion. The hand-written allocation
+    #   estimates (retired 2026-11-08) pinned their regional splits together for exactly this
+    #   reason, so the judgement is not new here — what is new is applying it to 10,032
+    #   company rows instead of four regions.
     # - The sleeve VWCE omits is almost entirely the part of VT's file that carries **no
     #   weight anyway**: Vanguard publishes to 2dp and 8,007 of VT's 10,032 rows are printed
     #   at 0.00%, so they contribute nothing to a look-through whichever fund is asked.

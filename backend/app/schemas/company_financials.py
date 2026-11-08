@@ -257,6 +257,47 @@ class CompanyPeer(BaseModel):
     key_stats: CompanyFinancialsKeyStats
 
 
+class CompanyScreenerRow(BaseModel):
+    """
+    One company of the screener: who, the overview's key figures (`key_stats`), its own
+    dividend record (`dividend_track`), and P/E, P/FCF and P/S against their own 5-year
+    medians — `*_vs_median` is today's over the median, less one.
+    """
+
+    cik: int
+    security_id: Optional[int] = None
+    symbol: str
+    name: str
+    isin: Optional[str] = None
+    held: bool
+    currency: Optional[str] = Field(None, description="The reporting currency of its figures.")
+    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    period_end: Optional[str] = None
+    market_cap: Optional[float] = None
+    revenue_yoy: Optional[float] = None
+    revenue_cagr_5y: Optional[float] = None
+    eps_yoy: Optional[float] = None
+    eps_cagr_5y: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    fcf_margin: Optional[float] = None
+    roe: Optional[float] = None
+    net_cash: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    pe_median_5y: Optional[float] = None
+    pe_vs_median: Optional[float] = None
+    pfcf_ratio: Optional[float] = None
+    pfcf_median_5y: Optional[float] = None
+    pfcf_vs_median: Optional[float] = None
+    ps_ratio: Optional[float] = None
+    ps_median_5y: Optional[float] = None
+    ps_vs_median: Optional[float] = None
+    dividend_yield: Optional[float] = None
+    dps_cagr_5y: Optional[float] = None
+    raise_years: Optional[int] = None
+    payout_ratio: Optional[float] = None
+
+
 class CompanyPeers(BaseModel):
     """The Peers card (review item R1): the company first, then its industry's largest."""
 

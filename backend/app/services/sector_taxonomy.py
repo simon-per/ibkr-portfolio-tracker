@@ -13,14 +13,13 @@ would have been defensible on coverage grounds — iShares answers 97 of the 103
 account's top companies against Yahoo's 27 — but it would rename every bucket on a screen that has
 been showing "Technology" for months, to no reader's benefit.
 
-**Scope, because this crosses a refusal written down elsewhere.** `models/etf_basket.py` calls
-`etf_holdings.sector` "deliberately UNSERVED", on the grounds that serving it would put a second
-sector answer beside `etf_mappings.py`'s on the Allocation tab. That still holds and the Allocation
-tab is untouched: this module exists so the *look-through* can group the companies it already draws,
-per company, with no portfolio-level rollup anywhere in the response. The two screens answer
-different questions over different denominators — one covers the whole book from hand-maintained
-fund-level percentages, the other covers only what could be decomposed — and neither is a rollup of
-the other.
+**Two screens, one vote.** The look-through classifies every company through this module, and since
+2026-11-08 the Allocation tab's Sectors chart is the rollup of those same companies
+(`LookthroughService.decompose`; docs/lookthrough.md, *Allocation is a rollup of this
+decomposition*). Until then `etf_holdings.sector` was "deliberately unserved" beside
+`etf_mappings.py`'s hand-written fund percentages, which drew the Allocation tab; those estimates are
+retired, and so is the client-side rename `AllocationTab.tsx` kept. `region_taxonomy` is this
+module's twin for countries.
 
 Adding a provider means adding its spellings here, never adding a second map somewhere else.
 """

@@ -1217,3 +1217,48 @@ async def test_an_exactly_tied_sector_vote_does_not_depend_on_arrival_order(sess
         f"the tie resolved to {answers[0]!r} then {answers[1]!r} — it is being decided by the "
         f"order the members arrived in, not by the sector name"
     )
+
+
+# ------------------------------------------------- the Allocation tab is this, rolled up
+
+@pytest.mark.asyncio
+async def test_allocation_sectors_are_the_lookthrough_companies_summed(session):
+    """
+    One decomposition, read by two tabs (docs/lookthrough.md, *Allocation is a rollup of this
+    decomposition*). Every company row's value lands in its sector and what no company carries —
+    a fund's residual, nested funds, a fund with no basket — is Unknown, so the Allocation tab's
+    sector money is the treemap's groups to the cent. Until 2026-11-08 Allocation spread each fund
+    by hand-written percentages and the two could not be reconciled at all.
+    """
+    await _standard_book(session)
+    (await _holding_row(session, XNAS_ISIN, 1)).sector = "Information Technology"
+    for sec_id in (1, 2, 3):
+        (await session.get(Security, sec_id)).sector = "Communication Services"
+    await session.flush()
+
+    report = await LookthroughService(session).get_lookthrough(limit=200)
+    allocation = await AllocationService(session).get_portfolio_allocation()
+
+    expected = {}
+    for row in report["companies"]:
+        expected[row["sector"]] = expected.get(row["sector"], Decimal("0")) + Decimal(
+            str(row["value_eur"])
+        )
+    expected["Unknown"] = expected.get("Unknown", Decimal("0")) + sum(
+        (Decimal(str(report[f])) for f in
+         ("fund_residual_eur", "nested_fund_eur", "uncovered_fund_eur")),
+        Decimal("0"),
+    )
+    published = {
+        name: Decimal(str(cat["market_value_eur"]))
+        for name, cat in allocation["sector_allocation"].items()
+    }
+    assert published == {name: value for name, value in expected.items() if value}
+    assert published == {
+        "Communications": Decimal("2300"),   # Alphabet: 1,700 direct + 600 through XNAS
+        "Unknown": Decimal("1700"),          # XNAS's cash, VWCE (no basket), DBPG (excluded)
+        "Technology": Decimal("1200"),       # NVIDIA, through XNAS only
+    }
+    assert {p["symbol"] for p in allocation["sector_allocation"]["Unknown"]["positions"]} == {
+        "XNAS", "VWCE", "DBPG",
+    }

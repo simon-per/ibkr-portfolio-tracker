@@ -20,6 +20,7 @@ from app.schemas.company_financials import (
     CompanyFinancialsCompany,
     CompanyFinancialsResponse,
     CompanyPeers,
+    CompanyScreenerRow,
 )
 from app.services.company_financials_service import (
     DEFAULT_PERIOD,
@@ -41,6 +42,13 @@ async def dividend_track(db: AsyncSession = Depends(get_db)):
     """Each held listing's company dividend record from its filings, by security id.
     Declared before `/{cik}`, which would otherwise take the path and refuse it."""
     return await CompanyFinancialsService(db).dividend_track()
+
+
+@router.get("/screener", response_model=List[CompanyScreenerRow])
+async def screener(db: AsyncSession = Depends(get_db)):
+    """Every company the tab lists, one row each: the overview's key figures, its dividend
+    record and today's multiples against their own 5-year medians. Declared before `/{cik}`."""
+    return await CompanyFinancialsService(db).screener()
 
 
 @router.get("/{cik}/peers", response_model=CompanyPeers)

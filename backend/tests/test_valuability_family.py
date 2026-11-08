@@ -93,8 +93,10 @@ def test_the_value_scan_recognises_the_form():
 
 def test_every_reader_of_the_breakdown_partitions_through_the_one_predicate():
     readers = [name for name, tree in _modules() if _reads_the_breakdown(tree)]
-    # A floor: allocation, look-through and the dividend breakdown read it today.
-    assert len(readers) >= 4, readers
+    # A floor: look-through, the dividend breakdown and the positions router read it today.
+    # Allocation did until 2026-11-08; it now rolls up the look-through's decomposition and
+    # reaches the rows only through it.
+    assert len(readers) >= 3, readers
     offenders = [
         name
         for name, tree in _modules()

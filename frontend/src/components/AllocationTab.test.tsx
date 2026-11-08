@@ -54,7 +54,7 @@ function allocation(
       },
     },
     geographic_allocation: {
-      'United States': {
+      'North America': {
         percentage: 100,
         market_value_eur: 1000,
         positions: [
@@ -185,21 +185,21 @@ describe('AllocationTab regions', () => {
     ],
   })
 
-  it('lists regions only: an unmapped country joins Other, and one emerging bucket', async () => {
+  it('draws the regions the server publishes, without renaming or folding them', async () => {
+    // The server places every country (region_taxonomy); a client-side fold once sent the
+    // countries it did not know to `Other` and printed "Emerging Markets" beside geography.
     mockApi({
       geographic_allocation: {
-        'United States': slice(60),
-        'Cayman Islands': slice(10),
-        'Emerging Markets': slice(20),
-        'Other Emerging Markets': slice(10),
+        'North America': slice(60),
+        'Asia Pacific': slice(30),
+        Unknown: slice(10),
       },
     })
     withProviders(<AllocationTab />)
 
     await waitFor(() => expect(screen.getAllByText('North America').length).toBeGreaterThan(0))
-    expect(screen.queryAllByText('Cayman Islands')).toHaveLength(0)
-    expect(screen.queryAllByText('Other Emerging Markets')).toHaveLength(0)
-    expect(screen.getAllByText('Other').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Emerging Markets').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Asia Pacific').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('Other')).toHaveLength(0)
   })
 })

@@ -5,7 +5,8 @@ import asyncio
 import logging
 import random
 from datetime import datetime, timedelta
-from app.clock import utc_today, utcnow
+from decimal import Decimal
+from app.clock import utcnow
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select
@@ -13,8 +14,8 @@ import yfinance as yf
 
 from app.models.security import Security
 from app.services.yahoo_eligibility import yahoo_eligible
-from app.services.cash_service import CashService, is_valuable
 from app.services.percentages import share_pct
+from app.services.sector_taxonomy import UNKNOWN
 from app.services.yahoo_estimates import is_fund_quote_type
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 from app.etf_mappings import allocation_for_fund_isin
@@ -272,211 +273,156 @@ class AllocationService:
 
     async def get_portfolio_allocation(self) -> Dict:
         """
-        Get current portfolio allocation breakdown by sector and geography.
-        Returns weighted percentages with position-level detail for drill-down.
+        The Sectors, Regions and Asset types breakdowns, each a partition of the book, with a
+        per-holding drill-down under every slice.
+
+        **Sectors and regions are a rollup of the look-through's decomposition**
+        (`LookthroughService.decompose`, since 2026-11-08): every company a holding is made of —
+        a fund's through its stored basket — classified by the value-weighted vote the
+        Look-through treemap groups on. A slice here is therefore the sum of the treemap's
+        companies in it, and the two tabs cannot disagree about one. Until then this tab spread
+        each fund by `etf_mappings.py`'s hand-written percentages while the Look-through measured
+        the same funds, and its Regions chart printed Yahoo's countries beside those hand-written
+        regions ("United States" 62% next to "North America" 12%). Value no company carries —
+        a decomposed fund's cash and nested funds, or all of a fund with no basket — is `Unknown`
+        under that fund, never spread by an estimate.
+
+        **Asset types are per holding**: the fund registry's answer, by ISIN
+        (`allocation_for_fund_isin`), else the security's own column, else `Unknown`.
 
         **A holding that cannot be valued is excluded and named.** It used to be included
         at a 0% weight, which is the quietest form of this app's most repeated failure:
         every slice is labelled "% of portfolio", the three breakdowns still sum to exactly
         100, and the missing holding is simply *absent* from a picture that looks complete.
-        `test_an_unpriced_holding_does_not_break_the_percentages` pinned the sums and could
-        not see it — summing to 100 is what being wrong looks like here.
+        The decomposition applies `cash_service.is_valuable`, the predicate the forward yield
+        asks too, and `unpriced_holdings` names what it left out.
 
-        Same predicate and same exclude-and-count rule as `LookthroughService`'s
-        `_split_by_valuability` and the forward yield: `cash_service.is_valuable`, which
-        covers both ways the backend fails to value a holding (no price, and no FX rate for
-        the price's currency) without the client-side two-clause form.
+        **Uninvested cash is a bucket in all three breakdowns**, so the three share one
+        denominator — holdings plus positive cash, the base Positions and the Look-through
+        divide by. Cash has no sector and no country, so it is named `Cash` rather than folded
+        into `Unknown`. A **negative** balance (a margin debit) is left out of both the slice
+        and the denominator and reported as `cash_eur`: a pie cannot draw a negative slice, and
+        renormalising around one would quietly inflate every other holding.
 
-        **Uninvested cash is a bucket in all three breakdowns**, not just the asset-type
-        one. Putting it in one chart and not the others would give this endpoint two
-        denominators — asset type over the whole account, sector and geography over the
-        invested part — and the second pair would sum to under 100 while the UI labels
-        every slice "% of portfolio". That is precisely the failure this docstring's
-        first paragraph describes, arriving by a different route. Cash has no sector and
-        no country, so it is named `Cash` rather than folded into `Unknown`, which means
-        something else here: a holding whose sector nobody has fetched yet.
-
-        A **negative** balance (a margin debit; this account carried about −250 CHF for
-        months) is left out of both the slice and the denominator and reported as
-        `cash_eur` instead. A pie cannot draw a negative slice, and renormalising around
-        one would quietly inflate every other holding.
+        **Every amount is summed unrounded and published once.** A basket whose weights add up
+        a hair over 100 (IWDA publishes 100.01) leaves its fund a negative remainder of cents;
+        it nets inside `Unknown`, and a drill-down row or a slice that comes to nothing or less
+        is not drawn rather than drawn negative.
         """
-        from app.services.portfolio_service import PortfolioService
+        from app.services.lookthrough_service import LookthroughService
 
-        portfolio_service = PortfolioService(self.db)
-        all_positions = await portfolio_service.get_positions_breakdown()
-
-        positions = [p for p in all_positions if is_valuable(p['market_value_eur'])]
-        unvaluable = [p for p in all_positions if not is_valuable(p['market_value_eur'])]
-
-        # The read Look-through shares (`CashService.uninvested_cash`), so the two tabs
-        # cannot disagree about what joins the denominator.
-        cash = await CashService(self.db).uninvested_cash(
-            await portfolio_service._load_base_fx(), utc_today()
-        )
-        cash_source = cash.source
-        # Absent when unknown, never 0.00 — Look-through's reading of the same helper.
+        decomposition = await LookthroughService(self.db).decompose()
+        cash = decomposition.cash
+        # Absent when unknown, never 0.00 — the Look-through's reading of the same balance.
         cash_eur = round(float(cash.balance), 2) if cash.balance is not None else None
         # Only a positive balance is a slice — see the docstring.
-        cash_slice = float(cash.in_book)
+        cash_slice = cash.in_book
+        unvaluable = decomposition.unvaluable
 
-        if not positions and not cash_slice:
+        if decomposition.empty and not cash_slice:
             return {
                 'sector_allocation': {},
                 'geographic_allocation': {},
                 'asset_type_allocation': {},
                 'total_market_value_eur': 0.0,
                 'cash_eur': cash_eur,
-                'cash_source': cash_source,
+                'cash_source': cash.source,
                 'total_value_eur': 0.0,
                 'unpriced_holdings': len(unvaluable),
                 'unpriced_symbols': [p['symbol'] for p in unvaluable],
             }
 
-        holdings_value = sum(pos['market_value_eur'] for pos in positions)
+        holdings_value = decomposition.total
         total_value = holdings_value + cash_slice
 
-        result = await self.db.execute(select(Security))
-        securities = {sec.id: sec for sec in result.scalars().all()}
+        securities: Dict[int, Security] = {}
+        if decomposition.holdings:
+            result = await self.db.execute(
+                select(Security).where(Security.id.in_(list(decomposition.holdings)))
+            )
+            securities = {sec.id: sec for sec in result.scalars().all()}
 
-        # Each category stores: {name: {"weight": float, "market_value_eur": float, "positions": [...]}}
+        # Each store: {name: {"value": Decimal, "positions": {symbol: row}}}
         sector_alloc: Dict[str, Dict] = {}
         geo_alloc: Dict[str, Dict] = {}
         asset_alloc: Dict[str, Dict] = {}
 
-        def _add_to_category(
-            store: Dict[str, Dict],
-            category_name: str,
-            weight: float,
-            market_value: float,
-            symbol: str,
-            description: str,
-            is_etf_contribution: bool = False,
-            security_id: Optional[int] = None,
-        ):
-            if category_name not in store:
-                store[category_name] = {"weight": 0.0, "market_value_eur": 0.0, "positions": []}
-            store[category_name]["weight"] += weight
-            store[category_name]["market_value_eur"] += market_value
-            # Merge into existing position entry if same symbol already present (ETF contributions)
-            existing = next((p for p in store[category_name]["positions"] if p["symbol"] == symbol), None)
-            if existing:
-                existing["weight"] += weight
-                existing["market_value_eur"] += market_value
-            else:
-                store[category_name]["positions"].append({
+        def _add(store: Dict[str, Dict], category: str, value: Decimal,
+                 holding: Optional[Dict], via_fund: bool) -> None:
+            bucket = store.setdefault(category, {"value": Decimal("0"), "positions": {}})
+            bucket["value"] += value
+            # One row per symbol: two listings sharing a symbol merge, and the row keeps the
+            # first listing's security for its logo. Cash has none.
+            symbol = holding["symbol"] if holding else "CASH"
+            row = bucket["positions"].get(symbol)
+            if row is None:
+                row = bucket["positions"][symbol] = {
                     "symbol": symbol,
-                    # The row's security, for its logo; the first listing's when two
-                    # listings share the symbol and merge into one row. None for cash.
-                    "security_id": security_id,
-                    "description": description,
-                    "weight": weight,
-                    "market_value_eur": market_value,
-                    "is_etf_contribution": is_etf_contribution,
-                })
+                    "security_id": holding["security_id"] if holding else None,
+                    "description": holding["description"] if holding else "Uninvested cash",
+                    "value": Decimal("0"),
+                    "is_etf_contribution": via_fund,
+                }
+            row["value"] += value
 
-        for position in positions:
-            security_id = position['security_id']
+        for security_id, holding in decomposition.holdings.items():
+            registry = allocation_for_fund_isin(holding["isin"])
             security = securities.get(security_id)
-            if not security:
-                continue
-
-            pos_value = position['market_value_eur']
-            pos_weight = pos_value / total_value if total_value > 0 else 0
-            sym = security.symbol
-            desc = security.description or sym
-
-            # Asset type. The `or 'Unknown'` here is the convention the other two
-            # charts must follow: a holding whose category we don't know still owns
-            # its share of the portfolio, so it gets a named bucket rather than being
-            # dropped. Sector and geography silently dropped it until 2026-08-05.
-            #
-            # The look-through table wins over the column, because otherwise this chart
-            # and the two below answer "is this a fund?" by different rules. They decide
-            # it from a live table lookup needing no sync, while `securities.asset_type` is
-            # written only by `POST /api/allocation/sync` and, since 2026-10-17, the daily
-            # fundamentals pass (held securities, `apply_allocation`). `sync_helper` never writes it, so an IBKR-ingested fund carries the column
-            # default "Stock" indefinitely: it would be a Stock here and an ETF
-            # distributed across eleven sectors a few pixels away, on the same tab. Every
-            # entry declares `asset_type: "ETF"` and `test_etf_mappings.py` pins that, so
-            # the table is the better source.
-            #
-            # **Resolved once, by ISIN, and reused by all three charts.** These were three
-            # separate symbol-keyed lookups, which is two problems: a ticker is not an
-            # identity (the UCITS SMH held here shares its ticker with the US one, and a
-            # *stock* colliding with a row would be spread across eleven sectors as if it
-            # were a fund), and three lookups is three chances for the charts to disagree
-            # about one holding — which they have already done twice.
-            etf_data = allocation_for_fund_isin(security.isin)
             asset_type = (
-                etf_data['asset_type'] if etf_data else security.asset_type
-            ) or 'Unknown'
-            _add_to_category(asset_alloc, asset_type, pos_weight, pos_value, sym, desc,
-                             security_id=security_id)
+                registry['asset_type'] if registry
+                else (security.asset_type if security else None)
+            ) or UNKNOWN
+            _add(asset_alloc, asset_type, holding["value"], holding, via_fund=False)
 
-            # Funds: distribute across sectors/regions
-            if etf_data:
-                for sector, pct in etf_data['sector'].items():
-                    w = pos_weight * (pct / 100)
-                    mv = pos_value * (pct / 100)
-                    _add_to_category(sector_alloc, sector, w, mv, sym, desc, is_etf_contribution=True,
-                                     security_id=security_id)
+        for company in decomposition.companies:
+            for security_id, value in company["_holdings"].items():
+                if not value:
+                    continue  # a constituent its issuer published at 0.00%
+                holding = decomposition.holdings[security_id]
+                _add(sector_alloc, company["sector"], value, holding, holding["is_fund"])
+                _add(geo_alloc, company["_region"], value, holding, holding["is_fund"])
 
-                for region, pct in etf_data['geographic'].items():
-                    w = pos_weight * (pct / 100)
-                    mv = pos_value * (pct / 100)
-                    _add_to_category(geo_alloc, region, w, mv, sym, desc, is_etf_contribution=True,
-                                     security_id=security_id)
-            else:
-                # `or 'Unknown'`, not `if security.sector:` — a holding with no sector on
-                # record is still part of the portfolio, and dropping it made these two
-                # charts sum to less than 100 while the frontend labelled every slice
-                # "% of portfolio". The treemap sizes by area and so renormalises, which
-                # is what kept the gap invisible: the picture looked complete and only the
-                # printed percentages were short.
-                #
-                # This is reached routinely rather than in theory. `sync_helper` never
-                # writes sector or country, so a newly bought security has both NULL,
-                # while `asset_type` carries a "Stock" column default — so a new holding
-                # appeared in the asset-type chart and in neither of these. Since
-                # 2026-10-17 the daily fundamentals pass fills them for held securities
-                # from the `.info` it already fetches (`apply_allocation`), so the gap
-                # lasts until its next 05:00 run rather than until someone clicks.
-                _add_to_category(
-                    sector_alloc, security.sector or 'Unknown', pos_weight, pos_value, sym, desc,
-                    security_id=security_id)
-                _add_to_category(
-                    geo_alloc, security.country or 'Unknown', pos_weight, pos_value, sym, desc,
-                    security_id=security_id)
+        for security_id, value in decomposition.unattributed.items():
+            if not value:
+                continue
+            holding = decomposition.holdings[security_id]
+            _add(sector_alloc, UNKNOWN, value, holding, via_fund=True)
+            _add(geo_alloc, UNKNOWN, value, holding, via_fund=True)
 
         # Cash, into all three, so the three denominators stay one denominator.
         if cash_slice > 0:
-            cash_weight = cash_slice / total_value
             for store in (sector_alloc, geo_alloc, asset_alloc):
-                _add_to_category(
-                    store, 'Cash', cash_weight, cash_slice, 'CASH', 'Uninvested cash')
+                _add(store, 'Cash', cash_slice, None, via_fund=False)
 
         def _finalize(store: Dict[str, Dict]) -> Dict:
             """
-            Sort by weight, publish each share through `share_pct`, round the money.
-
-            Every weight is `market_value / total_value` (a fund's slice and the cash slice
-            included), so the published share is that money over that whole — rounded in
-            Decimal by the one rule, not as `round(weight * 100, 2)` on a float, which
-            rounded a tie such as 1.015 the other way (issue #71's family).
+            Largest first (ties on the name), each share through `share_pct`, money rounded
+            once. Every share is that money over `total_value`, rounded in Decimal by the one
+            rule (issue #71's family).
             """
             out = {}
-            for name, data in sorted(store.items(), key=lambda x: x[1]["weight"], reverse=True):
-                pct = share_pct(data["market_value_eur"], total_value)
-                # Sort positions within category by weight descending
-                pos_list = sorted(data["positions"], key=lambda p: p["weight"], reverse=True)
-                for p in pos_list:
-                    p["weight"] = share_pct(p["market_value_eur"], total_value)
-                    p["market_value_eur"] = round(p["market_value_eur"], 2)
+            ordered = sorted(store.items(), key=lambda kv: (-kv[1]["value"], kv[0]))
+            for name, bucket in ordered:
+                if bucket["value"] <= 0:
+                    continue
+                rows = sorted(
+                    (r for r in bucket["positions"].values() if r["value"] > 0),
+                    key=lambda r: (-r["value"], r["symbol"]),
+                )
                 out[name] = {
-                    "percentage": pct,
-                    "market_value_eur": round(data["market_value_eur"], 2),
-                    "positions": pos_list,
+                    "percentage": share_pct(bucket["value"], total_value),
+                    "market_value_eur": float(round(bucket["value"], 2)),
+                    "positions": [
+                        {
+                            "symbol": r["symbol"],
+                            "security_id": r["security_id"],
+                            "description": r["description"],
+                            "weight": share_pct(r["value"], total_value),
+                            "market_value_eur": float(round(r["value"], 2)),
+                            "is_etf_contribution": r["is_etf_contribution"],
+                        }
+                        for r in rows
+                    ],
                 }
             return out
 
@@ -486,14 +432,13 @@ class AllocationService:
             'asset_type_allocation': _finalize(asset_alloc),
             # Holdings only, kept under its historical name. The percentages above are
             # shares of `total_value_eur`, which adds cash — read that one as the base.
-            'total_market_value_eur': round(holdings_value, 2),
+            'total_market_value_eur': float(round(holdings_value, 2)),
             'cash_eur': cash_eur,
-            'cash_source': cash_source,
-            'total_value_eur': round(total_value, 2),
+            'cash_source': cash.source,
+            'total_value_eur': float(round(total_value, 2)),
             # The completeness of all three breakdowns above. Every percentage is a share
-            # of `total_market_value_eur`, which is the value that could be *priced* — so
-            # anything above 0 means these charts describe less than the portfolio while
-            # labelling each slice "% of portfolio".
+            # of what could be *valued*, so anything above 0 means these charts describe
+            # less than the portfolio while labelling each slice "% of portfolio".
             'unpriced_holdings': len(unvaluable),
             'unpriced_symbols': [p['symbol'] for p in unvaluable],
         }

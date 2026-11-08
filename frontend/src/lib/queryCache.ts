@@ -193,6 +193,14 @@ export const companyPeersQuery = (cik: number) =>
     staleTime: 30 * 60 * 1000,
   })
 
+/** The screener's rows: every company the tab lists, asked only once the card is opened.
+ *  A few seconds on the server (every company's figures), so kept like the Peers card's. */
+export const companyScreenerQuery = queryOptions({
+  queryKey: ['company-financials', 'screener'],
+  queryFn: () => api.getCompanyScreener(),
+  staleTime: 30 * 60 * 1000,
+})
+
 export const companyFinancialsQuery = (
   cik: number,
   period: CompanyFinancialsPeriod,

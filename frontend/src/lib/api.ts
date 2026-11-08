@@ -1751,6 +1751,46 @@ export interface CompanyPeers {
   peers: CompanyPeer[];
 }
 
+/**
+ * One company of the screener: the overview's key figures, its own dividend record, and
+ * today's P/E, P/FCF and P/S against their own 5-year medians. `*_vs_median` is today's over
+ * the median, less one (+0.25: a quarter above the company's history). Money is in `currency`.
+ */
+export interface CompanyScreenerRow {
+  cik: number;
+  security_id: number | null;
+  symbol: string;
+  name: string;
+  isin: string | null;
+  held: boolean;
+  currency: string | null;
+  industry: string | null;
+  period_end: string | null;
+  market_cap: number | null;
+  revenue_yoy: number | null;
+  revenue_cagr_5y: number | null;
+  eps_yoy: number | null;
+  eps_cagr_5y: number | null;
+  gross_margin: number | null;
+  operating_margin: number | null;
+  fcf_margin: number | null;
+  roe: number | null;
+  net_cash: number | null;
+  pe_ratio: number | null;
+  pe_median_5y: number | null;
+  pe_vs_median: number | null;
+  pfcf_ratio: number | null;
+  pfcf_median_5y: number | null;
+  pfcf_vs_median: number | null;
+  ps_ratio: number | null;
+  ps_median_5y: number | null;
+  ps_vs_median: number | null;
+  dividend_yield: number | null;
+  dps_cagr_5y: number | null;
+  raise_years: number | null;
+  payout_ratio: number | null;
+}
+
 /** The newest quarter against the same one a year before (the overview's row, review item R4). */
 export interface CompanyFinancialsLatestQuarter {
   label: string;
@@ -2298,6 +2338,10 @@ class ApiClient {
 
   async getCompanyPeers(cik: number): Promise<CompanyPeers> {
     return this.request<CompanyPeers>(`/api/company-financials/${cik}/peers`);
+  }
+
+  async getCompanyScreener(): Promise<CompanyScreenerRow[]> {
+    return this.request<CompanyScreenerRow[]>('/api/company-financials/screener');
   }
 
   // Holding logos (docs/logos.md)

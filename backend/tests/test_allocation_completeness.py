@@ -21,6 +21,12 @@ The tests are written against the **family** rather than the instance: every
 breakdown the endpoint returns must sum to 100%, so a fourth chart added later is
 held to the same rule without anyone remembering to add a case.
 
+**Since 2026-11-08 sectors and regions are a rollup of the look-through's decomposition**
+(`LookthroughService.decompose`): a fund is spread by its stored basket, never by an estimate,
+and a company's region is the value-weighted vote of the countries its sources state, else its
+ISIN's prefix. The tests at the bottom pin that; the cross-tab equality lives in
+`test_lookthrough_partition.py`.
+
 Offline: no Yahoo, no network. Prices are seeded directly.
 """
 
@@ -30,6 +36,7 @@ from decimal import Decimal
 import pytest
 
 import app.models  # noqa: F401  register all mappers
+from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.security import Security
 from app.models.taxlot import TaxLot
 from app.models.market_price import MarketPrice
@@ -116,10 +123,13 @@ async def test_the_unknown_bucket_is_named_rather_than_folded_into_a_real_catego
     category would be the worse bug — a confident wrong answer instead of a gap.
     It must land in its own labelled bucket, which `AllocationTab` already has a
     colour for.
+
+    FRESH's ISIN carries no country prefix (`XS`), so nothing at all places it: a US prefix
+    would give it North America by the ISIN fallback, which is the next test's subject.
     """
     await _hold(db, symbol="KNOWN", isin="US0000000001", conid=1,
                 sector="Technology", country="United States")
-    await _hold(db, symbol="FRESH", isin="US0000000002", conid=2,
+    await _hold(db, symbol="FRESH", isin="XS0000000002", conid=2,
                 sector=None, country=None)
 
     allocation = await AllocationService(db).get_portfolio_allocation()
@@ -300,11 +310,9 @@ async def test_a_fund_is_a_fund_in_all_three_charts(db):
         f"VT is bucketed as {list(buckets)} while the sector and geography charts "
         "distribute it as a fund"
     )
-    # And the look-through it is being given at the same time, so the two really are
-    # describing one holding.
-    assert any(p["symbol"] == "VT"
-               for cat in allocation["sector_allocation"].values()
-               for p in cat["positions"])
+    # And the decomposition it is given at the same time, so the two really are describing
+    # one holding: with no basket stored, all of it is Unknown under its own name.
+    assert [p["symbol"] for p in allocation["sector_allocation"]["Unknown"]["positions"]] == ["VT"]
 
 
 @pytest.mark.asyncio
@@ -353,7 +361,132 @@ async def test_a_tie_publishes_what_share_pct_publishes(db):
 
     assert allocation["total_value_eur"] == 1000.0
     for key in BREAKDOWNS:
-        (category,) = allocation[key].values()  # Stock / Technology / United States
+        (category,) = allocation[key].values()  # Stock / Technology / North America
         weights = {p["symbol"]: p["weight"] for p in category["positions"]}
         assert weights == {"TIE": 1.02, "REST": 98.98}, key
         assert category["percentage"] == 100.0, key
+
+
+# ------------------------------------------------- one source: the look-through's decomposition
+
+VT_ISIN = "US9220427424"
+NVIDIA_ISIN = "US67066G1040"
+ASML_ISIN = "NL0010273215"
+
+
+async def _basket(db, fund_isin, rows):
+    """A stored basket: `rows` is (line, isin, name, weight, sector, country, asset_class)."""
+    db.add(EtfBasket(
+        fund_isin=fund_isin, as_of_date=utc_today(), as_of_is_issuer_stated=True,
+        source="test", adapter="test", source_rows=len(rows), stored_rows=len(rows),
+        skipped_rows=0, total_weight_pct=Decimal("100"),
+        equity_weight_pct=sum(
+            (Decimal(r[3]) for r in rows if r[6] == "Equity"), Decimal("0")
+        ),
+        identifier_coverage_pct=Decimal("100"), asset_class_available=True,
+    ))
+    for line, isin, name, weight, sector, country, asset_class in rows:
+        db.add(EtfHolding(
+            fund_isin=fund_isin, line_no=line, constituent_isin=isin, constituent_name=name,
+            weight_pct=Decimal(weight), sector=sector, country=country,
+            asset_class=asset_class,
+        ))
+    await db.commit()
+
+
+def _money(category):
+    return {p["symbol"]: p["market_value_eur"] for p in category["positions"]}
+
+
+@pytest.mark.asyncio
+async def test_a_fund_is_spread_by_its_basket_and_its_cash_is_unknown(db):
+    """
+    The retired estimates said what a fund *probably* held; the basket says what it does. VT at
+    1,000: 60% NVIDIA (US), 30% ASML (Netherlands), 10% cash. Technology gets 900, North America
+    600 and Europe 300 — and the cash is Unknown under VT, not spread across the sectors.
+    """
+    await _hold(db, symbol="VT", isin=VT_ISIN, conid=1, sector=None, country=None)
+    await _basket(db, VT_ISIN, [
+        (1, NVIDIA_ISIN, "NVIDIA CORP", "60", "Information Technology", "United States", "Equity"),
+        (2, ASML_ISIN, "ASML HOLDING NV", "30", "Information Technology", "Netherlands", "Equity"),
+        (3, None, "USD CASH", "10", None, None, "Cash"),
+    ])
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    sectors = allocation["sector_allocation"]
+    assert {name: cat["market_value_eur"] for name, cat in sectors.items()} == {
+        "Technology": 900.0, "Unknown": 100.0,
+    }
+    regions = allocation["geographic_allocation"]
+    assert {name: cat["market_value_eur"] for name, cat in regions.items()} == {
+        "North America": 600.0, "Europe": 300.0, "Unknown": 100.0,
+    }
+    assert _money(regions["Europe"]) == {"VT": 300.0}
+    assert all(p["is_etf_contribution"] for cat in sectors.values() for p in cat["positions"])
+    assert list(allocation["asset_type_allocation"]) == ["ETF"]
+
+
+@pytest.mark.asyncio
+async def test_a_company_held_directly_and_through_a_fund_takes_one_sector_and_one_region(db):
+    """
+    The look-through votes once per company, by value, and the rollup applies that answer to
+    every holding the company comes from — so the Allocation slice is the treemap's group and
+    one company is never in two sectors. NVIDIA directly at 1,000 (Yahoo: Technology, United
+    States) outweighs VT's 600 of it, whose basket here disagrees on both counts.
+    """
+    await _hold(db, symbol="NVDA", isin=NVIDIA_ISIN, conid=1,
+                sector="Technology", country="United States")
+    await _hold(db, symbol="VT", isin=VT_ISIN, conid=2, sector=None, country=None)
+    await _basket(db, VT_ISIN, [
+        (1, NVIDIA_ISIN, "NVIDIA CORP", "60", "Financials", "Ireland", "Equity"),
+        (2, ASML_ISIN, "ASML HOLDING NV", "40", "Information Technology", "Netherlands", "Equity"),
+    ])
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    assert _money(allocation["sector_allocation"]["Technology"]) == {"NVDA": 1000.0, "VT": 1000.0}
+    assert "Financials" not in allocation["sector_allocation"]
+    assert _money(allocation["geographic_allocation"]["North America"]) == {
+        "NVDA": 1000.0, "VT": 600.0,
+    }
+    assert _money(allocation["geographic_allocation"]["Europe"]) == {"VT": 400.0}
+
+
+@pytest.mark.asyncio
+async def test_a_stated_country_outranks_the_isin_prefix_and_an_offshore_prefix_says_nothing(db):
+    """
+    A Cayman-incorporated company Yahoo places in Brazil is Latin America; a stock with no
+    stated country falls back to its ISIN's US prefix; one with only a Cayman prefix stays
+    Unknown rather than being sent to the Caribbean.
+    """
+    await _hold(db, symbol="NU", isin="KYG6683N1034", conid=1,
+                sector="Financial Services", country="Brazil")
+    await _hold(db, symbol="NEWUS", isin="US0000000003", conid=2, sector=None, country=None)
+    await _hold(db, symbol="SHELL", isin="KYG000000001", conid=3, sector=None, country=None)
+
+    regions = (await AllocationService(db).get_portfolio_allocation())["geographic_allocation"]
+
+    assert set(_money(regions["Latin America"])) == {"NU"}
+    assert set(_money(regions["North America"])) == {"NEWUS"}
+    assert set(_money(regions["Unknown"])) == {"SHELL"}
+
+
+@pytest.mark.asyncio
+async def test_every_breakdown_is_a_partition_of_the_book_in_money(db):
+    """The percentages summing to 100 is the weaker form; the money must close too."""
+    await _hold(db, symbol="NVDA", isin=NVIDIA_ISIN, conid=1,
+                sector="Technology", country="United States")
+    await _hold(db, symbol="VT", isin=VT_ISIN, conid=2, sector=None, country=None, price="37")
+    await _basket(db, VT_ISIN, [
+        (1, NVIDIA_ISIN, "NVIDIA CORP", "33.3", "Information Technology", "United States", "Equity"),
+        (2, ASML_ISIN, "ASML HOLDING NV", "41.7", "Information Technology", "Netherlands", "Equity"),
+        (3, "JP3633400001", "TOYOTA MOTOR", "19", "Consumer Discretionary", "Japan", "Equity"),
+        (4, None, "USD CASH", "6", None, None, "Cash"),
+    ])
+
+    allocation = await AllocationService(db).get_portfolio_allocation()
+
+    for key in BREAKDOWNS:
+        money = sum(cat["market_value_eur"] for cat in allocation[key].values())
+        assert money == pytest.approx(allocation["total_value_eur"], abs=0.02), key
