@@ -2129,13 +2129,11 @@ class ApiClient {
     });
   }
 
-  async updateWatchlistItem(id: number, notes?: string, targetPrice?: number): Promise<WatchlistItem> {
+  /** Both fields as the editor holds them: an empty note and a null target clear them. */
+  async updateWatchlistItem(id: number, notes: string, targetPrice: number | null): Promise<WatchlistItem> {
     return this.request(`/api/watchlist/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({
-        notes: notes ?? null,
-        target_price: targetPrice ?? null,
-      }),
+      body: JSON.stringify({ notes, target_price: targetPrice }),
     });
   }
 

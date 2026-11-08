@@ -110,8 +110,9 @@ export function WatchlistTab() {
   const [editTargetPrice, setEditTargetPrice] = useState('')
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, notes, targetPrice }: { id: number; notes: string; targetPrice: number | undefined }) =>
-      api.updateWatchlistItem(id, notes || undefined, targetPrice),
+    // The editor's whole state, emptied fields included: they clear (review item U2).
+    mutationFn: ({ id, notes, targetPrice }: { id: number; notes: string; targetPrice: number | null }) =>
+      api.updateWatchlistItem(id, notes, targetPrice),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
       setEditingId(null)
@@ -228,7 +229,7 @@ export function WatchlistTab() {
                 size="sm"
                 disabled={updateMutation.isPending}
                 onClick={() => {
-                  const tp = editTargetPrice.trim() ? parseFloat(editTargetPrice) : undefined
+                  const tp = editTargetPrice.trim() ? parseFloat(editTargetPrice) : null
                   updateMutation.mutate({ id: item.id, notes: editNotes, targetPrice: tp })
                 }}
               >

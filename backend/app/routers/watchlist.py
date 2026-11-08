@@ -84,18 +84,15 @@ async def update_watchlist_item(
     if not item:
         raise HTTPException(status_code=404, detail="Watchlist item not found")
 
-    update_kwargs = {}
-    if request.notes is not None:
-        update_kwargs["notes"] = request.notes
-    if request.target_price is not None:
-        update_kwargs["target_price"] = request.target_price
-
-    if update_kwargs:
-        # Direct attribute update for simplicity
-        if "notes" in update_kwargs:
-            item.notes = update_kwargs["notes"]
-        if "target_price" in update_kwargs:
-            item.target_price = update_kwargs["target_price"]
+    # What the request SENT, not what is non-null: a null target price and an empty note
+    # are how a reader clears them (review item U2, 2026-11-08). Skipping None made both
+    # impossible to clear; a field left out is still left alone.
+    sent = request.model_fields_set
+    if "notes" in sent:
+        item.notes = (request.notes or "").strip() or None
+    if "target_price" in sent:
+        item.target_price = request.target_price
+    if sent & {"notes", "target_price"}:
         await db.flush()
         await db.commit()
         await db.refresh(item)
