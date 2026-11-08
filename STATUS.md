@@ -99,8 +99,8 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **The 2026-11-07 review, implemented by a /goal run (merged into `main` locally wave by wave,
-  not pushed — the owner pushes):** what production must show once deployed.
+- **The 2026-11-07 review, implemented by a /goal run (merged into `main` wave by wave, pushed
+  2026-11-08 as `65784c0`):** what production must show now that it is deployed.
   - *Wave 0 (`review-w0-safety`).* yfinance now raises instead of hiding errors (Y2): the logs
     carry more `… failed for TICKER` warnings from the secondary endpoints (each is an error
     yfinance used to hide), a ratings `404` is a miss with back-off rather than zero analysts,
@@ -207,8 +207,7 @@ Only what is still unverified.
     new fields filled in as the new server would, at 1440 and 390, light and dark.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
-  `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
-  waiting on CI when this was written — confirm `/health` shows it):**
+  `analyst-counts-and-freshness`, merged, pushed and deployed 2026-11-07 as `d8ae10e`):**
   migrations `b2d4f6a8c0e1` and `c3e5a7b9d1f2`. Seen only on a local build against production
   data, with the watchlist's old-shape answer rewritten to the new one by the test script
   (Positions, Company and Watchlist at 1440 light and dark, Watchlist at 390). After the deploy:
@@ -462,8 +461,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    goal run. The plan, the per-item evidence and the repro scripts are kept outside the repo
    (they quote account figures): `C:\Users\simon\Desktop\ibkr-review-2026-11-07\` (PLAN.md,
    findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
-   Company pages approved). A /goal run implemented all eight waves, merged into `main` locally
-   and not pushed; see *Watch after the next deploy*. R6 was built after the owner approved its
+   Company pages approved). A /goal run implemented all eight waves, merged into `main` and
+   pushed 2026-11-08 (`65784c0`); see *Watch after the next deploy*. R6 was built after the owner approved its
    companyfacts read, and CO8's KLAC concept after a second approved read: nothing in it is left open.
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
@@ -499,7 +498,8 @@ One line each, newest first; drop the oldest.
 
 - **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
-  tax; one local branch per wave merged into `main`, nothing pushed; R6 built after an approved read.
+  tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
+  (`65784c0`).
 - **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
   survey found one company's figures disagreeing across tabs; every rating now shows its
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
