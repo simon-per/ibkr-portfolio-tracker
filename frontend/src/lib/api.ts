@@ -1694,6 +1694,29 @@ export interface CompanyFinancialsSeriesSet {
  */
 export type CompanyFinancialsRating = AnalystRatingCounts
 
+/** One company of the Company tab's Peers card (review item R1). */
+export interface CompanyPeer {
+  cik: number;
+  security_id: number | null;
+  symbol: string;
+  name: string;
+  isin: string | null;
+  held: boolean;
+  /** The reporting currency of its figures. */
+  currency: string | null;
+  key_stats: CompanyFinancialsKeyStats;
+}
+
+/** The companies the tab lists in one company's SEC industry, the company first. */
+export interface CompanyPeers {
+  cik: number;
+  sic: number | null;
+  industry: string | null;
+  /** True when the peers are the three-digit SIC group's. */
+  widened: boolean;
+  peers: CompanyPeer[];
+}
+
 /** The newest quarter against the same one a year before (the overview's row, review item R4). */
 export interface CompanyFinancialsLatestQuarter {
   label: string;
@@ -2233,6 +2256,10 @@ class ApiClient {
   ): Promise<CompanyFinancialsResponse> {
     const params = new URLSearchParams({ period, range });
     return this.request<CompanyFinancialsResponse>(`/api/company-financials/${cik}?${params}`);
+  }
+
+  async getCompanyPeers(cik: number): Promise<CompanyPeers> {
+    return this.request<CompanyPeers>(`/api/company-financials/${cik}/peers`);
   }
 
   // Holding logos (docs/logos.md)

@@ -19,6 +19,7 @@ from app.schemas.company_financials import (
     CompanyDividendTrack,
     CompanyFinancialsCompany,
     CompanyFinancialsResponse,
+    CompanyPeers,
 )
 from app.services.company_financials_service import (
     DEFAULT_PERIOD,
@@ -40,6 +41,16 @@ async def dividend_track(db: AsyncSession = Depends(get_db)):
     """Each held listing's company dividend record from its filings, by security id.
     Declared before `/{cik}`, which would otherwise take the path and refuse it."""
     return await CompanyFinancialsService(db).dividend_track()
+
+
+@router.get("/{cik}/peers", response_model=CompanyPeers)
+async def company_peers(cik: DbId, db: AsyncSession = Depends(get_db)):
+    """The companies the tab lists in this one's SEC industry, with the overview's key
+    figures (review item R1). 404 for a company the pass never looked at."""
+    company = await db.get(SecCompany, cik)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return await CompanyFinancialsService(db).peers(company)
 
 
 @router.get("/{cik}", response_model=CompanyFinancialsResponse)

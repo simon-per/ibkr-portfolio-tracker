@@ -244,6 +244,31 @@ class CompanyDividendTrack(BaseModel):
     payout_ratio: Optional[float] = None
 
 
+class CompanyPeer(BaseModel):
+    """One company of the Peers card: who, and the overview's key figures."""
+
+    cik: int
+    security_id: Optional[int] = None
+    symbol: str
+    name: str
+    isin: Optional[str] = None
+    held: bool
+    currency: Optional[str] = Field(None, description="The reporting currency of its figures.")
+    key_stats: CompanyFinancialsKeyStats
+
+
+class CompanyPeers(BaseModel):
+    """The Peers card (review item R1): the company first, then its industry's largest."""
+
+    cik: int
+    sic: Optional[int] = None
+    industry: Optional[str] = Field(None, description="The SEC's SIC description.")
+    widened: bool = Field(
+        ..., description="True when the peers are the three-digit SIC group's."
+    )
+    peers: List[CompanyPeer] = Field(default_factory=list)
+
+
 class CompanyFinancialsLatestQuarter(BaseModel):
     """The newest quarter on its own: the overview's "Latest quarter" row (R4)."""
 

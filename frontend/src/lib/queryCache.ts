@@ -178,6 +178,14 @@ export const companyDividendTrackQuery = queryOptions({
 })
 
 /** One company's fundamentals history at one period basis and range (the Company tab). */
+/** The Peers card's rows (review item R1): asked only once the card is opened. */
+export const companyPeersQuery = (cik: number) =>
+  queryOptions({
+    queryKey: ['company-financials', 'peers', cik],
+    queryFn: () => api.getCompanyPeers(cik),
+    staleTime: 30 * 60 * 1000,
+  })
+
 export const companyFinancialsQuery = (
   cik: number,
   period: CompanyFinancialsPeriod,

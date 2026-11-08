@@ -707,6 +707,21 @@ filings' `currency`.
   back from the newest close, each point's YoY and the CAGRs by the same rules, `label` = the date.
   The Period toggle does not apply.
 
+## Peers
+
+`GET /api/company-financials/{cik}/peers` (`CompanyFinancialsService.peers`, review item R1,
+2026-11-08): the companies the tab lists (`list_companies`'s scope) in the company's SEC industry
+(`sec_companies.sic`, filled by the Sunday pass's `submissions` read), and when that holds fewer
+than `PEERS_MIN` (4) others, its three-digit group (`sic // 10`, `widened`). The company first,
+then the rest by TTM revenue, largest first, at most `PEERS_MAX` (15) rows. **Each row's figures are
+the overview's own** — `_priced` (rows, closes on the split basis, today's close) and `key_stats`,
+the one path `get_financials` reads too; `tests/test_company_peers.py` compares every peer's
+`key_stats` with its own overview's. No industry is no peers. On the tab: a collapsed card under the
+charts (`CompanyPeersCard`), shown only when the profile names an industry, that asks the server
+only once opened (about six queries a peer); the industry and `SIC 3674` (or `SIC 367x` widened)
+on its header, a sortable table (`peerColumns`, in `tableFamily.test.tsx`) whose rows link through
+`CompanyLink`. Figures stay in each company's reporting currency, as everywhere on the tab.
+
 ## Known gaps and out of scope
 
 - **NVDA capex, FY2013–FY2021**: NVDA tagged its annual capex ("purchases related to property

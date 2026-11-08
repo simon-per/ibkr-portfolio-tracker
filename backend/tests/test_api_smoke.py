@@ -121,6 +121,7 @@ READ_ENDPOINTS = [
     "/api/company-financials/937966?period=annual&range=max",
     "/api/company-financials/320193",   # a Nasdaq-100 constituent not held
     "/api/company-financials/1234567",  # a known company without figures
+    "/api/company-financials/937966/peers",  # its industry widened to 355x: Apple
 ]
 
 # The crypto book's reads need the admin key (docs/crypto.md), so they run through
@@ -169,11 +170,12 @@ async def _seed(session: AsyncSession) -> None:
     # eight calendar quarters and the two years, no capex in the first quarter.
     pass_at = datetime.combine(TODAY, time(5))
     session.add(SecurityCik(security_id=1, cik=937966, sec_ticker="ASML", cik_checked_at=pass_at))
-    session.add(SecCompany(cik=937966, ticker="ASML", fetched_at=pass_at))
+    session.add(SecCompany(cik=937966, ticker="ASML", fetched_at=pass_at, sic=3559,
+                           sic_description="Special Industry Machinery"))
     # A Nasdaq-100 constituent nobody holds, found by the newest pass; one that left the index
     # (an older stamp) and one the pass never got figures for.
     session.add(SecCompany(cik=320193, ticker="AAPL", name="Apple Inc", isin="US0378331005",
-                           universe_seen_at=pass_at, fetched_at=pass_at))
+                           universe_seen_at=pass_at, fetched_at=pass_at, sic=3555))
     session.add(SecCompany(cik=7654321, ticker="GONE", name="Former member",
                            universe_seen_at=pass_at - timedelta(days=7), fetched_at=pass_at))
     session.add(SecCompany(cik=1234567, ticker="EMPTY"))
@@ -595,6 +597,15 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     empty = client.get("/api/company-financials/1234567").json()
     assert empty["warnings"] and empty["series"]["revenue"]["points"] == []
     assert client.get("/api/company-financials/999").status_code == 404
+
+    # The Peers card (review item R1): one other in 3559 is too few, so 355x; the company
+    # first, with its own overview's figures.
+    peers = client.get("/api/company-financials/937966/peers").json()
+    assert (peers["sic"], peers["industry"], peers["widened"]) == (
+        3559, "Special Industry Machinery", True)
+    assert [p["symbol"] for p in peers["peers"]] == ["ASML", "AAPL"]
+    assert peers["peers"][0]["key_stats"] == body["key_stats"]
+    assert client.get("/api/company-financials/999/peers").status_code == 404
     assert client.get("/api/company-financials/937966?period=weekly").status_code == 422
     assert client.get("/api/company-financials/937966?range=2y").status_code == 422
     assert client.get("/api/company-financials/937966?range=3y").json()["range"] == "3y"
