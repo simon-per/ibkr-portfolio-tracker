@@ -105,6 +105,8 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
   { id: 'cash-debt', kind: 'bar', header: 'latest', optional: true,
     total: { title: 'Cash & debt', format: 'money', series: [
       { key: 'cash', name: 'Cash & equivalents' },
+      // Net cash counts them too, so the card's figures add up (review item VI1).
+      { key: 'investments', name: 'Investments' },
       { key: 'debt', name: 'Debt' },
       { key: 'net_cash', name: 'Net cash' },
     ] } },
@@ -250,9 +252,12 @@ const NO_CAGRS: CompanyFinancialsCagrs = { y3: null, y5: null, y10: null }
 export function growthOf(
   response: CompanyFinancialsResponse,
   key: CompanyFinancialsSeriesKey,
-): { cagr: number | null; yoy: number | null; cagrs: CompanyFinancialsCagrs } {
+): { cagr: number | null; yoy: number | null; cagrs: CompanyFinancialsCagrs; medians: CompanyFinancialsCagrs } {
   const series = seriesOf(response, key)
-  return { cagr: series?.cagr ?? null, yoy: series?.yoy ?? null, cagrs: series?.cagrs ?? NO_CAGRS }
+  return {
+    cagr: series?.cagr ?? null, yoy: series?.yoy ?? null, cagrs: series?.cagrs ?? NO_CAGRS,
+    medians: series?.medians ?? NO_CAGRS,
+  }
 }
 
 /** The CAGR spans a card's header quotes, shortest first. */

@@ -45,6 +45,7 @@ exercises:
   no row, never a zero.
 """
 
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -302,6 +303,13 @@ QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 
 #: Forms whose facts count: `edgar_client.PERIODIC_FORMS`, the one set.
 FORMS = PERIODIC_FORMS
+# A concept named like a current investment (`_unchained_investments`): marketable or
+# held-to-maturity securities, available-for-sale or debt securities, or investments,
+# classified current. Restricted balances are not liquid.
+INVESTMENT_LIKE = re.compile(
+    r"^(?!Restricted)\w*(MarketableSecurities|Investments|AvailableForSale|HeldToMaturity"
+    r"|DebtSecurities)\w*Current$"
+)
 
 # 12 to 14 weeks, or a retailer's 16- and 17-week fourth quarter: COST's 112 days had no Q4
 # from its ladder, so its year-end balances never reached a quarter (no Q4 cash or equity).
@@ -429,6 +437,8 @@ class Obs:
     error: float = 0.0
     # Differenced from a year-to-date ladder rather than reported.
     derived: bool = False
+    # Every filing's (filed, adjusted value) for this span, oldest first (`_as_of`).
+    vintages: Tuple[Tuple[date, float], ...] = ()
 
 
 @dataclass
@@ -436,6 +446,13 @@ class Normalised:
     rows: List[Dict[str, Any]] = field(default_factory=list)
     currency: Optional[str] = None
     entity_name: Optional[str] = None
+    # The splits the filings restated history for (`filed_splits`): each
+    # {"after", "by", "ratio"} — the last filing on the old basis, the first on the new
+    # (ISO dates), and new shares per old.
+    splits: List[Dict[str, Any]] = field(default_factory=list)
+    # Current-investment concepts outside every chain carrying a value at the newest
+    # balance sheet where no chained one does (`_unchained_investments`).
+    unchained_investments: List[str] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -542,6 +559,9 @@ def _filing_facts(
     concept for keeps companyfacts' answer.
     """
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
+    instant = {
+        c for spec in METRICS.values() if spec.timing == INSTANT for c in spec.concepts
+    }
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
@@ -554,7 +574,11 @@ def _filing_facts(
             continue
         start, end, filed = (_date(row.get(k)) for k in ("start", "end", "filed"))
         val, accn, form = row.get("val"), row.get("accn"), row.get("form")
-        if None in (start, end, filed) or not accn or form not in FORMS:
+        if None in (end, filed) or not accn or form not in FORMS:
+            continue
+        # A balance sheet's instant has no start (a filing companyfacts has not taken in
+        # yet, review item CO5); a flow without one is not a period.
+        if start is None and concept not in instant:
             continue
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             continue
@@ -658,11 +682,15 @@ def _vote(votes: Counter, fallback: Fraction) -> Fraction:
     return min(winners, key=lambda k: abs(float(k) - float(fallback)))
 
 
-def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
+def adjustments(
+    facts: Iterable[Fact], events: Optional[List[Dict[str, Any]]] = None
+) -> Dict[Tuple[str, str], float]:
     """
     (concept, accn) -> the multiplier that puts that filing's values of that concept into
     the newest filing's basis: its split factor (shares up, per-share down, money
     untouched) times the concept's own scale slip, if any. See the module docstring.
+    `events`, when given, receives each change of split factor between two consecutive
+    filings (`filed_splits`).
     """
     by_accn: Dict[str, List[Fact]] = defaultdict(list)
     by_period: Dict[Tuple[str, Optional[date], date], List[Fact]] = defaultdict(list)
@@ -681,6 +709,7 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
     # Share-count facts of the filings already walked, for `_neighbour_split`.
     walked_counts: Dict[str, List[Fact]] = defaultdict(list)
     previous_split = Fraction(1)
+    previous_accn: Optional[str] = None
     for accn in sorted(by_accn, key=lambda a: (filed_of[a], a), reverse=True):
         pairs = []
         split_votes: Counter = Counter()
@@ -731,8 +760,63 @@ def adjustments(facts: Iterable[Fact]) -> Dict[Tuple[str, str], float]:
         for f in by_accn[accn]:
             if f.kind == SHARES and f.val > 0:
                 walked_counts[f.concept].append(f)
-        previous_split = split
+        if events is not None and previous_accn is not None and split != previous_split:
+            events.append({
+                "after": filed_of[accn].isoformat(),
+                "by": filed_of[previous_accn].isoformat(),
+                "ratio": float(split / previous_split),
+            })
+        previous_split, previous_accn = split, accn
     return multiplier
+
+
+def _unchained_investments(companyfacts: Dict[str, Any], end: date) -> List[str]:
+    """
+    The us-gaap concepts named like current investments that no chain reads, with a
+    positive value on the balance sheet dated `end` (review item CO8, 2026-11-08). KLAC's
+    marketable securities sit in one, so its net cash counted cash alone; the sync names
+    each such concept so the chain can whitelist it (`short_term_investments`). Named, never
+    read: a concept is a member of a chain only once someone saw what it holds.
+    """
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    chained = {c for spec in METRICS.values() for c in spec.concepts}
+    out = []
+    for concept, body in gaap.items():
+        if concept in chained or not INVESTMENT_LIKE.match(concept):
+            continue
+        rows = ((body or {}).get("units") or {}).get("USD") or []
+        if any(
+            row.get("form") in FORMS
+            and not row.get("start")
+            and _date(row.get("end")) == end
+            and isinstance(row.get("val"), (int, float))
+            and row["val"] > 0
+            for row in rows
+        ):
+            out.append(concept)
+    return sorted(out)
+
+
+def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The splits the filings restated history for, oldest first (review item CO1,
+    2026-11-08): the closes before one Yahoo never booked are on the old share basis while
+    the figures are on the new (HON's 1:2 at its 2026 Aerospace separation doubled every
+    earlier EPS and halved every earlier P/E), and `eps_basis` scales them. A single filing
+    voted off its neighbours both ways is a mis-vote, not two splits, and is left out.
+    """
+    kept: List[Dict[str, Any]] = []
+    for event in sorted(events, key=lambda e: e["after"]):
+        last = kept[-1] if kept else None
+        if (
+            last is not None
+            and last["by"] == event["after"]
+            and abs(last["ratio"] * event["ratio"] - 1) <= NEIGHBOUR_TOLERANCE
+        ):
+            kept.pop()
+            continue
+        kept.append(event)
+    return kept
 
 
 def _neighbour_split(
@@ -786,6 +870,7 @@ def _latest(
     """Per concept, per (start, end): the value of the latest filing, adjusted."""
     chosen: Dict[Tuple[str, Optional[date], date], Fact] = {}
     annual_form: Dict[Tuple[str, Optional[date], date], bool] = defaultdict(bool)
+    every: Dict[Tuple[str, Optional[date], date], Dict[date, Fact]] = defaultdict(dict)
     for f in facts:
         key = (f.concept, f.start, f.end)
         if f.form.startswith("10-K"):
@@ -793,9 +878,16 @@ def _latest(
         held = chosen.get(key)
         if held is None or (f.filed, f.accn) > (held.filed, held.accn):
             chosen[key] = f
+        same_day = every[key].get(f.filed)
+        if same_day is None or f.accn > same_day.accn:
+            every[key][f.filed] = f
     out: Dict[str, Dict[Tuple[Optional[date], date], Obs]] = defaultdict(dict)
     for key, f in chosen.items():
         m = multiplier.get((f.concept, f.accn), 1.0)
+        vintages = tuple(
+            (day, g.val * multiplier.get((g.concept, g.accn), 1.0))
+            for day, g in sorted(every[key].items())
+        )
         error = CENT_ROUNDING * abs(m) if f.kind == PER_SHARE else 0.0
         out[f.concept][(f.start, f.end)] = Obs(
             value=f.val * m,
@@ -806,8 +898,33 @@ def _latest(
             concept=f.concept,
             annual_form=annual_form[key],
             error=error,
+            vintages=vintages,
         )
     return out
+
+
+def _as_of(obs: Obs, when: date) -> Obs:
+    """
+    `obs` as the filings up to `when` knew it: the newest value filed on or before it, or
+    `obs` itself when none was (review item CO6, 2026-11-08).
+    """
+    if obs.filed <= when:
+        return obs
+    known = [(day, value) for day, value in obs.vintages if day <= when]
+    if not known:
+        return obs
+    day, value = known[-1]
+    return Obs(
+        value=value,
+        filed=day,
+        start=obs.start,
+        end=obs.end,
+        unit=obs.unit,
+        concept=obs.concept,
+        annual_form=obs.annual_form,
+        error=obs.error,
+        derived=obs.derived,
+    )
 
 
 def _not_a_figure(
@@ -961,7 +1078,11 @@ def _quarters_and_years(
         for i, (shorter, longer) in enumerate(zip(rungs, rungs[1:])):
             if not _between((longer.end - shorter.end).days, QUARTER_DAYS):
                 continue
-            candidate = _difference(kind, longer, shorter)
+            # Both rungs of one filing vintage: a shorter rung a newer filing restated (HON's
+            # next 10-Q put the prior nine months on continuing operations) is taken as the
+            # longer rung's filing knew it, or Q4 is the whole company's year less the
+            # continuing nine months (review item CO6).
+            candidate = _difference(kind, longer, _as_of(shorter, longer.filed))
             zero_shown = cumulative and _accounted(rungs, i, direct)
             if _not_a_figure(kind, non_negative, candidate.value, zero_shown):
                 continue
@@ -1074,6 +1195,39 @@ def _implied_shares(
         return None
     shares = income.value / eps.value
     return shares if shares > 0 else None
+
+
+def _rescale_share_slips(
+    latest: Dict[str, Dict[Tuple[Optional[date], date], Obs]],
+    spec_of: Dict[str, "MetricSpec"],
+) -> None:
+    """
+    A reported share count a thousand times off net income over EPS for the same span,
+    rescaled in place **before** any quarter is derived from it (review item CO4,
+    2026-11-08). ONDS tags its 10-K counts in thousands and its 10-Qs in shares; the check
+    ran on the finished values, after Q4 had been derived from the year still in
+    thousands — negative, so dropped — and every TTM window since broke on the missing
+    quarter. The same test as the later pass (`_implied_shares`), on the raw spans.
+    """
+    def chain(metric: str) -> Dict[Tuple[Optional[date], date], Obs]:
+        out: Dict[Tuple[Optional[date], date], Obs] = {}
+        for concept in METRICS[metric].concepts:
+            for span, obs in latest.get(concept, {}).items():
+                out.setdefault(span, obs)
+        return out
+
+    by_span = {"net_income": chain("net_income"), "eps_diluted": chain("eps_diluted")}
+    for concept, periods in latest.items():
+        spec = spec_of.get(concept)
+        if spec is None or spec.kind != SHARES or spec.timing != FLOW:
+            continue
+        for span, obs in periods.items():
+            implied = _implied_shares(by_span, span, SHARES_SLIP_EPS_MAX_ERROR)
+            if implied is None:
+                continue
+            slip = _snap(obs.value / implied, SHARE_COUNT_SLIPS, SHARES_SLIP_TOLERANCE)
+            if slip is not None:
+                obs.value = obs.value / float(slip)
 
 
 def _quarter_totals(
@@ -1242,7 +1396,9 @@ def normalise(
     facts = _drop_lone_slips(base + _filing_facts(base, filing_facts))
     if not facts:
         return result
-    multiplier = adjustments(facts)
+    events: List[Dict[str, Any]] = []
+    multiplier = adjustments(facts, events)
+    result.splits = filed_splits(events)
     latest = _latest([f for f in facts if f.concept != SPLIT_WITNESS], multiplier)
     totals = {c: latest.pop(c) for c in DIVIDEND_TOTALS if c in latest}
 
@@ -1251,6 +1407,7 @@ def normalise(
     instants: Dict[str, Dict[date, Obs]] = {}
     year_spans, ladder_starts, quarter_starts = set(), set(), set()
     spec_of = {c: s for s in METRICS.values() for c in s.concepts}
+    _rescale_share_slips(latest, spec_of)
     for concept, periods in latest.items():
         spec = spec_of[concept]
         if spec.timing == INSTANT:
@@ -1379,7 +1536,10 @@ def normalise(
             for end, v in anchors
             if 0 < abs((end - key[1]).days) <= NEIGHBOUR_DAYS and v > 0
         ]
-        if near and not any(
+        # Between its two reported neighbours it is a count, however fast the company
+        # dilutes (CO4: a quarter of heavy issuance is more than 1.2x from either side).
+        between = len(near) >= 2 and min(near) <= obs.value <= max(near)
+        if near and not between and not any(
             1 / DERIVED_COUNT_MAX_STEP <= obs.value / v <= DERIVED_COUNT_MAX_STEP
             for v in near
         ):
@@ -1388,6 +1548,16 @@ def normalise(
     if dropped:
         _fill_shares_from_eps(values, keys)
     _fill_eps_from_shares(values, keys)
+
+    cash = values["cash"]
+    if cash:
+        newest = max(cash, key=lambda k: k[1])
+        if newest not in values["short_term_investments"] and newest not in values[
+            "cash_and_short_term"
+        ]:
+            result.unchained_investments = _unchained_investments(
+                companyfacts, cash[newest].end
+            )
 
     currencies: Counter = Counter()
     for metric in ("revenue", "net_income"):

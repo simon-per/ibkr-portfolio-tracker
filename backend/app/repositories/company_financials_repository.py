@@ -9,6 +9,7 @@ the stretch of closes one fetch covers.
 """
 
 from datetime import date, datetime
+import json
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import delete, func, select
@@ -161,6 +162,18 @@ class CompanyFinancialsRepository:
         row.facts_checked_at = checked_at
         row.facts_miss_count = (row.facts_miss_count or 0) + 1
 
+    async def record_lag(
+        self, cik: int, checked_at: datetime, misses: Optional[int]
+    ) -> None:
+        """
+        A fetch that stopped short of the filing the SEC lists (companyfacts lags it):
+        spaced like a miss (`facts_backoff_until`), counting on from `misses` — the
+        company's count before the fetch, which the write cleared (review item CO5).
+        """
+        row = await self.ensure_company(cik)
+        row.facts_checked_at = checked_at
+        row.facts_miss_count = (misses or 0) + 1
+
     async def record_profile(
         self, cik: int, profile: Optional[dict], checked_at: datetime
     ) -> None:
@@ -183,11 +196,16 @@ class CompanyFinancialsRepository:
         rows: Sequence[dict],
         fetched_at: datetime,
         entity_name: Optional[str] = None,
+        splits: Sequence[dict] = (),
     ) -> None:
-        """Every figure of one company, replaced as one set; clears its miss stamps."""
+        """
+        Every figure of one company, replaced as one set with the splits its filings
+        restated history for; clears its miss stamps.
+        """
         company = await self.ensure_company(cik)
         if entity_name and not company.name:
             company.name = entity_name
+        company.filed_splits = json.dumps(list(splits)) if splits else None
         await self.session.execute(
             delete(CompanyFinancial).where(CompanyFinancial.cik == cik)
         )

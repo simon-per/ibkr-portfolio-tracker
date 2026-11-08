@@ -66,6 +66,9 @@ class SecCompany(Base):
         DateTime, nullable=True
     )
     facts_miss_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The splits the filings restated history for, as JSON (`normaliser.filed_splits`):
+    # [{"after", "by", "ratio"}], written with the rows. NULL is none known.
+    filed_splits: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # When this company's rows were last written from a companyfacts answer.
     fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # The price pass's stamps (`company_price_sync`), the same three as the facts': when

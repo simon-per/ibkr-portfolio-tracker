@@ -101,6 +101,23 @@ export function zeroBasedTicks(values: number[], targetCount: number): Axis {
 }
 
 /**
+ * Values for an axis one spike must not flatten (review item VI5, 2026-11-08): each
+ * clipped to `factor` times the median of the positive values. A multiple over a
+ * near-zero denominator — AMD's P/E of 2,500, NXPI's 1,000 — is a real figure that says
+ * nothing the rest of the chart can be read against, and it squashed every other year
+ * into the bottom pixels. The tooltip and the headline keep the true value; fewer than
+ * four positive values are left alone.
+ */
+export function robustlyCapped(values: number[], factor = 3): number[] {
+  const positive = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+  if (positive.length < 4) return values
+  const mid = Math.floor(positive.length / 2)
+  const median = positive.length % 2 ? positive[mid] : (positive[mid - 1] + positive[mid]) / 2
+  const bound = median * factor
+  return values.map((v) => (Number.isFinite(v) ? Math.max(-bound, Math.min(bound, v)) : v))
+}
+
+/**
  * How far below zero a money axis should be allowed to go.
  *
  * `paddedMin` is the caller's padded minimum, which on a multi-series money chart is a

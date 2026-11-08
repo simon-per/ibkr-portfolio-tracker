@@ -51,8 +51,10 @@ Figures stay in the reporting currency. Converting a history into the base curre
 fold a decade of exchange-rate moves into every growth rate.
 """
 
+import json
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from statistics import median
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -97,6 +99,7 @@ SERIES = (
     "buybacks",
     "dividends_paid",
     "cash",
+    "investments",
     "debt",
     "net_cash",
     "pe_ratio",
@@ -143,6 +146,10 @@ PRICE_MATCH_DAYS = 7
 # A newest close older than this gives no current P/E: two missed weekly price passes.
 PRICE_MAX_AGE_DAYS = 14
 SPLIT_RATIO_TOLERANCE = 0.005
+# How near a filed split (`eps_basis`) a Yahoo split of its ratio must fall to be the same
+# one: Yahoo's ratio is the exchange's, the filings' a snapped vote.
+FILED_SPLIT_SLACK_DAYS = 14
+FILED_SPLIT_RATIO_TOLERANCE = 0.02
 # The market cap's share count must sit this near the diluted average: a filer that tags one
 # class of several without its class (half of GOOGL's, 87% of META's) is no company's count.
 MARKET_CAP_SHARE_TOLERANCE = 0.10
@@ -225,14 +232,16 @@ def _debt(base: Dict[str, Optional[float]]) -> Optional[float]:
     The tagged total, else the noncurrent and current halves added when both are tagged.
     A total of exactly zero is a tagging slip, not a debt-free company (ORCL's FY2022 and
     AMD's FY2021 10-Ks tag a 0 beside billions of notes); a company without debt tags none.
+    And a "total" smaller than its own halves is one of them under the total's concept
+    (review item CO7, 2026-11-08: AMD's FY2021 year end read 1M against 313M of notes, and
+    the next year's debt grew "+246,600%"): the halves win.
     """
     total = base.get("debt_total")
-    if total:
-        return total
     noncurrent, current = base.get("debt_noncurrent"), base.get("debt_current")
-    if noncurrent is not None and current is not None:
-        return noncurrent + current
-    return None
+    halves = noncurrent + current if noncurrent is not None and current is not None else None
+    if halves is not None and (not total or halves > total):
+        return halves
+    return total or None
 
 
 def _derive(point: Point) -> None:
@@ -321,6 +330,26 @@ def growth_at(points: Sequence[tuple], index: int, years: int) -> Optional[float
     return (last / previous) ** (1 / years) - 1
 
 
+def medians(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
+    """
+    The median of the positive values over the `CAGR_YEARS` up to the latest point, keyed
+    `y3`, `y5`, `y10` — a multiple's own history to read today's against (review item
+    R3, 2026-11-08), where a growth rate means nothing. None with fewer than three values
+    in the span or no span covered: a median of one quarter is that quarter.
+    """
+    known = [(d, v) for d, v in points if v is not None]
+    if not known:
+        return {f"y{n}": None for n in CAGR_YEARS}
+    last = known[-1][0]
+    out: Dict[str, Optional[float]] = {}
+    for n in CAGR_YEARS:
+        since = _years_before(last, n)
+        values = sorted(v for d, v in known if d > since and v > 0)
+        covered = known[0][0] <= _years_before(last, n - 1) if n > 1 else True
+        out[f"y{n}"] = float(median(values)) if len(values) >= 3 and covered else None
+    return out
+
+
 def cagrs(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
     """`CAGR_YEARS` growth to the latest point, keyed `y3`, `y5`, `y10`."""
     return {
@@ -398,6 +427,8 @@ def price_series(closes: Prices, range_key: str) -> Dict[str, Any]:
         "cagr": cagr(shown),
         "yoy": yoy(closes),
         "cagrs": cagrs(closes),
+        # A price has no median to read against: only the multiples carry one (R3).
+        "medians": dict.fromkeys(cagrs(closes)),
     }
 
 
@@ -410,13 +441,22 @@ def close_at(prices: Prices, day: date) -> Optional[float]:
 
 
 def eps_basis(
-    prices: Prices, splits: Prices, newest_filed: Optional[date]
+    prices: Prices,
+    splits: Prices,
+    newest_filed: Optional[date],
+    filed: Sequence[Dict[str, Any]] = (),
 ) -> List[Tuple[date, float]]:
     """
     Closes on the figures' split basis. Yahoo adjusts a history to the day it was fetched;
     the normaliser restates the figures to the newest filing, which has not seen a split
     after it, so each such split's ratio scales the closes back up. Only a split ratio
     counts: a spin-off Yahoo books as a split changes no share count.
+
+    `filed` are the splits the filings restated history for (`filed_splits`). One Yahoo
+    booked near it is in the closes already; one it did not leaves every close before it
+    on the old basis (HON's 1:2, review item CO1), so those are divided by its ratio. The
+    closes between the last filing on the old basis and the first on the new may be on
+    either, and are left out: a multiple there is unknown.
     """
     factor = 1.0
     for day, ratio in splits:
@@ -424,7 +464,26 @@ def eps_basis(
             abs(ratio / float(r) - 1) <= SPLIT_RATIO_TOLERANCE for r in SPLIT_RATIOS
         ):
             factor *= ratio
-    return [(day, close * factor) for day, close in prices]
+    unbooked = []
+    for event in filed:
+        after, by = date.fromisoformat(event["after"]), date.fromisoformat(event["by"])
+        slack = timedelta(days=FILED_SPLIT_SLACK_DAYS)
+        if not any(
+            after - slack <= day <= by + slack
+            and abs(ratio / event["ratio"] - 1) <= FILED_SPLIT_RATIO_TOLERANCE
+            for day, ratio in splits
+        ):
+            unbooked.append((after, by, event["ratio"]))
+    out = []
+    for day, close in prices:
+        if any(after < day <= by for after, by, _ in unbooked):
+            continue
+        scale = factor
+        for after, _, ratio in unbooked:
+            if day <= after:
+                scale /= ratio
+        out.append((day, close * scale))
+    return out
 
 
 def valuations(close: Optional[float], figures: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
@@ -486,6 +545,11 @@ def _with_net_cash(points: List[Point], rows: Sequence[CompanyFinancial]) -> Non
             liquid = None
         debt = p.series.get("debt")
         p.series["net_cash"] = liquid - debt if liquid is not None and debt is not None else None
+        # What net cash counts beside cash, so the Cash & debt card adds up: cash +
+        # investments - debt = net cash on every point (review item VI1, 2026-11-08).
+        p.series["investments"] = (
+            liquid - cash if liquid is not None and cash is not None else None
+        )
 
 
 def _value_near(values: Dict[date, float], day: date) -> Optional[float]:
@@ -651,6 +715,44 @@ def dividend_track(rows: Sequence[CompanyFinancial]) -> Dict[str, Any]:
     }
 
 
+def latest_quarter(rows: Sequence[CompanyFinancial]) -> Optional[Dict[str, Any]]:
+    """
+    The newest quarter on its own (review item R4, 2026-11-08): its label and filing
+    date, revenue, diluted EPS and FCF against the same quarter a year before (the
+    series' YoY rule), and the operating margin's change in points. The overview's
+    "Latest quarter" row — what the newest report said, which a TTM blends into three
+    older quarters. None without a quarter.
+    """
+    points = _series_points(rows, "quarterly")
+    if not points:
+        return None
+    last = points[-1]
+    filed = max(
+        (r.filed for r in rows if r.period_end == last.period_end and r.fiscal_period != ANNUAL),
+        default=None,
+    )
+
+    def growth(name: str) -> Optional[float]:
+        return yoy_at([(p.period_end, p.series.get(name)) for p in points], len(points) - 1)
+
+    margins = [(p.period_end, p.series.get("operating_margin")) for p in points]
+    now = margins[-1][1]
+    target = _years_before(last.period_end, 1)
+    before = [v for d, v in margins[:-1] if abs((d - target).days) <= YOY_SLACK_DAYS]
+    return {
+        "label": last.label,
+        "period_end": last.period_end.isoformat(),
+        "filed": filed.isoformat() if filed else None,
+        "revenue_yoy": growth("revenue"),
+        "eps_yoy": growth("eps_diluted"),
+        "fcf_yoy": growth("fcf"),
+        # Points, not a growth rate: a ratio's change (0.012 is +1.2 pts).
+        "operating_margin_change": (
+            now - before[0] if now is not None and before and before[0] is not None else None
+        ),
+    }
+
+
 def build_series(
     rows: Sequence[CompanyFinancial], period: str, range_key: str, prices: Prices = ()
 ) -> Dict[str, Any]:
@@ -683,6 +785,8 @@ def build_series(
             "yoy": None if name in NO_GROWTH else yoy(full),
             # Measured on the whole history, not the range: the 10Y figure of a 5Y chart.
             "cagrs": dict.fromkeys(cagrs(full)) if name in NO_GROWTH else cagrs(full),
+            # A multiple's own medians instead (R3); no other series has one.
+            "medians": medians(full) if name in VALUATIONS else dict.fromkeys(cagrs(full)),
         }
     return out
 
@@ -804,9 +908,32 @@ class CompanyFinancialsService:
                 daily is not None
                 and daily.currency == currency
                 and (not closes or daily.date > closes[-1][0])
+                and not await self._split_since(listing.id, closes[-1][0] if closes else None)
             ):
                 closes.append((daily.date, float(daily.close_price)))
         return closes
+
+    async def _split_since(self, security_id: int, since: Optional[date]) -> bool:
+        """
+        Whether IBKR recorded a price-restating split of this listing after `since` (the
+        newest weekly close). Its daily close is then on the new share basis while the
+        weekly closes are still on the old one until the Sunday pass refetches them, and
+        appended to them it read as a -90% week and a tenth of every multiple (review item
+        CO3, 2026-11-08). The last weekly close stands until then.
+        """
+        if since is None:
+            return False
+        from app.models.corporate_action import CorporateAction
+        from app.services.sync_helper import PRICE_RESTATING_ACTIONS
+
+        found = (await self.db.execute(
+            select(CorporateAction.id).where(
+                CorporateAction.security_id == security_id,
+                CorporateAction.action_type.in_(PRICE_RESTATING_ACTIONS),
+                CorporateAction.action_date > since,
+            ).limit(1)
+        )).first()
+        return found is not None
 
     async def _on_eps_basis(
         self, cik: int, rows: Sequence[CompanyFinancial], closes: Prices
@@ -815,7 +942,9 @@ class CompanyFinancialsService:
         if not closes:
             return []
         splits = [(s.date, s.ratio) for s in await self.repo.splits_for(cik)]
-        return eps_basis(closes, splits, max(r.filed for r in rows))
+        company = await self.db.get(SecCompany, cik)
+        filed = json.loads(company.filed_splits) if company and company.filed_splits else []
+        return eps_basis(closes, splits, max(r.filed for r in rows), filed)
 
     async def _yahoo_figures(
         self, company: SecCompany, listing: Optional[Security]
@@ -967,6 +1096,7 @@ class CompanyFinancialsService:
             "as_of": utc_iso(coverage["fetched_at"]) if coverage else None,
             "warnings": warnings,
             "key_stats": key_stats(rows, current),
+            "latest_quarter": latest_quarter(rows),
             "profile": await self._profile(company, listing, closes, currency),
             "series": {
                 **build_series(rows, period, range_key, prices),

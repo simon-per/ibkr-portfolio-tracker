@@ -158,6 +158,22 @@ Only what is still unverified.
     funds sit under Fundamentals' Funds, not as stock rows (VI4). A watchlist note or target can be
     cleared (U2). Seen on a local build against production data with the new fields filled in as
     the new server would, at 1440 and 390, light and dark.
+  - *Wave 5 (`review-w5-company-data`).* Migration `a8d0f2b4c6e7`
+    (`sec_companies.filed_splits`), a plain ADD COLUMN, NULL until a company's next facts fetch.
+    After the Sunday pass: HON's P/E, P/S and P/FCF before its Aerospace separation read about
+    twice the old values and run on continuously, the quarter around the event blank (CO1); HON's
+    newest Q4 operating margin is no longer 57% (CO6); ONDS has a TTM share count and P/S again
+    (CO4). The pass's warnings name KLAC's investments concept outside the chain (CO8) — its
+    net cash stays cash alone until that concept is whitelisted, a one-line follow-up. The six
+    companies stuck on Q1 2026 (AEP, CDNS, EXC, PYPL, SPGI, NXPI): the first Monday
+    `company_filings_check` after the deploy asks them, reads each newest filing's instance once
+    (`filings_read`), and their newest quarter appears; a company whose companyfacts still lags
+    is listed under `lagging` and not refetched the next day (CO5). The overview carries a
+    "Latest quarter" row (`new` for a week after a filing, R4), the Valuation card the company's
+    own 3Y/5Y/10Y medians (R3) and an axis one spike no longer flattens (VI5), the Cash & debt
+    card an Investments series (VI1). The week after a held company splits, its overview price is
+    the last weekly close (CO3). Seen on a local build against production data with the new
+    fields filled in as the new server would, at 1440 and 390, light and dark.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was

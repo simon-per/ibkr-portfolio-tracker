@@ -31,6 +31,7 @@ Touches neither Yahoo nor IBKR.
 import asyncio
 import re
 import time
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable, Dict, Optional
 
@@ -197,10 +198,10 @@ class EdgarClient(PacedGet):
             raise EdgarError(f"submissions for CIK {cik} is not an object")
         return submissions_profile(body)
 
-    async def latest_report(self, cik: int) -> Optional[date]:
+    async def latest_report(self, cik: int) -> Optional["PeriodicFiling"]:
         """
-        The period end the company's newest 10-Q or 10-K reports, from its `submissions`
-        document (`latest_periodic_report`); None when the SEC has no document (404) or it
+        The company's newest 10-Q or 10-K and the period it reports, from its `submissions`
+        document (`latest_periodic_filing`); None when the SEC has no document (404) or it
         lists no such filing.
         """
         body = await self._get_json(SUBMISSIONS_URL.format(cik=cik))
@@ -208,7 +209,7 @@ class EdgarClient(PacedGet):
             return None
         if not isinstance(body, dict):
             raise EdgarError(f"submissions for CIK {cik} is not an object")
-        return latest_periodic_report(body)
+        return latest_periodic_filing(body)
 
     async def filing_index(self, cik: int, accn: str) -> Optional[Dict[str, Any]]:
         """One filing's list of files (`index.json`), or None when the SEC has none (404)."""
@@ -236,27 +237,61 @@ PERIODIC_FORMS = frozenset(
 )
 
 
-def latest_periodic_report(body: Dict[str, Any]) -> Optional[date]:
+@dataclass(frozen=True)
+class PeriodicFiling:
+    """A submissions document's 10-Q or 10-K: the period it reports, and — when the
+    document states them — its accession number and filing date (`latest_periodic_filing`)."""
+
+    period_end: date
+    form: str
+    accn: Optional[str] = None
+    filed: Optional[date] = None
+
+
+def _iso(value: Any) -> Optional[date]:
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def latest_periodic_filing(body: Dict[str, Any]) -> Optional[PeriodicFiling]:
     """
-    The newest `reportDate` (the period end) of a periodic report (`PERIODIC_FORMS`) among a submissions
-    document's recent filings (`filings.recent`, parallel arrays); None when there is none
-    or the document is not that shape. Never a guess: an unparseable date is skipped.
+    The periodic report (`PERIODIC_FORMS`) with the newest `reportDate` (the period end)
+    among a submissions document's recent filings (`filings.recent`, parallel arrays);
+    None when there is none or the document is not that shape. Never a guess: an
+    unparseable date is skipped. Its accession number and filing date ride along where
+    the arrays carry them (review item CO5: the filing companyfacts has not taken in yet
+    is read from its own instance).
     """
     recent = (body.get("filings") or {}).get("recent") or {}
     forms, reports = recent.get("form"), recent.get("reportDate")
     if not isinstance(forms, list) or not isinstance(reports, list):
         return None
-    newest: Optional[date] = None
-    for form, report in zip(forms, reports):
-        if form not in PERIODIC_FORMS or not isinstance(report, str):
+    accns, filed = recent.get("accessionNumber"), recent.get("filingDate")
+    newest: Optional[PeriodicFiling] = None
+    for i, (form, report) in enumerate(zip(forms, reports)):
+        day = _iso(report)
+        if form not in PERIODIC_FORMS or day is None:
             continue
-        try:
-            day = date.fromisoformat(report)
-        except ValueError:
-            continue
-        if newest is None or day > newest:
-            newest = day
+        if newest is None or day > newest.period_end:
+            accn = accns[i] if isinstance(accns, list) and i < len(accns) else None
+            when = filed[i] if isinstance(filed, list) and i < len(filed) else None
+            newest = PeriodicFiling(
+                period_end=day,
+                form=form,
+                accn=accn if isinstance(accn, str) and accn else None,
+                filed=_iso(when),
+            )
     return newest
+
+
+def latest_periodic_report(body: Dict[str, Any]) -> Optional[date]:
+    """The period end the newest periodic report covers (`latest_periodic_filing`)."""
+    newest = latest_periodic_filing(body)
+    return newest.period_end if newest is not None else None
 
 
 def submissions_profile(body: Dict[str, Any]) -> Dict[str, Any]:

@@ -296,7 +296,40 @@ describe('CompanyTab', () => {
     expect(card('valuation').textContent).not.toContain('Nov 6, 2026')
   })
 
-  it('hides the valuation card for a company without stored prices', async () => {
+  it("reads today's multiple against the company's own medians (review item R3)", async () => {
+    const pe = { ...fixtureSeries([30, 45, 60, 48.3]), medians: { y3: 50, y5: 42.5, y10: null } }
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      series: { pe_ratio: pe },
+    }))
+    renderTab()
+    await screen.findAllByTestId('chart')
+    const medians = within(card('valuation')).getByTestId('medians').textContent ?? ''
+    expect(medians).toContain('3Y')
+    expect(medians).toContain('5Y')
+    expect(medians).not.toContain('10Y')
+    // A growth card has none.
+    expect(within(card('revenue')).queryByTestId('medians')).toBeNull()
+  })
+
+    it('shows the latest quarter on its own, new for a week (review item R4)', async () => {
+    const filed = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      latest_quarter: {
+        label: 'Q3 FY2026', period_end: '2026-10-26', filed, revenue_yoy: 0.123,
+        eps_yoy: 0.2, fcf_yoy: null, operating_margin_change: -0.012,
+      },
+    }))
+    renderTab()
+    const row = await screen.findByTestId('latest-quarter')
+    expect(row.textContent).toContain('Latest quarter · Q3 FY2026')
+    expect(row.textContent).toContain('new')
+    expect(row.textContent).toContain('-1.2 pts')
+    // A falling margin is inked as one: the tone reads the printed sign.
+    expect(within(row).getByText('-1.2 pts').className).toContain('text-red-600')
+    expect(row.textContent).not.toContain('FCF')
+  })
+
+    it('hides the valuation card for a company without stored prices', async () => {
     const none = fixtureSeries([null, null, null, null])
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
       series: { pe_ratio: none, ps_ratio: none, pfcf_ratio: none },

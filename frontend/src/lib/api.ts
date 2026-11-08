@@ -1642,6 +1642,8 @@ export interface CompanyFinancialsSeries {
   yoy: number | null;
   /** Growth to the latest point from 3, 5 and 10 years before it, over the whole history. */
   cagrs: CompanyFinancialsCagrs;
+  /** A valuation multiple's median over the last 3, 5 and 10 years; null elsewhere. */
+  medians?: CompanyFinancialsCagrs;
 }
 
 export interface CompanyFinancialsCagrs {
@@ -1670,6 +1672,8 @@ export interface CompanyFinancialsSeriesSet {
   buybacks: CompanyFinancialsSeries;
   dividends_paid: CompanyFinancialsSeries;
   cash: CompanyFinancialsSeries;
+  /** Short-term investments: net cash's other part (cash + investments - debt = net cash). */
+  investments: CompanyFinancialsSeries;
   debt: CompanyFinancialsSeries;
   /** Cash and short-term investments less debt; null where either side is unknown. */
   net_cash: CompanyFinancialsSeries;
@@ -1689,6 +1693,19 @@ export interface CompanyFinancialsSeriesSet {
  * never all zero — "no coverage" is no rating. An alias, so the two cannot drift (U8).
  */
 export type CompanyFinancialsRating = AnalystRatingCounts
+
+/** The newest quarter against the same one a year before (the overview's row, review item R4). */
+export interface CompanyFinancialsLatestQuarter {
+  label: string;
+  period_end: string;
+  /** When its filing was made; null when no row says. */
+  filed: string | null;
+  revenue_yoy: number | null;
+  eps_yoy: number | null;
+  fcf_yoy: number | null;
+  /** The operating margin's change in points, as a fraction (0.012 is +1.2 pts). */
+  operating_margin_change: number | null;
+}
 
 /**
  * The overview's company-level figures: the SEC's industry and fiscal year end, the price
@@ -1795,6 +1812,8 @@ export interface CompanyFinancialsResponse {
   as_of: string | null;
   warnings: string[];
   key_stats: CompanyFinancialsKeyStats;
+  /** The newest quarter on its own: the overview's "Latest quarter" row. */
+  latest_quarter?: CompanyFinancialsLatestQuarter | null;
   profile: CompanyFinancialsProfile;
   series: CompanyFinancialsSeriesSet;
 }

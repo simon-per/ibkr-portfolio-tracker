@@ -230,6 +230,15 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   that never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0
   (a debt-free MNST has none). Enterprise value = market cap less net cash; EV/EBIT over TTM
   operating income, both in the key figures only.
+- **An investments concept outside the chain is named, never read** (`_unchained_investments`,
+  review item CO8, 2026-11-08). KLAC's net cash was cash alone: its marketable securities sit in a
+  concept no chain reads. When the newest balance sheet has cash and neither chained concept, the
+  normaliser names every us-gaap concept shaped like a current investment (`INVESTMENT_LIKE`: marketable,
+  held-to-maturity, available-for-sale or debt securities, or investments, `…Current`, not
+  restricted) with a positive value there; the pass records `unchained_investments` and warns with
+  company and concept. Whitelisting it into `short_term_investments` is a one-line change once
+  someone has seen what it holds. KLAC's own concept was not confirmed from this side (no SEC read);
+  the first pass that writes KLAC names it.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 
@@ -248,7 +257,12 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
 - **The latest filing of a period wins** — that is how a restatement replaces the original.
 - **Year-to-date ladders.** 10-Q cash-flow items run from the fiscal year's start. Two rungs of
   one ladder a quarter apart give the quarter between them, and the 10-K's year less the
-  nine-month rung gives Q4. A reported discrete quarter beats a derived one. Flows and per-share
+  nine-month rung gives Q4. **Both rungs of one filing vintage** (`_as_of`, review item CO6,
+  2026-11-08): a shorter rung a newer filing restated is taken as the longer rung's filing knew it.
+  HON's next 10-Q put the prior nine months on continuing operations while the year stood
+  whole-company until the next 10-K, and their difference was a 57% operating margin. Until that
+  10-K the year's quarters mix bases (Q1–Q3 restated, Q4 not); each is still a real quarter.
+  A reported discrete quarter beats a derived one. Flows and per-share
   figures are differenced; a weighted-average share count by day weight
   (`(Y·d_Y − N·d_N) / (d_Y − d_N)`, what a weighted average is). **A derived Q4 EPS is the year's
   EPS less the nine months'**, the usual approximation, exact only while the share count holds
@@ -350,7 +364,11 @@ The same vote, per concept, undoes a **unit slip of a thousand or a million** (e
 tagged some counts in thousands; PCAR's 2019 10-K its share counts in millions, STX's 2024 10-K
 its dividends per share a million times over). A slip in a filing no newer one overlaps cannot be voted on, so a
 **reported share count about 1000× off net income / EPS** for the same period is rescaled too
-(ONDS tags some 10-Ks and Q1 10-Qs in thousands).
+(ONDS tags some 10-Ks and Q1 10-Qs in thousands) — **on the raw facts, before any quarter is
+derived** (`_rescale_share_slips`, review item CO4, 2026-11-08). The check ran on the finished values,
+after Q4 had come from the year still in thousands (negative, so dropped), and ONDS had no TTM share
+count since Q3 FY2023. A derived quarter's count lying between its two reported neighbours is kept
+however far from each it stands (a quarter of heavy issuance).
 
 A filing slipped **in some contexts only** fits no one factor: DXCM's 2014 10-K re-tagged its 2012
 quarters' EPS a million times over (−210000 beside three filings' −0.21) while its years stayed
@@ -444,6 +462,12 @@ Computed in `company_financials_service` only:
 - **Margins** = the figure / revenue of the same period, as fractions (0.25 is 25%); null when
   revenue is missing or not positive.
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
+  **Debt** is the tagged total, else the noncurrent and current halves, and the halves when the
+  "total" is smaller than they are — one half under the total's concept (review item CO7: AMD's
+  FY2021 read 1M against 313M of notes); `_debt`, `tests/test_company_debt.py`.
+  **`investments`** is served beside them (review item VI1, 2026-11-08): what net cash counts
+  beside cash (the liquid sum less cash), drawn on the Cash & debt card, so cash + investments −
+  debt = net cash on every point; the card showed AMD's cash 5.1B, debt 3.2B and net cash 9.9B.
 - **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
 - **P/E** = a close / TTM diluted EPS (a year's own EPS on the annual view); null when the EPS
   is not positive. **P/S** and **P/FCF** are the same close over revenue and FCF per share,
@@ -470,6 +494,15 @@ Computed in `company_financials_service` only:
   Only a ratio in `SPLIT_RATIOS` counts: Yahoo books a spin-off as a fractional split (SPGI's
   1.057 on 2026-07-01), which moves no share count. Its pre-spin-off closes stay as Yahoo
   lowered them, so a P/E before a spin-off reads that fraction low (accepted).
+- **A split the filings restated for and Yahoo never booked** (`filed_splits`, review item CO1,
+  2026-11-08): the normaliser emits each change of split factor between two consecutive filings
+  as `{after, by, ratio}` (the last filing on the old basis, the first on the new), stored as
+  `sec_companies.filed_splits` with the rows. `eps_basis` treats one as booked when a Yahoo split
+  of its ratio (±2%) falls within 14 days of that interval; otherwise the closes up to `after`
+  are divided by its ratio and the closes inside the interval are left out (either basis — a
+  multiple there is absent). HON's 1:2 at its 2026 Aerospace separation halved every earlier
+  P/E. A single filing voted off its neighbours both ways is a mis-vote, not two splits. NULL
+  until a company's next facts fetch writes it.
 - **CAGR** over the range's first and last known values; null when the start is not positive,
   the end is negative, or they are under a year apart. **YoY** = the latest point against the
   point a year before it (±20 days, for 53-week years); null when that point is missing or not
@@ -477,6 +510,14 @@ Computed in `company_financials_service` only:
   before it (same slack) over the whole history, not the range; null also when the latest is
   negative (a root of a negative ratio is no rate). **All are null for the margins** (lead's
   decision, 2026-10-25): a growth rate of a ratio reads as a figure nobody means.
+- **Medians** (`medians`, review item R3, 2026-11-08): a valuation multiple's own median over
+  the last 3, 5 and 10 years, positive values only, on the whole history like `cagrs`; null with
+  fewer than three values in a span or a history shorter than it, and null for every other
+  series. The Valuation card shows them where a growth card shows its CAGRs.
+- **The latest quarter** (`latest_quarter`, review item R4, 2026-11-08): the newest quarter on
+  its own — label, filing date, revenue, diluted EPS and FCF against the same quarter a year
+  before (the YoY rule), the operating margin's change in points — the overview's row of what the
+  newest report said, which TTM blends into three older quarters; tagged `new` for a week.
 - **Annual** = the fiscal years as filed (the FY facts), not a sum of quarters.
 - **Range** counts back from the series' latest period end, not from today, so a TTM at the
   range's start is computed from quarters before it.
@@ -521,6 +562,29 @@ weekly pass keeps those). Its own `sync_runs` type, `company_filings_check` with
 `company_filings_result`, because `_new_findings` compares a weekly pass with the previous
 weekly one and a check's partial lists must not stand in for it; it raises no finding warnings.
 Both jobs share one runner (`SchedulerService._edgar_job`). `tests/test_company_filings_check.py`.
+
+**When companyfacts lags the filing list** (review item CO5, 2026-11-08). Six companies (two held)
+sat on their Q1 2026 for 221 days: their Q2 10-Qs were filed and listed in `submissions`, and
+companyfacts never carried them; inside the window the check refetched companyfacts every
+weekday (about sixty fetches that moved nothing) and past it never looked. Three parts, all in
+`tests/test_company_filing_fallback.py`:
+
+- **The filing's own instance.** `latest_report` returns the newest periodic filing
+  (`PeriodicFiling`: period, form, accession number, filing date). When the normalised rows stop
+  `NEW_PERIOD_MARGIN` short of it, `_one` reads that filing's instance once ever
+  (`_filing_behind`, `parse_instance(whole=True)`): every chain concept's undimensioned facts,
+  balance-sheet instants included, besides the dividend members. They are stored in
+  `sec_filing_reads` like any filing read and only fill: once companyfacts carries the period, its
+  facts win (`_filing_facts`, which now takes an instant for an instant concept). An
+  undimensioned fact wins over a member's for the same period inside one instance.
+- **The re-ask guard.** A check fetch that still stops short of the listed period records a lag
+  (`record_lag`) on the facts miss stamps, counted on from the count before the fetch (the write
+  clears them), so the next ask waits 1, 2, 4… days on the shared doubling (`miss_backoff`) and
+  the Sunday pass honours it too. The summary lists the companies as `lagging`.
+- **Past the window.** Beyond `FILING_WATCH_UNTIL` the check asks a company once a week, on
+  `CHASE_WEEKDAY` (Monday), until `FILING_CHASE_UNTIL` (400 days): past a year of missing
+  10-Qs it has stopped filing. Not on Sunday: the weekly pass's tests count every URL, and a
+  date-relative ask there would start failing them once the fixture aged.
 
 **What each pass checks** (owner's request, 2026-11-07): the Sunday pass tests the stored rows
 of **every** company in scope after its loop, fetched or not, and the weekday check the companies
@@ -608,6 +672,11 @@ filings' `currency`.
   listing of a company with a CIK shows its canonical listing's counts (the lowest symbol, the one
   this overview reads), so GOOG and GOOGL rows match the Alphabet page; `counts_of` is the one
   reading of the five counts off a row. `tests/test_company_yahoo_family.py`.
+- **A split mid-week holds the daily close back** (`_split_since`, review item CO3, 2026-11-08):
+  when IBKR recorded a price-restating split of the held listing after the newest weekly close, the
+  daily close is on the new share basis and the weekly closes still on the old, and appended to
+  them it read as a −90% week and a tenth of every multiple. The last weekly close stands until the
+  Sunday pass refetches the history.
 - **The price line is the market's, the multiples' basis is the figures'.** `_closes` reads the
   weekly closes and the held listing's newest daily close once; the P/E and its kin take them
   through `_on_eps_basis` (a split after the newest filing scales them), the price line and

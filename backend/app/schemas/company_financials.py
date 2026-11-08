@@ -79,6 +79,9 @@ class CompanyFinancialsSeries(BaseModel):
         "missing or not positive. Always null for a margin.",
     )
     cagrs: CompanyFinancialsCagrs
+    #: A valuation multiple's median over the last 3, 5 and 10 years; null elsewhere and
+    #: where the span holds fewer than three values (review item R3).
+    medians: CompanyFinancialsCagrs
 
 
 class CompanyFinancialsKeyStats(BaseModel):
@@ -159,6 +162,9 @@ class CompanyFinancialsSeriesSet(BaseModel):
     buybacks: CompanyFinancialsSeries
     dividends_paid: CompanyFinancialsSeries
     cash: CompanyFinancialsSeries
+    #: Short-term investments: what net cash counts beside cash (cash + investments -
+    #: debt = net cash).
+    investments: CompanyFinancialsSeries
     debt: CompanyFinancialsSeries
     net_cash: CompanyFinancialsSeries
     pe_ratio: CompanyFinancialsSeries
@@ -238,6 +244,20 @@ class CompanyDividendTrack(BaseModel):
     payout_ratio: Optional[float] = None
 
 
+class CompanyFinancialsLatestQuarter(BaseModel):
+    """The newest quarter on its own: the overview's "Latest quarter" row (R4)."""
+
+    label: str
+    period_end: str
+    filed: Optional[str] = None
+    revenue_yoy: Optional[float] = None
+    eps_yoy: Optional[float] = None
+    fcf_yoy: Optional[float] = None
+    #: The operating margin against the same quarter a year before, as a fraction of
+    #: revenue (0.012 is +1.2 points).
+    operating_margin_change: Optional[float] = None
+
+
 class CompanyFinancialsResponse(BaseModel):
     cik: int = Field(..., description="The SEC Central Index Key; the path's id.")
     security_id: Optional[int] = Field(
@@ -255,5 +275,6 @@ class CompanyFinancialsResponse(BaseModel):
     as_of: Optional[str] = Field(None, description="When EDGAR was last read, UTC.")
     warnings: List[str]
     key_stats: CompanyFinancialsKeyStats
+    latest_quarter: Optional[CompanyFinancialsLatestQuarter] = None
     profile: CompanyFinancialsProfile
     series: CompanyFinancialsSeriesSet
