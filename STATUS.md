@@ -7,7 +7,7 @@
 > [docs/troubleshooting.md](docs/troubleshooting.md); local-dev traps in
 > [docs/local-development.md](docs/local-development.md).
 
-**Last updated: 2026-11-07.** The **Company tab** (one company's SEC EDGAR fundamentals history,
+**Last updated: 2026-11-08.** The **Company tab** (one company's SEC EDGAR fundamentals history,
 docs/company-financials.md) is deployed and filled for the held filers **and the Nasdaq-100**
 (102 companies with figures, keyed by CIK), with key figures, valuation multiples (weekly Yahoo closes), ROE and net cash, gross margin, operating income,
 buybacks & dividends, cash & debt and 3/5/10Y CAGRs (docs/shipped-log.md 2026-10-25). PR #80 (Swiss residency)
@@ -116,6 +116,20 @@ Only what is still unverified.
     shares of the book with cash, like Positions (M5); Currency Exposure says "of the holdings".
     A Forecast contribution typed earlier is stamped with today's base currency on the first
     visit.
+  - *Wave 2 (`review-w2-dividends`).* Migration `d4f6a8c0e2b3`: four plain ADD COLUMNs on
+    `dividend_accruals` (the amounts in the payment's own currency), NULL on arrival, no request.
+    **No `ingest_flex_xml` re-run is needed:** the table is replaced wholesale by every Flex
+    sync, so the first one after the deploy fills them; until then the forecast reads the stored
+    EUR as before. After that sync an unchanged announced dividend no longer shows as a raise or
+    a cut in the raises feed or on the calendar's tag when only the exchange rate moved (D2). An
+    announced Korean dividend reads the same before and after Yahoo's row for it lands, with no
+    "raises" jump that day, and Samsung's one-off quarter is not forecast again a year on (D1,
+    D3). By position has one Yield (the forecast's) and 5Y, Streak and Payout for the US filers,
+    dashes for funds (`/api/company-financials/dividend-track` answers 200; FD2, FD4). The open
+    forecast card lists the change by month, and the Next 12 months tile says how far the next
+    round level is (FD1, FD3). A new forecast withholding rate refreshes the Tax tab's
+    projection, the dividend summary, XIRR and the activity ledger at once (T6). Seen on a local
+    build against production data, the track figures faked (the endpoint is not deployed).
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
