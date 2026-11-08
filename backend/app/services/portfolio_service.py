@@ -22,7 +22,7 @@ from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED, UNKNOWN as CASH_UNKNOWN
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
-from app.services.realized_trades import realized_from_sell_trades
+from app.services.realized_trades import ClosedCost, gain_in_base, realized_from_sell_trades
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
 # benchmark_service import it from.
 from app.services.base_fx import BaseFx, default_start, load_base_fx  # noqa: F401
@@ -659,13 +659,15 @@ class PortfolioService:
 
         base_fx = await self._load_base_fx()
 
-        # Get all open taxlots with securities
+        # Every lot in one read: the open ones are valued, the closed ones price the
+        # realized gain's cost at the rate it was paid in (`closed_cost_by_security`).
         result = await self.db.execute(
             select(TaxLot, Security)
             .join(Security, TaxLot.security_id == Security.id)
-            .where(TaxLot.is_open == True)
         )
-        taxlots_with_securities = result.all()
+        every_lot = result.all()
+        taxlots_with_securities = [(lot, sec) for lot, sec in every_lot if lot.is_open]
+        closed_lots = [lot for lot, _ in every_lot if lot.is_open is False]
 
         # One CashService for the request: the realized totals and the cash balance read
         # the same `trades` rows, so they are read once (GitHub #47).
@@ -673,7 +675,8 @@ class PortfolioService:
 
         if not taxlots_with_securities:
             realized = await self.get_realized_totals(
-                base_fx=base_fx, trades=await cash_service.all_trades()
+                base_fx=base_fx, trades=await cash_service.all_trades(),
+                closed_lots=closed_lots,
             )
             # Nothing held is NOT the same as nothing owned: an account that has sold
             # everything holds its whole value in cash, which is the state this feature
@@ -707,7 +710,8 @@ class PortfolioService:
         )
 
         realized = await self.get_realized_totals(
-            base_fx=base_fx, trades=await cash_service.all_trades()
+            base_fx=base_fx, trades=await cash_service.all_trades(),
+            closed_lots=closed_lots,
         )
 
         cash = await self._cash_summary(base_fx, today, cash_service)
@@ -1070,7 +1074,10 @@ class PortfolioService:
         }
 
     async def _realized_from_trades(
-        self, base_fx: BaseFx, trades: Optional[Sequence[Trade]] = None
+        self,
+        base_fx: BaseFx,
+        trades: Optional[Sequence[Trade]] = None,
+        closed_lots: Optional[Sequence[TaxLot]] = None,
     ) -> Optional[Dict]:
         """
         Compute realized totals from authoritative IBKR SELL trades, or return
@@ -1103,8 +1110,17 @@ class PortfolioService:
         if realized.net_sales <= 0:
             return None
 
+        # Each security's gain with its cost at the rate it was bought at (V4); a trade
+        # never linked to a security keeps IBKR's figure.
+        closed = await self.closed_cost_by_security(base_fx, closed_lots)
         total_proceeds_eur = realized.proceeds
-        total_gain_eur = realized.gain
+        total_gain_eur = sum(
+            (
+                gain_in_base(sold, closed.get(sid)) if sid is not None else sold.gain
+                for sid, sold in realized.by_security.items()
+            ),
+            Decimal("0"),
+        )
         return {
             "total_realized_gain_loss_eur": float(total_gain_eur),
             "total_realized_proceeds_eur": float(total_proceeds_eur),
@@ -1117,10 +1133,35 @@ class PortfolioService:
             "unpriced_disposals": len(realized.unconvertible),
         }
 
+    async def closed_cost_by_security(
+        self, base_fx: BaseFx, lots: Optional[Sequence[TaxLot]] = None
+    ) -> Dict[int, ClosedCost]:
+        """
+        Every security's closed lots: shares, cost in their own currency, and cost in
+        the base currency at each lot's open date — what `gain_in_base` prices IBKR's
+        FIFO cost with. No price is needed, so no lot is left out for want of one.
+        ``lots``: the closed lots, when the caller has read them already.
+        """
+        if lots is None:
+            lots = (await self.db.execute(
+                select(TaxLot).where(TaxLot.is_open == False)  # noqa: E712 - SQL comparison
+            )).scalars().all()
+        out: Dict[int, ClosedCost] = {}
+        for lot in lots:
+            if lot.security_id is None:
+                continue
+            c = out.setdefault(lot.security_id, ClosedCost())
+            c.quantity += lot.quantity
+            c.cost_native += lot.cost_basis
+            c.cost_base += base_fx.convert(lot.cost_basis_eur, lot.open_date)
+            c.currencies.add(lot.currency)
+        return out
+
     async def get_realized_totals(
         self,
         base_fx: Optional[BaseFx] = None,
         trades: Optional[Sequence[Trade]] = None,
+        closed_lots: Optional[Sequence[TaxLot]] = None,
     ) -> Dict:
         """
         Aggregate realized gain/loss from closed tax lots.
@@ -1145,7 +1186,9 @@ class PortfolioService:
         if base_fx is None:
             base_fx = await self._load_base_fx()
 
-        trade_based = await self._realized_from_trades(base_fx, trades=trades)
+        trade_based = await self._realized_from_trades(
+            base_fx, trades=trades, closed_lots=closed_lots
+        )
         if trade_based is not None:
             return trade_based
 

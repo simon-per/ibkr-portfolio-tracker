@@ -30,9 +30,6 @@ OWNERS = {
 # (module, enclosing function) -> (matches, reason). Lot-level readers only: each
 # selects TaxLot rows and values them, which `held()` (a set of securities) cannot do.
 NOT_IN_THE_FAMILY = {
-    ("services/portfolio_service.py", "get_current_portfolio_summary"): (
-        1, "selects the open (TaxLot, Security) pairs and values each lot",
-    ),
     ("services/portfolio_service.py", "get_positions_breakdown"): (
         1, "selects the open (TaxLot, Security) pairs and aggregates them per security",
     ),

@@ -52,7 +52,7 @@ from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UNKNOWN as CASH_UNKNOWN
 from app.services.lookthrough_service import LookthroughService
 from app.services.native_amounts import NativeToBase
-from app.services.realized_trades import realized_from_sell_trades
+from app.services.realized_trades import gain_in_base, realized_from_sell_trades
 from app.services.portfolio_service import PRICE_LOOKBACK_DAYS, PortfolioService
 from app.services.sector_taxonomy import UNKNOWN as SECTOR_UNKNOWN, normalise as normalise_sector
 
@@ -547,6 +547,8 @@ class PerformanceAnalyticsService:
             )).scalars().all(),
             NativeToBase(self.portfolio.currency_service, base_fx),
         )).by_security
+        # Their lots' cost at the rate it was paid in, for `gain_in_base` (V4).
+        closed_cost = await self.portfolio.closed_cost_by_security(base_fx)
 
         grouped: Dict[int, Dict] = {}
         for r in rows:
@@ -587,7 +589,7 @@ class PerformanceAnalyticsService:
             # no IBKR figure to give (issue #58).
             sold = by_security.get(sid)
             if sold is not None and sold.net_sales > 0 and sold.converted and not sold.unconvertible:
-                realized = sold.gain
+                realized = gain_in_base(sold, closed_cost.get(sid))
                 source = "trade"
             else:
                 realized = g["proceeds"] - g["cost"]

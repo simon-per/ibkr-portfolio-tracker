@@ -166,7 +166,8 @@ allocation/selection split, which is **not built** — see *What is deliberately
 ## Closed positions
 
 Realized P&L is **IBKR's own FIFO figure** summed over the security's SELL trades when any
-exist (`realized_source: trade`), otherwise the market-price approximation over its closed
+exist (`realized_source: trade`), its cost priced at the rate the lots were bought at
+(`gain_in_base`, [data-model-and-valuation.md](data-model-and-valuation.md), V4), otherwise the market-price approximation over its closed
 lots that the tax report also uses (`closed_lots`). Cost is the closed lots' cost basis in
 both cases, so `return_pct` is against what was paid. Holding days are cost-weighted.
 

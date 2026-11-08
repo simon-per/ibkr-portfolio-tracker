@@ -225,6 +225,19 @@ answers it: `trade_kind`, `sale_sign` (+1 sale, −1 its cancellation, 0 otherwi
   without cancellations: the closed positions used to need only the *realized* figure to convert,
   so a sale with a realized P&L of exactly zero and no rate for its proceeds read as `trade`; it
   now falls back like any other unconvertible sale.
+- **A realized gain in the base currency prices its cost at the rate it was bought at**
+  (`gain_in_base`, review item V4, 2026-11-08). IBKR's `fifoPnlRealized` is in the trade's
+  currency; converted at the sale date it priced the cost at the sale date too, while every
+  unrealized figure prices cost at the open date — a USD holding bought at one rate and sold at
+  another carried its FX move on the cost inside the gain (the CHF realized headline read high by
+  that much). The summary and the closed positions take each security's net proceeds (proceeds +
+  commission) at each sale's date less IBKR's FIFO cost (net proceeds − realized, in the trade's
+  currency) at its closed lots' open-date rate (their `cost_basis_eur` in the base currency over
+  their `cost_basis`). For a holding in the base currency that is IBKR's figure exactly. IBKR's
+  figure converted at the sale date stays wherever the lots cannot vouch for the sales: a row
+  without a rate, two currencies, or closed lots that do not add up to the shares sold. The tax
+  report and the Activity ledger keep IBKR's per-trade figure at the sale date, as the statement
+  shows it. Tests: `tests/test_realized_cost_at_open_rate.py`.
 - **Reconcile and the restamp read `uncancelled_sales`.** A SELL busted inside the window no
   longer settles a drop as `close_source='trade'` on the busted date — the drop, if any, goes to
   inference — and a cancelled SELL is no restamp candidate.
