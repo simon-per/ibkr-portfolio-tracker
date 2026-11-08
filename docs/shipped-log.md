@@ -7,6 +7,41 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-08 — the 2026-11-07 review (14 reviewers): waves 0–7, R6 and CO8
+
+- **Why**: a 14-reviewer audit on 2026-11-07 left ~90 verified findings. The plan, per-item
+  evidence and repro scripts stay outside the repo (they quote account figures).
+- **What**: one /goal run, one local branch per wave merged into `main`: safety (Yahoo errors
+  surfaced, Flex request-step refusals held to midnight ET, `edgar_in_progress`), performance,
+  dividends, the ledger, Yahoo figures, company data, company features (Peers card, look-through
+  fundamentals, ~20 more Company pages on the owner-approved budget), look-through and tax. R6
+  (annual figures for the 20-F filers, ASML in US GAAP, NU and TSMC in IFRS) and CO8's KLAC concept
+  after owner-approved companyfacts reads. Migrations `d4f6a8c0e2b3`, `e5a7c9d1f3b4`,
+  `f6b8d0e2a4c5`, `a8d0f2b4c6e7`, all plain ADD COLUMNs. The durable rules are in each area's
+  `docs/` file.
+- **Verified on production** (pushed as `65784c0`, CI green, `/health` on it within minutes):
+  `dividend-track`, `{cik}/peers` and `lookthrough/fundamentals` answer 200 (the last in 8 s);
+  `/api/scheduler/status` carries `edgar_in_progress`; the tax report serves
+  `dividend_by_country_totals`, the countries summing to it and creditable + excess equal to
+  withholding on every row (T1, T7); NVDA's revenue growth reads ~+83% on a TTM basis (Y1); no
+  money-market line among the look-through companies (L5).
+- **Found by the same read**: `is_fund` was false for the EM 3a fund (VI4). Its fallback asked
+  `asset_category == 'FUND'`, which the finpension import never writes, and its test set that by
+  hand. `77962ea` asks `is_known_etf_isin` first (docs/failure-modes.md, the fourth visit); deployed
+  the same afternoon, both 3a funds read `is_fund: true`. What
+  needs a sync, a pass or a look in the browser is in STATUS.md *Watch after the next deploy*.
+
+## Shipped 2026-11-07 — analyst counts, valuation headline, watchlist and Company freshness
+
+- **Why**: a live-site survey found one company's rating and figures disagreeing across tabs.
+- **What** (branch `analyst-counts-and-freshness`, pushed as `d8ae10e`; migrations
+  `b2d4f6a8c0e1`, `c3e5a7b9d1f2`): every rating shows its analyst counts under one label (the
+  owner approved a watchlist `recommendations` budget), the valuation card heads with today's
+  multiples, a new report refreshes watchlist growth on the next run, and a Mon–Sat 05:00 EDGAR
+  check fetches a new 10-Q the next morning.
+- **Verified on production**: deployed (`/health` on `d8ae10e` on 2026-11-08). Its first runs are
+  in STATUS.md *Watch after the next deploy*.
+
 ## Shipped 2026-11-07 — Company tab: the dividend per share companyfacts leaves out
 
 - **Why**: MA's TTM dividend per share had a hole from FY19 to FY23 (owner's screenshot).

@@ -154,10 +154,7 @@ Only what is still unverified.
     and the overview, and GOOG and GOOGL rows the Alphabet page's counts (DR1, DR2). Once the Tue–Sat
     04:00/05:00 passes rewrite them (still the old values right after the deploy): KSPI and SBI.TO
     have no forward P/E (Y5); LITE no EPS growth (Y7). A London, Johannesburg or Tel Aviv
-    watchlist name is priced in pounds, rand or shekels (Y4). Both 3a funds sit under
-    Fundamentals' Funds, not as stock rows (VI4): `is_fund` true for both on
-    `/api/fundamentals/portfolio`; at `65784c0` the EM fund read false (its fallback asked a
-    category the finpension import never writes), fixed in the follow-up. A watchlist note or target can be
+    watchlist name is priced in pounds, rand or shekels (Y4). A watchlist note or target can be
     cleared (U2). Seen on a local build against production data with the new fields filled in as
     the new server would, at 1440 and 390, light and dark.
   - *Wave 5 (`review-w5-company-data`).* Migration `a8d0f2b4c6e7`
@@ -182,10 +179,10 @@ Only what is still unverified.
     a Yahoo profile within a rotation — the request budget the owner approved (R5). A look-through
     row of Linde or Seagate opens its page once the pass has stamped their ISIN from the identity
     store. The Company tab's collapsed Peers card lists the companies of its SEC industry, with the
-    same key figures as each one's overview (R1; `GET /api/company-financials/{cik}/peers`); the
+    same key figures as each one's overview (R1); the
     Look-through tab's collapsed "Fundamentals of what you own" card shows P/E, growth, margins and a
-    coverage figure (R2; `GET /api/portfolio/lookthrough/fundamentals`, a few seconds is expected:
-    it reads every covered company's figures). Seen on a local build against production data with
+    coverage figure (R2; its route took 8 s twice on production, uncached, reading every covered
+    company's figures — check the card reads as loading, not broken, meanwhile). Seen on a local build against production data with
     the two new routes answered by stand-ins, at 1440 and 390, light and dark. **R6** (branch
     `review-w6-r6-ifrs`, after the owner approved the companyfacts read): ASML, NU and TSMC get
     annual figures once their miss back-off runs out (at most 30 days) — ASML's from its US-GAAP 20-F,
@@ -198,8 +195,7 @@ Only what is still unverified.
   - *Wave 7 (`review-w7-lookthrough-tax`).* No migration. The first evening basket refresh rewrites
     every US-adapter basket once (each now keeps a derived row's CUSIP, L2); after the next ISIN pass
     Shopify, Thomson Reuters and Hydro One each fold into one look-through row. A basket below 80%
-    in securities is refused at write and named in the refresh's warnings (L1). QTUM's money-market
-    line sits with the nested funds, not the companies (L5). The Coverage tile is green with only the
+    in securities is refused at write and named in the refresh's warnings (L1). The Coverage tile is green with only the
     two Swisscanto proxies borrowed (L6); the 3a funds are named, not shown as ISINs (L7); MSCI World
     rows show no emerging-markets share on Allocation's Regions (L3). The Tax tab's DA-1 table ends in
     a total row (T1); the Realized gains tile counts sales as KS 36 does (T2); ASML's New York
@@ -501,7 +497,7 @@ One line each, newest first; drop the oldest.
 - **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
   tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
-  (`65784c0`).
+  (`65784c0`); the post-deploy read found VI4 missing the EM 3a fund, fixed in `77962ea`.
 - **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
   survey found one company's figures disagreeing across tabs; every rating now shows its
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
