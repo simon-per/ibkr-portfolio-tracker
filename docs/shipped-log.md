@@ -7,6 +7,28 @@
 > entry records what shipped, why, and what was verified on production — the durable rules it
 > established live in `docs/<subsystem>.md`.
 
+## Shipped 2026-11-08 — Allocation from the look-through; a Company screener
+
+- **Why**: the Allocation tab answered "how much of the book is Technology / in Europe" from
+  `etf_mappings.py`'s hand-written fund percentages and printed Yahoo's countries beside those
+  regions ("United States" next to "North America"), while the Look-through measured the same funds
+  from their baskets — two answers, three maps. And the owner wanted each company's history at a
+  glance: today's multiples against its own.
+- **What** (branch `allocation-one-source`, merged as `632f461`, pushed with `fe376cb`): Sectors and
+  Regions are `LookthroughService.decompose` rolled up, through a new `region_taxonomy` (five M49
+  regions; a company's region is the value-weighted vote of its stated countries, else its ISIN);
+  the estimates and the client's sector and region maps are deleted. A collapsed Screener card at
+  the top of the Company tab (`/api/company-financials/screener`) lists every company with its key
+  figures, P/E, P/FCF and P/S against their own 5-year medians, growth, FCF margin, ROE, yield and
+  raise streak. No migration, no new upstream request. Rules in docs/lookthrough.md (*Allocation is
+  a rollup of this decomposition*) and docs/company-financials.md (*Screener*).
+- **Verified on production** (CI green, `/health` on `fe376cb` within minutes, healthy on a second
+  probe): `/api/allocation/portfolio` publishes only the five regions, Unknown and Cash, and the
+  canonical sectors; each breakdown's money closes on `total_value_eur` to a cent; Unknown is small
+  on both and mostly VT (its 0.00% rows and its small caps), as predicted; it answers in 1.4 s.
+  The screener answers 102 rows, 84 with a 5-year P/E median, and NVDA's row equals its company page
+  (P/E, 5Y median, market cap) — but in **8–9 s**, uncached, against ~2.5 s measured locally.
+
 ## Shipped 2026-11-08 — the 2026-11-07 review (14 reviewers): waves 0–7, R6 and CO8
 
 - **Why**: a 14-reviewer audit on 2026-11-07 left ~90 verified findings. The plan, per-item

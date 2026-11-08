@@ -99,22 +99,12 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 Only what is still unverified.
 
-- **Allocation from the look-through, and the Company screener (branch `allocation-one-source`,
-  merged into `main` and pushed 2026-11-08).** No migration, no new upstream request. Neither was
-  seen on production data before the push: an ssh read of the basket countries was refused in
-  that session, and the screener was seen only on a local build answered from the live
-  per-company pages. After the deploy:
-  - *Allocation* (docs/lookthrough.md, *Allocation is a rollup of this decomposition*): Regions
-    shows only North America, Europe, Asia Pacific, Latin America, Middle East & Africa, Unknown
-    and Cash — no country name, no "Emerging Markets", no "Other"; Sectors the eleven canonical
-    names. Expect a small *Unknown* on both (VT's 0.00% rows and its small caps, whose Vanguard
-    rows carry no sector); a large one means a basket or a country spelling is missing
-    (`region_taxonomy.unmapped_countries` over `etf_holdings.country` names it). The sector money
-    equals the Look-through treemap's groups; the tab loads in about the look-through's time
-    (~1.5 s uncached, from ~0.3 s).
-  - *Screener*: the collapsed card at the top of the Company tab opens in a few seconds the first
-    time (every company's figures, no server cache), 102 rows, each matching its company page's
-    P/E and 5Y median chip. Measure the first load on production; cache server-side if it is slow.
+- **Allocation from the look-through, and the Company screener (pushed 2026-11-08, `fe376cb`):**
+  the API half is verified on production (docs/shipped-log.md 2026-11-08). Unseen in the browser
+  on production: the Allocation tab's three charts and drill-downs with the new buckets (the old
+  client fold is gone, so a stale cached bundle would print the server's names unchanged — fine),
+  and the Screener card on the live site. If *Unknown* ever grows past a sliver, a basket or a
+  country spelling is missing (`region_taxonomy.unmapped_countries` over `etf_holdings.country`).
 
 - **The 2026-11-07 review, implemented by a /goal run (merged into `main` wave by wave, pushed
   2026-11-08 as `65784c0`):** what production must show now that it is deployed.
@@ -498,13 +488,17 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
     hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
     classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
     commercial APIs — do not re-shop) are in docs/lookthrough.md.
-8. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
+8. **The screener takes 8–9 s on production** (uncached; 2.5 s locally). A server-side cache
+    would fix it; its key must follow the held listings' daily closes as well as the Sunday
+    figures (docs/company-financials.md *Screener*). Same shape as the look-through
+    fundamentals card's 8 s.
+9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
     against what IBKR paid, in the payment's own currency so FX is not an error.
-9. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+10. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-10. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+11. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+12. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
