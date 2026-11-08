@@ -491,7 +491,11 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 8. **The screener takes 8–9 s on production** (uncached; 2.5 s locally). A server-side cache
     would fix it; its key must follow the held listings' daily closes as well as the Sunday
     figures (docs/company-financials.md *Screener*). Same shape as the look-through
-    fundamentals card's 8 s.
+    fundamentals card's 8 s. Two P/E-median findings from the same read (2026-11-08):
+    `medians()` anchors each window at the company's *last* P/E, not the newest TTM point, so a
+    company with no recent P/E keeps an old median (BKR's and MRNA's 3Y chips describe 2019–22
+    and 2020–23); and BKR has no diluted EPS after 2022 in the stored figures — likely the Class A
+    member tagging that hid its dividend per share (*Filing instances*), unverified.
 9. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
     built): log each projected payment as it stood ~30 days before its pay date and score it
     against what IBKR paid, in the payment's own currency so FX is not an error.
