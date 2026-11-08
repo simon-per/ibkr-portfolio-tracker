@@ -228,6 +228,14 @@ answers it: `trade_kind`, `sale_sign` (+1 sale, −1 its cancellation, 0 otherwi
 - **Reconcile and the restamp read `uncancelled_sales`.** A SELL busted inside the window no
   longer settles a drop as `close_source='trade'` on the busted date — the drop, if any, goes to
   inference — and a cancelled SELL is no restamp candidate.
+- **A sale busted in a LATER statement undoes its closure** (`_undo_busted_closures`, Phase D2,
+  review item I3, 2026-11-08). The SELL closed its lot in the sync that carried it; the CANCELSELL
+  arrives one statement later with the sale's trade date and the lot comes back under its old open
+  date, and the closed lot used to stay beside it — the shares held twice on every day before the
+  "sale". Undone only where both sides agree: the statement reports shares on the closed lot's open
+  date that the snapshot did not hold, and on its close date the trade-closed shares exceed what the
+  sales still standing sold. The smaller of the two, newest first; a partial one shrinks the lot.
+  `lots_unclosed` on the sync result counts them. Tests: `tests/test_busted_sale_across_statements.py`.
 
 `tests/test_trade_kind_family.py` fails any comparison against `buy_sell` (or a trade-kind literal
 in a module that imports the trade model) outside `app/models/trade.py`, and any `.realized_pnl`
