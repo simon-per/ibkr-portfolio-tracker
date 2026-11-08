@@ -290,7 +290,7 @@ function CompanyBreakdown({
       {row.listings.length > 0 && (
         <p>
           <span className="text-muted-foreground">Held directly as </span>
-          {row.listings.join(', ')}
+          {listingTickers(row.listings).join(', ')}
           <span className="text-muted-foreground">
             {' '}
             — {formatCurrency(row.direct_value_eur)}

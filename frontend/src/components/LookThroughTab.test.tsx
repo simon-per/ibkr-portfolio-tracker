@@ -254,6 +254,8 @@ describe('LookThroughTab', () => {
     const owner = after.findIndex((r) => r.textContent?.includes('Alphabet'))
     expect(after[owner + 1]?.textContent).toContain('Held directly as')
     expect(after[owner + 1]?.textContent).toContain('XNAS')
+    // Tickers, not the listing keys' exchange suffixes (review item L8).
+    expect(after[owner + 1]?.textContent).not.toMatch(/@[A-Z]/)
   })
 
   it('opens the breakdown for the row pressed, and only that row', async () => {
