@@ -17,6 +17,12 @@ holding whose shares had been added inside the year (a year's income over today'
 0.10% against 0.75% forward), and on a phone the two shared the card's one delta slot, so the
 forward one never showed. `trailing_yield_pct`, `trailing_yield_partial` and `days_held_in_ttm` left
 the schema with it.
+
+**Each payer's own record** (review item FD4, 2026-11-08): *5Y* (the company's dividend per share,
+5-year growth over its fiscal years), *Streak* (years in a row raised) and *Payout* (TTM dividends
+over TTM EPS), from the stored SEC filings through `/api/company-financials/dividend-track`
+(docs/company-financials.md). *Growth* beside them is the payment IBKR made against the one a year
+earlier; these are the company's history. A fund, or a company filing abroad, has a dash.
 Unlike `/summary` it **never enqueues a sync**, so it cannot reach Yahoo (rule 1) — everything comes
 from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
 

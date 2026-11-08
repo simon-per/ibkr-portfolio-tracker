@@ -1565,6 +1565,20 @@ export interface CryptoSyncResponse {
   timestamp: string | null;
 }
 
+/**
+ * `/api/company-financials/dividend-track`: a held listing's company dividend record from
+ * its SEC filings, keyed by security id (review item FD4). A listing without a US filer
+ * behind it (a fund) is absent.
+ */
+export interface CompanyDividendTrack {
+  /** The fiscal years' dividends per share, 5-year compound growth (0.08 is 8%). */
+  dps_cagr_5y: number | null;
+  /** Fiscal years in a row, newest back, that paid more per share than the year before. */
+  raise_years: number | null;
+  /** TTM dividends per share over TTM diluted EPS (0.35 is 35%). */
+  payout_ratio: number | null;
+}
+
 /** `/api/company-financials/companies`: one SEC filer the Company tab can show, held or in the Nasdaq-100. */
 export interface CompanyFinancialsCompany {
   /** The SEC Central Index Key: the company's id on this API. */
@@ -2176,6 +2190,10 @@ class ApiClient {
   // Company financials from SEC filings (the Company tab).
   async getCompanyFinancialsCompanies(): Promise<CompanyFinancialsCompany[]> {
     return this.request<CompanyFinancialsCompany[]>('/api/company-financials/companies');
+  }
+
+  async getCompanyDividendTrack(): Promise<Record<string, CompanyDividendTrack>> {
+    return this.request<Record<string, CompanyDividendTrack>>('/api/company-financials/dividend-track');
   }
 
   async getCompanyFinancials(

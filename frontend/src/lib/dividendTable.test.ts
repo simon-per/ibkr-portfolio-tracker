@@ -30,6 +30,15 @@ describe('sortDividendRows', () => {
     expect(symbols(sortDividendRows(rows, 'yield', 'asc', true))).toEqual(['AAA', 'CCC', 'BBB'])
   })
 
+  it("sorts by a payer's own record, the rows without one last", () => {
+    const track = { 1: { dps_cagr_5y: 0.05, raise_years: 3, payout_ratio: 0.4 },
+      3: { dps_cagr_5y: 0.09, raise_years: 10, payout_ratio: null } }
+    expect(symbols(sortDividendRows(rows, 'dpsCagr', 'desc', true, track))).toEqual(['CCC', 'AAA', 'BBB'])
+    expect(symbols(sortDividendRows(rows, 'streak', 'asc', true, track))).toEqual(['AAA', 'CCC', 'BBB'])
+    expect(symbols(sortDividendRows(rows, 'payout', 'asc', true, track))).toEqual(['AAA', 'BBB', 'CCC'])
+    expect(symbols(sortDividendRows(rows, 'payout', 'desc', true))).toEqual(['AAA', 'BBB', 'CCC'])
+  })
+
   it('sorts net and leaves the input alone', () => {
     expect(symbols(sortDividendRows(rows, 'net', 'desc', true))).toEqual(['BBB', 'CCC', 'AAA'])
     expect(symbols(rows)).toEqual(['AAA', 'BBB', 'CCC'])

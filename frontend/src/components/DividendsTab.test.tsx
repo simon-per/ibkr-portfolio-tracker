@@ -583,6 +583,34 @@ describe('The per-position table', () => {
     }
   })
 
+  it("shows each payer's own record from its filings, a dash for a fund, and sorts by it", async () => {
+    // Review item FD4: 5-year growth of the dividend per share, the raise streak and the
+    // payout ratio, by security id; a fund has no SEC filer and is absent.
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
+    vi.spyOn(api, 'getCompanyDividendTrack').mockResolvedValue({
+      1: { dps_cagr_5y: 0.082, raise_years: 12, payout_ratio: 0.354 },
+      3: { dps_cagr_5y: 0.15, raise_years: 0, payout_ratio: null },
+    })
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText(/Received/)
+    const cells = (symbol: string) => {
+      const row = within(screen.getByRole('table')).getAllByRole('row')
+        .find((r) => r.querySelector('.text-xs')?.textContent === symbol)!
+      return Array.from(row.querySelectorAll('td')).map((td) => td.textContent)
+    }
+    await waitFor(() => expect(cells('AAA')).toEqual(expect.arrayContaining(['+8.2%', '12y', '35%'])))
+    expect(cells('CCC')).toEqual(expect.arrayContaining(['+15.0%', '0y']))
+    expect(cells('BBB').filter((c) => c === '—').length).toBeGreaterThanOrEqual(3)
+
+    const fiveYear = screen.getByRole('columnheader', { name: /5Y/ })
+    await user.click(within(fiveYear).getByRole('button'))
+    expect(bodyOrder().slice(0, 2)).toEqual(['CCC', 'AAA'])
+    // The rows without a record last, in either direction.
+    await user.click(within(fiveYear).getByRole('button'))
+    expect(bodyOrder().slice(0, 2)).toEqual(['AAA', 'CCC'])
+  })
+
   it('counts raises and cuts over the payers it lists', async () => {
     vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(withSecurities())
     mount()

@@ -160,6 +160,13 @@ export const companyFinancialsCompaniesQuery = queryOptions({
   staleTime: 30 * 60 * 1000,
 })
 
+/** Each held listing's company dividend record, by security id (the Dividends table). */
+export const companyDividendTrackQuery = queryOptions({
+  queryKey: ['company-financials', 'dividend-track'],
+  queryFn: () => api.getCompanyDividendTrack(),
+  staleTime: 30 * 60 * 1000,
+})
+
 /** One company's fundamentals history at one period basis and range (the Company tab). */
 export const companyFinancialsQuery = (
   cik: number,

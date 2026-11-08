@@ -115,6 +115,7 @@ READ_ENDPOINTS = [
     "/api/logos/2",
     "/api/logos/isin/NL0010273215",
     "/api/company-financials/companies",
+    "/api/company-financials/dividend-track",
     "/api/company-financials/937966",
     "/api/company-financials/937966?period=quarterly&range=5y",
     "/api/company-financials/937966?period=annual&range=max",
@@ -594,6 +595,11 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert client.get("/api/company-financials/937966?range=3y").json()["range"] == "3y"
     # No write route: a POST is not a route at all.
     assert client.post("/api/company-financials/937966").status_code in (401, 405)
+
+    # Each held listing's company dividend record (review item FD4), keyed by security id:
+    # ASML's listing has figures but no dividend per share, so every figure is absent.
+    track = client.get("/api/company-financials/dividend-track").json()
+    assert track == {"1": {"dps_cagr_5y": None, "raise_years": None, "payout_ratio": None}}
 
 
 @pytest.mark.parametrize("path", CRYPTO_READ_ENDPOINTS)
