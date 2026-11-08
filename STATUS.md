@@ -149,6 +149,15 @@ Only what is still unverified.
     (C6). A finpension file with a row lacking a CHF/EUR rate is refused whole (C4). The tax
     report's earlier years keep their opening/year-end cash and margin check when a later trade has
     no rate (C7).
+  - *Wave 4 (`review-w4-yahoo`).* No migration, no new request. The watchlist row of a held or
+    Company-tab company shows the same P/E, PEG, growth, margin, target and counts as Fundamentals
+    and the overview, and GOOG and GOOGL rows the Alphabet page's counts (DR1, DR2). Revenue and EPS
+    growth of a US filer read the filings' TTM (NVDA's revenue near +83%, not +106%), the others
+    carry a `q` (Y1). KSPI and SBI.TO have no forward P/E (Y5); LITE no EPS growth (Y7). A London,
+    Johannesburg or Tel Aviv watchlist name is priced in pounds, rand or shekels (Y4). The two 3a
+    funds sit under Fundamentals' Funds, not as stock rows (VI4). A watchlist note or target can be
+    cleared (U2). Seen on a local build against production data with the new fields filled in as
+    the new server would, at 1440 and 390, light and dark.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
