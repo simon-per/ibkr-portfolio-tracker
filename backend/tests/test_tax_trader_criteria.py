@@ -247,10 +247,15 @@ async def test_an_unconvertible_trade_makes_the_margin_unknown(db, monkeypatch):
     monkeypatch.setattr(CurrencyService, "get_exchange_rate", no_rate)
     tc = (await TaxService(db).get_tax_report(YEAR))["trader_criteria"]
     assert tc["margin_used"] is None and tc["min_cash_balance"] is None
-    # The purchase cannot be valued, and neither can the opening cash: no turnover.
-    assert tc["purchases"] is None and tc["opening_cash"] is None
+    # The purchase cannot be valued: no turnover. The opening cash is from before it, so
+    # it stays a figure (review item C7: an August trade blanked January's balance).
+    assert tc["purchases"] is None and tc["opening_cash"] == 3000.0
     assert tc["turnover_multiple"] is None
     assert tc["sales"] == 3
+
+    # The year before knows nothing of it: its margin check stands.
+    before = (await TaxService(db).get_tax_report(YEAR - 1))["trader_criteria"]
+    assert before["margin_used"] is not None
 
 
 @pytest.mark.asyncio

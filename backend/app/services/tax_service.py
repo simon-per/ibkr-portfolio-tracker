@@ -779,7 +779,7 @@ class TaxService:
         # Margin: did IBKR cash close a day of the year below zero. Unknown while a trade
         # has no rate -- the balance is short by the whole trade (CashService), and the
         # year-end cash line's warning already names the count.
-        if not await cash.unconverted_trades(base_fx, account=IBKR):
+        if not await cash.unconverted_trades(base_fx, account=IBKR, up_to=as_of):
             low = round(lowest, 2)
             criteria["min_cash_balance"] = float(low)
             criteria["margin_used"] = low < 0

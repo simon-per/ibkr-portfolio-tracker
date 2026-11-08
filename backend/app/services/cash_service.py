@@ -163,9 +163,9 @@ class CashService:
         self._dividend_receipts: Optional[List[Tuple[date, Decimal]]] = None
         # The last `_derived_events` result and the `BaseFx` it was projected with.
         self._derived: Optional[Tuple[object, tuple]] = None
-        # Trades `_derived_events` could not convert, per base currency and then per
-        # account — see `unconverted_trades`.
-        self._unconverted: Dict[str, Dict[str, int]] = {}
+        # The dates of the trades `_derived_events` could not convert, per base currency
+        # and then per account — see `unconverted_trades`.
+        self._unconverted: Dict[str, Dict[str, List[date]]] = {}
 
     async def all_trades(self) -> List[Trade]:
         """Every trade, oldest first — read once per instance. Shared with the realized
@@ -257,7 +257,7 @@ class CashService:
             return self._derived[1]
         by_account: Dict[str, List[Tuple[date, Decimal]]] = defaultdict(list)
         to_base = NativeToBase(self.currency_service, base_fx)
-        unconverted: Dict[str, int] = defaultdict(int)
+        unconverted: Dict[str, List[date]] = defaultdict(list)
 
         # 1. Trades. `proceeds` carries IBKR's sign — negative for a buy, positive for a
         #    sell — and `commission` is separately signed (negative), so the sum is the
@@ -273,7 +273,7 @@ class CashService:
                     "Cash: no FX for trade %s (%s near %s); the balance is unknown",
                     t.ib_key, t.currency, t.trade_date,
                 )
-                unconverted[t.account] += 1
+                unconverted[t.account].append(t.trade_date)
                 continue
             by_account[t.account].append((t.trade_date, amount))
 
@@ -297,7 +297,9 @@ class CashService:
         self._derived = (base_fx, (by_account, to_base))
         return by_account, to_base
 
-    async def unconverted_trades(self, base_fx, account: Optional[str] = None) -> int:
+    async def unconverted_trades(
+        self, base_fx, account: Optional[str] = None, up_to: Optional[date] = None
+    ) -> int:
         """
         Trades the derived events left out because no FX rate converts them.
 
@@ -309,13 +311,22 @@ class CashService:
         instance when there was one; the count depends on the base only through
         `NativeToBase`'s same-currency short-circuit, hence the key. `account` counts
         one account's trades only, so a pillar 3a trade cannot unknow the IBKR balance.
+
+        `up_to` counts only the trades dated on or before it (review item C7,
+        2026-11-08): a balance before an unconvertible trade does not contain it, so one
+        unconvertible trade in November no longer blanked the opening cash, the year-end
+        cash and the margin check of every earlier year.
         """
         if base_fx.base_currency not in self._unconverted:
             await self._derived_events(base_fx)
-        counts = self._unconverted[base_fx.base_currency]
-        if account is None:
-            return sum(counts.values())
-        return counts.get(account, 0)
+        by_account = self._unconverted[base_fx.base_currency]
+        return sum(
+            1
+            for owner, dates in by_account.items()
+            if account is None or owner == account
+            for d in dates
+            if up_to is None or d <= up_to
+        )
 
     async def measured_corrections(self, base_fx) -> List[Tuple[date, Decimal, str]]:
         """
@@ -494,7 +505,8 @@ class CashService:
         every caller before that, is the whole book.
         """
         events = await self.balance_events(base_fx, account=account)
-        unconverted = await self.unconverted_trades(base_fx, account=account)
+        # Only those by `on_date`: a later one is not in this balance (C7).
+        unconverted = await self.unconverted_trades(base_fx, account=account, up_to=on_date)
         source = await self.cash_source(account=account)
         if source == UNKNOWN or unconverted:
             return UninvestedCash(source=UNKNOWN, balance=None, unconverted=unconverted)

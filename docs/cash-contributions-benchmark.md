@@ -92,7 +92,10 @@ Six rules, each of which would be a wrong number the other way:
   reader served a balance off by the whole trade with nothing saying so — the silent
   half-result #26 fixed for realized P&L. `_derived_events` counts them;
   `CashService.unconverted_trades(base_fx)` reports the count (off the instance's last
-  derivation), and above 0 `uninvested_cash` returns `UNKNOWN` with `balance=None` —
+  derivation) — **up to a date** when asked (`up_to`, review item C7, 2026-11-08: a balance
+  before the trade does not contain it, so one unconvertible November trade no longer blanked
+  the opening and year-end cash and the margin check of every earlier year) — and above 0
+  `uninvested_cash` (counting up to its `on_date`) returns `UNKNOWN` with `balance=None` —
   the same state as no ledger at all, which every surface already renders as absent.
   Every reader of the raw events consults it too: the timeline drops the cash events and
   stamps every point `unknown`, and the decomposition reads cash as untracked and drops
