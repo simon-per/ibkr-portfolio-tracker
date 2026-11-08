@@ -209,7 +209,9 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Composite buy score',
       },
-      cell: (i) =>
+      // View-aware like Positions' (review item U7): a dash in the table, nothing on the
+      // card, whose badge row printed a stray "-" beside the analyst cell's "—".
+      cell: (i, view) =>
         i.buy_score !== null ? (
           <span
             className={cn(
@@ -219,9 +221,9 @@ export function watchlistColumns(deps: {
           >
             {Math.round(i.buy_score)}
           </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        ),
+        ) : view === 'table' ? (
+          <span className="text-muted-foreground">{ABSENT}</span>
+        ) : null,
     },
     {
       key: 'current_price',
@@ -254,8 +256,9 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Analyst rating and target upside',
       },
-      cell: (i) => {
+      cell: (i, view) => {
         const upside = analystUpside(i)
+        if (view !== 'table' && !i.analyst_rating && upside === null) return null
         return (
           // `whitespace-nowrap`: "Strong Buy" over "+35% upside" broke into three and four
           // lines in a column that only needs the width of its longest phrase.
