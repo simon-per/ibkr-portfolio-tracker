@@ -108,7 +108,7 @@ Only what is still unverified.
     `rate_limited`. Company prices and dividends still report a delisted ticker as `no_data`,
     never `errors`. A Sync press — or `POST /api/scheduler/trigger` — after any request-step
     refusal (`1004`–`1009`, `1019`, `1021`, "may have reached IBKR") answers 429 / skips until
-    midnight ET (I2). `/api/scheduler/status` carries `edgar_in_progress`; a push during the
+    midnight ET (I2). A push during the
     Sunday 05:00 EDGAR pass logs `Holding the restart: the running backend reports a sync in
     progress (stock pipeline or SEC EDGAR)` (I4). The Sunday pass's `ttm_dividend_gaps` /
     `stale_figures` list every company in scope, fetched or not (CO2).
@@ -131,11 +131,11 @@ Only what is still unverified.
     announced Korean dividend reads the same before and after Yahoo's row for it lands, with no
     "raises" jump that day, and Samsung's one-off quarter is not forecast again a year on (D1,
     D3). By position has one Yield (the forecast's) and 5Y, Streak and Payout for the US filers,
-    dashes for funds (`/api/company-financials/dividend-track` answers 200; FD2, FD4). The open
+    dashes for funds (FD2, FD4). The open
     forecast card lists the change by month, and the Next 12 months tile says how far the next
     round level is (FD1, FD3). A new forecast withholding rate refreshes the Tax tab's
     projection, the dividend summary, XIRR and the activity ledger at once (T6). Seen on a local
-    build against production data, the track figures faked (the endpoint is not deployed).
+    build against production data, the track figures faked.
   - *Wave 3 (`review-w3-ledger`).* Migrations `e5a7c9d1f3b4` (`trades.executed_at`) and
     `f6b8d0e2a4c5` (`cash_flows.flow_type_manual`), plain ADD COLUMNs, NULL on arrival, no
     request. After the first Flex sync: the trades of its window carry `executed_at`, and an
@@ -151,11 +151,13 @@ Only what is still unverified.
     no rate (C7).
   - *Wave 4 (`review-w4-yahoo`).* No migration, no new request. The watchlist row of a held or
     Company-tab company shows the same P/E, PEG, growth, margin, target and counts as Fundamentals
-    and the overview, and GOOG and GOOGL rows the Alphabet page's counts (DR1, DR2). Revenue and EPS
-    growth of a US filer read the filings' TTM (NVDA's revenue near +83%, not +106%), the others
-    carry a `q` (Y1). KSPI and SBI.TO have no forward P/E (Y5); LITE no EPS growth (Y7). A London,
-    Johannesburg or Tel Aviv watchlist name is priced in pounds, rand or shekels (Y4). The two 3a
-    funds sit under Fundamentals' Funds, not as stock rows (VI4). A watchlist note or target can be
+    and the overview, and GOOG and GOOGL rows the Alphabet page's counts (DR1, DR2). Once the Tue–Sat
+    04:00/05:00 passes rewrite them (still the old values right after the deploy): KSPI and SBI.TO
+    have no forward P/E (Y5); LITE no EPS growth (Y7). A London, Johannesburg or Tel Aviv
+    watchlist name is priced in pounds, rand or shekels (Y4). Both 3a funds sit under
+    Fundamentals' Funds, not as stock rows (VI4): `is_fund` true for both on
+    `/api/fundamentals/portfolio`; at `65784c0` the EM fund read false (its fallback asked a
+    category the finpension import never writes), fixed in the follow-up. A watchlist note or target can be
     cleared (U2). Seen on a local build against production data with the new fields filled in as
     the new server would, at 1440 and 390, light and dark.
   - *Wave 5 (`review-w5-company-data`).* Migration `a8d0f2b4c6e7`

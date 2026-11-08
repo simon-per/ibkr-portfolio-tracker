@@ -9,7 +9,7 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.etf_mappings import allocation_for_fund_isin
+from app.etf_mappings import allocation_for_fund_isin, is_known_etf_isin
 from app.repositories.fundamentals_repository import (
     FundamentalsRepository, backing_off, clear_fundamentals_backoff, record_fundamentals_miss,
     sync_scope,
@@ -474,12 +474,15 @@ class FundamentalsService:
                 'exchange': sec.exchange,
                 'currency': sec.currency,
                 # The server's one fund predicate (review items VI4/R7): Yahoo's quote type
-                # where it answered, else the security's own asset category — a pillar 3a
-                # fund priced off a NAV has no Yahoo quote type and read as an all-dash
-                # stock row behind the client's own `!== 'ETF'`.
+                # where it answered, else the ISIN predicate Look-through and Allocation ask
+                # (`is_known_etf_isin`), else IBKR's own FUND category — a pillar 3a fund
+                # priced off a NAV has no Yahoo quote type and read as an all-dash stock row
+                # behind the client's own `!== 'ETF'`. The category alone missed it: the
+                # finpension import writes none (docs/failure-modes.md, "is this a fund?").
                 'is_fund': (
                     m.is_fund if m is not None and m.quote_type
-                    else (sec.asset_category or '').upper() == 'FUND'
+                    else (is_known_etf_isin(sec.isin)
+                          or (sec.asset_category or '').upper() == 'FUND')
                 ),
             }
             if m:
