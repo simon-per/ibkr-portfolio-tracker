@@ -593,8 +593,15 @@ Yahoo's `amount_per_share` sizes only what IBKR never paid — the history befor
 because Yahoo restates history for a split and IBKR's cash line keeps the pre-split rate. An **unpaired**
 IBKR payment joins as amount-only evidence (`HistPayment.cadence=False`): it sizes, it never bends
 the schedule. An **open accrual** is the newest amount of all (IBKR's declared `grossRate`, else
-`gross / quantity`), replacing the Yahoo row of the same ex-date or joining as amount-only evidence — so
-a declared raise carries into every later projection the day IBKR lists it. Every amount converts at
+`gross / quantity`), replacing the Yahoo row of the same ex-date or otherwise joining the history — so
+a declared raise carries into every later projection the day IBKR lists it. It joins as a **scheduled**
+payment when it fills the ex-dated series' next open slot (no scheduled payment within half a cycle,
+`takes_open_slot`) and its ex-date has passed: that is the row Yahoo will write for it. Joined
+amount-only, a varying payer's slot was sized from a year earlier until Yahoo's row landed, and the
+level jumped that day as "raises" (review item D1, 2026-11-08: Korean payers declare a month after
+the ex-date; `tests/test_dividend_accrual_schedule.py` pins "accrual only" == "accrual + Yahoo row").
+An extra payment between two slots, a pay-dated IBKR-only series and an ex-date still ahead stay
+amount-only. Every amount converts at
 **one** rate per currency (the newest cached), so an exchange-rate move cannot make a level payer look
 varying — **the accrual included**: it is stored in the payment's own currency and converted when read
 (review item D2, 2026-11-08). Its EUR columns froze the rate of the day it was stored, so an unchanged

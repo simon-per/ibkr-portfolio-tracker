@@ -51,6 +51,7 @@ from app.services.dividend_forecast import (
     payout_level,
     per_share_growth,
     project_dividends,
+    takes_open_slot,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_minor_units import minor_unit_scale, reported_currency_of
@@ -2015,9 +2016,15 @@ class DividendService:
         # An open accrual is the newest amount there is: IBKR has declared it. It
         # replaces the figure of the dividend it records when that is already in the
         # history (Yahoo writes the ex-date a day after it passes), and otherwise joins
-        # it as amount-only evidence, so a declared raise carries into every later
-        # projection the day IBKR lists it — TSMC's 7.00 a share instead of the 4.78
-        # the old median kept repeating after it.
+        # it, so a declared raise carries into every later projection the day IBKR lists
+        # it — TSMC's 7.00 a share instead of the 4.78 the old median kept repeating
+        # after it. It joins as a SCHEDULED payment when it fills the ex-dated series'
+        # next open slot (`takes_open_slot`): that is the row Yahoo will write for it,
+        # and joining it amount-only sized the slot from a year earlier until then, so
+        # the level and the raises jumped the day Yahoo's row landed (review item D1,
+        # Samsung's dividend declared a month after its ex-date). Anything else — an
+        # extra payment between two slots, a pay-dated IBKR-only series, an ex-date
+        # still ahead — stays amount-only evidence.
         for sid, accruals in accruals_by_sec.items():
             if sid not in securities:
                 continue
@@ -2038,7 +2045,9 @@ class DividendService:
                         special=entries[same].special, cadence=entries[same].cadence,
                     )
                 else:
-                    entries.append(HistPayment(on_date=ex, per_share_eur=ps, cadence=False))
+                    scheduled = (sid in schedule_source and ex <= as_of
+                                 and takes_open_slot(entries, ex))
+                    entries.append(HistPayment(on_date=ex, per_share_eur=ps, cadence=scheduled))
 
         # Gross to expected net, one rate per security from the ladder. Applied once
         # here, so every projection — forward, overdue, two years out — carries the

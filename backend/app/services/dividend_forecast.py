@@ -243,6 +243,25 @@ def special_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayme
     return out
 
 
+def takes_open_slot(history: Sequence[HistPayment], on_date: date) -> bool:
+    """
+    True when a dividend on ``on_date`` fills a slot of the schedule no scheduled
+    payment fills: none sits within half a cycle of it (`_slot_tolerance`). False
+    without a cadence to judge by.
+
+    For an announced dividend the schedule does not record yet — IBKR's accrual of a
+    dividend Yahoo has no row for (review item D1: Korean payers declare a month after
+    the ex-date). It is the payment the schedule's own series will hold once Yahoo's row
+    lands, so it joins as a scheduled one, and the two states read the same.
+    """
+    scheduled = [p.on_date for p in history if p.cadence]
+    gap = infer_gap_days(scheduled)
+    if gap is None:
+        return False
+    tol = _slot_tolerance(gap)
+    return all(abs((d - on_date).days) > tol for d in scheduled)
+
+
 def is_special_near(history: Sequence[HistPayment], on_date: date, tol: int) -> bool:
     """
     True when the payment nearest ``on_date`` (within ``tol`` days) is one the forecast
