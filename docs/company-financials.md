@@ -230,6 +230,15 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   that never tagged any (AVGO) holds cash alone. No debt tagged is no net cash, never debt of 0
   (a debt-free MNST has none). Enterprise value = market cap less net cash; EV/EBIT over TTM
   operating income, both in the key figures only.
+- **An investments concept outside the chain is named, never read** (`_unchained_investments`,
+  review item CO8, 2026-11-08). KLAC's net cash was cash alone: its marketable securities sit in a
+  concept no chain reads. When the newest balance sheet has cash and neither chained concept, the
+  normaliser names every us-gaap concept shaped like a current investment (`INVESTMENT_LIKE`: marketable,
+  held-to-maturity, available-for-sale or debt securities, or investments, `…Current`, not
+  restricted) with a positive value there; the pass records `unchained_investments` and warns with
+  company and concept. Whitelisting it into `short_term_investments` is a one-line change once
+  someone has seen what it holds. KLAC's own concept was not confirmed from this side (no SEC read);
+  the first pass that writes KLAC names it.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 

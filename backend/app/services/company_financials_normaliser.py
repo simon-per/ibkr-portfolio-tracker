@@ -45,6 +45,7 @@ exercises:
   no row, never a zero.
 """
 
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -302,6 +303,13 @@ QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 
 #: Forms whose facts count: `edgar_client.PERIODIC_FORMS`, the one set.
 FORMS = PERIODIC_FORMS
+# A concept named like a current investment (`_unchained_investments`): marketable or
+# held-to-maturity securities, available-for-sale or debt securities, or investments,
+# classified current. Restricted balances are not liquid.
+INVESTMENT_LIKE = re.compile(
+    r"^(?!Restricted)\w*(MarketableSecurities|Investments|AvailableForSale|HeldToMaturity"
+    r"|DebtSecurities)\w*Current$"
+)
 
 # 12 to 14 weeks, or a retailer's 16- and 17-week fourth quarter: COST's 112 days had no Q4
 # from its ladder, so its year-end balances never reached a quarter (no Q4 cash or equity).
@@ -442,6 +450,9 @@ class Normalised:
     # {"after", "by", "ratio"} — the last filing on the old basis, the first on the new
     # (ISO dates), and new shares per old.
     splits: List[Dict[str, Any]] = field(default_factory=list)
+    # Current-investment concepts outside every chain carrying a value at the newest
+    # balance sheet where no chained one does (`_unchained_investments`).
+    unchained_investments: List[str] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -750,6 +761,33 @@ def adjustments(
             })
         previous_split, previous_accn = split, accn
     return multiplier
+
+
+def _unchained_investments(companyfacts: Dict[str, Any], end: date) -> List[str]:
+    """
+    The us-gaap concepts named like current investments that no chain reads, with a
+    positive value on the balance sheet dated `end` (review item CO8, 2026-11-08). KLAC's
+    marketable securities sit in one, so its net cash counted cash alone; the sync names
+    each such concept so the chain can whitelist it (`short_term_investments`). Named, never
+    read: a concept is a member of a chain only once someone saw what it holds.
+    """
+    gaap = ((companyfacts or {}).get("facts") or {}).get("us-gaap") or {}
+    chained = {c for spec in METRICS.values() for c in spec.concepts}
+    out = []
+    for concept, body in gaap.items():
+        if concept in chained or not INVESTMENT_LIKE.match(concept):
+            continue
+        rows = ((body or {}).get("units") or {}).get("USD") or []
+        if any(
+            row.get("form") in FORMS
+            and not row.get("start")
+            and _date(row.get("end")) == end
+            and isinstance(row.get("val"), (int, float))
+            and row["val"] > 0
+            for row in rows
+        ):
+            out.append(concept)
+    return sorted(out)
 
 
 def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1503,6 +1541,16 @@ def normalise(
     if dropped:
         _fill_shares_from_eps(values, keys)
     _fill_eps_from_shares(values, keys)
+
+    cash = values["cash"]
+    if cash:
+        newest = max(cash, key=lambda k: k[1])
+        if newest not in values["short_term_investments"] and newest not in values[
+            "cash_and_short_term"
+        ]:
+            result.unchained_investments = _unchained_investments(
+                companyfacts, cash[newest].end
+            )
 
     currencies: Counter = Counter()
     for metric in ("revenue", "net_income"):

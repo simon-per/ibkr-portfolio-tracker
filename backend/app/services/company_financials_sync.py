@@ -409,6 +409,7 @@ class CompanyFinancialsSync:
                 f"from EDGAR; asked again next week."
             )
         warnings.extend(await self._new_findings(summary))
+        warnings.extend(_unchained_warning(summary))
         f = summary["filing_errors"]
         if f:
             warnings.append(
@@ -505,6 +506,7 @@ class CompanyFinancialsSync:
                 )
         # The check's own lists cover what it fetched; the Sunday pass's cover everyone.
         await self._findings(fetched, summary)
+        warnings.extend(_unchained_warning(summary))
         failed = sum(1 for o in summary["outcomes"] if o["outcome"].startswith("error"))
         if failed:
             warnings.append(
@@ -747,6 +749,10 @@ class CompanyFinancialsSync:
         await self.repo.replace_rows(
             cik, result.rows, utcnow(), result.entity_name, result.splits
         )
+        if result.unchained_investments:
+            summary.setdefault("unchained_investments", []).append(
+                f"{label} ({', '.join(result.unchained_investments)})"
+            )
         await self.db.commit()
         summary["fetched"] += 1
         summary["rows_written"] += len(result.rows)
@@ -823,6 +829,18 @@ class CompanyFinancialsSync:
             summary["filings_unreadable"] += 1
             logger.warning(f"filing {filing.accn} of CIK {cik}: {name} is not XML ({e})")
             return []
+
+
+def _unchained_warning(summary: Dict[str, Any]) -> List[str]:
+    """The companies this pass wrote whose net cash counts cash alone while their filings
+    carry a current-investments concept no chain reads (review item CO8)."""
+    found = summary.get("unchained_investments") or []
+    if not found:
+        return []
+    return [
+        f"Short-term investments outside the concept chain for {', '.join(found)}: "
+        f"net cash counts cash alone until the chain names the concept."
+    ]
 
 
 def _filing_facts(stored: Dict[str, Any]) -> List[Dict[str, Any]]:
