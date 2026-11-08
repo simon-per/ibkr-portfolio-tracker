@@ -930,9 +930,64 @@ async def test_a_fund_with_no_basket_of_its_own_borrows_the_one_it_proxies(sessi
 
     assert vwce["status"] == "looked_through"
     assert vwce["proxy_for_symbol"] == "VT"
+    # A basket VWCE could still be imported by hand: not an accepted proxy (review item L6).
+    assert vwce["proxy_accepted"] is False
     assert vwce["constituents"] == 2
     # Its value is attributed, not left in the uncovered bucket.
     assert report["uncovered_fund_eur"] < 1000.0
+
+
+@pytest.mark.asyncio
+async def test_the_evening_isin_pass_ranks_a_borrowed_baskets_constituents(session):
+    """
+    Review item L4: `material_constituent_isins` read the held funds' baskets without the
+    proxy alias, so a fund that borrows its basket (the 3a funds) ranked nothing and the
+    evening ISIN pass never asked about what it holds. Both readers now load through
+    `_held_baskets`.
+    """
+    await _standard_book(session)
+    amazon = "US0231351067"  # in VT's basket only: nothing but the alias can rank it
+    session.add_all([
+        _basket(VT_ISIN, "100"),
+        _holding(VT_ISIN, 1, amazon, "Amazon.com Inc", "100"),
+    ])
+    await session.flush()
+
+    ranked = await LookthroughService(session).material_constituent_isins()
+    assert amazon in ranked
+
+
+@pytest.mark.asyncio
+async def test_a_fund_and_its_contributions_carry_its_name(session):
+    """Review item L7: a fund whose symbol is its ISIN (the 3a funds) is named on screen, so
+    its coverage row and every company's via-fund line carry the fund's name."""
+    await _standard_book(session)
+    report = await LookthroughService(session).get_lookthrough()
+    xnas = next(f for f in report["funds"] if f["fund_isin"] == XNAS_ISIN)
+    assert xnas["name"]
+    nvidia = next(r for r in report["companies"] if NVIDIA_ISIN in r["isins"])
+    assert nvidia["via_funds"][0]["name"] == xnas["name"]
+
+
+def test_every_reader_of_a_held_funds_basket_goes_through_the_alias():
+    """The family: in the look-through service only `_held_baskets` asks the repository for
+    baskets, so a new reader cannot skip the proxies the way the ranking did."""
+    import ast
+    import inspect
+
+    from app.services import lookthrough_service
+
+    tree = ast.parse(inspect.getsource(lookthrough_service))
+    callers = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(fn):
+                if (
+                    isinstance(node, ast.Attribute)
+                    and node.attr in ("get_baskets", "get_holdings")
+                ):
+                    callers.add(fn.name)
+    assert callers == {"_held_baskets"}
 
 
 @pytest.mark.asyncio

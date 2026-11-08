@@ -92,6 +92,11 @@ MIN_ROWS = 2
 # Rounding puts real files a hair over 100 (IWDA measures 100.01). Anything beyond this is a
 # unit error or a notional-weighted file, and is refused rather than clamped.
 MAX_TOTAL_WEIGHT_PCT = Decimal("101")
+# Below this share of the fund in securities, a basket is treated as *absent* rather than as
+# a fund holding mostly cash (`lookthrough_service._fund_status`): EMIM's real 98.04 is a
+# residual, a half-parsed file at 3 is not. `replace_basket` refuses one below it at write
+# (review item L1), or a partial parse took the place of a good stored basket.
+MIN_BASKET_COVERAGE_PCT = Decimal("80")
 
 
 class BasketParseError(Exception):
@@ -342,8 +347,11 @@ def _resolve_identifier(
         return text, None
     if kind == "CUSIP":
         # Digit-leading, so derivable. `derive_north_american_isin` assumes the US form; the
-        # Canadian one exists in the same numeric space and only one of the two is real.
-        return derive_north_american_isin(text), None
+        # Canadian one exists in the same numeric space and only one of the two is real. The
+        # CUSIP is kept beside it (review item L2): a Canadian company's (Shopify's 82509L107
+        # in QQQM) derives a US ISIN belonging to nothing, and only the CUSIP can still be
+        # asked about (`unresolved_identifiers`).
+        return derive_north_american_isin(text), text
     if kind in ("CINS", "SEDOL"):
         return None, text
     return None, None
@@ -1037,9 +1045,29 @@ DEFIANCE_COLUMNS = {
 }
 
 
-def _defiance_asset_class(identifier: Optional[str]) -> Optional[str]:
-    """Defiance's cash lines are the ones whose identifier column starts with `CASH`."""
-    return "Cash" if (identifier or "").strip().upper().startswith("CASH") else None
+# A US money-market fund's ticker: five letters ending in XX (FGXXX, SPAXX, AGPXX), the
+# NASDAQ convention for them.
+_MONEY_MARKET_TICKER = re.compile(r"^[A-Z]{3}XX$")
+_MONEY_MARKET_NAMES = ("money market", "government obligations fund", "treasury obligations fund")
+
+
+def _defiance_asset_class(
+    identifier: Optional[str], name: Optional[str] = None, ticker: Optional[str] = None
+) -> Optional[str]:
+    """
+    Defiance publishes no asset class. Its cash lines are the ones whose identifier column
+    starts with `CASH`; **a money-market fund line** (QTUM's FGXXX, First American Government
+    Obligations, review item L5) is a fund, so the look-through's nested-fund bucket takes it
+    rather than a company row: by its ticker's shape or its name.
+    """
+    if (identifier or "").strip().upper().startswith("CASH"):
+        return "Cash"
+    label = (name or "").strip().lower()
+    if _MONEY_MARKET_TICKER.match((ticker or "").strip().upper()) or any(
+        marker in label for marker in _MONEY_MARKET_NAMES
+    ):
+        return "Money Market Fund"
+    return None
 
 
 def parse_defiance(body: bytes, fund_isin: str, ticker: str, fetched_on: date) -> ParsedBasket:
@@ -1079,7 +1107,7 @@ def parse_defiance(body: bytes, fund_isin: str, ticker: str, fetched_on: date) -
             skipped += 1
             continue
         raw_id = _clean(record[at["cusip"]])
-        asset_class = _defiance_asset_class(raw_id)
+        asset_class = _defiance_asset_class(raw_id, record[at["name"]], record[at["ticker"]])
         row_isin, unresolved = _resolve_identifier(
             raw_id, is_security=counts_as_invested(asset_class, False)
         )

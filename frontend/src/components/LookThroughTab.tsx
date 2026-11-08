@@ -24,7 +24,7 @@ import { CASH_BUCKET, STRUCTURAL_PAINT } from '@/lib/sectorColors'
 import { paintBackground } from '@/lib/chartPaint'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
-import { listingTickers } from '@/lib/lookthroughIdentity'
+import { fundLabel, listingTickers } from '@/lib/lookthroughIdentity'
 import { ABSENT, cn, formatCount, formatSigned, placeholderDim } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { unresolvedTone } from '@/lib/lookthroughTone'
@@ -201,7 +201,7 @@ export function fundColumns(deps: {
       shortHeader: 'Fund',
       mobile: 'title',
       cellClassName: 'font-medium',
-      cell: (row) => row.symbol ?? row.fund_isin,
+      cell: (row) => fundLabel(row),
     },
     {
       key: 'status',
@@ -290,7 +290,7 @@ function CompanyBreakdown({
       {row.listings.length > 0 && (
         <p>
           <span className="text-muted-foreground">Held directly as </span>
-          {row.listings.join(', ')}
+          {listingTickers(row.listings).join(', ')}
           <span className="text-muted-foreground">
             {' '}
             — {formatCurrency(row.direct_value_eur)}
@@ -303,7 +303,7 @@ function CompanyBreakdown({
           <ul className="mt-1 space-y-1">
             {row.via_funds.map((fund) => (
               <li key={fund.fund_isin} className="flex justify-between gap-4">
-                <span>{fund.symbol ?? fund.fund_isin}</span>
+                <span>{fundLabel(fund)}</span>
                 <span className="text-muted-foreground">
                   {fund.weight_pct.toFixed(2)}% of the fund ·{' '}
                   {formatCurrency(fund.value_eur)}
@@ -444,8 +444,10 @@ export function LookThroughTab() {
   // from another fund's file, and a green "every fund decomposed" over that would be the
   // reassuring-zero failure this codebase keeps finding. It stays amber and, unlike a
   // percentage threshold, it can actually clear: importing a real basket for that fund wins
-  // over the proxy with no code change.
-  const proxiedFunds = (data?.funds ?? []).filter((f) => f.proxy_for_symbol)
+  // over the proxy with no code change. Except an owner-accepted proxy (review item L6): a fund
+  // that publishes no basket and has no route to one would keep it amber for good. Its row
+  // keeps the badge.
+  const proxiedFunds = (data?.funds ?? []).filter((f) => f.proxy_for_symbol && !f.proxy_accepted)
   // Ageing baskets are the other way coverage lies: the percentage does not move, but the
   // holdings behind it describe an older index. Surfaced on the card, not only in the table.
   const staleFunds = (data?.funds ?? []).filter((f) => f.stale)

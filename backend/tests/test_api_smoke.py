@@ -934,6 +934,11 @@ def test_the_shapes_that_broke_production_serialize(client):
     # the IBKR cash beside the holdings (#63). Nullable figures: absent, never coerced.
     for country in tax["dividend_by_country"]:
         assert {"rate_pct", "residual_pct", "creditable", "excess"} <= country.keys(), country
+    # And their total row, the creditable sum being the claim (review item T1).
+    assert "dividend_by_country_totals" in tax
+    if tax["dividend_by_country"]:
+        assert set(tax["dividend_by_country_totals"]) == {
+            "gross", "withholding", "creditable", "excess", "net"}
     for row in tax["realized_gains"] + tax["holdings_snapshot"]:
         assert {"isin", "security_id"} <= row.keys(), row
     assert all(row["security_id"] is not None for row in tax["holdings_snapshot"])
@@ -949,6 +954,7 @@ def test_the_shapes_that_broke_production_serialize(client):
         "opening_as_of", "opening_securities", "opening_cash", "purchases",
         "sales_proceeds", "turnover_multiple", "turnover_estimated", "sales",
         "short_held_sales", "sales_holding_unknown", "margin_used", "min_cash_balance",
+        "margin_interest",
     }
 
     # The activity ledger unions four tables that each had no read surface at all.

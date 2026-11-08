@@ -8,6 +8,7 @@ import type {
 import { STRUCTURAL_PAINT, sectorPaint } from '@/lib/sectorColors'
 import { HATCH_STRIPE_PX, chartPaint, paintBackground, type ChartPaint } from '@/lib/chartPaint'
 import { ConstituentAvatar } from './ConstituentAvatar'
+import { listingTickers } from '@/lib/lookthroughIdentity'
 
 /**
  * The two look-through charts. Their arithmetic lives in `lib/lookthroughChart.ts`; this file
@@ -159,6 +160,8 @@ interface TileContentProps {
   name?: string
   pct?: number
   paintKey?: string
+  /** The company's listing keys ("GOOG@NASDAQ"): a narrow tile's label is their ticker. */
+  listings?: string[]
   root?: { paintKey?: string }
 }
 
@@ -169,13 +172,13 @@ interface TileContentProps {
 // Under-filling costs a character, overflowing costs the tile boundary.
 const UPPERCASE_ADVANCE_PX = 7.6
 
-function truncate(name: string, width: number, pad: number): string {
-  const maxChars = Math.floor((width - pad) / UPPERCASE_ADVANCE_PX)
+function truncate(name: string, width: number, pad: number, fontSize = 12): string {
+  const maxChars = Math.floor((width - pad) / (UPPERCASE_ADVANCE_PX * (fontSize / 12)))
   if (maxChars < 2) return ''
   return name.length > maxChars ? `${name.slice(0, maxChars - 1)}…` : name
 }
 
-function TileContent(props: TileContentProps) {
+export function TileContent(props: TileContentProps) {
   const { x = 0, y = 0, width = 0, height = 0, depth = 0, name = '', pct = 0 } = props
   if (width <= 0 || height <= 0) return null
   if (depth !== 2) return null
@@ -190,6 +193,16 @@ function TileContent(props: TileContentProps) {
   // short for a name above it, and a clipped name is worse than no name.
   const showPct = width > 44 && height > 22
   const showName = width > 70 && height > 38
+  // Too narrow for the name but tall enough for two lines (a phone's column of small tiles,
+  // review item VI8): a bare percentage named nothing, so the ticker goes above it — or, for
+  // a company held only through funds, as much of the name as fits at the smaller size.
+  const ticker = listingTickers(props.listings ?? [])[0]
+  const shortLabel =
+    showPct && !showName && height > 38
+      ? ticker && truncate(ticker, width, 8, 10) === ticker
+        ? ticker
+        : truncate(name, width, 8, 10)
+      : ''
 
   return (
     <g>
@@ -219,10 +232,25 @@ function TileContent(props: TileContentProps) {
           {truncate(name, width, 14)}
         </text>
       )}
+      {shortLabel && (
+        <text
+          x={x + width / 2}
+          y={y + height / 2 - 7}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fill={paint.ink}
+          fontSize={10}
+          fontWeight={600}
+          className="pointer-events-none"
+          data-testid="tile-short-label"
+        >
+          {shortLabel}
+        </text>
+      )}
       {showPct && (
         <text
           x={x + width / 2}
-          y={y + height / 2 + (showName ? 8 : 0)}
+          y={y + height / 2 + (showName ? 8 : shortLabel ? 7 : 0)}
           textAnchor="middle"
           dominantBaseline="central"
           fill={paint.ink}

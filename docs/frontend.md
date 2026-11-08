@@ -426,6 +426,9 @@ tracks rather than cards: five summary cards need six tracks and the Analytics h
 cards need seven. Loading states use the same rendering and track count as the data they replace.
 A panel whose tile count is odd on a two-column phone grid passes `fillLastRow`, which widens the
 last tile across the row rather than leaving a blank cell beside it.
+`ui/kpiPanelFamily.test.ts` fails a panel with an odd, fixed number of tiles that does not (the Tax
+tab's two three-tile panels showed grey holes at 390px, review item VI6, 2026-11-08); a panel whose
+tiles are mapped or conditional cannot be counted from the source and is its author's to set.
 
 ---
 

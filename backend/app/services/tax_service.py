@@ -31,8 +31,11 @@ from app.models.taxlot import TaxLot
 from app.models.trade import Trade, buy_sign, is_sale_side, sale_sign, uncancelled_sales
 from app.models.dividend_payment import DividendPayment
 from app.repositories.dividend_repository import IBKR_SOURCE, YFINANCE_SOURCE
-from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
-from app.repositories.app_settings_repository import AppSettingsRepository
+from app.models.cash_flow import BROKER_INTEREST_PAID, CashFlow, DEPOSIT_WITHDRAW
+from app.repositories.app_settings_repository import (
+    BROKER_INTEREST_COVERED_FROM_KEY,
+    AppSettingsRepository,
+)
 from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService, load_exact_date_pairs
@@ -59,6 +62,48 @@ logger = logging.getLogger(__name__)
 def _blank(value):
     """A CSV cell for a figure that may be unknown: blank, never 0.00."""
     return "" if value is None else value
+
+
+def _agreed_withholding_countries(payments) -> Dict[int, str]:
+    """
+    Security id -> the withholding country its IBKR payments state, where they all state
+    the same one (review item T3, 2026-11-08). A payment ingested before the country was
+    stored fell back to the ISIN prefix, so ASML's New York listing filed one payment of a
+    year under NL and another under US. The prefix stays the last resort, for a security
+    no payment states a country for, or whose payments disagree.
+    """
+    stated: Dict[int, set] = {}
+    for dp in payments:
+        if dp.source == IBKR_SOURCE and dp.withholding_country:
+            stated.setdefault(dp.security_id, set()).add(dp.withholding_country.upper())
+    return {sid: next(iter(c)) for sid, c in stated.items() if len(c) == 1}
+
+
+def _country_totals(buckets: List[Dict]) -> Optional[Dict[str, Optional[float]]]:
+    """
+    The DA-1 table's total row (review item T1, 2026-11-08): the creditable sum is the
+    claim itself, and it was shown nowhere — the Withheld tile includes the excess, which
+    is reclaimed from the source country instead. Summed from the unrounded figures, then
+    rounded once. A part is absent when any country's is: a total over a gap reads as the
+    whole claim. None with no country.
+    """
+    if not buckets:
+        return None
+    all_estimated = any(b["estimated_payments"] == b["payments"] for b in buckets)
+    unsplit = all_estimated or any(b["unsplit"] for b in buckets)
+
+    def total(key: str, absent: bool) -> Optional[float]:
+        return None if absent else round(float(sum(b[key] for b in buckets)), 2)
+
+    withholding, creditable = total("withholding", all_estimated), total("creditable", unsplit)
+    return {
+        "gross": total("gross", False),
+        "withholding": withholding,
+        "creditable": creditable,
+        # The printed whole less the printed part, as on each row (review item T7).
+        "excess": None if unsplit else round(withholding - creditable, 2),
+        "net": total("net", False),
+    }
 
 
 class TaxService:
@@ -121,6 +166,7 @@ class TaxService:
         )
         kept_ids = {p.id for p in kept}
         rows = [(dp, sec) for dp, sec in all_rows if dp.id in kept_ids]
+        agreed_country = _agreed_withholding_countries(dp for dp, _ in all_rows)
 
         dividend_income: List[Dict] = []
         sources_seen: set = set()
@@ -176,15 +222,17 @@ class TaxService:
             # The country IBKR's withholding line names, else the ISIN's first two
             # letters. The prefix is the issuer's domicile, which is not the withholding
             # country for an ADR or some funds (GitHub issue #62).
-            country = withholding_country(dp.withholding_country, sec.isin) or "??"
+            country = withholding_country(
+                dp.withholding_country or agreed_country.get(dp.security_id), sec.isin
+            ) or "??"
             bucket = by_country.setdefault(country, {
                 "country": country,
                 "gross": Decimal("0"), "withholding": Decimal("0"), "net": Decimal("0"),
                 # The recorded payments' gross alone, for the rate: an estimate's gross
                 # beside no withholding would dilute it.
                 "recorded_gross": Decimal("0"),
-                "creditable": Decimal("0"), "excess": Decimal("0"), "unsplit": 0,
-                "symbols": set(), "payments": 0, "estimated_payments": 0,
+                "creditable": Decimal("0"), "unsplit": 0,
+                "securities": set(), "payments": 0, "estimated_payments": 0,
             })
             bucket["gross"] += gross
             bucket["withholding"] += wht
@@ -202,19 +250,24 @@ class TaxService:
                     bucket["unsplit"] += 1
                 else:
                     bucket["creditable"] += split[0]
-                    bucket["excess"] += split[1]
-            if sec.symbol:
-                bucket["symbols"].add(sec.symbol)
+            # Counted by security, not symbol (review item T7): ASML's two listings share a
+            # ticker, and "2 positions" over three securities undercounted.
+            bucket["securities"].add(sec.id)
 
         dividend_income.sort(key=lambda d: d["pay_date"])
 
         def _split_part(b: Dict, key: str) -> Optional[float]:
             # Absent, not 0.00, when there is nothing recorded to split or a payment
             # withheld with no treaty rate in the table: a guessed split on a filing aid
-            # is worse than none.
+            # is worse than none. The excess is the rounded withholding less the rounded
+            # creditable (review item T7), so the two printed parts add to the printed
+            # whole: rounded apart they read 1.02 + 0.41 under a withholding of 1.42.
             if b["estimated_payments"] == b["payments"] or b["unsplit"]:
                 return None
-            return round(float(b[key]), 2)
+            creditable = round(float(b["creditable"]), 2)
+            if key == "creditable":
+                return creditable
+            return round(round(float(b["withholding"]), 2) - creditable, 2)
 
         def _residual(country: str) -> Optional[float]:
             rate = residual_rate_pct(country)
@@ -236,7 +289,7 @@ class TaxService:
                 "residual_pct": _residual(b["country"]),
                 "creditable": _split_part(b, "creditable"),
                 "excess": _split_part(b, "excess"),
-                "positions": len(b["symbols"]),
+                "positions": len(b["securities"]),
                 # DA-1 is filed per country, so which countries' withholding is
                 # incomplete is said per country, not once for the year.
                 "payments": b["payments"],
@@ -246,6 +299,7 @@ class TaxService:
             # recorded rather than failing to compare.
             for b in sorted(by_country.values(), key=lambda b: b["withholding"], reverse=True)
         ]
+        dividend_by_country_totals = _country_totals(list(by_country.values()))
 
         # --- Realized capital gains (per SELL trade) ---
         # Filtered on `Trade.account`, NOT on the joined security. The join is an
@@ -567,6 +621,7 @@ class TaxService:
             "dividend_ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "dividend_income": dividend_income,
             "dividend_by_country": dividend_by_country,
+            "dividend_by_country_totals": dividend_by_country_totals,
             "dividend_country_note": (
                 "Country from IBKR's withholding line, else the ISIN prefix."
             ),
@@ -663,6 +718,7 @@ class TaxService:
             "dividend_ibkr_from": None,
             "dividend_income": [],
             "dividend_by_country": [],
+            "dividend_by_country_totals": None,
             "dividend_country_note": "",
             "dividend_totals": {
                 "gross": 0.0, "withholding": None, "net": 0.0, "estimated_rows": 0,
@@ -723,6 +779,35 @@ class TaxService:
             ),
         }
 
+    async def _margin_interest(self, start: date, as_of: date, base_fx) -> Optional[float]:
+        """
+        What IBKR charged on a margin loan from `start` to `as_of`, in the base currency
+        (review item T4, 2026-11-08; KS 36's margin criterion). Absent while the broker's
+        interest is not on record from `start` (`BROKER_INTEREST_COVERED_FROM_KEY`), or
+        when a booking has no rate: a part of the year is not the year's. A year on record
+        with no booking paid none.
+        """
+        covered = await AppSettingsRepository(self.db).get_date_setting(
+            BROKER_INTEREST_COVERED_FROM_KEY
+        )
+        if covered is None or covered > start:
+            return None
+        rows = (await self.db.execute(
+            select(CashFlow).where(and_(
+                CashFlow.account == IBKR,
+                CashFlow.flow_type == BROKER_INTEREST_PAID,
+                CashFlow.flow_date >= start,
+                CashFlow.flow_date <= as_of,
+            ))
+        )).scalars().all()
+        paid = Decimal("0")
+        for flow in rows:
+            converted = cash_flow_in_base(flow, base_fx)
+            if converted is None:
+                return None
+            paid -= converted
+        return round(float(paid), 2)
+
     async def _trader_criteria(
         self,
         year: int,
@@ -769,6 +854,7 @@ class TaxService:
             "sales_holding_unknown": 0,
             "margin_used": None,
             "min_cash_balance": None,
+            "margin_interest": None,
         }
 
         events = await cash.balance_events(base_fx, account=IBKR)
@@ -783,6 +869,7 @@ class TaxService:
             low = round(lowest, 2)
             criteria["min_cash_balance"] = float(low)
             criteria["margin_used"] = low < 0
+        criteria["margin_interest"] = await self._margin_interest(start, as_of, base_fx)
 
         # Sales, counted on IBKR's own executions; a cancelled sale is no sale.
         if any(is_sale_side(t) for t in trades):
@@ -962,6 +1049,11 @@ class TaxService:
                         _blank(c.get("residual_pct")), _blank(c.get("creditable")),
                         _blank(c.get("excess")), c["net"],
                         c.get("estimated_payments") or ""])
+        totals = report.get("dividend_by_country_totals")
+        if totals:
+            w.writerow(["TOTAL", "", totals["gross"], _blank(totals["withholding"]), "", "",
+                        _blank(totals["creditable"]), _blank(totals["excess"]),
+                        totals["net"], ""])
         w.writerow([])
 
         w.writerow([f"Realized capital gains (source: {report.get('realized_source', 'trades')})"])
@@ -1008,5 +1100,6 @@ class TaxService:
             w.writerow(["Sales with unknown holding period", tc["sales_holding_unknown"]])
             w.writerow(["Margin used", _yes_no(tc["margin_used"])])
             w.writerow([f"Lowest cash balance ({cur})", _blank(tc["min_cash_balance"])])
+            w.writerow([f"Margin interest ({cur})", _blank(tc.get("margin_interest"))])
 
         return buf.getvalue()

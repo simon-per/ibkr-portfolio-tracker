@@ -548,6 +548,8 @@ export interface PortfolioAllocationResponse {
  */
 export interface LookthroughFundContribution {
   symbol: string | null;
+  /** The fund's name, for a fund whose symbol is its ISIN. */
+  name?: string | null;
   fund_isin: string;
   value_eur: number;
   /** The company's weight inside that fund. */
@@ -579,6 +581,8 @@ export interface LookthroughCompanyRow {
 
 export interface LookthroughFundCoverage {
   symbol: string | null;
+  /** The fund's name, for a fund whose symbol is its ISIN. */
+  name?: string | null;
   fund_isin: string;
   market_value_eur: number;
   status: 'looked_through' | 'no_basket' | 'excluded' | 'implausible';
@@ -592,6 +596,8 @@ export interface LookthroughFundCoverage {
   source: string | null;
   /** Set when this fund publishes no basket and another fund's stood in — that fund's symbol. */
   proxy_for_symbol: string | null;
+  /** The owner-accepted picture of a fund with no route to a basket: not a Coverage condition. */
+  proxy_accepted?: boolean;
   /** Rows the issuer published at 0.00%. For a broad fund this IS the residual, and it is rounding rather than cash. */
   unweighted_constituents: number;
 }
@@ -1312,6 +1318,17 @@ export interface TaxReport {
   dividend_income: TaxDividendRow[];
   /** Withholding grouped by source country — DA-1 is filed per country. */
   dividend_by_country: TaxCountryRow[];
+  /**
+   * The DA-1 table's total row (review item T1): the creditable sum is the claim. A part is
+   * null when any country's is; the whole is null with no country.
+   */
+  dividend_by_country_totals?: {
+    gross: number;
+    withholding: number | null;
+    creditable: number | null;
+    excess: number | null;
+    net: number;
+  } | null;
   dividend_country_note: string;
   /**
    * `withholding` is the recorded withholding only (`null` when every row is an
@@ -1394,6 +1411,8 @@ export interface TaxTraderCriteria {
   /** IBKR cash closed a day of the year below zero. */
   margin_used: boolean | null;
   min_cash_balance: number | null;
+  /** What IBKR charged on a margin loan over the window; null while not on record from its start. */
+  margin_interest?: number | null;
 }
 
 /** One event on the ledger. Fields a kind cannot fill are null, never 0. */

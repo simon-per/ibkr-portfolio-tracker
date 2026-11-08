@@ -169,6 +169,9 @@ describe('buildExposureGroups', () => {
 
     expect(names).toContain('1 smaller companies')
     expect(names).toContain('Not attributed to a company')
+    // A count of thousands is formatted like every count (review item L8).
+    const many = buildExposureGroups(response({ other_companies_count: 10219 }))
+    expect(many.map((g) => g.name)).toContain('10,219 smaller companies')
     // 225 uncovered + 50 residual + 25 nested. Neither belongs to a sector: the tail spans all
     // of them and the remainder belongs to no company at all.
     expect(groups.find((g) => g.paintKey === 'unattributed')?.value).toBe(300)

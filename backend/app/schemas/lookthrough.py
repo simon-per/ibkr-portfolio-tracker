@@ -24,6 +24,9 @@ from typing import List, Optional
 class LookthroughFundContribution(BaseModel):
     """One fund's contribution to one company."""
     symbol: Optional[str] = Field(None, description="Mapped fund symbol, for labelling only")
+    name: Optional[str] = Field(
+        None, description="The fund's name, for a fund whose symbol is its ISIN (L7)."
+    )
     fund_isin: str
     value_eur: float
     weight_pct: float = Field(..., description="The company's weight inside that fund")
@@ -103,6 +106,9 @@ class LookthroughCompanyRow(BaseModel):
 class LookthroughFundCoverage(BaseModel):
     """What is known about one held fund's basket — including that nothing is."""
     symbol: Optional[str] = None
+    name: Optional[str] = Field(
+        None, description="The fund's name, for a fund whose symbol is its ISIN (L7)."
+    )
     fund_isin: str
     market_value_eur: float
     status: str = Field(
@@ -154,6 +160,14 @@ class LookthroughFundCoverage(BaseModel):
             "carries the reason the substitution is defensible and which way it errs. "
             "`status` stays looked_through because the value IS attributed; the proxy is "
             "a statement about provenance, not about the partition."
+        ),
+    )
+    proxy_accepted: bool = Field(
+        False,
+        description=(
+            "True when the proxy is the owner-accepted picture of a fund that publishes no "
+            "basket and has no route to one (review item L6): its row keeps the badge, the "
+            "Coverage tile is not toned by it."
         ),
     )
     unweighted_constituents: int = Field(

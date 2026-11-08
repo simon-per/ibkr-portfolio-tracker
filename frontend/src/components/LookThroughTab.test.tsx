@@ -254,6 +254,8 @@ describe('LookThroughTab', () => {
     const owner = after.findIndex((r) => r.textContent?.includes('Alphabet'))
     expect(after[owner + 1]?.textContent).toContain('Held directly as')
     expect(after[owner + 1]?.textContent).toContain('XNAS')
+    // Tickers, not the listing keys' exchange suffixes (review item L8).
+    expect(after[owner + 1]?.textContent).not.toMatch(/@[A-Z]/)
   })
 
   it('opens the breakdown for the row pressed, and only that row', async () => {
@@ -650,6 +652,32 @@ describe('LookThroughTab coverage tone', () => {
     // And the fund's own row must say which, rather than a green "Decomposed".
     await openFundCoverage()
     expect(screen.getByText('Via VT')).toBeTruthy()
+  })
+
+  it('stays green over an owner-accepted proxy, whose row keeps its badge (review item L6)', async () => {
+    vi.spyOn(api, 'getLookthrough').mockResolvedValue(
+      response({
+        // A pension-only fund that publishes no basket and has no route to one: amber for
+        // it would never clear.
+        coverage_pct: 96.8,
+        funds: [
+          {
+            symbol: 'CH0117044948', fund_isin: 'CH0117044948', market_value_eur: 6510,
+            status: 'looked_through', reason: null, basket_as_of: '2026-06-30', stale: false,
+            constituents: 1338, equity_weight_pct: 99.6, residual_eur: 26,
+            asset_class_available: true, source: 'ishares',
+            proxy_for_symbol: 'IWDA', proxy_accepted: true, unweighted_constituents: 0,
+          },
+        ],
+      }),
+    )
+    withProviders(<LookThroughTab />)
+
+    await screen.findByText('Coverage')
+    expect(coverageCard().querySelector('.text-green-600')).toBeTruthy()
+    expect(screen.queryByText(/via a similar fund/)).toBeNull()
+    await openFundCoverage()
+    expect(screen.getByText('Via IWDA')).toBeTruthy()
   })
 
   it('explains a broad fund\'s shortfall as rounding rather than leaving it to read as cash', async () => {

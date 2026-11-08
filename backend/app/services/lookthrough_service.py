@@ -54,7 +54,7 @@ from app.services.percentages import share_pct
 from app.services.cash_service import CashService, UninvestedCash, is_valuable
 from app.services.company_identity import IdentityMember
 from app.services.identity_service import group_companies
-from app.services.etf_basket_parsers import counts_as_invested
+from app.services.etf_basket_parsers import MIN_BASKET_COVERAGE_PCT, counts_as_invested
 from app.services.sector_taxonomy import UNKNOWN, normalise as normalise_sector
 from app.clock import utc_today
 
@@ -62,10 +62,10 @@ logger = logging.getLogger(__name__)
 
 HUNDRED = Decimal("100")
 
-# Below this, a basket is treated as *absent* rather than as a fund holding mostly cash.
-# A residual is the right answer for EMIM's real 98.04; at Σ=3 — a half-parsed file — "this
-# fund is 97% cash" is a plausible figure, which is the dangerous kind.
-MIN_BASKET_COVERAGE_PCT = Decimal("80")
+# `MIN_BASKET_COVERAGE_PCT` (etf_basket_parsers): below it a basket is treated as *absent*
+# rather than as a fund holding mostly cash. A residual is the right answer for EMIM's real
+# 98.04; at Σ=3 — a half-parsed file — "this fund is 97% cash" is a plausible figure, which
+# is the dangerous kind.
 
 # Past this a basket is served but badged, because today's fund value times an old basket shows
 # exposure to a company that has left the index. Default for an adapter not named below.
@@ -196,20 +196,8 @@ class LookthroughService:
         direct_positions = [p for p in valuable if not is_known_etf_isin(p["isin"])]
         fund_positions = [p for p in valuable if is_known_etf_isin(p["isin"])]
 
-        basket_repo = EtfBasketRepository(self.db)
         held_fund_isins = sorted({p["isin"].strip().upper() for p in fund_positions})
-        proxy_sources = sorted({
-            src for i in held_fund_isins if (src := basket_proxy_for(i)) and src != i
-        })
-        baskets = await basket_repo.get_baskets(held_fund_isins + proxy_sources)
-        holdings = await basket_repo.get_holdings(
-            [i for i in held_fund_isins + proxy_sources if i in baskets]
-        )
-        # A fund with no basket of its own falls back to the one it declares a proxy for.
-        # Aliased rather than copied, so there is one stored basket and two readers of it —
-        # refetching the source updates both. A real import for the proxied fund silently
-        # takes precedence, because this only fills a gap it finds.
-        proxied_from = self._alias_proxied_baskets(held_fund_isins, baskets, holdings)
+        baskets, holdings, proxied_from = await self._held_baskets(held_fund_isins)
 
         # `contributions` maps a member ref to what that member is worth and where it came
         # from. Kept beside the identity members rather than inside them so
@@ -254,8 +242,12 @@ class LookthroughService:
             value = pos["_mv"]
             status, reason = self._fund_status(isin, baskets.get(isin))
 
+            declared = source_for_fund_isin(isin)
             entry = {
                 "symbol": symbol_for_fund_isin(isin) or pos["symbol"],
+                # What a fund whose symbol is its ISIN (the 3a funds) is called on screen
+                # (review item L7): the security's own description, else the registry's.
+                "name": pos.get("description") or (declared.name if declared else None),
                 "fund_isin": isin,
                 "market_value_eur": value,
                 "status": status,
@@ -268,6 +260,7 @@ class LookthroughService:
                 "asset_class_available": True,
                 "source": None,
                 "proxy_for_symbol": None,
+                "proxy_accepted": False,
                 "unweighted_constituents": 0,
             }
 
@@ -313,7 +306,10 @@ class LookthroughService:
                     f"{basket.as_of_date.isoformat()} is when it was fetched — the basket "
                     f"itself may be older."
                 )
-            source_decl = source_for_fund_isin(isin)
+            source_decl = declared
+            entry["proxy_accepted"] = bool(
+                proxy_isin and source_decl and source_decl.proxy_accepted
+            )
             if proxy_isin:
                 warnings.append(
                     f"{entry['symbol']} has no basket of its own and is decomposed using "
@@ -356,6 +352,7 @@ class LookthroughService:
                     "value": row_value,
                     "fund_isin": isin,
                     "fund_symbol": entry["symbol"],
+                    "fund_name": entry["name"],
                     "weight_pct": Decimal(row.weight_pct),
                     # Already loaded — `get_holdings()` selects whole entities, so reading this
                     # costs no query and no column list to keep in step.
@@ -462,10 +459,11 @@ class LookthroughService:
         if not funds:
             return []
 
-        repo = EtfBasketRepository(self.db)
         held = sorted({p["isin"].strip().upper() for p in funds})
-        baskets = await repo.get_baskets(held)
-        holdings = await repo.get_holdings(list(baskets))
+        # Through the proxies too (review item L4): the 3a funds borrow their baskets, and
+        # read without the alias they ranked no constituent, so the evening ISIN pass never
+        # asked about what they hold.
+        baskets, holdings, _ = await self._held_baskets(held)
 
         by_isin: Dict[str, Decimal] = {}
         for pos in funds:
@@ -544,6 +542,31 @@ class LookthroughService:
             enriched = dict(pos, _mv=mv)
             (valuable if is_valuable(mv) else unvaluable).append(enriched)
         return valuable, unvaluable
+
+    async def _held_baskets(
+        self, held_fund_isins: List[str]
+    ) -> Tuple[Dict[str, object], Dict[str, list], Dict[str, str]]:
+        """
+        The stored baskets and holdings of the held funds, a fund with no basket of its own
+        aliased to the one it declares a proxy for (`_alias_proxied_baskets`), and which
+        were. **The one way a reader loads a held fund's basket** — the look-through and the
+        evening ISIN pass's ranking (`material_constituent_isins`) both; the second read
+        them without the alias until review item L4 (`test_every_reader_of_a_held_funds_basket_goes_through_the_alias`).
+
+        Aliased rather than copied, so there is one stored basket and two readers of it —
+        refetching the source updates both. A real import for the proxied fund silently
+        takes precedence, because this only fills a gap it finds.
+        """
+        repo = EtfBasketRepository(self.db)
+        proxy_sources = sorted({
+            src for i in held_fund_isins if (src := basket_proxy_for(i)) and src != i
+        })
+        baskets = await repo.get_baskets(held_fund_isins + proxy_sources)
+        holdings = await repo.get_holdings(
+            [i for i in held_fund_isins + proxy_sources if i in baskets]
+        )
+        proxied_from = self._alias_proxied_baskets(held_fund_isins, baskets, holdings)
+        return baskets, holdings, proxied_from
 
     @staticmethod
     def _alias_proxied_baskets(
@@ -706,6 +729,7 @@ class LookthroughService:
                         contribution["fund_isin"],
                         {
                             "symbol": contribution["fund_symbol"],
+                            "name": contribution["fund_name"],
                             "fund_isin": contribution["fund_isin"],
                             "value_eur": Decimal("0"),
                             "weight_pct": Decimal("0"),
@@ -864,6 +888,7 @@ class LookthroughService:
             "via_funds": [
                 {
                     "symbol": f["symbol"],
+                    "name": f["name"],
                     "fund_isin": f["fund_isin"],
                     "value_eur": self._q(f["value_eur"]),
                     "weight_pct": float(round(f["weight_pct"], 4)),

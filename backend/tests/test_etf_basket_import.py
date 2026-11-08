@@ -519,6 +519,35 @@ async def test_a_collapse_in_row_count_is_refused_and_the_old_basket_survives(db
     assert basket.as_of_date == TODAY
 
 
+def _partial_basket(rows: int, share: float, as_of: date):
+    """`rows` holdings that together are only `share` of the fund."""
+    return parse_dws(dws_csv([
+        (f"US{i:010d}", f"HOLDING {i}", f"{share / rows:.10f}", "Technology")
+        for i in range(rows)
+    ]), XNAS, as_of)
+
+
+@pytest.mark.asyncio
+async def test_a_basket_below_the_coverage_floor_is_refused_at_write(db):
+    """
+    Review item L1: a parse putting 40% of the fund in securities — every row present but
+    half the weights lost — passed the row-count gate and replaced a good basket; the
+    look-through then read the fund as having none, with no warning. It is refused at
+    write now, the stored basket kept; `force` still stores it.
+    """
+    repo = EtfBasketRepository(db)
+    await repo.replace_basket(_full_basket(20, TODAY))
+    with pytest.raises(BasketReplaceRefused, match="stored basket stays"):
+        await repo.replace_basket(_partial_basket(20, 0.4, TODAY + timedelta(days=1)))
+    basket = (await repo.get_baskets([XNAS]))[XNAS]
+    assert basket.as_of_date == TODAY and basket.equity_weight_pct > 99
+
+    result = await repo.replace_basket(
+        _partial_basket(20, 0.4, TODAY + timedelta(days=1)), force=True
+    )
+    assert result.stored_rows == 20
+
+
 @pytest.mark.asyncio
 async def test_a_basket_moving_backwards_in_time_is_refused(db):
     """Re-importing an older saved file would regress the basket while looking like a refresh."""

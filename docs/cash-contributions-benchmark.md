@@ -623,6 +623,9 @@ An incoming transfer moves capital saved years earlier somewhere else, and the t
 carry their own `open_date` — so counting it would both invent savings in a month that had none *and*
 double-count purchases already recorded. `CashFlowLedger.deposits()` therefore selects
 `flow_type == DEPOSITWITHDRAW` by **whitelist**, so no new transfer-ish type can leak in.
+The broker's interest (`BROKERINTPAID`, `BROKERINTRCVD`, ingested since review item T4, 2026-11-08) is
+exactly such a type: it moves cash, so `cash_moves()` and the derived balance take it, and it is never
+money in.
 `CashFlowRepository.get_deposits()` and the repository's earliest-date methods answer through
 the same ledger, so the rule exists once whether the rows were read for it or already held.
 

@@ -370,6 +370,11 @@ is not added to a total that already contains it. See *Cash*.
 money at all. **Transfers** exists only so an incoming broker transfer can be told apart from a deposit
 — see the contributions section. Both are inert until parsed: `extract_cash_transactions` filters to the
 three dividend types, so ticking them early cannot disturb anything.
+**Broker interest** (`Broker Interest Paid` / `Received`) needs no further portal option: it arrives in
+the same <CashTransactions> section, and `extract_cash_flows` keeps it beside deposits and withdrawals
+since review item T4 (2026-11-08) — for KS 36's margin interest and the derived cash ledger. Each
+statement carrying any <CashTransactions> row widens `broker_interest_covered_from`
+(`sync_helper.record_cash_coverage`).
 
 **General config that matters:** Format **XML**; Period **Last N Calendar Days** (N is measured, not
 assumed — see below);

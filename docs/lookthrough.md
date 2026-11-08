@@ -161,9 +161,16 @@ the same "% of portfolio" header.
 - **A basket below `MIN_BASKET_COVERAGE_PCT` (80) is reported as absent**, with its measured Σ.
   A residual is right for EMIM's real 98.04 and catastrophic at Σ=3, where "this fund is 97%
   cash" is a *plausible* figure — the dangerous kind.
+  **And it is refused at write** (`replace_basket`, review item L1, 2026-11-08): stored, it was
+  read as no basket and the good one it replaced was gone, with no warning. The refusal is that
+  fund's warning in the evening refresh; the stored basket stays; the import CLI's `--force`
+  stores it anyway. The floor lives beside the parser's other refusals (`etf_basket_parsers`).
 - **A constituent that is itself a fund gets its own bucket, not a company row.** Live risk:
   iShares baskets carry the BlackRock ICS liquidity fund as a line item. v1 does not recurse —
   that needs a depth cap and a visited set, because a feeder can hold its own share class.
+  An issuer with no class column says so another way: Defiance's money-market line (QTUM's FGXXX)
+  is named a fund by its ticker's shape (five letters ending in XX) or its name
+  (`_defiance_asset_class`, review item L5, 2026-11-08); it was a company row before.
 - **A repeated ISIN inside one basket is summed.** Copying `import_prices.py`'s last-row-wins
   rule for a repeated date would silently drop weight; hence `UNIQUE(fund_isin, line_no)`.
 - **The truncated tail is a named row carrying a value**, or the visible percentages sum to well
@@ -184,6 +191,11 @@ the same "% of portfolio" header.
 `lib/lookthroughChart.ts` builds both; `LookThroughCharts.tsx` draws them. The arithmetic is in
 `lib/` for the reason `portfolioKpis.ts` is — the interesting mistakes are numeric and testable
 in `node` without paying jsdom's startup.
+
+**Every tile tall enough for two lines names its company** (review item VI8, 2026-11-08): a tile
+over 70px wide carries the name; a narrower one (over 44px, as a phone's column of small tiles is)
+carried a bare percentage, so it now shows the company's ticker above it (its first listing), or for
+a company held only through funds as much of the name as fits at 10px (`TileContent`).
 
 **A treemap for the companies, a stacked bar for the partition, and a pie for neither.** The
 company ranking is ~50 rows spanning three orders of magnitude, where comparing angles fails
@@ -500,6 +512,10 @@ and each is wrong the other way round:
 - **The basket a fund actually reads comes from `LookthroughService._alias_proxied_baskets`**, not
   from a second copy of the proxy rule, so the age reported is the age of the file the numbers came
   from. For a proxied fund that is the *source's*, which is also where the threshold comes from.
+  **Every reader loads a held fund's basket through `_held_baskets`**, which applies the alias: the
+  evening ISIN pass's ranking (`material_constituent_isins`) read the baskets without it until review
+  item L4 (2026-11-08), so the 3a funds' borrowed constituents were never asked about. A test fails
+  any other method of the service that asks the repository for baskets.
 - **The threshold is `stale_after_days`**, the same per-adapter table the tab badges on. A second
   constant here would be the third definition of "stale", after the one that already badged Vanguard
   permanently. The fetch-after table is not a second definition of stale: it lives beside it and is
@@ -587,6 +603,16 @@ wrong number.
 
 ### A borrowed basket, and the three ways it could have become a silent one
 
+**A fund whose symbol is its ISIN is named** (`fundLabel`, review item L7, 2026-11-08): the 3a
+funds have no ticker, so each fund entry and each company's via-fund line carry the fund's `name`
+(the security's description, else the registry's) and the tab shows it where the symbol is the ISIN.
+
+**An owner-accepted proxy does not tone the Coverage tile** (`FundSource.proxy_accepted`, review item
+L6, 2026-11-08): the two pension-only Swisscanto tranches publish no basket and have no route to one,
+so their proxies (IEEM, IWDA) are their picture for good, and amber for them would never clear.
+Their rows keep the "Via …" badge; VWCE's proxy, which a hand import would replace, still tones it.
+`test_etf_source_registry.py` allows the flag only on those two.
+
 `FundSource.basket_proxy_isin` lets a fund with no published basket be decomposed using
 another fund's. **Two entries: VWCE borrows VT's and DBPG borrows VOO's**, both at the account owner's
 instruction. It is an
@@ -655,6 +681,13 @@ and treating that column as CUSIPs is a **silent fabrication**, which is why
   vowels, their own check digit — sitting in a column headed "CUSIP".
 - **Digit-leading is still not unambiguously US**: `82509L107` yields valid `US` and `CA` forms
   and only one exists. `derive_north_american_isin` names the assumption in its own signature.
+  **So the CUSIP is kept beside the ISIN derived from it** (`constituent_identifier`, review item
+  L2, 2026-11-08), and when both providers have answered "nothing" for that ISIN — a Canadian
+  company's CUSIP made a US ISIN that does not exist — `unresolved_identifiers` asks the CUSIP of
+  OpenFIGI (`ID_CUSIP`); its share-class FIGI folds the row with the Canadian listing. Shopify,
+  Thomson Reuters and Hydro One each read as two companies before. A US company's derived ISIN is
+  real and never asked again. Keeping the CUSIP changes every US adapter basket's fingerprint
+  once, so the first evening after the deploy rewrites them.
 
 So `identifier_kind()` classifies by *shape and check digit*, the ISIN is derived only for a
 plain CUSIP, and everything else is kept verbatim in `etf_holdings.constituent_identifier` for

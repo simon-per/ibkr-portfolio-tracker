@@ -10,7 +10,10 @@
 `GET /api/tax/report?year=YYYY` and `.csv`. `year` defaults to and is capped at the current UTC year,
 **resolved per request** (`_resolve_year`): it was a module constant evaluated at import, so on
 1 January the new year answered 422 and the default served the prior year until the container
-happened to restart — found 2026-09-12, pinned by `tests/test_tax_router_year.py`. Switzerland
+happened to restart — found 2026-09-12, pinned by `tests/test_tax_router_year.py`. **The tab asks for
+the UTC year too** (review item T8, 2026-11-08): it read the browser's local year, so from 00:00 to
+01:00 in Zurich on 1 January it asked for a year the server refused ("Failed to load"); and its
+picker starts at the residency year, the earlier reports being empty. Switzerland
 doesn't tax private capital gains but does tax
 dividend income and allows reclaiming foreign withholding via **DA-1** — so the report leads with
 dividend income + withholding, then realized gains, then a year-end holdings snapshot (Steuerwert).
@@ -154,6 +157,16 @@ by the difference. Each `dividend_by_country` row now also carries:
 - `creditable` = Σ min(withheld, gross × residual) and `excess` = withheld − creditable, **per
   payment** and then summed, since min() does not add across payments (30% and 0% on equal
   grosses is 15 + 0 creditable, not 15% of the sum).
+- **The printed parts add up** (review item T7, 2026-11-08): `excess` is served as the rounded
+  withholding less the rounded creditable, rows and total alike — rounded apart they read 1.02 + 0.40
+  under 1.43. `positions` counts securities, not symbols (ASML's two listings share a ticker).
+
+**The table has a total row** (`dividend_by_country_totals`, review item T1, 2026-11-08): the
+creditable sum is the claim DA-1 makes, and no figure on the tab stated it — the Withheld tile includes
+the excess. Gross, withholding, creditable, excess and net, each summed from the unrounded figures and
+rounded once (`_country_totals`); a part is null when any country's is (an estimate-only country, a
+country withheld without a treaty rate), because a total over a gap reads as the whole claim. The
+table's footer and the CSV's `TOTAL` line show it.
 
 The rules: a **country is in the table only where its rate is known with confidence**, each entry
 citing its treaty article — an unlisted country's row has `residual_pct`, `creditable` and
@@ -176,8 +189,10 @@ carried the line's description; `sync_dividends_from_cash_transactions` now pars
 than a pick — and the report keys on it, else on the ISIN prefix
 (`swiss_treaty_rates.withholding_country`). Rows ingested before the column fill in when a
 statement covering them is ingested again: the upsert rewrites every field, so a Client Portal
-download through `app/cli/ingest_flex_xml.py` backfills with no token spend. Until then they fall
-back to the prefix. Tests: `tests/test_tax_da1_split.py`,
+download through `app/cli/ingest_flex_xml.py` backfills with no token spend. Until then such a row
+takes **the country the same security's other IBKR payments all state** (`_agreed_withholding_countries`,
+review item T3, 2026-11-08: ASML's New York listing filed one payment of a year under NL and another under
+US); the prefix only for a security none states one for, or whose payments disagree. Tests: `tests/test_tax_da1_split.py`,
 `test_a_reingested_statement_backfills_the_withholding_country`.
 
 **The pillar 3a figure is guarded like the Steuerwert** (GitHub issue #63). Its
@@ -310,8 +325,12 @@ snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
   `sales_holding_unknown`, never guessed short or long; `short_held_sales` is null when every
   sale is unknown. A year whose only disposals are the closed-lot estimate's has `sales` and
   `short_held_sales` null: the trade ledger does not hold them. No sale at all is `0` and `0`.
+  **The Realized gains tile counts the same sales** (review item T2, 2026-11-08): it read the sale
+  rows ("15 sales") beside the criteria's "0 of 12"; it takes `sales` when on record, else the rows.
 - **`margin_used`, `min_cash_balance`.** The lowest **end-of-day** IBKR balance over the year
-  (1 January to `holdings_as_of`), the balance carried in included, from the same events the
+  (1 January to `holdings_as_of`), the balance carried in included — as the first day's level only
+  when nothing is booked that day (review item T5, 2026-11-08: a residency starting on a day whose
+  deposit lifted a negative carried balance read as margin used) — from the same events the
   year-end cash line reads; `margin_used` is that minimum, rounded to cents, below zero. Null
   while an IBKR trade has no exchange rate (`unconverted_trades`: the balance is short by the
   whole trade). Two limits of the derivation, stated: an intraday dip that closes the day
@@ -319,6 +338,13 @@ snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
   is one base-currency figure, so a negative balance in one currency offset by another is not
   seen either, while a same-currency sell-then-buy weeks apart can read a few units negative
   from the two days' different base rates. `min_cash_balance` is served so the size is visible.
+- **`margin_interest`** (review item T4, 2026-11-08): what IBKR charged on a margin loan over the
+  window, in the base currency — the `BROKERINTPAID` cash-flow rows, which the Flex ingest keeps
+  since that day. Null while the broker's interest is not on record from the window's start
+  (`broker_interest_covered_from`, widened by every statement carrying a <CashTransactions> row):
+  a part of the year is not the year's. A year on record with no booking paid none, `0`. The Margin
+  tile's sub-line names it; the CSV carries it. A Client Portal statement covering an earlier
+  period, ingested through `app/cli/ingest_flex_xml.py`, puts that period on record.
 - **Derivatives, the circular's fourth trading criterion, are not reported**: `ibkr_service.
   extract_trades` keeps STK executions only, so the ledger can never hold a derivative and the
   answer would always be a dash; it becomes answerable once that ingest records non-STK

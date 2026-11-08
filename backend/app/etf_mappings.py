@@ -54,15 +54,15 @@ per-company sector for *grouping* and publishes no sector total anywhere.
 """
 
 ETF_ALLOCATIONS = {
-    # iShares Core MSCI World (IWDA)
+    # iShares Core MSCI World (IWDA). Developed markets only: no emerging-markets bucket
+    # (review item L3 — a 3.0 had been carried here, a share World does not hold).
     "IWDA": {
         "isins": ["IE00B4L5Y983"],
         "asset_type": "ETF",
         "geographic": {
-            "North America": 72.0,
-            "Europe": 15.0,
+            "North America": 74.0,
+            "Europe": 16.0,
             "Asia Pacific": 10.0,
-            "Emerging Markets": 3.0,
         },
         "sector": {
             "Technology": 23.0,
@@ -485,11 +485,12 @@ ETF_ALLOCATIONS = {
     "CH0117044948": {
         "isins": ["CH0117044948"],
         "asset_type": "ETF",
+        # MSCI World ex Switzerland: developed markets only, so no emerging-markets bucket
+        # (review item L3; the 3.0 was copied from IWDA's row).
         "geographic": {
-            "North America": 74.0,
-            "Europe": 13.0,
+            "North America": 76.0,
+            "Europe": 14.0,
             "Asia Pacific": 10.0,
-            "Emerging Markets": 3.0,
         },
         "sector": {
             "Technology": 23.0,

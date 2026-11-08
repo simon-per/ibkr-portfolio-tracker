@@ -357,3 +357,18 @@ async def test_the_declared_locale_reaches_the_request_and_nothing_else_moves():
     # Everything other than locale and portfolioId must be identical, or the override has
     # quietly become a second endpoint.
     assert {k: v for k, v in us_params.items() if k not in ("locale", "portfolioId")} ==            {k: v for k, v in uk_params.items() if k not in ("locale", "portfolioId")}
+
+
+def test_an_accepted_proxy_is_one_with_no_route_to_a_basket():
+    """
+    Review item L6: `proxy_accepted` keeps a fund off the Coverage tile's tone, so it is
+    allowed only beside a proxy, and only for a fund with no route to its own basket — the
+    two pension-only Swisscanto tranches. VWCE can be imported by hand, so its proxy stays a
+    condition the tile names.
+    """
+    accepted = sorted(i for i, s in FUND_SOURCES.items() if s.proxy_accepted)
+    assert accepted == ["CH0117044948", "CH1529078078"]
+    for isin in accepted:
+        assert FUND_SOURCES[isin].basket_proxy_isin, isin
+    assert not FUND_SOURCES["IE00BK5BQT80"].proxy_accepted
+

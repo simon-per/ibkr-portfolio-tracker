@@ -100,7 +100,10 @@ def lowest_balance(
     while i < n and events[i][0] < start:
         balance += events[i][1]
         i += 1
-    if i:
+    # The carried balance is `start`'s end-of-day balance only when nothing is booked on
+    # `start` itself (review item T5): a residency starting on a day whose events lift a
+    # negative carried balance read as margin used, on a balance the window never had.
+    if i and (i == n or events[i][0] != start):
         lowest = balance
     while i < n and events[i][0] <= end:
         day = events[i][0]

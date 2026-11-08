@@ -255,6 +255,51 @@ async def test_an_estimate_only_country_stays_absent(db):
     assert de["residual_pct"] == 15.0
 
 
+async def _two_countries(db) -> None:
+    db.add_all([
+        Security(id=1, isin="KR7000660001", symbol="000660", description="SK hynix",
+                 currency="EUR", conid=1, exchange="KSE"),
+        Security(id=2, isin="US0000000002", symbol="USA", description="US Co",
+                 currency="EUR", conid=2, exchange="NYSE"),
+    ])
+    await db.flush()
+    db.add_all([
+        _pay(1, 10, "100", "22", country="KR"),
+        _pay(1, 11, "200", "44", country="KR"),
+        _pay(2, 12, "100", "15", country="US"),
+        _pay(2, 13, "100", "10", country="US"),
+    ])
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_table_has_a_total_row_whose_creditable_is_the_claim(db):
+    """Review item T1: the creditable sum is what DA-1 claims, and it was shown nowhere."""
+    await _two_countries(db)
+    totals = (await TaxService(db).get_tax_report(YEAR))["dividend_by_country_totals"]
+    assert totals == {
+        "gross": 500.0, "withholding": 91.0, "creditable": 70.0, "excess": 21.0, "net": 409.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_total_over_a_country_without_a_split_is_absent(db):
+    # DE is estimates only: no recorded withholding, so neither the withholding nor the
+    # claim adds up to a whole.
+    await _book(db)
+    totals = (await TaxService(db).get_tax_report(YEAR))["dividend_by_country_totals"]
+    assert (totals["withholding"], totals["creditable"], totals["excess"]) == (None, None, None)
+    assert totals["gross"] == 750.0
+
+
+@pytest.mark.asyncio
+async def test_the_csv_has_a_total_row(db):
+    await _two_countries(db)
+    service = TaxService(db)
+    lines = service.to_csv(await service.get_tax_report(YEAR)).splitlines()
+    assert "TOTAL,,500.0,91.0,,,70.0,21.0,409.0," in lines
+
+
 @pytest.mark.asyncio
 async def test_the_csv_carries_the_split(db):
     await _book(db)
@@ -266,3 +311,73 @@ async def test_the_csv_carries_the_split(db):
                       "Estimated payments")
     assert next(l for l in lines if l.startswith("KR,")) == "KR,1,300.0,66.0,22.0,15.0,45.0,21.0,234.0,"
     assert next(l for l in lines if l.startswith("TW,")) == "TW,1,100.0,21.0,21.0,15.0,15.0,6.0,79.0,"
+
+
+@pytest.mark.asyncio
+async def test_a_security_files_under_the_one_country_its_payments_state(db):
+    """
+    Review item T3: a payment ingested before the withholding country was stored fell back
+    to the ISIN prefix, so an ADR (ASML's New York listing: a US ISIN, withheld by the
+    Netherlands) filed one payment of a year under NL and another under US. The country its
+    other IBKR payments all state comes before the prefix.
+    """
+    db.add(Security(id=6, isin="USN070592100", symbol="ASML", description="ASML NY",
+                    currency="EUR", conid=6, exchange="NASDAQ"))
+    await db.flush()
+    db.add_all([
+        _pay(6, 5, "100", "15"),                   # before the column: no country
+        _pay(6, 20, "100", "15", country="NL"),
+    ])
+    await db.commit()
+    rows = _by_country(await TaxService(db).get_tax_report(YEAR))
+    assert set(rows) == {"NL"}
+    assert rows["NL"]["payments"] == 2
+
+
+@pytest.mark.asyncio
+async def test_payments_that_disagree_keep_the_prefix_for_the_unstated_one(db):
+    db.add(Security(id=6, isin="USN070592100", symbol="ASML", description="ASML NY",
+                    currency="EUR", conid=6, exchange="NASDAQ"))
+    await db.flush()
+    db.add_all([
+        _pay(6, 5, "100", "15"),
+        _pay(6, 20, "100", "15", country="NL"),
+        _pay(6, 21, "100", "15", country="US"),
+    ])
+    await db.commit()
+    rows = _by_country(await TaxService(db).get_tax_report(YEAR))
+    assert rows["US"]["payments"] == 2 and rows["NL"]["payments"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_printed_parts_add_to_the_printed_withholding(db):
+    """
+    Review item T7: creditable and excess rounded apart read 1.02 + 0.40 under a
+    withholding of 1.43. The excess is the rounded whole less the rounded creditable.
+    """
+    db.add(Security(id=1, isin="KR7000660001", symbol="000660", description="SK hynix",
+                    currency="EUR", conid=1, exchange="KSE"))
+    await db.flush()
+    db.add(_pay(1, 10, "6.8326", "1.4298", country="KR"))
+    await db.commit()
+    kr = _by_country(await TaxService(db).get_tax_report(YEAR))["KR"]
+    assert (kr["withholding"], kr["creditable"], kr["excess"]) == (1.43, 1.02, 0.41)
+
+
+@pytest.mark.asyncio
+async def test_positions_count_securities_not_symbols(db):
+    # ASML's Amsterdam and New York listings share a ticker: two positions, not one.
+    db.add_all([
+        Security(id=1, isin="NL0010273215", symbol="ASML", description="ASML AEB",
+                 currency="EUR", conid=1, exchange="AEB"),
+        Security(id=2, isin="USN070592100", symbol="ASML", description="ASML NY",
+                 currency="EUR", conid=2, exchange="NASDAQ"),
+    ])
+    await db.flush()
+    db.add_all([
+        _pay(1, 10, "100", "15", country="NL"),
+        _pay(2, 11, "100", "15", country="NL"),
+    ])
+    await db.commit()
+    assert _by_country(await TaxService(db).get_tax_report(YEAR))["NL"]["positions"] == 2
+

@@ -326,6 +326,15 @@ def _dec(value) -> Optional[Decimal]:
         return None
 
 
+# The <CashTransactions> rows `extract_cash_flows` keeps (review item T4 added the two
+# interest types); dividends and withholding have their own extractor.
+_CASH_FLOW_ACTIONS = frozenset({
+    ibflex_enums.CashAction.DEPOSITWITHDRAW,
+    ibflex_enums.CashAction.BROKERINTPAID,
+    ibflex_enums.CashAction.BROKERINTRCVD,
+})
+
+
 def _enum_name(value) -> Optional[str]:
     """Return a stable string for an ibflex enum member (its .name), else str()."""
     if value is None:
@@ -1192,7 +1201,8 @@ class IBKRService:
 
     async def extract_cash_flows(self, flex_data: Dict) -> List[Dict]:
         """
-        Extract external deposits and withdrawals from <CashTransactions>.
+        Extract external deposits and withdrawals — and the broker's interest on the cash
+        account (`BROKERINTPAID`, `BROKERINTRCVD`) — from <CashTransactions>.
 
         A sibling of extract_cash_transactions rather than an extension of it,
         because that one requires a ``conid`` to link a dividend to a security and
@@ -1212,7 +1222,10 @@ class IBKRService:
         flows: List[Dict] = []
         for ct in ct_section:
             ct_type = getattr(ct, 'type', None)
-            if ct_type is not ibflex_enums.CashAction.DEPOSITWITHDRAW:
+            # Deposits and withdrawals, and the broker's interest on the cash account (review
+            # item T4): KS 36's margin criterion asks what margin cost, and the derived cash
+            # balance was short by every interest booking. Whitelisted, never "all but".
+            if ct_type not in _CASH_FLOW_ACTIONS:
                 continue
 
             # The day IBKR books it into cash, not the day it settles. `endingCash` (what
@@ -1241,7 +1254,7 @@ class IBKRService:
             flows.append({
                 'ib_key': str(ib_key),
                 'flow_date': flow_date,
-                'flow_type': _enum_name(ct_type),  # DEPOSITWITHDRAW
+                'flow_type': _enum_name(ct_type),  # DEPOSITWITHDRAW, BROKERINTPAID, ...
                 'amount': amount,
                 'currency': currency,
                 'description': getattr(ct, 'description', None),

@@ -1,4 +1,5 @@
 import { displayName } from './securityName'
+import { formatCount } from './utils'
 import type { LookthroughResponse } from './api'
 import { CASH_BUCKET, UNKNOWN_SECTOR, sectorGroup } from './sectorColors'
 
@@ -166,7 +167,7 @@ export function buildExposureGroups(data: LookthroughResponse): ExposureGroup[] 
   structural(
     'other_companies',
     data.other_companies_count > 0
-      ? `${data.other_companies_count} smaller companies`
+      ? `${formatCount(data.other_companies_count)} smaller companies`
       : 'Smaller companies',
     data.other_companies_eur,
   )

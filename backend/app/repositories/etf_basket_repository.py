@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.etf_basket import ConstituentIdentifierMiss, EtfBasket, EtfHolding
+from app.models.isin_identity import IsinIdentity
+from app.services.etf_basket_parsers import MIN_BASKET_COVERAGE_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +137,8 @@ class EtfBasketRepository:
         """
         Distinct identifiers on holdings that have neither an ISIN nor a resolved FIGI.
 
-        These are the CINS and SEDOL lines three of the US issuers publish instead of ISINs.
+        These are the CINS and SEDOL lines three of the US issuers publish instead of ISINs,
+        and the CUSIPs whose derived ISIN no provider knows.
         Distinct rather than per-row because one identifier can appear in several funds — the
         same company inside GRID and QTUM is one question, not two.
         """
@@ -150,7 +153,26 @@ class EtfBasketRepository:
                 .distinct()
             )
         ).scalars().all()
-        return sorted({r.strip().upper() for r in rows if r and r.strip()})
+        # And a CUSIP whose derived US ISIN both providers answered "nothing" for (review
+        # item L2): a Canadian company's CUSIP in a US fund's file derives a US ISIN that
+        # does not exist, so the row stood apart from the same company's Canadian listing
+        # (Shopify, Thomson Reuters, Hydro One). OpenFIGI knows the CUSIP itself.
+        derived = (
+            await self.session.execute(
+                select(EtfHolding.constituent_identifier)
+                .join(IsinIdentity, IsinIdentity.isin == EtfHolding.constituent_isin)
+                .where(
+                    EtfHolding.constituent_identifier.isnot(None),
+                    EtfHolding.constituent_share_class_figi.is_(None),
+                    IsinIdentity.share_class_figi.is_(None),
+                    IsinIdentity.lei.is_(None),
+                    IsinIdentity.figi_checked_at.isnot(None),
+                    IsinIdentity.lei_checked_at.isnot(None),
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        return sorted({r.strip().upper() for r in [*rows, *derived] if r and r.strip()})
 
     async def resolved_figis(self, identifiers: Iterable[Optional[str]]) -> Dict[str, str]:
         """
@@ -184,9 +206,10 @@ class EtfBasketRepository:
         """
         Stamp resolved shareClassFIGIs onto every holding carrying those identifiers.
 
-        Writes the FIGI only — `constituent_isin` stays NULL and `constituent_identifier` stays
-        as the issuer published it, so the row still says where each part of its identity came
-        from. Flushed, not committed: the caller owns the transaction, as everywhere else here.
+        Writes the FIGI only — `constituent_isin` stays as it was (NULL, or the ISIN derived
+        from a CUSIP) and `constituent_identifier` as the issuer published it, so the row
+        still says where each part of its identity came from. Flushed, not committed: the
+        caller owns the transaction, as everywhere else here.
         """
         updated = 0
         for identifier, figi in figi_by_identifier.items():
@@ -263,6 +286,9 @@ class EtfBasketRepository:
         - **An as-of that moves backwards.** Re-importing an older saved file would regress
           the basket while looking like a successful refresh. Equal as-of is allowed, so
           re-running an import is idempotent.
+        - **Securities below `MIN_BASKET_COVERAGE_PCT` of the fund** (review item L1): the
+          look-through reads such a basket as none, so storing it would only have thrown
+          away the good one it replaced, with no warning anywhere.
 
         **Identical content is not rewritten** (`basket_fingerprint` matches the stored one):
         only `checked_at` moves, and `unchanged` tells the caller there is nothing new for
@@ -279,6 +305,14 @@ class EtfBasketRepository:
         if previous is not None:
             previous_as_of = previous.as_of_date
             previous_rows = int(previous.stored_rows or 0)
+        if not force and parsed.equity_weight_pct < MIN_BASKET_COVERAGE_PCT:
+            kept = " The stored basket stays." if previous is not None else ""
+            raise BasketReplaceRefused(
+                f"{fund_isin}: the incoming basket puts only "
+                f"{parsed.equity_weight_pct:.2f}% of the fund in securities, below the "
+                f"{MIN_BASKET_COVERAGE_PCT}% the look-through attributes, so nothing was "
+                f"written.{kept} Pass --force if the fund really holds this little."
+            )
         if previous is not None and not force:
             if parsed.as_of_date < previous.as_of_date:
                 raise BasketReplaceRefused(

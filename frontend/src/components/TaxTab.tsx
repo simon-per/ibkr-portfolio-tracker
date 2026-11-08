@@ -10,7 +10,7 @@ import { api } from '@/lib/api'
 import { contributionsQuery, settingsQuery } from '@/lib/queryCache'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
-import { DataTable, type Column } from '@/components/ui/DataTable'
+import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTable'
 import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { SwissResidencyControl } from '@/components/SwissResidencyControl'
@@ -242,6 +242,37 @@ export const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
   },
 ]
 
+/**
+ * The DA-1 table's total row (review item T1): its Creditable is the claim, which no other
+ * figure on the tab states — the Withheld tile includes the excess, reclaimed elsewhere.
+ */
+function byCountryFooter(
+  totals: TaxReport['dividend_by_country_totals'] | null,
+  money: Money,
+): FooterCell[] | undefined {
+  if (!totals) return undefined
+  const or = (v: number | null) => (v == null ? ABSENT : money(v))
+  return [
+    { key: 'label', spans: ['country'], content: TOTAL_LABEL },
+    { key: 'net', spans: ['net'], align: 'right', content: money(totals.net) },
+    { key: 'gross', spans: ['gross'], align: 'right', content: money(totals.gross) },
+    {
+      key: 'withholding',
+      spans: ['withholding'],
+      align: 'right',
+      content: totals.withholding == null ? ABSENT : withheld(money, totals.withholding),
+    },
+    { key: 'creditable', spans: ['creditable'], align: 'right', content: or(totals.creditable) },
+    {
+      key: 'excess',
+      spans: ['excess'],
+      align: 'right',
+      tone: totals.excess ? 'text-warn' : undefined,
+      content: or(totals.excess),
+    },
+  ]
+}
+
 export const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
   {
     key: 'symbol',
@@ -390,7 +421,10 @@ function TaxSummary({ data, money }: { data: TaxReport; money: Money }) {
     ? 'est.'
     : includedEstimatesTag(totals.estimated_rows, data.dividend_income.length)
   const withholding = withholdingTotalLabel(money, totals.withholding, totals.estimated_rows)
-  const sales = data.realized_gains.length
+  // One count of sales on the tab (review item T2): the KS 36 criteria's — one per security and
+  // day, IBKR's own executions — when it is on record, else the rows; the rows alone read "15
+  // sales" beside the criteria's "0 of 12".
+  const sales = data.trader_criteria?.sales ?? data.realized_gains.length
   const gain = data.realized_totals.gain_loss
   const base = data.holdings_snapshot_error ? null : data.holdings_snapshot_total
   return (
@@ -441,7 +475,7 @@ function YearEndProjection({ data, money }: { data: TaxReport; money: Money }) {
   const p = data.projected
   if (!p) return null
   return (
-    <KpiPanel columns={3}>
+    <KpiPanel columns={3} fillLastRow>
       <KpiCard tile icon={Telescope} label="Dividends to 31 Dec" value={money(p.gross)} sub="gross · est." />
       <KpiCard tile icon={CalendarClock} label="Still expected" value={money(p.expected_gross)} sub="gross · est." />
       <KpiCard
@@ -468,7 +502,7 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
   return (
     <div>
       <SectionHeader variant="bare" icon={Scale} title="Securities dealer (KS 36)" className="mb-3" />
-      <KpiPanel columns={3}>
+      <KpiPanel columns={3} fillLastRow>
         <KpiCard
           tile
           icon={ArrowLeftRight}
@@ -489,9 +523,11 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
           label="Margin used"
           tone={tc.margin_used ? 'warning' : 'neutral'}
           value={tc.margin_used == null ? null : tc.margin_used ? 'Yes' : 'No'}
-          sub={tc.margin_used && tc.min_cash_balance != null
-            ? `low ${money(tc.min_cash_balance)}`
-            : undefined}
+          // The low balance and, once on record, what the margin cost (review item T4).
+          sub={[
+            tc.margin_used && tc.min_cash_balance != null ? `low ${money(tc.min_cash_balance)}` : null,
+            tc.margin_interest ? `interest ${money(tc.margin_interest)}` : null,
+          ].filter(Boolean).join(' · ') || undefined}
         />
       </KpiPanel>
     </div>
@@ -500,7 +536,9 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
 
 export function TaxTab() {
   const money: Money = useFormatCurrency()
-  const currentYear = new Date().getFullYear()
+  // The server's year (review item T8): it caps `year` by the UTC date, and a browser in
+  // Zurich asked for the new year from 00:00 local, an hour early — "Failed to load".
+  const currentYear = new Date().getUTCFullYear()
   const [year, setYear] = useState(currentYear)
 
   // Shares Dashboard's query key, so TanStack Query serves it from cache rather than
@@ -511,7 +549,14 @@ export function TaxTab() {
   const inceptionYear = contributions?.first_contribution_date
     ? Number(contributions.first_contribution_date.slice(0, 4))
     : FALLBACK_FIRST_TAX_YEAR
-  const firstTaxYear = Math.min(inceptionYear, FALLBACK_FIRST_TAX_YEAR)
+  // No year before the move to Switzerland (review item T8): those reports are empty.
+  const residencyYear = settings?.swiss_tax_residency_from
+    ? Number(settings.swiss_tax_residency_from.slice(0, 4))
+    : null
+  const firstTaxYear = Math.max(
+    Math.min(inceptionYear, FALLBACK_FIRST_TAX_YEAR),
+    Math.min(residencyYear ?? 0, currentYear),
+  )
 
   const years: number[] = []
   for (let y = currentYear; y >= firstTaxYear; y--) years.push(y)
@@ -668,6 +713,7 @@ export function TaxTab() {
                   getRowKey={(c) => c.country}
                   label="Withholding by country"
                   density="compact"
+                  footer={byCountryFooter(data.dividend_by_country_totals ?? null, money)}
                 />
               </CardContent>
             </Card>

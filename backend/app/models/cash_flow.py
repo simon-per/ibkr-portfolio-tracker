@@ -16,6 +16,12 @@ TRANSFER = "TRANSFER"              # direction unknown
 TRANSFER_IN = "TRANSFER_IN"
 TRANSFER_OUT = "TRANSFER_OUT"
 TRANSFER_TYPES = (TRANSFER, TRANSFER_IN, TRANSFER_OUT)
+# IBKR's interest on the cash account (review item T4, 2026-11-08): paid on a margin loan,
+# received on a credit balance. Cash moves, so the derived cash ledger takes them; never
+# money in — `CashFlowLedger.deposits` whitelists DEPOSITWITHDRAW alone.
+BROKER_INTEREST_PAID = "BROKERINTPAID"
+BROKER_INTEREST_RECEIVED = "BROKERINTRCVD"
+BROKER_INTEREST_TYPES = (BROKER_INTEREST_PAID, BROKER_INTEREST_RECEIVED)
 
 # Costs and income a broker statement does not itemise but a Pillar 3a export does.
 # They move cash and are emphatically not money added, which the whitelist above
