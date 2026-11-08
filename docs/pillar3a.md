@@ -139,7 +139,10 @@ names, else `isin[:2]`, and both Swisscanto ISINs begin `CH`, so 3a income would
 bucket that is definitionally not a foreign-withholding reclaim — a claim against a country that
 withheld nothing.
 
-`tax_exempt_accounts()` is resolved once and applied at four sites: the dividend/DA-1 select,
+`tax_exempt_accounts()` reads the labels off securities, trades **and the cash ledger** (review item
+C5, 2026-11-08: an account only paid into, nothing bought yet, has neither of the first two, and
+its deductible deposits were missing from the report). It is resolved once and applied at four
+sites: the dividend/DA-1 select,
 the realized-gains select, `holdings_snapshot_as_of` and its closed-lot fallback. Realized
 gains filter on **`Trade.account`, not the joined security** — that join is an outer one
 because `Trade.security_id` is nullable by design, so a Security-side clause would silently

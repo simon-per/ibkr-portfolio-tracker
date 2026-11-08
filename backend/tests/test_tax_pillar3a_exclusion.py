@@ -278,3 +278,26 @@ async def test_a_second_3a_portfolio_inherits_the_treatment_without_an_edit():
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_an_account_only_paid_into_is_exempt_and_its_deposits_deductible():
+    """
+    Review item C5: a 3a account with deposits and nothing bought yet has no security and
+    no trade, which were the only places the exempt labels were read from — so its
+    deductible deposits were missing from the report.
+    """
+    engine, session = await _make_session()
+    try:
+        session.add(CashFlow(ib_key="fp:pillar3a:1", flow_date=date(YEAR, 12, 28),
+                             flow_type=DEPOSIT_WITHDRAW, amount=Decimal("7258"),
+                             currency="CHF", amount_eur=Decimal("7800"), account=PILLAR3A))
+        await session.commit()
+        assert await tax_exempt_accounts(session) == [PILLAR3A]
+
+        report = await TaxService(session).get_tax_report(YEAR)
+        assert report["pillar3a"]["tracked"] is True
+        assert report["pillar3a"]["contributions"] == 7800.00
+    finally:
+        await session.close()
+        await engine.dispose()
