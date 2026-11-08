@@ -29,6 +29,13 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 
 ## Needs a human
 
+- **Merge and push branch `allocation-one-source` (local, 2 commits on `ed28a64`) when happy.**
+  The Allocation tab's Sectors and Regions as the look-through rolled up (`f752903`), and the
+  Company tab's Screener (`9c6c790`). The new Allocation was not seen on real data: an ssh read of
+  production's basket countries was refused in that session, so the first real view is after the
+  deploy (*Watch after the next deploy* below). The screener was seen on a local build with its
+  route answered from the live per-company pages.
+
 - **Decide on the non-root backend container (#51).** The plan, the per-deploy `chown` and what
   happens if it is missed are in docs/deployment.md *Not done: non-root container*.
 - **Raise HSTS's `max-age`** in steps (on at 300 s since 2026-10-18) once nothing has broken;
@@ -98,6 +105,20 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
 ## Watch after the next deploy
 
 Only what is still unverified.
+
+- **Allocation from the look-through, and the Company screener (branch `allocation-one-source`,
+  not yet merged).** No migration, no new upstream request. After the deploy:
+  - *Allocation* (docs/lookthrough.md, *Allocation is a rollup of this decomposition*): Regions
+    shows only North America, Europe, Asia Pacific, Latin America, Middle East & Africa, Unknown
+    and Cash — no country name, no "Emerging Markets", no "Other"; Sectors the eleven canonical
+    names. Expect a small *Unknown* on both (VT's 0.00% rows and its small caps, whose Vanguard
+    rows carry no sector); a large one means a basket or a country spelling is missing
+    (`region_taxonomy.unmapped_countries` over `etf_holdings.country` names it). The sector money
+    equals the Look-through treemap's groups; the tab loads in about the look-through's time
+    (~1.5 s uncached, from ~0.3 s).
+  - *Screener*: the collapsed card at the top of the Company tab opens in a few seconds the first
+    time (every company's figures, no server cache), 102 rows, each matching its company page's
+    P/E and 5Y median chip. Measure the first load on production; cache server-side if it is slow.
 
 - **The 2026-11-07 review, implemented by a /goal run (merged into `main` wave by wave, pushed
   2026-11-08 as `65784c0`):** what production must show now that it is deployed.
@@ -223,12 +244,11 @@ Only what is still unverified.
 
 - **Dividends per share: filing instances, rate rules and the pass's check (deployed
   2026-11-07, `4cb7bd1`):** every gap company is backfilled on production (docs/shipped-log.md;
-  90 gaps left, each a documented cause). Unverified: the Sunday 2026-11-08 05:00
-  `company_financials_refresh` reads few or no filings, has no `filing_errors`, and — its first
-  run with the check — lists `ttm_dividend_gaps` and `stale_figures` once as warnings. If 11-08
-  runs the code before the review's CO2 fix, BKR is not among them (fetched by hand on 11-07, so
-  that pass skips it) and warns on 11-15 instead; with the fix deployed every company in scope is
-  listed, fetched or not. The Sunday after, the same names in the record and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
+  90 gaps left, each a documented cause). The Sunday 2026-11-08 pass (seen 2026-11-08) read one
+  filing, no `filing_errors`, and warned once each: PYPL's TTM dividend per share, AEP and EXC
+  stale. It ran the code from before the review (pushed 14:22 UTC), so BKR was not listed;
+  unverified: on 11-15, with CO2, every company in scope is listed, fetched or not, and the Sunday
+  after, the same names in the record and no warning. The owner's eye on MA's, IBKR's, INTC's and WMT's charts in the browser.
 
 - **The Company overview (2026-11-07, `company-overview`):** migrations `e8c2a4f6b1d3` and
   `f1a3c5e7b9d2`. The first Tue–Sat 05:00 `fundamentals_refresh` records a `profiles_result`
@@ -255,16 +275,14 @@ Only what is still unverified.
   for over a year). Unseen in the browser: the card reading *Period return*, and Sharpe, Sortino
   and Volatility showing a dash on 1W and early MTD (20-return floor).
 
-- **The Company tab (2026-10-25):** the 2026-11-01 Sunday rows were both successes:
-  `company_prices_refresh` fetched all 102 with no `rate_limited`; `company_financials_refresh`
-  had `universe` 100 but **0 due**, because every company was re-fetched after 2026-10-26 during
-  the fixes (`STALE_AFTER` is six days). So **Sunday 2026-11-08 is the first real refresh**: it
-  should fetch about 76 companies (the 26 fetched by hand on 2026-11-07 are skipped) and bring Q3
-  2026 for most (every company still ended at Q2 or earlier on 2026-11-07); the owner's eye on the charts (enlarged the same day: 2 per row, hover headline, legend
-  toggles, expand, Total | Per share) and whether the default 10Y TTM reads right. NVDA's TTM FCF
-  starts at Q3 FY2024 by design (older capex is an extension concept or survives only as nine
-  months and a year; docs/company-financials.md *Known gaps*).
-  SPGI and NXPI still end at Q1 2026; the 2026-11-08 pass should bring Q2 and Q3.
+- **The Company tab (2026-10-25):** the first real refresh is verified (2026-11-08):
+  `company_financials_refresh` fetched 76 of 76 with no errors, `company_prices_refresh` 102 of
+  102; 93 of the 102 now end in July–October 2026, SPGI and NXPI included. **AEP and EXC still end
+  at Q1 2026** — the first Monday `company_filings_check` with CO5 (wave 5 above) is what should
+  bring them; seven more end at June 30 only because they had not filed yet. Still open: the
+  owner's eye on the charts (2 per row, hover headline, legend toggles, expand, Total | Per share)
+  and whether the default 10Y TTM reads right. NVDA's TTM FCF starts at Q3 FY2024 by design
+  (docs/company-financials.md *Known gaps*).
 
 - **The two UI fixes (`bluegill`, 2026-10-18), in a real browser:** verified on production at
   1366 dark — the Watchlist's Stock column stays pinned while the table scrolls sideways, and
@@ -480,13 +498,17 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 6. **Should a trade still count as an external flow, now that cash is tracked?** Likely: serve
     both TWRs, labelled. `externalFlow`/`isMeasurable` in `portfolioKpis.ts`, `dailyReturnSeries`'
     five consumers and `betaAndCorrelation` must move together.
-7. **Look-through projects:** measured sector/geography from baskets replacing `etf_mappings.py`'s
-    estimates (needs a country→region map); exact World ex CH; nested funds; an identity detector.
-    Researched future sources (N-PORT, commercial APIs — do not re-shop) are in docs/lookthrough.md.
-8. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
+7. **Look-through projects:** exact World ex CH; nested funds; an identity detector; route the
+    hidden Analytics tab's `segments` through `decompose` before that tab returns (it still
+    classifies basket rows itself, with raw countries). Researched future sources (N-PORT,
+    commercial APIs — do not re-shop) are in docs/lookthrough.md.
+8. **Dividends: a forecast check** (owner asked 2026-11-08 what is best; proposal given, not
+    built): log each projected payment as it stood ~30 days before its pay date and score it
+    against what IBKR paid, in the payment's own currency so FX is not an error.
+9. **Crypto follow-ups:** a daily `type=3m` pull (10 credits/day); a Binance/Phantom split; a
     transactions ledger (no addresses or hashes); CORS registered outermost so a 401 shows locally.
-9. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
-10. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
+10. **Brinson attribution** needs benchmark sector data first (docs/performance-analytics.md).
+11. **Smaller:** a currency breakout for idle foreign cash; *Prior Period Positions* is ticked in
     the Flex Query and never read (untick or use); fold `prune_empty_dividends` into a job only
     after reassessing, reusing the CLI's predicate.
 
@@ -494,6 +516,10 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
 
 One line each, newest first; drop the oldest.
 
+- **2026-11-08 (feature survey; branch `allocation-one-source`, local)** — verified the Sunday EDGAR
+  pass on production; Allocation's Sectors and Regions became the look-through rolled up (new
+  `region_taxonomy`; `etf_mappings.py`'s estimates and the client's maps deleted), and a Company
+  screener reads each company against its own 5-year multiples. Not merged or pushed.
 - **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
   tax; one local branch per wave merged into `main`; R6 built after an approved read. Pushed 2026-11-08
@@ -518,12 +544,4 @@ One line each, newest first; drop the oldest.
   a price card) with Yahoo figures for index-only companies a chunk a day (owner-approved).
   Merged to `main` and pushed the same day (`harmonize-company-links`, `company-overview`); then
   every company the app names links to its page, and a 3Y range.
-
-- **2026-10-25 (Company tab: P/E)** — owner-approved weekly Yahoo closes per CIK (about a
-  hundred requests a Sunday, 5.1 MB first fill) for a P/E in the key figures and a P/E card; the
-  fill exposed EPS gaps (COST's 16-week Q4, continuing-ops and BasicAndDiluted EPS, EXC's
-  untagged years, DXCM's lone slip) and a spin-off booked as a split (SPGI). P/E on 88 of 102;
-  then P/S, P/FCF, dividend yield and return on equity (new `equity` concept), a Valuation card,
-  market cap (balance-sheet or cover count, cross-checked against the diluted count); net cash
-  with short-term investments (unknown where they stop being tagged, as NVDA's), EV, EV/EBIT.
 
