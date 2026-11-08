@@ -62,6 +62,8 @@ TS_NAME_FOR = {
     "AnalystRatingInfo": "AnalystRating",
     "WatchlistItemResponse": "WatchlistItem",
     "FundamentalMetricsResponse": "FundamentalMetrics",
+    # An alias of the one rating shape since review item U8 (2026-11-08).
+    "CompanyFinancialsRating": "AnalystRatingCounts",
 }
 
 
