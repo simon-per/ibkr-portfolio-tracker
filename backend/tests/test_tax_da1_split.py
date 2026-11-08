@@ -348,3 +348,36 @@ async def test_payments_that_disagree_keep_the_prefix_for_the_unstated_one(db):
     rows = _by_country(await TaxService(db).get_tax_report(YEAR))
     assert rows["US"]["payments"] == 2 and rows["NL"]["payments"] == 1
 
+
+@pytest.mark.asyncio
+async def test_the_printed_parts_add_to_the_printed_withholding(db):
+    """
+    Review item T7: creditable and excess rounded apart read 1.02 + 0.40 under a
+    withholding of 1.43. The excess is the rounded whole less the rounded creditable.
+    """
+    db.add(Security(id=1, isin="KR7000660001", symbol="000660", description="SK hynix",
+                    currency="EUR", conid=1, exchange="KSE"))
+    await db.flush()
+    db.add(_pay(1, 10, "6.8326", "1.4298", country="KR"))
+    await db.commit()
+    kr = _by_country(await TaxService(db).get_tax_report(YEAR))["KR"]
+    assert (kr["withholding"], kr["creditable"], kr["excess"]) == (1.43, 1.02, 0.41)
+
+
+@pytest.mark.asyncio
+async def test_positions_count_securities_not_symbols(db):
+    # ASML's Amsterdam and New York listings share a ticker: two positions, not one.
+    db.add_all([
+        Security(id=1, isin="NL0010273215", symbol="ASML", description="ASML AEB",
+                 currency="EUR", conid=1, exchange="AEB"),
+        Security(id=2, isin="USN070592100", symbol="ASML", description="ASML NY",
+                 currency="EUR", conid=2, exchange="NASDAQ"),
+    ])
+    await db.flush()
+    db.add_all([
+        _pay(1, 10, "100", "15", country="NL"),
+        _pay(2, 11, "100", "15", country="NL"),
+    ])
+    await db.commit()
+    assert _by_country(await TaxService(db).get_tax_report(YEAR))["NL"]["positions"] == 2
+

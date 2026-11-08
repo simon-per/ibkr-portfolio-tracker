@@ -95,11 +95,13 @@ def _country_totals(buckets: List[Dict]) -> Optional[Dict[str, Optional[float]]]
     def total(key: str, absent: bool) -> Optional[float]:
         return None if absent else round(float(sum(b[key] for b in buckets)), 2)
 
+    withholding, creditable = total("withholding", all_estimated), total("creditable", unsplit)
     return {
         "gross": total("gross", False),
-        "withholding": total("withholding", all_estimated),
-        "creditable": total("creditable", unsplit),
-        "excess": total("excess", unsplit),
+        "withholding": withholding,
+        "creditable": creditable,
+        # The printed whole less the printed part, as on each row (review item T7).
+        "excess": None if unsplit else round(withholding - creditable, 2),
         "net": total("net", False),
     }
 
@@ -229,8 +231,8 @@ class TaxService:
                 # The recorded payments' gross alone, for the rate: an estimate's gross
                 # beside no withholding would dilute it.
                 "recorded_gross": Decimal("0"),
-                "creditable": Decimal("0"), "excess": Decimal("0"), "unsplit": 0,
-                "symbols": set(), "payments": 0, "estimated_payments": 0,
+                "creditable": Decimal("0"), "unsplit": 0,
+                "securities": set(), "payments": 0, "estimated_payments": 0,
             })
             bucket["gross"] += gross
             bucket["withholding"] += wht
@@ -248,19 +250,24 @@ class TaxService:
                     bucket["unsplit"] += 1
                 else:
                     bucket["creditable"] += split[0]
-                    bucket["excess"] += split[1]
-            if sec.symbol:
-                bucket["symbols"].add(sec.symbol)
+            # Counted by security, not symbol (review item T7): ASML's two listings share a
+            # ticker, and "2 positions" over three securities undercounted.
+            bucket["securities"].add(sec.id)
 
         dividend_income.sort(key=lambda d: d["pay_date"])
 
         def _split_part(b: Dict, key: str) -> Optional[float]:
             # Absent, not 0.00, when there is nothing recorded to split or a payment
             # withheld with no treaty rate in the table: a guessed split on a filing aid
-            # is worse than none.
+            # is worse than none. The excess is the rounded withholding less the rounded
+            # creditable (review item T7), so the two printed parts add to the printed
+            # whole: rounded apart they read 1.02 + 0.41 under a withholding of 1.42.
             if b["estimated_payments"] == b["payments"] or b["unsplit"]:
                 return None
-            return round(float(b[key]), 2)
+            creditable = round(float(b["creditable"]), 2)
+            if key == "creditable":
+                return creditable
+            return round(round(float(b["withholding"]), 2) - creditable, 2)
 
         def _residual(country: str) -> Optional[float]:
             rate = residual_rate_pct(country)
@@ -282,7 +289,7 @@ class TaxService:
                 "residual_pct": _residual(b["country"]),
                 "creditable": _split_part(b, "creditable"),
                 "excess": _split_part(b, "excess"),
-                "positions": len(b["symbols"]),
+                "positions": len(b["securities"]),
                 # DA-1 is filed per country, so which countries' withholding is
                 # incomplete is said per country, not once for the year.
                 "payments": b["payments"],

@@ -154,6 +154,9 @@ by the difference. Each `dividend_by_country` row now also carries:
 - `creditable` = Σ min(withheld, gross × residual) and `excess` = withheld − creditable, **per
   payment** and then summed, since min() does not add across payments (30% and 0% on equal
   grosses is 15 + 0 creditable, not 15% of the sum).
+- **The printed parts add up** (review item T7, 2026-11-08): `excess` is served as the rounded
+  withholding less the rounded creditable, rows and total alike — rounded apart they read 1.02 + 0.40
+  under 1.43. `positions` counts securities, not symbols (ASML's two listings share a ticker).
 
 **The table has a total row** (`dividend_by_country_totals`, review item T1, 2026-11-08): the
 creditable sum is the claim DA-1 makes, and no figure on the tab stated it — the Withheld tile includes
