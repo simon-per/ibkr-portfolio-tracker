@@ -79,3 +79,22 @@ describe('editing a watchlist row', () => {
     await vi.waitFor(() => expect(update).toHaveBeenCalledWith(1, '', null))
   })
 })
+
+describe('a failed save', () => {
+  it('does not greet the next edit with its error (review item U8)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(api, 'getWatchlist').mockResolvedValue([item(1, { symbol: 'AAA' })])
+    vi.spyOn(api, 'updateWatchlistItem').mockRejectedValue(new Error('500'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(<QueryClientProvider client={client}><WatchlistTab /></QueryClientProvider>)
+    const edit = await screen.findByRole('button', { name: /Edit notes and target price for AAA/ })
+
+    fireEvent.click(edit)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/Failed to save/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    fireEvent.click(edit)
+    expect(screen.queryByText(/Failed to save/)).toBeNull()
+  })
+})

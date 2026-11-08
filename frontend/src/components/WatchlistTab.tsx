@@ -168,6 +168,8 @@ export function WatchlistTab() {
         open={editingId === item.id}
         onOpenChange={(open) => {
           if (open) {
+            // A failed save's message belongs to that attempt, not the next (U8).
+            updateMutation.reset()
             setEditNotes(item.notes || '')
             setEditTargetPrice(item.target_price !== null ? String(item.target_price) : '')
             setEditingId(item.id)

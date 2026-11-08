@@ -319,12 +319,14 @@ export function ForecastTab() {
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {/* Forecast Years */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">
+              <label htmlFor="forecast-years" className="text-sm font-medium">
                 Forecast Period
               </label>
               <div className="flex items-center gap-2">
                 <input
+                  id="forecast-years"
                   type="range"
+                  aria-valuetext={`${forecastYears} ${forecastYears === 1 ? 'year' : 'years'}`}
                   value={forecastYears}
                   onChange={(e) => setForecastYears(Number(e.target.value))}
                   className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-[hsl(var(--primary))]"
@@ -338,11 +340,12 @@ export function ForecastTab() {
 
             {/* Monthly Contribution */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">
+              <label htmlFor="forecast-contribution" className="text-sm font-medium">
                 Monthly Contribution
               </label>
               <div className="flex items-center gap-2">
                 <input
+                  id="forecast-contribution"
                   type="number"
                   value={monthlyContribution}
                   onChange={(e) => {
@@ -351,7 +354,6 @@ export function ForecastTab() {
                       chooseContribution(val)
                     }
                   }}
-                  aria-label="Monthly Contribution"
                   className="flex h-10 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   min="0"
                   max={MAX_CONTRIBUTION}
@@ -378,11 +380,12 @@ export function ForecastTab() {
 
             {/* Expected Return */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">
+              <label htmlFor="forecast-return" className="text-sm font-medium">
                 Expected Annual Return
               </label>
               <div className="flex items-center gap-2">
                 <input
+                  id="forecast-return"
                   type="number"
                   value={expectedReturn}
                   onChange={(e) => {
@@ -402,9 +405,10 @@ export function ForecastTab() {
 
             {/* Starting Point */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">
+              {/* Not a <label>: the toggle group names itself ("Starting point"). */}
+              <div className="text-sm font-medium" aria-hidden="true">
                 Starting Point
-              </label>
+              </div>
               {/* The app's one toggle group (`SegmentedControl`): the pair was two bare
                   buttons with no pressed state for assistive technology, split 50/50 so the
                   amount truncated to "Current (CHF 144…". Each option now takes its width. */}

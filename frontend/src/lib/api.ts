@@ -1684,16 +1684,11 @@ export interface CompanyFinancialsSeriesSet {
   price: CompanyFinancialsSeries;
 }
 
-/** The current period's analyst recommendation counts; all zero is "no coverage". */
-export interface CompanyFinancialsRating {
-  strong_buy: number;
-  buy: number;
-  hold: number;
-  sell: number;
-  strong_sell: number;
-  /** The label every rating in the app shows (`AnalystRating.consensus`'s rule). */
-  consensus: string;
-}
+/**
+ * The overview's rating: the one shape every rating in the app is served in (`rating_of`),
+ * never all zero — "no coverage" is no rating. An alias, so the two cannot drift (U8).
+ */
+export type CompanyFinancialsRating = AnalystRatingCounts
 
 /**
  * The overview's company-level figures: the SEC's industry and fiscal year end, the price
