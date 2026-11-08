@@ -323,7 +323,9 @@ describe('CompanyTab', () => {
     const row = await screen.findByTestId('latest-quarter')
     expect(row.textContent).toContain('Latest quarter · Q3 FY2026')
     expect(row.textContent).toContain('new')
-    expect(row.textContent).toContain('−1.2 pts')
+    expect(row.textContent).toContain('-1.2 pts')
+    // A falling margin is inked as one: the tone reads the printed sign.
+    expect(within(row).getByText('-1.2 pts').className).toContain('text-red-600')
     expect(row.textContent).not.toContain('FCF')
   })
 

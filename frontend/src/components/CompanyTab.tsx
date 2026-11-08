@@ -623,7 +623,7 @@ function LatestQuarter({ quarter }: { quarter: CompanyFinancialsLatestQuarter | 
     { label: 'Revenue', value: quarter.revenue_yoy == null ? null : signedPercent(quarter.revenue_yoy) },
     {
       label: 'Op margin',
-      value: margin == null ? null : `${margin >= 0 ? '+' : '−'}${Math.abs(margin * 100).toFixed(1)} pts`,
+      value: margin == null ? null : formatSigned(margin * 100, (n) => `${n.toFixed(1)} pts`),
     },
     { label: 'EPS', value: quarter.eps_yoy == null ? null : signedPercent(quarter.eps_yoy) },
     { label: 'FCF', value: quarter.fcf_yoy == null ? null : signedPercent(quarter.fcf_yoy) },
