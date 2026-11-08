@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { ABSENT, cn, formatDate, formatMultiple, formatShortDateTime, marketCapP
 import { useCurrencySymbol } from '@/lib/CurrencyContext'
 import { syncFreshness } from '@/lib/watchlistFreshness'
 import { api } from '@/lib/api'
+import { QuarterTag } from './QuarterTag'
 import type {
   FundamentalMetrics, EarningsCalendarItem, EarningsHistoryItem, FundamentalsStatus,
 } from '@/lib/api'
@@ -44,6 +45,11 @@ const SYNC_DEADLINE_MS = 15 * 60_000
 
 /** A status poll, stamped with when it was asked — so a poll can be placed after a click. */
 type StatusPoll = FundamentalsStatus & { askedAt: number }
+
+/** A growth figure, tagged `q` when it is the latest quarter's rather than TTM (Y1). */
+function growthCell(value: number | null, basis: FundamentalMetrics['growth_basis']): ReactNode {
+  return value != null && basis === 'quarter' ? <>{formatPct(value)}<QuarterTag /></> : formatPct(value)
+}
 
 function formatPct(value: number | null): string {
   if (value === null) return ABSENT
@@ -145,21 +151,23 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
       <SectionHeader
         variant="bare"
         icon={Layers}
-        title={<span className="text-sm">ETF Holdings ({etfs.length})</span>}
+        title={<span className="text-sm">Funds ({etfs.length})</span>}
         className="mb-3"
       />
       <div className="flex flex-wrap gap-2">
         {etfs.map((etf) => (
           <div
             key={etf.security_id}
-            className="inline-flex items-center gap-2 rounded-full border bg-muted/30 py-1 pl-1 pr-3 text-sm"
+            // min-w-0/max-w-full: a 3a fund's long name pushed the chip past a phone's width.
+            className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border bg-muted/30 py-1 pl-1 pr-3 text-sm"
           >
-            <TickerAvatar symbol={etf.symbol} securityId={etf.security_id} className="h-6 w-6 text-[9px]" />
-            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.neutral)}>
-              ETF
+            <TickerAvatar symbol={etf.symbol} securityId={etf.security_id} className="h-6 w-6 shrink-0 text-[9px]" />
+            {/* "Fund", not "ETF": the section holds the 3a mutual funds too (review item VI4). */}
+            <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold', TONE_CHIP.neutral)}>
+              Fund
             </span>
-            <span className="font-medium">{etf.symbol}</span>
-            <span className="text-xs text-muted-foreground truncate max-w-[160px]">{displayName(etf.description)}</span>
+            <span className="shrink-0 font-medium">{etf.symbol}</span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground max-w-[160px]">{displayName(etf.description)}</span>
           </div>
         ))}
       </div>
@@ -178,11 +186,9 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
  * they reach the phone through the glossary instead of dying with the hover.
  */
 export function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, SortKey>[] {
-  const peg = (row: FundamentalMetrics) =>
-    row.peg_ratio ??
-    (row.trailing_pe && row.fwd_eps_growth && row.fwd_eps_growth > 0
-      ? row.trailing_pe / (row.fwd_eps_growth * 100)
-      : null)
+  // As served: the server's PEG already falls back through its tiers and refuses a
+  // negative P/E (review items DR4/U3: a client copy here painted one green).
+  const peg = (row: FundamentalMetrics) => row.peg_ratio
 
   return [
     {
@@ -270,8 +276,8 @@ export function metricsColumns(currencySymbol: string): Column<FundamentalMetric
       sortKey: 'revenue_growth',
       align: 'right',
       tone: (row) => growthColor(row.revenue_growth),
-      hint: { description: 'Last 4 quarters vs the 4 before.' },
-      cell: (row) => formatPct(row.revenue_growth),
+      hint: { description: 'Revenue vs a year before; q: latest quarter' },
+      cell: (row) => growthCell(row.revenue_growth, row.growth_basis),
     },
     {
       key: 'earnings_growth',
@@ -280,8 +286,8 @@ export function metricsColumns(currencySymbol: string): Column<FundamentalMetric
       sortKey: 'earnings_growth',
       align: 'right',
       tone: (row) => growthColor(row.earnings_growth),
-      hint: { description: 'Last 4 quarters vs the 4 before.' },
-      cell: (row) => formatPct(row.earnings_growth),
+      hint: { description: 'EPS vs a year before; q: latest quarter' },
+      cell: (row) => growthCell(row.earnings_growth, row.growth_basis),
     },
     {
       key: 'fwd_revenue_growth',
@@ -319,8 +325,10 @@ function MetricsTable({ data }: { data: FundamentalMetrics[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('symbol')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
-  const stocks = useMemo(() => data.filter((d) => d.quote_type !== 'ETF'), [data])
-  const etfs = useMemo(() => data.filter((d) => d.quote_type === 'ETF'), [data])
+  // The server's fund predicate (`is_fund`, review items VI4/R7): a client `!== 'ETF'`
+  // read a MUTUALFUND and a NAV-priced 3a fund as stock rows of dashes.
+  const stocks = useMemo(() => data.filter((d) => !d.is_fund), [data])
+  const etfs = useMemo(() => data.filter((d) => d.is_fund), [data])
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {

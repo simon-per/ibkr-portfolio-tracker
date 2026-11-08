@@ -61,6 +61,13 @@ simulation), `manage_mappings` (writes no amount; an unscaled level check refuse
 (closes feed only RSI) are exempt with their reasons written there. It also fails on a second copy of
 either map or of the metadata read.
 
+**The watchlist scales too** (review item Y4, 2026-11-08): its price, 52-week range, moving averages
+and analyst target are divided by `minor_unit_scale` and labelled in the major code; it stored them
+as Yahoo reported them, so a 5-pound share read 500 under a pound sign. `data_currency` keeps the
+reported code, so the market cap keeps its refusal (troubleshooting.md). A held listing's target
+from `fundamental_metrics` is scaled the same way when the watchlist shows it
+(`tests/test_watchlist_minor_units.py`).
+
 Latent today, not live — this account holds no GBP security, and its one London line is `SMH@LSEETF`,
 a USD ETF pinned `manual` to `SMH.L` (which is also why bare-ticker auto-discovery never grabbed the
 NASDAQ SMH). The trap opens the day a UK equity or a GBP-line ETF is bought.

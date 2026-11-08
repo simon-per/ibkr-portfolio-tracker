@@ -760,12 +760,38 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
+**Revenue and EPS growth come from the filings where they are stored** (review item Y1,
+2026-11-08). yfinance returns at most five quarters, so the growth Yahoo's rows carry is the
+latest quarter against the same one a year before, though it was labelled TTM (NVDA's revenue
++105.85% against a TTM +83.4%). `/api/fundamentals/portfolio` and `/api/watchlist` serve a
+company's TTM-over-TTM growth from its stored SEC figures where there are any
+(`company_yahoo.served_growth`, no request), with `growth_basis: "ttm"`, and Yahoo's figure elsewhere
+with `"quarter"`, which the tables tag `q` (`tests/test_growth_basis.py`).
+
+**A forward P/E needs forward EPS in the trailing EPS's units** (review item Y5, 2026-11-08):
+`yahoo_estimates.forward_pe` is the one reader of `forwardPE`, and it and the forward-EPS growth
+fallback are refused when `forwardEps / trailingEps` sits outside 1/20–20 (`EPS_UNITS_BAND`) —
+KSPI's tenge forward EPS against a dollar trailing one read a forward P/E of 0.0135 and scored the
+top points; SBI.TO's 0.01 placeholder read 359 and -99% growth (`tests/test_forward_eps_units.py`).
+
+**An empty `.info` is refused** (review item Y3, 2026-11-08): yfinance answers a symbol it cannot
+serve with `{'trailingPegRatio': None}`, which the watchlist stored as a fresh row of blanks with a
+score from neutral fallbacks. `yahoo_estimates.info_is_empty` is the one test, shared with
+`extract_metrics`; the item returns an error and its row stays as it was
+(`tests/test_watchlist_empty_info.py`).
+
 **Analyst counts** (owner-approved 2026-11-07, CLAUDE.md rule 1: about one request a week for
 each ticker below, ~13 then). A row's rating is five counts labelled by `consensus_of`, never
 Yahoo's `recommendationKey`. A held listing's counts are `analyst_ratings`' and a Company-tab
 company's (by SEC ticker) `company_yahoo_profiles`', both read at response time
-(`WatchlistService.stored_ratings`, `watchlist_rating`) so the row shows what the positions
-table or the overview shows. Only a ticker in neither costs a `recommendations` request
+(`WatchlistService.stored_sources`, `watchlist_rating`) so the row shows what the positions
+table or the overview shows. **So are the figures** (review item DR1, 2026-11-08): a held or
+Company-tab ticker's P/E, forward P/E, PEG, growth, margin, market cap, target and analyst count
+are its stored row's (`fundamental_metrics`, else the profile), at sync time for the score and at
+response time for the row (`company_yahoo.company_figures`); the watchlist's own `.info` keeps the
+price, the 52-week range, the averages and EV/EBITDA. A profile counts only within the Company
+tab's scope (held, or in the newest Nasdaq-100 pass, DR2): a company that left the index keeps a
+profile nobody refreshes. Only a ticker in neither costs a `recommendations` request
 (`AnalystRatingService.fetch_counts`, the held pass's reader, so its 429 stops the pass) — on
 the slow run, or the first run when `ratings_synced_at` is NULL; a fund is answered with zeros
 and never asked. A failed ask keeps the old counts until the next slow run. The buy score's

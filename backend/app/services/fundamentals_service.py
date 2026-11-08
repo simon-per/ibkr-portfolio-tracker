@@ -17,6 +17,7 @@ from app.repositories.fundamentals_repository import (
 from app.repositories.security_repository import held
 from app.services.identity_service import companies_of_securities
 from app.services.allocation_service import allocation_from_info, apply_allocation
+from app.services.company_yahoo import growth_by_security, served_growth
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
@@ -24,7 +25,8 @@ from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, is_fund, read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, forward_pe, info_is_empty,
+    is_fund, read_optional,
 )
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
@@ -42,7 +44,7 @@ def extract_metrics(info: Dict, quarterly_financials=None, eps_trend_growth=None
     security (`FundamentalsService._extract_metrics`), the Company tab's chunk by CIK
     (`company_profile_sync`). Two readers would be two figures under one name, drifting.
     """
-    if not info or all(value is None for value in info.values()):
+    if info_is_empty(info):
         logger.info(f"No fundamental data available for {symbol}")
         return None
 
@@ -53,7 +55,7 @@ def extract_metrics(info: Dict, quarterly_financials=None, eps_trend_growth=None
 
     metrics_data = {
         'trailing_pe': trailing_pe,
-        'forward_pe': safe_float(info.get('forwardPE')),
+        'forward_pe': forward_pe(info),
         # One tier order with the watchlist, in one place (`peg_ratio.resolve_peg`).
         'peg_ratio': resolve_peg(info, trailing_pe, fwd_eps),
         'price_to_sales': safe_float(info.get('priceToSalesTrailing12Months')),
@@ -458,6 +460,10 @@ class FundamentalsService:
         # The tab shows and sorts the base-currency figure (`market_cap.py`).
         to_base = await market_cap_to_base(self.db)
 
+        # Revenue and EPS growth from the filings wherever a company's are stored: Yahoo's
+        # rows carry a quarter's, labelled TTM (`company_yahoo.served_growth`, Y1).
+        filed_growth = await growth_by_security(self.db, [s.id for s in securities])
+
         portfolio_data = []
         for sec in securities:
             m = metrics_map.get(sec.id)
@@ -467,6 +473,14 @@ class FundamentalsService:
                 'description': sec.description,
                 'exchange': sec.exchange,
                 'currency': sec.currency,
+                # The server's one fund predicate (review items VI4/R7): Yahoo's quote type
+                # where it answered, else the security's own asset category — a pillar 3a
+                # fund priced off a NAV has no Yahoo quote type and read as an all-dash
+                # stock row behind the client's own `!== 'ETF'`.
+                'is_fund': (
+                    m.is_fund if m is not None and m.quote_type
+                    else (sec.asset_category or '').upper() == 'FUND'
+                ),
             }
             if m:
                 entry.update({
@@ -494,6 +508,9 @@ class FundamentalsService:
                     # as local time, which the tab's as-of line prints.
                     'last_updated': utc_iso(m.last_updated),
                 })
+                entry.update(served_growth(
+                    m.revenue_growth, m.earnings_growth, filed_growth.get(sec.id)
+                ))
             else:
                 entry.update({
                     'quote_type': None,
@@ -518,6 +535,7 @@ class FundamentalsService:
                     'data_currency': None,
                     'last_updated': None,
                 })
+                entry.update(served_growth(None, None, filed_growth.get(sec.id)))
 
             portfolio_data.append(entry)
 

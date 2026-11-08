@@ -61,7 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
-from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
+from app.models.analyst_rating import rating_of
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
@@ -687,6 +687,9 @@ def build_series(
     return out
 
 
+from app.services.company_yahoo import counts_of, target_upside  # noqa: E402
+
+
 class CompanyFinancialsService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -842,9 +845,7 @@ class CompanyFinancialsService:
             return {
                 "figures": figures,
                 "as_of": figures.last_updated if figures is not None else None,
-                "counts": None
-                if rating is None
-                else {f: getattr(rating, f) for f in RATING_COUNT_FIELDS},
+                "counts": counts_of(rating),
                 "next_earnings_date": upcoming.earnings_date if upcoming else None,
                 "next_eps_estimate": upcoming.eps_estimate if upcoming else None,
             }
@@ -860,9 +861,7 @@ class CompanyFinancialsService:
         return {
             "figures": row,
             "as_of": row.fetched_at,
-            "counts": None
-            if row.strong_buy is None
-            else {f: getattr(row, f) or 0 for f in RATING_COUNT_FIELDS},
+            "counts": counts_of(row),
             "next_earnings_date": row.next_earnings_date,
             "next_eps_estimate": row.next_eps_estimate,
         }
@@ -893,14 +892,9 @@ class CompanyFinancialsService:
             and price > 0
             and (utc_today() - closes[-1][0]).days <= PRICE_MAX_AGE_DAYS
         )
-        target = figure("target_mean_price")
         upside = (
-            target / price - 1
-            if target is not None
-            and current
-            and currency is not None
-            and figure("data_currency") == currency
-            else None
+            target_upside(figure("target_mean_price"), price, figure("data_currency"), currency)
+            if current else None
         )
         next_date = yahoo["next_earnings_date"]
         counts = yahoo["counts"]
@@ -917,7 +911,7 @@ class CompanyFinancialsService:
             "rating": rating_of(counts),
             "analysts": figure("number_of_analysts"),
             "target_low": figure("target_low_price"),
-            "target_mean": target,
+            "target_mean": figure("target_mean_price"),
             "target_high": figure("target_high_price"),
             "target_upside": upside,
             "yahoo_currency": figure("data_currency"),

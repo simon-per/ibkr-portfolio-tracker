@@ -1118,6 +1118,9 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     assert rows[4]["market_cap_base"] is None
     assert rows[2]["market_cap_base"] is None and rows[2]["last_updated"] is None
     assert rows[1]["last_updated"].endswith("+00:00")
+    # The server's fund predicate and what the growth compares (review items VI4, Y1).
+    assert all(isinstance(r["is_fund"], bool) for r in rows.values())
+    assert all(r["growth_basis"] in (None, "ttm", "quarter") for r in rows.values())
 
     status = client.get("/api/fundamentals/status").json()
     assert status["newest_update"].endswith("+00:00")
@@ -1128,6 +1131,8 @@ def test_fundamentals_serve_a_base_currency_market_cap_and_utc_timestamps(client
     nvda = watch["NVDA"]
     assert nvda["market_cap"] == 4_000_000_000_000
     assert nvda["market_cap_base"] == int(4_000_000_000_000 * 0.9 * 0.94)
+    # The one upside and the growth basis ride on every row (review items DR7, Y1).
+    assert all("target_upside" in r and "growth_basis" in r for r in watch.values())
     # A ticker that is one of our securities carries its id, for its logo; one that is
     # not carries none.
     assert watch["AAPL"]["security_id"] == 3

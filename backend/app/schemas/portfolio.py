@@ -380,8 +380,15 @@ class FundamentalMetricsResponse(BaseModel):
     peg_ratio: Optional[float] = None
     price_to_sales: Optional[float] = None
     price_to_book: Optional[float] = None
+    # Whether this is a fund (ETF, mutual fund, a 3a fund priced off its NAV): the server's
+    # one predicate, which the Fundamentals tab splits its two tables by.
+    is_fund: bool = False
     revenue_growth: Optional[float] = None
     earnings_growth: Optional[float] = None
+    # What the two above compare: "ttm" (the last four quarters against the four before,
+    # from the SEC filings) or "quarter" (the latest quarter against the same one a year
+    # before, Yahoo's); None when neither is known (review item Y1).
+    growth_basis: Optional[str] = None
     fwd_revenue_growth: Optional[float] = None
     fwd_eps_growth: Optional[float] = None
     profit_margins: Optional[float] = None
@@ -449,12 +456,16 @@ class WatchlistItemResponse(BaseModel):
     ev_to_ebitda: Optional[float] = None
     revenue_growth: Optional[float] = None
     earnings_growth: Optional[float] = None
+    growth_basis: Optional[str] = None          # as on FundamentalMetricsResponse
     fwd_revenue_growth: Optional[float] = None
     fwd_eps_growth: Optional[float] = None
     profit_margins: Optional[float] = None
     market_cap: Optional[int] = None            # the listing's own currency
     market_cap_base: Optional[int] = None       # the same in the base currency, or None
     analyst_target: Optional[float] = None
+    # The mean target over the price, less one (0.12 is +12%), through the overview's
+    # guarded helper (`company_yahoo.target_upside`); None on a currency mismatch.
+    target_upside: Optional[float] = None
     # The counts a held listing or a Company-tab company already keeps, else the
     # watchlist's own (`watchlist_service.watchlist_rating`); None when none are known.
     analyst_rating: Optional[AnalystRatingCounts] = None

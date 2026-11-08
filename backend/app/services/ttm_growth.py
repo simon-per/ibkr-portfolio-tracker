@@ -13,6 +13,13 @@ security could report different earnings growth on ``/api/fundamentals/portfolio
 
 Neither copy touched ``self``, so this is a plain function.
 
+**In practice it is a quarter's growth** (review item Y1, 2026-11-08): yfinance's quarterly
+timeseries returns at most five quarters, so the 8-quarter TTM tier below rarely runs and
+the figure is the latest quarter against the same one a year before — and so is the
+`.info` fallback. Where a company's SEC filings are stored, the served rows replace it
+with their TTM-over-TTM growth (`company_yahoo.served_growth`, `growth_basis: "ttm"`);
+elsewhere it is served as what it is (`growth_basis: "quarter"`).
+
 **No positive base, no percentage** (2026-10-14). The division used to be by
 ``abs(prior)``, guarding only ``prior == 0``, so a company moving from a loss to a profit
 reported growth: -0.01 to +0.50 EPS read as **+5,100%**, painted green and scored as
@@ -35,9 +42,11 @@ def growth_over_base(current: Optional[float], prior: Optional[float]) -> Option
     ``(current - prior) / prior`` as a fraction rounded to 4 dp, or None.
 
     None when either side is unknown or the base is not positive: from zero the ratio is
-    infinite, and from a loss its sign says nothing about direction.
+    infinite, and from a loss its sign says nothing about direction. And None from a
+    profit to a loss (review item Y7, 2026-11-08): the same sign change the other way,
+    which read LITE's earnings as -2,959.8%.
     """
-    if current is None or prior is None or prior <= 0:
+    if current is None or prior is None or prior <= 0 or current < 0:
         return None
     return round((current - prior) / prior, 4)
 

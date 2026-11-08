@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WatchlistTab } from './WatchlistTab'
 import { colorClass, signalTone } from './watchlistColumns'
@@ -59,5 +59,42 @@ describe('WatchlistTab', () => {
 
     const pill = screen.getByText('-30.0%')
     expect(pill.className).toContain('bg-gain-soft')
+  })
+})
+
+describe('editing a watchlist row', () => {
+  it('clears a note and a target price by emptying them (review item U2)', async () => {
+    vi.spyOn(api, 'getWatchlist').mockResolvedValue([
+      item(1, { symbol: 'AAA', notes: 'buy below 90', target_price: 90 }),
+    ])
+    const update = vi.spyOn(api, 'updateWatchlistItem').mockResolvedValue(item(1, {}))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><WatchlistTab /></QueryClientProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Edit notes and target price for AAA/ }))
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText(/Target Price/), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(1, '', null))
+  })
+})
+
+describe('a failed save', () => {
+  it('does not greet the next edit with its error (review item U8)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(api, 'getWatchlist').mockResolvedValue([item(1, { symbol: 'AAA' })])
+    vi.spyOn(api, 'updateWatchlistItem').mockRejectedValue(new Error('500'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(<QueryClientProvider client={client}><WatchlistTab /></QueryClientProvider>)
+    const edit = await screen.findByRole('button', { name: /Edit notes and target price for AAA/ })
+
+    fireEvent.click(edit)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/Failed to save/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    fireEvent.click(edit)
+    expect(screen.queryByText(/Failed to save/)).toBeNull()
   })
 })

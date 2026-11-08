@@ -603,7 +603,11 @@ and its `consensus` `analyst_rating.consensus_of`, the rule every rating label i
 filings' `currency`.
 
 - **One resolver** (`_yahoo_figures`): a held company's listing rows or the chunk's row, never a
-  mix; `tests/test_company_overview_profile.py` pins which wins.
+  mix; `tests/test_company_overview_profile.py` pins which wins. **The counts are the company's
+  everywhere** (`app/services/company_yahoo.py`, review items DR1/DR2, 2026-11-08): every held
+  listing of a company with a CIK shows its canonical listing's counts (the lowest symbol, the one
+  this overview reads), so GOOG and GOOGL rows match the Alphabet page; `counts_of` is the one
+  reading of the five counts off a row. `tests/test_company_yahoo_family.py`.
 - **The price line is the market's, the multiples' basis is the figures'.** `_closes` reads the
   weekly closes and the held listing's newest daily close once; the P/E and its kin take them
   through `_on_eps_basis` (a split after the newest filing scales them), the price line and

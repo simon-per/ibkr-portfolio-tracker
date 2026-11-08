@@ -27,7 +27,7 @@ function withProviders(node: React.ReactNode) {
 
 const ROW: FundamentalMetrics = {
   security_id: 1, symbol: 'AAA', description: 'A', exchange: 'NASDAQ', currency: 'USD',
-  quote_type: 'EQUITY', trailing_pe: null, forward_pe: null, peg_ratio: null,
+  is_fund: false, quote_type: 'EQUITY', trailing_pe: null, forward_pe: null, peg_ratio: null,
   price_to_sales: null, price_to_book: null, revenue_growth: null, earnings_growth: null,
   fwd_revenue_growth: null, fwd_eps_growth: null, profit_margins: null, gross_margins: null,
   operating_margins: null, market_cap: null, market_cap_base: null, number_of_analysts: null,

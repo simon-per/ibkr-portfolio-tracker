@@ -654,8 +654,12 @@ export interface SyncResponse {
   warnings?: string[];
 }
 
+export type GrowthBasis = 'ttm' | 'quarter'
+
 export interface FundamentalMetrics {
   security_id: number;
+  /** The server's fund predicate: Yahoo's quote type, else the security's asset category. */
+  is_fund: boolean;
   symbol: string;
   description: string;
   exchange: string | null;
@@ -668,6 +672,12 @@ export interface FundamentalMetrics {
   price_to_book: number | null;
   revenue_growth: number | null;
   earnings_growth: number | null;
+  /**
+   * What the two growth figures compare: 'ttm' — the last four quarters against the four
+   * before, from the SEC filings — or 'quarter' — the latest quarter against the same one
+   * a year before, Yahoo's. Null when neither is known.
+   */
+  growth_basis?: GrowthBasis | null;
   fwd_revenue_growth: number | null;
   fwd_eps_growth: number | null;
   profit_margins: number | null;
@@ -755,6 +765,12 @@ export interface WatchlistItem {
   ev_to_ebitda: number | null;
   revenue_growth: number | null;
   earnings_growth: number | null;
+  /**
+   * What the two growth figures compare: 'ttm' — the last four quarters against the four
+   * before, from the SEC filings — or 'quarter' — the latest quarter against the same one
+   * a year before, Yahoo's. Null when neither is known.
+   */
+  growth_basis?: GrowthBasis | null;
   fwd_revenue_growth: number | null;
   fwd_eps_growth: number | null;
   profit_margins: number | null;
@@ -763,6 +779,8 @@ export interface WatchlistItem {
   /** `market_cap` in the base currency; null when it cannot be converted. */
   market_cap_base: number | null;
   analyst_target: number | null;
+  /** The mean target over the price, less one (0.12 is +12%); null on a currency mismatch. */
+  target_upside?: number | null;
   /** A held name's counts are the positions table's, a Company-tab name's its overview's. */
   analyst_rating: AnalystRatingCounts | null;
   analyst_count: number | null;
@@ -1666,16 +1684,11 @@ export interface CompanyFinancialsSeriesSet {
   price: CompanyFinancialsSeries;
 }
 
-/** The current period's analyst recommendation counts; all zero is "no coverage". */
-export interface CompanyFinancialsRating {
-  strong_buy: number;
-  buy: number;
-  hold: number;
-  sell: number;
-  strong_sell: number;
-  /** The label every rating in the app shows (`AnalystRating.consensus`'s rule). */
-  consensus: string;
-}
+/**
+ * The overview's rating: the one shape every rating in the app is served in (`rating_of`),
+ * never all zero — "no coverage" is no rating. An alias, so the two cannot drift (U8).
+ */
+export type CompanyFinancialsRating = AnalystRatingCounts
 
 /**
  * The overview's company-level figures: the SEC's industry and fiscal year end, the price
@@ -2111,13 +2124,11 @@ class ApiClient {
     });
   }
 
-  async updateWatchlistItem(id: number, notes?: string, targetPrice?: number): Promise<WatchlistItem> {
+  /** Both fields as the editor holds them: an empty note and a null target clear them. */
+  async updateWatchlistItem(id: number, notes: string, targetPrice: number | null): Promise<WatchlistItem> {
     return this.request(`/api/watchlist/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({
-        notes: notes ?? null,
-        target_price: targetPrice ?? null,
-      }),
+      body: JSON.stringify({ notes, target_price: targetPrice }),
     });
   }
 

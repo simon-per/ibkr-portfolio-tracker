@@ -46,8 +46,7 @@ NOT_A_SHARE = {
         "float, or None, would not fit it.",
     ("services/finpension_ingest.py", "abs(price - nav) / nav * 100"):
         "a derived price's distance from the published NAV, compared with a tolerance.",
-    ("services/watchlist_service.py", "(target - price) / price * 100"):
-        "upside to the analyst target, bucketed into a score and never published.",
+
     ("services/watchlist_service.py",
      "(current_price - data['week52_high']) / data['week52_high'] * 100"):
         "distance from the 52-week high: a change against a reference level.",

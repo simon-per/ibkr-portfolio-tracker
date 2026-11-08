@@ -104,14 +104,17 @@ def test_a_loss_widening_or_narrowing_has_no_growth_rate_either():
         assert ttm_growth_from_quarterly(df, ["Net Income"]) is None
 
 
-def test_a_profit_turning_into_a_loss_is_still_negative_growth():
+def test_a_profit_turning_into_a_loss_has_no_growth_rate():
+    """It read -110% here and LITE's -2,959.8% live: a sign change has no rate either way
+    (review item Y7, which reversed this test's old expectation of -1.1)."""
     df = frame({"Net Income": [-5, -5, 0, 0, 25, 25, 25, 25]})
-    assert ttm_growth_from_quarterly(df, ["Net Income"]) == -1.1
+    assert ttm_growth_from_quarterly(df, ["Net Income"]) is None
 
 
 @pytest.mark.parametrize("current, prior, expected", [
     (110, 100, 0.1),
     (90, 100, -0.1),
+    (-5, 100, None),        # profit to loss
     (0.5, -0.01, None),     # loss to profit
     (-1, -2, None),         # a narrowing loss
     (5, 0, None),           # from zero
@@ -198,3 +201,13 @@ def test_both_services_call_the_one_implementation():
     assert fundamentals_service.trailing_growth is trailing_growth
     assert watchlist_service.trailing_growth is trailing_growth
     assert fundamentals_service.EARNINGS_ROWS is watchlist_service.EARNINGS_ROWS
+
+
+def test_a_profit_turning_to_a_loss_has_no_growth_rate():
+    """Review item Y7: the sign change the other way read LITE's earnings as -2,959.8%."""
+    from app.services.ttm_growth import growth_over_base
+
+    assert growth_over_base(-2.86, 0.1) is None
+    assert growth_over_base(0.0, 0.1) == -1.0     # to nothing is a fall, not a sign change
+    assert growth_over_base(0.05, 0.1) == -0.5
+

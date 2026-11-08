@@ -108,7 +108,17 @@ describe('ForecastTab', () => {
     expect(screen.queryByText(/Total Contributions/)).toBeNull()
   })
 
-  it('refuses a baseline that failed to load rather than drawing it as zero', async () => {
+  it('names every parameter for assistive technology (review item U8)', async () => {
+    mockApi()
+    renderTab()
+    const years = (await screen.findByLabelText('Forecast Period')) as HTMLInputElement
+    expect(years.type).toBe('range')
+    expect(years.getAttribute('aria-valuetext')).toMatch(/years?$/)
+    expect((screen.getByLabelText('Monthly Contribution') as HTMLInputElement).type).toBe('number')
+    expect((screen.getByLabelText('Expected Annual Return') as HTMLInputElement).type).toBe('number')
+  })
+
+    it('refuses a baseline that failed to load rather than drawing it as zero', async () => {
     mockApi({ contributions: new Error('backend down') })
     renderTab()
 

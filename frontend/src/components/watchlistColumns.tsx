@@ -7,6 +7,7 @@ import type { Column } from '@/components/ui/DataTable'
 import { AnalystRatingBadge } from './AnalystRatingBadge'
 import { CompanyLink } from './CompanyLink'
 import { TickerAvatar } from '@/components/ui/TickerAvatar'
+import { QuarterTag } from './QuarterTag'
 
 /**
  * The watchlist's eighteen columns, described once for both renderings.
@@ -102,24 +103,20 @@ export function scoreTone(score: number | null): Tone {
   return 'negative'
 }
 
-/** Upside to the analyst mean target, or null when either side is missing. */
+/**
+ * Upside to the analyst mean target in percent, as the server serves it
+ * (`target_upside`, the overview's guarded helper: review item DR7); null without one.
+ */
 export function analystUpside(item: WatchlistItem): number | null {
-  return item.analyst_target && item.current_price && item.current_price > 0
-    ? ((item.analyst_target - item.current_price) / item.current_price) * 100
-    : null
+  return item.target_upside != null ? item.target_upside * 100 : null
 }
 
-/** Stored PEG, falling back to P/E over forward EPS growth. */
-export function pegOf(item: WatchlistItem): number | null {
-  return (
-    item.peg_ratio ??
-    (item.trailing_pe && item.fwd_eps_growth && item.fwd_eps_growth > 0
-      ? item.trailing_pe / (item.fwd_eps_growth * 100)
-      : null)
-  )
-}
 
 const pct = (v: number | null) => (v != null ? `${(v * 100).toFixed(1)}%` : ABSENT)
+
+/** A growth figure, tagged `q` when it is the latest quarter's rather than TTM (Y1). */
+const growthCell = (v: number | null, basis: WatchlistItem['growth_basis']): ReactNode =>
+  v != null && basis === 'quarter' ? <>{pct(v)}<QuarterTag /></> : pct(v)
 const num = (v: number | null, dp = 1) => (v != null ? v.toFixed(dp) : ABSENT)
 
 /** The entry's logo by security or ISIN, else a monogram; the card title draws it too. */
@@ -212,7 +209,9 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Composite buy score',
       },
-      cell: (i) =>
+      // View-aware like Positions' (review item U7): a dash in the table, nothing on the
+      // card, whose badge row printed a stray "-" beside the analyst cell's "—".
+      cell: (i, view) =>
         i.buy_score !== null ? (
           <span
             className={cn(
@@ -222,9 +221,9 @@ export function watchlistColumns(deps: {
           >
             {Math.round(i.buy_score)}
           </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        ),
+        ) : view === 'table' ? (
+          <span className="text-muted-foreground">{ABSENT}</span>
+        ) : null,
     },
     {
       key: 'current_price',
@@ -257,17 +256,18 @@ export function watchlistColumns(deps: {
       hint: {
         description: 'Analyst rating and target upside',
       },
-      cell: (i) => {
+      cell: (i, view) => {
         const upside = analystUpside(i)
+        if (view !== 'table' && !i.analyst_rating && upside === null) return null
         return (
           // `whitespace-nowrap`: "Strong Buy" over "+35% upside" broke into three and four
           // lines in a column that only needs the width of its longest phrase.
           <div className="flex flex-col items-start gap-1 whitespace-nowrap">
             {i.analyst_rating ? (
               <AnalystRatingBadge rating={i.analyst_rating} />
-            ) : (
+            ) : view === 'table' ? (
               <span className="text-xs text-muted-foreground">{ABSENT}</span>
-            )}
+            ) : null}
             {upside !== null && (
               <div
                 className={`text-[11px] ${upside > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
@@ -314,7 +314,9 @@ export function watchlistColumns(deps: {
         description: 'P/E over EPS growth',
       },
       cell: (i) => {
-        const peg = pegOf(i)
+        // As served: the server's PEG already falls back through its tiers and refuses a
+        // negative P/E (review items DR4/U3: a client copy here painted -0.16 green).
+        const peg = i.peg_ratio
         return peg !== null ? (
           <span
             className={
@@ -368,10 +370,8 @@ export function watchlistColumns(deps: {
       shortHeader: 'Revenue growth',
       sortKey: 'revenue_growth',
       tone: (i) => colorClass(i.revenue_growth != null ? i.revenue_growth * 100 : null, true),
-      hint: {
-        description: 'TTM revenue growth',
-      },
-      cell: (i) => pct(i.revenue_growth),
+      hint: { description: 'Revenue vs a year before; q: latest quarter' },
+      cell: (i) => growthCell(i.revenue_growth, i.growth_basis),
     },
     {
       key: 'earnings_growth',
@@ -379,10 +379,8 @@ export function watchlistColumns(deps: {
       shortHeader: 'EPS growth',
       sortKey: 'earnings_growth',
       tone: (i) => colorClass(i.earnings_growth != null ? i.earnings_growth * 100 : null, true),
-      hint: {
-        description: 'TTM EPS growth',
-      },
-      cell: (i) => pct(i.earnings_growth),
+      hint: { description: 'EPS vs a year before; q: latest quarter' },
+      cell: (i) => growthCell(i.earnings_growth, i.growth_basis),
     },
     {
       key: 'fwd_revenue_growth',
