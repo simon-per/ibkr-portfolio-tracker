@@ -957,6 +957,18 @@ async def test_the_evening_isin_pass_ranks_a_borrowed_baskets_constituents(sessi
     assert amazon in ranked
 
 
+@pytest.mark.asyncio
+async def test_a_fund_and_its_contributions_carry_its_name(session):
+    """Review item L7: a fund whose symbol is its ISIN (the 3a funds) is named on screen, so
+    its coverage row and every company's via-fund line carry the fund's name."""
+    await _standard_book(session)
+    report = await LookthroughService(session).get_lookthrough()
+    xnas = next(f for f in report["funds"] if f["fund_isin"] == XNAS_ISIN)
+    assert xnas["name"]
+    nvidia = next(r for r in report["companies"] if NVIDIA_ISIN in r["isins"])
+    assert nvidia["via_funds"][0]["name"] == xnas["name"]
+
+
 def test_every_reader_of_a_held_funds_basket_goes_through_the_alias():
     """The family: in the look-through service only `_held_baskets` asks the repository for
     baskets, so a new reader cannot skip the proxies the way the ranking did."""

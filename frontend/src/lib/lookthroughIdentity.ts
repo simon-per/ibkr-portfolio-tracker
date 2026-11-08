@@ -3,6 +3,17 @@
  * the logo store for. Shared by the company table, the treemap tooltip and the insight strip,
  * so the three cannot disagree about which mark a company wears.
  */
+import { displayName } from './securityName'
+
+/**
+ * What a held fund is called on Look-through: its symbol, unless that is only its ISIN (the
+ * pension-only 3a funds have no ticker), then its name (review item L7).
+ */
+export function fundLabel(fund: { symbol: string | null; name?: string | null; fund_isin: string }): string {
+  const symbol = fund.symbol?.trim()
+  if (symbol && symbol.toUpperCase() !== fund.fund_isin.toUpperCase()) return symbol
+  return fund.name ? displayName(fund.name) : symbol || fund.fund_isin
+}
 
 /** Tickers only, de-duplicated: the listing keys carry their exchange ("GOOG@NASDAQ") for identity. */
 export function listingTickers(listings: readonly string[]): string[] {

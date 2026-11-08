@@ -24,7 +24,7 @@ import { CASH_BUCKET, STRUCTURAL_PAINT } from '@/lib/sectorColors'
 import { paintBackground } from '@/lib/chartPaint'
 import { cashIsTracked } from '@/lib/portfolioCash'
 import { lookthroughInsights, type CompanyHighlight } from '@/lib/lookthroughInsights'
-import { listingTickers } from '@/lib/lookthroughIdentity'
+import { fundLabel, listingTickers } from '@/lib/lookthroughIdentity'
 import { ABSENT, cn, formatCount, formatSigned, placeholderDim } from '@/lib/utils'
 import { useRememberedOpen } from '@/lib/storage'
 import { unresolvedTone } from '@/lib/lookthroughTone'
@@ -201,7 +201,7 @@ export function fundColumns(deps: {
       shortHeader: 'Fund',
       mobile: 'title',
       cellClassName: 'font-medium',
-      cell: (row) => row.symbol ?? row.fund_isin,
+      cell: (row) => fundLabel(row),
     },
     {
       key: 'status',
@@ -303,7 +303,7 @@ function CompanyBreakdown({
           <ul className="mt-1 space-y-1">
             {row.via_funds.map((fund) => (
               <li key={fund.fund_isin} className="flex justify-between gap-4">
-                <span>{fund.symbol ?? fund.fund_isin}</span>
+                <span>{fundLabel(fund)}</span>
                 <span className="text-muted-foreground">
                   {fund.weight_pct.toFixed(2)}% of the fund ·{' '}
                   {formatCurrency(fund.value_eur)}

@@ -548,6 +548,8 @@ export interface PortfolioAllocationResponse {
  */
 export interface LookthroughFundContribution {
   symbol: string | null;
+  /** The fund's name, for a fund whose symbol is its ISIN. */
+  name?: string | null;
   fund_isin: string;
   value_eur: number;
   /** The company's weight inside that fund. */
@@ -579,6 +581,8 @@ export interface LookthroughCompanyRow {
 
 export interface LookthroughFundCoverage {
   symbol: string | null;
+  /** The fund's name, for a fund whose symbol is its ISIN. */
+  name?: string | null;
   fund_isin: string;
   market_value_eur: number;
   status: 'looked_through' | 'no_basket' | 'excluded' | 'implausible';

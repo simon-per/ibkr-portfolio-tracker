@@ -598,6 +598,10 @@ wrong number.
 
 ### A borrowed basket, and the three ways it could have become a silent one
 
+**A fund whose symbol is its ISIN is named** (`fundLabel`, review item L7, 2026-11-08): the 3a
+funds have no ticker, so each fund entry and each company's via-fund line carry the fund's `name`
+(the security's description, else the registry's) and the tab shows it where the symbol is the ISIN.
+
 **An owner-accepted proxy does not tone the Coverage tile** (`FundSource.proxy_accepted`, review item
 L6, 2026-11-08): the two pension-only Swisscanto tranches publish no basket and have no route to one,
 so their proxies (IEEM, IWDA) are their picture for good, and amber for them would never clear.

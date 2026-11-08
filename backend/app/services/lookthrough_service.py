@@ -242,8 +242,12 @@ class LookthroughService:
             value = pos["_mv"]
             status, reason = self._fund_status(isin, baskets.get(isin))
 
+            declared = source_for_fund_isin(isin)
             entry = {
                 "symbol": symbol_for_fund_isin(isin) or pos["symbol"],
+                # What a fund whose symbol is its ISIN (the 3a funds) is called on screen
+                # (review item L7): the security's own description, else the registry's.
+                "name": pos.get("description") or (declared.name if declared else None),
                 "fund_isin": isin,
                 "market_value_eur": value,
                 "status": status,
@@ -302,7 +306,7 @@ class LookthroughService:
                     f"{basket.as_of_date.isoformat()} is when it was fetched — the basket "
                     f"itself may be older."
                 )
-            source_decl = source_for_fund_isin(isin)
+            source_decl = declared
             entry["proxy_accepted"] = bool(
                 proxy_isin and source_decl and source_decl.proxy_accepted
             )
@@ -348,6 +352,7 @@ class LookthroughService:
                     "value": row_value,
                     "fund_isin": isin,
                     "fund_symbol": entry["symbol"],
+                    "fund_name": entry["name"],
                     "weight_pct": Decimal(row.weight_pct),
                     # Already loaded — `get_holdings()` selects whole entities, so reading this
                     # costs no query and no column list to keep in step.
@@ -724,6 +729,7 @@ class LookthroughService:
                         contribution["fund_isin"],
                         {
                             "symbol": contribution["fund_symbol"],
+                            "name": contribution["fund_name"],
                             "fund_isin": contribution["fund_isin"],
                             "value_eur": Decimal("0"),
                             "weight_pct": Decimal("0"),
@@ -882,6 +888,7 @@ class LookthroughService:
             "via_funds": [
                 {
                     "symbol": f["symbol"],
+                    "name": f["name"],
                     "fund_isin": f["fund_isin"],
                     "value_eur": self._q(f["value_eur"]),
                     "weight_pct": float(round(f["weight_pct"], 4)),
