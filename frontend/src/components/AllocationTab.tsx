@@ -131,7 +131,7 @@ const drillDownAvatar = (pos: DrillDownPosition, className: string) =>
     <TickerAvatar symbol={pos.symbol} securityId={pos.security_id} className={className} />
   ) : null
 
-function drillDownColumns(deps: {
+export function drillDownColumns(deps: {
   formatCurrency: (v: number) => string
 }): Column<AllocationCategory['positions'][number]>[] {
   const { formatCurrency } = deps

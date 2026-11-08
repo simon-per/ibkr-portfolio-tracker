@@ -189,7 +189,7 @@ function cashFooter(
 }
 
 /** The per-fund coverage columns — the honest half of the page. */
-function fundColumns(deps: {
+export function fundColumns(deps: {
   formatCurrency: (v: number) => string
 }): Column<LookthroughFundCoverage>[] {
   const { formatCurrency } = deps

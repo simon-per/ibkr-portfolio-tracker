@@ -177,7 +177,7 @@ function EtfSection({ etfs }: { etfs: FundamentalMetrics[] }) {
  * The five `title=` explanations that used to sit on the headers are `hint`s now, so
  * they reach the phone through the glossary instead of dying with the hover.
  */
-function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, SortKey>[] {
+export function metricsColumns(currencySymbol: string): Column<FundamentalMetrics, SortKey>[] {
   const peg = (row: FundamentalMetrics) =>
     row.peg_ratio ??
     (row.trailing_pe && row.fwd_eps_growth && row.fwd_eps_growth > 0
@@ -450,7 +450,7 @@ function EarningsCalendar({ data }: { data: EarningsCalendarItem[] }) {
  * The earnings-history columns. A module constant rather than a factory: nothing here
  * closes over a hook, which is exactly why it can be one.
  */
-const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
+export const EARNINGS_COLUMNS: Column<EarningsHistoryItem>[] = [
   {
     key: 'symbol',
     header: 'Symbol',

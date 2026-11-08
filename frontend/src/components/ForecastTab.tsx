@@ -103,7 +103,7 @@ function readChosenContribution(): ChosenContribution | null {
   return kept
 }
 
-interface ProjectionRow {
+export interface ProjectionRow {
   year: number
   /** `null` while today's value is unknown (the summary loading or failed). */
   value: number | null
@@ -134,7 +134,7 @@ const MONEY_IN_COLOR = NEUTRAL_COLOR
  * the chart's included every gain ever made. Both render a dash rather than a figure when
  * the baseline could not be loaded, because a 0 would claim nothing was ever paid in.
  */
-const projectionColumns = (money: (value: number) => string): Column<ProjectionRow>[] => [
+export const projectionColumns = (money: (value: number) => string): Column<ProjectionRow>[] => [
   {
     key: 'horizon',
     header: 'Horizon',

@@ -4,8 +4,17 @@ import { cleanup, render } from '@testing-library/react'
 import { DataTable, type Column } from './DataTable'
 import { positionColumns } from '../PositionsList'
 import { watchlistColumns } from '../watchlistColumns'
-import { lookthroughColumns } from '../LookThroughTab'
+import { fundColumns, lookthroughColumns } from '../LookThroughTab'
 import { cryptoHoldingColumns } from '../cryptoColumns'
+import { dividendColumns } from '../DividendsTab'
+import { activityColumns } from '../ActivityTab'
+import { drillDownColumns } from '../AllocationTab'
+import { drawdownColumns } from '../AnalyticsTab'
+import { projectionColumns } from '../ForecastTab'
+import { EARNINGS_COLUMNS, metricsColumns } from '../FundamentalsTab'
+import {
+  BY_COUNTRY_COLUMNS, DIVIDEND_INCOME_COLUMNS, HOLDINGS_COLUMNS, REALIZED_COLUMNS,
+} from '../TaxTab'
 
 /**
  * The family test CLAUDE.md asks for: written against "every table that renders through
@@ -29,10 +38,11 @@ const money = (n: number) => `€${n.toFixed(2)}`
 const moneyOrDash = (value: number | null) => (value === null ? '-' : `€${value.toFixed(2)}`)
 
 /**
- * Only the column sets exported as factories can be checked. The four tax tables and
- * the activity/fundamentals/dividends sets are module-local by design — they close over
- * nothing and are exercised through their components — so `noRawTables` is what covers
- * them.
+ * Every module-level column set is exported and registered here (review item U1,
+ * 2026-11-08). Until then only four were: the Dividends table carried two `delta`
+ * columns, and the phone card draws only the first, so its forward yield never reached a
+ * phone. The sets still built inline (the hidden Analytics tab's tables, the rebalance
+ * plan) are covered by the backstops at the bottom of this file.
  */
 /**
  * Each entry carries a row with every *nullable* field actually null — the shape the
@@ -121,6 +131,81 @@ const SPARSE_CRYPTO_HOLDING = {
   change_today_pct: null,
 }
 
+const SPARSE_DIVIDEND = {
+  security_id: 1, symbol: 'X', exchange: null, description: '', payouts: 0, gross_eur: 0,
+  withholding_eur: 0, net_eur: 0, forecast_payouts: 0, forecast_net_eur: 0,
+  forward_yield_pct: null, per_share_growth_pct: null, yield_on_cost_pct: null,
+  share_pct: null, next_pay_date: null, source: null, forecast_basis: null,
+  forecast_samples: null, forecast_cadence_days: null, forecast_lag_days: null,
+  forecast_lag_samples: null, forecast_method: null, forecast_withholding_pct: null,
+  forecast_withholding_source: null,
+}
+
+// A cash flow: no symbol, no security, no quantity or price.
+const SPARSE_ACTIVITY = {
+  date: '2026-01-02', kind: 'cash', subtype: 'DEPOSITWITHDRAW', symbol: null,
+  security_id: null, description: '', quantity: null, price: null, currency: null,
+  amount_base: null, realized_pnl_base: null, counts_as_money_in: null, source: null,
+  ib_key: null, is_sale: null, is_cancellation: null,
+}
+
+const SPARSE_ALLOCATION_POSITION = {
+  symbol: 'X', security_id: null, description: '', weight: 0, market_value_eur: 0,
+  is_etf_contribution: false,
+}
+
+// A fall still open, with no benchmark beside it.
+const SPARSE_DRAWDOWN = {
+  peakDate: '2026-01-02', troughDate: '2026-02-02', recoveredDate: null, depthPct: 0,
+  daysToTrough: 0, daysToRecover: null, benchmarkPct: null,
+}
+
+// Today's value unknown: every figure of the projection is.
+const SPARSE_PROJECTION = { year: 1, value: null, moneyIn: null, gains: null }
+
+const SPARSE_FUNDAMENTALS = {
+  security_id: 1, symbol: 'X', description: '', exchange: null, currency: 'USD',
+  quote_type: null, trailing_pe: null, forward_pe: null, peg_ratio: null,
+  price_to_sales: null, price_to_book: null, revenue_growth: null, earnings_growth: null,
+  fwd_revenue_growth: null, fwd_eps_growth: null, profit_margins: null,
+  gross_margins: null, operating_margins: null, market_cap: null, market_cap_base: null,
+  number_of_analysts: null, target_mean_price: null, target_high_price: null,
+  target_low_price: null, data_currency: null, last_updated: null,
+}
+
+const SPARSE_EARNINGS = {
+  security_id: 1, symbol: 'X', symbols: [], description: '',
+  earnings_date: '2026-01-02T00:00:00Z', eps_estimate: null, reported_eps: null,
+  surprise_percent: null, beat_or_miss: null,
+}
+
+const SPARSE_FUND_COVERAGE = {
+  symbol: null, fund_isin: 'XX0000000000', market_value_eur: 0, status: 'no_basket',
+  reason: null, basket_as_of: null, stale: false, constituents: 0,
+  equity_weight_pct: null, residual_eur: 0, asset_class_available: false, source: null,
+  proxy_for_symbol: null, unweighted_constituents: 0,
+}
+
+const SPARSE_TAX_DIVIDEND = {
+  symbol: null, description: null, isin: null, pay_date: '2026-01-02', gross: 0,
+  withholding: null, net: 0, source: 'yfinance_estimate',
+}
+
+const SPARSE_TAX_COUNTRY = {
+  country: 'XX', positions: 0, gross: 0, withholding: null, rate_pct: null,
+  residual_pct: null, creditable: null, excess: null, net: 0, payments: 0,
+  estimated_payments: 0,
+}
+
+const SPARSE_TAX_REALIZED = {
+  symbol: null, security_id: null, isin: null, trade_date: '2026-01-02', quantity: null,
+  proceeds: 0, cost_basis: 0, gain_loss: 0,
+}
+
+const SPARSE_TAX_HOLDING = {
+  symbol: null, security_id: 1, isin: null, quantity: null, market_value: 0, cost_basis: 0,
+}
+
 const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
   [
     'Positions',
@@ -147,6 +232,22 @@ const FAMILY: Array<[string, Column<never, string>[], unknown]> = [
     cryptoHoldingColumns({ formatCurrency: money, formatPrice: money }) as never,
     SPARSE_CRYPTO_HOLDING,
   ],
+  [
+    'Dividends by position',
+    dividendColumns({ formatCurrency: money, duplicated: new Set(), showForecast: true }) as never,
+    SPARSE_DIVIDEND,
+  ],
+  ['Activity', activityColumns({ baseCurrency: 'EUR' }) as never, SPARSE_ACTIVITY],
+  ['Allocation drill-down', drillDownColumns({ formatCurrency: money }) as never, SPARSE_ALLOCATION_POSITION],
+  ['Drawdowns', drawdownColumns(null) as never, SPARSE_DRAWDOWN],
+  ['Forecast projection', projectionColumns(money) as never, SPARSE_PROJECTION],
+  ['Fundamentals metrics', metricsColumns('€') as never, SPARSE_FUNDAMENTALS],
+  ['Earnings history', EARNINGS_COLUMNS as never, SPARSE_EARNINGS],
+  ['Look-through funds', fundColumns({ formatCurrency: money }) as never, SPARSE_FUND_COVERAGE],
+  ['Tax dividend income', DIVIDEND_INCOME_COLUMNS(money) as never, SPARSE_TAX_DIVIDEND],
+  ['Tax by country', BY_COUNTRY_COLUMNS(money) as never, SPARSE_TAX_COUNTRY],
+  ['Tax realized gains', REALIZED_COLUMNS(money) as never, SPARSE_TAX_REALIZED],
+  ['Tax holdings', HOLDINGS_COLUMNS(money) as never, SPARSE_TAX_HOLDING],
 ]
 
 describe.each(FAMILY)('%s columns follow the shared conventions', (_name, columns, sparseRow) => {

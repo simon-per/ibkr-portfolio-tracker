@@ -59,7 +59,7 @@ const dividendAvatar = (row: DividendSecurityRow, className: string) => (
  * did not exist at all. As `desktop: 'hide'` detail columns they are on the card and
  * still out of the desktop table's ten.
  */
-function dividendColumns(deps: {
+export function dividendColumns(deps: {
   formatCurrency: (v: number) => string
   duplicated: Set<string>
   showForecast: boolean
