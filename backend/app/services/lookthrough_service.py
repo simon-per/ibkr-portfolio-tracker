@@ -256,6 +256,7 @@ class LookthroughService:
                 "asset_class_available": True,
                 "source": None,
                 "proxy_for_symbol": None,
+                "proxy_accepted": False,
                 "unweighted_constituents": 0,
             }
 
@@ -302,6 +303,9 @@ class LookthroughService:
                     f"itself may be older."
                 )
             source_decl = source_for_fund_isin(isin)
+            entry["proxy_accepted"] = bool(
+                proxy_isin and source_decl and source_decl.proxy_accepted
+            )
             if proxy_isin:
                 warnings.append(
                     f"{entry['symbol']} has no basket of its own and is decomposed using "

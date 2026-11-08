@@ -156,6 +156,14 @@ class LookthroughFundCoverage(BaseModel):
             "a statement about provenance, not about the partition."
         ),
     )
+    proxy_accepted: bool = Field(
+        False,
+        description=(
+            "True when the proxy is the owner-accepted picture of a fund that publishes no "
+            "basket and has no route to one (review item L6): its row keeps the badge, the "
+            "Coverage tile is not toned by it."
+        ),
+    )
     unweighted_constituents: int = Field(
         0,
         description=(

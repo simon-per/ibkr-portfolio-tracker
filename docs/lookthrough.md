@@ -598,6 +598,12 @@ wrong number.
 
 ### A borrowed basket, and the three ways it could have become a silent one
 
+**An owner-accepted proxy does not tone the Coverage tile** (`FundSource.proxy_accepted`, review item
+L6, 2026-11-08): the two pension-only Swisscanto tranches publish no basket and have no route to one,
+so their proxies (IEEM, IWDA) are their picture for good, and amber for them would never clear.
+Their rows keep the "Via …" badge; VWCE's proxy, which a hand import would replace, still tones it.
+`test_etf_source_registry.py` allows the flag only on those two.
+
 `FundSource.basket_proxy_isin` lets a fund with no published basket be decomposed using
 another fund's. **Two entries: VWCE borrows VT's and DBPG borrows VOO's**, both at the account owner's
 instruction. It is an

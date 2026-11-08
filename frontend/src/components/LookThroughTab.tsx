@@ -444,8 +444,10 @@ export function LookThroughTab() {
   // from another fund's file, and a green "every fund decomposed" over that would be the
   // reassuring-zero failure this codebase keeps finding. It stays amber and, unlike a
   // percentage threshold, it can actually clear: importing a real basket for that fund wins
-  // over the proxy with no code change.
-  const proxiedFunds = (data?.funds ?? []).filter((f) => f.proxy_for_symbol)
+  // over the proxy with no code change. Except an owner-accepted proxy (review item L6): a fund
+  // that publishes no basket and has no route to one would keep it amber for good. Its row
+  // keeps the badge.
+  const proxiedFunds = (data?.funds ?? []).filter((f) => f.proxy_for_symbol && !f.proxy_accepted)
   // Ageing baskets are the other way coverage lies: the percentage does not move, but the
   // holdings behind it describe an older index. Surfaced on the card, not only in the table.
   const staleFunds = (data?.funds ?? []).filter((f) => f.stale)

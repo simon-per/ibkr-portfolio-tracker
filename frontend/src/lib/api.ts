@@ -592,6 +592,8 @@ export interface LookthroughFundCoverage {
   source: string | null;
   /** Set when this fund publishes no basket and another fund's stood in — that fund's symbol. */
   proxy_for_symbol: string | null;
+  /** The owner-accepted picture of a fund with no route to a basket: not a Coverage condition. */
+  proxy_accepted?: boolean;
   /** Rows the issuer published at 0.00%. For a broad fund this IS the residual, and it is rounding rather than cash. */
   unweighted_constituents: number;
 }

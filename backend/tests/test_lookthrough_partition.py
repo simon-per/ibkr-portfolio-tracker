@@ -930,6 +930,8 @@ async def test_a_fund_with_no_basket_of_its_own_borrows_the_one_it_proxies(sessi
 
     assert vwce["status"] == "looked_through"
     assert vwce["proxy_for_symbol"] == "VT"
+    # A basket VWCE could still be imported by hand: not an accepted proxy (review item L6).
+    assert vwce["proxy_accepted"] is False
     assert vwce["constituents"] == 2
     # Its value is attributed, not left in the uncovered bucket.
     assert report["uncovered_fund_eur"] < 1000.0

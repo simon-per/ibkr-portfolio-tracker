@@ -67,6 +67,11 @@ class FundSource:
     # readers: refresh the source and the proxy follows.
     basket_proxy_isin: Optional[str] = None
     basket_proxy_reason: str = ""
+    # The owner accepted the proxy as this fund's picture for good: the fund publishes no
+    # basket and has no route to one (the two pension-only Swisscanto tranches, accepted
+    # 2026-10-04). Its row keeps the "Via …" badge; the Coverage tile is not toned by it,
+    # or it would be amber for a reason nobody can act on (review item L6).
+    proxy_accepted: bool = False
 
     # Non-empty means: do not look this fund through, and say this instead. Surfaced to
     # the API verbatim, so the explanation lives where it is read.
@@ -327,6 +332,7 @@ FUND_SOURCES: Dict[str, FundSource] = {
         name="Swisscanto (CH) Index Equity Fund Emerging Markets NMT CHF",
         adapter="manual",
         basket_proxy_isin="IE00B0M63177",
+        proxy_accepted=True,
         basket_proxy_reason=(
             "A pension-only Swisscanto tranche that publishes no basket, so IEEM's is used: "
             "the same MSCI Emerging Markets index (measured within 0.02 pp on the top 10). "
@@ -345,6 +351,7 @@ FUND_SOURCES: Dict[str, FundSource] = {
         name="Swisscanto (CH) IPF I Index Equity Fund World ex CH NT CHF",
         adapter="manual",
         basket_proxy_isin="IE00B4L5Y983",
+        proxy_accepted=True,
         basket_proxy_reason=(
             "A pension-only Swisscanto tranche that publishes no basket, so IWDA's MSCI "
             "World is used for this fund's MSCI World ex Switzerland. It therefore shows "
