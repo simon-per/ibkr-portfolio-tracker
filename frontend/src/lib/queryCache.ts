@@ -19,6 +19,16 @@ const INDEPENDENT_ROOTS: readonly unknown[] = ['settings', 'health', 'logos']
 /** The crypto book is projected into the base currency but has its own tables and sync. */
 const NOT_WRITTEN_BY_IBKR_SYNC: readonly unknown[] = [...INDEPENDENT_ROOTS, 'crypto']
 
+/**
+ * The base currency a response says it was converted into (its top-level `base_currency`),
+ * or null for one that does not say — an array, a figure-free read.
+ */
+export function servedBaseCurrency(data: unknown): string | null {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return null
+  const base = (data as { base_currency?: unknown }).base_currency
+  return typeof base === 'string' && base ? base : null
+}
+
 /** A base-currency switch: every query whose figures were converted into the old one. */
 export function dependsOnBaseCurrency(query: Query): boolean {
   return !INDEPENDENT_ROOTS.includes(query.queryKey[0])
