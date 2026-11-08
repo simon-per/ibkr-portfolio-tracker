@@ -9,7 +9,14 @@
 
 `GET /api/dividends/breakdown?year=&forecast=&period=` → `DividendService.get_dividend_breakdown()`, rendered by
 `DividendsTab.tsx`: net dividends by month **stacked by symbol**, a year filter (All time + the years
-with data), a Forecast toggle, and a per-stock table (payouts, net, projected, trailing-12M yield).
+with data), a Forecast toggle, and a per-stock table (payouts, net, projected, yield).
+
+**One yield per row** (review item FD2, 2026-11-08): `forward_yield_pct`, next-12-month forecast over
+market value, headed *Yield*. A trailing-12M yield sat beside it until then and read low for any
+holding whose shares had been added inside the year (a year's income over today's position: AVGO
+0.10% against 0.75% forward), and on a phone the two shared the card's one delta slot, so the
+forward one never showed. `trailing_yield_pct`, `trailing_yield_partial` and `days_held_in_ttm` left
+the schema with it.
 Unlike `/summary` it **never enqueues a sync**, so it cannot reach Yahoo (rule 1) — everything comes
 from `dividend_payments`, `taxlots`, `market_prices` and `exchange_rates`.
 
@@ -308,7 +315,7 @@ accruals `_forecast_inputs` reads, with or without a forecast, so no figure move
 Every reader of an estimate row, decided:
 
 - **The breakdown** — months, `ttm_series`, `annual[]` net and `withholding_eur`, TTM/YTD and the
-  paces, per-security `net_eur` and the trailing yield: the split. A per-security row's
+  paces and per-security `net_eur`: the split. A per-security row's
   `gross_eur`/`withholding_eur` stay the recorded figures, and the phone card leaves an estimate
   row's withholding out (`source === 'estimate'`: absent, not 0.00).
 - **The pending-estimate tail of the calendar**: the split (it already deducted the ladder rate,
@@ -509,16 +516,6 @@ poisoned data, not a real schedule — don't reinstate it.**
 a monthly payer 11 payouts a year instead of 12, and 91 days walked a quarterly payer from the 15th to
 the 14th to the 13th. A gap near a calendar period snaps to it (`CALENDAR_PERIODS`), keeping the
 schedule's own day and clamping at month end; anything else keeps day-stepping.
-
-**`days_held_in_ttm` is the union of the lot intervals inside the trailing year**, not
-`as_of - min(open_date)`. Those agree only while a holding is unbroken, and diverge in the one case
-the flag exists for: sell out entirely, rebuy months later, and the older form still reported a full
-year because the *first* purchase was a year ago — so a yield built from two partial stretches of
-income was presented unqualified. Intervals are `[open_date, close_date)`, matching the
-exclude-on-close convention, and overlapping lots are merged so three lots open across one month
-count as one month held rather than three. Pinned from all three sides in
-`tests/test_dividend_breakdown.py`: the gap case, the overlap case, and a continuously-held position
-that must keep reporting full coverage.
 
 **Judge staleness from *now*, not from the horizon.** The stopped-payer guard compares against `as_of`,
 because the distance to a future horizon is a property of the question. Otherwise asking about 2027 made
@@ -916,7 +913,7 @@ implementation beside the forecast, which is this file's opening warning. `yfina
 **Weighting is arithmetic, not code.** A market-value-weighted average of per-security yields *is*
 Σ(income)/Σ(value) — `Σ (Vᵢ/V × Dᵢ/Vᵢ) == Σ Dᵢ / V`, every non-payer entering at zero. So the service
 divides two figures it already holds and nothing is weighted by hand. `forward_yield_pct` on each
-breakdown row is the audit of the headline; the *Fwd yield* column on the Dividends tab shows it.
+breakdown row is the audit of the headline; the *Yield* column on the Dividends tab shows it.
 
 Four rules, each of which would be a wrong number the other way:
 
@@ -946,7 +943,8 @@ describe different positions the moment the position size changes inside the win
 - **Adding to a holding** divides a small position's income by the finished position's cost, so the
   figure reads far too low. Live on **nine of fifteen rows** when it was found — MCO showed 0.35%
   against a real forward 0.84%, SPGI 0.53% against 0.93% — and *unbadged*, because the `†`
-  partial-coverage marker was only ever on the trailing yield column, never on yield on cost.
+  partial-coverage marker was only ever on the trailing yield column (removed 2026-11-08, FD2),
+  never on yield on cost.
 - **Selling and rebuying** is the same defect at its most extreme: the income was earned on shares
   bought cheaply and then divided by the cost of the shares that replaced them, so the result is
   neither the old holding's yield nor the new one's. Under the current definition a rebuy at a higher
@@ -1018,7 +1016,7 @@ Each of these was a wrong number before it was a rule:
 
 **Data-quality notes are not rendered** (owner's call, 2026-10-14: "a lot of bloat, which is not
 relevant data"). The API still carries every flag — `yoy_vs_partial`, `prev_year_partial`,
-`ttm_crosses_era`, `mom_crosses_era`, `partial` on a year, `trailing_yield_partial`,
+`ttm_crosses_era`, `mom_crosses_era`, `partial` on a year,
 `forecast_samples`, `basis: gross_estimate`, `source`, `ttm_coverage_start` — but the tab draws no
 dagger, asterisk, `n=` badge, era note or provenance line for them, and `DeltaChip` has no
 `caveat` prop any more. What stays is what changes how a figure is read today: `est.` on anything

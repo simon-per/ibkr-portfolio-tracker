@@ -166,13 +166,6 @@ def yahoo_dividend_rows(
         })
     return rows, skipped
 
-# Below this many days held inside the trailing year, a trailing-12M yield divides
-# a partial year's income by a full position value and so reads low. 350 rather
-# than 365 to absorb a lot opened a few days into the window without flagging
-# every long-held position.
-TTM_FULL_COVERAGE_DAYS = 350
-
-
 # How far an ex-date may precede its pay-date for the two sources to be treated as the
 # same dividend at the era boundary. Mastercard's 29-day lag is the widest this account
 # has — CLAUDE.md cites it as exceeding a whole monthly cycle — so 30 covers every real
@@ -3372,62 +3365,6 @@ class DividendService:
             "per_share": self._book_per_share_growth(ps_growth, next_12m_by_sec, next_12m),
         }
 
-        # Trailing-12-month yield: spliced net over the current market value.
-        # Positions are a decoration here — their failure must not 500 the view.
-        ttm_start = as_of - timedelta(days=365)
-        ttm_net: Dict[int, Decimal] = defaultdict(Decimal)
-        for p in all_payments:
-            d = p.pay_date or p.ex_date
-            if ttm_start <= d <= as_of:
-                ttm_net[p.security_id] += base_fx.convert(income.net(p), d)
-
-        # How much of that trailing year the position was actually held for. A
-        # holding bought seven weeks ago divides seven weeks of income by a full
-        # position value, so its yield reads a fraction of the truth — SBI showed
-        # 1.0% off a single payment. The figure is not wrong to compute, but it is
-        # wrong to present unqualified, so report the coverage and let the UI badge
-        # it, the same way `yoy_vs_partial` handles the first year of income.
-        # One aggregate rather than reusing the forecast's lot map, which only
-        # exists when include_forecast is set — this figure must be right either way.
-        #
-        # Measured as the UNION of the lot intervals clipped to the window, not as
-        # `as_of - min(open_date)`. That older form asked "how long ago was this security
-        # first bought", which answers the question only while the holding is unbroken:
-        # sell out entirely and rebuy months later and it still reports a full year, so a
-        # yield built from two partial stretches of income was presented unqualified —
-        # the flag under-reporting in exactly the case that most needs it.
-        #
-        # Intervals are [open_date, close_date) because a lot sold on D is not held at D's
-        # close, the same convention as `_calculate_daily_value` and the attribution gates.
-        lot_spans = (await self.db.execute(
-            select(TaxLot.security_id, TaxLot.open_date, TaxLot.close_date)
-        )).all()
-        spans_by_sec: Dict[int, List] = defaultdict(list)
-        for sid, opened, closed in lot_spans:
-            if opened is None:
-                continue
-            span_start = max(opened, ttm_start)
-            span_end = min(closed, as_of) if closed else as_of
-            if span_end > span_start:
-                spans_by_sec[sid].append((span_start, span_end))
-
-        ttm_days_held: Dict[int, int] = {}
-        for sid, spans in spans_by_sec.items():
-            # Overlapping lots must not double-count a day: three lots open across the
-            # same month is one month held, not three.
-            total_days = 0
-            cur_start = cur_end = None
-            for span_start, span_end in sorted(spans):
-                if cur_end is None:
-                    cur_start, cur_end = span_start, span_end
-                elif span_start <= cur_end:
-                    cur_end = max(cur_end, span_end)
-                else:
-                    total_days += (cur_end - cur_start).days
-                    cur_start, cur_end = span_start, span_end
-            if cur_end is not None:
-                total_days += (cur_end - cur_start).days
-            ttm_days_held[sid] = total_days
         # This call must stay the LAST database access in the method. It is allowed to
         # fail into "yields omitted" only because nothing queries afterwards: a
         # DBAPI-level error leaves the AsyncSession needing a rollback, so any later
@@ -3621,7 +3558,6 @@ class DividendService:
             sec = securities.get(sid)
             mv = mv_by_sec.get(sid)
             cost = cost_by_sec.get(sid)
-            ttm = ttm_net.get(sid, Decimal("0"))
             sec_rows.append({
                 "security_id": sid,
                 "symbol": _symbol(sid),
@@ -3637,12 +3573,11 @@ class DividendService:
                 "net_eur": round(float(row["net"]), 2),
                 "forecast_payouts": row["forecast_payouts"],
                 "forecast_net_eur": round(float(row["forecast_net"]), 2),
-                "trailing_yield_pct": (
-                    share_pct(ttm, mv) if is_valuable(mv) and ttm > 0 else None
-                ),
-                # The forward counterpart, and the audit of the portfolio-level figure:
-                # weight each of these by its share of market value and the result is
-                # `forward_yield.pct` exactly.
+                # The row's one yield (review item FD2, 2026-11-08: the trailing yield
+                # beside it divided a year's income by today's position and read low
+                # whenever shares had been added), and the audit of the portfolio-level
+                # figure: weight each of these by its share of market value and the
+                # result is `forward_yield.pct` exactly.
                 #
                 # Deliberately the security's NEXT-12-MONTH projection, not the
                 # window-limited `forecast_net_eur` beside it — asked in August with
@@ -3665,14 +3600,6 @@ class DividendService:
                     if sid in ps_growth and next_12m_by_sec.get(sid, Decimal("0")) > 0
                     else None
                 ),
-                # True when the position wasn't held for the whole trailing year, so
-                # a partial year's income is being divided by a full position value
-                # and the yield reads low. Badged, not silently annualized: scaling
-                # up would invent income the schedule may not support.
-                "trailing_yield_partial": (
-                    ttm_days_held.get(sid, 0) < TTM_FULL_COVERAGE_DAYS
-                ),
-                "days_held_in_ttm": ttm_days_held.get(sid),
                 # The FORWARD annual rate over what the position cost — which is what
                 # "yield on cost" means, and what the portfolio-level card divides.
                 #

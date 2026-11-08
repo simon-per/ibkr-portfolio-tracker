@@ -382,8 +382,7 @@ describe('The dividend legend', () => {
     data.securities = data.stack_order.map((symbol, i) => ({
       security_id: i + 1, symbol, exchange: null, description: symbol,
       payouts: 1, gross_eur: symbols[symbol], withholding_eur: 0, net_eur: symbols[symbol],
-      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
-      forward_yield_pct: null, trailing_yield_partial: false, days_held_in_ttm: 365,
+      forecast_payouts: 0, forecast_net_eur: 0, forward_yield_pct: null,
       yield_on_cost_pct: null, share_pct: null, next_pay_date: null, source: 'ibkr',
       forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
       forecast_lag_days: null, forecast_lag_samples: null,
@@ -516,9 +515,8 @@ describe('The per-position table', () => {
     return {
       security_id: id, symbol, exchange: null, description: symbol,
       payouts: 1, gross_eur: net, withholding_eur: 0, net_eur: net,
-      forecast_payouts: 0, forecast_net_eur: 0, trailing_yield_pct: null,
-      forward_yield_pct: null, per_share_growth_pct: growth, trailing_yield_partial: false,
-      days_held_in_ttm: 365, yield_on_cost_pct: null, share_pct: net, next_pay_date: null,
+      forecast_payouts: 0, forecast_net_eur: 0,
+      forward_yield_pct: null, per_share_growth_pct: growth, yield_on_cost_pct: null, share_pct: net, next_pay_date: null,
       source: 'ibkr', forecast_basis: null, forecast_samples: null, forecast_cadence_days: null,
       forecast_lag_days: null, forecast_lag_samples: null, forecast_method: null,
       forecast_withholding_pct: null, forecast_withholding_source: null,
@@ -557,6 +555,32 @@ describe('The per-position table', () => {
     expect(bodyOrder()).toEqual(['AAA', 'DDD', 'CCC', 'BBB'])
     await user.click(within(growth).getByRole('button'))
     expect(bodyOrder()).toEqual(['CCC', 'DDD', 'AAA', 'BBB'])
+  })
+
+  it('has one yield, the forecast over market value, on the table and on the phone', async () => {
+    // Review items FD2 and U1: a trailing "Yield" beside "Fwd yield" read low whenever
+    // shares had been added, and both were the card's delta, so the phone drew only the
+    // trailing one.
+    const data = withSecurities()
+    data.securities = [{ ...security(1, 'AAA', null, 40), forward_yield_pct: 1.25 }]
+    vi.spyOn(api, 'getDividendBreakdown').mockResolvedValue(data)
+    mount()
+    await screen.findByText(/Received/)
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(headers.filter((h) => /yield/i.test(h ?? '') && !/YoC/.test(h ?? ''))).toEqual(['Yield'])
+    expect(within(screen.getByRole('table')).getByText('1.25%')).toBeTruthy()
+    cleanup()
+
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    }))
+    try {
+      mount()
+      await screen.findByText(/Received/)
+      expect(screen.getByText('1.25%')).toBeTruthy()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('counts raises and cuts over the payers it lists', async () => {

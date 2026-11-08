@@ -829,9 +829,8 @@ export interface DividendSecurityRow {
   net_eur: number;
   forecast_payouts: number;
   forecast_net_eur: number;
-  trailing_yield_pct: number | null;
   /**
-   * The forward counterpart: this security's projection for the NEXT 12 MONTHS over its
+   * The row's one yield: this security's projection for the NEXT 12 MONTHS over its
    * current market value. Weight these by market value and they average to
    * `DividendForwardYield.pct` — which is what makes that headline auditable.
    *
@@ -847,13 +846,6 @@ export interface DividendSecurityRow {
    * not 0%. Optional so an older backend payload still parses.
    */
   per_share_growth_pct?: number | null;
-  /**
-   * True when the position wasn't held for the whole trailing year, so the yield
-   * divides a partial year's income by a full position value and reads low.
-   * Deliberately not annualized — that would invent income.
-   */
-  trailing_yield_partial: boolean;
-  days_held_in_ttm: number | null;
   /**
    * Projected next-12-month income over what the position cost — the same numerator as
    * `forward_yield_pct`, so the gap between them is the holding's appreciation, and the

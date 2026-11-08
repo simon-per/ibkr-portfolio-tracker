@@ -19,7 +19,7 @@ import { compareNullsLast } from './nullsLast'
  * renders.
  */
 export type DividendSortKey =
-  | 'symbol' | 'net' | 'yield' | 'fwdYield' | 'payouts' | 'share' | 'forecast' | 'next'
+  | 'symbol' | 'net' | 'yield' | 'payouts' | 'share' | 'forecast' | 'next'
   | 'growth' | 'yoc'
 
 export type DividendSortDirection = 'asc' | 'desc'
@@ -38,8 +38,7 @@ function sortValue(
   switch (key) {
     case 'symbol': return row.symbol
     case 'net': return row.net_eur
-    case 'yield': return row.trailing_yield_pct
-    case 'fwdYield': return row.forward_yield_pct
+    case 'yield': return row.forward_yield_pct
     case 'payouts': return row.payouts
     case 'share': return row.share_pct
     case 'forecast': return showForecast && row.forecast_net_eur > 0 ? row.forecast_net_eur : null

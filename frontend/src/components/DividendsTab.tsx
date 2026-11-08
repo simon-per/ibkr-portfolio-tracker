@@ -127,21 +127,6 @@ function dividendColumns(deps: {
       shortHeader: 'Yield',
       align: 'right',
       mobile: 'delta',
-      hint: { description: 'Trailing 12M net ÷ market value' },
-      cell: (row, view) =>
-        row.trailing_yield_pct != null ? (
-          `${row.trailing_yield_pct.toFixed(2)}%`
-        ) : view === 'table' ? (
-          ABSENT
-        ) : null,
-    },
-    {
-      key: 'fwdYield',
-      sortKey: 'fwdYield',
-      header: 'Fwd yield',
-      shortHeader: 'Fwd yield',
-      align: 'right',
-      mobile: 'delta',
       hint: { description: 'Next 12M forecast ÷ market value' },
       cell: (row, view) =>
         row.forward_yield_pct != null

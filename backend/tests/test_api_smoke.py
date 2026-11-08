@@ -863,14 +863,13 @@ def test_the_shapes_that_broke_production_serialize(client):
     # The tax report's honesty fields survive the HTTP layer. holdings_snapshot_total
     # is nullable now — a failed snapshot is a missing wealth-tax base, not a zero
     # one — so the route must not coerce None to 0.0 or drop the flag.
-    # The two qualifying fields on a security row must survive DividendSecurityRow —
-    # a Pydantic model drops what it does not declare, and both exist precisely to
-    # stop a figure being read as more solid than it is.
+    # The qualifying fields on a security row must survive DividendSecurityRow — a
+    # Pydantic model drops what it does not declare, and they exist precisely to stop a
+    # figure being read as more solid than it is. One yield per row (review item FD2):
+    # the trailing one and its coverage flag are gone from the wire.
     for row in bd["securities"]:
-        assert "trailing_yield_partial" in row and isinstance(
-            row["trailing_yield_partial"], bool
-        )
         assert "forecast_samples" in row and "forecast_cadence_days" in row
+        assert not {"trailing_yield_pct", "trailing_yield_partial", "days_held_in_ttm"} & set(row)
         # The forward yield's per-security audit. Nullable by design — a row with no
         # projection or no price has no rate, which is not a rate of zero.
         assert row["forward_yield_pct"] is None or isinstance(
