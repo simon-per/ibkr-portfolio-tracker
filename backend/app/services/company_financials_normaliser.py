@@ -429,6 +429,8 @@ class Obs:
     error: float = 0.0
     # Differenced from a year-to-date ladder rather than reported.
     derived: bool = False
+    # Every filing's (filed, adjusted value) for this span, oldest first (`_as_of`).
+    vintages: Tuple[Tuple[date, float], ...] = ()
 
 
 @dataclass
@@ -786,6 +788,7 @@ def _latest(
     """Per concept, per (start, end): the value of the latest filing, adjusted."""
     chosen: Dict[Tuple[str, Optional[date], date], Fact] = {}
     annual_form: Dict[Tuple[str, Optional[date], date], bool] = defaultdict(bool)
+    every: Dict[Tuple[str, Optional[date], date], Dict[date, Fact]] = defaultdict(dict)
     for f in facts:
         key = (f.concept, f.start, f.end)
         if f.form.startswith("10-K"):
@@ -793,9 +796,16 @@ def _latest(
         held = chosen.get(key)
         if held is None or (f.filed, f.accn) > (held.filed, held.accn):
             chosen[key] = f
+        same_day = every[key].get(f.filed)
+        if same_day is None or f.accn > same_day.accn:
+            every[key][f.filed] = f
     out: Dict[str, Dict[Tuple[Optional[date], date], Obs]] = defaultdict(dict)
     for key, f in chosen.items():
         m = multiplier.get((f.concept, f.accn), 1.0)
+        vintages = tuple(
+            (day, g.val * multiplier.get((g.concept, g.accn), 1.0))
+            for day, g in sorted(every[key].items())
+        )
         error = CENT_ROUNDING * abs(m) if f.kind == PER_SHARE else 0.0
         out[f.concept][(f.start, f.end)] = Obs(
             value=f.val * m,
@@ -806,8 +816,33 @@ def _latest(
             concept=f.concept,
             annual_form=annual_form[key],
             error=error,
+            vintages=vintages,
         )
     return out
+
+
+def _as_of(obs: Obs, when: date) -> Obs:
+    """
+    `obs` as the filings up to `when` knew it: the newest value filed on or before it, or
+    `obs` itself when none was (review item CO6, 2026-11-08).
+    """
+    if obs.filed <= when:
+        return obs
+    known = [(day, value) for day, value in obs.vintages if day <= when]
+    if not known:
+        return obs
+    day, value = known[-1]
+    return Obs(
+        value=value,
+        filed=day,
+        start=obs.start,
+        end=obs.end,
+        unit=obs.unit,
+        concept=obs.concept,
+        annual_form=obs.annual_form,
+        error=obs.error,
+        derived=obs.derived,
+    )
 
 
 def _not_a_figure(
@@ -961,7 +996,11 @@ def _quarters_and_years(
         for i, (shorter, longer) in enumerate(zip(rungs, rungs[1:])):
             if not _between((longer.end - shorter.end).days, QUARTER_DAYS):
                 continue
-            candidate = _difference(kind, longer, shorter)
+            # Both rungs of one filing vintage: a shorter rung a newer filing restated (HON's
+            # next 10-Q put the prior nine months on continuing operations) is taken as the
+            # longer rung's filing knew it, or Q4 is the whole company's year less the
+            # continuing nine months (review item CO6).
+            candidate = _difference(kind, longer, _as_of(shorter, longer.filed))
             zero_shown = cumulative and _accounted(rungs, i, direct)
             if _not_a_figure(kind, non_negative, candidate.value, zero_shown):
                 continue

@@ -248,7 +248,12 @@ transition reports; an 8-K's or a proxy's stray fact does not count.
 - **The latest filing of a period wins** — that is how a restatement replaces the original.
 - **Year-to-date ladders.** 10-Q cash-flow items run from the fiscal year's start. Two rungs of
   one ladder a quarter apart give the quarter between them, and the 10-K's year less the
-  nine-month rung gives Q4. A reported discrete quarter beats a derived one. Flows and per-share
+  nine-month rung gives Q4. **Both rungs of one filing vintage** (`_as_of`, review item CO6,
+  2026-11-08): a shorter rung a newer filing restated is taken as the longer rung's filing knew it.
+  HON's next 10-Q put the prior nine months on continuing operations while the year stood
+  whole-company until the next 10-K, and their difference was a 57% operating margin. Until that
+  10-K the year's quarters mix bases (Q1–Q3 restated, Q4 not); each is still a real quarter.
+  A reported discrete quarter beats a derived one. Flows and per-share
   figures are differenced; a weighted-average share count by day weight
   (`(Y·d_Y − N·d_N) / (d_Y − d_N)`, what a weighted average is). **A derived Q4 EPS is the year's
   EPS less the nine months'**, the usual approximation, exact only while the share count holds
