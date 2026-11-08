@@ -317,6 +317,34 @@ def test_a_special_is_never_repeated_and_its_slot_falls_back_to_the_regular_leve
     assert {fp.net_eur for fp in out} == {Decimal("361")}
 
 
+def test_a_varying_payers_newest_one_off_sizes_only_itself():
+    """
+    Review item D3: Samsung's quarter of twelve times the usual is the newest payment,
+    so nothing after it has fallen back yet. The payer is varying (a larger year-end)
+    and each of its slots repeats its own a year on, so taken as regular it was forecast
+    again the next September. The same quarter a year earlier was ordinary: a one-off.
+    """
+    history = _series([
+        (date(2024, 9, 27), "361"), (date(2024, 12, 27), "363"), (date(2025, 3, 28), "365"),
+        (date(2025, 6, 27), "365"), (date(2025, 9, 29), "365"), (date(2025, 12, 29), "566"),
+        (date(2026, 3, 30), "370"), (date(2026, 6, 29), "372"), (date(2026, 9, 29), "4601"),
+    ])
+    assert [p.per_share_eur for p in special_payments(history, 91)] == [Decimal("4601")]
+    out = project_dividends(history, Decimal("1"),
+                            date(2026, 10, 1), date(2027, 9, 30), as_of=date(2026, 10, 1))
+    assert len(out) == 4
+    assert max(fp.net_eur for fp in out) < Decimal("1000")
+
+
+def test_a_steady_payers_newest_jump_is_still_a_raise():
+    """NVDA's 0.01 to 0.25 passes every test a one-off would, but the payer is steady."""
+    history = _series(_quarters([2025, 2026], [
+        ["0.01", "0.01", "0.01", "0.01"],
+        ["0.01", "0.01", "0.25"],
+    ]))
+    assert special_payments(history, 91) == []
+
+
 def test_ibkr_labelling_a_payment_special_is_final():
     """Even a modest special is excluded when IBKR's cash line says so."""
     history = _series(_quarters([2025, 2026], [

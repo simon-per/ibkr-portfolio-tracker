@@ -641,8 +641,12 @@ is > 2× the median of its neighbours within a year, nothing at least half its s
 side, AND something shows it was a one-off: it sat off the schedule (within half a cycle of another
 payment), or the same payment a year apart *exists and was small* and the next payment fell back.
 Those last conditions are not decoration: NVDA's step to 0.25 passes the first two tests exactly as a
-special would — only what came after can tell them apart, so the newest on-schedule payment is never
-called special by inference. And without a year-apart payment to compare, a fund's first December in
+special would — only what came after can tell them apart, so the newest on-schedule payment of a
+**steady** payer is never called special by inference. A **varying** payer's newest is (review item D3,
+2026-11-08) when the same payment a year earlier exists and was small: its slots repeat their own a
+year on, so taken as regular, Samsung's quarter of twelve times the usual was forecast again the next
+September (about 4.5% of the next twelve months). Judged with it included, so a steady payer's jump
+stays a raise. And without a year-apart payment to compare, a fund's first December in
 the history would look special and read every winter-starting fund low, so it stays regular.
 
 **Each projected payment says how it was sized:** `upcoming[].amount_source` and the row's

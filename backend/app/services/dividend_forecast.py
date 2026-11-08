@@ -211,14 +211,21 @@ def special_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayme
     That last condition is what separates a special from a raise. NVDA's step from
     0.01 to 0.25 passes the first two tests exactly as a special would; only what
     came after it can tell them apart, so the newest payment on the regular
-    schedule is never called special on our inference — IBKR's label is the one
-    source that can say so on the day.
+    schedule of a STEADY payer is never called special on our inference — IBKR's
+    label is the one source that can say so on the day.
+
+    A varying payer's newest is (review item D3, 2026-11-08): when the same payment a
+    year earlier exists and was small, and the payer judged with it is varying. A
+    varying payer's slot is sized by the same one a year earlier, so taking it as
+    regular repeats it a year on — Samsung's quarter of twelve times the usual,
+    forecast again for next year. A steady payer's jump stays a raise.
 
     Needs two neighbours to judge; with fewer, nothing is flagged.
     """
     priced = [p for p in history if p.per_share_eur is not None and p.per_share_eur > 0]
     tol = _slot_tolerance(gap)
     out = [p for p in priced if p.special]
+    unlabelled = sorted((p for p in priced if not p.special), key=lambda p: p.on_date)
     for p in priced:
         if p.special:
             continue
@@ -238,7 +245,10 @@ def special_payments(history: Sequence[HistPayment], gap: int) -> List[HistPayme
                         for q in priced)
         later = [q for q in priced if q.on_date > p.on_date]
         fell_back = bool(later) and min(later, key=lambda q: q.on_date).per_share_eur             * SPECIAL_MULTIPLE < p.per_share_eur
-        if off_cycle or (year_apart and fell_back):
+        newest_of_a_varying_payer = (
+            not later and bool(year_apart) and not is_steady(unlabelled)
+        )
+        if off_cycle or (year_apart and fell_back) or newest_of_a_varying_payer:
             out.append(p)
     return out
 
