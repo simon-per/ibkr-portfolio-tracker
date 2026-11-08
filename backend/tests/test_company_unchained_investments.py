@@ -87,3 +87,51 @@ async def test_the_pass_warns_with_the_company_and_the_concept(db, configured): 
     assert any(
         "NVDA (OtherMarketableSecuritiesCurrent)" in w for w in summary["warnings"]
     )
+
+
+def _investments(result):
+    return {r["period_end"].isoformat(): r["value"] for r in result.rows
+            if r["metric"] == "short_term_investments"}
+
+
+def test_klacs_available_for_sale_total_is_its_marketable_securities():
+    """
+    Read on the server (2026-11-08): KLAC tags its balance-sheet "Marketable securities" as
+    `AvailableForSaleSecuritiesDebtSecurities` — a total, with no "Current" suffix, so the
+    check above would never have named it. With nothing non-current tagged beside it, it is
+    all current, and net cash counts it.
+    """
+    result = normalise(facts({
+        "AvailableForSaleSecuritiesDebtSecurities": {"units": {"USD": [
+            f("2026-06-30", 3.206e9, "k26", "2026-08-01"),
+        ]}},
+    }))
+    assert _investments(result) == {"2026-06-30": 3.206e9}
+    assert result.unchained_investments == []
+
+
+def test_the_total_beside_a_noncurrent_figure_is_not_liquid():
+    result = normalise(facts({
+        "AvailableForSaleSecuritiesDebtSecurities": {"units": {"USD": [
+            f("2026-06-30", 3.206e9, "k26", "2026-08-01"),
+        ]}},
+        "MarketableSecuritiesNoncurrent": {"units": {"USD": [
+            f("2026-06-30", 1.0e9, "k26", "2026-08-01"),
+        ]}},
+    }))
+    assert _investments(result) == {}
+    # The non-current figure is read for the test alone, never stored.
+    assert not any(r["metric"] == "noncurrent_investments" for r in result.rows)
+
+
+def test_a_current_concept_wins_over_the_total():
+    result = normalise(facts({
+        "MarketableSecuritiesCurrent": {"units": {"USD": [
+            f("2026-06-30", 2.0e9, "k26", "2026-08-01"),
+        ]}},
+        "AvailableForSaleSecuritiesDebtSecurities": {"units": {"USD": [
+            f("2026-06-30", 3.0e9, "k26", "2026-08-01"),
+        ]}},
+    }))
+    assert _investments(result) == {"2026-06-30": 2.0e9}
+
