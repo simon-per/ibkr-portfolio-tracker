@@ -444,6 +444,9 @@ Computed in `company_financials_service` only:
 - **Margins** = the figure / revenue of the same period, as fractions (0.25 is 25%); null when
   revenue is missing or not positive.
 - **Balances** (cash, debt) are the period end's; a TTM point carries its newest quarter's.
+  **Debt** is the tagged total, else the noncurrent and current halves, and the halves when the
+  "total" is smaller than they are — one half under the total's concept (review item CO7: AMD's
+  FY2021 read 1M against 313M of notes); `_debt`, `tests/test_company_debt.py`.
 - **Payout ratio** = TTM dividends per share / TTM diluted EPS; null when the EPS is not positive.
 - **P/E** = a close / TTM diluted EPS (a year's own EPS on the annual view); null when the EPS
   is not positive. **P/S** and **P/FCF** are the same close over revenue and FCF per share,

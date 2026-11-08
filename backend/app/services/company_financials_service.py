@@ -225,14 +225,16 @@ def _debt(base: Dict[str, Optional[float]]) -> Optional[float]:
     The tagged total, else the noncurrent and current halves added when both are tagged.
     A total of exactly zero is a tagging slip, not a debt-free company (ORCL's FY2022 and
     AMD's FY2021 10-Ks tag a 0 beside billions of notes); a company without debt tags none.
+    And a "total" smaller than its own halves is one of them under the total's concept
+    (review item CO7, 2026-11-08: AMD's FY2021 year end read 1M against 313M of notes, and
+    the next year's debt grew "+246,600%"): the halves win.
     """
     total = base.get("debt_total")
-    if total:
-        return total
     noncurrent, current = base.get("debt_noncurrent"), base.get("debt_current")
-    if noncurrent is not None and current is not None:
-        return noncurrent + current
-    return None
+    halves = noncurrent + current if noncurrent is not None and current is not None else None
+    if halves is not None and (not total or halves > total):
+        return halves
+    return total or None
 
 
 def _derive(point: Point) -> None:
