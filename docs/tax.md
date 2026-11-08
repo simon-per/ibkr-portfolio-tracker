@@ -330,6 +330,13 @@ snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
   is one base-currency figure, so a negative balance in one currency offset by another is not
   seen either, while a same-currency sell-then-buy weeks apart can read a few units negative
   from the two days' different base rates. `min_cash_balance` is served so the size is visible.
+- **`margin_interest`** (review item T4, 2026-11-08): what IBKR charged on a margin loan over the
+  window, in the base currency — the `BROKERINTPAID` cash-flow rows, which the Flex ingest keeps
+  since that day. Null while the broker's interest is not on record from the window's start
+  (`broker_interest_covered_from`, widened by every statement carrying a <CashTransactions> row):
+  a part of the year is not the year's. A year on record with no booking paid none, `0`. The Margin
+  tile's sub-line names it; the CSV carries it. A Client Portal statement covering an earlier
+  period, ingested through `app/cli/ingest_flex_xml.py`, puts that period on record.
 - **Derivatives, the circular's fourth trading criterion, are not reported**: `ibkr_service.
   extract_trades` keeps STK executions only, so the ledger can never hold a derivative and the
   answer would always be a dash; it becomes answerable once that ingest records non-STK

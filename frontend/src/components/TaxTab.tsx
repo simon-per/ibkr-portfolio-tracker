@@ -523,9 +523,11 @@ function TraderCriteria({ data, money }: { data: TaxReport; money: Money }) {
           label="Margin used"
           tone={tc.margin_used ? 'warning' : 'neutral'}
           value={tc.margin_used == null ? null : tc.margin_used ? 'Yes' : 'No'}
-          sub={tc.margin_used && tc.min_cash_balance != null
-            ? `low ${money(tc.min_cash_balance)}`
-            : undefined}
+          // The low balance and, once on record, what the margin cost (review item T4).
+          sub={[
+            tc.margin_used && tc.min_cash_balance != null ? `low ${money(tc.min_cash_balance)}` : null,
+            tc.margin_interest ? `interest ${money(tc.margin_interest)}` : null,
+          ].filter(Boolean).join(' · ') || undefined}
         />
       </KpiPanel>
     </div>

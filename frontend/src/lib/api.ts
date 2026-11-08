@@ -1411,6 +1411,8 @@ export interface TaxTraderCriteria {
   /** IBKR cash closed a day of the year below zero. */
   margin_used: boolean | null;
   min_cash_balance: number | null;
+  /** What IBKR charged on a margin loan over the window; null while not on record from its start. */
+  margin_interest?: number | null;
 }
 
 /** One event on the ledger. Fields a kind cannot fill are null, never 0. */

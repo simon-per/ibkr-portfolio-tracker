@@ -41,6 +41,10 @@ from app.repositories.market_price_repository import MarketPriceRepository
 from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowRepository
 from app.models.cash_flow import DEPOSIT_WITHDRAW, TRANSFER, TRANSFER_IN, TRANSFER_OUT
+from app.repositories.app_settings_repository import (
+    BROKER_INTEREST_COVERED_FROM_KEY,
+    AppSettingsRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,14 +176,9 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
         await cash_balance_repo.upsert(row)
 
     # Record how far back the deposit ledger is complete — the splice point between
-    # "measure contributions from lot cost basis" and "measure them from real deposits".
-    # Only widen when deposits were actually present: an export taken without the
-    # Deposits & Withdrawals option would otherwise claim coverage it has no data for.
-    coverage_from = None
-    if cash_flows_data and flex_data.get('from_date'):
-        coverage_from = await app_settings.widen_cash_flows_covered_from(
-            flex_data['from_date']
-        )
+    # "measure contributions from lot cost basis" and "measure them from real deposits" —
+    # and the broker's interest with it.
+    coverage_from = await record_cash_coverage(app_settings, flex_data, cash_flows_data)
 
     warnings: List[str] = []
     if superseded:
@@ -429,6 +428,30 @@ async def resolve_cash_balances(
         by_date[row['report_date']] = row
 
     return [by_date[d] for d in sorted(by_date)]
+
+
+async def record_cash_coverage(
+    app_settings: AppSettingsRepository, flex_data: Dict, cash_flows_data: List[Dict]
+) -> Optional[date]:
+    """
+    How far back the cash ledgers are complete, widened by this statement; returns the
+    deposit ledger's start.
+
+    - **Deposits** — only when deposits were actually present: an export taken without the
+      Deposits & Withdrawals option would otherwise claim coverage it has no data for.
+    - **The broker's interest** (`BROKER_INTEREST_COVERED_FROM_KEY`, review item T4): from a
+      statement carrying any <CashTransactions> row, which had the section on — so a period
+      with no interest row in it paid none.
+    """
+    from_date = flex_data.get('from_date')
+    coverage_from = None
+    deposits = [f for f in cash_flows_data if f.get('flow_type') == DEPOSIT_WITHDRAW]
+    if deposits and from_date:
+        coverage_from = await app_settings.widen_cash_flows_covered_from(from_date)
+    statement = flex_data.get('statement')
+    if getattr(statement, 'CashTransactions', None) and from_date:
+        await app_settings.widen_date_setting(BROKER_INTEREST_COVERED_FROM_KEY, from_date)
+    return coverage_from
 
 
 async def persist_cash_flows(

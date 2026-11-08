@@ -31,8 +31,11 @@ from app.models.taxlot import TaxLot
 from app.models.trade import Trade, buy_sign, is_sale_side, sale_sign, uncancelled_sales
 from app.models.dividend_payment import DividendPayment
 from app.repositories.dividend_repository import IBKR_SOURCE, YFINANCE_SOURCE
-from app.models.cash_flow import CashFlow, DEPOSIT_WITHDRAW
-from app.repositories.app_settings_repository import AppSettingsRepository
+from app.models.cash_flow import BROKER_INTEREST_PAID, CashFlow, DEPOSIT_WITHDRAW
+from app.repositories.app_settings_repository import (
+    BROKER_INTEREST_COVERED_FROM_KEY,
+    AppSettingsRepository,
+)
 from app.services.cash_service import CashService
 from app.services.currency_service import CurrencyService
 from app.services.dividend_service import DividendService, load_exact_date_pairs
@@ -769,6 +772,35 @@ class TaxService:
             ),
         }
 
+    async def _margin_interest(self, start: date, as_of: date, base_fx) -> Optional[float]:
+        """
+        What IBKR charged on a margin loan from `start` to `as_of`, in the base currency
+        (review item T4, 2026-11-08; KS 36's margin criterion). Absent while the broker's
+        interest is not on record from `start` (`BROKER_INTEREST_COVERED_FROM_KEY`), or
+        when a booking has no rate: a part of the year is not the year's. A year on record
+        with no booking paid none.
+        """
+        covered = await AppSettingsRepository(self.db).get_date_setting(
+            BROKER_INTEREST_COVERED_FROM_KEY
+        )
+        if covered is None or covered > start:
+            return None
+        rows = (await self.db.execute(
+            select(CashFlow).where(and_(
+                CashFlow.account == IBKR,
+                CashFlow.flow_type == BROKER_INTEREST_PAID,
+                CashFlow.flow_date >= start,
+                CashFlow.flow_date <= as_of,
+            ))
+        )).scalars().all()
+        paid = Decimal("0")
+        for flow in rows:
+            converted = cash_flow_in_base(flow, base_fx)
+            if converted is None:
+                return None
+            paid -= converted
+        return round(float(paid), 2)
+
     async def _trader_criteria(
         self,
         year: int,
@@ -815,6 +847,7 @@ class TaxService:
             "sales_holding_unknown": 0,
             "margin_used": None,
             "min_cash_balance": None,
+            "margin_interest": None,
         }
 
         events = await cash.balance_events(base_fx, account=IBKR)
@@ -829,6 +862,7 @@ class TaxService:
             low = round(lowest, 2)
             criteria["min_cash_balance"] = float(low)
             criteria["margin_used"] = low < 0
+        criteria["margin_interest"] = await self._margin_interest(start, as_of, base_fx)
 
         # Sales, counted on IBKR's own executions; a cancelled sale is no sale.
         if any(is_sale_side(t) for t in trades):
@@ -1059,5 +1093,6 @@ class TaxService:
             w.writerow(["Sales with unknown holding period", tc["sales_holding_unknown"]])
             w.writerow(["Margin used", _yes_no(tc["margin_used"])])
             w.writerow([f"Lowest cash balance ({cur})", _blank(tc["min_cash_balance"])])
+            w.writerow([f"Margin interest ({cur})", _blank(tc.get("margin_interest"))])
 
         return buf.getvalue()

@@ -57,6 +57,11 @@ LAST_IBKR_SYNC_TO_DATE_KEY = "last_ibkr_sync_to_date"
 # week's purchases to the lot side and double-count them against its deposits.
 CASH_FLOWS_COVERED_FROM_KEY = "cash_flows_covered_from"
 
+# The first day the broker's interest is on record (review item T4): the earliest
+# statement whose CashTransactions were read for BROKERINTPAID/BROKERINTRCVD. A year
+# starting before it has no margin interest to report, not none.
+BROKER_INTEREST_COVERED_FROM_KEY = "broker_interest_covered_from"
+
 # The first day the dividend forecast history's growth percentages are measured from
 # (docs/dividends.md, *The forecast's history*). Set by the owner when the book changed
 # shape — swapping accumulating funds for distributing ones multiplies the forecast
@@ -245,6 +250,24 @@ class AppSettingsRepository:
         existing = await self.get_cash_flows_covered_from()
         if existing is None or from_date < existing:
             await self.set(CASH_FLOWS_COVERED_FROM_KEY, from_date.isoformat())
+            return from_date
+        return existing
+
+    async def get_date_setting(self, key: str) -> Optional[date]:
+        """A date stored under `key`, or None when unset or unreadable."""
+        val = await self.get(key)
+        if not val:
+            return None
+        try:
+            return date.fromisoformat(val)
+        except ValueError:
+            return None
+
+    async def widen_date_setting(self, key: str, from_date: Optional[date]) -> Optional[date]:
+        """Move a coverage start stored under `key` earlier, never later; the result."""
+        existing = await self.get_date_setting(key)
+        if from_date is not None and (existing is None or from_date < existing):
+            await self.set(key, from_date.isoformat())
             return from_date
         return existing
 

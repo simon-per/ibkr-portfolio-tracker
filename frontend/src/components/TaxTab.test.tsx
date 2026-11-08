@@ -500,6 +500,24 @@ describe('logos in the tax tables', () => {
     expect((await tile('Realized gains')).textContent).toContain('1 sale')
   })
 
+  it('says what the margin cost once the interest is on record (review item T4)', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({ trader_criteria: criteria({ margin_interest: 42.5 }) }),
+    )
+    renderTab()
+    const margin = await tile('Margin used')
+    expect(margin.textContent).toMatch(/low .*500\.00/)
+    expect(margin.textContent).toMatch(/interest .*42\.50/)
+  })
+
+  it('names no interest while it is not on record', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({ trader_criteria: criteria({ margin_interest: null }) }),
+    )
+    renderTab()
+    expect((await tile('Margin used')).textContent).not.toMatch(/interest/)
+  })
+
   it('puts the KS 36 indicators as figures', async () => {
     vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria() }))
     renderTab()

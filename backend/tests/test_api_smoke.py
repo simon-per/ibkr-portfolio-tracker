@@ -954,6 +954,7 @@ def test_the_shapes_that_broke_production_serialize(client):
         "opening_as_of", "opening_securities", "opening_cash", "purchases",
         "sales_proceeds", "turnover_multiple", "turnover_estimated", "sales",
         "short_held_sales", "sales_holding_unknown", "margin_used", "min_cash_balance",
+        "margin_interest",
     }
 
     # The activity ledger unions four tables that each had no read surface at all.
