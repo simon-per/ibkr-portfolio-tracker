@@ -41,12 +41,14 @@ export const CANONICAL_SECTORS = [
   'Utilities',
 ] as const
 
-/** The regions `AllocationTab.regionOf` can produce, in slot order. */
+/**
+ * The regions the server publishes, in slot order — mirrors `region_taxonomy.REGIONS`, and
+ * `backend/tests/test_region_taxonomy.py` holds the two lists equal.
+ */
 export const REGION_ORDER = [
   'North America',
   'Europe',
   'Asia Pacific',
-  'Emerging Markets',
   'Latin America',
   'Middle East & Africa',
 ] as const

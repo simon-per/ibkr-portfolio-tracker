@@ -24,59 +24,13 @@ import { displayName } from '@/lib/securityName'
 /**
  * Colours come from `lib/sectorColors.ts` — palette slots by a fixed identity order per
  * breakdown, shared with the look-through treemap so one sector is one colour across the app.
- * The region map that used to live here also keyed countries (`US`, `Germany`) the chart can
- * never show: `regionOf` folds every country into its region before a colour is asked for.
+ *
+ * The buckets arrive final. Since 2026-11-08 the server rolls Sectors and Regions up from the
+ * look-through's decomposition, already in the canonical sector names (`sector_taxonomy`) and
+ * regions (`region_taxonomy`), largest first. This file used to rename sectors and fold
+ * countries into regions itself — a third copy of both maps, and one that sent every country
+ * it did not know to `Other`.
  */
-
-// Normalize sector names for consistency
-const SECTOR_MAPPING: Record<string, string> = {
-  'Information Technology': 'Technology',
-  'Tech': 'Technology',
-  'IT': 'Technology',
-  'Financial Services': 'Financials',
-  'Finance': 'Financials',
-  'Health Care': 'Healthcare',
-  'HealthCare': 'Healthcare',
-  'Consumer Discretionary': 'Consumer Cyclical',
-  'Consumer Staples': 'Consumer Defensive',
-  'Communication Services': 'Communications',
-  'Telecommunications': 'Communications',
-  'Materials': 'Basic Materials',
-}
-
-const GEOGRAPHIC_MAPPING: Record<string, string> = {
-  'US': 'North America', 'USA': 'North America', 'United States': 'North America',
-  'Canada': 'North America', 'Mexico': 'North America',
-  'Europe': 'Europe', 'European Union': 'Europe', 'EU': 'Europe',
-  'Germany': 'Europe', 'France': 'Europe', 'UK': 'Europe', 'United Kingdom': 'Europe',
-  'Switzerland': 'Europe', 'Netherlands': 'Europe', 'Ireland': 'Europe',
-  'Spain': 'Europe', 'Italy': 'Europe', 'Sweden': 'Europe', 'Norway': 'Europe',
-  'Denmark': 'Europe', 'Finland': 'Europe', 'Austria': 'Europe', 'Belgium': 'Europe', 'Poland': 'Europe',
-  'China': 'Asia Pacific', 'Japan': 'Asia Pacific', 'South Korea': 'Asia Pacific', 'Korea': 'Asia Pacific',
-  'India': 'Asia Pacific', 'Taiwan': 'Asia Pacific', 'Hong Kong': 'Asia Pacific',
-  'Singapore': 'Asia Pacific', 'Australia': 'Asia Pacific', 'New Zealand': 'Asia Pacific',
-  'Thailand': 'Asia Pacific', 'Malaysia': 'Asia Pacific', 'Indonesia': 'Asia Pacific',
-  'Saudi Arabia': 'Middle East & Africa', 'UAE': 'Middle East & Africa', 'Israel': 'Middle East & Africa',
-  'South Africa': 'Middle East & Africa',
-  'Brazil': 'Latin America', 'Argentina': 'Latin America', 'Chile': 'Latin America',
-  'Other Emerging Markets': 'Emerging Markets',
-}
-
-/** What the region chart may show: the regions above plus the server's own buckets. */
-const REGIONS = new Set([...Object.values(GEOGRAPHIC_MAPPING), 'Emerging Markets', 'Cash', 'Unknown'])
-
-function normalize(name: string, mapping: Record<string, string>): string {
-  return mapping[name] || name
-}
-
-/**
- * A whitelist: a country the map does not know joins `Other` rather than standing beside
- * the regions under its own name ("Cayman Islands" next to "Europe").
- */
-function regionOf(name: string): string {
-  const region = normalize(name, GEOGRAPHIC_MAPPING)
-  return REGIONS.has(region) ? region : 'Other'
-}
 
 /**
  * The "nothing loaded" allocation, as one module-level object rather than a fresh `{}` per
@@ -84,43 +38,6 @@ function regionOf(name: string): string {
  * identity, so a literal here would close the panel on every parent re-render.
  */
 const NO_ALLOCATION: Record<string, AllocationCategory> = {}
-
-// Merge allocation categories that share the same normalized name
-function mergeAllocation(
-  raw: Record<string, AllocationCategory>,
-  rename: (name: string) => string,
-): Record<string, AllocationCategory> {
-  const merged: Record<string, AllocationCategory> = {}
-
-  for (const [name, cat] of Object.entries(raw)) {
-    const normalized = rename(name)
-    if (!merged[normalized]) {
-      merged[normalized] = { percentage: 0, market_value_eur: 0, positions: [] }
-    }
-    merged[normalized].percentage += cat.percentage
-    merged[normalized].market_value_eur += cat.market_value_eur
-
-    // Merge positions, combining same symbols
-    for (const pos of cat.positions) {
-      const existing = merged[normalized].positions.find(p => p.symbol === pos.symbol)
-      if (existing) {
-        existing.weight += pos.weight
-        existing.market_value_eur += pos.market_value_eur
-      } else {
-        merged[normalized].positions.push({ ...pos })
-      }
-    }
-  }
-
-  // Sort by percentage descending
-  const sorted = Object.entries(merged).sort((a, b) => b[1].percentage - a[1].percentage)
-  const result: Record<string, AllocationCategory> = {}
-  for (const [k, v] of sorted) {
-    v.positions.sort((a, b) => b.weight - a.weight)
-    result[k] = v
-  }
-  return result
-}
 
 /** The drill-down's five columns, described once for both renderings. */
 type DrillDownPosition = AllocationCategory['positions'][number]
@@ -441,27 +358,12 @@ export function AllocationTab() {
     [allocation],
   )
 
-  // Merge and normalize allocation data. Memoised on `allocation`, because
+  // Passed through as the query cached them, so each keeps its identity across re-renders:
   // `AllocationBreakdown` resets its drill-down whenever its `allocation` prop changes
-  // identity — and `mergeAllocation` in the render body handed it a fresh object on every
-  // render, so the Dashboard's 60-second `scheduler/status` refetch, which re-renders
-  // everything under it, closed the open panel once a minute.
-  const sectorAllocation = useMemo(
-    () =>
-      allocation?.sector_allocation
-        ? mergeAllocation(allocation.sector_allocation, (n) => normalize(n, SECTOR_MAPPING))
-        : NO_ALLOCATION,
-    [allocation],
-  )
-
-  const geoAllocation = useMemo(
-    () =>
-      allocation?.geographic_allocation
-        ? mergeAllocation(allocation.geographic_allocation, regionOf)
-        : NO_ALLOCATION,
-    [allocation],
-  )
-
+  // identity, and a fresh object per render once closed the open panel on every 60-second
+  // `scheduler/status` refetch.
+  const sectorAllocation = allocation?.sector_allocation ?? NO_ALLOCATION
+  const geoAllocation = allocation?.geographic_allocation ?? NO_ALLOCATION
   const assetAllocation = allocation?.asset_type_allocation ?? NO_ALLOCATION
 
   return (

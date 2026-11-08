@@ -166,18 +166,14 @@ class EtfHolding(Base):
     # next new value ('Rights', 'Warrant', 'Preferred') as a company.
     asset_class: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
-    # `sector` is read by ONE consumer, and the boundary is narrower than it looks.
-    # `lookthrough_service` normalises it through `sector_taxonomy` to group the companies on
-    # its own response — per company, with no portfolio-level rollup anywhere. It is NOT a
-    # second answer to the question the Allocation tab asks: that one covers the whole book
-    # from `etf_mappings.py`'s hand-maintained fund-level percentages, this one covers only
-    # the ~79% that could be decomposed, and neither is derivable from the other. Serving a
-    # sector *total* from here would be the dominant failure mode; grouping is not.
-    #
-    # `country` remains UNSERVED, and the reason is specific rather than inherited: it is a
-    # country while every geographic bucket in the app is a region, so using it needs a
-    # hand-maintained country-to-region map — a new drift surface, not a removed one. See
-    # `etf_mappings.py`'s docstring for the full precondition.
+    # `sector` and `country` are the constituent's classification as its issuer publishes it,
+    # and `lookthrough_service.decompose` is their one reader: it normalises them through
+    # `sector_taxonomy` and `region_taxonomy`, votes one sector and one region per company by
+    # value, and both the Look-through treemap and the Allocation tab's Sectors and Regions
+    # charts read that vote (since 2026-11-08; they used to be "deliberately unserved" so as
+    # not to stand beside `etf_mappings.py`'s hand-written fund percentages, which are gone).
+    # Only iShares and DWS publish a country (of risk) and only iShares, DWS and First Trust a
+    # sector; a row without one abstains, and its company is classified by another source.
     sector: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 

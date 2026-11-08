@@ -35,8 +35,14 @@ from app.services.portfolio_service import PortfolioService
 
 SERVICES_DIR = Path(__file__).resolve().parents[1] / "app" / "services"
 
-#: The two "% of portfolio" denominators that include cash server-side.
-SHARE_OF_BOOK_SERVICES = ("allocation_service.py", "lookthrough_service.py")
+#: The service that reads the balance for every "% of portfolio" denominator that includes
+#: cash server-side. Allocation joined it on 2026-11-08: it rolls up the look-through's
+#: decomposition, which carries the balance, so the two tabs read it once.
+SHARE_OF_BOOK_SERVICES = ("lookthrough_service.py",)
+
+#: Share-of-book services that take the balance from that decomposition and must not read it
+#: a second time.
+DECOMPOSITION_READERS = ("allocation_service.py",)
 
 #: The low-level reads the helper wraps.
 LOW_LEVEL = {"balance_as_of", "balance_events", "cash_source"}
@@ -62,13 +68,21 @@ def _called_attributes(path: Path) -> set:
     }
 
 
-def test_both_share_of_book_services_read_cash_through_the_one_helper():
+def test_the_share_of_book_services_read_cash_once_through_the_one_helper():
     for name in SHARE_OF_BOOK_SERVICES:
         called = _called_attributes(SERVICES_DIR / name)
         assert "uninvested_cash" in called, f"{name} does not call CashService.uninvested_cash"
         assert not called & LOW_LEVEL, (
             f"{name} calls {sorted(called & LOW_LEVEL)} itself — a second derivation of "
             f"the balance beside uninvested_cash"
+        )
+    for name in DECOMPOSITION_READERS:
+        called = _called_attributes(SERVICES_DIR / name)
+        assert "decompose" in called, f"{name} no longer reads LookthroughService.decompose"
+        second_read = called & (LOW_LEVEL | {"uninvested_cash"})
+        assert not second_read, (
+            f"{name} calls {sorted(second_read)} beside the decomposition — a second read of "
+            f"the balance the decomposition already carries"
         )
 
 

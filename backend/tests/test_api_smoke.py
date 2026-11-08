@@ -1107,6 +1107,11 @@ def test_the_lookthrough_folds_a_dual_listing_through_the_real_stack(client):
     assert lt["total_value_eur"] == pytest.approx(
         lt["total_market_value_eur"] + max(lt["cash_eur"] or 0.0, 0.0)
     )
+    # Allocation's Sectors and Regions are this decomposition rolled up (since 2026-11-08), so
+    # through the real stack each is a partition of that same book, in money.
+    for breakdown in ("sector_allocation", "geographic_allocation"):
+        money = sum(cat["market_value_eur"] for cat in allocation[breakdown].values())
+        assert money == pytest.approx(allocation["total_value_eur"], abs=0.05), breakdown
 
     # Truncation reports the tail as a value rather than only a count.
     small = client.get("/api/portfolio/lookthrough?limit=1").json()

@@ -214,8 +214,8 @@ economic exposure; for a fund it need not be, and here often is not — a EUR-li
 quoted in EUR and carries USD risk. Folding it into the EUR bucket is confidently backwards on
 exactly the positions that prompt the question.
 
-**Nothing is re-attributed, and the ETF look-through table cannot fix it**: `app/etf_mappings.py` maps
-*regions*, and regions do not determine currency — "Europe" spans EUR/GBP/CHF/SEK, "Asia Pacific"
+**Nothing is re-attributed, and the look-through cannot fix it**: its Allocation rollup places
+companies in *regions*, and regions do not determine currency — "Europe" spans EUR/GBP/CHF/SEK, "Asia Pacific"
 spans JPY/AUD/HKD/TWD. Funds are counted where they trade, with their share of the book named on
 screen and the reason given, so the rows cannot be mistaken for an FX position. The fund set comes
 from the ETF bucket of the allocation response already on the page, since `Position` carries no asset

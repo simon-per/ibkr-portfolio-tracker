@@ -33,6 +33,7 @@ from app.etf_mappings import (
     allocation_for_fund_isin,
     is_known_etf_isin,
 )
+from app.models.etf_basket import EtfBasket, EtfHolding
 from app.models.market_price import MarketPrice
 from app.models.security import Security
 from app.models.taxlot import TaxLot
@@ -120,8 +121,26 @@ async def test_a_stock_sharing_a_funds_ticker_is_not_distributed_as_a_fund(db):
 
 @pytest.mark.asyncio
 async def test_the_real_fund_is_still_distributed(db):
-    """The other direction, so the fix cannot be 'classify nothing as a fund'."""
+    """
+    The other direction, so the fix cannot be 'classify nothing as a fund'. Distributed by its
+    stored basket since 2026-11-08 (the look-through's decomposition), so it is given one.
+    """
     await _hold(db, symbol="VT", isin=VT_ISIN, conid=1)
+    db.add(EtfBasket(
+        fund_isin=VT_ISIN, as_of_date=utc_today(), as_of_is_issuer_stated=True,
+        source="test", adapter="test", source_rows=2, stored_rows=2, skipped_rows=0,
+        total_weight_pct=Decimal("100"), equity_weight_pct=Decimal("100"),
+        identifier_coverage_pct=Decimal("100"), asset_class_available=True,
+    ))
+    db.add_all([
+        EtfHolding(fund_isin=VT_ISIN, line_no=1, constituent_isin="US67066G1040",
+                   constituent_name="NVIDIA CORP", weight_pct=Decimal("60"),
+                   sector="Information Technology", asset_class="Equity"),
+        EtfHolding(fund_isin=VT_ISIN, line_no=2, constituent_isin="US46625H1005",
+                   constituent_name="JPMORGAN CHASE", weight_pct=Decimal("40"),
+                   sector="Financials", asset_class="Equity"),
+    ])
+    await db.commit()
 
     allocation = await AllocationService(db).get_portfolio_allocation()
 

@@ -259,14 +259,11 @@ Three things make it more than a display change:
   name.** A folded company can be described differently by two funds, and anything
   order-dependent here is this codebase's signature bug — `test_lookthrough_partition.py`
   shuffles the input and asserts the answer does not move.
-- **This narrows a documented refusal rather than breaking it.** `etf_basket.py` said `sector`
-  was stored and *deliberately unserved*, because serving it would put a second sector answer
-  on the Allocation tab. It is served now for **grouping only**: per company, with no
-  portfolio-level rollup anywhere in the response, so nothing says "this portfolio is 35%
-  tech". The Allocation tab keeps `ETF_ALLOCATIONS` as its answer, and the two are not
-  derivable from each other — this one covers only the ~79% that decomposes. The comments on
-  both sides say so; `country` stays unserved for its own reason (it is a country, and every
-  geographic bucket in the app is a region).
+- **The vote is the Allocation tab's answer too** (since 2026-11-08, *Allocation is a rollup of
+  this decomposition* below). Until then `sector` was served for grouping only, because the
+  Allocation tab answered "how much of the book is Technology" from `ETF_ALLOCATIONS`' hand-written
+  fund percentages and a rollup here would have been a second answer. Those estimates are retired,
+  so there is one.
 
 **The treemap draws on the app's one categorical palette** (`lib/chartPalette.ts`, since
 2026-10-17); `lib/sectorColors.ts` owns only the assignment and `lib/chartPaint.ts` the label
@@ -319,6 +316,48 @@ The remaining estimate is the tile label's *fit*: SVG text cannot be measured be
 `UPPERCASE_ADVANCE_PX` budgets for the worst glyphs, because IBKR names arrive shouted
 (`NU HOLDINGS LTD/CAYMAN ISL-A`). Budgeting for mixed case put `ARISTA NETWOR…` over both edges
 of its own tile. Under-filling costs a character; overflowing costs the tile boundary.
+
+### Allocation is a rollup of this decomposition
+
+Since 2026-11-08 the Allocation tab's **Sectors** and **Regions** charts are
+`LookthroughService.decompose()` summed: every company row's value goes to that company's sector
+and region, under each held security it came from (the drill-down rows), and the value no company
+carries — a decomposed fund's residual and nested funds, or all of a fund with no basket — is
+`Unknown` under that fund. `get_lookthrough` presents the same `Decomposition`; nothing is
+computed twice. `test_lookthrough_partition.py::test_allocation_sectors_are_the_lookthrough_companies_summed`
+pins the equality to the cent, and the smoke test that each breakdown's money is the book.
+
+**What it replaced, and why it was wrong.** The tab spread each fund by `ETF_ALLOCATIONS`'
+hand-written `sector`/`geographic` percentages (Yahoo `funds_data` sectors, regions inferred from
+top-ten holdings covering 15–60% of a fund), printed Yahoo's *countries* for direct stocks beside
+those *regions* ("United States" 62% next to "North America" 12% on production, 2026-11-08), and
+`AllocationTab.tsx` renamed sectors and folded countries a third time, sending every country it did
+not know to `Other`. Three sources for two charts, and a company could be Technology on the
+treemap while the fund holding it was 30% Financials on the pie.
+
+- **One vote per company, both dimensions.** Sector as above. Region is the same value-weighted
+  vote over the *stated* countries — a basket's country of risk (iShares, DWS) and Yahoo's
+  `securities.country` for a held stock — through `app/services/region_taxonomy.py`. Only when
+  nothing states one does the company's ISIN prefix vote (`region_of_isin`), and an offshore
+  incorporation (Cayman, Bermuda, Jersey…) answers nothing rather than send a Chinese ADR to the
+  Caribbean. Vanguard, Invesco, First Trust, Defiance and VanEck publish no country, so their
+  constituents are placed by the funds that do or by the ISIN.
+- **Five geographic regions, no "Emerging Markets".** UN M49 with four overrides (Cyprus and
+  Türkiye → Europe, Iran → Middle East & Africa, Puerto Rico and the US Virgin Islands → North
+  America). "Emerging" is an index provider's classification that MSCI and FTSE disagree on and
+  revise, and it overlapped the regions it sat beside. `REGION_ORDER` in `lib/sectorColors.ts`
+  mirrors `REGIONS`, and `test_region_taxonomy.py` holds them equal.
+- **`Unknown` is measured, not missing.** On this book it is VT's rows published at 0.00% (its
+  residual) and the constituents no sector-publishing basket also holds — mostly VT's small caps,
+  whose Vanguard rows carry no sector. It is counted under the fund it came from, never spread.
+- **Asset types stay per holding**: the fund registry by ISIN (`allocation_for_fund_isin`), else
+  `securities.asset_type`. That was already one source.
+- **The cost:** the tab now pays the decomposition (~1.5 s uncached on production against
+  ~0.3 s before). Accepted for a lazily loaded tab; cache it if it starts to matter.
+- **Not folded in:** the hidden Analytics tab's segment attribution
+  (`performance_analytics_service.segments`) still classifies basket rows itself, per row and with
+  raw country strings. It attributes *gains*, on a tab switched off since 2026-10-04; route it
+  through `decompose` before that tab comes back.
 
 ### Fundamentals of what you own
 
@@ -380,11 +419,9 @@ every row would make "the fund's as-of" a `MAX()` that one stale row ages.
 `weight_pct` is a **percent**, matching `etf_mappings.py`, and normalising at the adapter
 boundary is mandatory: DWS ships fractions summing to 1.0 and iShares percents summing to ~100,
 so a fraction landing here makes the fund contribute 1/100th of its value and read as 99% cash.
-`sector` is captured and served to **one** consumer — grouping the look-through treemap, per
-company, with no rollup (see *Grouping the treemap by sector* above). `country` remains
-unserved: it is a country while every geographic bucket in the app is a region, so using it
-needs a hand-maintained country-to-region map. See `etf_mappings.py`'s docstring for the full
-precondition for switching the three allocation charts onto either.
+`sector` and `country` feed the per-company votes (see *Grouping the treemap by sector* above
+and *Allocation is a rollup of this decomposition* below). Only iShares and DWS publish a country
+(of risk), and only iShares, DWS and First Trust a sector; a row without one abstains.
 
 **"Stale" is per-adapter (`ADAPTER_STALE_DAYS`), and a single global threshold was wrong.** The badge
 is only useful if it means *the issuer has newer holdings we failed to fetch* — Xtrackers and iShares
@@ -619,8 +656,8 @@ instruction. It is an
 approximation stated as one, and four things make it safe to have in a file whose governing
 rule is that an unjustifiable figure is absent rather than invented:
 
-- **The judgement is not new here.** `ETF_ALLOCATIONS` already pins VT's regional split to
-  VWCE's *deliberately*, with the reasoning written down: FTSE Global All Cap and FTSE
+- **The judgement is not new here.** `ETF_ALLOCATIONS`' hand-written estimates (retired
+  2026-11-08) pinned VT's regional split to VWCE's *deliberately*, with the reasoning written down: FTSE Global All Cap and FTSE
   All-World are the same index family differing by small-cap inclusion. What is new is
   applying it to 10,032 company rows instead of four regions.
 - **It errs low, measurably.** The sleeve VWCE omits is almost exactly the part of VT's file
