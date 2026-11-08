@@ -80,6 +80,15 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   and TWSE lots (one SK Hynix lot among them) keep the evening-before date. A Client Portal download
   covering their purchases, fed through `app/cli/ingest_flex_xml.py` over ssh, stores the instants;
   the next sync then redates them. Nothing breaks without it.
+- **Confirm `ifrs-full` facts for ASML, NU and TSMC (review item R6, blocked).** The IFRS annual
+  figures for the three 20-F filers start with one companyfacts read per CIK (937966, 1691493,
+  1046179) through the app's `EdgarClient` with the server's User-Agent, which lives only in the
+  VPS `.env`; the /goal run could make neither an SEC request nor an ssh call. Run the read on the
+  VPS (or say so and a session will), then build R6 on what it shows.
+- **Whitelist KLAC's investments concept (CO8).** The first Sunday pass after the wave-5 deploy
+  warns "Short-term investments outside the concept chain for KLAC (…)"; add that concept to the
+  `short_term_investments` chain in `company_financials_normaliser.py` once its values look like
+  KLAC's marketable securities.
 
 ## Watching
 
@@ -174,6 +183,17 @@ Only what is still unverified.
     card an Investments series (VI1). The week after a held company splits, its overview price is
     the last weekly close (CO3). Seen on a local build against production data with the new
     fields filled in as the new server would, at 1440 and 390, light and dark.
+  - *Wave 6 (`review-w6-company-features`).* No migration. The first Sunday EDGAR pass after the
+    deploy lists about twenty more companies (`universe` up by about that): the look-through's US
+    companies and the watchlist's US tickers, each with a page, weekly closes the Sunday after and
+    a Yahoo profile within a rotation — the request budget the owner approved (R5). A look-through
+    row of Linde or Seagate opens its page once the pass has stamped their ISIN from the identity
+    store. The Company tab's collapsed Peers card lists the companies of its SEC industry, with the
+    same key figures as each one's overview (R1; `GET /api/company-financials/{cik}/peers`); the
+    Look-through tab's collapsed "Fundamentals of what you own" card shows P/E, growth, margins and a
+    coverage figure (R2; `GET /api/portfolio/lookthrough/fundamentals`, a few seconds is expected:
+    it reads every covered company's figures). Seen on a local build against production data with
+    the two new routes answered by stand-ins, at 1440 and 390, light and dark.
 
 - **Analyst counts, valuation headline, watchlist and Company freshness (branch
   `analyst-counts-and-freshness`, merged and pushed 2026-11-07 as `d8ae10e`; the deploy was
