@@ -79,6 +79,9 @@ class CompanyFinancialsSeries(BaseModel):
         "missing or not positive. Always null for a margin.",
     )
     cagrs: CompanyFinancialsCagrs
+    #: A valuation multiple's median over the last 3, 5 and 10 years; null elsewhere and
+    #: where the span holds fewer than three values (review item R3).
+    medians: CompanyFinancialsCagrs
 
 
 class CompanyFinancialsKeyStats(BaseModel):

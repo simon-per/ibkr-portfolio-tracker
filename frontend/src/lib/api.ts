@@ -1642,6 +1642,8 @@ export interface CompanyFinancialsSeries {
   yoy: number | null;
   /** Growth to the latest point from 3, 5 and 10 years before it, over the whole history. */
   cagrs: CompanyFinancialsCagrs;
+  /** A valuation multiple's median over the last 3, 5 and 10 years; null elsewhere. */
+  medians?: CompanyFinancialsCagrs;
 }
 
 export interface CompanyFinancialsCagrs {

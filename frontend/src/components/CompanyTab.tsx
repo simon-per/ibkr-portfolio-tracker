@@ -222,6 +222,14 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
   const inverse = chart.inverse ?? false
   const pointYoy = growth ? signedPercent(row?.yoy[lead.key] ?? null) : null
   const leadCagrs = growthOf(data, lead.key).cagrs
+  // A multiple has no growth rate; its own medians are what today's reads against (R3).
+  const leadMedians = growthOf(data, lead.key).medians
+  const medianChips = view.format === 'multiple'
+    ? CAGR_SPANS.flatMap((span) => {
+        const value = leadMedians[span.key]
+        return value == null ? [] : [{ ...span, printed: format(value) }]
+      })
+    : []
   const cagrs = growth
     ? CAGR_SPANS.flatMap((span) => {
         const value = leadCagrs[span.key]
@@ -308,6 +316,14 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
               {pointYoy != null && <Stat label="YoY" value={pointYoy} tone={growthTone(pointYoy, inverse)} />}
             </p>
           </div>
+          {medianChips.length > 0 && (
+            <span className="flex flex-wrap items-center gap-x-3 text-xs" data-testid="medians">
+              <span className="text-muted-foreground">Median</span>
+              {medianChips.map((c) => (
+                <Stat key={c.key} label={c.label} value={c.printed} />
+              ))}
+            </span>
+          )}
           {cagrs.length > 0 && (
             <span className="flex flex-wrap items-center gap-x-3 text-xs" data-testid="cagrs">
               <span className="text-muted-foreground">CAGR</span>

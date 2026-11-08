@@ -296,7 +296,22 @@ describe('CompanyTab', () => {
     expect(card('valuation').textContent).not.toContain('Nov 6, 2026')
   })
 
-  it('hides the valuation card for a company without stored prices', async () => {
+  it("reads today's multiple against the company's own medians (review item R3)", async () => {
+    const pe = { ...fixtureSeries([30, 45, 60, 48.3]), medians: { y3: 50, y5: 42.5, y10: null } }
+    vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
+      series: { pe_ratio: pe },
+    }))
+    renderTab()
+    await screen.findAllByTestId('chart')
+    const medians = within(card('valuation')).getByTestId('medians').textContent ?? ''
+    expect(medians).toContain('3Y')
+    expect(medians).toContain('5Y')
+    expect(medians).not.toContain('10Y')
+    // A growth card has none.
+    expect(within(card('revenue')).queryByTestId('medians')).toBeNull()
+  })
+
+    it('hides the valuation card for a company without stored prices', async () => {
     const none = fixtureSeries([null, null, null, null])
     vi.spyOn(api, 'getCompanyFinancials').mockResolvedValue(fixtureFinancials({
       series: { pe_ratio: none, ps_ratio: none, pfcf_ratio: none },

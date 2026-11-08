@@ -483,6 +483,10 @@ Computed in `company_financials_service` only:
   before it (same slack) over the whole history, not the range; null also when the latest is
   negative (a root of a negative ratio is no rate). **All are null for the margins** (lead's
   decision, 2026-10-25): a growth rate of a ratio reads as a figure nobody means.
+- **Medians** (`medians`, review item R3, 2026-11-08): a valuation multiple's own median over
+  the last 3, 5 and 10 years, positive values only, on the whole history like `cagrs`; null with
+  fewer than three values in a span or a history shorter than it, and null for every other
+  series. The Valuation card shows them where a growth card shows its CAGRs.
 - **Annual** = the fiscal years as filed (the FY facts), not a sum of quarters.
 - **Range** counts back from the series' latest period end, not from today, so a TTM at the
   range's start is computed from quarters before it.

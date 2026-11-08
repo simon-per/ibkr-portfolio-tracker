@@ -53,6 +53,7 @@ fold a decade of exchange-rate moves into every growth rate.
 
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from statistics import median
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -324,6 +325,26 @@ def growth_at(points: Sequence[tuple], index: int, years: int) -> Optional[float
     return (last / previous) ** (1 / years) - 1
 
 
+def medians(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
+    """
+    The median of the positive values over the `CAGR_YEARS` up to the latest point, keyed
+    `y3`, `y5`, `y10` — a multiple's own history to read today's against (review item
+    R3, 2026-11-08), where a growth rate means nothing. None with fewer than three values
+    in the span or no span covered: a median of one quarter is that quarter.
+    """
+    known = [(d, v) for d, v in points if v is not None]
+    if not known:
+        return {f"y{n}": None for n in CAGR_YEARS}
+    last = known[-1][0]
+    out: Dict[str, Optional[float]] = {}
+    for n in CAGR_YEARS:
+        since = _years_before(last, n)
+        values = sorted(v for d, v in known if d > since and v > 0)
+        covered = known[0][0] <= _years_before(last, n - 1) if n > 1 else True
+        out[f"y{n}"] = float(median(values)) if len(values) >= 3 and covered else None
+    return out
+
+
 def cagrs(points: Sequence[tuple]) -> Dict[str, Optional[float]]:
     """`CAGR_YEARS` growth to the latest point, keyed `y3`, `y5`, `y10`."""
     return {
@@ -401,6 +422,8 @@ def price_series(closes: Prices, range_key: str) -> Dict[str, Any]:
         "cagr": cagr(shown),
         "yoy": yoy(closes),
         "cagrs": cagrs(closes),
+        # A price has no median to read against: only the multiples carry one (R3).
+        "medians": dict.fromkeys(cagrs(closes)),
     }
 
 
@@ -691,6 +714,8 @@ def build_series(
             "yoy": None if name in NO_GROWTH else yoy(full),
             # Measured on the whole history, not the range: the 10Y figure of a 5Y chart.
             "cagrs": dict.fromkeys(cagrs(full)) if name in NO_GROWTH else cagrs(full),
+            # A multiple's own medians instead (R3); no other series has one.
+            "medians": medians(full) if name in VALUATIONS else dict.fromkeys(cagrs(full)),
         }
     return out
 

@@ -81,7 +81,7 @@ def test_every_series_is_served():
     series = build_series(_rows(ENDS, BASE), "ttm", "max")
     assert set(series) == set(SERIES)
     for name in SERIES:
-        assert set(series[name]) == {"points", "cagr", "yoy", "cagrs"}
+        assert set(series[name]) == {"points", "cagr", "yoy", "cagrs", "medians"}
         assert set(series[name]["cagrs"]) == {"y3", "y5", "y10"}
 
 
@@ -475,3 +475,18 @@ def test_a_retailers_long_fourth_quarter_still_makes_a_ttm():
     # A missing quarter is still a gap, never a three-quarter sum.
     gap = _rows(ends[:3] + ends[4:], {"revenue": lambda i: 100.0})
     assert set(_values(build_series(gap, "ttm", "max"), "revenue")) == {None}
+
+
+def test_a_multiple_carries_its_own_medians_and_nothing_else_does():
+    """Review item R3: the Valuation card reads today's P/E against the company's own."""
+    from datetime import date as _date
+
+    from app.services.company_financials_service import medians
+
+    years = [(_date(2016 + i, 12, 31), pe) for i, pe in enumerate(
+        (12.0, 15.0, 18.0, -4.0, 20.0, 22.0, 25.0, 30.0, 28.0, 24.0))]
+    out = medians(years)
+    # The last 3 years: 30, 28, 24 -> 28; 5 years: 22..24 -> 25; 10 years, positives only.
+    assert out == {"y3": 28.0, "y5": 25.0, "y10": 22.0}
+    assert medians(years[:2]) == {"y3": None, "y5": None, "y10": None}
+
