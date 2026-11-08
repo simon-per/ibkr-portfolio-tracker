@@ -764,8 +764,14 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 each ticker below, ~13 then). A row's rating is five counts labelled by `consensus_of`, never
 Yahoo's `recommendationKey`. A held listing's counts are `analyst_ratings`' and a Company-tab
 company's (by SEC ticker) `company_yahoo_profiles`', both read at response time
-(`WatchlistService.stored_ratings`, `watchlist_rating`) so the row shows what the positions
-table or the overview shows. Only a ticker in neither costs a `recommendations` request
+(`WatchlistService.stored_sources`, `watchlist_rating`) so the row shows what the positions
+table or the overview shows. **So are the figures** (review item DR1, 2026-11-08): a held or
+Company-tab ticker's P/E, forward P/E, PEG, growth, margin, market cap, target and analyst count
+are its stored row's (`fundamental_metrics`, else the profile), at sync time for the score and at
+response time for the row (`company_yahoo.company_figures`); the watchlist's own `.info` keeps the
+price, the 52-week range, the averages and EV/EBITDA. A profile counts only within the Company
+tab's scope (held, or in the newest Nasdaq-100 pass, DR2): a company that left the index keeps a
+profile nobody refreshes. Only a ticker in neither costs a `recommendations` request
 (`AnalystRatingService.fetch_counts`, the held pass's reader, so its 429 stops the pass) — on
 the slow run, or the first run when `ratings_synced_at` is NULL; a fund is answered with zeros
 and never asked. A failed ask keeps the old counts until the next slow run. The buy score's

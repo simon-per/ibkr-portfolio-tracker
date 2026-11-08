@@ -61,7 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utc_today, utcnow
 from app.models.company_financials import CompanyFinancial, SecCompany
-from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
+from app.models.analyst_rating import rating_of
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.repositories.analyst_rating_repository import AnalystRatingRepository
@@ -687,6 +687,9 @@ def build_series(
     return out
 
 
+from app.services.company_yahoo import counts_of  # noqa: E402
+
+
 class CompanyFinancialsService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -842,9 +845,7 @@ class CompanyFinancialsService:
             return {
                 "figures": figures,
                 "as_of": figures.last_updated if figures is not None else None,
-                "counts": None
-                if rating is None
-                else {f: getattr(rating, f) for f in RATING_COUNT_FIELDS},
+                "counts": counts_of(rating),
                 "next_earnings_date": upcoming.earnings_date if upcoming else None,
                 "next_eps_estimate": upcoming.eps_estimate if upcoming else None,
             }
@@ -860,9 +861,7 @@ class CompanyFinancialsService:
         return {
             "figures": row,
             "as_of": row.fetched_at,
-            "counts": None
-            if row.strong_buy is None
-            else {f: getattr(row, f) or 0 for f in RATING_COUNT_FIELDS},
+            "counts": counts_of(row),
             "next_earnings_date": row.next_earnings_date,
             "next_eps_estimate": row.next_eps_estimate,
         }

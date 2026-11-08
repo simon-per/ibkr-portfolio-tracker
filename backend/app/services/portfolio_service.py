@@ -12,7 +12,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
-from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
+from app.models.analyst_rating import rating_of
 from app.models.corporate_action import CorporateAction
 from app.models.taxlot import TaxLot
 from app.models.security import Security
@@ -22,6 +22,7 @@ from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED, UNKNOWN as CASH_UNKNOWN
 from app.models.cash_flow import TRANSFER_TYPES
+from app.services.company_yahoo import canonical_listings, counts_of
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.realized_trades import ClosedCost, gain_in_base, realized_from_sell_trades
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
@@ -1515,8 +1516,14 @@ class PortfolioService:
         # Pre-load analyst ratings
         from app.repositories.analyst_rating_repository import AnalystRatingRepository
         rating_repo = AnalystRatingRepository(self.db)
-        all_ratings = await rating_repo.get_all()
-        ratings_by_security = {rating.security_id: rating for rating in all_ratings}
+        own_rating = {rating.security_id: rating for rating in await rating_repo.get_all()}
+        # The company's counts on every listing of it (`company_yahoo`, review item DR2):
+        # GOOG and GOOGL show the one rating the Alphabet overview shows.
+        canonical = await canonical_listings(self.db)
+        ratings_by_security = {
+            sid: own_rating.get(canonical.get(sid, sid))
+            for sid in set(own_rating) | set(canonical)
+        }
 
         # Group by security
         positions = {}
@@ -1609,9 +1616,7 @@ class PortfolioService:
             # (`rating_of`): a zero-count row is the stored answer "no analysts cover
             # this" (analyst_rating_service.no_rating), absent here.
             rating = ratings_by_security.get(security_id)
-            shown = rating_of(
-                {f: getattr(rating, f) for f in RATING_COUNT_FIELDS} if rating else None
-            )
+            shown = rating_of(counts_of(rating))
             position["analyst_rating"] = (
                 {
                     **shown,

@@ -5,7 +5,8 @@ from app.database import get_db
 from app.services.market_cap import market_cap_to_base
 from app.services.peg_ratio import read_time_peg
 from app.services.ticker_isin import isins_by_yahoo_ticker
-from app.services.watchlist_service import WatchlistService, own_counts, watchlist_rating
+from app.services.company_yahoo import company_figures, counts_of
+from app.services.watchlist_service import WatchlistService, watchlist_rating
 from app.single_flight import (
     PUBLIC_SYNC_COOLDOWN_SECONDS,
     SYNC_PIPELINE,
@@ -172,21 +173,35 @@ async def _responses(db: AsyncSession, items,
     isins = await isins_by_yahoo_ticker(
         db, [i.yahoo_ticker for i in items if i.yahoo_ticker.upper() not in security_ids]
     )
-    # Read now, not copied at sync time: a held name's counts are the positions table's
-    # at this moment, whichever pass wrote them last.
-    stored = await service.stored_ratings(i.yahoo_ticker for i in items)
-    return [
-        _item_to_response(
-            item, await to_base(item.market_cap, item.data_currency),
-            security_ids.get(item.yahoo_ticker.upper()), isins.get(item.yahoo_ticker.upper()),
-            watchlist_rating(item.yahoo_ticker, own_counts(item), stored),
+    # Read now, not copied at sync time: a held or Company-tab name's figures and counts
+    # are the company's own rows at this moment (`company_yahoo`, review item DR1).
+    sources = await service.stored_sources(i.yahoo_ticker for i in items)
+    stored = {t: s.counts for t, s in sources.items() if s.counts is not None}
+    out = []
+    for item in items:
+        source = sources.get(item.yahoo_ticker.upper())
+        figures = (
+            company_figures(source.figures)
+            if source is not None and source.figures is not None else {}
         )
-        for item in items
-    ]
+        cap = figures.get("market_cap", item.market_cap) if figures else item.market_cap
+        cap_currency = figures.get("data_currency") if figures else item.data_currency
+        out.append(_item_to_response(
+            item, await to_base(cap, cap_currency),
+            security_ids.get(item.yahoo_ticker.upper()), isins.get(item.yahoo_ticker.upper()),
+            watchlist_rating(item.yahoo_ticker, counts_of(item), stored), figures,
+        ))
+    return out
 
 
 def _item_to_response(item, market_cap_base=None, security_id=None,
-                      isin=None, rating=None) -> WatchlistItemResponse:
+                      isin=None, rating=None, figures=None) -> WatchlistItemResponse:
+    """`figures`: the company's stored figures (`company_figures`), over the row's own."""
+    f = figures or {}
+
+    def pick(column):
+        return f[column] if column in f else getattr(item, column)
+
     return WatchlistItemResponse(
         id=item.id,
         yahoo_ticker=item.yahoo_ticker,
@@ -198,13 +213,13 @@ def _item_to_response(item, market_cap_base=None, security_id=None,
         target_price=item.target_price,
         current_price=item.current_price,
         currency=item.currency,
-        trailing_pe=item.trailing_pe,
-        revenue_growth=item.revenue_growth,
-        earnings_growth=item.earnings_growth,
-        fwd_revenue_growth=item.fwd_revenue_growth,
-        fwd_eps_growth=item.fwd_eps_growth,
-        profit_margins=item.profit_margins,
-        market_cap=item.market_cap,
+        trailing_pe=pick("trailing_pe"),
+        revenue_growth=pick("revenue_growth"),
+        earnings_growth=pick("earnings_growth"),
+        fwd_revenue_growth=pick("fwd_revenue_growth"),
+        fwd_eps_growth=pick("fwd_eps_growth"),
+        profit_margins=pick("profit_margins"),
+        market_cap=pick("market_cap"),
         market_cap_base=market_cap_base,
         week52_high=item.week52_high,
         week52_low=item.week52_low,
@@ -213,13 +228,14 @@ def _item_to_response(item, market_cap_base=None, security_id=None,
         ma50=item.ma50,
         pct_from_ma200=item.pct_from_ma200,
         rsi14=item.rsi14,
-        data_currency=item.data_currency,
-        forward_pe=item.forward_pe,
-        peg_ratio=_compute_peg(item),
+        data_currency=pick("data_currency"),
+        forward_pe=pick("forward_pe"),
+        # The company's own PEG as stored, else the row's (its read-time tier).
+        peg_ratio=f["peg_ratio"] if "peg_ratio" in f else _compute_peg(item),
         ev_to_ebitda=item.ev_to_ebitda,
-        analyst_target=item.analyst_target,
+        analyst_target=pick("analyst_target"),
         analyst_rating=rating,
-        analyst_count=item.analyst_count,
+        analyst_count=pick("analyst_count"),
         buy_score=item.buy_score,
         # Through `utc_iso`, not a bare `isoformat()`: the tab prints this as the data's
         # as-of time, and a naive string is read by the browser as local time.

@@ -117,8 +117,11 @@ async def _hold(db, symbol, **counts):
     await db.commit()
 
 
-async def _company(db, ticker, **counts):
-    db.add(SecCompany(cik=320193, ticker=ticker, name=ticker))
+async def _company(db, ticker, in_index=True, **counts):
+    """A Company-tab company: in the newest Nasdaq-100 pass unless `in_index` is False (a
+    company that left the index keeps a profile nobody refreshes)."""
+    db.add(SecCompany(cik=320193, ticker=ticker, name=ticker,
+                      universe_seen_at=utcnow() if in_index else None))
     db.add(CompanyYahooProfile(cik=320193, fetched_at=utcnow(), **counts))
     await db.commit()
 
@@ -235,6 +238,20 @@ async def test_a_company_tab_company_reads_its_overviews_counts_and_asks_nothing
     assert "recommendations" not in reads
     assert item.analyst_rating == "Hold"
     assert (await _row(db, "IDX")).analyst_rating.hold == 10
+
+
+@pytest.mark.asyncio
+async def test_a_company_that_left_the_index_is_not_read_off_its_frozen_profile(db, reads):
+    """Review item DR2: only the Company tab's scope refreshes a profile; outside it the
+    watchlist asks for itself rather than show counts nobody keeps current."""
+    await _company(db, "IDX", in_index=False, strong_buy=9, buy=0, hold=0, sell=0,
+                   strong_sell=0)
+    await _item(db, "IDX")
+
+    await WatchlistService(db).sync_item("IDX", force=True)
+
+    assert "recommendations" in reads
+    assert (await _row(db, "IDX")).analyst_rating.strong_buy != 9
 
 
 @pytest.mark.asyncio

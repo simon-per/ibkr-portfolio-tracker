@@ -6,14 +6,12 @@ import yfinance as yf
 import random
 import asyncio
 import numpy as np
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analyst_rating import AnalystRating, RATING_COUNT_FIELDS, rating_of
-from app.models.company_financials import SecCompany
+from app.models.analyst_rating import RATING_COUNT_FIELDS, rating_of
 from app.models.market_price import MarketPrice
 from app.models.security import Security
-from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.security_repository import held
 from app.repositories.watchlist_repository import WatchlistRepository
 from app.services.analyst_rating_service import AnalystRatingService
@@ -60,14 +58,9 @@ def new_quarter(info: Optional[Dict], known: Optional[date]) -> bool:
     return known is not None and reported is not None and reported > known
 
 
-def own_counts(item) -> Dict[str, Optional[int]]:
-    """The counts the watchlist asked Yahoo for itself (all None until it asked)."""
-    return {f: getattr(item, f) for f in RATING_COUNT_FIELDS}
-
-
 def watchlist_rating(
     yahoo_ticker: str,
-    own: Mapping[str, Optional[int]],
+    own: Optional[Mapping[str, Optional[int]]],
     stored: Dict[str, Dict[str, int]],
 ) -> Optional[Dict[str, Any]]:
     """
@@ -78,6 +71,11 @@ def watchlist_rating(
     """
     counts = stored.get(yahoo_ticker.upper())
     return rating_of(counts if counts is not None else own)
+
+
+from app.services.company_yahoo import (  # noqa: E402 - below the module helpers on purpose
+    TickerSource, company_figures, counts_of, sources_for_tickers,
+)
 
 
 class WatchlistService:
@@ -366,40 +364,24 @@ class WatchlistService:
             self._ticker_index = {True: held_index, False: every_index}
         return self._ticker_index[held_only]
 
-    async def stored_ratings(self, tickers: Iterable[str]) -> Dict[str, Dict[str, int]]:
+    async def stored_sources(self, tickers: Iterable[str]) -> Dict[str, TickerSource]:
         """
-        Upper-cased ticker -> the recommendation counts another pass already keeps for it:
-        a held listing's (`analyst_ratings`, the 05:00 held pass, which the positions table
-        shows), else a Company-tab company's by its SEC ticker (`company_yahoo_profiles`,
-        the 05:00 chunk, which its overview shows). A ticker in neither is absent. Read at
-        sync time for the score and at read time for the row, so a company's counts are
+        Upper-cased ticker -> its company's stored figures and counts (`company_yahoo`):
+        a held listing's own `fundamental_metrics` with the company's counts, else a
+        Company-tab company's profile. A ticker in neither is absent. Read at sync time
+        for the score and at read time for the row, so a company's figures and counts are
         the same wherever they appear. Pure database.
         """
-        wanted = {t.upper() for t in tickers}
-        held_ids = await self.security_ids_by_ticker(held_only=True)
-        ticker_of = {held_ids[t]: t for t in wanted if t in held_ids}
-        out: Dict[str, Dict[str, int]] = {}
-        if ticker_of:
-            rows = (await self.db.execute(
-                select(AnalystRating).where(AnalystRating.security_id.in_(ticker_of))
-            )).scalars()
-            for row in rows:
-                out[ticker_of[row.security_id]] = {
-                    f: getattr(row, f) for f in RATING_COUNT_FIELDS
-                }
-        rest = wanted - set(ticker_of.values())
-        if rest:
-            ticker = func.upper(SecCompany.ticker)
-            ciks = dict((await self.db.execute(
-                select(ticker, SecCompany.cik).where(ticker.in_(rest))
-            )).all())
-            profiles = await CompanyFinancialsRepository(self.db).yahoo_profiles(ciks.values())
-            for symbol, cik in ciks.items():
-                profile = profiles.get(cik)
-                if profile is not None and profile.fetched_at is not None \
-                        and profile.strong_buy is not None:
-                    out[symbol] = {f: getattr(profile, f) or 0 for f in RATING_COUNT_FIELDS}
-        return out
+        return await sources_for_tickers(
+            self.db, tickers, await self.security_ids_by_ticker(held_only=True)
+        )
+
+    async def stored_ratings(self, tickers: Iterable[str]) -> Dict[str, Dict[str, int]]:
+        """Upper-cased ticker -> the company's counts another pass keeps (`stored_sources`)."""
+        return {
+            t: s.counts for t, s in (await self.stored_sources(tickers)).items()
+            if s.counts is not None
+        }
 
     def _filter_outliers(self, closes: np.ndarray) -> np.ndarray:
         """Remove outlier prices (likely currency-mixed data)."""
@@ -438,7 +420,8 @@ class WatchlistService:
         # Recommendation counts: asked for only when no other pass keeps them — never for
         # a held listing (the held pass does) or a Company-tab company (its chunk does) —
         # on the weekly slow run, or when never asked.
-        stored = await self.stored_ratings([yahoo_ticker])
+        sources = await self.stored_sources([yahoo_ticker])
+        stored = {t: s.counts for t, s in sources.items() if s.counts is not None}
         counts_due = (
             yahoo_ticker.upper() not in await self.security_ids_by_ticker(held_only=True)
             and yahoo_ticker.upper() not in stored
@@ -517,6 +500,12 @@ class WatchlistService:
             "analyst_count": self._safe_int(info.get("numberOfAnalystOpinions")),
             "last_synced": utcnow(),
         }
+        # A held or Company-tab company's figures are the ones its own rows store, so the
+        # watchlist, Fundamentals and the overview cannot disagree about them (review item
+        # DR1); `.info` keeps the price and the technicals.
+        source = sources.get(yahoo_ticker.upper())
+        if source is not None and source.figures is not None:
+            data.update(company_figures(source.figures))
         if slow:
             data["estimates_synced_at"] = utcnow()
         # Kept when `.info` lacks it, so a missing field never re-arms `new_quarter`; and
@@ -526,7 +515,7 @@ class WatchlistService:
             item.reported_quarter is None or quarter > item.reported_quarter
         ):
             data["reported_quarter"] = quarter
-        own = own_counts(item)
+        own = counts_of(item)
         if counts_due:
             data["ratings_synced_at"] = utcnow()
             if fetched_counts is not None:
