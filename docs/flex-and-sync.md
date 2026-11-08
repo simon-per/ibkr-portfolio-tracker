@@ -723,7 +723,10 @@ staleness window.
 
 **Third, the Company tab's chunk** (owner-approved 2026-11-07, `company_profile_sync`): Yahoo's
 company-level figures — rating counts and targets, forward P/E, PEG, forward growth, the next
-earnings date, the business summary — for the Nasdaq-100 companies **nobody holds** (a held company
+earnings date, the business summary — for the Nasdaq-100 companies **nobody holds**, and since
+review item R5 (owner-approved 2026-11-07) the look-through's and the watchlist's US companies too
+(about twenty more: the rotation's chunk about 20% larger, and as many more weekly-close requests
+in the Sunday `company_prices_refresh`) (a held company
 reads the two passes above). Each is refreshed once per `ROTATION_DAYS` (14), oldest first, so a
 run asks `chunk_size(n)` = ⌈n / `RUNS_PER_ROTATION`⌉ companies: about 9 at `REQUESTS_PER_COMPANY`
 (7: `_fetch_yahoo_data`'s six and `fetch_counts`' one), **about 60 requests a run**, on top of the

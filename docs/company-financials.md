@@ -146,7 +146,24 @@ the same list (101 lines, GOOG and GOOGL one company; all 101 resolve to SEC tic
 2026-10-25). Equity rows only, **whitelisted** (`INVESTED_ASSET_CLASSES`): QQQM's money-market
 fund, futures and cash lines are no companies — and not `counts_as_invested`, whose fund marker
 would admit the money-market fund. Foreign private issuers in the index (ASML, AZN, PDD, ARM, …)
-get their CIK and then a miss, like a held one.
+get their CIK and then a miss, like a held one. A line QQQM publishes with a CINS and no ISIN
+(Linde, Seagate) takes the ISIN the identity store gives its share-class FIGI (`_isins_of_figis`),
+or `/companies` carried no ISIN for it and a look-through row of Linde — which only ISINs name —
+linked nowhere (review item R5).
+
+**Named elsewhere** — `CompanyFinancialsSync.named_elsewhere` (review item R5, 2026-11-08;
+**owner's approval 2026-11-07** for the requests, CLAUDE.md rule 1): 37 of the look-through's top
+100 rows linked nowhere. On top of the index's capped hundred (`Constituent.capped`), the pass takes
+the look-through's heaviest `NAMED_LOOKTHROUGH` (100) companies **with a US ISIN**, under the
+ticker the stored baskets most often give that ISIN, and the watchlist's US tickers (no exchange
+suffix). A US ISIN rather than any ticker the SEC lists: a foreign line's ticker can name another
+company there (Roche's ROG is Rogers Corp's). A held company is in scope already; one named twice
+is one company. Measured budget, approved: about twenty more companies, so about twenty more
+companyfacts requests a week, about twenty more Yahoo weekly-close requests every Sunday
+(`company_price_sync`), and the Yahoo profile rotation about 20% longer (`company_profile_sync`).
+They are stamped like the index's, so every reader of the stamp (the picker, the price pass, the
+profile chunk) takes them with no further change. Irish-domiciled 10-K filers outside the index
+(Accenture, Medtronic, Eaton) carry no US ISIN and stay without a page (accepted).
 
 - **A constituent nobody holds gets a `sec_companies` row and never a `securities` row**: every
   Yahoo loop reads `securities`, and a hundred new rows there would be a hundred new price

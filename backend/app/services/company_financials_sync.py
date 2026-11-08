@@ -6,7 +6,7 @@ The EDGAR pass: SEC filers' companyfacts in, `company_financials` rows out
 whose next 10-Q or 10-K the SEC now lists — one small request for each company whose filing
 is due, so a report reaches the tab the next morning rather than on Sunday.
 
-**Scope**, two parts, one request per company (CIK) whichever brought it in:
+**Scope**, three parts, one request per company (CIK) whichever brought it in:
 
 - **Held** (`in_scope`): held securities (`security_repository.held`) listed on a US
   exchange — the exchanges the price path maps to a bare ticker — that are not a known fund.
@@ -17,7 +17,11 @@ is due, so a report reaches the tab the next morning rather than on Sunday.
   keeps current, so a reconstitution reaches this list without a code change. Equity rows
   only (whitelisted); a constituent the account does not hold gets a `sec_companies` row and
   never a `securities` one. Each ticker's CIK, or the SEC's "no such ticker", is kept in
-  `sec_tickers`. Each full pass stamps the companies it found
+  `sec_tickers`. A line published with a CINS and no ISIN takes the ISIN the identity store
+  gives its share-class FIGI (Linde, Seagate), so a look-through row can find its page.
+- **Named elsewhere** (`named_elsewhere`, review item R5, owner's approval 2026-11-07): the
+  look-through's heaviest `NAMED_LOOKTHROUGH` companies with a US ISIN and the watchlist's
+  US tickers, on top of the index's hundred. Each full pass stamps the companies it found
   (`universe_seen_at`), which is how the tab lists the current index and not a former member.
 
 A foreign filer (ASML's and NU's 20-F) has a CIK but files IFRS, so its document yields no
@@ -53,6 +57,7 @@ Touches neither Yahoo nor IBKR.
 import asyncio
 import logging
 import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -65,7 +70,9 @@ from app.clock import utc_today, utcnow
 from app.config import settings
 from app.etf_mappings import is_known_etf_isin
 from app.models.etf_basket import EtfHolding
+from app.models.isin_identity import IsinIdentity
 from app.models.security import Security
+from app.models.watchlist_item import WatchlistItem
 from app.repositories.company_financials_repository import (
     CompanyFinancialsRepository,
     facts_backoff_until,
@@ -118,6 +125,10 @@ CIK_RECHECK_AFTER = timedelta(days=30)
 UNIVERSE_FUNDS = ("QQQM",)
 #: Companies, not lines: GOOG and GOOGL are one, so the index's 101 lines are 100.
 UNIVERSE_SIZE = 100
+#: The look-through's heaviest companies whose US filers the tab carries beside the index
+#: (`named_elsewhere`, review item R5; owner's approval 2026-11-07 for about twenty more
+#: companies' EDGAR and Yahoo requests a week).
+NAMED_LOOKTHROUGH = 100
 #: Filing instances read for one company in one pass (two requests each). The first fill
 #: reads MA's six years of dividend gaps in about ten, BKR's nine in about twenty; a company
 #: that keeps tagging only on a dimension member needs one a quarter after that.
@@ -165,6 +176,9 @@ class Constituent:
     ticker: str  # the SEC's spelling
     name: str
     isin: Optional[str]
+    # Counted against `UNIVERSE_SIZE`: the index's lines. The companies the look-through and
+    # the watchlist name (`named_elsewhere`) are not; they come on top.
+    capped: bool = True
 
 
 @dataclass
@@ -204,8 +218,9 @@ class CompanyFinancialsSync:
 
     async def universe(self) -> tuple:
         """
-        The universe funds' equity constituents, heaviest first, one line per ticker;
-        and the funds that have no stored basket.
+        The universe funds' equity constituents, heaviest first, one line per ticker, then
+        the companies named elsewhere (`named_elsewhere`); and the funds that have no stored
+        basket.
         """
         baskets = EtfBasketRepository(self.db)
         lines: List[EtfHolding] = []
@@ -226,6 +241,7 @@ class CompanyFinancialsSync:
             if not rows:
                 missing.append(ref)
             lines.extend(rows)
+        isin_of_figi = await self._isins_of_figis(lines)
         out: Dict[str, Constituent] = {}
         for row in sorted(lines, key=lambda r: -r.weight_pct):
             # Whitelisted: a money-market fund, a future or cash is no company.
@@ -234,10 +250,80 @@ class CompanyFinancialsSync:
             if not row.constituent_ticker or is_known_etf_isin(row.constituent_isin):
                 continue
             ticker = sec_ticker(row.constituent_ticker)
-            out.setdefault(
-                ticker, Constituent(ticker, row.constituent_name, row.constituent_isin)
+            isin = row.constituent_isin or isin_of_figi.get(
+                row.constituent_share_class_figi
             )
-        return list(out.values()), missing
+            out.setdefault(ticker, Constituent(ticker, row.constituent_name, isin))
+        return list(out.values()) + await self.named_elsewhere(), missing
+
+    async def _isins_of_figis(self, lines: Sequence[EtfHolding]) -> Dict[str, str]:
+        """
+        A share-class FIGI -> the ISIN the identity store gives it, for the lines published
+        with a CINS and no ISIN (review item R5): QQQM lists Linde and Seagate that way, so
+        their company rows carried no ISIN and a look-through row of Linde, which only an ISIN
+        names, linked nowhere. The alphabetically first where several ISINs share one.
+        """
+        figis = {
+            row.constituent_share_class_figi
+            for row in lines
+            if not row.constituent_isin and row.constituent_share_class_figi
+        }
+        if not figis:
+            return {}
+        found = await self.db.execute(
+            select(IsinIdentity.share_class_figi, IsinIdentity.isin)
+            .where(IsinIdentity.share_class_figi.in_(sorted(figis)))
+            .order_by(IsinIdentity.isin)
+        )
+        out: Dict[str, str] = {}
+        for figi, isin in found:
+            out.setdefault(figi, isin)
+        return out
+
+    async def named_elsewhere(self) -> List[Constituent]:
+        """
+        The companies the app names outside the index, as constituents `UNIVERSE_SIZE` does
+        not count (review item R5, 2026-11-08): **the look-through's heaviest
+        `NAMED_LOOKTHROUGH`** with a US ISIN, under the ticker the stored baskets most often
+        give that ISIN, and **the watchlist's US tickers** (no exchange suffix). 37 of the
+        look-through's top 100 rows linked nowhere. A US ISIN, not any ticker the SEC lists:
+        a foreign line's ticker can name another company there (Roche's ROG is Rogers
+        Corp's). A held company is in scope already; one named twice is one company.
+        """
+        from app.services.lookthrough_service import LookthroughService
+
+        view = await LookthroughService(self.db).get_lookthrough(limit=NAMED_LOOKTHROUGH)
+        wanted: List[Tuple[str, str]] = []
+        for row in view.get("companies") or []:
+            isin = next(
+                (i for i in sorted(row.get("isins") or []) if i.upper().startswith("US")),
+                None,
+            )
+            if isin is not None:
+                wanted.append((isin.upper(), row.get("name") or isin))
+        counts: Dict[str, Counter] = defaultdict(Counter)
+        if wanted:
+            found = await self.db.execute(
+                select(EtfHolding.constituent_isin, EtfHolding.constituent_ticker).where(
+                    EtfHolding.constituent_isin.in_([isin for isin, _ in wanted]),
+                    EtfHolding.constituent_ticker.is_not(None),
+                )
+            )
+            for isin, ticker in found:
+                counts[isin.upper()][sec_ticker(ticker)] += 1
+        out: List[Constituent] = []
+        for isin, name in wanted:
+            if counts[isin]:
+                ticker = max(counts[isin].items(), key=lambda kv: (kv[1], kv[0]))[0]
+                out.append(Constituent(ticker, name, isin, capped=False))
+        items = (await self.db.execute(select(WatchlistItem))).scalars()
+        for item in items:
+            symbol = (item.yahoo_ticker or "").strip().upper()
+            if not symbol or any(mark in symbol for mark in (".", "^", "=")):
+                continue
+            ticker = sec_ticker(symbol)
+            out.append(Constituent(ticker, item.company_name or ticker, None, capped=False))
+        return out
 
     async def refresh(
         self,
@@ -646,14 +732,19 @@ class CompanyFinancialsSync:
     def _universe_ciks(
         constituents: Sequence[Constituent], known: Dict[str, int]
     ) -> List[int]:
-        """The first `UNIVERSE_SIZE` distinct companies among the constituents."""
+        """The first `UNIVERSE_SIZE` distinct companies among the index's constituents,
+        then every company named elsewhere (`named_elsewhere`) not among them."""
         ciks: List[int] = []
+        capped = 0
         for constituent in constituents:
             cik = known.get(constituent.ticker)
-            if cik is not None and cik not in ciks:
-                ciks.append(cik)
-            if len(ciks) == UNIVERSE_SIZE:
-                break
+            if cik is None or cik in ciks:
+                continue
+            if constituent.capped:
+                if capped == UNIVERSE_SIZE:
+                    continue
+                capped += 1
+            ciks.append(cik)
         return ciks
 
     async def _record_universe(
