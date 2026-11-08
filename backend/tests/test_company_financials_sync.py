@@ -9,7 +9,7 @@ is in memory, and the client's sleeps are recorded rather than slept.
 
 import json
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -827,6 +827,103 @@ async def test_a_gap_its_own_filing_lacks_is_read_from_the_filing_a_year_later(
         ("2020-06-30", "Q2"): 0.20,  # the 2021 10-Q's comparative
         ("2021-06-30", "Q2"): 0.22,  # companyfacts' own, never replaced
     }
+
+
+# BKR from 2023: net income every quarter, its diluted EPS only on the Class A, so
+# companyfacts has none. The second quarter's 10-Q was read for a dividend before the reader
+# looked for EPS.
+EPS_INSTANCE = (Path(__file__).parent / "fixtures" / "edgar_class_eps.xbrl").read_bytes()
+CLASS_A_EPS = {
+    "cik": APPLE_CIK,
+    "entityName": "Example",
+    "facts": {
+        "us-gaap": {
+            "NetIncomeLoss": {
+                "units": {
+                    "USD": [
+                        _paid("2021-01-01", "2021-03-31", 3.8e8, Q1_10Q, "2021-04-29"),
+                        _paid("2021-01-01", "2021-06-30", 7.9e8, Q2_10Q, "2021-07-29"),
+                        _paid("2021-04-01", "2021-06-30", 4.1e8, Q2_10Q, "2021-07-29"),
+                    ]
+                }
+            },
+        }
+    },
+}
+
+
+def _eps_edgar():
+    return EdgarWithFilings(
+        {APPLE_CIK: CLASS_A_EPS},
+        {
+            filing_url(APPLE_CIK, Q2_10Q, "index.json"): {
+                "status_code": 200,
+                "json": {"directory": {"item": [{"name": "bkr-20210630_htm.xml"}]}},
+            },
+            filing_url(APPLE_CIK, Q2_10Q, "bkr-20210630_htm.xml"): {
+                "status_code": 200,
+                "content": EPS_INSTANCE,
+            },
+        },
+    )
+
+
+async def _read_before_eps(db, accn, filed, facts=()):
+    """A read stored by the reader that looked for the dividend alone."""
+    db.add(SecCompany(cik=APPLE_CIK, ticker="AAPL"))
+    db.add(SecFilingRead(cik=APPLE_CIK, accn=accn, form="10-Q", filed=filed,
+                         facts=list(facts), read_at=utcnow(), reader=1))
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_eps_gap_reads_a_filing_read_before_eps_once_more(db, configured):
+    await _hold(db, 1, "AAPL")
+    await _read_before_eps(db, Q2_10Q, date(2021, 7, 29))
+    edgar = _eps_edgar()
+
+    summary = await _sync(db, edgar).refresh()
+    assert summary["filings_read"] == 2
+    assert edgar.filing_urls() == [
+        filing_url(APPLE_CIK, Q2_10Q, "index.json"),
+        filing_url(APPLE_CIK, Q2_10Q, "bkr-20210630_htm.xml"),
+        filing_url(APPLE_CIK, Q1_10Q, "index.json"),  # 404: holds nothing
+    ]
+    eps = (
+        await db.execute(
+            select(CompanyFinancial).where(
+                CompanyFinancial.cik == APPLE_CIK,
+                CompanyFinancial.metric == "eps_diluted",
+            )
+        )
+    ).scalars().all()
+    # The second quarter's from the Class A; the first stays absent (six months less the
+    # second quarter is not derived).
+    assert {(r.period_end.isoformat(), r.value) for r in eps} == {("2021-06-30", 0.41)}
+    reads = {r.accn: r for r in (await db.execute(select(SecFilingRead))).scalars()}
+    assert {accn: r.reader for accn, r in reads.items()} == {Q1_10Q: 2, Q2_10Q: 2}
+    assert {f["concept"] for f in reads[Q2_10Q].facts} == {
+        "EarningsPerShareDiluted", "CommonStockDividendsPerShareDeclared"}
+
+    # Never again: the first quarter's filing held nothing, the second's was read for EPS.
+    edgar = _eps_edgar()
+    summary = await _sync(db, edgar).refresh(force=True)
+    assert edgar.filing_urls() == [] and summary["filings_read"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_dividend_gap_never_rereads_a_filing_read_before_eps(db, configured):
+    await _hold(db, 1, "AAPL")
+    await _read_before_eps(db, Q1_10Q, date(2021, 4, 29))
+    edgar = _filings_edgar()
+
+    summary = await _sync(db, edgar).refresh()
+    # The second quarter's filing is read (never read before); the first's is not asked.
+    assert edgar.filing_urls() == [
+        filing_url(APPLE_CIK, Q2_10Q, "index.json"),
+        filing_url(APPLE_CIK, Q2_10Q, "aapl-20210630_htm.xml"),
+    ]
+    assert summary["filings_read"] == 1
 
 
 @pytest.mark.asyncio

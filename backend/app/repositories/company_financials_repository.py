@@ -233,10 +233,13 @@ class CompanyFinancialsRepository:
         filed: date,
         facts: Sequence[dict],
         read_at: datetime,
+        reader: int,
     ) -> None:
-        """What one filing held, nothing included: the filing is never asked again."""
+        """What one filing held, nothing included, and the `reader` that read it: the
+        filing is never asked again for what that reader looks for. A read by an older
+        reader is replaced whole — the new one looked for everything the old one did."""
         await self.ensure_company(cik)
-        self.session.add(
+        await self.session.merge(
             SecFilingRead(
                 cik=cik,
                 accn=accn,
@@ -244,6 +247,7 @@ class CompanyFinancialsRepository:
                 filed=filed,
                 facts=list(facts),
                 read_at=read_at,
+                reader=reader,
             )
         )
 

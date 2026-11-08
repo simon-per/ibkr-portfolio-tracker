@@ -15,7 +15,7 @@ never IBKR.
 |---|---|
 | the SEC endpoints, pacing, retries | `backend/app/services/edgar_client.py` |
 | companyfacts → rows (every rule below) | `backend/app/services/company_financials_normaliser.py` |
-| a filing's instance → the dividend per share companyfacts leaves out | `backend/app/services/edgar_filing_facts.py` (table `sec_filing_reads`, migration `a7c9e1f3b5d8`) |
+| a filing's instance → the dividend per share and diluted EPS companyfacts leaves out | `backend/app/services/edgar_filing_facts.py` (table `sec_filing_reads`, migrations `a7c9e1f3b5d8`, `e7a9c1d3f5b8`) |
 | the pass: scope, CIKs, back-off, writes | `backend/app/services/company_financials_sync.py` |
 | TTM, FCF, margins, CAGR, YoY | `backend/app/services/company_financials_service.py` |
 | tables | `backend/app/models/company_financials.py` (migration `d1e3f5a7b9c2`) |
@@ -88,7 +88,8 @@ kept three gaps each that the survey had filled (2026-11-07).
   own filing's accession number (so the split vote and the latest-filing rule treat them as that
   filing's), and only for a (concept, period) companyfacts has no fact for.
 - **Once per filing, ever** (`sec_filing_reads`): a filing never changes, so what it held is
-  stored, nothing included, and never asked again; a 404 index or a filing with no single
+  stored, nothing included, and never asked again for what its reader looked for (the EPS
+  reads below added one more look); a 404 index or a filing with no single
   instance is stored as nothing. A failure stamps nothing and stops that company's reads for the
   pass (`filing_errors`, a warning); a 401/403/429 writes the company's figures, then stops the
   pass. A document that is not XML is stored as nothing, with a warning (`filings_unreadable`).
@@ -105,6 +106,27 @@ The survey's effect on the 102 companies: gaps 280 → 134 with the zero rule be
 metric's row moved, no existing dividend per share changed but MCHP's FY2011 Q4 (0.173 → 0, its
 two dividends declared in Q3 now sum to the year). MA, MDLZ, XEL and COST have no gap left;
 PCAR one, INTC two, BKR four.
+
+**The diluted EPS the same way** (2026-11-08). BKR's stored EPS stopped in 2022, so its P/E did
+too: companyfacts holds its 10-Ks' undimensioned EPS to FY2024 and no 10-Q's after Q3 2022 —
+the 10-Qs print it under "Class A Common Stock" (`StatementClassOfStockAxis` /
+`CommonClassAMember`, read off the Q3 2026 10-Q's rendered statement), with no diluted count
+to derive it from. So a quarter with net income and no diluted EPS (`eps_gaps`) is a gap too,
+asked through the same `sources`, and the instance's EPS-chain facts on a share class
+(`EPS_MEMBERS`: `CommonStockMember`, `CommonClassAMember`) are kept — **only when every share
+class the filing tags that period's EPS on gives one value**, the classes not read included.
+Alphabet tags its three classes alike (kept); a company whose classes earn different amounts
+per share (Berkshire's A and B) has no one EPS, whichever class is quoted (left out). The
+diluted count then comes from net income / EPS (*Diluted shares when not reported*).
+
+- **What a read looked for** (`sec_filing_reads.reader`, migration `e7a9c1d3f5b8`): 1 the
+  dividend alone, 2 the EPS too (`READER`, `READ_SINCE`). A filing an EPS gap names that was
+  read at 1 is read once more and replaced whole; a dividend gap never re-reads it. A filing
+  read for one gap covers another only through facts of that gap's concepts (`GAP_CONCEPTS`).
+- **Measured** on the public API (2026-11-08): 12 of the 102 companies have quarters with net
+  income and no EPS, 60 quarters in all — BKR 20 (2016's shell quarters have no filing of their
+  own), TSLA 11 (2010–12), ALNY 5, FANG and FAST 4, GOOG and REGN 3, HONA, NXPI, ONDS, RKLB and
+  SNDK 2. Each names a filing once ever; BKR then costs one filing a quarter, as its dividend does.
 
 ## Limits and bounds
 
@@ -433,7 +455,7 @@ share a period end, hence the fiscal period in the key — with `fiscal_year`, `
 `unit` (`USD`, `USD/shares` or `shares`), `source_concept`, `filed` (the newest filing behind the
 value) and `fetched_at`. **A period never reported has no row; nothing is stored as 0.** A
 dividend per share read from a filing's instance carries its concept's name like any other; its
-filing is in `sec_filing_reads` (cik, accn, form, filed, `facts` as JSON, read_at).
+filing is in `sec_filing_reads` (cik, accn, form, filed, `facts` as JSON, read_at, reader).
 
 ## Service and API
 
@@ -800,8 +822,7 @@ All three were misses: the normaliser read 10-K/10-Q facts in us-gaap only.
   the fiscal year): its 2016-2017 share counts jump. Accepted; the figures since 2018 are one company's.
 - **A 10-Q missing from companyfacts**: ALNY's Q1 2026 is in no fact, so it has no TTM from
   then until its Q1 2027 10-Q restates the quarter. Deriving it as six months less Q2 is not done.
-- **No EPS tagged at all**: BKR after 2024 (no EPS concept, no diluted count to derive it);
-  HONA and SPCX are new filers with too few quarters for a TTM.
+- **New filers**: HONA and SPCX have too few quarters for a TTM.
 - Non-US listings; a 40-F filer; a 20-F filer's quarters (its 6-Ks carry no XBRL figures this
   reads); IFRS concepts without an exact US-GAAP twin (`Borrowings`, so no net cash for NU or TSMC).
 - EBITDA (D&A tagged unevenly, above), so no EV/EBITDA; return on invested capital (it needs a

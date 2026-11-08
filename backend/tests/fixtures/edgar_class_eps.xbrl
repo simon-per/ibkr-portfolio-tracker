@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A synthetic XBRL instance (tests/test_edgar_filing_facts.py, tests/test_company_financials_sync.py):
+  the shapes a 10-Q's diluted EPS takes when companyfacts leaves it out, as BKR's since 2023 —
+  tagged only on its Class A. Kept: the EPS on the Class A alone, and on the Class A beside a
+  class of the company's own member that gives the same value. Not kept: a period another
+  class gives another value for, two dimensions, a concept outside the chain. The undimensioned
+  EPS is companyfacts' to give (read only for a filing companyfacts has not taken in). The
+  dividend on the Class A is read in the same pass.
+-->
+<xbrli:xbrl
+    xmlns:xbrli="http://www.xbrl.org/2003/instance"
+    xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+    xmlns:us-gaap="http://fasb.org/us-gaap/2023"
+    xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+    xmlns:ex="http://example.com/20210630">
+  <xbrli:context id="q2_a">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2021-04-01</xbrli:startDate><xbrli:endDate>2021-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="h1_a">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2021-01-01</xbrli:startDate><xbrli:endDate>2021-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="py_q2_a">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2020-04-01</xbrli:startDate><xbrli:endDate>2020-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="py_q2_b">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassBMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2020-04-01</xbrli:startDate><xbrli:endDate>2020-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="py_h1_a">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2020-01-01</xbrli:startDate><xbrli:endDate>2020-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="py_h1_own_class">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">ex:ClassCMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2020-01-01</xbrli:startDate><xbrli:endDate>2020-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="q1_two_dims">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember>
+        <xbrldi:explicitMember dimension="us-gaap:StatementBusinessSegmentsAxis">ex:OilfieldMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period><xbrli:startDate>2021-01-01</xbrli:startDate><xbrli:endDate>2021-03-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="q2_plain">
+    <xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2021-04-01</xbrli:startDate><xbrli:endDate>2021-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="usdPerShare">
+    <xbrli:divide>
+      <xbrli:unitNumerator><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unitNumerator>
+      <xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator>
+    </xbrli:divide>
+  </xbrli:unit>
+  <us-gaap:EarningsPerShareDiluted contextRef="q2_a" unitRef="usdPerShare" decimals="2">0.41</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="h1_a" unitRef="usdPerShare" decimals="2">0.80</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="py_q2_a" unitRef="usdPerShare" decimals="2">0.30</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="py_q2_b" unitRef="usdPerShare" decimals="2">3.00</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="py_h1_a" unitRef="usdPerShare" decimals="2">0.55</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="py_h1_own_class" unitRef="usdPerShare" decimals="2">0.55</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareDiluted contextRef="q1_two_dims" unitRef="usdPerShare" decimals="2">9.99</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:EarningsPerShareBasic contextRef="q2_a" unitRef="usdPerShare" decimals="2">0.42</us-gaap:EarningsPerShareBasic>
+  <us-gaap:EarningsPerShareDiluted contextRef="q2_plain" unitRef="usdPerShare" decimals="2">0.43</us-gaap:EarningsPerShareDiluted>
+  <us-gaap:CommonStockDividendsPerShareDeclared contextRef="q2_a" unitRef="usdPerShare" decimals="2">0.23</us-gaap:CommonStockDividendsPerShareDeclared>
+</xbrli:xbrl>

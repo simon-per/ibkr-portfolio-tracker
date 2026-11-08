@@ -181,11 +181,12 @@ class CompanyFinancial(Base):
 class SecFilingRead(Base):
     """
     One 10-Q/10-K whose XBRL instance the EDGAR pass has read for the figures companyfacts
-    leaves out — a dividend per share tagged only on a dimension member
+    leaves out — a dividend per share or a diluted EPS tagged only on a dimension member
     (`edgar_filing_facts`) — and what it found: `facts`, a list of `{concept, unit, start,
     end, val}`, empty when the filing held none. A filing never changes, so a row means the
-    filing is never asked again; `form` and `filed` are companyfacts' for that accession
-    number, which the normaliser needs beside each fact.
+    filing is never asked again for what its `reader` looked for (`READER`: 1 the dividend
+    alone, 2 the EPS too); `form` and `filed` are companyfacts' for that accession number,
+    which the normaliser needs beside each fact.
     """
 
     __tablename__ = "sec_filing_reads"
@@ -198,6 +199,7 @@ class SecFilingRead(Base):
     filed: Mapped[date] = mapped_column(Date, nullable=False)
     facts: Mapped[list] = mapped_column(JSON, nullable=False)
     read_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    reader: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
     def __repr__(self) -> str:
         return f"<SecFilingRead {self.cik} {self.accn} facts={len(self.facts or [])}>"

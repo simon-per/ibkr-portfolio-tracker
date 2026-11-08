@@ -12,11 +12,14 @@ figure is in the filing's XBRL instance, which EDGAR serves beside the filing.
 
 So when a quarter shows dividends paid but no dividend per share, the pass reads the
 instance of the filing that reports that quarter (a 10-Q, or the 10-K for a fourth quarter)
-and keeps its dividend-per-share facts on a whitelisted dimension member (`MEMBERS`). Each
-filing is read once ever — a filing never changes — and what it held is stored, nothing
-included (`sec_filing_reads`). The normaliser takes those facts beside companyfacts' and
-lets them fill a period only where companyfacts has no fact of that concept
-(`company_financials_normaliser.normalise`).
+and keeps its dividend-per-share facts on a whitelisted dimension member (`MEMBERS`). The
+diluted EPS the same way (2026-11-08): BKR has tagged it only on its Class A since 2023, so
+companyfacts held no quarter's EPS after 2022 and the P/E stopped there; a quarter with net
+income and no EPS reads its filing for the EPS on a share class (`EPS_MEMBERS`). Each
+filing is read once for what the reader looks for — a filing never changes — and what it
+held is stored, nothing included (`sec_filing_reads`, with the `READER` that read it). The
+normaliser takes those facts beside companyfacts' and lets them fill a period only where
+companyfacts has no fact of that concept (`company_financials_normaliser.normalise`).
 
 Pure: the requests are `EdgarClient.filing_index` / `filing_document`, the loop is
 `CompanyFinancialsSync`.
@@ -34,9 +37,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from app.services.company_financials_normaliser import FORMS, METRICS
 from app.services.edgar_client import ANNUAL_FORM_PREFIXES
 
-#: The concepts read from a filing on a dimension member: the dividend-per-share chain,
-#: nothing else.
-CONCEPTS = frozenset(METRICS["dividends_per_share"].concepts)
+#: The concepts read from a filing on a dimension member: the dividend-per-share chain on
+#: `MEMBERS`, the diluted EPS chain on `EPS_MEMBERS`, nothing else.
+DIVIDEND_CONCEPTS = frozenset(METRICS["dividends_per_share"].concepts)
+EPS_CONCEPTS = frozenset(METRICS["eps_diluted"].concepts)
+CONCEPTS = DIVIDEND_CONCEPTS | EPS_CONCEPTS
 #: The concepts read undimensioned from a filing companyfacts has not taken in yet
 #: (`parse_instance(whole=True)`, review item CO5): every chain's.
 CHAIN_CONCEPTS = frozenset(c for spec in METRICS.values() for c in spec.concepts)
@@ -57,6 +62,21 @@ MEMBERS = frozenset(
         ("DividendsAxis", "DividendDeclaredMember"),
     }
 )
+
+CLASS_AXIS = "StatementClassOfStockAxis"
+#: The share classes whose diluted EPS is read. A period is kept only when every class the
+#: filing tags its EPS on gives one value — the classes not read count too: Alphabet tags
+#: its three classes alike, while a company whose classes earn different amounts per share
+#: (Berkshire's A and B) has no one EPS to read, whichever class it is quoted by.
+EPS_MEMBERS = frozenset({(CLASS_AXIS, "CommonStockMember"), (CLASS_AXIS, "CommonClassAMember")})
+
+#: The concepts each gap's read must hold to fill it, by the metric missing.
+GAP_CONCEPTS = {"dividends_per_share": DIVIDEND_CONCEPTS, "eps_diluted": EPS_CONCEPTS}
+#: What a stored read looked for (`sec_filing_reads.reader`): 1 the dividend per share
+#: alone (2026-11-07), 2 the diluted EPS too (2026-11-08). A filing read before a metric
+#: was looked for is read once more for that metric's gap, and never again after.
+READER = 2
+READ_SINCE = {"dividends_per_share": 1, "eps_diluted": 2}
 
 #: A gap and a filing's period are one period when their ends are this close (the
 #: normaliser's `_canonical_ends` folds ends within a week the same way).
@@ -134,6 +154,32 @@ def dividend_gaps(rows: Iterable[Dict[str, Any]]) -> List[date]:
     return sorted(paid - have, reverse=True)
 
 
+def eps_gaps(rows: Iterable[Dict[str, Any]]) -> List[date]:
+    """
+    Quarter ends with net income but no diluted EPS, newest first: BKR's quarters from 2023
+    (its EPS on the Class A alone). A quarter whose diluted count was tagged has its EPS
+    already (net income over it, the normaliser); a filing that tags none on a class is
+    read once and holds nothing.
+    """
+    income, have = set(), set()
+    for row in rows:
+        if row["fiscal_period"] == "FY":
+            continue
+        if row["metric"] == "net_income":
+            income.add(row["period_end"])
+        elif row["metric"] == "eps_diluted":
+            have.add(row["period_end"])
+    return sorted(income - have, reverse=True)
+
+
+def gaps(rows: Sequence[Dict[str, Any]]) -> List[Tuple[date, str]]:
+    """Every quarter a filing may fill, as (quarter end, the metric missing), newest
+    first: the dividend gaps and the EPS gaps."""
+    found = [(d, "dividends_per_share") for d in dividend_gaps(rows)]
+    found += [(d, "eps_diluted") for d in eps_gaps(rows)]
+    return sorted(found, key=lambda gap: gap[0], reverse=True)
+
+
 def ttm_dividend_gap(rows: Sequence[Dict[str, Any]]) -> bool:
     """Whether a dividend gap falls in the company's newest four quarters: its TTM dividend
     per share is absent now."""
@@ -172,11 +218,15 @@ def sources(by_accn: Dict[str, Filing], period_end: date) -> List[Filing]:
     return out
 
 
-def covers(facts: Sequence[Dict[str, Any]], period_end: date) -> bool:
-    """Whether facts read from a filing end on this period (a comparative quarter, a
-    year-to-date rung or a year), so its own filing need not be read in the same pass."""
+def covers(
+    facts: Sequence[Dict[str, Any]], period_end: date, concepts: frozenset = CONCEPTS
+) -> bool:
+    """Whether facts of `concepts` read from a filing end on this period (a comparative
+    quarter, a year-to-date rung or a year), so its own filing need not be read in the
+    same pass."""
     return any(
-        (end := _date(f.get("end"))) is not None
+        f.get("concept") in concepts
+        and (end := _date(f.get("end"))) is not None
         and abs((end - period_end).days) <= SAME_PERIOD_DAYS
         for f in facts
     )
@@ -216,11 +266,12 @@ def _gaap_name(qname: str, prefixes: Dict[str, str]) -> Optional[str]:
 def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
     """
     The dividend-per-share facts of one XBRL instance that sit on exactly one whitelisted
-    dimension member (`MEMBERS`): `{concept, unit, start, end, val}`, dates as ISO strings
-    (`start` None for a balance-sheet instant), the unit spelled as companyfacts spells it
-    (`USD`, `shares`, `USD/shares`). A period two accepted facts give different values for
-    (two share classes paid differently) is left out whole. Raises `ET.ParseError` on a
-    document that is not XML.
+    dimension member (`MEMBERS`), and the diluted EPS facts on one share class
+    (`EPS_MEMBERS`): `{concept, unit, start, end, val}`, dates as ISO strings (`start` None
+    for a balance-sheet instant), the unit spelled as companyfacts spells it (`USD`,
+    `shares`, `USD/shares`). A period two accepted facts give different values for (two
+    share classes paid differently) is left out whole, and an EPS period any other share
+    class gives another value for too. Raises `ET.ParseError` on a document that is not XML.
 
     Undimensioned facts are returned only `whole`: companyfacts has them, except for a
     filing it has not taken in yet (review item CO5, 2026-11-08: six companies sat on
@@ -287,6 +338,8 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
 
     by_period: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
     plain: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
+    # An EPS period's values on every share class, read or not.
+    classes: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
     for concept, ctx_ref, unit_ref, text in candidates:
         context, unit = contexts.get(ctx_ref), units.get(unit_ref)
         if context is None or unit is None:
@@ -294,22 +347,32 @@ def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
         start, end, dims, typed = context
         if typed:
             continue
+        on_class = concept in EPS_CONCEPTS and len(dims) == 1 and dims[0][0] == CLASS_AXIS
+        target: Optional[Dict] = None
         if not dims and whole:
             target = plain
-        elif concept in CONCEPTS and len(dims) == 1 and dims[0] in MEMBERS:
+        elif concept in DIVIDEND_CONCEPTS and len(dims) == 1 and dims[0] in MEMBERS:
             target = by_period
-        else:
+        elif on_class and dims[0] in EPS_MEMBERS:
+            target = by_period
+        elif not on_class:
             continue
         if _date(end) is None or (start is not None and _date(start) is None):
             continue
-        if start is None and target is by_period:
+        if start is None and target is not plain:
             continue
         try:
             val = float(text)
         except ValueError:
             continue
-        if math.isfinite(val):
+        if not math.isfinite(val):
+            continue
+        if on_class:
+            classes[(concept, unit, start, end)].add(val)
+        if target is not None:
             target[(concept, unit, start, end)].add(val)
+    for key in by_period.keys() & classes.keys():
+        by_period[key] = classes[key]  # another class's value leaves the period out
     merged = {k: v for k, v in by_period.items() if k not in plain}
     merged.update(plain)
     return [

@@ -12,10 +12,16 @@ from pathlib import Path
 import pytest
 
 from app.services.edgar_filing_facts import (
+    EPS_CONCEPTS,
+    GAP_CONCEPTS,
+    READ_SINCE,
+    READER,
     Filing,
     covers,
     dividend_gaps,
+    eps_gaps,
     filings,
+    gaps,
     instance_name,
     parse_instance,
     reporting,
@@ -25,7 +31,9 @@ from app.services.edgar_filing_facts import (
 INSTANCE = (
     Path(__file__).parent / "fixtures" / "edgar_dimensioned_dividends.xbrl"
 ).read_bytes()
+EPS_INSTANCE = (Path(__file__).parent / "fixtures" / "edgar_class_eps.xbrl").read_bytes()
 DPS = "CommonStockDividendsPerShareDeclared"
+EPS = "EarningsPerShareDiluted"
 
 
 def _fact(start, end, val):
@@ -53,6 +61,30 @@ def test_only_a_single_whitelisted_us_gaap_member_is_kept():
 def test_two_members_that_disagree_leave_the_period_out_whole():
     kept = {(f["start"], f["end"]) for f in parse_instance(INSTANCE)}
     assert ("2020-01-01", "2020-06-30") not in kept  # Class A 0.38 against 0.40
+
+
+def _eps(start, end, val):
+    return {"concept": EPS, "unit": "USD/shares", "start": start, "end": end, "val": val}
+
+
+def test_the_eps_on_one_share_class_is_read():
+    """BKR since 2023: the diluted EPS on its Class A alone. Kept beside a class of the
+    company's own member giving the same value; left out where another class gives another
+    (Berkshire's A and B), on two dimensions, and for a concept outside the chain. The
+    Class A's dividend comes with it."""
+    assert parse_instance(EPS_INSTANCE) == [
+        _fact("2021-04-01", "2021-06-30", 0.23),
+        _eps("2020-01-01", "2020-06-30", 0.55),
+        _eps("2021-01-01", "2021-06-30", 0.80),
+        _eps("2021-04-01", "2021-06-30", 0.41),
+    ]
+
+
+def test_an_undimensioned_eps_wins_in_a_filing_companyfacts_has_not_taken_in():
+    whole = {(f["concept"], f["start"], f["end"]): f["val"]
+             for f in parse_instance(EPS_INSTANCE, whole=True)}
+    assert whole[(EPS, "2021-04-01", "2021-06-30")] == 0.43
+    assert (EPS, "2020-04-01", "2020-06-30") not in whole
 
 
 def test_a_document_that_is_not_xml_raises():
@@ -188,10 +220,39 @@ def test_a_gap_is_a_quarter_with_dividends_paid_and_no_dividend_per_share():
     assert dividend_gaps(rows) == [date(2021, 6, 30), date(2020, 6, 30)]
 
 
+def test_an_eps_gap_is_a_quarter_with_net_income_and_no_diluted_eps():
+    rows = [
+        _r("net_income", date(2023, 6, 30), 410e6),
+        _r("net_income", date(2023, 3, 31), -50e6, "Q1"),  # a loss has an EPS too
+        _r("net_income", date(2022, 12, 31), 1.2e9, "FY"),  # a year is no gap
+        _r("net_income", date(2022, 9, 30), 8e6, "Q3"),
+        _r("eps_diluted", date(2022, 9, 30), 0.01, "Q3"),
+    ]
+    assert eps_gaps(rows) == [date(2023, 6, 30), date(2023, 3, 31)]
+    rows.append(_r("dividends_paid", date(2023, 6, 30), 190e6))
+    rows.append(_r("dividends_paid", date(2022, 9, 30), 180e6, "Q3"))
+    assert gaps(rows) == [
+        (date(2023, 6, 30), "dividends_per_share"),
+        (date(2023, 6, 30), "eps_diluted"),
+        (date(2023, 3, 31), "eps_diluted"),
+        (date(2022, 9, 30), "dividends_per_share"),
+    ]
+
+
 def test_facts_read_cover_the_periods_they_end_on():
     facts = parse_instance(INSTANCE)
     assert covers(facts, date(2021, 6, 30)) and covers(facts, date(2020, 7, 4))
     assert not covers(facts, date(2021, 3, 31))
+    # A dividend read holds no EPS: it covers no EPS gap.
+    assert not covers(facts, date(2021, 6, 30), EPS_CONCEPTS)
+    assert covers(parse_instance(EPS_INSTANCE), date(2021, 6, 30), EPS_CONCEPTS)
+
+
+def test_every_gap_names_what_fills_it_and_the_reader_that_first_looked():
+    """A stored read is re-read for a gap only when it predates the metric's reader; the
+    current reader looks for every metric a gap can miss."""
+    assert set(GAP_CONCEPTS) == set(READ_SINCE)
+    assert READER == max(READ_SINCE.values())
 
 
 def test_a_gap_asks_its_own_filing_then_the_ones_that_repeat_it():

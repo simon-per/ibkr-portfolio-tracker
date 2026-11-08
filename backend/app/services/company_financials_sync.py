@@ -30,9 +30,10 @@ whose document holds nothing this reads (a 40-F filer, a fund) is a miss, backed
 other.
 
 **Filing instances** (`edgar_filing_facts`): a quarter with dividends paid and no dividend
-per share sends the pass to the filing that reports it, whose XBRL instance may tag the
-figure on a dimension member companyfacts leaves out (MA from 2019 to mid-2023). Each filing
-is read once ever and what it held is stored (`sec_filing_reads`); at most
+per share, or with net income and no diluted EPS, sends the pass to the filing that reports
+it, whose XBRL instance may tag the figure on a dimension member companyfacts leaves out (MA's
+dividend from 2019 to mid-2023, BKR's EPS from 2023). Each filing is read once for what the
+reader looks for and what it held is stored (`sec_filing_reads`); at most
 `FILING_READS_PER_COMPANY` a company a pass, newest first.
 
 **What the pass checks** (`ttm_dividend_gaps`, `stale_figures` in its record): a dividend
@@ -92,10 +93,13 @@ from app.services.edgar_client import (
     sec_ticker,
 )
 from app.services.edgar_filing_facts import (
+    GAP_CONCEPTS,
+    READ_SINCE,
+    READER,
     Filing,
     covers,
-    dividend_gaps,
     filings,
+    gaps,
     instance_name,
     parse_instance,
     sources,
@@ -898,7 +902,7 @@ class CompanyFinancialsSync:
                 logger.warning(f"filing {newest.accn} of CIK {cik} failed: {e}")
             else:
                 await self.repo.record_filing_read(
-                    cik, newest.accn, newest.form, newest.filed, found, utcnow()
+                    cik, newest.accn, newest.form, newest.filed, found, utcnow(), READER
                 )
                 await self.db.commit()
                 summary["filings_read"] += 1
@@ -907,7 +911,12 @@ class CompanyFinancialsSync:
         read = 0
         if refused is None:
             read, refused = await self._read_filings(
-                client, cik, facts, result.rows, set(stored), summary
+                client,
+                cik,
+                facts,
+                result.rows,
+                {accn: row.reader for accn, row in stored.items()},
+                summary,
             )
         if read:
             result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
@@ -932,24 +941,27 @@ class CompanyFinancialsSync:
         cik: int,
         companyfacts: Dict[str, Any],
         rows: Sequence[dict],
-        read: set,
+        read: Dict[str, int],
         summary: Dict[str, Any],
     ) -> Tuple[int, Optional[EdgarRefused]]:
         """
-        The filings behind this company's dividend gaps, newest first, each read once ever
-        and at most `FILING_READS_PER_COMPANY` this pass. A gap asks its `sources` in turn —
-        its own filing, then the ones that repeat it — until one holds it; a gap the filings
-        already read this pass cover (a comparative quarter, a year) is not asked for again.
-        Returns how many were read, and the refusal that stopped them, if one did. A failure
-        stamps nothing and stops this company's reads: next week asks again.
+        The filings behind this company's dividend and EPS gaps (`gaps`), newest first, at
+        most `FILING_READS_PER_COMPANY` this pass. `read` is every stored read's `READER`: a
+        filing is read once for what the reader looks for, so one read before EPS was
+        looked for is read once more for an EPS gap, never for a dividend gap. A gap asks
+        its `sources` in turn — its own filing, then the ones that repeat it — until one
+        holds it; a gap the filings already read this pass cover (a comparative quarter, a
+        year) is not asked for again. Returns how many were read, and the refusal that
+        stopped them, if one did. A failure stamps nothing and stops this company's reads:
+        next week asks again.
         """
         by_accn = filings(companyfacts)
-        pending = dividend_gaps(rows)
+        pending = gaps(rows)
         count = 0
         while pending and count < FILING_READS_PER_COMPANY:
-            gap = pending.pop(0)
+            gap, metric = pending.pop(0)
             for filing in sources(by_accn, gap):
-                if filing.accn in read:
+                if read.get(filing.accn, 0) >= READ_SINCE[metric]:
                     continue
                 if count >= FILING_READS_PER_COMPANY:
                     break
@@ -962,14 +974,16 @@ class CompanyFinancialsSync:
                     logger.warning(f"filing {filing.accn} of CIK {cik} failed: {e}")
                     return count, None
                 await self.repo.record_filing_read(
-                    cik, filing.accn, filing.form, filing.filed, found, utcnow()
+                    cik, filing.accn, filing.form, filing.filed, found, utcnow(), READER
                 )
                 await self.db.commit()
-                read.add(filing.accn)
+                read[filing.accn] = READER
                 count += 1
                 summary["filings_read"] += 1
-                pending = [g for g in pending if not covers(found, g)]
-                if covers(found, gap):
+                pending = [
+                    (g, m) for g, m in pending if not covers(found, g, GAP_CONCEPTS[m])
+                ]
+                if covers(found, gap, GAP_CONCEPTS[metric]):
                     break
         return count, None
 
