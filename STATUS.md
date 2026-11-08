@@ -80,10 +80,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   and TWSE lots (one SK Hynix lot among them) keep the evening-before date. A Client Portal download
   covering their purchases, fed through `app/cli/ingest_flex_xml.py` over ssh, stores the instants;
   the next sync then redates them. Nothing breaks without it.
-- **Whitelist KLAC's investments concept (CO8).** The first Sunday pass after the wave-5 deploy
-  warns "Short-term investments outside the concept chain for KLAC (…)"; add that concept to the
-  `short_term_investments` chain in `company_financials_normaliser.py` once its values look like
-  KLAC's marketable securities.
 
 ## Watching
 
@@ -192,7 +188,11 @@ Only what is still unverified.
     `review-w6-r6-ifrs`, after the owner approved the companyfacts read): ASML, NU and TSMC get
     annual figures once their miss back-off runs out (at most 30 days) — ASML's from its US-GAAP 20-F,
     NU's and TSMC's from IFRS; their Company page opens on the latest fiscal year, the quarterly view
-    empty, and NU has a P/E while TSMC (TWD figures, USD ADR closes) has none.
+    empty, and NU has a P/E while TSMC (TWD figures, USD ADR closes) has none. **CO8's KLAC part**
+    (branch `review-w5-co8-klac`, after an owner-approved read): after its next facts fetch KLAC's net
+    cash counts its ~3.2B of marketable securities. Any other filer that tags only that
+    available-for-sale total gains investments too — NVDA among them if it does past late 2025;
+    check its net cash reads as cash plus marketable securities, not more.
   - *Wave 7 (`review-w7-lookthrough-tax`).* No migration. The first evening basket refresh rewrites
     every US-adapter basket once (each now keeps a derived row's CUSIP, L2); after the next ISIN pass
     Shopify, Thomson Reuters and Hydro One each fold into one look-through row. A basket below 80%
@@ -464,7 +464,7 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
    Company pages approved). A /goal run implemented all eight waves, merged into `main` locally
    and not pushed; see *Watch after the next deploy*. R6 was built after the owner approved its
-   companyfacts read; CO8's KLAC concept waits for the first Sunday pass to name it (*Needs a human*).
+   companyfacts read, and CO8's KLAC concept after a second approved read: nothing in it is left open.
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's

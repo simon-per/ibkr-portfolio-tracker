@@ -254,8 +254,12 @@ derived inside one concept before the chains merge (one exception, Q4 below).
   held-to-maturity, available-for-sale or debt securities, or investments, `…Current`, not
   restricted) with a positive value there; the pass records `unchained_investments` and warns with
   company and concept. Whitelisting it into `short_term_investments` is a one-line change once
-  someone has seen what it holds. KLAC's own concept was not confirmed from this side (no SEC read);
-  the first pass that writes KLAC names it.
+  someone has seen what it holds. **KLAC's, read on the server (2026-11-08, owner-approved), is
+  `AvailableForSaleSecuritiesDebtSecurities`** — 3.2B beside 1.5B of cash — a total, with no `Current`
+  suffix, so this check would not have named it. It is the chain's last link (`AFS_TOTAL`), counted only
+  for a period with no non-current investments tagged beside it (`_total_only_when_current`, which
+  reads `noncurrent_investments` for that test alone and never stores it): a total with nothing
+  non-current beside it is all current, while beside one it would count long-dated securities as liquid.
 - **EBITDA is not served**: depreciation and amortization are tagged inconsistently (GOOGL and
   AVGO tag depreciation alone, without the amortization of intangibles that dominates AVGO's).
 

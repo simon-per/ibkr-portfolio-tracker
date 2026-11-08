@@ -82,6 +82,10 @@ CONTINUING_EPS = "IncomeLossFromContinuingOperationsPerDilutedShare"
 #: PEP). It is dated the cover date, weeks after the period; `_facts` keys it to the newest
 #: period end its own filing reports, so it sits beside that filing's figures.
 COVER_SHARES = "EntityCommonStockSharesOutstanding"
+# The available-for-sale debt securities' total, and the metric read only to tell whether it
+# is all current (`_total_only_when_current`, review item CO8).
+AFS_TOTAL = "AvailableForSaleSecuritiesDebtSecurities"
+NONCURRENT_INVESTMENTS = "noncurrent_investments"
 
 # Verified across the book's SEC filers (2026-10-25). Order is preference.
 #
@@ -193,6 +197,23 @@ METRICS: Dict[str, MetricSpec] = {
             "MarketableSecuritiesCurrent",
             "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
             "AvailableForSaleSecuritiesCurrent",
+            # The total of the available-for-sale debt securities, current or not: KLAC's
+            # balance-sheet "Marketable securities" (3.2B beside 1.5B of cash, read on the
+            # server 2026-11-08, review item CO8). Counted only for a period with nothing
+            # non-current tagged beside it (`NONCURRENT_INVESTMENTS`, `_total_only_when_current`).
+            AFS_TOTAL,
+        ),
+    ),
+    # Only read to decide whether `AFS_TOTAL` is all current; never stored as a figure.
+    NONCURRENT_INVESTMENTS: MetricSpec(
+        MONETARY,
+        INSTANT,
+        (
+            "MarketableSecuritiesNoncurrent",
+            "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent",
+            "AvailableForSaleSecuritiesNoncurrent",
+            "HeldToMaturitySecuritiesNoncurrent",
+            "LongTermInvestments",
         ),
     ),
     # Gross profit as tagged; the service falls back to revenue less cost of revenue, the
@@ -836,6 +857,21 @@ def _unchained_investments(companyfacts: Dict[str, Any], end: date) -> List[str]
         ):
             out.append(concept)
     return sorted(out)
+
+
+def _total_only_when_current(values: Dict[str, Dict[Tuple[str, date], Obs]]) -> None:
+    """
+    `AFS_TOTAL` stands for the short-term investments only where the company tagged no
+    non-current investments for the same period: a total with nothing non-current beside
+    it is all current (KLAC, review item CO8), while beside a non-current figure it would
+    count long-dated securities as liquid. The non-current figures themselves are dropped
+    here, read for this test alone.
+    """
+    noncurrent = values.pop(NONCURRENT_INVESTMENTS, {})
+    investments = values.get("short_term_investments", {})
+    for key, obs in list(investments.items()):
+        if obs.concept == AFS_TOTAL and key in noncurrent:
+            del investments[key]
 
 
 def filed_splits(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1501,6 +1537,7 @@ def normalise(
                     break
 
     _flat_rate_years(values, keys, calendar, latest, totals, mapping)
+    _total_only_when_current(values)
 
     # Q4 = FY less the three quarters, across the chain, when no single concept could give
     # it: ORCL tags the year as `Revenues` and its quarters as `RevenueFromContract...`, so
