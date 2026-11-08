@@ -7,7 +7,7 @@ import type { DateRange } from './dateRanges'
 /**
  * Which cached queries a write makes stale (docs/frontend.md, *The query cache*).
  *
- * Both predicates name what they leave OUT, not what they refresh: a list of the roots to
+ * Every predicate names what it leaves OUT, not what they refresh: a list of the roots to
  * refresh is how the manual sync once refreshed only `['portfolio']` and left the dividend
  * and tax figures on the same screen pre-sync. A root added later is refreshed by default,
  * which costs a request; leaving it out would cost a wrong figure.
@@ -27,6 +27,39 @@ export function dependsOnBaseCurrency(query: Query): boolean {
 /** A manual IBKR sync: every query reading rows a Flex statement can write. */
 export function readsIbkrRows(query: Query): boolean {
   return !NOT_WRITTEN_BY_IBKR_SYNC.includes(query.queryKey[0])
+}
+
+/**
+ * Roots none of whose figures is an estimated dividend's net. Settings is in the first
+ * list and is written by the save itself.
+ */
+const NO_DIVIDEND_NET_ROOTS: readonly unknown[] = [
+  ...NOT_WRITTEN_BY_IBKR_SYNC, 'company-financials', 'fundamentals', 'watchlist',
+  'scheduler', 'allocation',
+  // The return decomposition reads the dividend cash that landed, never an estimate.
+  'performance',
+]
+
+/**
+ * The portfolio views that read no estimated dividend's net: valuations, money in and
+ * the benchmark. XIRR's dividend inflows and the activity ledger do, so they refresh.
+ */
+const PORTFOLIO_VIEWS_WITHOUT_DIVIDEND_NETS: readonly unknown[] = [
+  'summary', 'positions', 'value-over-time', 'attribution', 'benchmark', 'benchmarks',
+  'contributions', 'lookthrough',
+]
+
+/**
+ * A new forecast withholding rate: every query reading an estimated dividend's net, which
+ * is its gross less the assumed rate when nothing better is known (`IncomeSplit`) — the
+ * dividends, the Tax tab's projection, XIRR, the activity ledger (review items T6/U5,
+ * 2026-11-08: only the breakdown was refreshed, and the Tax tab kept the old rate for
+ * its 30-minute stale time).
+ */
+export function readsAssumedWithholding(query: Query): boolean {
+  const [root, view] = query.queryKey
+  if (NO_DIVIDEND_NET_ROOTS.includes(root)) return false
+  return !(root === 'portfolio' && PORTFOLIO_VIEWS_WITHOUT_DIVIDEND_NETS.includes(view))
 }
 
 /**

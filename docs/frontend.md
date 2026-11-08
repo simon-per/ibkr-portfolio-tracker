@@ -321,8 +321,8 @@ The edge trim and range flag on each window are `computeModifiedDietzReturn`'s, 
 
 TanStack Query, `refetchOnWindowFocus: false` and a 5-minute default `staleTime` (`App.tsx`); most
 reads set 30 minutes. The Dashboard stays mounted for the session, so a cache entry nobody refreshes
-can stay on screen until the tab is reloaded. `lib/queryCache.ts` decides what two app-wide writes
-refresh. Both predicates **name what they leave out**: a list of roots to refresh is how the bugs
+can stay on screen until the tab is reloaded. `lib/queryCache.ts` decides what three app-wide writes
+refresh. Every predicate **names what it leaves out**: a list of roots to refresh is how the bugs
 below happened, and a root added later is refreshed by default. Refreshing it anyway costs a request;
 missing it costs a wrong figure.
 
@@ -355,6 +355,15 @@ missing it costs a wrong figure.
   and `crypto` (its own tables and sync). A `skipped` sync refreshes nothing. The one active reader
   that can reach Yahoo is `GET /api/dividends/summary`, throttled server-side, so a sync's refetch
   costs what a page load costs. `Dashboard.sync.test.tsx` pins it.
+- **A new forecast withholding rate invalidates every reader of an estimated net**
+  (`readsAssumedWithholding`, review items T6/U5, 2026-11-08). An estimate's net is its gross less
+  the assumed rate (`IncomeSplit`, docs/dividends.md), and the control refreshed only
+  `['dividends', 'breakdown']`: the Tax tab's projection, the dividend summary, XIRR's dividend
+  inflows and the activity ledger kept the old rate for their stale time. Left out: the sync's
+  roots, `company-financials`, `fundamentals`, `watchlist`, `scheduler`, `allocation`,
+  `performance` (the decomposition reads the cash that landed) and the portfolio views without a
+  dividend net (summary, positions, value over time, attribution, benchmark, contributions,
+  look-through). `DividendWithholdingControl.test.tsx` pins both sides.
 - **`summaryQuery` and `positionsQuery` are defined once** in the same module, with one
   `staleTime`. Positions used to fall back to the 5-minute default at both of its readers. Opening
   the Allocation tab after 5 minutes then refetched positions but not the summary, and the hero's
