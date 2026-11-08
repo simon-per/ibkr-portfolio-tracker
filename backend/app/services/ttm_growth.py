@@ -35,9 +35,11 @@ def growth_over_base(current: Optional[float], prior: Optional[float]) -> Option
     ``(current - prior) / prior`` as a fraction rounded to 4 dp, or None.
 
     None when either side is unknown or the base is not positive: from zero the ratio is
-    infinite, and from a loss its sign says nothing about direction.
+    infinite, and from a loss its sign says nothing about direction. And None from a
+    profit to a loss (review item Y7, 2026-11-08): the same sign change the other way,
+    which read LITE's earnings as -2,959.8%.
     """
-    if current is None or prior is None or prior <= 0:
+    if current is None or prior is None or prior <= 0 or current < 0:
         return None
     return round((current - prior) / prior, 4)
 
