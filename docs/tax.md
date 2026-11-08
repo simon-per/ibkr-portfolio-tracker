@@ -155,6 +155,13 @@ by the difference. Each `dividend_by_country` row now also carries:
   payment** and then summed, since min() does not add across payments (30% and 0% on equal
   grosses is 15 + 0 creditable, not 15% of the sum).
 
+**The table has a total row** (`dividend_by_country_totals`, review item T1, 2026-11-08): the
+creditable sum is the claim DA-1 makes, and no figure on the tab stated it — the Withheld tile includes
+the excess. Gross, withholding, creditable, excess and net, each summed from the unrounded figures and
+rounded once (`_country_totals`); a part is null when any country's is (an estimate-only country, a
+country withheld without a treaty rate), because a total over a gap reads as the whole claim. The
+table's footer and the CSV's `TOTAL` line show it.
+
 The rules: a **country is in the table only where its rate is known with confidence**, each entry
 citing its treaty article — an unlisted country's row has `residual_pct`, `creditable` and
 `excess` null rather than a guessed split. A payment that withheld **nothing** needs no rate (0 is

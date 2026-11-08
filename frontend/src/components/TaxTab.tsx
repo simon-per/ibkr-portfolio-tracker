@@ -10,7 +10,7 @@ import { api } from '@/lib/api'
 import { contributionsQuery, settingsQuery } from '@/lib/queryCache'
 import { useFormatCurrency } from '@/lib/CurrencyContext'
 import type { TaxReport } from '@/lib/api'
-import { DataTable, type Column } from '@/components/ui/DataTable'
+import { DataTable, type Column, type FooterCell } from '@/components/ui/DataTable'
 import { KpiCard, KpiPanel } from '@/components/ui/KpiCard'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { SwissResidencyControl } from '@/components/SwissResidencyControl'
@@ -241,6 +241,37 @@ export const BY_COUNTRY_COLUMNS = (money: Money): Column<ByCountryRow>[] => [
     cell: (c) => (c.excess == null ? ABSENT : money(c.excess)),
   },
 ]
+
+/**
+ * The DA-1 table's total row (review item T1): its Creditable is the claim, which no other
+ * figure on the tab states — the Withheld tile includes the excess, reclaimed elsewhere.
+ */
+function byCountryFooter(
+  totals: TaxReport['dividend_by_country_totals'] | null,
+  money: Money,
+): FooterCell[] | undefined {
+  if (!totals) return undefined
+  const or = (v: number | null) => (v == null ? ABSENT : money(v))
+  return [
+    { key: 'label', spans: ['country'], content: TOTAL_LABEL },
+    { key: 'net', spans: ['net'], align: 'right', content: money(totals.net) },
+    { key: 'gross', spans: ['gross'], align: 'right', content: money(totals.gross) },
+    {
+      key: 'withholding',
+      spans: ['withholding'],
+      align: 'right',
+      content: totals.withholding == null ? ABSENT : withheld(money, totals.withholding),
+    },
+    { key: 'creditable', spans: ['creditable'], align: 'right', content: or(totals.creditable) },
+    {
+      key: 'excess',
+      spans: ['excess'],
+      align: 'right',
+      tone: totals.excess ? 'text-warn' : undefined,
+      content: or(totals.excess),
+    },
+  ]
+}
 
 export const REALIZED_COLUMNS = (money: Money): Column<RealizedRow>[] => [
   {
@@ -668,6 +699,7 @@ export function TaxTab() {
                   getRowKey={(c) => c.country}
                   label="Withholding by country"
                   density="compact"
+                  footer={byCountryFooter(data.dividend_by_country_totals ?? null, money)}
                 />
               </CardContent>
             </Card>

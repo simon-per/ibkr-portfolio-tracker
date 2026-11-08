@@ -61,6 +61,31 @@ def _blank(value):
     return "" if value is None else value
 
 
+def _country_totals(buckets: List[Dict]) -> Optional[Dict[str, Optional[float]]]:
+    """
+    The DA-1 table's total row (review item T1, 2026-11-08): the creditable sum is the
+    claim itself, and it was shown nowhere — the Withheld tile includes the excess, which
+    is reclaimed from the source country instead. Summed from the unrounded figures, then
+    rounded once. A part is absent when any country's is: a total over a gap reads as the
+    whole claim. None with no country.
+    """
+    if not buckets:
+        return None
+    all_estimated = any(b["estimated_payments"] == b["payments"] for b in buckets)
+    unsplit = all_estimated or any(b["unsplit"] for b in buckets)
+
+    def total(key: str, absent: bool) -> Optional[float]:
+        return None if absent else round(float(sum(b[key] for b in buckets)), 2)
+
+    return {
+        "gross": total("gross", False),
+        "withholding": total("withholding", all_estimated),
+        "creditable": total("creditable", unsplit),
+        "excess": total("excess", unsplit),
+        "net": total("net", False),
+    }
+
+
 class TaxService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -246,6 +271,7 @@ class TaxService:
             # recorded rather than failing to compare.
             for b in sorted(by_country.values(), key=lambda b: b["withholding"], reverse=True)
         ]
+        dividend_by_country_totals = _country_totals(list(by_country.values()))
 
         # --- Realized capital gains (per SELL trade) ---
         # Filtered on `Trade.account`, NOT on the joined security. The join is an
@@ -567,6 +593,7 @@ class TaxService:
             "dividend_ibkr_from": ibkr_from.isoformat() if ibkr_from else None,
             "dividend_income": dividend_income,
             "dividend_by_country": dividend_by_country,
+            "dividend_by_country_totals": dividend_by_country_totals,
             "dividend_country_note": (
                 "Country from IBKR's withholding line, else the ISIN prefix."
             ),
@@ -663,6 +690,7 @@ class TaxService:
             "dividend_ibkr_from": None,
             "dividend_income": [],
             "dividend_by_country": [],
+            "dividend_by_country_totals": None,
             "dividend_country_note": "",
             "dividend_totals": {
                 "gross": 0.0, "withholding": None, "net": 0.0, "estimated_rows": 0,
@@ -962,6 +990,11 @@ class TaxService:
                         _blank(c.get("residual_pct")), _blank(c.get("creditable")),
                         _blank(c.get("excess")), c["net"],
                         c.get("estimated_payments") or ""])
+        totals = report.get("dividend_by_country_totals")
+        if totals:
+            w.writerow(["TOTAL", "", totals["gross"], _blank(totals["withholding"]), "", "",
+                        _blank(totals["creditable"]), _blank(totals["excess"]),
+                        totals["net"], ""])
         w.writerow([])
 
         w.writerow([f"Realized capital gains (source: {report.get('realized_source', 'trades')})"])

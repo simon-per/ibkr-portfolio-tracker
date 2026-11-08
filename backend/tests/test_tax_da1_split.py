@@ -255,6 +255,51 @@ async def test_an_estimate_only_country_stays_absent(db):
     assert de["residual_pct"] == 15.0
 
 
+async def _two_countries(db) -> None:
+    db.add_all([
+        Security(id=1, isin="KR7000660001", symbol="000660", description="SK hynix",
+                 currency="EUR", conid=1, exchange="KSE"),
+        Security(id=2, isin="US0000000002", symbol="USA", description="US Co",
+                 currency="EUR", conid=2, exchange="NYSE"),
+    ])
+    await db.flush()
+    db.add_all([
+        _pay(1, 10, "100", "22", country="KR"),
+        _pay(1, 11, "200", "44", country="KR"),
+        _pay(2, 12, "100", "15", country="US"),
+        _pay(2, 13, "100", "10", country="US"),
+    ])
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_table_has_a_total_row_whose_creditable_is_the_claim(db):
+    """Review item T1: the creditable sum is what DA-1 claims, and it was shown nowhere."""
+    await _two_countries(db)
+    totals = (await TaxService(db).get_tax_report(YEAR))["dividend_by_country_totals"]
+    assert totals == {
+        "gross": 500.0, "withholding": 91.0, "creditable": 70.0, "excess": 21.0, "net": 409.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_total_over_a_country_without_a_split_is_absent(db):
+    # DE is estimates only: no recorded withholding, so neither the withholding nor the
+    # claim adds up to a whole.
+    await _book(db)
+    totals = (await TaxService(db).get_tax_report(YEAR))["dividend_by_country_totals"]
+    assert (totals["withholding"], totals["creditable"], totals["excess"]) == (None, None, None)
+    assert totals["gross"] == 750.0
+
+
+@pytest.mark.asyncio
+async def test_the_csv_has_a_total_row(db):
+    await _two_countries(db)
+    service = TaxService(db)
+    lines = service.to_csv(await service.get_tax_report(YEAR)).splitlines()
+    assert "TOTAL,,500.0,91.0,,,70.0,21.0,409.0," in lines
+
+
 @pytest.mark.asyncio
 async def test_the_csv_carries_the_split(db):
     await _book(db)

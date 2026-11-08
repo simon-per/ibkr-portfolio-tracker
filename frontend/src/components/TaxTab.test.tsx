@@ -214,6 +214,44 @@ describe('TaxTab', () => {
     expect(byCountry.textContent).not.toMatch(/CHF\s0\.00|0\.00%/)
   })
 
+  it('totals the DA-1 table, the creditable sum being the claim (review item T1)', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(
+      report({
+        dividend_by_country: [
+          country({
+            country: 'KR', positions: 1, gross: 300, withholding: 66, rate_pct: 22,
+            residual_pct: 15, creditable: 45, excess: 21, net: 234, payments: 2,
+            estimated_payments: 0,
+          }),
+          country({
+            country: 'US', positions: 1, gross: 100, withholding: 15, rate_pct: 15,
+            residual_pct: 15, creditable: 15, excess: 0, net: 85, payments: 1,
+            estimated_payments: 0,
+          }),
+        ],
+        dividend_by_country_totals: { gross: 400, withholding: 81, creditable: 60, excess: 21, net: 319 },
+      }),
+    )
+    renderTab()
+    const byCountry = await tableWithHeader('Creditable')
+    const headers = Array.from(byCountry.querySelectorAll('thead th')).map((th) => th.textContent)
+    const total = byCountry.querySelector('tfoot tr')!
+    const cells = Array.from(total.querySelectorAll('td'))
+    const under = (header: string) => {
+      // A footer cell spans its own columns; walk the spans to the one under the header.
+      let column = 0
+      for (const cell of cells) {
+        const span = Number(cell.getAttribute('colspan') ?? 1)
+        if (headers.indexOf(header) < column + span) return cell.textContent ?? ''
+        column += span
+      }
+      return ''
+    }
+    expect(under('Creditable')).toContain('60.00')
+    expect(under('Excess')).toContain('21.00')
+    expect(under('Gross')).toContain('400.00')
+  })
+
   it('splits a country withheld above its treaty rate into creditable and excess', async () => {
     vi.spyOn(api, 'getTaxReport').mockResolvedValue(
       report({

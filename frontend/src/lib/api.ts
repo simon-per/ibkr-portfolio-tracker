@@ -1318,6 +1318,17 @@ export interface TaxReport {
   dividend_income: TaxDividendRow[];
   /** Withholding grouped by source country — DA-1 is filed per country. */
   dividend_by_country: TaxCountryRow[];
+  /**
+   * The DA-1 table's total row (review item T1): the creditable sum is the claim. A part is
+   * null when any country's is; the whole is null with no country.
+   */
+  dividend_by_country_totals?: {
+    gross: number;
+    withholding: number | null;
+    creditable: number | null;
+    excess: number | null;
+    net: number;
+  } | null;
   dividend_country_note: string;
   /**
    * `withholding` is the recorded withholding only (`null` when every row is an
