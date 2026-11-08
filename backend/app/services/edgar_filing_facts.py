@@ -32,6 +32,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.services.company_financials_normaliser import FORMS, METRICS
+from app.services.edgar_client import ANNUAL_FORM_PREFIXES
 
 #: The concepts read from a filing on a dimension member: the dividend-per-share chain,
 #: nothing else.
@@ -163,7 +164,7 @@ def sources(by_accn: Dict[str, Filing], period_end: date) -> List[Filing]:
     """
     own = reporting(by_accn, period_end)
     out = [own] if own is not None else []
-    years = 2 if own is not None and own.form.startswith("10-K") else 1
+    years = 2 if own is not None and own.form.startswith(ANNUAL_FORM_PREFIXES) else 1
     for n in range(1, years + 1):
         later = reporting(by_accn, period_end + timedelta(days=365 * n))
         if later is not None and later not in out:

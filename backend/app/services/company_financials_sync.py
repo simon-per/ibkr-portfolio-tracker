@@ -24,8 +24,10 @@ is due, so a report reaches the tab the next morning rather than on Sunday.
   US tickers, on top of the index's hundred. Each full pass stamps the companies it found
   (`universe_seen_at`), which is how the tab lists the current index and not a former member.
 
-A foreign filer (ASML's and NU's 20-F) has a CIK but files IFRS, so its document yields no
-row: a miss, backed off like any other.
+A foreign private issuer's annual 20-F counts as an annual report (review item R6): ASML's in
+US GAAP, NU's and TSMC's in IFRS (`normaliser.IFRS_TWINS`), annual figures only. A filer
+whose document holds nothing this reads (a 40-F filer, a fund) is a miss, backed off like any
+other.
 
 **Filing instances** (`edgar_filing_facts`): a quarter with dividends paid and no dividend
 per share sends the pass to the filing that reports it, whose XBRL instance may tag the

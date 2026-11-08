@@ -80,15 +80,6 @@ code trace; all of them shipped that evening (waves 1–3, the product issues #7
   and TWSE lots (one SK Hynix lot among them) keep the evening-before date. A Client Portal download
   covering their purchases, fed through `app/cli/ingest_flex_xml.py` over ssh, stores the instants;
   the next sync then redates them. Nothing breaks without it.
-- **Confirm `ifrs-full` facts for ASML, NU and TSMC (review item R6, blocked).** The IFRS annual
-  figures for the three 20-F filers start with one companyfacts read per CIK (937966, 1691493,
-  1046179) through the app's `EdgarClient` with the server's User-Agent, which lives only in the
-  VPS `.env`; the /goal run could make neither an SEC request nor an ssh call. Run the read on the
-  VPS (or say so and a session will), then build R6 on what it shows.
-- **Optional: put 2026's broker interest on record (T4).** Margin interest is reported only for a year
-  whose start the ingested statements reach; the Flex sync covers about its own window from the
-  deploy on. A Client Portal statement from 2026-01-01 with Cash Transactions, fed through
-  `app/cli/ingest_flex_xml.py` over ssh, fills 2026's figure; otherwise it starts with 2027.
 - **Whitelist KLAC's investments concept (CO8).** The first Sunday pass after the wave-5 deploy
   warns "Short-term investments outside the concept chain for KLAC (…)"; add that concept to the
   `short_term_investments` chain in `company_financials_normaliser.py` once its values look like
@@ -197,7 +188,11 @@ Only what is still unverified.
     Look-through tab's collapsed "Fundamentals of what you own" card shows P/E, growth, margins and a
     coverage figure (R2; `GET /api/portfolio/lookthrough/fundamentals`, a few seconds is expected:
     it reads every covered company's figures). Seen on a local build against production data with
-    the two new routes answered by stand-ins, at 1440 and 390, light and dark.
+    the two new routes answered by stand-ins, at 1440 and 390, light and dark. **R6** (branch
+    `review-w6-r6-ifrs`, after the owner approved the companyfacts read): ASML, NU and TSMC get
+    annual figures once their miss back-off runs out (at most 30 days) — ASML's from its US-GAAP 20-F,
+    NU's and TSMC's from IFRS; their Company page opens on the latest fiscal year, the quarterly view
+    empty, and NU has a P/E while TSMC (TWD figures, USD ADR closes) has none.
   - *Wave 7 (`review-w7-lookthrough-tax`).* No migration. The first evening basket refresh rewrites
     every US-adapter basket once (each now keeps a derived row's CUSIP, L2); after the next ISIN pass
     Shopify, Thomson Reuters and Hydro One each fold into one look-through row. A basket below 80%
@@ -468,8 +463,8 @@ Rough priority. Re-verify each `path:line` in code before fixing; lines move.
    (they quote account figures): `C:\Users\simon\Desktop\ibkr-review-2026-11-07\` (PLAN.md,
    findings-raw.md, GOAL.md, repros/). Owner decisions are in PLAN.md (Yahoo budget for ~20 more
    Company pages approved). A /goal run implemented all eight waves, merged into `main` locally
-   and not pushed; see *Watch after the next deploy*. Two items wait on a read this run could not
-   make: R6 (IFRS figures) and CO8's KLAC concept — both under *Needs a human*.
+   and not pushed; see *Watch after the next deploy*. R6 was built after the owner approved its
+   companyfacts read; CO8's KLAC concept waits for the first Sunday pass to name it (*Needs a human*).
 1. **The last leftover from audit round 2** (not filed): KS 36's derivatives indicator needs the
    Flex ingest to keep non-STK trades. The rest shipped on 2026-11-07 (branch
    `harmonize-company-links`). Accumulating funds' Kursliste income is out of scope: the owner's
@@ -504,7 +499,7 @@ One line each, newest first; drop the oldest.
 
 - **2026-11-07/08 (/goal run of the 14-reviewer audit, waves 0–7)** — ~90 findings fixed across
   safety, performance, dividends, the ledger, Yahoo, company data and features, look-through and
-  tax; one local branch per wave merged into `main`, nothing pushed; R6 blocked on an SEC read.
+  tax; one local branch per wave merged into `main`, nothing pushed; R6 built after an approved read.
 - **2026-11-07 (improvements survey, branch `analyst-counts-and-freshness`)** — a live-site
   survey found one company's figures disagreeing across tabs; every rating now shows its
   analyst counts under one label (owner-approved watchlist `recommendations` budget), the
