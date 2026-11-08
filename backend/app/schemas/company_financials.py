@@ -159,6 +159,9 @@ class CompanyFinancialsSeriesSet(BaseModel):
     buybacks: CompanyFinancialsSeries
     dividends_paid: CompanyFinancialsSeries
     cash: CompanyFinancialsSeries
+    #: Short-term investments: what net cash counts beside cash (cash + investments -
+    #: debt = net cash).
+    investments: CompanyFinancialsSeries
     debt: CompanyFinancialsSeries
     net_cash: CompanyFinancialsSeries
     pe_ratio: CompanyFinancialsSeries

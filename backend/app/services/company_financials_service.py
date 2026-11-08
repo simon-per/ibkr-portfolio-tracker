@@ -97,6 +97,7 @@ SERIES = (
     "buybacks",
     "dividends_paid",
     "cash",
+    "investments",
     "debt",
     "net_cash",
     "pe_ratio",
@@ -488,6 +489,11 @@ def _with_net_cash(points: List[Point], rows: Sequence[CompanyFinancial]) -> Non
             liquid = None
         debt = p.series.get("debt")
         p.series["net_cash"] = liquid - debt if liquid is not None and debt is not None else None
+        # What net cash counts beside cash, so the Cash & debt card adds up: cash +
+        # investments - debt = net cash on every point (review item VI1, 2026-11-08).
+        p.series["investments"] = (
+            liquid - cash if liquid is not None and cash is not None else None
+        )
 
 
 def _value_near(values: Dict[date, float], day: date) -> Optional[float]:

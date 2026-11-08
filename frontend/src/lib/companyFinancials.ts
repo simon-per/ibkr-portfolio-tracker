@@ -105,6 +105,8 @@ export const COMPANY_CHARTS: readonly CompanyChartDef[] = [
   { id: 'cash-debt', kind: 'bar', header: 'latest', optional: true,
     total: { title: 'Cash & debt', format: 'money', series: [
       { key: 'cash', name: 'Cash & equivalents' },
+      // Net cash counts them too, so the card's figures add up (review item VI1).
+      { key: 'investments', name: 'Investments' },
       { key: 'debt', name: 'Debt' },
       { key: 'net_cash', name: 'Net cash' },
     ] } },

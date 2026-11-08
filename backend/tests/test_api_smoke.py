@@ -575,6 +575,8 @@ def test_company_financials_serve_their_contract_through_the_real_stack(client):
     assert set(revenue[0]) == {"period_end", "label", "value", "yoy"}
     assert "revenue_per_share" in body["series"]
     assert "fcf_after_sbc_per_share" in body["series"]
+    # Net cash's other part, so the Cash & debt card adds up (review item VI1).
+    assert "investments" in body["series"]
     assert set(body["series"]["revenue"]["cagrs"]) == {"y3", "y5", "y10"}
     assert body["key_stats"]["label"] == "Q4 FY2024"
     assert body["key_stats"]["revenue"] == 104.0 + 105.0 + 106.0 + 107.0

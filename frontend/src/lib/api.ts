@@ -1670,6 +1670,8 @@ export interface CompanyFinancialsSeriesSet {
   buybacks: CompanyFinancialsSeries;
   dividends_paid: CompanyFinancialsSeries;
   cash: CompanyFinancialsSeries;
+  /** Short-term investments: net cash's other part (cash + investments - debt = net cash). */
+  investments: CompanyFinancialsSeries;
   debt: CompanyFinancialsSeries;
   /** Cash and short-term investments less debt; null where either side is unknown. */
   net_cash: CompanyFinancialsSeries;
