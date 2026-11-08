@@ -141,6 +141,35 @@ def _plus_one_year(frame, column: str, label: str) -> Optional[float]:
         return None
 
 
+#: How far apart forward and trailing EPS may sit and still be one company's earnings in
+#: one currency and unit (review item Y5, 2026-11-08). KSPI's forward EPS is in tenge
+#: against a dollar trailing figure (a forward P/E of 0.0135 that scored the top points);
+#: SBI.TO's is a 0.01 placeholder (a forward P/E of 359 and forward growth of -99%).
+#: A real company moves its EPS a few-fold at most.
+EPS_UNITS_BAND = (1 / 20, 20)
+
+
+def forward_eps_in_units(info: Optional[Dict]) -> bool:
+    """
+    False when `.info`'s forward EPS cannot be the trailing EPS's kin: their ratio (by
+    size) outside `EPS_UNITS_BAND`. True when either is missing or zero — there is
+    nothing to judge, and each figure is refused elsewhere on its own grounds.
+    """
+    info = info or {}
+    fwd, trailing = safe_float(info.get("forwardEps")), safe_float(info.get("trailingEps"))
+    if not fwd or not trailing:
+        return True
+    low, high = EPS_UNITS_BAND
+    return low <= abs(fwd / trailing) <= high
+
+
+def forward_pe(info: Optional[Dict]) -> Optional[float]:
+    """`.info`'s forward P/E, or None when its forward EPS is not in the trailing EPS's
+    units (`forward_eps_in_units`): the one reader of `forwardPE`."""
+    info = info or {}
+    return safe_float(info.get("forwardPE")) if forward_eps_in_units(info) else None
+
+
 def forward_growth(
     revenue_estimate, eps_trend_growth: Optional[float], info: Optional[Dict], label: str = "",
 ) -> Tuple[Optional[float], Optional[float]]:
@@ -154,7 +183,7 @@ def forward_growth(
     """
     fwd_rev = _plus_one_year(revenue_estimate, "growth", label)
     fwd_eps = safe_float(eps_trend_growth)
-    if fwd_eps is None:
+    if fwd_eps is None and forward_eps_in_units(info):
         info = info or {}
         fwd_eps = growth_over_base(
             safe_float(info.get("forwardEps")), safe_float(info.get("trailingEps"))

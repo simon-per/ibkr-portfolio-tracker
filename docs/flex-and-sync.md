@@ -760,6 +760,12 @@ dividend-adjusted, the stored closes are not, so the RSI can differ slightly aro
 *Budget* for a company over the five weekly runs: 7 × 5 = 35 requests before issue #11, now
 6 + 4 × 4 = 22, and 17 when held. A fund stays 4 a run (3 when held).
 
+**A forward P/E needs forward EPS in the trailing EPS's units** (review item Y5, 2026-11-08):
+`yahoo_estimates.forward_pe` is the one reader of `forwardPE`, and it and the forward-EPS growth
+fallback are refused when `forwardEps / trailingEps` sits outside 1/20–20 (`EPS_UNITS_BAND`) —
+KSPI's tenge forward EPS against a dollar trailing one read a forward P/E of 0.0135 and scored the
+top points; SBI.TO's 0.01 placeholder read 359 and -99% growth (`tests/test_forward_eps_units.py`).
+
 **An empty `.info` is refused** (review item Y3, 2026-11-08): yfinance answers a symbol it cannot
 serve with `{'trailingPegRatio': None}`, which the watchlist stored as a fresh row of blanks with a
 score from neutral fallbacks. `yahoo_estimates.info_is_empty` is the one test, shared with

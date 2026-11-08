@@ -24,8 +24,8 @@ from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.models.earnings_event import EarningsEvent
 from app.models.security import Security
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, info_is_empty, is_fund,
-    read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, forward_pe, info_is_empty,
+    is_fund, read_optional,
 )
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
@@ -54,7 +54,7 @@ def extract_metrics(info: Dict, quarterly_financials=None, eps_trend_growth=None
 
     metrics_data = {
         'trailing_pe': trailing_pe,
-        'forward_pe': safe_float(info.get('forwardPE')),
+        'forward_pe': forward_pe(info),
         # One tier order with the watchlist, in one place (`peg_ratio.resolve_peg`).
         'peg_ratio': resolve_peg(info, trailing_pe, fwd_eps),
         'price_to_sales': safe_float(info.get('priceToSalesTrailing12Months')),

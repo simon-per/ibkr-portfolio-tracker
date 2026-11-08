@@ -19,8 +19,8 @@ from app.services.peg_ratio import resolve_peg
 from app.services.safe_numbers import safe_float, safe_int
 from app.services.ttm_growth import EARNINGS_ROWS, REVENUE_ROWS, trailing_growth
 from app.services.yahoo_estimates import (
-    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, info_is_empty, is_fund,
-    read_optional,
+    EPS_TREND_GROWTH, fetch_estimate_frames, forward_growth, forward_pe, info_is_empty,
+    is_fund, read_optional,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
@@ -492,7 +492,7 @@ class WatchlistService:
             "currency": info.get("currency"),
             "data_currency": info.get("currency"),
             "trailing_pe": trailing_pe,
-            "forward_pe": self._safe_float(info.get("forwardPE")),
+            "forward_pe": forward_pe(info),
             # One tier order with FundamentalsService, in one place (`peg_ratio.resolve_peg`).
             "peg_ratio": resolve_peg(info, trailing_pe, fwd_eps),
             "ev_to_ebitda": self._safe_float(info.get("enterpriseToEbitda")),
