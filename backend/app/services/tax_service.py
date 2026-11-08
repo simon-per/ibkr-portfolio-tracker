@@ -61,6 +61,21 @@ def _blank(value):
     return "" if value is None else value
 
 
+def _agreed_withholding_countries(payments) -> Dict[int, str]:
+    """
+    Security id -> the withholding country its IBKR payments state, where they all state
+    the same one (review item T3, 2026-11-08). A payment ingested before the country was
+    stored fell back to the ISIN prefix, so ASML's New York listing filed one payment of a
+    year under NL and another under US. The prefix stays the last resort, for a security
+    no payment states a country for, or whose payments disagree.
+    """
+    stated: Dict[int, set] = {}
+    for dp in payments:
+        if dp.source == IBKR_SOURCE and dp.withholding_country:
+            stated.setdefault(dp.security_id, set()).add(dp.withholding_country.upper())
+    return {sid: next(iter(c)) for sid, c in stated.items() if len(c) == 1}
+
+
 def _country_totals(buckets: List[Dict]) -> Optional[Dict[str, Optional[float]]]:
     """
     The DA-1 table's total row (review item T1, 2026-11-08): the creditable sum is the
@@ -146,6 +161,7 @@ class TaxService:
         )
         kept_ids = {p.id for p in kept}
         rows = [(dp, sec) for dp, sec in all_rows if dp.id in kept_ids]
+        agreed_country = _agreed_withholding_countries(dp for dp, _ in all_rows)
 
         dividend_income: List[Dict] = []
         sources_seen: set = set()
@@ -201,7 +217,9 @@ class TaxService:
             # The country IBKR's withholding line names, else the ISIN's first two
             # letters. The prefix is the issuer's domicile, which is not the withholding
             # country for an ADR or some funds (GitHub issue #62).
-            country = withholding_country(dp.withholding_country, sec.isin) or "??"
+            country = withholding_country(
+                dp.withholding_country or agreed_country.get(dp.security_id), sec.isin
+            ) or "??"
             bucket = by_country.setdefault(country, {
                 "country": country,
                 "gross": Decimal("0"), "withholding": Decimal("0"), "net": Decimal("0"),

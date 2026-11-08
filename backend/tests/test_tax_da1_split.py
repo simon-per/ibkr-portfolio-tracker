@@ -311,3 +311,40 @@ async def test_the_csv_carries_the_split(db):
                       "Estimated payments")
     assert next(l for l in lines if l.startswith("KR,")) == "KR,1,300.0,66.0,22.0,15.0,45.0,21.0,234.0,"
     assert next(l for l in lines if l.startswith("TW,")) == "TW,1,100.0,21.0,21.0,15.0,15.0,6.0,79.0,"
+
+
+@pytest.mark.asyncio
+async def test_a_security_files_under_the_one_country_its_payments_state(db):
+    """
+    Review item T3: a payment ingested before the withholding country was stored fell back
+    to the ISIN prefix, so an ADR (ASML's New York listing: a US ISIN, withheld by the
+    Netherlands) filed one payment of a year under NL and another under US. The country its
+    other IBKR payments all state comes before the prefix.
+    """
+    db.add(Security(id=6, isin="USN070592100", symbol="ASML", description="ASML NY",
+                    currency="EUR", conid=6, exchange="NASDAQ"))
+    await db.flush()
+    db.add_all([
+        _pay(6, 5, "100", "15"),                   # before the column: no country
+        _pay(6, 20, "100", "15", country="NL"),
+    ])
+    await db.commit()
+    rows = _by_country(await TaxService(db).get_tax_report(YEAR))
+    assert set(rows) == {"NL"}
+    assert rows["NL"]["payments"] == 2
+
+
+@pytest.mark.asyncio
+async def test_payments_that_disagree_keep_the_prefix_for_the_unstated_one(db):
+    db.add(Security(id=6, isin="USN070592100", symbol="ASML", description="ASML NY",
+                    currency="EUR", conid=6, exchange="NASDAQ"))
+    await db.flush()
+    db.add_all([
+        _pay(6, 5, "100", "15"),
+        _pay(6, 20, "100", "15", country="NL"),
+        _pay(6, 21, "100", "15", country="US"),
+    ])
+    await db.commit()
+    rows = _by_country(await TaxService(db).get_tax_report(YEAR))
+    assert rows["US"]["payments"] == 2 and rows["NL"]["payments"] == 1
+

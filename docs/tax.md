@@ -183,8 +183,10 @@ carried the line's description; `sync_dividends_from_cash_transactions` now pars
 than a pick — and the report keys on it, else on the ISIN prefix
 (`swiss_treaty_rates.withholding_country`). Rows ingested before the column fill in when a
 statement covering them is ingested again: the upsert rewrites every field, so a Client Portal
-download through `app/cli/ingest_flex_xml.py` backfills with no token spend. Until then they fall
-back to the prefix. Tests: `tests/test_tax_da1_split.py`,
+download through `app/cli/ingest_flex_xml.py` backfills with no token spend. Until then such a row
+takes **the country the same security's other IBKR payments all state** (`_agreed_withholding_countries`,
+review item T3, 2026-11-08: ASML's New York listing filed one payment of a year under NL and another under
+US); the prefix only for a security none states one for, or whose payments disagree. Tests: `tests/test_tax_da1_split.py`,
 `test_a_reingested_statement_backfills_the_withholding_country`.
 
 **The pillar 3a figure is guarded like the Steuerwert** (GitHub issue #63). Its
