@@ -121,3 +121,22 @@ describe('per 1,000 in', () => {
     expect(tile('Next 12 months').textContent).not.toContain('per €1,000 in')
   })
 })
+
+describe('the next round level', () => {
+  const row = () => tile('Next 12 months').querySelector<HTMLElement>('[data-next-milestone]')
+
+  it('prints the next level and how far it is, beside the per-1,000 line', () => {
+    render(<DividendKpiCards growth={growth()} trend={{
+      received: [100, 130], forecast: [300, 364.84],
+      milestone: { next: 400, toGo: 35.16 },
+      perMoneyIn: { values: [27.5, 30.86], latest: 30.86, change: 3.36, since: '2026-08-28' },
+    }} />)
+    expect(row()?.textContent).toBe('Next €400.00 · €35.16 to go')
+    expect(tile('Next 12 months').querySelector('[data-per-money-in]')).not.toBeNull()
+  })
+
+  it('is absent without a history to measure from', () => {
+    render(<DividendKpiCards growth={growth()} trend={{ received: [100], forecast: [300], milestone: null }} />)
+    expect(row()).toBeNull()
+  })
+})

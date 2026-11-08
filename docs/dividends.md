@@ -1251,6 +1251,11 @@ that it keeps growing, and have the breakdown available without it being the lou
   start day is the anchor and lists nothing). No server change: the months add up exactly to
   the newest breakdown, which is what the header prints since the start
   (`dividendForecastTrend.test.ts` pins the sum).
+- **Milestones** (`lib/dividendMilestones.ts`, review item FD3, 2026-11-08): a dot on the line
+  where the forecast first reached each round level since the start, and *Next X · Y to go* under
+  the Next 12 months tile. The levels are multiples of 1, 2 or 5 times a power of ten, the largest
+  at most a third of today's figure, so three to six sit below it. No date is projected for the
+  next one: a forecast of a forecast.
 - **Today is the breakdown's live figure, not the newest snapshot** (since 2026-10-14).
   The KPI tile shows `growth.next_12m_eur`, recomputed on every read; the card showed the
   last stored row under the same label, so the two disagreed whenever the forecast had

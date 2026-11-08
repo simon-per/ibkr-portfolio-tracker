@@ -11,6 +11,7 @@ import {
 } from '@/lib/dividendChart'
 import { dividendColor, hasIdentity } from '@/lib/dividendColors'
 import { forecastTrend, type LiveForecast } from '@/lib/dividendForecastTrend'
+import { forecastMilestones } from '@/lib/dividendMilestones'
 import { incomePerMoneyIn } from '@/lib/incomePerMoneyIn'
 import { deltaColor } from '@/lib/delta'
 import { feedRaises, payoutChanges, RAISE_BAND_PCT } from '@/lib/dividendGrowth'
@@ -354,9 +355,11 @@ export function DividendsTab() {
   const kpiTrend = useMemo<DividendKpiTrend | null>(() => {
     const trend = forecastTrend(forecastHistory, live)
     if (!trend || !forecastHistory) return null
+    const milestones = forecastMilestones(trend.points)
     return {
       received: trend.points.map((p) => p.received),
       forecast: trend.points.map((p) => p.value),
+      milestone: milestones && { next: milestones.next, toGo: milestones.toGo },
       // `forecastTrend` drops `live` in another currency, so every point is the history's.
       perMoneyIn: incomePerMoneyIn(trend.points, forecastHistory.base_currency, contributions),
     }

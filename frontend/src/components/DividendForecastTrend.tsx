@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -29,6 +30,7 @@ import {
   type LiveForecast,
 } from '@/lib/dividendForecastTrend'
 import { dividendMonthLabel } from '@/lib/dividendChart'
+import { forecastMilestones } from '@/lib/dividendMilestones'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { axisFloor, niceTicks } from '@/lib/niceTicks'
 import { useResizableHeight } from '@/lib/useResizableHeight'
@@ -97,6 +99,8 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
   const { data } = useQuery(forecastHistoryQuery)
   const trend = useMemo(() => forecastTrend(data, live), [data, live])
   const monthColumns = useMemo(() => forecastMonthColumns(formatCurrency), [formatCurrency])
+  // The round levels the line has crossed since the start (review item FD3).
+  const milestones = useMemo(() => (trend ? forecastMilestones(trend.points) : null), [trend])
 
   const axis = useMemo(() => {
     if (!trend) return null
@@ -213,6 +217,22 @@ export function DividendForecastTrend({ live }: { live?: LiveForecast | null }) 
                   activeDot={{ r: 5 }}
                   isAnimationActive={false}
                 />
+                {milestones?.crossed.map((c) => (
+                  <ReferenceDot
+                    key={c.level}
+                    x={c.date}
+                    y={c.value}
+                    r={3.5}
+                    fill={chartColor(0)}
+                    stroke="hsl(var(--background))"
+                    strokeWidth={1.5}
+                    label={{
+                      value: formatAxisMoney(c.level, curSym, milestones.step),
+                      position: 'top',
+                      className: 'fill-muted-foreground text-[10px]',
+                    }}
+                  />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
