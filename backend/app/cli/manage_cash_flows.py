@@ -71,8 +71,10 @@ async def cmd_list(db, flow_type: Optional[str]) -> int:
           f"{'EUR':>12}  added?  description")
     for r in rows:
         counts = "yes" if r.flow_type == DEPOSIT_WITHDRAW else "no"
+        # A type set by hand is marked: the ingest keeps it.
+        shown = f"{r.flow_type}*" if r.flow_type_manual else r.flow_type
         print(
-            f"{r.ib_key[:20]:<20} {str(r.flow_date):<12} {r.flow_type:<16} "
+            f"{r.ib_key[:20]:<20} {str(r.flow_date):<12} {shown:<16} "
             f"{r.amount:>14} {(r.currency or '?'):<4} {r.amount_eur:>12.2f}  "
             f"{counts:<6}  {(r.description or '')[:44]}"
         )
@@ -128,6 +130,8 @@ async def cmd_reclassify(
         return 0, {}
 
     row.flow_type = new_type
+    # Kept by every later ingest that re-delivers the row (CashFlowRepository.upsert).
+    row.flow_type_manual = True
     await db.flush()
     await db.commit()
 

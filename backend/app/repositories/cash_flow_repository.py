@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 from datetime import date
 from sqlalchemy import select, and_, func
@@ -72,6 +73,9 @@ class CashFlowLedger:
         )
 
 
+logger = logging.getLogger(__name__)
+
+
 class CashFlowRepository:
     """Repository for CashFlow model operations (idempotent on ib_key)."""
 
@@ -79,12 +83,25 @@ class CashFlowRepository:
         self.session = session
 
     async def upsert(self, data: dict) -> CashFlow:
+        """
+        Insert, or update the row with this ``ib_key``. A type the owner set by hand
+        (``flow_type_manual``) is kept against the statement's: the statement re-delivers
+        the row for about a month, and its own type undid a reclassification the next day
+        (review item I1). The disagreement is logged, so it stays visible.
+        """
         result = await self.session.execute(
             select(CashFlow).where(CashFlow.ib_key == data["ib_key"])
         )
         existing = result.scalar_one_or_none()
 
         if existing:
+            incoming_type = data.get("flow_type")
+            if existing.flow_type_manual and incoming_type not in (None, existing.flow_type):
+                logger.info(
+                    f"Cash flow {existing.ib_key}: keeping {existing.flow_type}, set by "
+                    f"hand, over the statement's {incoming_type}"
+                )
+                data = {k: v for k, v in data.items() if k != "flow_type"}
             for key, value in data.items():
                 if hasattr(existing, key):
                     setattr(existing, key, value)

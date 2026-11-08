@@ -611,7 +611,11 @@ left out of the match keys, or every no-cash transfer would collide on `(date, 0
 **This is the highest-risk number in the feature**: an unexcluded transfer shows a portfolio-sized fake
 contribution. `app/cli/manage_cash_flows.py` is the manual override — `list` marks which rows count as
 added, `reclassify <ib_key> --as TRANSFER_IN` fixes one, `--dry-run` on the mutating path, and every
-edit records a `sync_runs` row (`manual_cash_flow`).
+edit records a `sync_runs` row (`manual_cash_flow`). **A reclassification is kept by every later ingest**
+(`cash_flows.flow_type_manual`, review item I1, 2026-11-08; `list` marks the type with `*`): the
+statement re-delivers a row for about a month, and the upsert wrote its own type back the next day —
+in both directions, the transfer match included. `CashFlowRepository.upsert` keeps the owner's type
+and logs the disagreement. Tests: `tests/test_cash_flow_reclassify_survives.py`.
 
 Three things this account's real data settled, so nobody re-investigates them:
 

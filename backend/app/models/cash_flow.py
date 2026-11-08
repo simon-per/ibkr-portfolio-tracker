@@ -1,4 +1,4 @@
-from sqlalchemy import String, Numeric, Date
+from sqlalchemy import Boolean, String, Numeric, Date
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from datetime import datetime, date
@@ -55,6 +55,10 @@ class CashFlow(Base):
     # bool so the other non-dividend cash types (broker interest, fees) can be added
     # later without a migration.
     flow_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    #: True when the owner set ``flow_type`` by hand (`manage_cash_flows reclassify`).
+    #: The ingest then keeps it: the statement re-delivers the row for about a month and
+    #: its own type used to undo the reclassification the next day (review item I1).
+    flow_type_manual: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # See app/accounts.py. Pillar 3a cash is locked, so it is derived and reported
     # separately rather than summed into the balance a purchase could draw on.
     account: Mapped[str] = mapped_column(
