@@ -64,6 +64,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.accounts import IBKR
 from app.models.cash_balance import CashBalance
 from app.models.cash_flow import CashFlow
+from app.models.corporate_action import CorporateAction
 from app.models.trade import Trade
 from app.repositories.cash_balance_repository import CashBalanceRepository
 from app.repositories.cash_flow_repository import CashFlowLedger, CashFlowRepository
@@ -159,6 +160,7 @@ class CashService:
         self.currency_service = CurrencyService(db)
         self._trades: Optional[List[Trade]] = None
         self._flows: Optional[List[CashFlow]] = None
+        self._actions: Optional[List[CorporateAction]] = None
         self._balances: Optional[List[CashBalance]] = None
         self._dividend_receipts: Optional[List[Tuple[date, Decimal]]] = None
         # The last `_derived_events` result and the `BaseFx` it was projected with.
@@ -173,6 +175,16 @@ class CashService:
         if self._trades is None:
             self._trades = await TradeRepository(self.db).get_all()
         return self._trades
+
+    async def _cash_actions(self) -> List[CorporateAction]:
+        """The corporate actions that moved cash, read once per instance."""
+        if self._actions is None:
+            self._actions = list((await self.db.execute(
+                select(CorporateAction).where(
+                    CorporateAction.proceeds.isnot(None), CorporateAction.proceeds != 0
+                )
+            )).scalars().all())
+        return self._actions
 
     async def _all_flows(self) -> List[CashFlow]:
         if self._flows is None:
@@ -263,7 +275,8 @@ class CashService:
         #    sell — and `commission` is separately signed (negative), so the sum is the
         #    net cash effect. The same expression `ActivityService._trades` renders as
         #    `amount_base`, so the ledger and the balance cannot disagree about a trade.
-        for t in await self.all_trades():
+        trades = await self.all_trades()
+        for t in trades:
             amount = await to_base.convert(
                 (t.proceeds or Decimal("0")) + (t.commission or Decimal("0")),
                 t.currency, t.trade_date,
@@ -276,6 +289,29 @@ class CashService:
                 unconverted[t.account].append(t.trade_date)
                 continue
             by_account[t.account].append((t.trade_date, amount))
+
+        # 1b. Corporate-action cash: cash in lieu of a fractional share, a cash merger
+        #     (review item C6, 2026-11-08). The Activity ledger showed it and the balance
+        #     did not, so the cash line ran short by it until the next measured level.
+        #     IBKR's own sign, native currency, the trades' conversion. An action whose
+        #     cash IBKR also booked as a trade (same contract, day and amount) is that
+        #     trade's and counts once. IBKR only: `corporate_actions` has no account.
+        booked_as_trade = {
+            (str(t.conid), t.trade_date, round(t.proceeds, 2))
+            for t in trades if t.proceeds is not None
+        }
+        for a in await self._cash_actions():
+            if (str(a.conid), a.action_date, round(a.proceeds, 2)) in booked_as_trade:
+                continue
+            amount = await to_base.convert(a.proceeds, a.currency, a.action_date)
+            if amount is None:
+                logger.warning(
+                    "Cash: no FX for corporate action %s (%s near %s); the balance is unknown",
+                    a.ib_key, a.currency, a.action_date,
+                )
+                unconverted[IBKR].append(a.action_date)
+                continue
+            by_account[IBKR].append((a.action_date, amount))
 
         # 2. External cash. **Every** flow type, not `get_deposits()`'s whitelist: that
         #    one answers "was this money added", where a transfer must never count. This

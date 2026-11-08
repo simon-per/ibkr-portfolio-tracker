@@ -32,8 +32,15 @@ missed.
 ### Derived from what moved, never from what is held
 
     cash = Σ trades (proceeds + commission)
-         + Σ cash flows (deposits, withdrawals, cash legs of transfers)
+         + Σ corporate-action proceeds (cash in lieu, a cash merger)
+         + Σ cash flows (deposits, withdrawals, cash legs of transfers, each once)
          + Σ IBKR dividend payments, net of withholding
+
+The corporate-action line since review item C6 (2026-11-08): the Activity ledger showed that cash
+and the balance did not, so the cash line ran short by it until the next measured level. An action
+whose cash IBKR also booked as a trade (same contract, day and amount) is that trade's and counts
+once. No statement sample with corporate-action cash was at hand to confirm IBKR never books it a
+third way; the measured balance's correction on such a day is where a double count would show.
 
 anchored at **zero before the first record**, which is definitional rather than an
 assumption: the account did not exist.
