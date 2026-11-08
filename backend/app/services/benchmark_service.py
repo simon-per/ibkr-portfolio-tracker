@@ -649,7 +649,9 @@ class BenchmarkService:
                 for tl, _ in taxlots_with_securities
             ],
         )
-        money_in_legs = contributions["money_in_legs"]
+        # Money in plus capital transferred in once deposits are on record (C2): the
+        # benchmark invests what the portfolio was given, however it arrived.
+        money_in_legs = contributions["capital_legs"]
         if not money_in_legs:
             return []
 
@@ -730,7 +732,7 @@ class BenchmarkService:
 
         # The same splice the chart's Money In line and the inception series read.
         contributions = await portfolio._contribution_inputs(BaseFx("EUR", {}))
-        money_in_legs = contributions["money_in_legs"]
+        money_in_legs = contributions["capital_legs"]
 
         fetch = benchmark_fetch_window(
             start_date, end_date, min((d for d, _ in money_in_legs), default=None)

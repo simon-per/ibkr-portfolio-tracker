@@ -21,6 +21,7 @@ from app.services.market_data_service import MarketDataService
 from app.services.currency_service import CurrencyService
 from app.accounts import IBKR
 from app.services.cash_service import CashService, MEASURED, UNKNOWN as CASH_UNKNOWN
+from app.models.cash_flow import TRANSFER_TYPES
 from app.services.native_amounts import NativeToBase, cash_flow_in_base
 from app.services.realized_trades import ClosedCost, gain_in_base, realized_from_sell_trades
 # `BaseFx` lives in base_fx.py and is re-exported here, where eight test modules and
@@ -447,7 +448,7 @@ class PortfolioService:
                 else await self._load_position_start_dates()
             ),
             cash_events=cash_events,
-            money_in_legs=contributions["money_in_legs"],
+            money_in_legs=contributions["capital_legs"],
             cash_source=cash_source,
             cash_measured_from=await cash_service.measured_from(),
             cash_measured_source=cash_measured_source,
@@ -873,10 +874,33 @@ class PortfolioService:
             earliest_leg = money_in_legs[0][0]
             first_open = min(first_open, earliest_leg) if first_open else earliest_leg
 
+        # Capital that moved by TRANSFER once the deposit ledger is complete (review item
+        # C2, 2026-11-08): finpension's vested benefits, an IBKR transfer's cash leg. It is
+        # not money saved — so not a contribution, not in the monthly bars, not in the 3a
+        # deduction — but it is capital the account did not earn: in Total Value and in
+        # nothing beside it, it read as profit on the chart and the benchmark never
+        # invested it. `capital_legs` is money in plus it, for the readers that compare
+        # a value with what was put in: the chart's Money In line, the benchmark and the
+        # decomposition's external flows. Before `coverage_from` the lot legs already carry
+        # a transfer's capital. IBKR can book a transfer's cash leg twice — the deposit
+        # the ingest reclassified and the <Transfers> row — and it counts once, as in the
+        # cash balance (`CashFlowLedger.cash_moves`).
+        transfer_legs: List[Tuple[date, Decimal]] = []
+        if coverage_from is not None:
+            transfer_legs = [
+                (f.flow_date, cash_flow_in_base(f, base_fx))
+                for f in flow_ledger.cash_moves()
+                if f.flow_type in TRANSFER_TYPES and f.amount and f.flow_date >= coverage_from
+            ]
+        capital_legs = sorted(money_in_legs + transfer_legs, key=lambda leg: leg[0])
+        if transfer_legs:
+            first_open = min(first_open or capital_legs[0][0], capital_legs[0][0])
+
         return {
             "legs": legs,
             "deposit_legs": deposit_legs,
             "money_in_legs": money_in_legs,
+            "capital_legs": capital_legs,
             "coverage_from": coverage_from,
             "deposits_from": deposits_from,
             "transfer_in_date": transfer_in_date,

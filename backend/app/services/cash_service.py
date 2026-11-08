@@ -282,7 +282,8 @@ class CashService:
         #    asks "did cash move", where a transfer's cash leg genuinely did. The in-kind
         #    rows this account holds carry a zero amount and so contribute nothing either
         #    way, which is the correct answer rather than a lucky one.
-        for f in await self._all_flows():
+        #    A transfer's cash leg booked twice by IBKR counts once (`cash_moves`).
+        for f in (await self.flow_ledger()).cash_moves():
             by_account[f.account].append((f.flow_date, cash_flow_in_base(f, base_fx)))
 
         # 3. Dividends actually paid into the account. IBKR rows only, and the rule for

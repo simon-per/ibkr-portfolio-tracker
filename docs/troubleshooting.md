@@ -121,6 +121,13 @@
 Moved from STATUS.md on 2026-10-14. Each is known, measured and accepted, mostly by owner
 decision; read the entry before "fixing" one.
 
+- **A lot transferred in kind with an open date after the deposit ledger begins reads as profit.**
+  Cash transferred in after `coverage_from` has its own leg (`capital_legs`, review item C2), but
+  an in-kind lot is only told apart from a purchase by the absence of a BUY, which is no evidence
+  before the trade ledger begins, and a spin-off line or a stock dividend lacks one too. Every
+  in-kind transfer seen so far carried its original, earlier open dates, which the lot legs count.
+  Accepted 2026-11-08; fix it the day one arrives dated inside the ledger.
+
 - **Credentials: nothing open, by owner decision — do not re-raise.** The IBKR Flex token leaked
   through `/api/scheduler/history` until the 2026-07-28 scrub and was not rotated (2026-08-17:
   the Flex Web Service is read-only reporting, so the worst case is our own syncs locked out);

@@ -139,7 +139,8 @@ class PerformanceAnalyticsService:
         # trade as fees and interest, so the window reads as untracked cash instead.
         if await cash_service.unconverted_trades(base_fx):
             cash_source, corrections = CASH_UNKNOWN, []
-        flows: List[Tuple[date, Decimal]] = inputs["money_in_legs"]
+        # External flows: money in and capital transferred in (C2), the chart's own line.
+        flows: List[Tuple[date, Decimal]] = inputs["capital_legs"]
 
         async def window(ws: date, we: date) -> Dict:
             return await self._decompose_window(

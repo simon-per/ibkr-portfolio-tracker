@@ -594,7 +594,20 @@ which is the opposite shape: the pillar 3a deposits landed 2026-08-25 against pu
 monthly loops also clamp at `as_of`, as the windows already did, or the identity holds only when no row is
 future-dated.
 
-### Transfers are never money in
+### Transfers are never money in — but capital transferred later is not profit either
+
+**`capital_legs`** (review item C2, 2026-11-08). Before `coverage_from` a transfer's capital rides
+in the lot legs. After it, a cash transfer — finpension's vested benefits, an IBKR transfer's cash
+leg — entered Total Value and nothing beside it: the chart read it as profit and the benchmark never
+invested it. `_contribution_inputs` now returns `capital_legs` = `money_in_legs` plus every
+transfer row's cash from `coverage_from` on (signed, so a transfer out lowers it), and the chart's
+Money In line, the benchmark and the decomposition's external flows read it. The monthly bars, the
+windows and the 3a deduction keep `money_in_legs`: savings are deposits. IBKR can book one transfer's
+cash twice (the reclassified deposit and the `<Transfers>` row), and `CashFlowLedger.cash_moves`
+counts it once for these legs and for the derived cash balance alike. A lot transferred **in kind**
+whose own open date falls after `coverage_from` is not detected (troubleshooting.md, *Accepted rough
+edges*). Tests: `tests/test_capital_transferred_in.py`.
+
 
 An incoming transfer moves capital saved years earlier somewhere else, and the transferred lots already
 carry their own `open_date` — so counting it would both invent savings in a month that had none *and*
