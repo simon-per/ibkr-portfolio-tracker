@@ -485,6 +485,21 @@ describe('logos in the tax tables', () => {
       .toBe('—')
   })
 
+  it('counts sales once on the tab, as the KS 36 criteria do (review item T2)', async () => {
+    // One sale row here, but the criteria count three sales on IBKR's own executions: the
+    // tile said "1 sale" beside the criteria's "1 of 3".
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria() }))
+    renderTab()
+    const realized = await tile('Realized gains')
+    expect(realized.textContent).toContain('3 sales')
+  })
+
+  it('falls back to the sale rows when the criteria have no count', async () => {
+    vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria({ sales: null }) }))
+    renderTab()
+    expect((await tile('Realized gains')).textContent).toContain('1 sale')
+  })
+
   it('puts the KS 36 indicators as figures', async () => {
     vi.spyOn(api, 'getTaxReport').mockResolvedValue(report({ trader_criteria: criteria() }))
     renderTab()

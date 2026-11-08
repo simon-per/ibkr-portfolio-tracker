@@ -317,6 +317,8 @@ snapshot; `account=IBKR` on cash), so pillar 3a moves none of them
   `sales_holding_unknown`, never guessed short or long; `short_held_sales` is null when every
   sale is unknown. A year whose only disposals are the closed-lot estimate's has `sales` and
   `short_held_sales` null: the trade ledger does not hold them. No sale at all is `0` and `0`.
+  **The Realized gains tile counts the same sales** (review item T2, 2026-11-08): it read the sale
+  rows ("15 sales") beside the criteria's "0 of 12"; it takes `sales` when on record, else the rows.
 - **`margin_used`, `min_cash_balance`.** The lowest **end-of-day** IBKR balance over the year
   (1 January to `holdings_as_of`), the balance carried in included, from the same events the
   year-end cash line reads; `margin_used` is that minimum, rounded to cents, below zero. Null

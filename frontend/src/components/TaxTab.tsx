@@ -421,7 +421,10 @@ function TaxSummary({ data, money }: { data: TaxReport; money: Money }) {
     ? 'est.'
     : includedEstimatesTag(totals.estimated_rows, data.dividend_income.length)
   const withholding = withholdingTotalLabel(money, totals.withholding, totals.estimated_rows)
-  const sales = data.realized_gains.length
+  // One count of sales on the tab (review item T2): the KS 36 criteria's — one per security and
+  // day, IBKR's own executions — when it is on record, else the rows; the rows alone read "15
+  // sales" beside the criteria's "0 of 12".
+  const sales = data.trader_criteria?.sales ?? data.realized_gains.length
   const gain = data.realized_totals.gain_loss
   const base = data.holdings_snapshot_error ? null : data.holdings_snapshot_total
   return (
