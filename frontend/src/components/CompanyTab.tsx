@@ -61,7 +61,7 @@ import {
 } from '@/lib/companyFinancials'
 import { chartColor, LOSS_COLOR } from '@/lib/chartPalette'
 import { CHART_GRID_PROPS, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/chartTooltip'
-import { zeroBasedTicks, type Axis } from '@/lib/niceTicks'
+import { robustlyCapped, zeroBasedTicks, type Axis } from '@/lib/niceTicks'
 import { displayName } from '@/lib/securityName'
 import { TONE_TEXT, type Tone } from '@/lib/tone'
 import { useIsCompact } from '@/lib/useMediaQuery'
@@ -197,7 +197,11 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
     () => chartRows(data, chartView(chart, basis).series.map((s) => s.key)),
     [data, chart, basis],
   )
-  const axis = zeroBasedTicks(rows.flatMap((r) => shown.map((s) => r[s.key] ?? NaN)), 5)
+  // A multiple's axis is cut at a robust bound so one spike cannot flatten the rest; the
+  // spike runs off the top and its own figure stays in the tooltip (review item VI5).
+  const capped = view.format === 'multiple'
+  const plotted = rows.flatMap((r) => shown.map((s) => r[s.key] ?? NaN))
+  const axis = zeroBasedTicks(capped ? robustlyCapped(plotted) : plotted, 5)
   const periodTicks = axisTicks(rows, maxTicks)
   const format = valueFormatter(view.format, data.currency)
   const tick = tickFormatter(view.format, data.currency, axis)
@@ -253,6 +257,7 @@ function CompanyChartCard({ chart, basis, data, expanded, onExpand }: {
       domain={axis.domain}
       ticks={axis.ticks}
       tickFormatter={tick}
+      allowDataOverflow={capped}
     />
   )
   const zeroLine = axis.domain[0] < 0 && (

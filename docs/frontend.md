@@ -1188,6 +1188,10 @@ after Fundamentals, `Building2`), its wiring in `lib/companyFinancials.ts`, the 
   hides or shows the series (never the last one) and the y axis refits. A series with no value
   anywhere gets no chip (`seriesWithData`: MA files no gross margin). Hovering dims the other
   periods' bars. The shares card tones growth the other way (`inverse`): fewer shares is green.
+  **A multiple card's axis stops at three times the median** (`robustlyCapped`, review item VI5,
+  2026-11-08): a P/E over a near-zero EPS (AMD's 2,500, NXPI's 1,000) squashed every other year
+  into the bottom pixels. The spike runs off the top (`allowDataOverflow`); the tooltip and the
+  headline keep its true figure.
   **The valuation card heads with today's multiples** (`current`, 2026-11-07): until a period
   is hovered its headline and chips read `key_stats` (the newest close over the newest TTM),
   dated by `profile.price_date`, so it agrees with the overview's P/E; it fell back to the last

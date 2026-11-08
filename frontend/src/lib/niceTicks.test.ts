@@ -162,3 +162,17 @@ describe('axisFloor', () => {
     expect(axisFloor(NaN, -1_000, -5_000)).toBe(0)
   })
 })
+
+describe('robustlyCapped (review item VI5)', () => {
+  it('clips a spike to three times the median, leaving the rest', async () => {
+    const { robustlyCapped } = await import('./niceTicks')
+    const pe = [24, 30, 2_500, 28, 35, -40, Number.NaN]
+    // Median of the positives is 30: bound 90.
+    expect(robustlyCapped(pe)).toEqual([24, 30, 90, 28, 35, -40, Number.NaN])
+  })
+
+  it('leaves a short series alone', async () => {
+    const { robustlyCapped } = await import('./niceTicks')
+    expect(robustlyCapped([10, 1_000, 12])).toEqual([10, 1_000, 12])
+  })
+})
