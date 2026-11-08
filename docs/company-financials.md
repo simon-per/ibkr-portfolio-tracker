@@ -622,6 +622,11 @@ filings' `currency`.
   listing of a company with a CIK shows its canonical listing's counts (the lowest symbol, the one
   this overview reads), so GOOG and GOOGL rows match the Alphabet page; `counts_of` is the one
   reading of the five counts off a row. `tests/test_company_yahoo_family.py`.
+- **A split mid-week holds the daily close back** (`_split_since`, review item CO3, 2026-11-08):
+  when IBKR recorded a price-restating split of the held listing after the newest weekly close, the
+  daily close is on the new share basis and the weekly closes still on the old, and appended to
+  them it read as a −90% week and a tenth of every multiple. The last weekly close stands until the
+  Sunday pass refetches the history.
 - **The price line is the market's, the multiples' basis is the figures'.** `_closes` reads the
   weekly closes and the held listing's newest daily close once; the P/E and its kin take them
   through `_on_eps_basis` (a split after the newest filing scales them), the price line and

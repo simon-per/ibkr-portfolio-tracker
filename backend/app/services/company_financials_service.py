@@ -875,9 +875,32 @@ class CompanyFinancialsService:
                 daily is not None
                 and daily.currency == currency
                 and (not closes or daily.date > closes[-1][0])
+                and not await self._split_since(listing.id, closes[-1][0] if closes else None)
             ):
                 closes.append((daily.date, float(daily.close_price)))
         return closes
+
+    async def _split_since(self, security_id: int, since: Optional[date]) -> bool:
+        """
+        Whether IBKR recorded a price-restating split of this listing after `since` (the
+        newest weekly close). Its daily close is then on the new share basis while the
+        weekly closes are still on the old one until the Sunday pass refetches them, and
+        appended to them it read as a -90% week and a tenth of every multiple (review item
+        CO3, 2026-11-08). The last weekly close stands until then.
+        """
+        if since is None:
+            return False
+        from app.models.corporate_action import CorporateAction
+        from app.services.sync_helper import PRICE_RESTATING_ACTIONS
+
+        found = (await self.db.execute(
+            select(CorporateAction.id).where(
+                CorporateAction.security_id == security_id,
+                CorporateAction.action_type.in_(PRICE_RESTATING_ACTIONS),
+                CorporateAction.action_date > since,
+            ).limit(1)
+        )).first()
+        return found is not None
 
     async def _on_eps_basis(
         self, cik: int, rows: Sequence[CompanyFinancial], closes: Prices
