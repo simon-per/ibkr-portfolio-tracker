@@ -78,6 +78,7 @@ from app.services.edgar_client import (
     EdgarClient,
     EdgarError,
     EdgarRefused,
+    PeriodicFiling,
     is_configured,
     sec_ticker,
 )
@@ -131,6 +132,12 @@ FIGURES_STALE_AFTER = timedelta(days=150)
 #: company that stopped filing is not asked about every day.
 FILING_EXPECTED_AFTER = timedelta(days=105)
 FILING_WATCH_UNTIL = FIGURES_STALE_AFTER + timedelta(days=30)
+#: Past the watch, a company's figures are stale: its filing may be listed while
+#: companyfacts never took it in (six companies sat on their Q1 for 221 days, review item
+#: CO5). The check asks such a company once a week, on `CHASE_WEEKDAY`, until this old —
+#: past a year of missing 10-Qs it has stopped filing.
+FILING_CHASE_UNTIL = timedelta(days=400)
+CHASE_WEEKDAY = 0  # Monday
 #: A company fetched within this is not checked: the Sunday pass, or a check that found it.
 CHECKED_WITHIN = timedelta(hours=20)
 #: A filing's period counts as new only this far past the stored one. A quarter is ~91 days
@@ -487,16 +494,24 @@ class CompanyFinancialsSync:
                         logger.warning(f"submissions for CIK {target.cik} failed: {e}")
                         continue
                     summary["checked"] += 1
-                    if reported is None or reported < stored_end + NEW_PERIOD_MARGIN:
+                    if (
+                        reported is None
+                        or reported.period_end < stored_end + NEW_PERIOD_MARGIN
+                    ):
                         continue
                     summary["new_filings"] += 1
+                    company = (await self.repo.companies([target.cik])).get(target.cik)
+                    misses = company.facts_miss_count if company is not None else None
+                    wrote = summary["fetched"]
                     outcome = await self._one(
-                        client, target.cik, summary, target.symbols[0]
+                        client, target.cik, summary, target.symbols[0], expected=reported
                     )
                     summary["outcomes"].append(
                         {"cik": target.cik, "symbols": target.symbols, "outcome": outcome}
                     )
                     fetched.append(target)
+                    if summary["fetched"] > wrote:
+                        await self._lagging(target, reported, misses, summary)
             except EdgarRefused as refused:
                 summary["stopped"] = refused.status
                 hint = "" if refused.status == 429 else " Check EDGAR_USER_AGENT."
@@ -521,14 +536,38 @@ class CompanyFinancialsSync:
             summary["warnings"] = warnings
         return summary
 
+    async def _lagging(
+        self,
+        target: Target,
+        reported: PeriodicFiling,
+        misses: Optional[int],
+        summary: Dict[str, Any],
+    ) -> None:
+        """
+        After a fetch the filing list said was due: when the stored figures still stop
+        short of the reported period, companyfacts lags the SEC's own filing list, and the
+        next ask waits on the shared doubling (`facts_backoff_until`), counted across such
+        fetches — the write cleared the stamps. Asking daily cost about sixty fetches a
+        filing that never moved anything (review item CO5).
+        """
+        newest = ((await self.repo.coverage([target.cik])).get(target.cik) or {}).get(
+            "last"
+        )
+        if newest is not None and reported.period_end < newest + NEW_PERIOD_MARGIN:
+            return
+        await self.repo.record_lag(target.cik, utcnow(), misses)
+        await self.db.commit()
+        summary.setdefault("lagging", []).append(target.symbols[0])
+
     async def _filing_due(
         self, targets: Sequence[Target], now: datetime
     ) -> List[Tuple[Target, Any]]:
         """
         The targets whose next 10-Q or 10-K is due, each with its newest stored period end:
         figures stored, the newest between `FILING_EXPECTED_AFTER` and `FILING_WATCH_UNTIL`
-        old, not backed off, not fetched within `CHECKED_WITHIN`. A company with no figures
-        is the weekly pass's.
+        old — or, on a Monday, up to `FILING_CHASE_UNTIL` (review item CO5) — not backed
+        off, not fetched within `CHECKED_WITHIN`. A company with no figures is the weekly
+        pass's.
         """
         ciks = [t.cik for t in targets]
         companies = await self.repo.companies(ciks)
@@ -539,7 +578,13 @@ class CompanyFinancialsSync:
             newest = (coverage.get(target.cik) or {}).get("last")
             if newest is None:
                 continue
-            if not FILING_EXPECTED_AFTER <= today - newest <= FILING_WATCH_UNTIL:
+            age = today - newest
+            watched = FILING_EXPECTED_AFTER <= age <= FILING_WATCH_UNTIL
+            chased = (
+                today.weekday() == CHASE_WEEKDAY
+                and FILING_WATCH_UNTIL < age <= FILING_CHASE_UNTIL
+            )
+            if not (watched or chased):
                 continue
             company = companies.get(target.cik)
             wait = facts_backoff_until(company)
@@ -726,7 +771,12 @@ class CompanyFinancialsSync:
         return out
 
     async def _one(
-        self, client: EdgarClient, cik: int, summary: Dict[str, Any], label: str
+        self,
+        client: EdgarClient,
+        cik: int,
+        summary: Dict[str, Any],
+        label: str,
+        expected: Optional[PeriodicFiling] = None,
     ) -> str:
         try:
             facts = await client.company_facts(cik)
@@ -741,9 +791,31 @@ class CompanyFinancialsSync:
             await self.db.commit()
             summary["no_data"] += 1
             return "no 10-Q/10-K figures" if facts is not None else "not found"
-        read, refused = await self._read_filings(
-            client, cik, facts, result.rows, set(stored), summary
-        )
+        refused: Optional[EdgarRefused] = None
+        newest = _filing_behind(result.rows, expected, set(stored))
+        if newest is not None:
+            # companyfacts has not taken in the filing the SEC lists: its own instance
+            # gives its periods (review item CO5), read once ever like any other.
+            try:
+                found = await self._read_filing(client, cik, newest, summary, whole=True)
+            except EdgarRefused as e:
+                refused = e
+            except EdgarError as e:
+                summary["filing_errors"] += 1
+                logger.warning(f"filing {newest.accn} of CIK {cik} failed: {e}")
+            else:
+                await self.repo.record_filing_read(
+                    cik, newest.accn, newest.form, newest.filed, found, utcnow()
+                )
+                await self.db.commit()
+                summary["filings_read"] += 1
+                stored = await self.repo.filing_reads(cik)
+                result = normalise(facts, _filing_facts(stored))
+        read = 0
+        if refused is None:
+            read, refused = await self._read_filings(
+                client, cik, facts, result.rows, set(stored), summary
+            )
         if read:
             result = normalise(facts, _filing_facts(await self.repo.filing_reads(cik)))
         await self.repo.replace_rows(
@@ -814,8 +886,10 @@ class CompanyFinancialsSync:
         cik: int,
         filing: Filing,
         summary: Dict[str, Any],
+        whole: bool = False,
     ) -> List[dict]:
-        """What one filing's instance holds; nothing when it has none, or none EDGAR lists."""
+        """What one filing's instance holds; nothing when it has none, or none EDGAR lists.
+        `whole`: its undimensioned chain facts too (`parse_instance`)."""
         index = await client.filing_index(cik, filing.accn)
         name = instance_name(index) if index is not None else None
         if name is None:
@@ -824,11 +898,30 @@ class CompanyFinancialsSync:
         if body is None:
             return []
         try:
-            return parse_instance(body)
+            return parse_instance(body, whole=whole)
         except ET.ParseError as e:
             summary["filings_unreadable"] += 1
             logger.warning(f"filing {filing.accn} of CIK {cik}: {name} is not XML ({e})")
             return []
+
+
+def _filing_behind(
+    rows: Sequence[dict], expected: Optional[PeriodicFiling], read: set
+) -> Optional[Filing]:
+    """
+    The filing the SEC lists that companyfacts has not taken in (review item CO5): the
+    newest periodic report is `NEW_PERIOD_MARGIN` past the newest period `rows` reach,
+    and its accession number and filing date are known and it was never read. None
+    otherwise.
+    """
+    if expected is None or expected.accn is None or expected.filed is None:
+        return None
+    if expected.accn in read:
+        return None
+    newest = max((r["period_end"] for r in rows), default=None)
+    if newest is not None and expected.period_end < newest + NEW_PERIOD_MARGIN:
+        return None
+    return Filing(expected.accn, expected.form, expected.filed, expected.period_end)
 
 
 def _unchained_warning(summary: Dict[str, Any]) -> List[str]:

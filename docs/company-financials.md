@@ -563,6 +563,29 @@ weekly pass keeps those). Its own `sync_runs` type, `company_filings_check` with
 weekly one and a check's partial lists must not stand in for it; it raises no finding warnings.
 Both jobs share one runner (`SchedulerService._edgar_job`). `tests/test_company_filings_check.py`.
 
+**When companyfacts lags the filing list** (review item CO5, 2026-11-08). Six companies (two held)
+sat on their Q1 2026 for 221 days: their Q2 10-Qs were filed and listed in `submissions`, and
+companyfacts never carried them; inside the window the check refetched companyfacts every
+weekday (about sixty fetches that moved nothing) and past it never looked. Three parts, all in
+`tests/test_company_filing_fallback.py`:
+
+- **The filing's own instance.** `latest_report` returns the newest periodic filing
+  (`PeriodicFiling`: period, form, accession number, filing date). When the normalised rows stop
+  `NEW_PERIOD_MARGIN` short of it, `_one` reads that filing's instance once ever
+  (`_filing_behind`, `parse_instance(whole=True)`): every chain concept's undimensioned facts,
+  balance-sheet instants included, besides the dividend members. They are stored in
+  `sec_filing_reads` like any filing read and only fill: once companyfacts carries the period, its
+  facts win (`_filing_facts`, which now takes an instant for an instant concept). An
+  undimensioned fact wins over a member's for the same period inside one instance.
+- **The re-ask guard.** A check fetch that still stops short of the listed period records a lag
+  (`record_lag`) on the facts miss stamps, counted on from the count before the fetch (the write
+  clears them), so the next ask waits 1, 2, 4… days on the shared doubling (`miss_backoff`) and
+  the Sunday pass honours it too. The summary lists the companies as `lagging`.
+- **Past the window.** Beyond `FILING_WATCH_UNTIL` the check asks a company once a week, on
+  `CHASE_WEEKDAY` (Monday), until `FILING_CHASE_UNTIL` (400 days): past a year of missing
+  10-Qs it has stopped filing. Not on Sunday: the weekly pass's tests count every URL, and a
+  date-relative ask there would start failing them once the fixture aged.
+
 **What each pass checks** (owner's request, 2026-11-07): the Sunday pass tests the stored rows
 of **every** company in scope after its loop, fetched or not, and the weekday check the companies
 it fetched. Until review items CO2/DR3 the Sunday lists covered only the companies that pass

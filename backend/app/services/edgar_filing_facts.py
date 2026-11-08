@@ -33,8 +33,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.services.company_financials_normaliser import FORMS, METRICS
 
-#: The concepts read from a filing: the dividend-per-share chain, nothing else.
+#: The concepts read from a filing on a dimension member: the dividend-per-share chain,
+#: nothing else.
 CONCEPTS = frozenset(METRICS["dividends_per_share"].concepts)
+#: The concepts read undimensioned from a filing companyfacts has not taken in yet
+#: (`parse_instance(whole=True)`, review item CO5): every chain's.
+CHAIN_CONCEPTS = frozenset(c for spec in METRICS.values() for c in spec.concepts)
 
 #: The (axis, member) pairs whose dividend per share is the company's own per common share.
 #: Whitelisted, never blacklisted: a member not named here (a second share class, a
@@ -208,14 +212,20 @@ def _gaap_name(qname: str, prefixes: Dict[str, str]) -> Optional[str]:
     return name if prefixes.get(prefix, "").startswith(US_GAAP) else None
 
 
-def parse_instance(body: bytes) -> List[Dict[str, Any]]:
+def parse_instance(body: bytes, whole: bool = False) -> List[Dict[str, Any]]:
     """
     The dividend-per-share facts of one XBRL instance that sit on exactly one whitelisted
-    dimension member (`MEMBERS`): `{concept, unit, start, end, val}`, dates as ISO strings,
-    the unit spelled as companyfacts spells it (`USD/shares`). A period two accepted facts
-    give different values for (two share classes paid differently) is left out whole.
-    Undimensioned facts are not returned: companyfacts already has them. Raises
-    `ET.ParseError` on a document that is not XML.
+    dimension member (`MEMBERS`): `{concept, unit, start, end, val}`, dates as ISO strings
+    (`start` None for a balance-sheet instant), the unit spelled as companyfacts spells it
+    (`USD`, `shares`, `USD/shares`). A period two accepted facts give different values for
+    (two share classes paid differently) is left out whole. Raises `ET.ParseError` on a
+    document that is not XML.
+
+    Undimensioned facts are returned only `whole`: companyfacts has them, except for a
+    filing it has not taken in yet (review item CO5, 2026-11-08: six companies sat on
+    their Q1 for 221 days while their Q2 10-Qs were filed). Then every chain concept's
+    undimensioned facts come too, and win over a member's value for the same period —
+    they are what companyfacts would carry.
     """
     contexts: Dict[
         str, Tuple[Optional[str], Optional[str], List[Tuple[str, str]], bool]
@@ -243,6 +253,8 @@ def parse_instance(body: bytes) -> List[Dict[str, Any]]:
             if period is not None:
                 start = (period.findtext(XBRLI + "startDate") or "").strip() or None
                 end = (period.findtext(XBRLI + "endDate") or "").strip() or None
+                if end is None and whole:
+                    end = (period.findtext(XBRLI + "instant") or "").strip() or None
             dims = [
                 (
                     _gaap_name(m.get("dimension") or "", prefixes),
@@ -256,7 +268,11 @@ def parse_instance(body: bytes) -> List[Dict[str, Any]]:
             measures = [_local(m.text or "") for m in elem.iter(XBRLI + "measure")]
             if len(measures) == 2 and measures[1] == "shares":
                 units[elem.get("id")] = f"{measures[0]}/shares"
-        elif tag.startswith("{" + US_GAAP) and tag.split("}", 1)[1] in CONCEPTS:
+            elif len(measures) == 1 and whole:
+                units[elem.get("id")] = measures[0]
+        elif tag.startswith("{" + US_GAAP) and tag.split("}", 1)[1] in (
+            CHAIN_CONCEPTS if whole else CONCEPTS
+        ):
             if elem.get(XSI_NIL) != "true" and elem.text is not None:
                 candidates.append(
                     (
@@ -268,24 +284,37 @@ def parse_instance(body: bytes) -> List[Dict[str, Any]]:
                 )
         elem.clear()
 
-    by_period: Dict[Tuple[str, str, str, str], set] = defaultdict(set)
+    by_period: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
+    plain: Dict[Tuple[str, str, Optional[str], str], set] = defaultdict(set)
     for concept, ctx_ref, unit_ref, text in candidates:
         context, unit = contexts.get(ctx_ref), units.get(unit_ref)
         if context is None or unit is None:
             continue
         start, end, dims, typed = context
-        if typed or len(dims) != 1 or dims[0] not in MEMBERS:
+        if typed:
             continue
-        if _date(start) is None or _date(end) is None:
+        if not dims and whole:
+            target = plain
+        elif concept in CONCEPTS and len(dims) == 1 and dims[0] in MEMBERS:
+            target = by_period
+        else:
+            continue
+        if _date(end) is None or (start is not None and _date(start) is None):
+            continue
+        if start is None and target is by_period:
             continue
         try:
             val = float(text)
         except ValueError:
             continue
         if math.isfinite(val):
-            by_period[(concept, unit, start, end)].add(val)
+            target[(concept, unit, start, end)].add(val)
+    merged = {k: v for k, v in by_period.items() if k not in plain}
+    merged.update(plain)
     return [
         {"concept": c, "unit": u, "start": s, "end": e, "val": next(iter(vals))}
-        for (c, u, s, e), vals in sorted(by_period.items())
+        for (c, u, s, e), vals in sorted(
+            merged.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or "", kv[0][3])
+        )
         if len(vals) == 1
     ]

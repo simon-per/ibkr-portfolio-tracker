@@ -162,6 +162,18 @@ class CompanyFinancialsRepository:
         row.facts_checked_at = checked_at
         row.facts_miss_count = (row.facts_miss_count or 0) + 1
 
+    async def record_lag(
+        self, cik: int, checked_at: datetime, misses: Optional[int]
+    ) -> None:
+        """
+        A fetch that stopped short of the filing the SEC lists (companyfacts lags it):
+        spaced like a miss (`facts_backoff_until`), counting on from `misses` — the
+        company's count before the fetch, which the write cleared (review item CO5).
+        """
+        row = await self.ensure_company(cik)
+        row.facts_checked_at = checked_at
+        row.facts_miss_count = (misses or 0) + 1
+
     async def record_profile(
         self, cik: int, profile: Optional[dict], checked_at: datetime
     ) -> None:

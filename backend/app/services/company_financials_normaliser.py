@@ -559,6 +559,9 @@ def _filing_facts(
     concept for keeps companyfacts' answer.
     """
     wanted = {c: spec.kind for spec in METRICS.values() for c in spec.concepts}
+    instant = {
+        c for spec in METRICS.values() if spec.timing == INSTANT for c in spec.concepts
+    }
     never_negative = {
         c for spec in METRICS.values() if spec.non_negative for c in spec.concepts
     }
@@ -571,7 +574,11 @@ def _filing_facts(
             continue
         start, end, filed = (_date(row.get(k)) for k in ("start", "end", "filed"))
         val, accn, form = row.get("val"), row.get("accn"), row.get("form")
-        if None in (start, end, filed) or not accn or form not in FORMS:
+        if None in (end, filed) or not accn or form not in FORMS:
+            continue
+        # A balance sheet's instant has no start (a filing companyfacts has not taken in
+        # yet, review item CO5); a flow without one is not a period.
+        if start is None and concept not in instant:
             continue
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             continue
