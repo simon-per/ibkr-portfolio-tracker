@@ -186,7 +186,7 @@ fund at a six-month-old NAV for ever with nothing saying so.
 **A `sibling` fund is priced from another share class of the same fund** (since 2026-09-12,
 the owner's call). The bounded carry traded the wrong things for the EM tranche: its share
 count never changes between uploads, an EM index drifts a few percent a month, and the
-position is ~0.6% of the book — so going *unpriced* after 45 business days removed 464 EUR
+position is ~0.6% of the book — so going *unpriced* after 45 calendar days removed 464 EUR
 from the total to avoid a stale-price error of perhaps 15. Yahoo does not quote the tranche
 held (`CH1529078078`, the NMT class), but it quotes the same fund's NT class
 (`0P0000S0OE.SW`, CHF, daily) at a level ~49% higher — the very thing the NAV check refuses
