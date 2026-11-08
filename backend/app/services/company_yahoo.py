@@ -33,6 +33,7 @@ from app.models.fundamental_metrics import FundamentalMetrics
 from app.models.security import Security
 from app.repositories.company_financials_repository import CompanyFinancialsRepository
 from app.repositories.security_repository import held
+from app.services.yahoo_minor_units import minor_unit
 
 def counts_of(row) -> Optional[Dict[str, int]]:
     """
@@ -280,4 +281,9 @@ def source_columns(source: Optional[TickerSource]) -> Dict[str, object]:
         columns.update(served_growth(
             columns.get("revenue_growth"), columns.get("earnings_growth"), source.growth
         ))
+    # The stored target is in the quote's unit, pence for a London listing; the watchlist
+    # shows prices in the major unit (review item Y4).
+    minor = minor_unit(columns.get("data_currency"))
+    if minor and columns.get("analyst_target") is not None:
+        columns["analyst_target"] = columns["analyst_target"] / float(minor[1])
     return columns

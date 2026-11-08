@@ -23,6 +23,7 @@ from app.services.yahoo_estimates import (
     is_fund, read_optional,
 )
 from app.services.yahoo_eligibility import yahoo_eligible
+from app.services.yahoo_minor_units import minor_unit, minor_unit_scale
 from app.services.yahoo_rate_limit import check_yahoo_hold, is_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -483,14 +484,26 @@ class WatchlistService:
 
         logger.debug(f"{yahoo_ticker}: fwd_rev={fwd_rev}, fwd_eps={fwd_eps}")
 
-        current_price = self._safe_float(info.get("currentPrice") or info.get("regularMarketPrice"))
+        # A London or Johannesburg quote is in pence or cents (`GBp`, `ZAc`): every price
+        # below is divided into the major unit and labelled with its code, or a 5-pound
+        # share read 500 (review item Y4). The reported code stays as `data_currency`, so
+        # the market cap keeps its refusal (`market_cap.py`) until Yahoo's scale is known.
+        reported = info.get("currency")
+        scale = float(minor_unit_scale(yahoo_ticker, reported))
+        minor = minor_unit(reported)
+
+        def price(value):
+            figure = self._safe_float(value)
+            return figure / scale if figure is not None else None
+
+        current_price = price(info.get("currentPrice") or info.get("regularMarketPrice"))
 
         data: Dict = {
             "symbol": info.get("symbol", yahoo_ticker),
             "company_name": info.get("shortName") or info.get("longName"),
             "current_price": current_price,
-            "currency": info.get("currency"),
-            "data_currency": info.get("currency"),
+            "currency": minor[0] if minor and scale != 1 else reported,
+            "data_currency": reported,
             "trailing_pe": trailing_pe,
             "forward_pe": forward_pe(info),
             # One tier order with FundamentalsService, in one place (`peg_ratio.resolve_peg`).
@@ -502,7 +515,7 @@ class WatchlistService:
             "fwd_eps_growth": fwd_eps,
             "profit_margins": self._safe_float(info.get("profitMargins")),
             "market_cap": self._safe_int(info.get("marketCap")),
-            "analyst_target": self._safe_float(info.get("targetMeanPrice")),
+            "analyst_target": price(info.get("targetMeanPrice")),
             "analyst_count": self._safe_int(info.get("numberOfAnalystOpinions")),
             "last_synced": utcnow(),
         }
@@ -532,10 +545,10 @@ class WatchlistService:
         data["analyst_rating"] = rating["consensus"] if rating else None
 
         # Use .info for 52-week high/low and moving averages (reliable, pre-computed)
-        data["week52_high"] = self._safe_float(info.get("fiftyTwoWeekHigh"))
-        data["week52_low"] = self._safe_float(info.get("fiftyTwoWeekLow"))
-        data["ma200"] = self._safe_float(info.get("twoHundredDayAverage"))
-        data["ma50"] = self._safe_float(info.get("fiftyDayAverage"))
+        data["week52_high"] = price(info.get("fiftyTwoWeekHigh"))
+        data["week52_low"] = price(info.get("fiftyTwoWeekLow"))
+        data["ma200"] = price(info.get("twoHundredDayAverage"))
+        data["ma50"] = price(info.get("fiftyDayAverage"))
 
         # These three are assigned unconditionally, None included, and that is the whole
         # point.

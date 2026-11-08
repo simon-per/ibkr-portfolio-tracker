@@ -36,9 +36,6 @@ EXEMPT = {
         "verifies a mapping against published NAVs and writes no amount: an unscaled "
         "level check refuses (fails closed), the tracking check is a ratio of moves"
     ),
-    "services/watchlist_service.py": (
-        "its history closes feed only RSI-14, a ratio of moves; nothing stored is a Close"
-    ),
 }
 
 AMOUNT_COLUMNS = {"Close", "Dividends"}
