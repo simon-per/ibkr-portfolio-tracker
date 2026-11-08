@@ -235,7 +235,8 @@ answers it: `trade_kind`, `sale_sign` (+1 sale, −1 its cancellation, 0 otherwi
   currency) at its closed lots' open-date rate (their `cost_basis_eur` in the base currency over
   their `cost_basis`). For a holding in the base currency that is IBKR's figure exactly. IBKR's
   figure converted at the sale date stays wherever the lots cannot vouch for the sales: a row
-  without a rate, two currencies, or closed lots that do not add up to the shares sold. The tax
+  without a rate, two currencies, or closed lots whose cost is not IBKR's cost of the sales within
+  1% (cost, not shares: a split restates the closed lots' share count, never their cost). The tax
   report and the Activity ledger keep IBKR's per-trade figure at the sale date, as the statement
   shows it. Tests: `tests/test_realized_cost_at_open_rate.py`.
 - **Reconcile and the restamp read `uncancelled_sales`.** A SELL busted inside the window no
@@ -403,6 +404,14 @@ IBKR restates the lot quantity immediately — leaving a step change in the char
 So `invalidate_prices_for_splits()` deletes `market_prices` up to and including the action date
 (`MarketPriceRepository.delete_up_to`), and the next market-data sync refetches them — one extra
 request per security, since fetching is range-based.
+
+**And the lots sold before it** (`rescale_lots_closed_before_splits`, review item V5, 2026-11-08).
+IBKR restates the open lots; a lot closed before the split kept its old share count, so its days
+before the sale were valued at the old count times the adjusted price (a tenth of the truth for a
+10-for-1) and its realized approximation with them. The same newly inserted actions rescale every lot
+of the security closed before the action date: shares times the ratio, price per share over it, cost
+unchanged. The ratio is read off IBKR's description ("SPLIT 10 FOR 1", `split_ratio`); one that
+states none is named in `warnings[]` and left alone. Once per split, like the purge.
 
 **Holidays are not "missing" forever.** `get_missing_dates()` skipped weekends but not market holidays,
 so a date the exchange never traded (4 July, Good Friday) stayed missing permanently — and one such date

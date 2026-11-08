@@ -33,6 +33,10 @@ NOT_IN_THE_FAMILY = {
     ("services/sync_helper.py", "restamp_unsourced_closed_lots"): (
         1, "matches a SELL trade to the lot it closed (`trade_date <= close_date`)",
     ),
+    ("services/sync_helper.py", "rescale_lots_closed_before_splits"): (
+        1, "the lots sold before a split (`close_date < action_date`), which IBKR never "
+        "restated — a disposal before a date, not held at one",
+    ),
 }
 
 _ORDERING = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)

@@ -30,7 +30,7 @@ OPENED, SOLD = date(2026, 1, 5), date(2026, 3, 10)
 SALE_RATE = Decimal("0.8")  # USD -> EUR on the sale date; 0.9 when bought
 
 
-async def _session(lot_shares="10"):
+async def _session(lot_cost="1000"):
     engine = await memory_engine()
     s = AsyncSession(engine, expire_on_commit=False)
     s.add(
@@ -53,9 +53,9 @@ async def _session(lot_shares="10"):
             open_date=OPENED,
             close_date=SOLD,
             is_open=False,
-            quantity=Decimal(lot_shares),
-            cost_basis=Decimal("1000"),
-            cost_basis_eur=Decimal("900"),
+            quantity=Decimal("10"),
+            cost_basis=Decimal(lot_cost),
+            cost_basis_eur=Decimal(lot_cost) * Decimal("0.9"),
             price_per_unit=Decimal("100"),
             currency="USD",
         )
@@ -137,8 +137,9 @@ async def test_the_closed_positions_agree_with_the_summary():
 
 @pytest.mark.asyncio
 async def test_lots_that_do_not_add_up_to_the_sale_leave_ibkrs_figure():
-    """Closed lots of 8 shares cannot vouch for a sale of 10: IBKR's figure, converted."""
-    engine, s = await _session(lot_shares="8")
+    """Closed lots that cost 800 cannot vouch for sales IBKR costed at 1,000: IBKR's figure,
+    converted."""
+    engine, s = await _session(lot_cost="800")
     try:
         portfolio = PortfolioService(s)
         _stub(portfolio)

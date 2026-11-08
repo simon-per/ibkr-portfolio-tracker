@@ -20,6 +20,7 @@ day. Quantities per open date are immune to that drift, and unlike the security'
 net quantity (used until issue #54) a rebuy cannot hide a sale.
 """
 import logging
+import re
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
@@ -115,6 +116,10 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
     # the one moment we know the action is new.
     invalidated = await invalidate_prices_for_splits(
         MarketPriceRepository(db), persisted["newly_restating_actions"]
+    )
+    # The lots it closed before the split, onto the share basis those prices are now on.
+    rescaled = await rescale_lots_closed_before_splits(
+        db, persisted["newly_restating_actions"]
     )
 
     # Real dividend income (gross/withholding/net) from <CashTransactions>. Flex-only.
@@ -232,6 +237,7 @@ async def ingest_flex_statement(db, flex_data: Dict) -> Dict:
             f"TRANSFER (matched a position transfer's cash leg) — excluded from money added"
         )
     warnings.extend(invalidated["notes"])
+    warnings.extend(rescaled["notes"])
     # A dividend skipped for want of an FX rate rides on a *successful* sync, so it is
     # structurally invisible unless hoisted here.
     warnings.extend(dividend_result.get("warnings") or [])
@@ -646,6 +652,65 @@ async def invalidate_prices_for_splits(
         "prices_invalidated": rows_deleted,
         "notes": notes,
     }
+
+
+_SPLIT_RATIO_RE = re.compile(
+    r"\bSPLIT\s+(\d+(?:\.\d+)?)\s+FOR\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE
+)
+
+
+def split_ratio(description: Optional[str]) -> Optional[Decimal]:
+    """New shares per old from IBKR's ``actionDescription`` ("... SPLIT 10 FOR 1 ...",
+    a reverse split "SPLIT 1 FOR 10"); None when it states none."""
+    m = _SPLIT_RATIO_RE.search(description or "")
+    if not m:
+        return None
+    new, old = Decimal(m.group(1)), Decimal(m.group(2))
+    return new / old if new > 0 and old > 0 else None
+
+
+async def rescale_lots_closed_before_splits(session, actions: List[Dict]) -> Dict:
+    """
+    Restate the lots a newly seen split's security closed before it onto the new share
+    basis: shares times the ratio, price per share over it, cost unchanged (review item
+    V5, 2026-11-08). Same newly-inserted actions as `invalidate_prices_for_splits`, so it
+    runs once per split.
+
+    The price history is refetched split-adjusted (above), and IBKR restates the open
+    lots itself; a closed lot kept its old share count, so its days before the sale were
+    valued at the old count times the adjusted price — a 10-for-1 split cut them to a
+    tenth — and its realized approximation with them. A split whose description states
+    no ratio is named in the notes and left alone.
+    """
+    rescaled, notes = 0, []
+    for action in sorted(actions, key=lambda a: a["action_date"]):
+        ratio = split_ratio(action.get("description"))
+        if ratio is None:
+            notes.append(
+                f"{action.get('symbol') or action['security_id']}: {action['action_type']} on "
+                f"{action['action_date']} states no ratio — its earlier closed lots keep "
+                f"their share count"
+            )
+            continue
+        lots = (await session.execute(
+            select(TaxLot).where(
+                TaxLot.security_id == action["security_id"],
+                TaxLot.is_open == False,  # noqa: E712 - SQL comparison, not identity
+                TaxLot.close_date < action["action_date"],
+            )
+        )).scalars().all()
+        for lot in lots:
+            lot.quantity = lot.quantity * ratio
+            lot.price_per_unit = lot.price_per_unit / ratio
+            rescaled += 1
+        if lots:
+            logger.info(
+                f"security_id={action['security_id']}: {len(lots)} closed lot(s) restated "
+                f"for the {ratio}-for-1 {action['action_type']} on {action['action_date']}"
+            )
+    if rescaled:
+        await session.flush()
+    return {"closed_lots_rescaled": rescaled, "notes": notes}
 
 
 class EmptyStatementError(Exception):

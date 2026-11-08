@@ -93,9 +93,10 @@ class ClosedCost:
     currencies: set = field(default_factory=set)
 
 
-# How far the closed lots' shares may differ from the shares sold and still be the lots
-# those sales closed (rounding in IBKR's fractional quantities).
-QUANTITY_TOLERANCE = Decimal("0.0001")
+# How far the closed lots' cost may differ from IBKR's FIFO cost of the sales and still
+# be the lots those sales closed: commissions rounded on either side. Cost rather than
+# shares, because a split restates the closed lots' share count and never their cost.
+COST_TOLERANCE = Decimal("0.01")
 
 
 def gain_in_base(sold: SecurityRealized, closed: Optional[ClosedCost]) -> Decimal:
@@ -107,14 +108,16 @@ def gain_in_base(sold: SecurityRealized, closed: Optional[ClosedCost]) -> Decima
 
     IBKR's figure converted at the sale date (``sold.gain``) wherever the lots cannot
     vouch for the sales: a row without a rate, a currency the two do not share, or
-    closed lots that do not add up to the shares sold (a sale whose lot was closed by
-    some other path, or before the trade ledger began).
+    closed lots whose cost is not IBKR's cost of the sales within `COST_TOLERANCE` (a
+    sale whose lot was closed by some other path, or before the trade ledger began).
     """
     if closed is None or sold.unconvertible or not sold.converted:
         return sold.gain
     if len(sold.currencies) != 1 or closed.currencies != sold.currencies:
         return sold.gain
-    if abs(closed.quantity - sold.quantity) > QUANTITY_TOLERANCE or closed.cost_native <= 0:
+    if closed.cost_native <= 0 or sold.cost_native <= 0:
+        return sold.gain
+    if abs(closed.cost_native - sold.cost_native) > sold.cost_native * COST_TOLERANCE:
         return sold.gain
     return sold.net_proceeds - sold.cost_native * (closed.cost_base / closed.cost_native)
 

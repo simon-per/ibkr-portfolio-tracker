@@ -197,7 +197,9 @@ currency** — the last close on or before the sale date against the newest clos
 Both come from two queries for all sold securities together (`get_latest_prices`, then
 `get_price_ranges` over each one's 14 days up to its last close), not two per security (#47).
 Base-currency proceeds cannot serve as the reference (they carry FX), and a quote in a
-different currency is refused rather than compared. It is `None` without a later price. Since
+different currency is refused rather than compared. It is `None` without a later price, and
+`None` across a split (a price-restating corporate action between the sale and the newest close,
+review item V5): the two closes are on two share bases. Since
 2026-10-17 (GitHub issue #10) the market-data sync prices a sold security in the six 7-day
 passes only for `SOLD_PRICE_GRACE_DAYS` after its last close, and after that **once a day, in
 the 18:00 pass** — kept for this figure, at one request a day instead of seven; dropping it would

@@ -57,9 +57,10 @@ TODAY = utc_today()
 
 # What the fix measured (see the module docstring for before).
 SUMMARY_MAX_QUERIES = 9
-# One more since 2026-11-08 (review item V4): the closed lots' cost at their open-date
-# rate, one query whatever the number of securities.
-CLOSED_POSITIONS_MAX_QUERIES = 9
+# Two more since 2026-11-08, one query each whatever the number of securities: the closed
+# lots' cost at their open-date rate (review item V4), and the sold securities' splits,
+# across which no post-sale move is computed (V5).
+CLOSED_POSITIONS_MAX_QUERIES = 10
 DECOMPOSITION_MAX_QUERIES = 11
 
 
